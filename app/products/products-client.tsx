@@ -1,0 +1,4183 @@
+"use client";
+
+import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { toast } from "sonner";
+import { supabase } from "@/lib/supabase";
+import {
+  createSize,
+  createSizesBulk,
+  getAllSizesByBrand,
+  getBrands,
+  getGenders,
+  getMasterDataForMatrix,
+  getSizesByBrand,
+  getVendorMappingsByProductIds,
+  getVendors,
+} from "@/lib/actions/master";
+import SmartColorCombobox, {
+  type SmartColor,
+} from "@/components/shared/SmartColorCombobox";
+import BrandCombobox, { type Brand } from "./brand-combobox";
+import CategoryCombobox, { type Category } from "./category-combobox";
+import { type Vendor } from "./vendor-combobox";
+import ModelLoadCombobox from "./model-load-combobox";
+import { ProductMatrixVendorField } from "./ProductMatrixForm";
+import {
+  findProductModelByCode,
+  generateSkusFromModel,
+  insertDraftProductModel,
+  listLoadableProductModels,
+  overwriteDraftProductModel,
+  type ExistingProductModel,
+  type LoadableProductModel,
+  type SaveDraftModelInput,
+} from "./actions/product-matrix";
+import {
+  buildProductSku,
+  formatGenderOption,
+  type Gender,
+  isValidModelCode,
+  MODEL_CODE_LENGTH,
+  normalizeSkuPart,
+} from "./product-sku";
+import {
+  parseProductModelIdentity,
+  vendorIdSchema,
+  VENDOR_ID_REQUIRED_MESSAGE,
+  zodFirstError,
+} from "./zod-schemas";
+
+type TaxType = "INC_VAT" | "EXC_VAT" | "NON_VAT";
+
+const TAX_TYPE_OPTIONS: { value: TaxType; label: string }[] = [
+  { value: "INC_VAT", label: "INC_VAT (ราคารวมภาษี)" },
+  { value: "EXC_VAT", label: "EXC_VAT (ราคาไม่รวมภาษี)" },
+  { value: "NON_VAT", label: "NON_VAT (ไม่มีภาษี)" },
+];
+
+type Product = {
+  id: string;
+  created_at: string;
+  sku: string;
+  name: string;
+  short_name: string | null;
+  description: string | null;
+  category: string | null;
+  color: string | null;
+  size: string | null;
+  gender: string | null;
+  tax_type: TaxType;
+  base_uom: string;
+  cost_price: number;
+  retail_price: number;
+  wholesale_price: number;
+  is_active: boolean;
+  model_id: string | null;
+};
+
+type ProductGroup = {
+  key: string;
+  title: string;
+  shortName: string;
+  category: string | null;
+  gender: string | null;
+  taxType: TaxType;
+  modelId: string | null;
+  products: Product[];
+  activeCount: number;
+  colors: string[];
+  sizes: string[];
+  colorGroups: ColorSubGroup[];
+};
+
+type ColorSubGroup = {
+  key: string;
+  color: string;
+  products: Product[];
+  activeCount: number;
+  sizes: string[];
+};
+
+type VendorDetail = {
+  id: string;
+  company_name: string;
+  phone: string | null;
+  tax_id: string | null;
+  address: string | null;
+  branch_code: string | null;
+  credit_days: number | null;
+  default_price_tier: string | null;
+};
+
+type BrandDetail = {
+  id: string;
+  brand_code: string;
+  brand_name: string;
+};
+
+type EntitySheet =
+  | { kind: "vendor"; data: VendorDetail }
+  | { kind: "brand"; data: BrandDetail };
+
+type BatchEditForm = {
+  description: string;
+  shortName: string;
+  genderId: string;
+  taxType: TaxType;
+  /** contacts.id where contact_type = Vendor → product_models.vendor_id */
+  vendorId: string;
+  prices: Record<string, SizePrice>;
+};
+
+type Color = SmartColor;
+
+type Size = {
+  id: string;
+  brand_id: string;
+  size_label: string;
+  size_code: string;
+  sort_order: number;
+};
+
+type MasterData = {
+  brands: Brand[];
+  categories: Category[];
+  colors: Color[];
+  genders: Gender[];
+  vendors: Vendor[];
+};
+
+type SizePrice = {
+  cost: string;
+  retail: string;
+  wholesale: string;
+};
+
+type DiscountType = "PERCENT" | "THB";
+
+/** Per-size pricing config for Matrix Step 3 + draft size_pricing_config. */
+type SizePricingRow = {
+  sizeId: string;
+  sizeCode: string;
+  sizeLabel: string;
+  retailPrice: string;
+  wholesalePrice: string;
+  discountType: DiscountType;
+  discountValue: string;
+  costPrice: string;
+};
+
+type MatrixForm = {
+  vendorId: string;
+  brandId: string;
+  categoryId: string;
+  genderId: string;
+  taxType: TaxType;
+  modelCode: string;
+  productName: string;
+  shortName: string;
+  colorIds: string[];
+  sizeIds: string[];
+};
+
+type PreviewRow = {
+  key: string;
+  sku: string;
+  fullName: string;
+  color: Color;
+  size: Size;
+  prices: SizePrice;
+};
+
+const productSelect =
+  "id, created_at, sku, name, short_name, description, category, color, size, gender, tax_type, base_uom, cost_price, retail_price, wholesale_price, is_active, model_id";
+
+const emptyMasterData: MasterData = {
+  brands: [],
+  categories: [],
+  colors: [],
+  genders: [],
+  vendors: [],
+};
+
+const emptyPrice: SizePrice = { cost: "", retail: "", wholesale: "" };
+
+function createEmptySizePricing(size: Size): SizePricingRow {
+  return {
+    sizeId: size.id,
+    sizeCode: size.size_code,
+    sizeLabel: size.size_label,
+    retailPrice: "",
+    wholesalePrice: "",
+    discountType: "PERCENT",
+    discountValue: "",
+    costPrice: "",
+  };
+}
+
+/** Real-time cost from retail ± discount. */
+function calculateCostPrice(
+  retailPrice: string,
+  discountType: DiscountType,
+  discountValue: string,
+): string {
+  const retail = Number(retailPrice);
+  if (!Number.isFinite(retail) || retailPrice.trim() === "") return "";
+
+  const discount =
+    discountValue.trim() === "" ? 0 : Number(discountValue);
+  if (!Number.isFinite(discount)) return "";
+
+  const raw =
+    discountType === "PERCENT"
+      ? retail - retail * (discount / 100)
+      : retail - discount;
+
+  if (!Number.isFinite(raw)) return "";
+  return String(Math.round(Math.max(0, raw) * 100) / 100);
+}
+
+function withCalculatedCost(row: SizePricingRow): SizePricingRow {
+  return {
+    ...row,
+    costPrice: calculateCostPrice(
+      row.retailPrice,
+      row.discountType,
+      row.discountValue,
+    ),
+  };
+}
+
+function serializeSizePricingConfig(rows: SizePricingRow[]): string {
+  return JSON.stringify(
+    rows.map((row) => ({
+      sizeCode: row.sizeCode,
+      retailPrice: toPrice(row.retailPrice),
+      wholesalePrice: toPrice(row.wholesalePrice),
+      discountType: row.discountType,
+      discountValue: toPrice(row.discountValue),
+      costPrice: toPrice(row.costPrice),
+    })),
+  );
+}
+
+function formatSizePricingSummary(value: unknown): string {
+  if (value == null) return "—";
+  if (typeof value === "string") {
+    try {
+      return formatSizePricingSummary(JSON.parse(value));
+    } catch {
+      return value || "—";
+    }
+  }
+  if (!Array.isArray(value) || value.length === 0) return "ไม่มีราคา";
+  return value
+    .map((item) => {
+      const row = item as Record<string, unknown>;
+      const code = String(row.sizeCode ?? "?");
+      const retail = Number(row.retailPrice ?? 0);
+      const cost = Number(row.costPrice ?? 0);
+      const discountType = String(row.discountType ?? "PERCENT");
+      const discountValue = Number(row.discountValue ?? 0);
+      const discountLabel =
+        discountType === "THB"
+          ? `ลด ${discountValue}฿`
+          : `ลด ${discountValue}%`;
+      return `${code}: ปลีก ${retail} → ต้นทุน ${cost} (${discountLabel})`;
+    })
+    .join("\n");
+}
+
+function hydrateSizePricingFromConfig(
+  config: unknown,
+  brandSizes: Size[],
+): { sizeIds: string[]; sizePricing: SizePricingRow[] } {
+  let rows: unknown[] = [];
+  if (typeof config === "string") {
+    try {
+      const parsed = JSON.parse(config);
+      rows = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      rows = [];
+    }
+  } else if (Array.isArray(config)) {
+    rows = config;
+  }
+
+  const sizeIds: string[] = [];
+  const sizePricing: SizePricingRow[] = [];
+
+  for (const item of rows) {
+    const raw = item as Record<string, unknown>;
+    const sizeCode = String(raw.sizeCode ?? "").toUpperCase();
+    if (!sizeCode) continue;
+    const size =
+      brandSizes.find(
+        (entry) => entry.size_code.toUpperCase() === sizeCode,
+      ) ??
+      brandSizes.find(
+        (entry) =>
+          entry.size_label.toUpperCase() === sizeCode ||
+          entry.size_label === String(raw.sizeLabel ?? ""),
+      );
+    if (!size) continue;
+
+    const discountType: DiscountType =
+      String(raw.discountType ?? "PERCENT").toUpperCase() === "THB"
+        ? "THB"
+        : "PERCENT";
+
+    const row = withCalculatedCost({
+      sizeId: size.id,
+      sizeCode: size.size_code,
+      sizeLabel: size.size_label,
+      retailPrice: priceToInput(Number(raw.retailPrice ?? 0)),
+      wholesalePrice: priceToInput(Number(raw.wholesalePrice ?? 0)),
+      discountType,
+      discountValue: priceToInput(Number(raw.discountValue ?? 0)),
+      costPrice: "",
+    });
+
+    sizeIds.push(size.id);
+    sizePricing.push(row);
+  }
+
+  return { sizeIds, sizePricing };
+}
+
+const STANDARD_SIZES = [
+  { label: "KS", code: "B", sort_order: 20 },
+  { label: "JS", code: "B", sort_order: 20 },
+  { label: "KM", code: "C", sort_order: 30 },
+  { label: "JM", code: "C", sort_order: 30 },
+  { label: "KL", code: "D", sort_order: 40 },
+  { label: "JL", code: "D", sort_order: 40 },
+  { label: "KXL", code: "E", sort_order: 50 },
+  { label: "JXL", code: "E", sort_order: 50 },
+  { label: "3S", code: "G", sort_order: 70 },
+  { label: "2S", code: "H", sort_order: 80 },
+  { label: "XS", code: "H", sort_order: 80 },
+  { label: "S", code: "I", sort_order: 90 },
+  { label: "M", code: "J", sort_order: 100 },
+  { label: "L", code: "K", sort_order: 110 },
+  { label: "XL", code: "L", sort_order: 120 },
+  { label: "2XL", code: "M", sort_order: 130 },
+  { label: "2L", code: "M", sort_order: 130 },
+  { label: "3XL", code: "N", sort_order: 140 },
+  { label: "3L", code: "N", sort_order: 140 },
+  { label: "4XL", code: "O", sort_order: 150 },
+  { label: "4L", code: "O", sort_order: 150 },
+  { label: "5XL", code: "P", sort_order: 160 },
+  { label: "5L", code: "P", sort_order: 160 },
+  { label: "6XL", code: "Q", sort_order: 170 },
+  { label: "6L", code: "Q", sort_order: 170 },
+  { label: "F", code: "V", sort_order: 220 },
+] as const;
+
+const SIZE_SORT_ORDER: Record<string, number> = {
+  KS: 2,
+  JS: 2,
+  KM: 3,
+  JM: 3,
+  KL: 4,
+  JL: 4,
+  KXL: 5,
+  JXL: 5,
+  "3S": 7,
+  "2S": 8,
+  XS: 8,
+  S: 9,
+  M: 10,
+  L: 11,
+  XL: 12,
+  "2XL": 13,
+  "2L": 13,
+  "3XL": 14,
+  "3L": 14,
+  "4XL": 15,
+  "4L": 15,
+  "5XL": 16,
+  "5L": 16,
+  "6XL": 17,
+  "6L": 17,
+  F: 22,
+};
+
+function getSizeSortWeight(sizeLabel: string | null | undefined): number {
+  const key = (sizeLabel ?? "").trim().toUpperCase();
+  return SIZE_SORT_ORDER[key] ?? 99;
+}
+
+function compareSizeLabels(left: string, right: string): number {
+  const weightDiff = getSizeSortWeight(left) - getSizeSortWeight(right);
+  if (weightDiff !== 0) return weightDiff;
+  return left.localeCompare(right, "th", { numeric: true, sensitivity: "base" });
+}
+
+type StandardSize = (typeof STANDARD_SIZES)[number];
+
+const STANDARD_SIZE_GROUPS: { title: string; sizes: StandardSize[] }[] = [
+  {
+    title: "ไซส์เด็ก (K / J)",
+    sizes: STANDARD_SIZES.filter((size) =>
+      /^[KJ]/.test(size.label),
+    ),
+  },
+  {
+    title: "ไซส์ผู้ใหญ่",
+    sizes: STANDARD_SIZES.filter((size) => !/^[KJ]/.test(size.label)),
+  },
+];
+
+function createEmptyForm(vendorId = ""): MatrixForm {
+  return {
+    vendorId,
+    brandId: "",
+    categoryId: "",
+    genderId: "",
+    taxType: "INC_VAT",
+    modelCode: "",
+    productName: "",
+    shortName: "",
+    colorIds: [],
+    sizeIds: [],
+  };
+}
+
+/**
+ * Vendors / Brands / Categories / Colors / Genders ALL come from the
+ * `getMasterDataForMatrix` Server Action (Service Role Key — Phase 3
+ * "Strict Server-Side Fetching") to bypass RLS "Permission Denied" on
+ * `contacts`, `mst_brands`, `mst_categories`, `mst_colors`, and `mst_genders`.
+ * Zero client-side `supabase.from(...)` calls remain for Master Data.
+ */
+async function fetchMasterData(): Promise<MasterData> {
+  const masterResult = await getMasterDataForMatrix();
+  if (masterResult.error) throw new Error(masterResult.error);
+
+  return {
+    brands: masterResult.brands,
+    categories: masterResult.categories,
+    colors: masterResult.colors,
+    genders: masterResult.genders,
+    vendors: masterResult.vendors,
+  };
+}
+
+/**
+ * `mst_sizes` — same Phase 3 "Strict Server-Side Fetching" rule as
+ * `fetchMasterData` above: zero client-side `supabase.from(...)` calls,
+ * everything routes through `lib/actions/master.ts` (Service Role Key).
+ */
+async function fetchSizesByBrand(brandId: string): Promise<Size[]> {
+  const result = await getSizesByBrand(brandId);
+  if (result.error) throw new Error(result.error);
+  return result.data as Size[];
+}
+
+async function fetchAllSizesByBrand(brandId: string): Promise<Size[]> {
+  const result = await getAllSizesByBrand(brandId);
+  if (result.error) throw new Error(result.error);
+  return result.data as Size[];
+}
+
+function toPrice(value: string): number {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function priceToInput(value: number): string {
+  return Number.isFinite(value) ? String(value) : "";
+}
+
+function getProductGroupKey(product: Product): string {
+  const description = product.description?.trim();
+  if (description) return `desc:${description}`;
+  const shortName = product.short_name?.trim();
+  if (shortName) return `short:${shortName}`;
+  return `name:${product.name}`;
+}
+
+function getProductGroupTitle(product: Product): string {
+  return (
+    product.description?.trim() ||
+    product.short_name?.trim() ||
+    product.name
+  );
+}
+
+function buildColorSubGroups(groupProducts: Product[]): ColorSubGroup[] {
+  const map = new Map<string, Product[]>();
+  for (const product of groupProducts) {
+    const color = product.color?.trim() || "ไม่ระบุสี";
+    const bucket = map.get(color);
+    if (bucket) bucket.push(product);
+    else map.set(color, [product]);
+  }
+
+  return Array.from(map.entries())
+    .map(([color, products]) => {
+      const sizes = [
+        ...new Set(
+          products
+            .map((item) => item.size)
+            .filter((value): value is string => Boolean(value)),
+        ),
+      ].sort(compareSizeLabels);
+
+      const sortedProducts = [...products].sort((left, right) =>
+        compareSizeLabels(left.size || "", right.size || ""),
+      );
+
+      return {
+        key: color,
+        color,
+        products: sortedProducts,
+        activeCount: products.filter((item) => item.is_active).length,
+        sizes,
+      };
+    })
+    .sort((left, right) =>
+      left.color.localeCompare(right.color, "th", { sensitivity: "base" }),
+    );
+}
+
+function buildGroupedProducts(list: Product[]): ProductGroup[] {
+  const map = new Map<string, Product[]>();
+  for (const product of list) {
+    const key = getProductGroupKey(product);
+    const bucket = map.get(key);
+    if (bucket) bucket.push(product);
+    else map.set(key, [product]);
+  }
+
+  return Array.from(map.entries())
+    .map(([key, groupProducts]) => {
+      const first = groupProducts[0];
+      const colorGroups = buildColorSubGroups(groupProducts);
+      const colors = colorGroups.map((group) => group.color);
+      const sizes = [
+        ...new Set(colorGroups.flatMap((group) => group.sizes)),
+      ];
+
+      return {
+        key,
+        title: getProductGroupTitle(first),
+        shortName: first.short_name?.trim() || "",
+        category: first.category,
+        gender: first.gender,
+        taxType: first.tax_type,
+        modelId:
+          groupProducts.find((item) => item.model_id)?.model_id ?? null,
+        products: groupProducts,
+        activeCount: groupProducts.filter((item) => item.is_active).length,
+        colors,
+        sizes,
+        colorGroups,
+      };
+    })
+    .sort((left, right) =>
+      left.title.localeCompare(right.title, "th", { sensitivity: "base" }),
+    );
+}
+
+function resolveBrandFromSku(
+  sku: string,
+  brands: BrandDetail[],
+): BrandDetail | null {
+  const upper = sku.trim().toUpperCase();
+  if (!upper || brands.length === 0) return null;
+  return (
+    [...brands]
+      .sort((left, right) => right.brand_code.length - left.brand_code.length)
+      .find((brand) =>
+        upper.startsWith(brand.brand_code.trim().toUpperCase()),
+      ) ?? null
+  );
+}
+
+function Icon({
+  name,
+  className = "size-4",
+}: {
+  name:
+    | "plus"
+    | "search"
+    | "close"
+    | "box"
+    | "sparkles"
+    | "layers"
+    | "palette"
+    | "check"
+    | "chevron"
+    | "edit"
+    | "ban";
+  className?: string;
+}) {
+  const paths = {
+    plus: <path d="M12 5v14M5 12h14" />,
+    search: (
+      <>
+        <circle cx="11" cy="11" r="7" />
+        <path d="m20 20-4-4" />
+      </>
+    ),
+    close: <path d="m6 6 12 12M18 6 6 18" />,
+    box: (
+      <>
+        <path d="M21 8 12 3 3 8v8l9 5 9-5z" />
+        <path d="M3 8l9 5 9-5M12 13v8" />
+      </>
+    ),
+    sparkles: (
+      <>
+        <path d="m12 3 1.2 3.8L17 8l-3.8 1.2L12 13l-1.2-3.8L7 8l3.8-1.2z" />
+        <path d="m18 14 .8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8z" />
+        <path d="m5 13 .6 1.4L7 15l-1.4.6L5 17l-.6-1.4L3 15l1.4-.6z" />
+      </>
+    ),
+    layers: (
+      <>
+        <path d="m12 2 9 5-9 5-9-5z" />
+        <path d="m3 12 9 5 9-5M3 17l9 5 9-5" />
+      </>
+    ),
+    palette: (
+      <>
+        <path d="M12 21a9 9 0 1 1 9-9c0 2.5-1.5 3.5-3 3.5h-2a2 2 0 0 0-1.5 3.3c.4.5.5 1.2-.2 1.6-.7.4-1.5.6-2.3.6z" />
+        <circle cx="7.5" cy="11" r="1" />
+        <circle cx="10.5" cy="7.5" r="1" />
+        <circle cx="15" cy="7.5" r="1" />
+      </>
+    ),
+    check: <path d="m5 12 4 4L19 6" />,
+    chevron: <path d="m9 18 6-6-6-6" />,
+    edit: (
+      <>
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+      </>
+    ),
+    ban: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="m5.5 5.5 13 13" />
+      </>
+    ),
+  };
+
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {paths[name]}
+    </svg>
+  );
+}
+
+const fieldClass =
+  "h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400";
+const labelClass = "mb-1.5 block text-xs font-semibold text-slate-700";
+const baht = new Intl.NumberFormat("th-TH", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+function StepHeading({
+  number,
+  title,
+  description,
+}: {
+  number: number;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="mb-5 flex items-start gap-3">
+      <span className="grid size-8 shrink-0 place-items-center rounded-full bg-blue-600 text-xs font-bold text-white shadow-sm shadow-blue-600/30">
+        {number}
+      </span>
+      <div>
+        <h3 className="text-sm font-bold text-slate-900">{title}</h3>
+        <p className="mt-0.5 text-xs text-slate-500">{description}</p>
+      </div>
+    </div>
+  );
+}
+
+function PriceInput({
+  value,
+  onChange,
+  ariaLabel,
+  disabled = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  ariaLabel: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="relative">
+      <input
+        type="number"
+        min="0"
+        step="0.01"
+        inputMode="decimal"
+        aria-label={ariaLabel}
+        value={value}
+        disabled={disabled}
+        readOnly={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="0.00"
+        className={`${fieldClass} pr-8 text-right tabular-nums ${
+          disabled ? "cursor-not-allowed bg-slate-50 text-slate-600" : ""
+        }`}
+      />
+      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-slate-400">
+        ฿
+      </span>
+    </div>
+  );
+}
+
+export default function ProductsClient() {
+  /**
+   * `?vendorId=` — set when arriving from the Goods Receipt "Full Matrix"
+   * on-the-fly link-out (see `components/procurement/FullMatrixDialog.tsx`).
+   * Pre-fills the Vendor field the next time "สร้าง Product Matrix" is
+   * opened, so the operator doesn't have to re-select the vendor manually.
+   */
+  const searchParams = useSearchParams();
+  const vendorIdFromQuery = searchParams.get("vendorId")?.trim() || "";
+
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [search, setSearch] = useState("");
+
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [form, setForm] = useState<MatrixForm>(createEmptyForm);
+  const [masterData, setMasterData] = useState<MasterData>(emptyMasterData);
+  const [sizes, setSizes] = useState<Size[]>([]);
+  const [isMasterLoading, setIsMasterLoading] = useState(false);
+  const [isSizeLoading, setIsSizeLoading] = useState(false);
+  const [isSizeDialogOpen, setIsSizeDialogOpen] = useState(false);
+  const [sizeReference, setSizeReference] = useState<Size[]>([]);
+  const [newSizeLabel, setNewSizeLabel] = useState("");
+  const [newSizeCode, setNewSizeCode] = useState("");
+  const [newSizeSortOrder, setNewSizeSortOrder] = useState("");
+  const [sizeDialogError, setSizeDialogError] = useState("");
+  const [isSizeReferenceLoading, setIsSizeReferenceLoading] = useState(false);
+  const [isSizeSaving, setIsSizeSaving] = useState(false);
+  const [quickSizeLabels, setQuickSizeLabels] = useState<string[]>([]);
+  const [isQuickSizeSaving, setIsQuickSizeSaving] = useState(false);
+
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [expandedColorGroups, setExpandedColorGroups] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [vendorByProductId, setVendorByProductId] = useState<
+    Record<string, VendorDetail>
+  >({});
+  const [listBrands, setListBrands] = useState<BrandDetail[]>([]);
+  const [entitySheet, setEntitySheet] = useState<EntitySheet | null>(null);
+  const [deactivateTarget, setDeactivateTarget] = useState<ProductGroup | null>(
+    null,
+  );
+  const [isDeactivating, setIsDeactivating] = useState(false);
+  const [deactivateError, setDeactivateError] = useState("");
+
+  const [editTarget, setEditTarget] = useState<ProductGroup | null>(null);
+  const [editForm, setEditForm] = useState<BatchEditForm | null>(null);
+  const [editError, setEditError] = useState("");
+  const [isEditSaving, setIsEditSaving] = useState(false);
+  const [isEditConfirmOpen, setIsEditConfirmOpen] = useState(false);
+  const [draftModelId, setDraftModelId] = useState<string | null>(null);
+  const [loadedModelStatus, setLoadedModelStatus] = useState<
+    "DRAFT" | "ACTIVE" | null
+  >(null);
+  const [loadableModels, setLoadableModels] = useState<LoadableProductModel[]>(
+    [],
+  );
+  const [isLoadableModelsLoading, setIsLoadableModelsLoading] = useState(false);
+  const [pendingSizePricingConfig, setPendingSizePricingConfig] = useState<
+    unknown | null
+  >(null);
+  const [isDraftSaving, setIsDraftSaving] = useState(false);
+  const [isOverwriteModalOpen, setIsOverwriteModalOpen] = useState(false);
+  const [existingDraftModel, setExistingDraftModel] =
+    useState<ExistingProductModel | null>(null);
+  const [pendingDraftPayload, setPendingDraftPayload] =
+    useState<SaveDraftModelInput | null>(null);
+  const [sizePricing, setSizePricing] = useState<SizePricingRow[]>([]);
+  const [shortNameTouched, setShortNameTouched] = useState(false);
+  const [productNameTouched, setProductNameTouched] = useState(false);
+
+  const loadProducts = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError("");
+    const { data, error } = await supabase
+      .from("products")
+      .select(productSelect)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      setProducts([]);
+      setVendorByProductId({});
+      setListBrands([]);
+      setLoadError(error.message);
+      setIsLoading(false);
+      return;
+    }
+
+    const nextProducts = (data ?? []) as Product[];
+    setProducts(nextProducts);
+
+    // Brands (mst_brands) + vendor mapping (vendor_product_mapping → contacts)
+    // go through Server Actions — Service Role Key bypasses RLS entirely.
+    const productIds = nextProducts.map((item) => item.id);
+    const [brandsResult, mappingsResult] = await Promise.all([
+      getBrands(),
+      getVendorMappingsByProductIds(productIds),
+    ]);
+
+    if (!brandsResult.error) {
+      setListBrands(brandsResult.data);
+    }
+
+    if (!mappingsResult.error) {
+      const nextVendors: Record<string, VendorDetail> = {};
+      for (const row of mappingsResult.data) {
+        if (row.internal_product_id && row.vendor.id) {
+          nextVendors[row.internal_product_id] = row.vendor;
+        }
+      }
+      setVendorByProductId(nextVendors);
+    }
+
+    setIsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadProducts();
+  }, [loadProducts]);
+
+  useEffect(() => {
+    if (!entitySheet) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setEntitySheet(null);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [entitySheet]);
+
+  // Keep Escape-handler flags in a ref so useEffect deps stay a fixed length.
+  const matrixEscapeStateRef = useRef({
+    isSizeDialogOpen,
+    isSizeSaving,
+    isOverwriteModalOpen,
+    isSaving,
+    isDraftSaving,
+  });
+  matrixEscapeStateRef.current = {
+    isSizeDialogOpen,
+    isSizeSaving,
+    isOverwriteModalOpen,
+    isSaving,
+    isDraftSaving,
+  };
+
+  useEffect(() => {
+    if (!isDialogOpen) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+
+      const state = matrixEscapeStateRef.current;
+      if (state.isSizeDialogOpen) {
+        if (!state.isSizeSaving) setIsSizeDialogOpen(false);
+        return;
+      }
+      if (state.isOverwriteModalOpen) {
+        if (!state.isDraftSaving) {
+          setIsOverwriteModalOpen(false);
+          setExistingDraftModel(null);
+          setPendingDraftPayload(null);
+        }
+        return;
+      }
+      if (!state.isSaving && !state.isDraftSaving) {
+        setIsDialogOpen(false);
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [isDialogOpen]);
+
+  useEffect(() => {
+    if (!form.brandId) {
+      setSizes([]);
+      setQuickSizeLabels([]);
+      return;
+    }
+
+    let active = true;
+    setIsSizeLoading(true);
+    setQuickSizeLabels([]);
+    fetchSizesByBrand(form.brandId)
+      .then((data) => {
+        if (!active) return;
+        setSizes(data);
+        if (pendingSizePricingConfig != null) {
+          const hydrated = hydrateSizePricingFromConfig(
+            pendingSizePricingConfig,
+            data,
+          );
+          setForm((current) => ({
+            ...current,
+            sizeIds: hydrated.sizeIds,
+          }));
+          setSizePricing(hydrated.sizePricing);
+          setPendingSizePricingConfig(null);
+        }
+      })
+      .catch((error: Error) => {
+        if (active) {
+          setSizes([]);
+          setFormError(`ไม่สามารถโหลดข้อมูลไซส์ได้: ${error.message}`);
+        }
+      })
+      .finally(() => {
+        if (active) setIsSizeLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [form.brandId, pendingSizePricingConfig]);
+
+  const selectedBrand = masterData.brands.find(
+    (brand) => brand.id === form.brandId,
+  );
+  const selectedCategory = masterData.categories.find(
+    (category) => category.id === form.categoryId,
+  );
+  const selectedGender = masterData.genders.find(
+    (gender) => gender.id === form.genderId,
+  );
+
+  const baseProductName = useMemo(() => {
+    const typed = form.productName.trim();
+    if (typed) return typed;
+    if (!selectedCategory || !isValidModelCode(form.modelCode)) return "";
+    return `${selectedCategory.category_name} ${form.modelCode.trim()}`;
+  }, [form.productName, form.modelCode, selectedCategory]);
+
+  const sizePricingById = useMemo(() => {
+    const map = new Map<string, SizePricingRow>();
+    for (const row of sizePricing) map.set(row.sizeId, row);
+    return map;
+  }, [sizePricing]);
+
+  const previewRows = useMemo<PreviewRow[]>(() => {
+    if (
+      !selectedBrand ||
+      !selectedCategory ||
+      !selectedGender ||
+      !isValidModelCode(form.modelCode)
+    ) {
+      return [];
+    }
+
+    const selectedColors = masterData.colors.filter((color) =>
+      form.colorIds.includes(color.id),
+    );
+    const selectedSizes = sizes.filter((size) =>
+      form.sizeIds.includes(size.id),
+    );
+
+    return selectedColors.flatMap((color) =>
+      selectedSizes.map((size) => {
+        const sku = buildProductSku({
+          brandCode: selectedBrand.brand_code,
+          categoryCode: selectedCategory.category_code,
+          modelCode: form.modelCode,
+          genderCode: selectedGender.gender_code,
+          colorCode: color.color_code,
+          sizeCode: size.size_code,
+        });
+        const pricing = sizePricingById.get(size.id);
+
+        return {
+          key: `${color.id}-${size.id}`,
+          sku,
+          fullName: `${baseProductName} สี${color.color_name} ไซส์ ${size.size_label}`,
+          color,
+          size,
+          prices: {
+            cost: pricing?.costPrice ?? "",
+            retail: pricing?.retailPrice ?? "",
+            wholesale: pricing?.wholesalePrice ?? "",
+          },
+        };
+      }),
+    );
+  }, [
+    baseProductName,
+    form.colorIds,
+    form.modelCode,
+    form.sizeIds,
+    masterData.colors,
+    selectedBrand,
+    selectedCategory,
+    selectedGender,
+    sizePricingById,
+    sizes,
+  ]);
+
+  // Auto-fill short_name from category; product_name from category + model_code
+  useEffect(() => {
+    if (!selectedCategory) return;
+
+    const categoryName = selectedCategory.category_name;
+    const modelCode = form.modelCode.trim();
+
+    setForm((current) => {
+      const nextShortName =
+        !shortNameTouched || !current.shortName.trim()
+          ? categoryName
+          : current.shortName;
+
+      const shouldAutoProductName =
+        !productNameTouched &&
+        modelCode.length === MODEL_CODE_LENGTH &&
+        isValidModelCode(modelCode);
+
+      const nextProductName = shouldAutoProductName
+        ? `${categoryName} ${modelCode}`
+        : current.productName;
+
+      if (
+        nextShortName === current.shortName &&
+        nextProductName === current.productName
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        shortName: nextShortName,
+        productName: nextProductName,
+      };
+    });
+  }, [
+    selectedCategory,
+    form.modelCode,
+    shortNameTouched,
+    productNameTouched,
+  ]);
+
+  const isStep1Complete = Boolean(
+    form.vendorId &&
+      form.brandId &&
+      form.categoryId &&
+      form.genderId &&
+      isValidModelCode(form.modelCode) &&
+      baseProductName,
+  );
+
+  const isStep2Complete =
+    form.colorIds.length > 0 && form.sizeIds.length > 0;
+
+  const isStep3Complete =
+    isStep2Complete &&
+    form.sizeIds.every((sizeId) => {
+      const pricing = sizePricingById.get(sizeId);
+      if (!pricing) return false;
+      return (
+        pricing.retailPrice.trim() !== "" &&
+        Number.isFinite(Number(pricing.retailPrice)) &&
+        pricing.costPrice.trim() !== "" &&
+        Number.isFinite(Number(pricing.costPrice))
+      );
+    });
+
+  const canGenerateSkus =
+    isStep1Complete &&
+    isStep2Complete &&
+    isStep3Complete &&
+    previewRows.length > 0 &&
+    previewRows.every((row) => Boolean(row.sku));
+
+  const filteredProducts = useMemo(() => {
+    const keyword = search.trim().toLocaleLowerCase("th");
+    if (!keyword) return products;
+    return products.filter((product) => {
+      const vendor = vendorByProductId[product.id];
+      const brand = resolveBrandFromSku(product.sku, listBrands);
+      return [
+        product.sku,
+        product.name,
+        product.short_name,
+        product.description,
+        product.category,
+        product.color,
+        product.size,
+        product.gender,
+        vendor?.company_name,
+        brand?.brand_name,
+        brand?.brand_code,
+      ].some((value) => value?.toLocaleLowerCase("th").includes(keyword));
+    });
+  }, [products, search, vendorByProductId, listBrands]);
+
+  const productGroups = useMemo(
+    () => buildGroupedProducts(filteredProducts),
+    [filteredProducts],
+  );
+
+  const editSizeLabels = useMemo(() => {
+    if (!editTarget) return [];
+    return [
+      ...new Set(
+        editTarget.products
+          .map((product) => product.size)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    ];
+  }, [editTarget]);
+
+  async function openDialog(presetVendorId?: string) {
+    setForm(createEmptyForm(presetVendorId ?? ""));
+    setSizes([]);
+    setSizePricing([]);
+    setShortNameTouched(false);
+    setProductNameTouched(false);
+    setFormError("");
+    setDraftModelId(null);
+    setLoadedModelStatus(null);
+    setPendingSizePricingConfig(null);
+    setIsOverwriteModalOpen(false);
+    setExistingDraftModel(null);
+    setPendingDraftPayload(null);
+    setIsSizeDialogOpen(false);
+    setIsDialogOpen(true);
+    setIsMasterLoading(true);
+    setIsLoadableModelsLoading(true);
+
+    try {
+      const data = await fetchMasterData();
+      setMasterData(data);
+      const defaultGender =
+        data.genders.find((item) => item.gender_name === "ทั่วไป") ??
+        data.genders[0];
+      if (defaultGender) {
+        setForm((current) => ({ ...current, genderId: defaultGender.id }));
+      }
+    } catch (error) {
+      setMasterData(emptyMasterData);
+      setFormError(
+        `ไม่สามารถโหลด Master Data ได้: ${
+          error instanceof Error ? error.message : "เกิดข้อผิดพลาด"
+        }`,
+      );
+    } finally {
+      setIsMasterLoading(false);
+    }
+
+    try {
+      const result = await listLoadableProductModels();
+      if (!result.ok) {
+        setLoadableModels([]);
+        toast.error(result.error ?? "โหลดรายการโมเดลไม่สำเร็จ");
+      } else {
+        setLoadableModels(result.models);
+      }
+    } catch (error) {
+      setLoadableModels([]);
+      toast.error(
+        error instanceof Error ? error.message : "โหลดรายการโมเดลไม่สำเร็จ",
+      );
+    } finally {
+      setIsLoadableModelsLoading(false);
+    }
+  }
+
+  function closeDialog() {
+    if (!isSaving && !isDraftSaving) setIsDialogOpen(false);
+  }
+
+  function updateForm<K extends keyof MatrixForm>(
+    key: K,
+    value: MatrixForm[K],
+  ) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function changeBrand(brandId: string) {
+    setIsSizeDialogOpen(false);
+    setQuickSizeLabels([]);
+    setSizePricing([]);
+    setForm((current) => ({
+      ...current,
+      brandId,
+      sizeIds: [],
+    }));
+    setFormError("");
+  }
+
+  async function handleLoadModel(
+    modelId: string,
+    model: LoadableProductModel | null,
+  ) {
+    if (!modelId || !model) return;
+
+    setFormError("");
+    setDraftModelId(model.id);
+    setLoadedModelStatus(model.status === "ACTIVE" ? "ACTIVE" : "DRAFT");
+    setShortNameTouched(true);
+    setProductNameTouched(true);
+    setPendingSizePricingConfig(model.size_pricing_config ?? []);
+    setSizePricing([]);
+    setQuickSizeLabels([]);
+
+    const matchedGender =
+      masterData.genders.find(
+        (item) =>
+          item.gender_name === model.gender ||
+          item.gender_code === model.gender,
+      ) ?? masterData.genders[0];
+
+    let taxType: TaxType = "INC_VAT";
+    const taxRaw = String(model.tax_type ?? "INC_VAT").toUpperCase();
+    if (taxRaw.includes("EXC")) taxType = "EXC_VAT";
+    else if (taxRaw.includes("NON")) taxType = "NON_VAT";
+
+    setForm((current) => ({
+      ...current,
+      vendorId: model.vendor_id ?? current.vendorId,
+      brandId: model.brand_id ?? "",
+      categoryId: model.category_id ?? "",
+      genderId: matchedGender?.id ?? current.genderId,
+      taxType,
+      modelCode: model.model_code ?? "",
+      productName: model.name ?? "",
+      shortName: model.short_name ?? "",
+      colorIds: [],
+      sizeIds: [],
+    }));
+
+    toast.success(
+      `โหลดโมเดล ${model.model_code} (${model.status ?? "DRAFT"}) แล้ว — เพิ่มสี/ไซส์ใหม่แล้วกดสร้าง SKU ได้`,
+    );
+  }
+
+  function toggleQuickSize(label: string) {
+    setQuickSizeLabels((current) =>
+      current.includes(label)
+        ? current.filter((item) => item !== label)
+        : [...current, label],
+    );
+  }
+
+  async function handleSaveQuickSizes() {
+    if (!form.brandId || quickSizeLabels.length === 0 || isQuickSizeSaving) {
+      return;
+    }
+
+    const selected = STANDARD_SIZES.filter((size) =>
+      quickSizeLabels.includes(size.label),
+    );
+    if (selected.length === 0) return;
+
+    setIsQuickSizeSaving(true);
+    setFormError("");
+
+    const { data, error } = await createSizesBulk({
+      brand_id: form.brandId,
+      sizes: selected.map((size) => ({
+        size_label: size.label,
+        size_code: size.code,
+        sort_order: size.sort_order,
+      })),
+    });
+
+    if (error || !data) {
+      const message = error ?? "ไม่สามารถบันทึกไซส์มาตรฐานได้";
+      setFormError(message);
+      toast.error(message);
+      setIsQuickSizeSaving(false);
+      return;
+    }
+
+    const inserted = (data as Size[]).sort(
+      (left, right) => left.sort_order - right.sort_order,
+    );
+
+    try {
+      const refreshed = await fetchSizesByBrand(form.brandId);
+      setSizes(refreshed);
+      setForm((current) => ({
+        ...current,
+        sizeIds: refreshed.map((size) => size.id),
+      }));
+      setSizePricing((current) => {
+        const byId = new Map(current.map((row) => [row.sizeId, row]));
+        return refreshed.map(
+          (size) => byId.get(size.id) ?? createEmptySizePricing(size),
+        );
+      });
+    } catch {
+      setSizes(inserted);
+      setForm((current) => ({
+        ...current,
+        sizeIds: inserted.map((size) => size.id),
+      }));
+      setSizePricing(inserted.map((size) => createEmptySizePricing(size)));
+    }
+
+    setQuickSizeLabels([]);
+    setIsQuickSizeSaving(false);
+    toast.success(`เพิ่มไซส์มาตรฐาน ${inserted.length} รายการแล้ว`);
+  }
+
+  function toggleSize(sizeId: string) {
+    const size = sizes.find((item) => item.id === sizeId);
+    setForm((current) => {
+      const isSelected = current.sizeIds.includes(sizeId);
+      return {
+        ...current,
+        sizeIds: isSelected
+          ? current.sizeIds.filter((id) => id !== sizeId)
+          : [...current.sizeIds, sizeId],
+      };
+    });
+    setSizePricing((current) => {
+      const exists = current.some((row) => row.sizeId === sizeId);
+      if (exists) return current.filter((row) => row.sizeId !== sizeId);
+      if (!size) return current;
+      return [...current, createEmptySizePricing(size)];
+    });
+  }
+
+  function updateSizePricing(
+    sizeId: string,
+    patch: Partial<
+      Pick<
+        SizePricingRow,
+        | "retailPrice"
+        | "wholesalePrice"
+        | "discountType"
+        | "discountValue"
+      >
+    >,
+  ) {
+    setSizePricing((current) =>
+      current.map((row) => {
+        if (row.sizeId !== sizeId) return row;
+        return withCalculatedCost({ ...row, ...patch });
+      }),
+    );
+  }
+
+  async function openSizeDialog() {
+    if (!form.brandId) return;
+
+    setNewSizeLabel("");
+    setNewSizeCode("");
+    setNewSizeSortOrder("");
+    setSizeDialogError("");
+    setSizeReference([]);
+    setIsSizeDialogOpen(true);
+    setIsSizeReferenceLoading(true);
+
+    try {
+      setSizeReference(await fetchAllSizesByBrand(form.brandId));
+    } catch (error) {
+      setSizeDialogError(
+        `ไม่สามารถโหลดตารางอ้างอิงไซส์ได้: ${
+          error instanceof Error ? error.message : "เกิดข้อผิดพลาด"
+        }`,
+      );
+    } finally {
+      setIsSizeReferenceLoading(false);
+    }
+  }
+
+  async function handleCreateSize(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    setSizeDialogError("");
+
+    const sizeLabel = newSizeLabel.trim();
+    const sizeCode = normalizeSkuPart(newSizeCode);
+    const sortOrder = Number(newSizeSortOrder);
+
+    if (!form.brandId) {
+      setSizeDialogError("กรุณาเลือกแบรนด์ก่อนเพิ่มไซส์");
+      return;
+    }
+    if (!sizeLabel || !sizeCode || newSizeSortOrder.trim() === "") {
+      setSizeDialogError("กรุณากรอกข้อมูลไซส์ให้ครบทั้ง 3 ช่อง");
+      return;
+    }
+    if (!Number.isInteger(sortOrder) || sortOrder < 0) {
+      setSizeDialogError("ลำดับต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป");
+      return;
+    }
+
+    setIsSizeSaving(true);
+
+    const { data: insertedSize, error } = await createSize({
+      brand_id: form.brandId,
+      size_label: sizeLabel,
+      size_code: sizeCode,
+      sort_order: sortOrder,
+    });
+
+    if (error || !insertedSize) {
+      setSizeDialogError(error ?? "ไม่สามารถบันทึกไซส์ใหม่ได้");
+      setIsSizeSaving(false);
+      return;
+    }
+
+    try {
+      const refreshedSizes = await fetchSizesByBrand(form.brandId);
+      setSizes(refreshedSizes);
+    } catch {
+      setSizes((current) =>
+        [...current, insertedSize as Size].sort(
+          (left, right) => left.sort_order - right.sort_order,
+        ),
+      );
+    }
+
+    setForm((current) => ({
+      ...current,
+      sizeIds: [...current.sizeIds, (insertedSize as Size).id],
+    }));
+    setSizePricing((current) => [
+      ...current,
+      createEmptySizePricing(insertedSize as Size),
+    ]);
+    setIsSizeSaving(false);
+    setIsSizeDialogOpen(false);
+  }
+
+  async function handleSaveDraftModel() {
+    setFormError("");
+
+    if (!selectedGender) {
+      setFormError("กรุณาเลือกเพศจาก Master Data");
+      return;
+    }
+    if (!baseProductName) {
+      setFormError("กรุณาระบุชื่อสินค้า หรือเลือก Brand/Category/Model ให้ครบ");
+      return;
+    }
+
+    const shortName =
+      form.shortName.trim() ||
+      selectedCategory?.category_name ||
+      `${selectedBrand?.brand_name ?? ""} ${form.modelCode.trim()}`.trim();
+
+    const identity = parseProductModelIdentity({
+      vendorId: form.vendorId,
+      brandId: form.brandId,
+      categoryId: form.categoryId,
+      modelCode: form.modelCode,
+      name: baseProductName,
+      shortName,
+      gender: selectedGender.gender_name,
+      taxType: form.taxType,
+    });
+    if (!identity.ok) {
+      setFormError(identity.error);
+      return;
+    }
+
+    const payload: SaveDraftModelInput = {
+      vendorId: identity.data.vendor_id,
+      brandId: identity.data.brand_id,
+      categoryId: identity.data.category_id,
+      modelCode: identity.data.model_code,
+      name: identity.data.name,
+      shortName: identity.data.short_name || shortName,
+      gender: identity.data.gender,
+      taxType: identity.data.tax_type,
+      sizePricingConfig: serializeSizePricingConfig(sizePricing),
+    };
+
+    setIsDraftSaving(true);
+
+    const check = await findProductModelByCode(payload.modelCode);
+    if (!check.ok) {
+      setFormError(check.error ?? "ตรวจสอบรหัสรุ่นไม่สำเร็จ");
+      toast.error(check.error ?? "ตรวจสอบรหัสรุ่นไม่สำเร็จ");
+      setIsDraftSaving(false);
+      return;
+    }
+
+    if (check.existing) {
+      setExistingDraftModel(check.existing);
+      setPendingDraftPayload(payload);
+      setIsOverwriteModalOpen(true);
+      setIsDraftSaving(false);
+      return;
+    }
+
+    const result = await insertDraftProductModel(payload);
+    if (!result.ok || !result.modelId) {
+      setFormError(result.error ?? "บันทึกโครงร่างสินค้าไม่สำเร็จ");
+      toast.error(result.error ?? "บันทึกโครงร่างสินค้าไม่สำเร็จ");
+      setIsDraftSaving(false);
+      return;
+    }
+
+    setDraftModelId(result.modelId);
+    setLoadedModelStatus("DRAFT");
+    toast.success("บันทึกโครงร่างสินค้า (DRAFT) สำเร็จ — ยังไม่สร้าง SKU");
+    setIsDraftSaving(false);
+
+    const refreshed = await listLoadableProductModels();
+    if (refreshed.ok) setLoadableModels(refreshed.models);
+  }
+
+  function closeOverwriteModal() {
+    if (isDraftSaving) return;
+    setIsOverwriteModalOpen(false);
+    setExistingDraftModel(null);
+    setPendingDraftPayload(null);
+  }
+
+  async function handleConfirmOverwriteDraft() {
+    if (!pendingDraftPayload) return;
+
+    setIsDraftSaving(true);
+    const result = await overwriteDraftProductModel(pendingDraftPayload);
+
+    if (!result.ok || !result.modelId) {
+      setFormError(result.error ?? "บันทึกทับโมเดลไม่สำเร็จ");
+      toast.error(result.error ?? "บันทึกทับโมเดลไม่สำเร็จ");
+      setIsDraftSaving(false);
+      return;
+    }
+
+    setDraftModelId(result.modelId);
+    setLoadedModelStatus("DRAFT");
+    setIsOverwriteModalOpen(false);
+    setExistingDraftModel(null);
+    setPendingDraftPayload(null);
+    toast.success("บันทึกทับโมเดลสำเร็จ (DRAFT)");
+    setIsDraftSaving(false);
+
+    const refreshed = await listLoadableProductModels();
+    if (refreshed.ok) setLoadableModels(refreshed.models);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormError("");
+
+    if (!canGenerateSkus) {
+      setFormError(
+        "กรุณากรอก Step 1–3 ให้ครบ (สี ไซส์ และราคา) ก่อนสร้าง SKU",
+      );
+      return;
+    }
+    if (!selectedGender || !selectedBrand || !selectedCategory) {
+      setFormError("กรุณาเลือก Vendor / Brand / Category / Gender ให้ครบ");
+      return;
+    }
+    if (
+      new Set(previewRows.map((row) => row.sku)).size !== previewRows.length
+    ) {
+      setFormError("พบ SKU ซ้ำกันเองใน Matrix กรุณาตรวจสอบรหัสสีและไซส์");
+      return;
+    }
+
+    const shortName =
+      form.shortName.trim() ||
+      selectedCategory.category_name ||
+      `${selectedBrand.brand_name} ${form.modelCode.trim()}`.trim();
+
+    const identity = parseProductModelIdentity({
+      vendorId: form.vendorId,
+      brandId: form.brandId,
+      categoryId: form.categoryId,
+      modelCode: form.modelCode,
+      name: baseProductName,
+      shortName,
+      gender: selectedGender.gender_name,
+      taxType: form.taxType,
+    });
+    if (!identity.ok) {
+      setFormError(identity.error);
+      return;
+    }
+
+    setIsSaving(true);
+
+    const safeTaxType = identity.data.tax_type;
+
+    const result = await generateSkusFromModel({
+      modelId: draftModelId,
+      vendorId: identity.data.vendor_id,
+      model: {
+        vendorId: identity.data.vendor_id,
+        brandId: identity.data.brand_id,
+        categoryId: identity.data.category_id,
+        modelCode: identity.data.model_code,
+        name: identity.data.name,
+        shortName: identity.data.short_name || shortName,
+        gender: identity.data.gender,
+        taxType: safeTaxType,
+        sizePricingConfig: serializeSizePricingConfig(sizePricing),
+      },
+      skus: previewRows.map((row) => ({
+        sku: row.sku,
+        name: row.fullName,
+        shortName: identity.data.short_name || shortName,
+        description: identity.data.name,
+        category: selectedCategory.category_name,
+        color: row.color.color_name,
+        size: row.size.size_label,
+        gender: identity.data.gender,
+        taxType: safeTaxType,
+        costPrice: toPrice(row.prices.cost),
+        retailPrice: toPrice(row.prices.retail),
+        wholesalePrice: toPrice(row.prices.wholesale),
+      })),
+    });
+
+    if (!result.ok) {
+      if (result.error?.includes("SKU ซ้ำ")) {
+        window.alert(result.error);
+      }
+      setFormError(result.error ?? "สร้าง SKU ไม่สำเร็จ");
+      toast.error(result.error ?? "สร้าง SKU ไม่สำเร็จ");
+      setIsSaving(false);
+      return;
+    }
+
+    if (result.modelId) {
+      setDraftModelId(result.modelId);
+      setLoadedModelStatus("ACTIVE");
+    }
+
+    const inserted = result.inserted ?? 0;
+    const skipped = result.skipped ?? 0;
+    if (inserted === 0 && skipped > 0) {
+      toast.success(
+        `ไม่มี SKU ใหม่ — ข้าม ${skipped.toLocaleString("th-TH")} รายการที่มีอยู่แล้ว (โมเดลเป็น ACTIVE)`,
+      );
+    } else {
+      toast.success(
+        [
+          `สร้าง ${inserted.toLocaleString("th-TH")} SKU ใหม่สำเร็จ`,
+          skipped > 0
+            ? `(ข้าม ${skipped.toLocaleString("th-TH")} รายการที่มีอยู่แล้ว)`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      );
+    }
+    await loadProducts();
+    setIsSaving(false);
+    setIsDialogOpen(false);
+  }
+
+  function toggleGroup(groupKey: string) {
+    setExpandedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(groupKey)) {
+        next.delete(groupKey);
+        setExpandedColorGroups((colors) => {
+          const pruned = new Set(colors);
+          for (const key of colors) {
+            if (key.startsWith(`${groupKey}::`)) pruned.delete(key);
+          }
+          return pruned;
+        });
+      } else {
+        next.add(groupKey);
+      }
+      return next;
+    });
+  }
+
+  function toggleColorGroup(groupKey: string, colorKey: string) {
+    const composite = `${groupKey}::${colorKey}`;
+    setExpandedColorGroups((current) => {
+      const next = new Set(current);
+      if (next.has(composite)) next.delete(composite);
+      else next.add(composite);
+      return next;
+    });
+  }
+
+  function getGroupVendor(group: ProductGroup): VendorDetail | null {
+    for (const product of group.products) {
+      const vendor = vendorByProductId[product.id];
+      if (vendor) return vendor;
+    }
+    return null;
+  }
+
+  function getGroupBrand(group: ProductGroup): BrandDetail | null {
+    for (const product of group.products) {
+      const brand = resolveBrandFromSku(product.sku, listBrands);
+      if (brand) return brand;
+    }
+    return null;
+  }
+
+  function openDeactivateDialog(group: ProductGroup) {
+    setDeactivateError("");
+    setDeactivateTarget(group);
+  }
+
+  function closeDeactivateDialog() {
+    if (isDeactivating) return;
+    setDeactivateTarget(null);
+    setDeactivateError("");
+  }
+
+  async function confirmDeactivateGroup() {
+    if (!deactivateTarget) return;
+    setIsDeactivating(true);
+    setDeactivateError("");
+
+    const ids = deactivateTarget.products.map((product) => product.id);
+    const { error } = await supabase
+      .from("products")
+      .update({ is_active: false })
+      .in("id", ids);
+
+    if (error) {
+      setDeactivateError(error.message);
+      setIsDeactivating(false);
+      return;
+    }
+
+    await loadProducts();
+    setIsDeactivating(false);
+    setDeactivateTarget(null);
+  }
+
+  function openBatchEdit(group: ProductGroup) {
+    const prices: Record<string, SizePrice> = {};
+    for (const product of group.products) {
+      const sizeLabel = product.size?.trim();
+      if (!sizeLabel || prices[sizeLabel]) continue;
+      prices[sizeLabel] = {
+        cost: priceToInput(Number(product.cost_price)),
+        retail: priceToInput(Number(product.retail_price)),
+        wholesale: priceToInput(Number(product.wholesale_price)),
+      };
+    }
+
+    void (async () => {
+      try {
+        let genders = masterData.genders;
+        let vendors = masterData.vendors;
+
+        if (genders.length === 0 || vendors.length === 0) {
+          const [gendersResult, vendorsResult] = await Promise.all([
+            genders.length === 0
+              ? getGenders()
+              : Promise.resolve({ data: genders, error: null }),
+            vendors.length === 0
+              ? getVendors()
+              : Promise.resolve({ data: vendors, error: null }),
+          ]);
+
+          if (gendersResult.error) {
+            throw new Error(gendersResult.error);
+          }
+          if (vendorsResult.error) {
+            throw new Error(vendorsResult.error);
+          }
+
+          genders = gendersResult.data;
+          vendors = vendorsResult.data;
+          setMasterData((current) => ({
+            ...current,
+            genders,
+            vendors,
+          }));
+        }
+
+        const matched =
+          genders.find((item) => item.gender_name === group.gender) ??
+          genders.find((item) => item.gender_name === "ทั่วไป") ??
+          genders[0];
+
+        let vendorId = "";
+        const modelId =
+          group.modelId ??
+          group.products.find((item) => item.model_id)?.model_id ??
+          null;
+
+        if (modelId) {
+          const { data: modelRow, error: modelError } = await supabase
+            .from("product_models")
+            .select("vendor_id")
+            .eq("id", modelId)
+            .maybeSingle();
+
+          if (modelError) {
+            throw modelError;
+          }
+
+          vendorId = (modelRow?.vendor_id as string | null) ?? "";
+        } else {
+          const mappedVendor = vendorByProductId[group.products[0]?.id ?? ""];
+          vendorId = mappedVendor?.id ?? "";
+        }
+
+        setEditTarget(group);
+        setEditForm({
+          description: group.title,
+          shortName: group.shortName,
+          genderId: matched?.id ?? "",
+          taxType: group.taxType || "INC_VAT",
+          vendorId,
+          prices,
+        });
+        setEditError("");
+        setIsEditConfirmOpen(false);
+      } catch (error) {
+        setEditError(
+          `โหลดข้อมูลแก้ไขไม่สำเร็จ: ${
+            error instanceof Error ? error.message : "เกิดข้อผิดพลาด"
+          }`,
+        );
+      }
+    })();
+  }
+
+  function closeBatchEdit() {
+    if (isEditSaving) return;
+    setEditTarget(null);
+    setEditForm(null);
+    setEditError("");
+    setIsEditConfirmOpen(false);
+  }
+
+  function updateEditPrice(
+    sizeLabel: string,
+    key: keyof SizePrice,
+    value: string,
+  ) {
+    setEditForm((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        prices: {
+          ...current.prices,
+          [sizeLabel]: {
+            ...(current.prices[sizeLabel] ?? emptyPrice),
+            [key]: value,
+          },
+        },
+      };
+    });
+  }
+
+  function requestBatchEditSave() {
+    if (!editTarget || !editForm) return;
+    setEditError("");
+
+    if (!editForm.description.trim()) {
+      setEditError("กรุณากรอกชื่อสินค้า (คำอธิบายรุ่น)");
+      return;
+    }
+
+    const vendorResult = vendorIdSchema.safeParse(editForm.vendorId.trim());
+    if (!vendorResult.success) {
+      setEditError(zodFirstError(vendorResult.error, VENDOR_ID_REQUIRED_MESSAGE));
+      return;
+    }
+
+    for (const sizeLabel of editSizeLabels) {
+      const price = editForm.prices[sizeLabel] ?? emptyPrice;
+      if (
+        price.cost.trim() === "" ||
+        price.retail.trim() === "" ||
+        price.wholesale.trim() === ""
+      ) {
+        setEditError(`กรุณากรอกราคาให้ครบสำหรับไซส์ ${sizeLabel}`);
+        return;
+      }
+      if (
+        toPrice(price.cost) < 0 ||
+        toPrice(price.retail) < 0 ||
+        toPrice(price.wholesale) < 0
+      ) {
+        setEditError(`ราคาของไซส์ ${sizeLabel} ต้องไม่ติดลบ`);
+        return;
+      }
+    }
+
+    setIsEditConfirmOpen(true);
+  }
+
+  async function confirmBatchEditSave() {
+    if (!editTarget || !editForm) return;
+    setIsEditSaving(true);
+    setEditError("");
+
+    const vendorResult = vendorIdSchema.safeParse(editForm.vendorId.trim());
+    if (!vendorResult.success) {
+      setEditError(zodFirstError(vendorResult.error, VENDOR_ID_REQUIRED_MESSAGE));
+      setIsEditSaving(false);
+      setIsEditConfirmOpen(false);
+      return;
+    }
+    const requiredVendorId = vendorResult.data;
+
+    let safeTaxType: TaxType = "INC_VAT";
+    if (typeof editForm.taxType === "string") {
+      const taxRaw = editForm.taxType.toUpperCase();
+      if (taxRaw.includes("EXC")) safeTaxType = "EXC_VAT";
+      else if (taxRaw.includes("NON")) safeTaxType = "NON_VAT";
+      else safeTaxType = "INC_VAT";
+    }
+
+    const baseName = editForm.description.trim();
+    const shortName =
+      editForm.shortName.trim() || baseName;
+    const selectedEditGender = masterData.genders.find(
+      (item) => item.id === editForm.genderId,
+    );
+    if (!selectedEditGender) {
+      setEditError("กรุณาเลือกเพศจาก Master Data");
+      setIsEditSaving(false);
+      setIsEditConfirmOpen(false);
+      return;
+    }
+
+    const updates = editTarget.products.map((product) => {
+      const sizeLabel = product.size?.trim() || "";
+      const price = editForm.prices[sizeLabel] ?? emptyPrice;
+      const colorPart = product.color ? ` สี${product.color}` : "";
+      const sizePart = sizeLabel ? ` ไซส์ ${sizeLabel}` : "";
+
+      return {
+        id: product.id,
+        name: `${baseName}${colorPart}${sizePart}`,
+        short_name: shortName,
+        description: baseName,
+        gender: selectedEditGender.gender_name,
+        tax_type: safeTaxType,
+        cost_price: toPrice(price.cost),
+        retail_price: toPrice(price.retail),
+        wholesale_price: toPrice(price.wholesale),
+      };
+    });
+
+    const results = await Promise.all(
+      updates.map(({ id, ...payload }) =>
+        supabase.from("products").update(payload).eq("id", id),
+      ),
+    );
+
+    const firstError = results.find((result) => result.error)?.error;
+    if (firstError) {
+      setEditError(firstError.message);
+      setIsEditSaving(false);
+      setIsEditConfirmOpen(false);
+      return;
+    }
+
+    const modelId =
+      editTarget.modelId ??
+      editTarget.products.find((item) => item.model_id)?.model_id ??
+      null;
+
+    if (modelId) {
+      const { error: modelError } = await supabase
+        .from("product_models")
+        .update({
+          vendor_id: requiredVendorId,
+          name: baseName,
+          short_name: shortName,
+          gender: selectedEditGender.gender_name,
+          tax_type: safeTaxType,
+        })
+        .eq("id", modelId);
+
+      if (modelError) {
+        setEditError(
+          `อัปเดตสินค้าแล้ว แต่บันทึก product_models ไม่สำเร็จ: ${modelError.message}`,
+        );
+        setIsEditSaving(false);
+        setIsEditConfirmOpen(false);
+        await loadProducts();
+        return;
+      }
+    } else {
+      setEditError(
+        "อัปเดต SKU แล้ว แต่ไม่พบ model_id — ไม่สามารถบังคับบันทึก Vendor ลง product_models ได้",
+      );
+      setIsEditSaving(false);
+      setIsEditConfirmOpen(false);
+      await loadProducts();
+      return;
+    }
+
+    toast.success("บันทึกการแก้ไขทั้งรุ่นแล้ว");
+    await loadProducts();
+    setIsEditSaving(false);
+    setIsEditConfirmOpen(false);
+    setEditTarget(null);
+    setEditForm(null);
+  }
+
+  const activeCount = products.filter((product) => product.is_active).length;
+  const groupCount = productGroups.length;
+
+  return (
+    <div className="mx-auto max-w-[1600px]">
+      <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-blue-600">
+              <Icon name="sparkles" />
+              PRODUCT MASTER
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-950">
+              สินค้าและราคา
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              สร้างสินค้าแบบ Matrix พร้อม Auto-SKU และราคาตามไซส์
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="rounded-xl bg-slate-50 px-4 py-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                สินค้าทั้งหมด
+              </p>
+              <p className="mt-0.5 text-lg font-bold text-slate-800">
+                {products.length.toLocaleString("th-TH")}
+              </p>
+            </div>
+            <div className="rounded-xl bg-emerald-50 px-4 py-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600">
+                พร้อมใช้งาน
+              </p>
+              <p className="mt-0.5 text-lg font-bold text-emerald-700">
+                {activeCount.toLocaleString("th-TH")}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void openDialog(vendorIdFromQuery)}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            >
+              <Icon name="plus" />
+              สร้าง Product Matrix
+            </button>
+          </div>
+        </div>
+
+        {vendorIdFromQuery && (
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-blue-100 bg-blue-50 px-4 py-2.5 text-xs font-medium text-blue-700">
+            <Icon name="sparkles" />
+            มาจาก Smart Goods Receipt — คลิก &ldquo;สร้าง Product Matrix&rdquo;
+            เพื่อสร้างรุ่นสินค้าใหม่ ระบบเตรียมผู้จำหน่ายไว้ให้แล้ว
+          </div>
+        )}
+      </header>
+
+      <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900">รายการสินค้า</h2>
+            <p className="mt-0.5 text-xs text-slate-400">
+              จัดกลุ่มตามรุ่น → สี ({groupCount.toLocaleString("th-TH")} รุ่น ·{" "}
+              {filteredProducts.length.toLocaleString("th-TH")} SKU)
+            </p>
+          </div>
+          <label className="relative block sm:w-80">
+            <span className="sr-only">ค้นหาสินค้า</span>
+            <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+              <Icon name="search" />
+            </span>
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="ค้นหา SKU, ชื่อรุ่น, สี, ไซส์..."
+              className={`${fieldClass} h-9 bg-slate-50 pl-9 text-xs focus:bg-white`}
+            />
+          </label>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1200px] text-left">
+            <thead className="border-b border-slate-200 bg-slate-50/80">
+              <tr>
+                {[
+                  "รุ่น / สี / ไซส์",
+                  "Vendor",
+                  "Brand",
+                  "หมวดหมู่ / เพศ",
+                  "รายละเอียด",
+                  "สถานะ",
+                  "จัดการ",
+                ].map((heading) => (
+                  <th
+                    key={heading}
+                    className="px-5 py-3 text-[11px] font-semibold tracking-wide text-slate-500"
+                  >
+                    {heading}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {isLoading ? (
+                Array.from({ length: 5 }).map((_, row) => (
+                  <tr key={row} className="animate-pulse">
+                    {Array.from({ length: 7 }).map((__, cell) => (
+                      <td key={cell} className="px-5 py-4">
+                        <div className="h-3.5 rounded bg-slate-100" />
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              ) : loadError ? (
+                <tr>
+                  <td colSpan={7} className="px-5 py-16 text-center">
+                    <p className="text-sm font-semibold text-red-600">
+                      ไม่สามารถโหลดข้อมูลสินค้าได้
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">{loadError}</p>
+                    <button
+                      type="button"
+                      onClick={() => void loadProducts()}
+                      className="mt-4 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                    >
+                      ลองอีกครั้ง
+                    </button>
+                  </td>
+                </tr>
+              ) : productGroups.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-5 py-16 text-center">
+                    <div className="mx-auto grid size-11 place-items-center rounded-full bg-slate-100 text-slate-400">
+                      <Icon name={search ? "search" : "box"} />
+                    </div>
+                    <p className="mt-3 text-sm font-medium text-slate-600">
+                      {search ? "ไม่พบสินค้าที่ค้นหา" : "ยังไม่มีข้อมูลสินค้า"}
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                productGroups.map((group) => {
+                  const isExpanded = expandedGroups.has(group.key);
+                  const isFullyActive =
+                    group.activeCount === group.products.length;
+                  const isPartiallyActive =
+                    group.activeCount > 0 && !isFullyActive;
+                  const groupVendor = getGroupVendor(group);
+                  const groupBrand = getGroupBrand(group);
+
+                  return (
+                    <Fragment key={group.key}>
+                      <tr className="bg-white transition hover:bg-slate-50/80">
+                        <td className="px-5 py-4">
+                          <button
+                            type="button"
+                            onClick={() => toggleGroup(group.key)}
+                            className="flex max-w-md items-start gap-2 text-left"
+                          >
+                            <span
+                              className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 transition ${
+                                isExpanded
+                                  ? "rotate-90 bg-blue-50 text-blue-600"
+                                  : ""
+                              }`}
+                            >
+                              <Icon name="chevron" className="size-3.5" />
+                            </span>
+                            <span>
+                              <span className="block text-sm font-semibold text-slate-900">
+                                {group.title}
+                              </span>
+                              {group.shortName ? (
+                                <span className="mt-0.5 block text-[11px] text-slate-400">
+                                  {group.shortName} · {group.taxType}
+                                </span>
+                              ) : (
+                                <span className="mt-0.5 block text-[11px] text-slate-400">
+                                  {group.taxType}
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                        </td>
+                        <td className="px-5 py-4 text-xs">
+                          {groupVendor ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEntitySheet({
+                                  kind: "vendor",
+                                  data: groupVendor,
+                                })
+                              }
+                              className="text-left font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 transition hover:text-blue-800 hover:decoration-blue-500"
+                            >
+                              {groupVendor.company_name}
+                            </button>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-4 text-xs">
+                          {groupBrand ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEntitySheet({
+                                  kind: "brand",
+                                  data: groupBrand,
+                                })
+                              }
+                              className="text-left font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 transition hover:text-blue-800 hover:decoration-blue-500"
+                            >
+                              {groupBrand.brand_name}
+                              <span className="ml-1 font-mono text-[10px] text-blue-500">
+                                ({groupBrand.brand_code})
+                              </span>
+                            </button>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-4 text-xs text-slate-600">
+                          <p>{group.category || "—"}</p>
+                          <p className="mt-0.5 text-slate-400">
+                            {group.gender || "—"}
+                          </p>
+                        </td>
+                        <td className="px-5 py-4 text-xs text-slate-600">
+                          <p>
+                            {group.colors.length || 0} สี ×{" "}
+                            {group.sizes.length || 0} ไซส์
+                          </p>
+                          <p className="mt-0.5 font-semibold text-blue-700">
+                            {group.products.length.toLocaleString("th-TH")} SKU
+                          </p>
+                        </td>
+                        <td className="px-5 py-4">
+                          <span
+                            className={`inline-flex items-center gap-1.5 text-[11px] font-medium ${
+                              isFullyActive
+                                ? "text-emerald-700"
+                                : isPartiallyActive
+                                  ? "text-amber-700"
+                                  : "text-slate-400"
+                            }`}
+                          >
+                            <span
+                              className={`size-1.5 rounded-full ${
+                                isFullyActive
+                                  ? "bg-emerald-500"
+                                  : isPartiallyActive
+                                    ? "bg-amber-500"
+                                    : "bg-slate-300"
+                              }`}
+                            />
+                            {isFullyActive
+                              ? "ใช้งานทั้งหมด"
+                              : isPartiallyActive
+                                ? `ใช้งาน ${group.activeCount}/${group.products.length}`
+                                : "ปิดใช้งานทั้งหมด"}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openBatchEdit(group)}
+                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                            >
+                              <Icon name="edit" className="size-3.5" />
+                              แก้ไขทั้งรุ่น
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openDeactivateDialog(group)}
+                              disabled={group.activeCount === 0}
+                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-2.5 text-[11px] font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+                            >
+                              <Icon name="ban" className="size-3.5" />
+                              ปิดการใช้งาน
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+
+                      {isExpanded &&
+                        group.colorGroups.map((colorGroup) => {
+                          const colorKey = `${group.key}::${colorGroup.key}`;
+                          const isColorExpanded =
+                            expandedColorGroups.has(colorKey);
+                          const colorFullyActive =
+                            colorGroup.activeCount ===
+                            colorGroup.products.length;
+                          const colorPartiallyActive =
+                            colorGroup.activeCount > 0 && !colorFullyActive;
+
+                          return (
+                            <Fragment key={colorKey}>
+                              <tr className="bg-slate-50/90 hover:bg-slate-50">
+                                <td className="px-5 py-3 pl-12" colSpan={4}>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      toggleColorGroup(
+                                        group.key,
+                                        colorGroup.key,
+                                      )
+                                    }
+                                    className="flex items-center gap-2 text-left"
+                                  >
+                                    <span
+                                      className={`grid size-5 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-500 transition ${
+                                        isColorExpanded
+                                          ? "rotate-90 bg-blue-50 text-blue-600"
+                                          : ""
+                                      }`}
+                                    >
+                                      <Icon
+                                        name="chevron"
+                                        className="size-3"
+                                      />
+                                    </span>
+                                    <span className="grid size-5 place-items-center rounded-md bg-blue-100 text-blue-700">
+                                      <Icon
+                                        name="palette"
+                                        className="size-3"
+                                      />
+                                    </span>
+                                    <span>
+                                      <span className="block text-xs font-semibold text-slate-800">
+                                        สี{colorGroup.color}
+                                      </span>
+                                      <span className="block text-[11px] text-slate-400">
+                                        {colorGroup.sizes.length} ไซส์ ·{" "}
+                                        {colorGroup.products.length} SKU
+                                      </span>
+                                    </span>
+                                  </button>
+                                </td>
+                                <td className="px-5 py-3 text-xs text-slate-500">
+                                  {colorGroup.sizes.join(", ") || "—"}
+                                </td>
+                                <td className="px-5 py-3">
+                                  <span
+                                    className={`inline-flex items-center gap-1.5 text-[11px] font-medium ${
+                                      colorFullyActive
+                                        ? "text-emerald-700"
+                                        : colorPartiallyActive
+                                          ? "text-amber-700"
+                                          : "text-slate-400"
+                                    }`}
+                                  >
+                                    <span
+                                      className={`size-1.5 rounded-full ${
+                                        colorFullyActive
+                                          ? "bg-emerald-500"
+                                          : colorPartiallyActive
+                                            ? "bg-amber-500"
+                                            : "bg-slate-300"
+                                      }`}
+                                    />
+                                    {colorFullyActive
+                                      ? "ใช้งานทั้งหมด"
+                                      : colorPartiallyActive
+                                        ? `ใช้งาน ${colorGroup.activeCount}/${colorGroup.products.length}`
+                                        : "ปิดใช้งาน"}
+                                  </span>
+                                </td>
+                                <td className="px-5 py-3" />
+                              </tr>
+
+                              {isColorExpanded &&
+                                colorGroup.products.map((product) => (
+                                  <tr
+                                    key={product.id}
+                                    className="bg-white hover:bg-blue-50/30"
+                                  >
+                                    <td className="px-5 py-3 pl-20" colSpan={4}>
+                                      <p className="text-xs font-medium text-slate-700">
+                                        ไซส์ {product.size || "—"}
+                                      </p>
+                                      <p className="mt-0.5 font-mono text-[11px] font-semibold text-blue-700">
+                                        {product.sku}
+                                      </p>
+                                    </td>
+                                    <td className="px-5 py-3 text-right text-[11px] tabular-nums text-slate-600">
+                                      <div>
+                                        ต้นทุน{" "}
+                                        {baht.format(Number(product.cost_price))}
+                                      </div>
+                                      <div>
+                                        ปลีก{" "}
+                                        {baht.format(
+                                          Number(product.retail_price),
+                                        )}{" "}
+                                        · ส่ง{" "}
+                                        {baht.format(
+                                          Number(product.wholesale_price),
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="px-5 py-3" colSpan={2}>
+                                      <span
+                                        className={`inline-flex items-center gap-1.5 text-[11px] font-medium ${
+                                          product.is_active
+                                            ? "text-emerald-700"
+                                            : "text-slate-400"
+                                        }`}
+                                      >
+                                        <span
+                                          className={`size-1.5 rounded-full ${
+                                            product.is_active
+                                              ? "bg-emerald-500"
+                                              : "bg-slate-300"
+                                          }`}
+                                        />
+                                        {product.is_active
+                                          ? "ใช้งาน"
+                                          : "ปิดใช้งาน"}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                            </Fragment>
+                          );
+                        })}
+                    </Fragment>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {isDialogOpen && (
+        <div
+          role="presentation"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/60 p-2 backdrop-blur-sm sm:p-5"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeDialog();
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="matrix-dialog-title"
+            className="flex max-h-[calc(100dvh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl sm:max-h-[calc(100dvh-2.5rem)]"
+          >
+            <div className="flex shrink-0 items-start justify-between border-b border-slate-200 bg-white px-5 py-4 sm:px-7 sm:py-5">
+              <div className="flex items-start gap-3">
+                <div className="grid size-10 place-items-center rounded-xl bg-blue-50 text-blue-600">
+                  <Icon name="layers" className="size-5" />
+                </div>
+                <div>
+                  <h2
+                    id="matrix-dialog-title"
+                    className="text-lg font-bold text-slate-950"
+                  >
+                    Product Matrix Generator
+                  </h2>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    สร้างหลาย SKU จากสีและไซส์ในครั้งเดียว
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeDialog}
+                disabled={isSaving || isDraftSaving}
+                aria-label="ปิดหน้าต่าง"
+                className="grid size-9 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+              >
+                <Icon name="close" className="size-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleSubmit}
+              className="flex min-h-0 flex-1 flex-col"
+            >
+              <div className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
+                <section className="rounded-2xl border border-slate-200 bg-white p-5">
+                  <StepHeading
+                    number={1}
+                    title="ข้อมูลหลักสินค้า (Model Info)"
+                    description="โหลดโมเดลเดิม (DRAFT/ACTIVE) หรือสร้างใหม่จาก Master Data"
+                  />
+
+                  <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                    <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                      <span className={labelClass + " mb-0"}>
+                        ค้นหาโครงร่าง / รุ่นสินค้า (Load Model)
+                      </span>
+                      {loadedModelStatus && (
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                            loadedModelStatus === "ACTIVE"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-amber-100 text-amber-800"
+                          }`}
+                        >
+                          {loadedModelStatus}
+                        </span>
+                      )}
+                    </div>
+                    <ModelLoadCombobox
+                      models={loadableModels}
+                      value={draftModelId ?? ""}
+                      isLoading={isLoadableModelsLoading}
+                      disabled={isMasterLoading || isSaving || isDraftSaving}
+                      onChange={(modelId, model) =>
+                        void handleLoadModel(modelId, model)
+                      }
+                    />
+                    <p className="mt-1.5 text-[11px] text-slate-400">
+                      แสดงโมเดลสถานะ DRAFT และ ACTIVE — โหลดแล้วเพิ่มสีใหม่ได้
+                      ระบบจะข้าม SKU ที่มีอยู่แล้ว
+                    </p>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+                    <ProductMatrixVendorField
+                      className="sm:col-span-2"
+                      disabled={isMasterLoading}
+                      vendors={masterData.vendors}
+                      value={form.vendorId}
+                      onChange={(vendorId) => updateForm("vendorId", vendorId)}
+                      onVendorsChange={(vendors) =>
+                        setMasterData((current) => ({
+                          ...current,
+                          vendors,
+                        }))
+                      }
+                      error={
+                        formError.includes("vendor_id") ||
+                        formError.includes("ผู้จำหน่าย")
+                          ? formError
+                          : null
+                      }
+                    />
+                    <div className="relative block sm:col-span-1 lg:col-span-2">
+                      <span className={labelClass}>
+                        แบรนด์ (Brand) <span className="text-red-500">*</span>
+                      </span>
+                      <BrandCombobox
+                        required
+                        disabled={isMasterLoading}
+                        brands={masterData.brands}
+                        value={form.brandId}
+                        onChange={changeBrand}
+                        onBrandsChange={(brands) =>
+                          setMasterData((current) => ({
+                            ...current,
+                            brands,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="relative block sm:col-span-1 lg:col-span-2">
+                      <span className={labelClass}>
+                        หมวดหมู่ (Category){" "}
+                        <span className="text-red-500">*</span>
+                      </span>
+                      <CategoryCombobox
+                        required
+                        disabled={isMasterLoading}
+                        categories={masterData.categories}
+                        value={form.categoryId}
+                        onChange={(categoryId) =>
+                          updateForm("categoryId", categoryId)
+                        }
+                        onCategoriesChange={(categories) =>
+                          setMasterData((current) => ({
+                            ...current,
+                            categories,
+                          }))
+                        }
+                      />
+                    </div>
+                    <label className="block lg:col-span-1">
+                      <span className={labelClass}>
+                        เพศ (Gender) <span className="text-red-500">*</span>
+                      </span>
+                      <select
+                        required
+                        disabled={isMasterLoading}
+                        value={form.genderId}
+                        onChange={(event) =>
+                          updateForm("genderId", event.target.value)
+                        }
+                        className={fieldClass}
+                      >
+                        <option value="">
+                          {isMasterLoading ? "กำลังโหลด..." : "เลือกเพศ"}
+                        </option>
+                        {masterData.genders.map((gender) => (
+                          <option key={gender.id} value={gender.id}>
+                            {formatGenderOption(gender)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block lg:col-span-2">
+                      <span className={labelClass}>ประเภทภาษี (Tax Type)</span>
+                      <select
+                        value={form.taxType}
+                        onChange={(event) =>
+                          updateForm("taxType", event.target.value as TaxType)
+                        }
+                        className={fieldClass}
+                      >
+                        {TAX_TYPE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block lg:col-span-3">
+                      <span className={labelClass}>
+                        ชื่อรุ่น / รหัสรุ่น ({MODEL_CODE_LENGTH} ตัวอักษร){" "}
+                        <span className="text-red-500">*</span>
+                      </span>
+                      <input
+                        required
+                        value={form.modelCode}
+                        maxLength={MODEL_CODE_LENGTH}
+                        onChange={(event) =>
+                          updateForm("modelCode", event.target.value)
+                        }
+                        placeholder="เช่น 6401AB"
+                        className={`${fieldClass} font-mono`}
+                      />
+                      <span
+                        className={`mt-1 block text-[11px] ${
+                          form.modelCode && !isValidModelCode(form.modelCode)
+                            ? "font-medium text-red-600"
+                            : "text-slate-400"
+                        }`}
+                      >
+                        ต้องยาวพอดี {MODEL_CODE_LENGTH} ตัวอักษร (ปัจจุบัน{" "}
+                        {form.modelCode.trim().length})
+                      </span>
+                    </label>
+                    <label className="block sm:col-span-2 lg:col-span-4">
+                      <span className={labelClass}>ชื่อสินค้า (คำอธิบาย)</span>
+                      <input
+                        value={form.productName}
+                        onChange={(event) => {
+                          setProductNameTouched(true);
+                          updateForm("productName", event.target.value);
+                        }}
+                        placeholder={
+                          selectedCategory && isValidModelCode(form.modelCode)
+                            ? `${selectedCategory.category_name} ${form.modelCode.trim()}`
+                            : "เช่น เสื้อโปโล 6401AB"
+                        }
+                        className={fieldClass}
+                      />
+                      <span className="mt-1 block text-[11px] text-slate-400">
+                        Auto-fill เมื่อ model_code ครบ 6 ตัว: หมวดหมู่ + รหัสรุ่น
+                        (แก้ไขได้)
+                      </span>
+                    </label>
+                    <label className="block sm:col-span-2 lg:col-span-2">
+                      <span className={labelClass}>
+                        ชื่อย่อสินค้า (Short Name)
+                      </span>
+                      <input
+                        value={form.shortName}
+                        onChange={(event) => {
+                          setShortNameTouched(true);
+                          updateForm("shortName", event.target.value);
+                        }}
+                        placeholder={
+                          selectedCategory?.category_name || "เช่น เสื้อโปโล"
+                        }
+                        className={fieldClass}
+                      />
+                      <span className="mt-1 block text-[11px] text-slate-400">
+                        Auto-fill จากชื่อหมวดหมู่เมื่อยังไม่ได้แก้
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="mt-5 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="text-xs text-slate-500">
+                      {draftModelId ? (
+                        <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-700">
+                          <span
+                            className={`size-1.5 rounded-full ${
+                              loadedModelStatus === "ACTIVE"
+                                ? "bg-emerald-500"
+                                : "bg-amber-500"
+                            }`}
+                          />
+                          โหลดแล้ว ·{" "}
+                          <span className="font-bold uppercase">
+                            {loadedModelStatus ?? "DRAFT"}
+                          </span>
+                        </span>
+                      ) : (
+                        <span>
+                          Phase 1: บันทึก Base Model ลง{" "}
+                          <code className="rounded bg-slate-100 px-1">
+                            product_models
+                          </code>{" "}
+                          โดยยังไม่สร้าง SKU
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveDraftModel()}
+                      disabled={
+                        isDraftSaving ||
+                        isSaving ||
+                        isMasterLoading ||
+                        !isStep1Complete
+                      }
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isDraftSaving
+                        ? "กำลังบันทึกโครงร่าง..."
+                        : "บันทึกโครงร่างสินค้า (Save Draft Model)"}
+                    </button>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-slate-200 bg-white p-5">
+                  <StepHeading
+                    number={2}
+                    title="สีและไซส์ (Matrix Setup)"
+                    description="เลือกตัวเลือกที่ต้องการ ระบบจะจับคู่เป็น Matrix ให้อัตโนมัติ"
+                  />
+                  <div className="grid gap-5 lg:grid-cols-2">
+                    <div>
+                      <span className={labelClass}>
+                        สี (เลือกได้หลายสี){" "}
+                        <span className="text-red-500">*</span>
+                      </span>
+                      <SmartColorCombobox
+                        colors={masterData.colors}
+                        value={form.colorIds}
+                        onChange={(colorIds) =>
+                          setForm((current) => ({ ...current, colorIds }))
+                        }
+                        onColorsChange={(colors) =>
+                          setMasterData((current) => ({ ...current, colors }))
+                        }
+                        disabled={isMasterLoading || isSaving}
+                      />
+                      <p className="mt-1.5 text-[11px] text-slate-400">
+                        รหัสสีใหม่ต้องเป็นตัวอักษรอังกฤษ 3 ตัวพอดี (เช่น BLK, RED)
+                      </p>
+                    </div>
+
+                    <div>
+                      <div className="mb-1.5 flex items-center justify-between gap-3">
+                        <span className="text-xs font-semibold text-slate-700">
+                          ไซส์ของแบรนด์ (เรียงตาม sort_order){" "}
+                          <span className="text-red-500">*</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void openSizeDialog()}
+                          disabled={!form.brandId || isMasterLoading}
+                          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-[11px] font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+                        >
+                          <Icon name="plus" className="size-3" />
+                          เพิ่มไซส์ใหม่
+                        </button>
+                      </div>
+                      {!form.brandId ? (
+                        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center text-xs text-slate-400">
+                          กรุณาเลือกแบรนด์ก่อน
+                        </div>
+                      ) : isSizeLoading ? (
+                        <div className="rounded-xl bg-slate-50 px-4 py-5 text-center text-xs text-slate-400">
+                          กำลังโหลดไซส์...
+                        </div>
+                      ) : sizes.length === 0 ? (
+                        <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4">
+                          <div className="mb-3">
+                            <p className="text-xs font-semibold text-slate-800">
+                              ยังไม่มีไซส์สำหรับแบรนด์นี้
+                            </p>
+                            <p className="mt-0.5 text-[11px] text-slate-500">
+                              เลือกไซส์มาตรฐานด้านล่างแล้วกดยืนยัน เพื่อบันทึกลง
+                              mst_sizes ทันที
+                            </p>
+                          </div>
+
+                          <div className="space-y-4">
+                            {STANDARD_SIZE_GROUPS.map((group) => (
+                              <div key={group.title}>
+                                <p className="mb-2 text-[11px] font-bold tracking-wide text-slate-500">
+                                  {group.title}
+                                </p>
+                                <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+                                  {group.sizes.map((size) => {
+                                    const checked = quickSizeLabels.includes(
+                                      size.label,
+                                    );
+                                    return (
+                                      <label
+                                        key={size.label}
+                                        className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-semibold transition ${
+                                          checked
+                                            ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                                            : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={() =>
+                                            toggleQuickSize(size.label)
+                                          }
+                                          className="sr-only"
+                                        />
+                                        {size.label}
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-[11px] text-slate-500">
+                              เลือกแล้ว {quickSizeLabels.length} ไซส์
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => void handleSaveQuickSizes()}
+                              disabled={
+                                quickSizeLabels.length === 0 || isQuickSizeSaving
+                              }
+                              className="inline-flex h-9 items-center justify-center rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                            >
+                              {isQuickSizeSaving
+                                ? "กำลังบันทึก..."
+                                : `ยืนยันเพิ่ม ${quickSizeLabels.length} ไซส์`}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {sizes.map((size) => {
+                            const checked = form.sizeIds.includes(size.id);
+                            return (
+                              <button
+                                type="button"
+                                key={size.id}
+                                aria-pressed={checked}
+                                onClick={() => toggleSize(size.id)}
+                                className={`inline-flex min-w-16 items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                                  checked
+                                    ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                                    : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                                }`}
+                              >
+                                {checked && (
+                                  <Icon name="check" className="size-3.5" />
+                                )}
+                                {size.size_label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-slate-200 bg-white p-5">
+                  <StepHeading
+                    number={3}
+                    title="ราคาตามไซส์"
+                    description="ต้นทุนคำนวณอัตโนมัติจากราคาปลีกและส่วนลด — ใช้กับทุกสีในไซส์เดียวกัน"
+                  />
+                  {form.sizeIds.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-xs text-slate-400">
+                      เลือกไซส์เพื่อกำหนดราคา
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="w-full min-w-[860px]">
+                        <thead className="bg-slate-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
+                              ไซส์
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
+                              ราคาขายปลีก
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
+                              ราคาขายส่ง
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
+                              ประเภทส่วนลด
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
+                              ค่าส่วนลด
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
+                              ราคาต้นทุน
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {sizes
+                            .filter((size) => form.sizeIds.includes(size.id))
+                            .map((size) => {
+                              const pricing =
+                                sizePricingById.get(size.id) ??
+                                createEmptySizePricing(size);
+                              return (
+                                <tr key={size.id}>
+                                  <td className="px-4 py-3">
+                                    <span className="font-semibold text-slate-800">
+                                      {size.size_label}
+                                    </span>
+                                    <span className="ml-2 font-mono text-[10px] text-slate-400">
+                                      {size.size_code}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <PriceInput
+                                      value={pricing.retailPrice}
+                                      ariaLabel={`ราคาขายปลีกไซส์ ${size.size_label}`}
+                                      onChange={(value) =>
+                                        updateSizePricing(size.id, {
+                                          retailPrice: value,
+                                        })
+                                      }
+                                    />
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <PriceInput
+                                      value={pricing.wholesalePrice}
+                                      ariaLabel={`ราคาขายส่งไซส์ ${size.size_label}`}
+                                      onChange={(value) =>
+                                        updateSizePricing(size.id, {
+                                          wholesalePrice: value,
+                                        })
+                                      }
+                                    />
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <select
+                                      aria-label={`ประเภทส่วนลดไซส์ ${size.size_label}`}
+                                      value={pricing.discountType}
+                                      onChange={(event) =>
+                                        updateSizePricing(size.id, {
+                                          discountType: event.target
+                                            .value as DiscountType,
+                                        })
+                                      }
+                                      className={fieldClass}
+                                    >
+                                      <option value="PERCENT">%</option>
+                                      <option value="THB">THB</option>
+                                    </select>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <div className="relative">
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        inputMode="decimal"
+                                        aria-label={`ค่าส่วนลดไซส์ ${size.size_label}`}
+                                        value={pricing.discountValue}
+                                        onChange={(event) =>
+                                          updateSizePricing(size.id, {
+                                            discountValue: event.target.value,
+                                          })
+                                        }
+                                        placeholder="0"
+                                        className={`${fieldClass} pr-10 text-right tabular-nums`}
+                                      />
+                                      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-slate-400">
+                                        {pricing.discountType === "PERCENT"
+                                          ? "%"
+                                          : "฿"}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <PriceInput
+                                      value={pricing.costPrice}
+                                      ariaLabel={`ราคาต้นทุนไซส์ ${size.size_label}`}
+                                      disabled
+                                      onChange={() => undefined}
+                                    />
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+
+                <section className="rounded-2xl border border-slate-200 bg-white p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <StepHeading
+                      number={4}
+                      title="Preview และ Auto-SKU"
+                      description="SKU = แบรนด์ + หมวดหมู่ + รุ่น(6) + เพศ + สี + ไซส์"
+                    />
+                    <span className="shrink-0 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
+                      {previewRows.length.toLocaleString("th-TH")} SKU
+                    </span>
+                  </div>
+                  {previewRows.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
+                      <Icon
+                        name="layers"
+                        className="mx-auto size-6 text-slate-300"
+                      />
+                      <p className="mt-2 text-xs text-slate-400">
+                        กรอกข้อมูลรุ่น แล้วเลือกสีและไซส์เพื่อดู Preview
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="max-h-72 overflow-auto rounded-xl border border-slate-200">
+                      <table className="w-full min-w-[860px] text-left">
+                        <thead className="sticky top-0 z-10 bg-slate-50">
+                          <tr>
+                            {[
+                              "SKU อัตโนมัติ",
+                              "ชื่อสินค้าเต็ม",
+                              "สี",
+                              "ไซส์",
+                              "ต้นทุน",
+                              "ขายปลีก",
+                              "ขายส่ง",
+                            ].map((heading) => (
+                              <th
+                                key={heading}
+                                className="border-b border-slate-200 px-4 py-3 text-[11px] font-semibold text-slate-500"
+                              >
+                                {heading}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {previewRows.map((row) => (
+                            <tr key={row.key} className="hover:bg-slate-50">
+                              <td className="px-4 py-3 font-mono text-xs font-bold text-blue-700">
+                                {row.sku}
+                              </td>
+                              <td className="px-4 py-3 text-xs font-medium text-slate-700">
+                                {row.fullName}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-slate-600">
+                                {row.color.color_name}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-slate-600">
+                                {row.size.size_label}
+                              </td>
+                              {[
+                                row.prices.cost,
+                                row.prices.retail,
+                                row.prices.wholesale,
+                              ].map((price, index) => (
+                                <td
+                                  key={index}
+                                  className="px-4 py-3 text-right text-xs tabular-nums text-slate-600"
+                                >
+                                  {baht.format(toPrice(price))}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+
+                {formError && (
+                  <div
+                    role="alert"
+                    className="whitespace-pre-line rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-medium text-red-700"
+                  >
+                    {formError}
+                  </div>
+                )}
+              </div>
+
+              <footer className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+                <p className="text-xs text-slate-500">
+                  Phase 2: สร้าง SKU จากสูตร Brand+Category+Model+Gender+Color+Size —
+                  SKU ที่มีอยู่แล้วจะถูกข้ามอัตโนมัติ (
+                  <strong className="text-slate-800">
+                    {previewRows.length}
+                  </strong>{" "}
+                  รายการใน Preview)
+                </p>
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={closeDialog}
+                    disabled={isSaving || isDraftSaving}
+                    className="h-10 rounded-xl border border-slate-200 bg-white px-5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={
+                      isSaving ||
+                      isDraftSaving ||
+                      isMasterLoading ||
+                      !canGenerateSkus
+                    }
+                    className="inline-flex h-10 min-w-40 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                  >
+                    {isSaving ? (
+                      "กำลังสร้าง SKU..."
+                    ) : (
+                      <>
+                        <Icon name="sparkles" />
+                        สร้าง {previewRows.length} SKU
+                      </>
+                    )}
+                  </button>
+                </div>
+              </footer>
+            </form>
+          </div>
+
+          {isSizeDialogOpen && (
+            <div
+              role="presentation"
+              className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-[2px]"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget && !isSizeSaving)
+                  setIsSizeDialogOpen(false);
+              }}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="size-dialog-title"
+                className="flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+              >
+                <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
+                  <div>
+                    <h3
+                      id="size-dialog-title"
+                      className="text-sm font-bold text-slate-900"
+                    >
+                      เพิ่มไซส์ใหม่
+                    </h3>
+                    <p className="mt-0.5 text-[11px] text-slate-400">
+                      แบรนด์: {selectedBrand?.brand_name ?? "—"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsSizeDialogOpen(false)}
+                    disabled={isSizeSaving}
+                    aria-label="ปิดหน้าต่างเพิ่มไซส์"
+                    className="grid size-8 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+                  >
+                    <Icon name="close" />
+                  </button>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  <section className="border-b border-slate-100 p-5">
+                    <div className="mb-3">
+                      <h4 className="text-xs font-bold text-slate-800">
+                        ตารางไซส์อ้างอิง
+                      </h4>
+                      <p className="mt-0.5 text-[11px] text-slate-400">
+                        ไซส์ทั้งหมดของแบรนด์ที่เลือก
+                      </p>
+                    </div>
+                    <div className="max-h-48 overflow-auto rounded-xl border border-slate-200">
+                      <table className="w-full text-left">
+                        <thead className="sticky top-0 bg-slate-50">
+                          <tr>
+                            {["Size Label", "Size Code", "Sort Order"].map(
+                              (heading) => (
+                                <th
+                                  key={heading}
+                                  className="border-b border-slate-200 px-3 py-2 text-[10px] font-semibold text-slate-500"
+                                >
+                                  {heading}
+                                </th>
+                              ),
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {isSizeReferenceLoading ? (
+                            <tr>
+                              <td
+                                colSpan={3}
+                                className="px-3 py-6 text-center text-xs text-slate-400"
+                              >
+                                กำลังโหลดข้อมูลไซส์...
+                              </td>
+                            </tr>
+                          ) : sizeReference.length === 0 ? (
+                            <tr>
+                              <td
+                                colSpan={3}
+                                className="px-3 py-6 text-center text-xs text-slate-400"
+                              >
+                                แบรนด์นี้ยังไม่มีข้อมูลไซส์
+                              </td>
+                            </tr>
+                          ) : (
+                            sizeReference.map((size) => (
+                              <tr key={size.id}>
+                                <td className="px-3 py-2 text-xs font-medium text-slate-700">
+                                  {size.size_label}
+                                </td>
+                                <td className="px-3 py-2 font-mono text-xs text-slate-600">
+                                  {size.size_code}
+                                </td>
+                                <td className="px-3 py-2 text-right text-xs tabular-nums text-slate-600">
+                                  {size.sort_order}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  <form
+                    onSubmit={handleCreateSize}
+                    className="space-y-4 p-5"
+                  >
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-800">
+                        ข้อมูลไซส์ใหม่
+                      </h4>
+                      <p className="mt-0.5 text-[11px] text-slate-400">
+                        ระบบจะผูกไซส์กับแบรนด์ปัจจุบันโดยอัตโนมัติ
+                      </p>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="block">
+                        <span className={labelClass}>
+                          ชื่อป้ายไซส์ (Size Label){" "}
+                          <span className="text-red-500">*</span>
+                        </span>
+                        <input
+                          required
+                          autoFocus
+                          value={newSizeLabel}
+                          onChange={(event) =>
+                            setNewSizeLabel(event.target.value)
+                          }
+                          placeholder="เช่น Extra Large"
+                          maxLength={20}
+                          className={fieldClass}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className={labelClass}>
+                          รหัสตัวย่อ (Size Code){" "}
+                          <span className="text-red-500">*</span>
+                        </span>
+                        <input
+                          required
+                          value={newSizeCode}
+                          onChange={(event) =>
+                            setNewSizeCode(event.target.value)
+                          }
+                          placeholder="เช่น XL"
+                          maxLength={10}
+                          className={`${fieldClass} font-mono uppercase`}
+                        />
+                      </label>
+                    </div>
+                    <label className="block sm:w-1/2 sm:pr-2">
+                      <span className={labelClass}>
+                        ลำดับ (Sort Order){" "}
+                        <span className="text-red-500">*</span>
+                      </span>
+                      <input
+                        required
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={newSizeSortOrder}
+                        onChange={(event) =>
+                          setNewSizeSortOrder(event.target.value)
+                        }
+                        placeholder="เช่น 40"
+                        className={`${fieldClass} tabular-nums`}
+                      />
+                    </label>
+                    {sizeDialogError && (
+                      <p
+                        role="alert"
+                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700"
+                      >
+                        {sizeDialogError}
+                      </p>
+                    )}
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setIsSizeDialogOpen(false)}
+                        disabled={isSizeSaving}
+                        className="h-9 rounded-xl border border-slate-200 bg-white px-4 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        ยกเลิก
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isSizeSaving}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:bg-blue-300"
+                      >
+                        {isSizeSaving ? (
+                          "กำลังบันทึก..."
+                        ) : (
+                          <>
+                            <Icon name="check" className="size-3.5" />
+                            บันทึกไซส์ใหม่
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {deactivateTarget && (
+        <div
+          role="presentation"
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-[2px]"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeDeactivateDialog();
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="deactivate-dialog-title"
+            className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="border-b border-slate-100 px-5 py-4">
+              <h3
+                id="deactivate-dialog-title"
+                className="text-sm font-bold text-slate-900"
+              >
+                ยืนยันการปิดการใช้งาน
+              </h3>
+              <p className="mt-1 text-xs text-slate-500">
+                คุณต้องการปิดการใช้งานสินค้ากลุ่มนี้ ใช่หรือไม่?
+                (สามารถเปิดใหม่ได้ภายหลัง)
+              </p>
+            </div>
+            <div className="space-y-3 px-5 py-4">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-sm font-semibold text-slate-800">
+                  {deactivateTarget.title}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  จะปิดการใช้งาน{" "}
+                  {deactivateTarget.products.length.toLocaleString("th-TH")} SKU
+                  ในกลุ่มนี้
+                </p>
+              </div>
+              {deactivateError && (
+                <p
+                  role="alert"
+                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700"
+                >
+                  {deactivateError}
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4">
+              <button
+                type="button"
+                onClick={closeDeactivateDialog}
+                disabled={isDeactivating}
+                className="h-9 rounded-xl border border-slate-200 bg-white px-4 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeactivateGroup()}
+                disabled={isDeactivating}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-red-600 px-4 text-xs font-semibold text-white transition hover:bg-red-700 disabled:bg-red-300"
+              >
+                {isDeactivating ? (
+                  "กำลังปิดการใช้งาน..."
+                ) : (
+                  <>
+                    <Icon name="ban" className="size-3.5" />
+                    ยืนยันปิดใช้งาน
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editTarget && editForm && (
+        <div
+          role="presentation"
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/60 p-2 backdrop-blur-sm sm:p-5"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeBatchEdit();
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="batch-edit-dialog-title"
+            className="flex max-h-[calc(100dvh-1rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl sm:max-h-[calc(100dvh-2.5rem)]"
+          >
+            <div className="flex shrink-0 items-start justify-between border-b border-slate-200 bg-white px-5 py-4 sm:px-7 sm:py-5">
+              <div className="flex items-start gap-3">
+                <div className="grid size-10 place-items-center rounded-xl bg-blue-50 text-blue-600">
+                  <Icon name="edit" className="size-5" />
+                </div>
+                <div>
+                  <h2
+                    id="batch-edit-dialog-title"
+                    className="text-lg font-bold text-slate-950"
+                  >
+                    แก้ไขทั้งรุ่น
+                  </h2>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    อัปเดตชื่อและราคาของทุก SKU ในกลุ่ม (
+                    {editTarget.products.length.toLocaleString("th-TH")} รายการ)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeBatchEdit}
+                disabled={isEditSaving}
+                aria-label="ปิดหน้าต่างแก้ไข"
+                className="grid size-9 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+              >
+                <Icon name="close" className="size-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
+              <section className="rounded-2xl border border-slate-200 bg-white p-5">
+                <StepHeading
+                  number={1}
+                  title="ข้อมูลรุ่นสินค้า"
+                  description="แก้ไขชื่อรุ่นและข้อมูลหลักที่ใช้ร่วมกันทั้งกลุ่ม"
+                />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block sm:col-span-2">
+                    <span className={labelClass}>
+                      ชื่อสินค้า (คำอธิบายรุ่น){" "}
+                      <span className="text-red-500">*</span>
+                    </span>
+                    <input
+                      value={editForm.description}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, description: event.target.value }
+                            : current,
+                        )
+                      }
+                      className={fieldClass}
+                      placeholder="เช่น เสื้อโปโล Portman 6401"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className={labelClass}>ชื่อย่อสินค้า</span>
+                    <input
+                      value={editForm.shortName}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, shortName: event.target.value }
+                            : current,
+                        )
+                      }
+                      className={fieldClass}
+                      placeholder="เช่น Portman 6401"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className={labelClass}>เพศ</span>
+                    <select
+                      value={editForm.genderId}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                genderId: event.target.value,
+                              }
+                            : current,
+                        )
+                      }
+                      className={fieldClass}
+                    >
+                      <option value="">เลือกเพศ</option>
+                      {masterData.genders.map((gender) => (
+                        <option key={gender.id} value={gender.id}>
+                          {formatGenderOption(gender)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className={labelClass}>ประเภทภาษี</span>
+                    <select
+                      value={editForm.taxType}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                taxType: event.target.value as TaxType,
+                              }
+                            : current,
+                        )
+                      }
+                      className={fieldClass}
+                    >
+                      {TAX_TYPE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="block sm:col-span-2">
+                    <ProductMatrixVendorField
+                      vendors={masterData.vendors}
+                      value={editForm.vendorId}
+                      onChange={(vendorId) =>
+                        setEditForm((current) =>
+                          current ? { ...current, vendorId } : current,
+                        )
+                      }
+                      onVendorsChange={(vendors) =>
+                        setMasterData((current) => ({
+                          ...current,
+                          vendors,
+                        }))
+                      }
+                      disabled={isEditSaving}
+                      error={
+                        editError.includes("vendor_id") ||
+                        editError.includes("ผู้จำหน่าย")
+                          ? editError
+                          : null
+                      }
+                      hint="บังคับ (UUID) — บันทึกลง product_models.vendor_id สำหรับ Bulk Mapping / Goods Receipt"
+                    />
+                  </div>
+                </div>
+              </section>
+
+              <section className="rounded-2xl border border-slate-200 bg-white p-5">
+                <StepHeading
+                  number={2}
+                  title="ราคาตามไซส์"
+                  description="ราคานี้จะอัปเดตทุกสีในไซส์เดียวกันทั้งกลุ่ม"
+                />
+                {editSizeLabels.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-xs text-slate-400">
+                    ไม่พบข้อมูลไซส์ในกลุ่มนี้
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full min-w-[620px]">
+                      <thead className="bg-slate-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
+                            ไซส์
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
+                            ราคาต้นทุน
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
+                            ราคาขายปลีก
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
+                            ราคาขายส่ง
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {editSizeLabels.map((sizeLabel) => {
+                          const price =
+                            editForm.prices[sizeLabel] ?? emptyPrice;
+                          return (
+                            <tr key={sizeLabel}>
+                              <td className="px-4 py-3 font-semibold text-slate-800">
+                                {sizeLabel}
+                              </td>
+                              <td className="px-4 py-3">
+                                <PriceInput
+                                  value={price.cost}
+                                  ariaLabel={`ราคาต้นทุนไซส์ ${sizeLabel}`}
+                                  onChange={(value) =>
+                                    updateEditPrice(sizeLabel, "cost", value)
+                                  }
+                                />
+                              </td>
+                              <td className="px-4 py-3">
+                                <PriceInput
+                                  value={price.retail}
+                                  ariaLabel={`ราคาขายปลีกไซส์ ${sizeLabel}`}
+                                  onChange={(value) =>
+                                    updateEditPrice(sizeLabel, "retail", value)
+                                  }
+                                />
+                              </td>
+                              <td className="px-4 py-3">
+                                <PriceInput
+                                  value={price.wholesale}
+                                  ariaLabel={`ราคาขายส่งไซส์ ${sizeLabel}`}
+                                  onChange={(value) =>
+                                    updateEditPrice(
+                                      sizeLabel,
+                                      "wholesale",
+                                      value,
+                                    )
+                                  }
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+
+              <section className="rounded-2xl border border-slate-200 bg-white p-5">
+                <StepHeading
+                  number={3}
+                  title="รายการที่จะถูกอัปเดต"
+                  description="ตรวจสอบชื่อเต็มหลังแก้ไขก่อนบันทึก"
+                />
+                <div className="max-h-56 overflow-auto rounded-xl border border-slate-200">
+                  <table className="w-full min-w-[720px] text-left">
+                    <thead className="sticky top-0 bg-slate-50">
+                      <tr>
+                        {["SKU", "ชื่อสินค้าใหม่", "สี / ไซส์"].map(
+                          (heading) => (
+                            <th
+                              key={heading}
+                              className="border-b border-slate-200 px-4 py-3 text-[11px] font-semibold text-slate-500"
+                            >
+                              {heading}
+                            </th>
+                          ),
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {editTarget.products.map((product) => {
+                        const colorPart = product.color
+                          ? ` สี${product.color}`
+                          : "";
+                        const sizePart = product.size
+                          ? ` ไซส์ ${product.size}`
+                          : "";
+                        return (
+                          <tr key={product.id}>
+                            <td className="px-4 py-3 font-mono text-xs font-semibold text-blue-700">
+                              {product.sku}
+                            </td>
+                            <td className="px-4 py-3 text-xs text-slate-700">
+                              {`${editForm.description.trim()}${colorPart}${sizePart}`}
+                            </td>
+                            <td className="px-4 py-3 text-xs text-slate-600">
+                              {product.color || "—"} / {product.size || "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              {editError && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-medium text-red-700"
+                >
+                  {editError}
+                </div>
+              )}
+            </div>
+
+            <footer className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+              <p className="text-xs text-slate-500">
+                จะอัปเดต{" "}
+                <strong className="text-slate-800">
+                  {editTarget.products.length}
+                </strong>{" "}
+                SKU พร้อมกัน
+              </p>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={closeBatchEdit}
+                  disabled={isEditSaving}
+                  className="h-10 rounded-xl border border-slate-200 bg-white px-5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  onClick={requestBatchEditSave}
+                  disabled={isEditSaving}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:bg-blue-300"
+                >
+                  <Icon name="check" />
+                  บันทึกการแก้ไข
+                </button>
+              </div>
+            </footer>
+          </div>
+
+          {isEditConfirmOpen && (
+            <div
+              role="presentation"
+              className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/40 p-4"
+              onMouseDown={(event) => {
+                if (
+                  event.target === event.currentTarget &&
+                  !isEditSaving
+                ) {
+                  setIsEditConfirmOpen(false);
+                }
+              }}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="edit-confirm-title"
+                className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl"
+              >
+                <div className="border-b border-slate-100 px-5 py-4">
+                  <h3
+                    id="edit-confirm-title"
+                    className="text-sm font-bold text-slate-900"
+                  >
+                    ยืนยันการบันทึก
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    ยืนยันอัปเดตชื่อและราคาของทุก SKU ในรุ่นนี้ใช่หรือไม่?
+                  </p>
+                </div>
+                <div className="px-5 py-4">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-sm font-semibold text-slate-800">
+                      {editForm.description.trim()}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {editTarget.products.length.toLocaleString("th-TH")} SKU ·{" "}
+                      {editSizeLabels.length.toLocaleString("th-TH")} ไซส์
+                      {editForm.vendorId
+                        ? ` · Vendor: ${
+                            masterData.vendors.find(
+                              (item) => item.id === editForm.vendorId,
+                            )?.company_name ?? editForm.vendorId
+                          }`
+                        : " · ⚠ ยังไม่มี Vendor (บังคับ)"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditConfirmOpen(false)}
+                    disabled={isEditSaving}
+                    className="h-9 rounded-xl border border-slate-200 bg-white px-4 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void confirmBatchEditSave()}
+                    disabled={isEditSaving}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:bg-blue-300"
+                  >
+                    {isEditSaving ? "กำลังบันทึก..." : "ยืนยันบันทึก"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isOverwriteModalOpen && existingDraftModel && pendingDraftPayload && (
+        <div
+          role="presentation"
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-[2px]"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeOverwriteModal();
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="overwrite-draft-title"
+            aria-describedby="overwrite-draft-desc"
+            className="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+          >
+            <header className="border-b border-slate-200 px-5 py-4 sm:px-6">
+              <h3
+                id="overwrite-draft-title"
+                className="text-base font-bold text-slate-900"
+              >
+                พบรหัสรุ่นซ้ำในระบบ
+              </h3>
+              <p
+                id="overwrite-draft-desc"
+                className="mt-1 text-sm text-slate-600"
+              >
+                รหัสรุ่นนี้มีอยู่ในระบบแล้ว ต้องการบันทึกข้อมูลทับหรือไม่?
+              </p>
+              <p className="mt-2 font-mono text-xs font-semibold text-amber-700">
+                model_code: {pendingDraftPayload.modelCode.trim().toUpperCase()}
+              </p>
+            </header>
+
+            <div className="grid flex-1 gap-4 overflow-y-auto p-5 sm:grid-cols-2 sm:px-6">
+              <section className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Existing Data
+                </h4>
+                <dl className="mt-3 space-y-2.5 text-xs">
+                  <div>
+                    <dt className="text-slate-400">name</dt>
+                    <dd className="mt-0.5 font-medium text-slate-800">
+                      {existingDraftModel.name || "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-400">short_name</dt>
+                    <dd className="mt-0.5 font-medium text-slate-800">
+                      {existingDraftModel.short_name || "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-400">tax_type</dt>
+                    <dd className="mt-0.5 font-mono font-semibold text-slate-800">
+                      {existingDraftModel.tax_type || "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-400">gender / status</dt>
+                    <dd className="mt-0.5 font-medium text-slate-800">
+                      {existingDraftModel.gender || "—"} ·{" "}
+                      {existingDraftModel.status || "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-400">size_pricing_config</dt>
+                    <dd className="mt-0.5 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-700">
+                      {formatSizePricingSummary(
+                        existingDraftModel.size_pricing_config,
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section className="rounded-xl border border-blue-200 bg-blue-50/50 p-4">
+                <h4 className="text-xs font-bold uppercase tracking-wide text-blue-600">
+                  New Data
+                </h4>
+                <dl className="mt-3 space-y-2.5 text-xs">
+                  <div>
+                    <dt className="text-blue-400">name</dt>
+                    <dd
+                      className={`mt-0.5 font-medium ${
+                        pendingDraftPayload.name !== existingDraftModel.name
+                          ? "text-blue-900 underline decoration-blue-300"
+                          : "text-slate-800"
+                      }`}
+                    >
+                      {pendingDraftPayload.name}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-blue-400">short_name</dt>
+                    <dd
+                      className={`mt-0.5 font-medium ${
+                        (pendingDraftPayload.shortName ?? "") !==
+                        (existingDraftModel.short_name ?? "")
+                          ? "text-blue-900 underline decoration-blue-300"
+                          : "text-slate-800"
+                      }`}
+                    >
+                      {pendingDraftPayload.shortName || "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-blue-400">tax_type</dt>
+                    <dd
+                      className={`mt-0.5 font-mono font-semibold ${
+                        pendingDraftPayload.taxType !==
+                        existingDraftModel.tax_type
+                          ? "text-blue-900 underline decoration-blue-300"
+                          : "text-slate-800"
+                      }`}
+                    >
+                      {pendingDraftPayload.taxType}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-blue-400">gender / status</dt>
+                    <dd className="mt-0.5 font-medium text-slate-800">
+                      {pendingDraftPayload.gender} · DRAFT
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-blue-400">size_pricing_config</dt>
+                    <dd className="mt-0.5 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-700">
+                      {formatSizePricingSummary(
+                        pendingDraftPayload.sizePricingConfig,
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+            </div>
+
+            <footer className="flex shrink-0 justify-end gap-3 border-t border-slate-200 bg-slate-50/80 px-5 py-4 sm:px-6">
+              <button
+                type="button"
+                onClick={closeOverwriteModal}
+                disabled={isDraftSaving}
+                className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmOverwriteDraft()}
+                disabled={isDraftSaving}
+                className="inline-flex h-10 items-center justify-center rounded-xl bg-amber-600 px-4 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
+              >
+                {isDraftSaving ? "กำลังบันทึกทับ..." : "Confirm Overwrite"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+
+      {entitySheet && (
+        <div
+          role="presentation"
+          className="fixed inset-0 z-[70] flex justify-end bg-slate-950/40 backdrop-blur-[1px]"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setEntitySheet(null);
+          }}
+        >
+          <aside
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="entity-sheet-title"
+            className="flex h-full w-full max-w-md flex-col bg-white shadow-2xl"
+          >
+            <div className="flex items-start justify-between border-b border-slate-200 px-5 py-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-600">
+                  {entitySheet.kind === "vendor" ? "Vendor" : "Brand"}
+                </p>
+                <h3
+                  id="entity-sheet-title"
+                  className="mt-1 text-base font-bold text-slate-900"
+                >
+                  {entitySheet.kind === "vendor"
+                    ? entitySheet.data.company_name
+                    : entitySheet.data.brand_name}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEntitySheet(null)}
+                aria-label="ปิดรายละเอียด"
+                className="grid size-8 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+              >
+                <Icon name="close" />
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+              {entitySheet.kind === "vendor" ? (
+                <>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-[11px] font-semibold text-slate-400">
+                      ประเภท
+                    </p>
+                    <p className="mt-1 text-sm font-medium text-slate-800">
+                      ผู้จำหน่าย (Vendor)
+                    </p>
+                  </div>
+                  <div className="grid gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-400">
+                        ชื่อเต็ม
+                      </p>
+                      <p className="mt-1 text-sm text-slate-800">
+                        {entitySheet.data.company_name}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-400">
+                        เบอร์ติดต่อ
+                      </p>
+                      <p className="mt-1 text-sm text-slate-800">
+                        {entitySheet.data.phone || "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-400">
+                        เลขผู้เสียภาษี
+                      </p>
+                      <p className="mt-1 text-sm text-slate-800">
+                        {entitySheet.data.tax_id || "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-400">
+                        สาขา
+                      </p>
+                      <p className="mt-1 text-sm text-slate-800">
+                        {entitySheet.data.branch_code || "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-400">
+                        ที่อยู่
+                      </p>
+                      <p className="mt-1 text-sm whitespace-pre-wrap text-slate-800">
+                        {entitySheet.data.address || "—"}
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-400">
+                          ระดับราคา
+                        </p>
+                        <p className="mt-1 text-sm text-slate-800">
+                          {entitySheet.data.default_price_tier || "—"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-400">
+                          เครดิต (วัน)
+                        </p>
+                        <p className="mt-1 text-sm text-slate-800">
+                          {entitySheet.data.credit_days ?? "—"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-[11px] font-semibold text-slate-400">
+                      ประเภท
+                    </p>
+                    <p className="mt-1 text-sm font-medium text-slate-800">
+                      แบรนด์ (mst_brands)
+                    </p>
+                  </div>
+                  <div className="grid gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-400">
+                        ชื่อแบรนด์
+                      </p>
+                      <p className="mt-1 text-sm text-slate-800">
+                        {entitySheet.data.brand_name}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-400">
+                        รหัสแบรนด์ (SKU prefix)
+                      </p>
+                      <p className="mt-1 font-mono text-sm font-semibold tracking-wide text-blue-700">
+                        {entitySheet.data.brand_code}
+                      </p>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
+    </div>
+  );
+}
