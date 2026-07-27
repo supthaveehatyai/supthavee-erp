@@ -4,7 +4,9 @@
  * "Save to Ledger" confirmation dialog — the last checkpoint before
  * `saveGoodsReceiptToLedger` writes `doc_headers`/`doc_details` +
  * `inventory_ledger`. Replaces the old `window.prompt` flow so the user can
- * review/edit BOTH the invoice number and invoice date Gemini extracted.
+ * review/edit BOTH the invoice number and invoice date Gemini extracted,
+ * plus the optional end-of-bill discount (`billDiscountText`) that feeds
+ * `calculateNetCostApportionment`.
  *
  * Zero Client-Side Fetching: the only network call this component makes is
  * `checkDuplicateInvoice` (a Server Action) — the Early Warning check for
@@ -26,15 +28,22 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+export type SaveToLedgerConfirmPayload = {
+  docNumber: string;
+  docDate: string;
+  billDiscountText: string;
+};
+
 export type SaveToLedgerDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   vendorId: string;
   initialDocNumber: string;
   initialDocDate: string;
+  initialBillDiscountText: string;
   matchedCount: number;
   isSaving: boolean;
-  onConfirm: (docNumber: string, docDate: string) => void;
+  onConfirm: (payload: SaveToLedgerConfirmPayload) => void;
 };
 
 export default function SaveToLedgerDialog({
@@ -43,19 +52,21 @@ export default function SaveToLedgerDialog({
   vendorId,
   initialDocNumber,
   initialDocDate,
+  initialBillDiscountText,
   matchedCount,
   isSaving,
   onConfirm,
 }: SaveToLedgerDialogProps) {
   const [docNumber, setDocNumber] = useState(initialDocNumber);
   const [docDate, setDocDate] = useState(initialDocDate);
+  const [billDiscountText, setBillDiscountText] = useState(initialBillDiscountText);
 
   const [duplicateCheck, setDuplicateCheck] = useState<{
     isDuplicate: boolean;
     isChecking: boolean;
   }>({ isDuplicate: false, isChecking: false });
 
-  // Reset the form to the latest OCR values every time the dialog
+  // Reset the form to the latest OCR / parent values every time the dialog
   // transitions from closed -> open (adjusting state during render,
   // React-sanctioned, instead of a `useEffect`).
   const [wasOpen, setWasOpen] = useState(open);
@@ -64,6 +75,7 @@ export default function SaveToLedgerDialog({
     if (open) {
       setDocNumber(initialDocNumber);
       setDocDate(initialDocDate);
+      setBillDiscountText(initialBillDiscountText);
     }
   }
 
@@ -116,7 +128,11 @@ export default function SaveToLedgerDialog({
 
   function handleConfirm() {
     if (!canConfirm) return;
-    onConfirm(docNumber.trim(), docDate.trim());
+    onConfirm({
+      docNumber: docNumber.trim(),
+      docDate: docDate.trim(),
+      billDiscountText: billDiscountText.trim(),
+    });
   }
 
   return (
@@ -154,6 +170,20 @@ export default function SaveToLedgerDialog({
               className={isDuplicate ? "border-red-400 focus-visible:ring-red-400" : ""}
             />
           </div>
+        </div>
+
+        <div className="mt-3">
+          <Label htmlFor="save-ledger-bill-discount">ส่วนลดท้ายบิล (%, บาท)</Label>
+          <Input
+            id="save-ledger-bill-discount"
+            value={billDiscountText}
+            onChange={(e) => setBillDiscountText(e.target.value)}
+            placeholder="เช่น 40%, 1500"
+            disabled={isSaving}
+          />
+          <p className="mt-1 text-[11px] text-slate-400">
+            เช่น 40%, 1500 — ระบบจะกระจายส่วนลดนี้ลงทุกรายการตามสัดส่วนมูลค่า (ไม่รวมของแถม)
+          </p>
         </div>
 
         {isDuplicate && (

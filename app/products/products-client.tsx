@@ -5,11 +5,9 @@ import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import {
-  createSize,
-  createSizesBulk,
-  getAllSizesByBrand,
   getBrands,
   getGenders,
+  getGlobalSizes,
   getMasterDataForMatrix,
   getSizesByBrand,
   getVendorMappingsByProductIds,
@@ -134,7 +132,7 @@ type Color = SmartColor;
 
 type Size = {
   id: string;
-  brand_id: string;
+  brand_id: string | null;
   size_label: string;
   size_code: string;
   sort_order: number;
@@ -154,7 +152,7 @@ type SizePrice = {
   wholesale: string;
 };
 
-type DiscountType = "PERCENT" | "THB";
+type DiscountType = "PERCENT" | "THB" | "NET";
 
 /** Per-size pricing config for Matrix Step 3 + draft size_pricing_config. */
 type SizePricingRow = {
@@ -216,12 +214,14 @@ function createEmptySizePricing(size: Size): SizePricingRow {
   };
 }
 
-/** Real-time cost from retail ± discount. */
+/** Real-time cost from retail ± discount. Skipped for NET (manual entry). */
 function calculateCostPrice(
   retailPrice: string,
   discountType: DiscountType,
   discountValue: string,
 ): string {
+  if (discountType === "NET") return "";
+
   const retail = Number(retailPrice);
   if (!Number.isFinite(retail) || retailPrice.trim() === "") return "";
 
@@ -239,6 +239,10 @@ function calculateCostPrice(
 }
 
 function withCalculatedCost(row: SizePricingRow): SizePricingRow {
+  // Net Price mode: user types cost_price directly — do not overwrite.
+  if (row.discountType === "NET") {
+    return row;
+  }
   return {
     ...row,
     costPrice: calculateCostPrice(
@@ -281,9 +285,11 @@ function formatSizePricingSummary(value: unknown): string {
       const discountType = String(row.discountType ?? "PERCENT");
       const discountValue = Number(row.discountValue ?? 0);
       const discountLabel =
-        discountType === "THB"
-          ? `ลด ${discountValue}฿`
-          : `ลด ${discountValue}%`;
+        discountType === "NET"
+          ? "ราคาเน็ต"
+          : discountType === "THB"
+            ? `ลด ${discountValue}฿`
+            : `ลด ${discountValue}%`;
       return `${code}: ปลีก ${retail} → ต้นทุน ${cost} (${discountLabel})`;
     })
     .join("\n");
@@ -323,21 +329,37 @@ function hydrateSizePricingFromConfig(
       );
     if (!size) continue;
 
+    const rawDiscountType = String(raw.discountType ?? "PERCENT").toUpperCase();
     const discountType: DiscountType =
-      String(raw.discountType ?? "PERCENT").toUpperCase() === "THB"
+      rawDiscountType === "THB"
         ? "THB"
-        : "PERCENT";
+        : rawDiscountType === "NET"
+          ? "NET"
+          : "PERCENT";
 
-    const row = withCalculatedCost({
-      sizeId: size.id,
-      sizeCode: size.size_code,
-      sizeLabel: size.size_label,
-      retailPrice: priceToInput(Number(raw.retailPrice ?? 0)),
-      wholesalePrice: priceToInput(Number(raw.wholesalePrice ?? 0)),
-      discountType,
-      discountValue: priceToInput(Number(raw.discountValue ?? 0)),
-      costPrice: "",
-    });
+    const row =
+      discountType === "NET"
+        ? {
+            sizeId: size.id,
+            sizeCode: size.size_code,
+            sizeLabel: size.size_label,
+            retailPrice: priceToInput(Number(raw.retailPrice ?? 0)),
+            wholesalePrice: priceToInput(Number(raw.wholesalePrice ?? 0)),
+            discountType: "NET" as const,
+            discountValue: "",
+            // Preserve the manually entered net cost from the saved config.
+            costPrice: priceToInput(Number(raw.costPrice ?? 0)),
+          }
+        : withCalculatedCost({
+            sizeId: size.id,
+            sizeCode: size.size_code,
+            sizeLabel: size.size_label,
+            retailPrice: priceToInput(Number(raw.retailPrice ?? 0)),
+            wholesalePrice: priceToInput(Number(raw.wholesalePrice ?? 0)),
+            discountType,
+            discountValue: priceToInput(Number(raw.discountValue ?? 0)),
+            costPrice: "",
+          });
 
     sizeIds.push(size.id);
     sizePricing.push(row);
@@ -476,8 +498,9 @@ async function fetchSizesByBrand(brandId: string): Promise<Size[]> {
   return result.data as Size[];
 }
 
-async function fetchAllSizesByBrand(brandId: string): Promise<Size[]> {
-  const result = await getAllSizesByBrand(brandId);
+/** Global Size catalog (`brand_id IS NULL`) — SELECT only, never INSERT. */
+async function fetchGlobalSizes(): Promise<Size[]> {
+  const result = await getGlobalSizes();
   if (result.error) throw new Error(result.error);
   return result.data as Size[];
 }
@@ -771,14 +794,11 @@ export default function ProductsClient() {
   const [sizes, setSizes] = useState<Size[]>([]);
   const [isMasterLoading, setIsMasterLoading] = useState(false);
   const [isSizeLoading, setIsSizeLoading] = useState(false);
-  const [isSizeDialogOpen, setIsSizeDialogOpen] = useState(false);
-  const [sizeReference, setSizeReference] = useState<Size[]>([]);
-  const [newSizeLabel, setNewSizeLabel] = useState("");
-  const [newSizeCode, setNewSizeCode] = useState("");
-  const [newSizeSortOrder, setNewSizeSortOrder] = useState("");
-  const [sizeDialogError, setSizeDialogError] = useState("");
-  const [isSizeReferenceLoading, setIsSizeReferenceLoading] = useState(false);
-  const [isSizeSaving, setIsSizeSaving] = useState(false);
+  /** Global Size catalog for the standard-size grid (SELECT only). */
+  const [globalSizeCatalog, setGlobalSizeCatalog] = useState<Size[]>([]);
+  const [isGlobalSizeLoading, setIsGlobalSizeLoading] = useState(false);
+  /** Inline panel: standard size selection grid (no create modal). */
+  const [isStandardSizePanelOpen, setIsStandardSizePanelOpen] = useState(false);
   const [quickSizeLabels, setQuickSizeLabels] = useState<string[]>([]);
   const [isQuickSizeSaving, setIsQuickSizeSaving] = useState(false);
 
@@ -889,15 +909,13 @@ export default function ProductsClient() {
 
   // Keep Escape-handler flags in a ref so useEffect deps stay a fixed length.
   const matrixEscapeStateRef = useRef({
-    isSizeDialogOpen,
-    isSizeSaving,
+    isStandardSizePanelOpen,
     isOverwriteModalOpen,
     isSaving,
     isDraftSaving,
   });
   matrixEscapeStateRef.current = {
-    isSizeDialogOpen,
-    isSizeSaving,
+    isStandardSizePanelOpen,
     isOverwriteModalOpen,
     isSaving,
     isDraftSaving,
@@ -910,8 +928,9 @@ export default function ProductsClient() {
       if (event.key !== "Escape") return;
 
       const state = matrixEscapeStateRef.current;
-      if (state.isSizeDialogOpen) {
-        if (!state.isSizeSaving) setIsSizeDialogOpen(false);
+      if (state.isStandardSizePanelOpen) {
+        setIsStandardSizePanelOpen(false);
+        setQuickSizeLabels([]);
         return;
       }
       if (state.isOverwriteModalOpen) {
@@ -931,24 +950,50 @@ export default function ProductsClient() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [isDialogOpen]);
 
+  const prevBrandIdForSizesRef = useRef(form.brandId);
+
   useEffect(() => {
+    const brandChanged = prevBrandIdForSizesRef.current !== form.brandId;
+    prevBrandIdForSizesRef.current = form.brandId;
+
     if (!form.brandId) {
       setSizes([]);
       setQuickSizeLabels([]);
+      setIsStandardSizePanelOpen(false);
       return;
     }
 
     let active = true;
-    setIsSizeLoading(true);
-    setQuickSizeLabels([]);
-    fetchSizesByBrand(form.brandId)
-      .then((data) => {
-        if (!active) return;
-        setSizes(data);
-        if (pendingSizePricingConfig != null) {
+
+    // Hydrate size pricing from a loaded DRAFT/ACTIVE model (Global + brand sizes).
+    if (pendingSizePricingConfig != null) {
+      setIsSizeLoading(true);
+      setQuickSizeLabels([]);
+      setIsStandardSizePanelOpen(false);
+
+      void (async () => {
+        try {
+          const [brandData, globalData] = await Promise.all([
+            fetchSizesByBrand(form.brandId),
+            fetchGlobalSizes(),
+          ]);
+          if (!active) return;
+
+          setGlobalSizeCatalog(globalData);
+
+          const byId = new Map<string, Size>();
+          for (const size of globalData) byId.set(size.id, size);
+          for (const size of brandData) byId.set(size.id, size);
+          const catalog = [...byId.values()].sort(
+            (left, right) => left.sort_order - right.sort_order,
+          );
+
           const hydrated = hydrateSizePricingFromConfig(
             pendingSizePricingConfig,
-            data,
+            catalog,
+          );
+          setSizes(
+            catalog.filter((size) => hydrated.sizeIds.includes(size.id)),
           );
           setForm((current) => ({
             ...current,
@@ -956,21 +1001,32 @@ export default function ProductsClient() {
           }));
           setSizePricing(hydrated.sizePricing);
           setPendingSizePricingConfig(null);
+        } catch (error) {
+          if (active) {
+            setSizes([]);
+            setFormError(
+              `ไม่สามารถโหลดข้อมูลไซส์ได้: ${
+                error instanceof Error ? error.message : "เกิดข้อผิดพลาด"
+              }`,
+            );
+          }
+        } finally {
+          if (active) setIsSizeLoading(false);
         }
-      })
-      .catch((error: Error) => {
-        if (active) {
-          setSizes([]);
-          setFormError(`ไม่สามารถโหลดข้อมูลไซส์ได้: ${error.message}`);
-        }
-      })
-      .finally(() => {
-        if (active) setIsSizeLoading(false);
-      });
+      })();
 
-    return () => {
-      active = false;
-    };
+      return () => {
+        active = false;
+      };
+    }
+
+    // Brand switched (no pending hydrate): clear Matrix size selection.
+    if (brandChanged) {
+      setSizes([]);
+      setQuickSizeLabels([]);
+      setIsStandardSizePanelOpen(false);
+      setIsSizeLoading(false);
+    }
   }, [form.brandId, pendingSizePricingConfig]);
 
   const selectedBrand = masterData.brands.find(
@@ -1177,7 +1233,8 @@ export default function ProductsClient() {
     setIsOverwriteModalOpen(false);
     setExistingDraftModel(null);
     setPendingDraftPayload(null);
-    setIsSizeDialogOpen(false);
+    setIsStandardSizePanelOpen(false);
+    setQuickSizeLabels([]);
     setIsDialogOpen(true);
     setIsMasterLoading(true);
     setIsLoadableModelsLoading(true);
@@ -1232,7 +1289,7 @@ export default function ProductsClient() {
   }
 
   function changeBrand(brandId: string) {
-    setIsSizeDialogOpen(false);
+    setIsStandardSizePanelOpen(false);
     setQuickSizeLabels([]);
     setSizePricing([]);
     setForm((current) => ({
@@ -1297,69 +1354,134 @@ export default function ProductsClient() {
     );
   }
 
-  async function handleSaveQuickSizes() {
-    if (!form.brandId || quickSizeLabels.length === 0 || isQuickSizeSaving) {
-      return;
-    }
+  /** Open the Global Size selection grid (no create / INSERT). */
+  async function openStandardSizePanel() {
+    const alreadySelectedLabels = sizes
+      .filter((size) => form.sizeIds.includes(size.id))
+      .map((size) => size.size_label);
+    setQuickSizeLabels(alreadySelectedLabels);
+    setIsStandardSizePanelOpen(true);
 
-    const selected = STANDARD_SIZES.filter((size) =>
-      quickSizeLabels.includes(size.label),
-    );
-    if (selected.length === 0) return;
+    if (globalSizeCatalog.length > 0 || isGlobalSizeLoading) return;
+
+    setIsGlobalSizeLoading(true);
+    try {
+      setGlobalSizeCatalog(await fetchGlobalSizes());
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "โหลดรายการไซส์มาตรฐานไม่สำเร็จ",
+      );
+    } finally {
+      setIsGlobalSizeLoading(false);
+    }
+  }
+
+  /**
+   * Confirm grid selection — SELECT existing Global Size rows into Matrix
+   * state only. Does NOT call createSizesBulk / INSERT into mst_sizes.
+   */
+  async function handleConfirmStandardSizes() {
+    if (quickSizeLabels.length === 0 || isQuickSizeSaving) return;
 
     setIsQuickSizeSaving(true);
     setFormError("");
 
-    const { data, error } = await createSizesBulk({
-      brand_id: form.brandId,
-      sizes: selected.map((size) => ({
-        size_label: size.label,
-        size_code: size.code,
-        sort_order: size.sort_order,
-      })),
-    });
-
-    if (error || !data) {
-      const message = error ?? "ไม่สามารถบันทึกไซส์มาตรฐานได้";
-      setFormError(message);
-      toast.error(message);
-      setIsQuickSizeSaving(false);
-      return;
-    }
-
-    const inserted = (data as Size[]).sort(
-      (left, right) => left.sort_order - right.sort_order,
-    );
-
     try {
-      const refreshed = await fetchSizesByBrand(form.brandId);
-      setSizes(refreshed);
-      setForm((current) => ({
-        ...current,
-        sizeIds: refreshed.map((size) => size.id),
-      }));
-      setSizePricing((current) => {
-        const byId = new Map(current.map((row) => [row.sizeId, row]));
-        return refreshed.map(
-          (size) => byId.get(size.id) ?? createEmptySizePricing(size),
+      let catalog = globalSizeCatalog;
+      if (catalog.length === 0) {
+        catalog = await fetchGlobalSizes();
+        setGlobalSizeCatalog(catalog);
+      }
+
+      const byLabel = new Map(
+        catalog.map((size) => [size.size_label.trim().toUpperCase(), size]),
+      );
+      // Fall back to brand-scoped sizes already in memory (legacy rows).
+      for (const size of sizes) {
+        const key = size.size_label.trim().toUpperCase();
+        if (!byLabel.has(key)) byLabel.set(key, size);
+      }
+
+      const matched: Size[] = [];
+      const missing: string[] = [];
+      for (const label of quickSizeLabels) {
+        const found = byLabel.get(label.trim().toUpperCase());
+        if (found) matched.push(found);
+        else missing.push(label);
+      }
+
+      if (matched.length === 0) {
+        const message =
+          missing.length > 0
+            ? `ไม่พบไซส์ในระบบ: ${missing.join(", ")}`
+            : "ไม่พบไซส์ที่เลือกในระบบ";
+        setFormError(message);
+        toast.error(message);
+        return;
+      }
+
+      if (missing.length > 0) {
+        toast.error(`ข้ามไซส์ที่ไม่มีในระบบ: ${missing.join(", ")}`);
+      }
+
+      setSizes((current) => {
+        const map = new Map(current.map((size) => [size.id, size]));
+        for (const size of matched) map.set(size.id, size);
+        return [...map.values()].sort(
+          (left, right) => left.sort_order - right.sort_order,
         );
       });
-    } catch {
-      setSizes(inserted);
-      setForm((current) => ({
-        ...current,
-        sizeIds: inserted.map((size) => size.id),
-      }));
-      setSizePricing(inserted.map((size) => createEmptySizePricing(size)));
-    }
 
-    setQuickSizeLabels([]);
-    setIsQuickSizeSaving(false);
-    toast.success(`เพิ่มไซส์มาตรฐาน ${inserted.length} รายการแล้ว`);
+      const nextSizeIds = [...form.sizeIds];
+      for (const size of matched) {
+        if (!nextSizeIds.includes(size.id)) nextSizeIds.push(size.id);
+      }
+
+      setForm((current) => ({ ...current, sizeIds: nextSizeIds }));
+      setSizePricing((current) => {
+        const byId = new Map(current.map((row) => [row.sizeId, row]));
+        const sizeById = new Map(matched.map((size) => [size.id, size]));
+        for (const size of sizes) sizeById.set(size.id, size);
+        for (const size of matched) sizeById.set(size.id, size);
+
+        return nextSizeIds.map((sizeId) => {
+          const existing = byId.get(sizeId);
+          if (existing) return existing;
+          const size = sizeById.get(sizeId);
+          return size
+            ? createEmptySizePricing(size)
+            : {
+                sizeId,
+                sizeCode: "",
+                sizeLabel: "?",
+                retailPrice: "",
+                wholesalePrice: "",
+                discountType: "PERCENT" as const,
+                discountValue: "",
+                costPrice: "",
+              };
+        });
+      });
+
+      setQuickSizeLabels([]);
+      setIsStandardSizePanelOpen(false);
+      toast.success(`เพิ่ม ${matched.length} ไซส์เข้า Matrix แล้ว`);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "เพิ่มไซส์เข้า Matrix ไม่สำเร็จ";
+      setFormError(message);
+      toast.error(message);
+    } finally {
+      setIsQuickSizeSaving(false);
+    }
   }
 
   function toggleSize(sizeId: string) {
-    const size = sizes.find((item) => item.id === sizeId);
+    const size =
+      sizes.find((item) => item.id === sizeId) ??
+      globalSizeCatalog.find((item) => item.id === sizeId);
     setForm((current) => {
       const isSelected = current.sizeIds.includes(sizeId);
       return {
@@ -1386,99 +1508,33 @@ export default function ProductsClient() {
         | "wholesalePrice"
         | "discountType"
         | "discountValue"
+        | "costPrice"
       >
     >,
   ) {
     setSizePricing((current) =>
       current.map((row) => {
         if (row.sizeId !== sizeId) return row;
-        return withCalculatedCost({ ...row, ...patch });
+        const next = { ...row, ...patch };
+
+        // Switching into Net Price: keep current cost as a starting seed
+        // the user can edit; clear the unused discount value field.
+        if (patch.discountType === "NET") {
+          return {
+            ...next,
+            discountType: "NET",
+            discountValue: "",
+          };
+        }
+
+        // Manual cost edits only apply in Net Price mode.
+        if (patch.costPrice !== undefined && next.discountType === "NET") {
+          return next;
+        }
+
+        return withCalculatedCost(next);
       }),
     );
-  }
-
-  async function openSizeDialog() {
-    if (!form.brandId) return;
-
-    setNewSizeLabel("");
-    setNewSizeCode("");
-    setNewSizeSortOrder("");
-    setSizeDialogError("");
-    setSizeReference([]);
-    setIsSizeDialogOpen(true);
-    setIsSizeReferenceLoading(true);
-
-    try {
-      setSizeReference(await fetchAllSizesByBrand(form.brandId));
-    } catch (error) {
-      setSizeDialogError(
-        `ไม่สามารถโหลดตารางอ้างอิงไซส์ได้: ${
-          error instanceof Error ? error.message : "เกิดข้อผิดพลาด"
-        }`,
-      );
-    } finally {
-      setIsSizeReferenceLoading(false);
-    }
-  }
-
-  async function handleCreateSize(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-    setSizeDialogError("");
-
-    const sizeLabel = newSizeLabel.trim();
-    const sizeCode = normalizeSkuPart(newSizeCode);
-    const sortOrder = Number(newSizeSortOrder);
-
-    if (!form.brandId) {
-      setSizeDialogError("กรุณาเลือกแบรนด์ก่อนเพิ่มไซส์");
-      return;
-    }
-    if (!sizeLabel || !sizeCode || newSizeSortOrder.trim() === "") {
-      setSizeDialogError("กรุณากรอกข้อมูลไซส์ให้ครบทั้ง 3 ช่อง");
-      return;
-    }
-    if (!Number.isInteger(sortOrder) || sortOrder < 0) {
-      setSizeDialogError("ลำดับต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป");
-      return;
-    }
-
-    setIsSizeSaving(true);
-
-    const { data: insertedSize, error } = await createSize({
-      brand_id: form.brandId,
-      size_label: sizeLabel,
-      size_code: sizeCode,
-      sort_order: sortOrder,
-    });
-
-    if (error || !insertedSize) {
-      setSizeDialogError(error ?? "ไม่สามารถบันทึกไซส์ใหม่ได้");
-      setIsSizeSaving(false);
-      return;
-    }
-
-    try {
-      const refreshedSizes = await fetchSizesByBrand(form.brandId);
-      setSizes(refreshedSizes);
-    } catch {
-      setSizes((current) =>
-        [...current, insertedSize as Size].sort(
-          (left, right) => left.sort_order - right.sort_order,
-        ),
-      );
-    }
-
-    setForm((current) => ({
-      ...current,
-      sizeIds: [...current.sizeIds, (insertedSize as Size).id],
-    }));
-    setSizePricing((current) => [
-      ...current,
-      createEmptySizePricing(insertedSize as Size),
-    ]);
-    setIsSizeSaving(false);
-    setIsSizeDialogOpen(false);
   }
 
   async function handleSaveDraftModel() {
@@ -2816,17 +2872,22 @@ export default function ProductsClient() {
                     <div>
                       <div className="mb-1.5 flex items-center justify-between gap-3">
                         <span className="text-xs font-semibold text-slate-700">
-                          ไซส์ของแบรนด์ (เรียงตาม sort_order){" "}
+                          ไซส์ (Global Size){" "}
                           <span className="text-red-500">*</span>
                         </span>
                         <button
                           type="button"
-                          onClick={() => void openSizeDialog()}
-                          disabled={!form.brandId || isMasterLoading}
-                          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-[11px] font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+                          onClick={() => void openStandardSizePanel()}
+                          disabled={
+                            !form.brandId ||
+                            isMasterLoading ||
+                            isSaving ||
+                            isSizeLoading ||
+                            isGlobalSizeLoading
+                          }
+                          className="inline-flex h-8 items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-[11px] font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          <Icon name="plus" className="size-3" />
-                          เพิ่มไซส์ใหม่
+                          + เพิ่มไซส์
                         </button>
                       </div>
                       {!form.brandId ? (
@@ -2837,96 +2898,143 @@ export default function ProductsClient() {
                         <div className="rounded-xl bg-slate-50 px-4 py-5 text-center text-xs text-slate-400">
                           กำลังโหลดไซส์...
                         </div>
-                      ) : sizes.length === 0 ? (
-                        <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4">
-                          <div className="mb-3">
-                            <p className="text-xs font-semibold text-slate-800">
-                              ยังไม่มีไซส์สำหรับแบรนด์นี้
-                            </p>
-                            <p className="mt-0.5 text-[11px] text-slate-500">
-                              เลือกไซส์มาตรฐานด้านล่างแล้วกดยืนยัน เพื่อบันทึกลง
-                              mst_sizes ทันที
-                            </p>
-                          </div>
-
-                          <div className="space-y-4">
-                            {STANDARD_SIZE_GROUPS.map((group) => (
-                              <div key={group.title}>
-                                <p className="mb-2 text-[11px] font-bold tracking-wide text-slate-500">
-                                  {group.title}
-                                </p>
-                                <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-                                  {group.sizes.map((size) => {
-                                    const checked = quickSizeLabels.includes(
-                                      size.label,
-                                    );
-                                    return (
-                                      <label
-                                        key={size.label}
-                                        className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-semibold transition ${
-                                          checked
-                                            ? "border-blue-600 bg-blue-600 text-white shadow-sm"
-                                            : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
-                                        }`}
-                                      >
-                                        <input
-                                          type="checkbox"
-                                          checked={checked}
-                                          onChange={() =>
-                                            toggleQuickSize(size.label)
-                                          }
-                                          className="sr-only"
-                                        />
-                                        {size.label}
-                                      </label>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-
-                          <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                            <p className="text-[11px] text-slate-500">
-                              เลือกแล้ว {quickSizeLabels.length} ไซส์
-                            </p>
-                            <button
-                              type="button"
-                              onClick={() => void handleSaveQuickSizes()}
-                              disabled={
-                                quickSizeLabels.length === 0 || isQuickSizeSaving
-                              }
-                              className="inline-flex h-9 items-center justify-center rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
-                            >
-                              {isQuickSizeSaving
-                                ? "กำลังบันทึก..."
-                                : `ยืนยันเพิ่ม ${quickSizeLabels.length} ไซส์`}
-                            </button>
-                          </div>
-                        </div>
                       ) : (
-                        <div className="flex flex-wrap gap-2">
-                          {sizes.map((size) => {
-                            const checked = form.sizeIds.includes(size.id);
-                            return (
-                              <button
-                                type="button"
-                                key={size.id}
-                                aria-pressed={checked}
-                                onClick={() => toggleSize(size.id)}
-                                className={`inline-flex min-w-16 items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
-                                  checked
-                                    ? "border-blue-600 bg-blue-600 text-white shadow-sm"
-                                    : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
-                                }`}
-                              >
-                                {checked && (
-                                  <Icon name="check" className="size-3.5" />
-                                )}
-                                {size.size_label}
-                              </button>
-                            );
-                          })}
+                        <div className="space-y-3">
+                          {form.sizeIds.length > 0 ? (
+                            <div className="flex flex-wrap gap-2">
+                              {sizes
+                                .filter((size) =>
+                                  form.sizeIds.includes(size.id),
+                                )
+                                .map((size) => {
+                                  const checked = form.sizeIds.includes(
+                                    size.id,
+                                  );
+                                  return (
+                                    <button
+                                      type="button"
+                                      key={size.id}
+                                      aria-pressed={checked}
+                                      onClick={() => toggleSize(size.id)}
+                                      className={`inline-flex min-w-16 items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                                        checked
+                                          ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                                          : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                                      }`}
+                                    >
+                                      {checked && (
+                                        <Icon
+                                          name="check"
+                                          className="size-3.5"
+                                        />
+                                      )}
+                                      {size.size_label}
+                                    </button>
+                                  );
+                                })}
+                            </div>
+                          ) : (
+                            !isStandardSizePanelOpen && (
+                              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center text-xs text-slate-400">
+                                กด &quot;+ เพิ่มไซส์&quot;
+                                เพื่อเลือกไซส์มาตรฐานเข้า Matrix
+                              </div>
+                            )
+                          )}
+
+                          {isStandardSizePanelOpen && (
+                            <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4">
+                              <div className="mb-3 flex items-start justify-between gap-2">
+                                <div>
+                                  <p className="text-xs font-semibold text-slate-800">
+                                    เลือกไซส์มาตรฐานเพื่อเพิ่มใน Matrix
+                                  </p>
+                                  <p className="mt-0.5 text-[11px] text-slate-500">
+                                    เลือกจากแคตตาล็อก Global Size
+                                    ที่มีในระบบแล้ว — ไม่สร้างไซส์ใหม่
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsStandardSizePanelOpen(false);
+                                    setQuickSizeLabels([]);
+                                  }}
+                                  disabled={isQuickSizeSaving}
+                                  aria-label="ปิดแผงเลือกไซส์"
+                                  className="grid size-7 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-slate-700 disabled:opacity-50"
+                                >
+                                  <Icon name="close" className="size-4" />
+                                </button>
+                              </div>
+
+                              {isGlobalSizeLoading ? (
+                                <div className="rounded-xl bg-white/70 px-4 py-6 text-center text-xs text-slate-400">
+                                  กำลังโหลดไซส์มาตรฐาน...
+                                </div>
+                              ) : (
+                                <div className="space-y-4">
+                                  {STANDARD_SIZE_GROUPS.map((group) => (
+                                    <div key={group.title}>
+                                      <p className="mb-2 text-[11px] font-bold tracking-wide text-slate-500">
+                                        {group.title}
+                                      </p>
+                                      <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+                                        {group.sizes.map((size) => {
+                                          const checked =
+                                            quickSizeLabels.includes(
+                                              size.label,
+                                            );
+                                          return (
+                                            <label
+                                              key={size.label}
+                                              className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-semibold transition ${
+                                                checked
+                                                  ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                                                  : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                                              }`}
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                checked={checked}
+                                                onChange={() =>
+                                                  toggleQuickSize(size.label)
+                                                }
+                                                className="sr-only"
+                                              />
+                                              {size.label}
+                                            </label>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-[11px] text-slate-500">
+                                  เลือกแล้ว {quickSizeLabels.length} ไซส์
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleConfirmStandardSizes()
+                                  }
+                                  disabled={
+                                    quickSizeLabels.length === 0 ||
+                                    isQuickSizeSaving ||
+                                    isGlobalSizeLoading
+                                  }
+                                  className="inline-flex h-9 items-center justify-center rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                                >
+                                  {isQuickSizeSaving
+                                    ? "กำลังเพิ่ม..."
+                                    : `ยืนยันเพิ่ม ${quickSizeLabels.length} ไซส์`}
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2937,7 +3045,7 @@ export default function ProductsClient() {
                   <StepHeading
                     number={3}
                     title="ราคาตามไซส์"
-                    description="ต้นทุนคำนวณอัตโนมัติจากราคาปลีกและส่วนลด — ใช้กับทุกสีในไซส์เดียวกัน"
+                    description="ต้นทุนคำนวณอัตโนมัติจากราคาปลีกและส่วนลด — หรือเลือก “ราคาเน็ต” เพื่อพิมพ์ต้นทุนตรงๆ (ใช้กับทุกสีในไซส์เดียวกัน)"
                   />
                   {form.sizeIds.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-xs text-slate-400">
@@ -2975,6 +3083,7 @@ export default function ProductsClient() {
                               const pricing =
                                 sizePricingById.get(size.id) ??
                                 createEmptySizePricing(size);
+                              const isNetPrice = pricing.discountType === "NET";
                               return (
                                 <tr key={size.id}>
                                   <td className="px-4 py-3">
@@ -3021,6 +3130,7 @@ export default function ProductsClient() {
                                     >
                                       <option value="PERCENT">%</option>
                                       <option value="THB">THB</option>
+                                      <option value="NET">ราคาเน็ต</option>
                                     </select>
                                   </td>
                                   <td className="px-4 py-3">
@@ -3032,18 +3142,26 @@ export default function ProductsClient() {
                                         inputMode="decimal"
                                         aria-label={`ค่าส่วนลดไซส์ ${size.size_label}`}
                                         value={pricing.discountValue}
+                                        disabled={isNetPrice}
+                                        readOnly={isNetPrice}
                                         onChange={(event) =>
                                           updateSizePricing(size.id, {
                                             discountValue: event.target.value,
                                           })
                                         }
-                                        placeholder="0"
-                                        className={`${fieldClass} pr-10 text-right tabular-nums`}
+                                        placeholder={isNetPrice ? "—" : "0"}
+                                        className={`${fieldClass} pr-10 text-right tabular-nums ${
+                                          isNetPrice
+                                            ? "cursor-not-allowed bg-slate-50 text-slate-400"
+                                            : ""
+                                        }`}
                                       />
                                       <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-slate-400">
-                                        {pricing.discountType === "PERCENT"
-                                          ? "%"
-                                          : "฿"}
+                                        {isNetPrice
+                                          ? ""
+                                          : pricing.discountType === "PERCENT"
+                                            ? "%"
+                                            : "฿"}
                                       </span>
                                     </div>
                                   </td>
@@ -3051,8 +3169,12 @@ export default function ProductsClient() {
                                     <PriceInput
                                       value={pricing.costPrice}
                                       ariaLabel={`ราคาต้นทุนไซส์ ${size.size_label}`}
-                                      disabled
-                                      onChange={() => undefined}
+                                      disabled={!isNetPrice}
+                                      onChange={(value) =>
+                                        updateSizePricing(size.id, {
+                                          costPrice: value,
+                                        })
+                                      }
                                     />
                                   </td>
                                 </tr>
@@ -3194,212 +3316,6 @@ export default function ProductsClient() {
               </footer>
             </form>
           </div>
-
-          {isSizeDialogOpen && (
-            <div
-              role="presentation"
-              className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-[2px]"
-              onMouseDown={(event) => {
-                if (event.target === event.currentTarget && !isSizeSaving)
-                  setIsSizeDialogOpen(false);
-              }}
-            >
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="size-dialog-title"
-                className="flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
-              >
-                <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
-                  <div>
-                    <h3
-                      id="size-dialog-title"
-                      className="text-sm font-bold text-slate-900"
-                    >
-                      เพิ่มไซส์ใหม่
-                    </h3>
-                    <p className="mt-0.5 text-[11px] text-slate-400">
-                      แบรนด์: {selectedBrand?.brand_name ?? "—"}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsSizeDialogOpen(false)}
-                    disabled={isSizeSaving}
-                    aria-label="ปิดหน้าต่างเพิ่มไซส์"
-                    className="grid size-8 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
-                  >
-                    <Icon name="close" />
-                  </button>
-                </div>
-
-                <div className="min-h-0 flex-1 overflow-y-auto">
-                  <section className="border-b border-slate-100 p-5">
-                    <div className="mb-3">
-                      <h4 className="text-xs font-bold text-slate-800">
-                        ตารางไซส์อ้างอิง
-                      </h4>
-                      <p className="mt-0.5 text-[11px] text-slate-400">
-                        ไซส์ทั้งหมดของแบรนด์ที่เลือก
-                      </p>
-                    </div>
-                    <div className="max-h-48 overflow-auto rounded-xl border border-slate-200">
-                      <table className="w-full text-left">
-                        <thead className="sticky top-0 bg-slate-50">
-                          <tr>
-                            {["Size Label", "Size Code", "Sort Order"].map(
-                              (heading) => (
-                                <th
-                                  key={heading}
-                                  className="border-b border-slate-200 px-3 py-2 text-[10px] font-semibold text-slate-500"
-                                >
-                                  {heading}
-                                </th>
-                              ),
-                            )}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {isSizeReferenceLoading ? (
-                            <tr>
-                              <td
-                                colSpan={3}
-                                className="px-3 py-6 text-center text-xs text-slate-400"
-                              >
-                                กำลังโหลดข้อมูลไซส์...
-                              </td>
-                            </tr>
-                          ) : sizeReference.length === 0 ? (
-                            <tr>
-                              <td
-                                colSpan={3}
-                                className="px-3 py-6 text-center text-xs text-slate-400"
-                              >
-                                แบรนด์นี้ยังไม่มีข้อมูลไซส์
-                              </td>
-                            </tr>
-                          ) : (
-                            sizeReference.map((size) => (
-                              <tr key={size.id}>
-                                <td className="px-3 py-2 text-xs font-medium text-slate-700">
-                                  {size.size_label}
-                                </td>
-                                <td className="px-3 py-2 font-mono text-xs text-slate-600">
-                                  {size.size_code}
-                                </td>
-                                <td className="px-3 py-2 text-right text-xs tabular-nums text-slate-600">
-                                  {size.sort_order}
-                                </td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-
-                  <form
-                    onSubmit={handleCreateSize}
-                    className="space-y-4 p-5"
-                  >
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-800">
-                        ข้อมูลไซส์ใหม่
-                      </h4>
-                      <p className="mt-0.5 text-[11px] text-slate-400">
-                        ระบบจะผูกไซส์กับแบรนด์ปัจจุบันโดยอัตโนมัติ
-                      </p>
-                    </div>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <label className="block">
-                        <span className={labelClass}>
-                          ชื่อป้ายไซส์ (Size Label){" "}
-                          <span className="text-red-500">*</span>
-                        </span>
-                        <input
-                          required
-                          autoFocus
-                          value={newSizeLabel}
-                          onChange={(event) =>
-                            setNewSizeLabel(event.target.value)
-                          }
-                          placeholder="เช่น Extra Large"
-                          maxLength={20}
-                          className={fieldClass}
-                        />
-                      </label>
-                      <label className="block">
-                        <span className={labelClass}>
-                          รหัสตัวย่อ (Size Code){" "}
-                          <span className="text-red-500">*</span>
-                        </span>
-                        <input
-                          required
-                          value={newSizeCode}
-                          onChange={(event) =>
-                            setNewSizeCode(event.target.value)
-                          }
-                          placeholder="เช่น XL"
-                          maxLength={10}
-                          className={`${fieldClass} font-mono uppercase`}
-                        />
-                      </label>
-                    </div>
-                    <label className="block sm:w-1/2 sm:pr-2">
-                      <span className={labelClass}>
-                        ลำดับ (Sort Order){" "}
-                        <span className="text-red-500">*</span>
-                      </span>
-                      <input
-                        required
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={newSizeSortOrder}
-                        onChange={(event) =>
-                          setNewSizeSortOrder(event.target.value)
-                        }
-                        placeholder="เช่น 40"
-                        className={`${fieldClass} tabular-nums`}
-                      />
-                    </label>
-                    {sizeDialogError && (
-                      <p
-                        role="alert"
-                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700"
-                      >
-                        {sizeDialogError}
-                      </p>
-                    )}
-                    <div className="flex justify-end gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setIsSizeDialogOpen(false)}
-                        disabled={isSizeSaving}
-                        className="h-9 rounded-xl border border-slate-200 bg-white px-4 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
-                      >
-                        ยกเลิก
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={isSizeSaving}
-                        className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:bg-blue-300"
-                      >
-                        {isSizeSaving ? (
-                          "กำลังบันทึก..."
-                        ) : (
-                          <>
-                            <Icon name="check" className="size-3.5" />
-                            บันทึกไซส์ใหม่
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       )}
 

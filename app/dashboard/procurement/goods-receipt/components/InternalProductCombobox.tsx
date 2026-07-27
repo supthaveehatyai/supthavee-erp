@@ -81,20 +81,24 @@ export function InternalProductCombobox({
           role="combobox"
           aria-expanded={open}
           disabled={disabled}
-          className="h-9 w-full justify-between font-normal"
+          className="h-auto min-h-9 w-full justify-between py-1.5 font-normal"
         >
           <span
             className={cn(
-              "truncate text-left text-xs",
+              "whitespace-normal break-words text-left text-xs leading-tight",
               selected ? "text-slate-800" : "text-slate-400",
             )}
           >
             {selected ? productLabel(selected) : placeholder}
           </span>
-          <ChevronsUpDown className="size-3.5 shrink-0 text-slate-400" />
+          <ChevronsUpDown className="size-3.5 shrink-0 self-start text-slate-400" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={4} className="p-0">
+      <PopoverContent
+        align="start"
+        sideOffset={4}
+        className="w-[min(500px,calc(100vw-2rem))] p-0"
+      >
         <Command shouldFilter={false}>
           <CommandInput
             placeholder="SKU, ชื่อ, สี, ไซส์..."
@@ -110,6 +114,7 @@ export function InternalProductCombobox({
                   <CommandItem
                     key={product.id}
                     value={product.id}
+                    className="items-start"
                     onSelect={() => {
                       onChange(product.id);
                       setOpen(false);
@@ -117,10 +122,10 @@ export function InternalProductCombobox({
                     }}
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-mono text-xs font-semibold">
+                      <p className="whitespace-normal break-words font-mono text-xs font-semibold leading-tight">
                         {product.sku}
                       </p>
-                      <p className="truncate text-[11px] text-slate-500">
+                      <p className="mt-0.5 whitespace-normal break-words text-[11px] leading-tight text-slate-500">
                         {product.name}
                         {[product.color, product.size].filter(Boolean).length > 0
                           ? ` · ${[product.color, product.size]
@@ -131,7 +136,7 @@ export function InternalProductCombobox({
                     </div>
                     <Check
                       className={cn(
-                        "size-4 text-blue-600",
+                        "mt-0.5 size-4 shrink-0 text-blue-600",
                         isSelected ? "opacity-100" : "opacity-0",
                       )}
                     />

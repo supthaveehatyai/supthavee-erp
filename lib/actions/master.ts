@@ -248,6 +248,30 @@ export async function getSizesByBrand(brandId: string): Promise<GetSizesResult> 
   }
 }
 
+/**
+ * Global Size catalog (`mst_sizes.brand_id IS NULL`) — active only, ordered
+ * by `sort_order`. Used by Product Matrix Step 2 to SELECT existing sizes
+ * into the matrix without INSERTing duplicates.
+ */
+export async function getGlobalSizes(): Promise<GetSizesResult> {
+  try {
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data, error } = await supabaseAdmin
+      .from("mst_sizes")
+      .select(SIZE_COLUMNS)
+      .is("brand_id", null)
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true });
+
+    if (error) return { data: [], error: error.message };
+    return { data: (data ?? []) as MasterSize[], error: null };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "โหลดรายการไซส์มาตรฐาน (Global) ไม่สำเร็จ";
+    return { data: [], error: message };
+  }
+}
+
 /** Active + inactive sizes for a brand — reference table shown inside the "Add New Size" modal. */
 export async function getAllSizesByBrand(brandId: string): Promise<GetSizesResult> {
   const trimmedBrandId = brandId?.trim() ?? "";

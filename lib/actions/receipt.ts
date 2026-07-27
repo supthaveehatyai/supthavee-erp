@@ -19,6 +19,10 @@
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { calculateNetUnitCost } from "@/lib/utils/pricing";
+import {
+  calculateNetCostApportionment,
+  type ApportionmentItem,
+} from "@/lib/utils/accounting";
 
 /**
  * Raw service-role client — bypasses RLS.
@@ -110,6 +114,8 @@ export type ReceiptLineRow = {
   matchedProduct: ReceiptProductSummary | null;
   discountAmountPerUnit: number;
   netCost: number;
+  /** Free-of-Charge (ของแถม) — when true, Net Cost Apportionment forces cost = 0. */
+  isFoc: boolean;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -323,6 +329,7 @@ export async function matchReceiptItemsToProducts(
         matchedProduct: match?.product ?? null,
         discountAmountPerUnit,
         netCost: unitCostPrice,
+        isFoc: false,
       };
     });
 
@@ -539,9 +546,19 @@ function roundMoney(value: number): number {
  * action is the single place that inserts "IN" movements for a receipt.
  *
  * Pricing is recomputed server-side from `unit_price` + `discount_text` via
- * {@link calculateNetUnitCost} — `row.netCost` / `row.discountAmountPerUnit`
- * from the client are NOT trusted for the actual insert (a Server Action
- * boundary is still an untrusted network edge).
+ * {@link calculateNetCostApportionment} — `row.netCost` /
+ * `row.discountAmountPerUnit` from the client are NOT trusted for the
+ * actual insert (a Server Action boundary is still an untrusted network
+ * edge). `calculateNetCostApportionment` supersedes the simpler
+ * {@link calculateNetUnitCost} (still used for the live preview in
+ * `matchReceiptItemsToProducts`) for the FINAL save — it additionally
+ * supports FOC (`isFoc`) lines and prorates an optional end-of-bill
+ * discount (`billDiscountText`) across every line by relative value.
+ *
+ * After a successful `inventory_ledger` insert, each non-FOC line's
+ * `finalUnitCost` is written back to `products.cost_price` (Last Purchase
+ * Price / LPP) via the same admin client — master data stays in sync with
+ * the true net receipt cost without any client-side Supabase calls.
  *
  * `vendorId` is intentionally NOT a parameter — it's derived from each row's
  * `mappingId` (`vendor_product_mapping.vendor_id`), the same Ground Truth
@@ -560,11 +577,18 @@ function roundMoney(value: number): number {
  * (`vendor_id` + `doc_no` + `doc_date`, enforced by
  * `doc_headers_contact_doc_no_date_key`), so an incorrect date here would
  * silently defeat that constraint. Falls back to today only if left blank.
+ *
+ * `billDiscountText` (optional, e.g. `"5%"` or `"200"`) — an end-of-bill
+ * discount some vendors stamp once at the bottom of the invoice, on top of
+ * each line's own `discount_text`. Omitted/`null` — no bill-level discount
+ * is applied (existing call sites in `GoodsReceiptUI`, which is a locked
+ * module, are unaffected since this is a new trailing optional param).
  */
 export async function saveGoodsReceiptToLedger(
   rows: ReceiptLineRow[],
   documentRef: string,
   documentDate: string,
+  billDiscountText?: string | null,
 ): Promise<SaveGoodsReceiptToLedgerResult> {
   if (!Array.isArray(rows) || rows.length === 0) {
     return { docHeaderId: null, docNo: null, error: "ไม่มีรายการให้บันทึกรับสินค้า" };
@@ -611,38 +635,55 @@ export async function saveGoodsReceiptToLedger(
     }
     const vendorId = [...vendorIds][0];
 
-    // Recompute net pricing server-side — never trust client-supplied netCost.
-    const lines = rows.map((row) => {
-      const qty = Math.max(0, Math.round(Number(row.qty) || 0));
-      const unitPrice = Number(row.unit_price) || 0;
-      const { unitCostPrice, discountAmountPerUnit } = calculateNetUnitCost(
-        unitPrice,
-        row.discount_text,
-      );
-      return {
-        row,
-        qty,
-        unitPrice,
-        unitCostPrice,
-        discountAmountPerUnit,
-        lineTotal: roundMoney(unitCostPrice * qty),
-      };
-    });
+    const qtyByLineKey = new Map(
+      rows.map((row) => [row.lineKey, Math.max(0, Math.round(Number(row.qty) || 0))]),
+    );
 
-    const zeroQtyLine = lines.find((line) => line.qty <= 0);
-    if (zeroQtyLine) {
+    const zeroQtyRow = rows.find((row) => (qtyByLineKey.get(row.lineKey) ?? 0) <= 0);
+    if (zeroQtyRow) {
       return {
         docHeaderId: null,
         docNo: null,
-        error: `รายการ "${zeroQtyLine.row.raw_vendor_sku}" มีจำนวน (qty) ไม่ถูกต้อง`,
+        error: `รายการ "${zeroQtyRow.raw_vendor_sku}" มีจำนวน (qty) ไม่ถูกต้อง`,
       };
     }
+
+    // Recompute net pricing server-side via the Net Cost Apportionment
+    // engine — never trust client-supplied netCost. Each row's own
+    // `discount_text` is applied first (Step 1), then the optional
+    // `billDiscountText` is prorated across every line by relative value
+    // (Step 3).
+    const apportionmentItems: ApportionmentItem[] = rows.map((row) => ({
+      id: row.lineKey,
+      unitPrice: Number(row.unit_price) || 0,
+      qty: qtyByLineKey.get(row.lineKey) ?? 0,
+      discountText: row.discount_text,
+      isFoc: Boolean(row.isFoc),
+    }));
+
+    const apportionmentByLineKey = new Map(
+      calculateNetCostApportionment(apportionmentItems, billDiscountText ?? null).map(
+        (result) => [result.id, result],
+      ),
+    );
+
+    const lines = rows.map((row) => {
+      const qty = qtyByLineKey.get(row.lineKey) ?? 0;
+      const unitPrice = Number(row.unit_price) || 0;
+      const apportioned = apportionmentByLineKey.get(row.lineKey);
+      const lineTotal = roundMoney(apportioned?.finalLineTotal ?? 0);
+      const unitCostPrice = roundMoney(apportioned?.finalUnitCost ?? 0);
+      // Total discount for this line = gross value minus net value AFTER
+      // both its own discount_text AND its prorated share of billDiscountText.
+      const discountAmount = roundMoney(unitPrice * qty - lineTotal);
+      return { row, qty, unitPrice, unitCostPrice, discountAmount, lineTotal };
+    });
 
     const subTotal = roundMoney(
       lines.reduce((sum, line) => sum + line.unitPrice * line.qty, 0),
     );
     const discountAmount = roundMoney(
-      lines.reduce((sum, line) => sum + line.discountAmountPerUnit * line.qty, 0),
+      lines.reduce((sum, line) => sum + line.discountAmount, 0),
     );
     const grandTotal = roundMoney(
       lines.reduce((sum, line) => sum + line.lineTotal, 0),
@@ -682,7 +723,7 @@ export async function saveGoodsReceiptToLedger(
 
     const docHeaderId = (docHeader as { id: string; doc_no: string }).id;
 
-    // 2. doc_details — line-level cost/qty (unit_cost_price via pricing utility)
+    // 2. doc_details — line-level cost/qty (unit_cost_price via calculateNetCostApportionment)
     const docDetailsPayload = lines.map((line) => ({
       doc_header_id: docHeaderId,
       product_id: line.row.matchedProduct!.id,
@@ -692,7 +733,7 @@ export async function saveGoodsReceiptToLedger(
       unit_price: line.unitPrice,
       unit_cost_price: line.unitCostPrice,
       discount_text: line.row.discount_text ?? "",
-      discount_amount: roundMoney(line.discountAmountPerUnit * line.qty),
+      discount_amount: line.discountAmount,
       line_total: line.lineTotal,
     }));
 
@@ -731,6 +772,52 @@ export async function saveGoodsReceiptToLedger(
         docNo: null,
         error: ledgerError.message ?? "บันทึกการรับเข้าคลัง (inventory_ledger) ไม่สำเร็จ",
       };
+    }
+
+    // 4. Last Purchase Price (LPP) — push finalUnitCost into products.cost_price.
+    // Skips FOC lines so free goods never wipe a real historical cost.
+    // Uses service-role admin client (Zero Client-Side Fetching).
+    const lppTargets = lines.filter(
+      (line) => !line.row.isFoc && line.row.matchedProduct?.id,
+    );
+
+    if (lppTargets.length > 0) {
+      // Collapse duplicates (same internal product on multiple receipt rows)
+      // so the latest finalUnitCost for that product wins.
+      const costByProductId = new Map<string, number>();
+      for (const line of lppTargets) {
+        costByProductId.set(line.row.matchedProduct!.id, line.unitCostPrice);
+      }
+
+      const lppResults = await Promise.all(
+        [...costByProductId.entries()].map(([productId, costPrice]) =>
+          supabaseAdmin
+            .from("products")
+            .update({ cost_price: costPrice })
+            .eq("id", productId),
+        ),
+      );
+
+      const lppError = lppResults.find((result) => result.error)?.error;
+      if (lppError) {
+        // Compensating rollback — keep receipt + LPP atomic.
+        await supabaseAdmin
+          .from("inventory_ledger")
+          .delete()
+          .eq("doc_header_id", docHeaderId);
+        await supabaseAdmin
+          .from("doc_details")
+          .delete()
+          .eq("doc_header_id", docHeaderId);
+        await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+        return {
+          docHeaderId: null,
+          docNo: null,
+          error:
+            lppError.message ??
+            "อัปเดตราคาต้นทุนล่าสุด (products.cost_price) ไม่สำเร็จ",
+        };
+      }
     }
 
     return { docHeaderId, docNo, error: null };

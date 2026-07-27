@@ -52,11 +52,17 @@ import {
   type ReceiptLineRow,
   type ReceiptProductSummary,
 } from "@/lib/actions/receipt";
+import {
+  calculateNetCostApportionment,
+  type ApportionmentItem,
+} from "@/lib/utils/accounting";
 import VendorCombobox from "@/components/procurement/VendorCombobox";
 import InternalProductCombobox from "@/components/procurement/InternalProductCombobox";
 import QuickCreateDialog from "@/components/procurement/QuickCreateDialog";
 import FullMatrixDialog from "@/components/procurement/FullMatrixDialog";
-import SaveToLedgerDialog from "./components/SaveToLedgerDialog";
+import SaveToLedgerDialog, {
+  type SaveToLedgerConfirmPayload,
+} from "./components/SaveToLedgerDialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -121,6 +127,9 @@ export default function GoodsReceiptUI() {
   const [ocrDocNumber, setOcrDocNumber] = useState("");
   /** Document/invoice date Gemini extracted from the receipt header (ISO `YYYY-MM-DD`, editable at Save time). */
   const [ocrDocDate, setOcrDocDate] = useState("");
+
+  /** End-of-bill discount text (e.g. "40%", "1500") — fed into calculateNetCostApportionment. */
+  const [billDiscountText, setBillDiscountText] = useState("");
 
   /** "Save to Ledger" confirmation dialog — final review + Early Warning duplicate check. */
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
@@ -196,6 +205,7 @@ export default function GoodsReceiptUI() {
     setDraftProductByLineKey({});
     setOcrDocNumber("");
     setOcrDocDate("");
+    setBillDiscountText("");
   }, [previewUrl]);
 
   /**
@@ -209,6 +219,7 @@ export default function GoodsReceiptUI() {
       setDraftProductByLineKey({});
       setOcrDocNumber("");
       setOcrDocDate("");
+      setBillDiscountText("");
       setFileName(file.name);
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(
@@ -405,16 +416,43 @@ export default function GoodsReceiptUI() {
     toast.success(`บันทึก Ground Truth แล้ว: ${row.raw_vendor_sku} ↔ ${result.product.sku}`);
   }
 
+  /** Toggle FOC (ของแถม) for a review-table row — drives calculateNetCostApportionment. */
+  function handleToggleFoc(lineKey: string, isFoc: boolean) {
+    setRows((current) =>
+      current.map((row) => (row.lineKey === lineKey ? { ...row, isFoc } : row)),
+    );
+  }
+
   const stats = {
     total: rows.length,
     matched: rows.filter((row) => row.status === "matched").length,
     unmatched: rows.filter((row) => row.status === "unmatched").length,
   };
 
+  /**
+   * Live preview of Net Cost Apportionment — same engine the Server Action
+   * uses on Save, so Total Document Value / per-row Net Cost stay in sync
+   * with FOC toggles and bill-level discount before the user commits.
+   */
+  const apportionmentPreview = useMemo(() => {
+    const items: ApportionmentItem[] = rows.map((row) => ({
+      id: row.lineKey,
+      unitPrice: Number(row.unit_price) || 0,
+      qty: Math.max(0, Math.round(Number(row.qty) || 0)),
+      discountText: row.discount_text,
+      isFoc: Boolean(row.isFoc),
+    }));
+    return calculateNetCostApportionment(items, billDiscountText || null);
+  }, [rows, billDiscountText]);
+
+  const apportionmentByLineKey = useMemo(() => {
+    return new Map(apportionmentPreview.map((result) => [result.id, result]));
+  }, [apportionmentPreview]);
+
   const totals = {
     qty: rows.reduce((sum, row) => sum + (Number(row.qty) || 0), 0),
-    value: rows.reduce(
-      (sum, row) => sum + (Number(row.netCost) || 0) * (Number(row.qty) || 0),
+    value: apportionmentPreview.reduce(
+      (sum, result) => sum + (Number(result.finalLineTotal) || 0),
       0,
     ),
   };
@@ -429,15 +467,22 @@ export default function GoodsReceiptUI() {
   }
 
   /**
-   * Finalizes the receipt with the user-confirmed doc number/date from
-   * `SaveToLedgerDialog`, then calls `saveGoodsReceiptToLedger` — the ONLY
-   * path that writes stock movements (via `inventory_ledger`), never
-   * directly to `products`.
+   * Finalizes the receipt with the user-confirmed doc number/date/bill
+   * discount from `SaveToLedgerDialog`, then calls `saveGoodsReceiptToLedger`
+   * — the ONLY path that writes stock movements (via `inventory_ledger`),
+   * never directly to `products`. Each row's `isFoc` travels with `rows`.
    */
-  async function handleConfirmSaveToLedger(docNumber: string, docDate: string) {
+  async function handleConfirmSaveToLedger(payload: SaveToLedgerConfirmPayload) {
     setIsSavingToLedger(true);
+    // Sync bill discount from the dialog (user may have edited it there).
+    setBillDiscountText(payload.billDiscountText);
     try {
-      const result = await saveGoodsReceiptToLedger(rows, docNumber, docDate);
+      const result = await saveGoodsReceiptToLedger(
+        rows,
+        payload.docNumber,
+        payload.docDate,
+        payload.billDiscountText || null,
+      );
       if (result.error || !result.docHeaderId) {
         toast.error(result.error ?? "บันทึกรับสินค้าเข้าคลังไม่สำเร็จ");
         return;
@@ -659,7 +704,7 @@ export default function GoodsReceiptUI() {
                 </div>
               ) : null}
 
-              <Table className="min-w-[1080px]">
+              <Table className="min-w-[1180px]">
                 <TableHeader>
                   <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
                     <TableHead>สถานะ</TableHead>
@@ -667,6 +712,7 @@ export default function GoodsReceiptUI() {
                     <TableHead className="min-w-[280px]">
                       Matched Internal Product
                     </TableHead>
+                    <TableHead className="text-center">ของแถม</TableHead>
                     <TableHead className="text-right">Qty</TableHead>
                     <TableHead className="text-right">Unit Price</TableHead>
                     <TableHead>Discount</TableHead>
@@ -678,6 +724,10 @@ export default function GoodsReceiptUI() {
                     const isMatched = row.status === "matched";
                     const isBusy = confirmingLineKey === row.lineKey;
                     const draftProductId = draftProductByLineKey[row.lineKey] ?? "";
+                    const preview = apportionmentByLineKey.get(row.lineKey);
+                    const displayNetCost = row.isFoc
+                      ? 0
+                      : (preview?.finalUnitCost ?? row.netCost);
 
                     return (
                       <TableRow
@@ -686,15 +736,28 @@ export default function GoodsReceiptUI() {
                           isMatched && "bg-emerald-50/40",
                           !isMatched &&
                             "border-l-4 border-l-amber-400 bg-amber-50/60 hover:bg-amber-50",
+                          row.isFoc && "bg-slate-50/80 text-slate-400",
                         )}
                       >
                         <TableCell>
-                          <StatusBadge status={row.status} />
+                          <div className="flex flex-col gap-1">
+                            <StatusBadge status={row.status} />
+                            {row.isFoc ? (
+                              <span className="inline-flex w-fit items-center rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                                ของแถม (FOC)
+                              </span>
+                            ) : null}
+                          </div>
                         </TableCell>
 
                         {/* OCR Raw Text — Ground Truth, never edited/predicted */}
                         <TableCell>
-                          <p className="font-mono text-xs font-semibold text-slate-800">
+                          <p
+                            className={cn(
+                              "font-mono text-xs font-semibold",
+                              row.isFoc ? "text-slate-400 line-through" : "text-slate-800",
+                            )}
+                          >
                             {row.raw_vendor_sku || "—"}
                           </p>
                           {row.raw_description ? (
@@ -713,7 +776,12 @@ export default function GoodsReceiptUI() {
                                 aria-hidden
                               />
                               <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-emerald-700">
+                                <p
+                                  className={cn(
+                                    "truncate text-sm font-semibold",
+                                    row.isFoc ? "text-slate-400" : "text-emerald-700",
+                                  )}
+                                >
                                   {row.matchedProduct.name}
                                 </p>
                                 <p className="truncate font-mono text-[11px] text-slate-400">
@@ -783,22 +851,58 @@ export default function GoodsReceiptUI() {
                           )}
                         </TableCell>
 
-                        <TableCell className="text-right tabular-nums">
+                        <TableCell className="text-center">
+                          <label className="inline-flex cursor-pointer flex-col items-center gap-1">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(row.isFoc)}
+                              onChange={(event) =>
+                                handleToggleFoc(row.lineKey, event.target.checked)
+                              }
+                              className="size-4 rounded border-slate-300 text-slate-700 focus:ring-slate-400"
+                              aria-label={`ของแถม ${row.raw_vendor_sku}`}
+                            />
+                            <span className="text-[10px] font-medium text-slate-500">
+                              ของแถม
+                            </span>
+                          </label>
+                        </TableCell>
+
+                        <TableCell
+                          className={cn(
+                            "text-right tabular-nums",
+                            row.isFoc && "text-slate-400",
+                          )}
+                        >
                           {row.qty.toLocaleString("th-TH")}
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">
+                        <TableCell
+                          className={cn(
+                            "text-right tabular-nums",
+                            row.isFoc && "text-slate-400 line-through",
+                          )}
+                        >
                           {formatMoney(row.unit_price)}
                         </TableCell>
-                        <TableCell className="font-mono text-xs text-slate-600">
+                        <TableCell
+                          className={cn(
+                            "font-mono text-xs",
+                            row.isFoc ? "text-slate-400" : "text-slate-600",
+                          )}
+                        >
                           {row.discount_text?.trim() || "—"}
                         </TableCell>
                         <TableCell
                           className={cn(
                             "text-right font-semibold tabular-nums",
-                            isMatched ? "text-emerald-700" : "text-amber-800",
+                            row.isFoc
+                              ? "text-slate-400"
+                              : isMatched
+                                ? "text-emerald-700"
+                                : "text-amber-800",
                           )}
                         >
-                          {formatMoney(row.netCost)}
+                          {row.isFoc ? "0.00" : formatMoney(displayNetCost)}
                         </TableCell>
                       </TableRow>
                     );
@@ -812,8 +916,8 @@ export default function GoodsReceiptUI() {
 
       {/* Sticky summary footer — appears once there's something to save */}
       {rows.length > 0 && (
-        <div className="sticky bottom-4 z-30 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white/95 px-5 py-4 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-4">
+        <div className="sticky bottom-4 z-30 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white/95 px-5 py-4 shadow-lg backdrop-blur sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex flex-wrap items-end gap-4">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                 Total Received Qty
@@ -831,6 +935,23 @@ export default function GoodsReceiptUI() {
               <p className="text-lg font-bold text-slate-900">
                 ฿{formatMoney(totals.value)}
               </p>
+            </div>
+            <div className="h-8 w-px bg-slate-200" />
+            <div className="w-40">
+              <Label
+                htmlFor="bill-discount-text"
+                className="text-[10px] font-semibold uppercase tracking-wide text-slate-400"
+              >
+                ส่วนลดท้ายบิล (%, บาท)
+              </Label>
+              <Input
+                id="bill-discount-text"
+                value={billDiscountText}
+                onChange={(event) => setBillDiscountText(event.target.value)}
+                placeholder="เช่น 40%, 1500"
+                className="mt-1 h-9 text-sm"
+              />
+              <p className="mt-0.5 text-[10px] text-slate-400">เช่น 40%, 1500</p>
             </div>
             {stats.unmatched > 0 && (
               <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-800">
@@ -859,9 +980,10 @@ export default function GoodsReceiptUI() {
         vendorId={vendorId}
         initialDocNumber={ocrDocNumber}
         initialDocDate={ocrDocDate}
+        initialBillDiscountText={billDiscountText}
         matchedCount={stats.matched}
         isSaving={isSavingToLedger}
-        onConfirm={(docNumber, docDate) => void handleConfirmSaveToLedger(docNumber, docDate)}
+        onConfirm={(payload) => void handleConfirmSaveToLedger(payload)}
       />
 
       <QuickCreateDialog
