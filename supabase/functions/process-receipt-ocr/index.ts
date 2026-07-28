@@ -57,6 +57,10 @@ type RawOcrExtraction = {
   document_number: string | null;
   /** ISO `YYYY-MM-DD`, already normalized from Thai Buddhist Era if needed — or `null` if not found. */
   document_date: string | null;
+  /** ERP `document_type` subset for goods receipt: TAX_INV | INV_DO | REC */
+  doc_type: "TAX_INV" | "INV_DO" | "REC";
+  /** ERP `vat_calculation_type`: NONE | INCLUSIVE | EXCLUSIVE */
+  vat_type: "NONE" | "INCLUSIVE" | "EXCLUSIVE";
   items: RawOcrLine[];
 };
 
@@ -81,6 +85,37 @@ function extractInvoiceDateHint(ocrPatternConfig: unknown): string | null {
   if (!ocrPatternConfig || typeof ocrPatternConfig !== "object") return null;
   const raw = (ocrPatternConfig as Record<string, unknown>).invoice_date_hint;
   return typeof raw === "string" && raw.trim() ? raw.trim() : null;
+}
+
+function normalizeOcrDocType(value: unknown): RawOcrExtraction["doc_type"] {
+  const raw = String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+  if (raw === "TAX_INV" || raw === "TAXINV" || raw.includes("TAX")) {
+    return "TAX_INV";
+  }
+  if (raw === "INV_DO" || raw === "INVDO" || raw === "DO" || raw.includes("INV_DO")) {
+    return "INV_DO";
+  }
+  if (raw === "REC" || raw === "RECEIPT" || raw === "ABB") {
+    return "REC";
+  }
+  return "REC";
+}
+
+function normalizeOcrVatType(value: unknown): RawOcrExtraction["vat_type"] {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (raw === "INCLUSIVE" || raw === "INC" || raw.includes("INCLUSIVE")) {
+    return "INCLUSIVE";
+  }
+  if (raw === "EXCLUSIVE" || raw === "EXC" || raw.includes("EXCLUSIVE")) {
+    return "EXCLUSIVE";
+  }
+  if (raw === "NONE" || raw === "NO_VAT" || raw === "NOVAT") {
+    return "NONE";
+  }
+  return "NONE";
 }
 
 /**
@@ -122,6 +157,18 @@ ${
 }
 Thai invoices commonly print the date in Buddhist Era (พ.ศ., e.g. "15/03/2567"). You MUST convert Buddhist Era years to the Gregorian equivalent (subtract 543) and normalize the result to ISO format "YYYY-MM-DD" (e.g. "15/03/2567" → "2024-03-15"). Return it as "document_date" in the JSON response root. If it is truly not visible anywhere on the page, or you cannot confidently parse day/month/year, return an empty string "" — NEVER invent or guess one.
 
+DOCUMENT TYPE (doc_type) — analyze the document TITLE / header label and classify into ONE of these ERP enum values only:
+- "TAX_INV" if the header says ใบกำกับภาษี / Tax Invoice / ใบกำกับภาษีอย่างย่อ
+- "INV_DO" if the header says ใบส่งของ / Delivery Order / ใบส่งสินค้า
+- "REC" if the header says ใบเสร็จ / ใบเสร็จรับเงิน / บิลเงินสด / ใบรับสินค้า / Cash Bill / Receipt, or when the type is unclear
+Return exactly one of: "TAX_INV", "INV_DO", "REC".
+
+VAT TYPE (vat_type) — analyze the TOTALS / summary footer (ยอดรวม, ส่วนลด, ภาษีมูลค่าเพิ่ม, ยอดสุทธิ):
+- "EXCLUSIVE" if VAT 7% is ADDED separately after a net/subtotal (e.g. lines show "ภาษีมูลค่าเพิ่ม 7%" or "VAT 7%" as an added amount)
+- "INCLUSIVE" if prices/totals already INCLUDE VAT (e.g. "ราคารวม VAT", "รวมภาษีแล้ว", no separate VAT add-on line but VAT is mentioned as included)
+- "NONE" if there is no VAT at all (no 7%, no VAT line, cash bill without tax)
+Return exactly one of: "NONE", "INCLUSIVE", "EXCLUSIVE".
+
 CRUCIAL FLATTENING RULE — Size Matrix:
 Some invoices show one product row (code + color) with MULTIPLE size columns (e.g. XS, S, M, L, XL) each holding its own quantity. You MUST flatten this into one output row PER size column that has a quantity greater than 0. Combine the product code, color, and that size into "raw_vendor_sku" as "{Code}-{Color}-{Size}".
 Example: row code "EA1331", color "DD", with qty 15 under the "S" column and qty 8 under the "M" column → TWO separate output rows: {"raw_vendor_sku": "EA1331-DD-S", "qty": 15, ...} AND {"raw_vendor_sku": "EA1331-DD-M", "qty": 8, ...}. Never merge sizes into one row, and never output a row for a size column with quantity 0 or blank.
@@ -133,7 +180,7 @@ Other rules:
 - "discount_text" examples: "40%", "41.8%", "40+5%", "50", or "" if no discount.
 - "qty" and "unit_price" MUST be plain numbers — no currency symbols, no thousands separators.
 - Respond with ONLY a valid JSON OBJECT — no markdown code fences, no commentary, no trailing text — matching EXACTLY this shape:
-{"document_number": "", "document_date": "", "items": [{"raw_vendor_sku": "", "raw_description": "", "qty": 0, "unit_price": 0, "discount_text": ""}]}
+{"document_number": "", "document_date": "", "doc_type": "REC", "vat_type": "NONE", "items": [{"raw_vendor_sku": "", "raw_description": "", "qty": 0, "unit_price": 0, "discount_text": ""}]}
 `.trim();
 }
 
@@ -193,6 +240,8 @@ function parseOcrExtractionJson(rawText: string): RawOcrExtraction {
   return {
     document_number: documentNumber || null,
     document_date: documentDate,
+    doc_type: normalizeOcrDocType(root.doc_type),
+    vat_type: normalizeOcrVatType(root.vat_type),
     items,
   };
 }
@@ -316,6 +365,8 @@ serve(async (req: Request) => {
         data: extraction.items,
         document_number: extraction.document_number,
         document_date: extraction.document_date,
+        doc_type: extraction.doc_type,
+        vat_type: extraction.vat_type,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

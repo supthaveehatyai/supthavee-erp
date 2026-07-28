@@ -32,3 +32,50 @@ a {
   scrollbar-color: rgb(96 165 250 / 0.4) transparent;
   scrollbar-width: thin;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Print — sales A4 document                                                  */
+/* -------------------------------------------------------------------------- */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Hide app chrome; only the print document should remain visible */
+  .app-shell-sidebar,
+  .app-shell-header,
+  .app-shell-mobile-overlay {
+    display: none !important;
+  }
+
+  .app-shell-main {
+    padding: 0 !important;
+    margin: 0 !important;
+    min-height: 0 !important;
+  }
+
+  .app-shell-content {
+    padding-left: 0 !important;
+  }
+
+  /* Avoid breaking signature / totals awkwardly across pages */
+  #sales-print-document {
+    break-inside: avoid;
+  }
+
+  #sales-print-document table {
+    break-inside: auto;
+  }
+
+  #sales-print-document tr {
+    break-inside: avoid;
+    break-after: auto;
+  }
+}

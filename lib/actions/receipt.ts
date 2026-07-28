@@ -18,11 +18,26 @@
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  DOCUMENT_TYPE_PREFIX,
+  GOODS_RECEIPT_DOC_TYPES,
+  type GoodsReceiptDocType,
+} from "@/lib/constants/document";
 import { calculateNetUnitCost } from "@/lib/utils/pricing";
 import {
   calculateNetCostApportionment,
   type ApportionmentItem,
 } from "@/lib/utils/accounting";
+import {
+  calculateDocumentSummary,
+  isVatCalculationType,
+  type VatCalculationType,
+} from "@/lib/utils/document-summary";
+import type { DocumentType } from "@/types/document";
+
+function isGoodsReceiptDocType(value: string): value is GoodsReceiptDocType {
+  return (GOODS_RECEIPT_DOC_TYPES as readonly string[]).includes(value);
+}
 
 /**
  * Raw service-role client — bypasses RLS.
@@ -128,8 +143,46 @@ export type ParseReceiptOcrResult = {
   documentNumber: string | null;
   /** Document/invoice date (ISO `YYYY-MM-DD`, Buddhist Era already converted) — `null` if not found. */
   documentDate: string | null;
+  /** AI-classified goods-receipt doc type — defaults to REC when missing/invalid. */
+  docType: GoodsReceiptDocType;
+  /** AI-classified VAT mode — defaults to NONE when missing/invalid. */
+  vatType: VatCalculationType;
   error: string | null;
 };
+
+function emptyParseReceiptOcrResult(
+  error: string | null,
+): ParseReceiptOcrResult {
+  return {
+    data: [],
+    documentNumber: null,
+    documentDate: null,
+    docType: "REC",
+    vatType: "NONE",
+    error,
+  };
+}
+
+function normalizeGoodsReceiptDocType(value: unknown): GoodsReceiptDocType {
+  const raw = String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+  if (isGoodsReceiptDocType(raw)) return raw;
+  if (raw.includes("TAX")) return "TAX_INV";
+  if (raw.includes("INV_DO") || raw === "DO" || raw.includes("DELIVERY")) {
+    return "INV_DO";
+  }
+  return "REC";
+}
+
+function normalizeOcrVatType(value: unknown): VatCalculationType {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (isVatCalculationType(raw)) return raw;
+  if (raw.includes("INCLUSIVE")) return "INCLUSIVE";
+  if (raw.includes("EXCLUSIVE")) return "EXCLUSIVE";
+  return "NONE";
+}
 
 /**
  * Real Vision AI OCR — this Server Action never talks to Gemini itself. It
@@ -160,20 +213,12 @@ export async function parseReceiptOcr(
   const file = formData.get("file");
 
   if (!vendorId) {
-    return {
-      data: [],
-      documentNumber: null,
-      documentDate: null,
-      error: "กรุณาเลือกผู้จำหน่าย (vendor) ก่อนอัปโหลดบิล",
-    };
+    return emptyParseReceiptOcrResult(
+      "กรุณาเลือกผู้จำหน่าย (vendor) ก่อนอัปโหลดบิล",
+    );
   }
   if (!(file instanceof File) || file.size === 0) {
-    return {
-      data: [],
-      documentNumber: null,
-      documentDate: null,
-      error: "ไม่พบไฟล์รูปบิล กรุณาอัปโหลดไฟล์ก่อน",
-    };
+    return emptyParseReceiptOcrResult("ไม่พบไฟล์รูปบิล กรุณาอัปโหลดไฟล์ก่อน");
   }
 
   try {
@@ -194,40 +239,38 @@ export async function parseReceiptOcr(
       // supabase-js only gives a generic "non-2xx status code" message here —
       // the Edge Function always returns a JSON `{ error }` body, so unwrap
       // it from `error.context` (the raw Response) to surface the real cause.
-      return {
-        data: [],
-        documentNumber: null,
-        documentDate: null,
-        error: await extractEdgeFunctionErrorMessage(error),
-      };
+      return emptyParseReceiptOcrResult(
+        await extractEdgeFunctionErrorMessage(error),
+      );
     }
 
     const payload = data as {
       data?: RawOcrLine[];
       document_number?: string | null;
       document_date?: string | null;
+      doc_type?: string | null;
+      vat_type?: string | null;
       error?: string;
     } | null;
 
     if (!Array.isArray(payload?.data)) {
-      return {
-        data: [],
-        documentNumber: null,
-        documentDate: null,
-        error: payload?.error ?? "Edge Function ไม่คืนข้อมูลรายการ OCR กลับมา",
-      };
+      return emptyParseReceiptOcrResult(
+        payload?.error ?? "Edge Function ไม่คืนข้อมูลรายการ OCR กลับมา",
+      );
     }
 
     return {
       data: payload.data,
       documentNumber: payload.document_number?.trim() || null,
       documentDate: payload.document_date?.trim() || null,
+      docType: normalizeGoodsReceiptDocType(payload.doc_type),
+      vatType: normalizeOcrVatType(payload.vat_type),
       error: null,
     };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "วิเคราะห์บิลด้วย OCR ไม่สำเร็จ";
-    return { data: [], documentNumber: null, documentDate: null, error: message };
+    return emptyParseReceiptOcrResult(message);
   }
 }
 
@@ -539,7 +582,9 @@ function roundMoney(value: number): number {
 
 /**
  * Finalize a Goods Receipt: creates the financial document (`doc_headers` +
- * `doc_details`) AND the stock movement (`inventory_ledger`) in one call.
+ * `doc_details`), mirrors a Phase 4 Purchase Document (`documents` +
+ * `document_items`, `doc_type = REC`, `contact_id = vendor`), AND the stock
+ * movement (`inventory_ledger`) in one call.
  *
  * ERP Blueprint rule: stock is NEVER written to `products` directly — the
  * only source of truth for on-hand quantity is `inventory_ledger`. This
@@ -563,7 +608,8 @@ function roundMoney(value: number): number {
  * `vendorId` is intentionally NOT a parameter — it's derived from each row's
  * `mappingId` (`vendor_product_mapping.vendor_id`), the same Ground Truth
  * already used to resolve the match. All rows must resolve to the SAME
- * vendor (one receipt document = one vendor), same convention as `doc_headers.contact_id`.
+ * vendor (one receipt document = one vendor), same convention as `doc_headers.contact_id`
+ * and Phase 4 `documents.contact_id`.
  *
  * Note: `supabase-js` REST calls cannot share a single DB transaction across
  * three separate inserts. This uses sequential inserts with a best-effort
@@ -589,10 +635,21 @@ export async function saveGoodsReceiptToLedger(
   documentRef: string,
   documentDate: string,
   billDiscountText?: string | null,
+  docType: GoodsReceiptDocType = "REC",
+  vatType: VatCalculationType = "NONE",
+  attachmentUrl?: string | null,
 ): Promise<SaveGoodsReceiptToLedgerResult> {
   if (!Array.isArray(rows) || rows.length === 0) {
     return { docHeaderId: null, docNo: null, error: "ไม่มีรายการให้บันทึกรับสินค้า" };
   }
+
+  const resolvedDocType: GoodsReceiptDocType = isGoodsReceiptDocType(docType)
+    ? docType
+    : "REC";
+  const resolvedVatType: VatCalculationType = isVatCalculationType(vatType)
+    ? vatType
+    : "NONE";
+  const vatRate = resolvedVatType === "NONE" ? 0 : 7;
 
   const badRow = rows.find(
     (row) => row.status !== "matched" || !row.mappingId || !row.matchedProduct,
@@ -649,10 +706,9 @@ export async function saveGoodsReceiptToLedger(
     }
 
     // Recompute net pricing server-side via the Net Cost Apportionment
-    // engine — never trust client-supplied netCost. Each row's own
-    // `discount_text` is applied first (Step 1), then the optional
-    // `billDiscountText` is prorated across every line by relative value
-    // (Step 3).
+    // engine — never trust client-supplied netCost.
+    // INCLUSIVE: strip VAT 7% from unit prices BEFORE line/bill discount so
+    // LPP (`products.cost_price`) is true vatable cost.
     const apportionmentItems: ApportionmentItem[] = rows.map((row) => ({
       id: row.lineKey,
       unitPrice: Number(row.unit_price) || 0,
@@ -661,20 +717,28 @@ export async function saveGoodsReceiptToLedger(
       isFoc: Boolean(row.isFoc),
     }));
 
-    const apportionmentByLineKey = new Map(
-      calculateNetCostApportionment(apportionmentItems, billDiscountText ?? null).map(
-        (result) => [result.id, result],
-      ),
+    const costApportionmentByLineKey = new Map(
+      calculateNetCostApportionment(apportionmentItems, billDiscountText ?? null, {
+        vatType: resolvedVatType,
+        vatRate: resolvedVatType === "NONE" ? 0 : 7,
+      }).map((result) => [result.id, result]),
+    );
+
+    // Invoice-facing line totals (as printed) — no VAT strip; used for document money + VAT summary.
+    const invoiceApportionmentByLineKey = new Map(
+      calculateNetCostApportionment(apportionmentItems, billDiscountText ?? null, {
+        vatType: "NONE",
+        vatRate: 0,
+      }).map((result) => [result.id, result]),
     );
 
     const lines = rows.map((row) => {
       const qty = qtyByLineKey.get(row.lineKey) ?? 0;
       const unitPrice = Number(row.unit_price) || 0;
-      const apportioned = apportionmentByLineKey.get(row.lineKey);
-      const lineTotal = roundMoney(apportioned?.finalLineTotal ?? 0);
-      const unitCostPrice = roundMoney(apportioned?.finalUnitCost ?? 0);
-      // Total discount for this line = gross value minus net value AFTER
-      // both its own discount_text AND its prorated share of billDiscountText.
+      const costApportioned = costApportionmentByLineKey.get(row.lineKey);
+      const invoiceApportioned = invoiceApportionmentByLineKey.get(row.lineKey);
+      const lineTotal = roundMoney(invoiceApportioned?.finalLineTotal ?? 0);
+      const unitCostPrice = roundMoney(costApportioned?.finalUnitCost ?? 0);
       const discountAmount = roundMoney(unitPrice * qty - lineTotal);
       return { row, qty, unitPrice, unitCostPrice, discountAmount, lineTotal };
     });
@@ -685,9 +749,14 @@ export async function saveGoodsReceiptToLedger(
     const discountAmount = roundMoney(
       lines.reduce((sum, line) => sum + line.discountAmount, 0),
     );
-    const grandTotal = roundMoney(
-      lines.reduce((sum, line) => sum + line.lineTotal, 0),
-    );
+
+    const vatSummary = calculateDocumentSummary({
+      lineTotals: lines.map((line) => line.lineTotal),
+      discountText: null,
+      vatType: resolvedVatType,
+      vatRate,
+    });
+    const grandTotal = roundMoney(vatSummary.grand_total);
 
     const docNo = documentRef?.trim() || `REC-${Date.now()}`;
     const isValidIsoDate = /^\d{4}-\d{2}-\d{2}$/.test(documentDate?.trim() ?? "");
@@ -695,12 +764,12 @@ export async function saveGoodsReceiptToLedger(
       ? documentDate.trim()
       : new Date().toISOString().slice(0, 10);
 
-    // 1. doc_headers — the financial document (doc_type = "REC")
+    // 1. doc_headers — legacy financial document (keeps vendor invoice identity)
     const { data: docHeader, error: docHeaderError } = await supabaseAdmin
       .from("doc_headers")
       .insert({
         doc_no: docNo,
-        doc_type: "REC",
+        doc_type: resolvedDocType,
         doc_date: docDate,
         contact_id: vendorId,
         sub_total: subTotal,
@@ -723,7 +792,7 @@ export async function saveGoodsReceiptToLedger(
 
     const docHeaderId = (docHeader as { id: string; doc_no: string }).id;
 
-    // 2. doc_details — line-level cost/qty (unit_cost_price via calculateNetCostApportionment)
+    // 2. doc_details — line-level cost/qty (unit_cost_price via VAT-aware apportionment)
     const docDetailsPayload = lines.map((line) => ({
       doc_header_id: docHeaderId,
       product_id: line.row.matchedProduct!.id,
@@ -750,13 +819,119 @@ export async function saveGoodsReceiptToLedger(
       };
     }
 
+    // 2b. Phase 4 `documents` + `document_items` (Purchase Document List bridge)
+    const runningPrefix =
+      DOCUMENT_TYPE_PREFIX[resolvedDocType as DocumentType] ?? "REC";
+    const { data: phase4DocNoRaw, error: phase4NoError } = await supabaseAdmin.rpc(
+      "generate_document_no",
+      { p_doc_type: runningPrefix, p_doc_date: docDate },
+    );
+
+    if (phase4NoError || typeof phase4DocNoRaw !== "string" || !phase4DocNoRaw) {
+      await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", docHeaderId);
+      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+      return {
+        docHeaderId: null,
+        docNo: null,
+        error:
+          phase4NoError?.message ??
+          "สร้างเลขที่เอกสาร Phase 4 (documents) ไม่สำเร็จ",
+      };
+    }
+
+    const phase4DocNo = phase4DocNoRaw;
+    const nowIso = new Date().toISOString();
+    const vendorInvoiceNote = `อ้างอิงบิลซัพพลายเออร์: ${docNo}`;
+    const resolvedAttachmentUrl = attachmentUrl?.trim() || null;
+
+    const { data: phase4Document, error: phase4DocError } = await supabaseAdmin
+      .from("documents")
+      .insert({
+        doc_no: phase4DocNo,
+        doc_type: resolvedDocType,
+        status: "COMPLETED",
+        doc_date: docDate,
+        contact_id: vendorId,
+        contact_person_id: null,
+        sub_total: subTotal,
+        discount_amount: discountAmount,
+        tax_rate: vatSummary.vat_rate,
+        tax_amount: vatSummary.vat_amount,
+        grand_total: grandTotal,
+        vat_type: resolvedVatType,
+        vat_rate: vatSummary.vat_rate,
+        total_amount: vatSummary.total_amount,
+        net_before_vat: vatSummary.net_before_vat,
+        vat_amount: vatSummary.vat_amount,
+        discount_text: billDiscountText?.trim() || null,
+        payment_status: "Pending",
+        notes: vendorInvoiceNote,
+        attachment_url: resolvedAttachmentUrl,
+        attached_file_url: resolvedAttachmentUrl,
+        original_file_name: resolvedAttachmentUrl
+          ? resolvedAttachmentUrl.split("/").pop() || null
+          : null,
+        updated_at: nowIso,
+      })
+      .select("id, doc_no")
+      .single();
+
+    if (phase4DocError || !phase4Document) {
+      await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", docHeaderId);
+      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+      return {
+        docHeaderId: null,
+        docNo: null,
+        error:
+          phase4DocError?.message ??
+          "สร้างเอกสารรับสินค้า (documents / Phase 4) ไม่สำเร็จ",
+      };
+    }
+
+    const phase4DocumentId = phase4Document.id as string;
+
+    const phase4ItemsPayload = lines.map((line, index) => ({
+      document_id: phase4DocumentId,
+      product_id: line.row.matchedProduct!.id,
+      description: (
+        line.row.raw_description ??
+        line.row.matchedProduct!.name ??
+        ""
+      ).slice(0, 255),
+      qty: line.qty,
+      uom_used: "ตัว",
+      unit_price: line.unitPrice,
+      unit_cost_price: line.unitCostPrice,
+      discount_text: line.row.discount_text?.trim() || null,
+      discount_amount: line.discountAmount,
+      line_total: line.lineTotal,
+      sort_order: index,
+    }));
+
+    const { error: phase4ItemsError } = await supabaseAdmin
+      .from("document_items")
+      .insert(phase4ItemsPayload);
+
+    if (phase4ItemsError) {
+      await supabaseAdmin.from("documents").delete().eq("id", phase4DocumentId);
+      await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", docHeaderId);
+      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+      return {
+        docHeaderId: null,
+        docNo: null,
+        error:
+          phase4ItemsError.message ??
+          "บันทึกรายการสินค้า (document_items) ไม่สำเร็จ",
+      };
+    }
+
     // 3. inventory_ledger — the ONLY table allowed to move stock ("IN")
     const ledgerPayload = lines.map((line) => ({
       product_id: line.row.matchedProduct!.id,
       doc_header_id: docHeaderId,
       trans_type: "IN",
       qty: line.qty,
-      notes: `รับสินค้าจากเอกสาร ${docNo} — Vendor SKU: ${line.row.raw_vendor_sku}`,
+      notes: `รับสินค้าจากเอกสาร ${docNo} (${phase4DocNo}) — Vendor SKU: ${line.row.raw_vendor_sku}`,
     }));
 
     const { error: ledgerError } = await supabaseAdmin
@@ -765,6 +940,7 @@ export async function saveGoodsReceiptToLedger(
 
     if (ledgerError) {
       // Compensating rollback — never leave a financial doc without its stock movement.
+      await supabaseAdmin.from("documents").delete().eq("id", phase4DocumentId);
       await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", docHeaderId);
       await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
       return {
@@ -805,6 +981,7 @@ export async function saveGoodsReceiptToLedger(
           .from("inventory_ledger")
           .delete()
           .eq("doc_header_id", docHeaderId);
+        await supabaseAdmin.from("documents").delete().eq("id", phase4DocumentId);
         await supabaseAdmin
           .from("doc_details")
           .delete()
@@ -820,11 +997,434 @@ export async function saveGoodsReceiptToLedger(
       }
     }
 
-    return { docHeaderId, docNo, error: null };
+    // Return Phase 4 doc_no so Purchase List / deep-links stay consistent.
+    return { docHeaderId, docNo: phase4DocNo, error: null };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "บันทึกรับสินค้าเข้าคลังไม่สำเร็จ";
     return { docHeaderId: null, docNo: null, error: message };
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* saveManualGoodsReceipt                                                    */
+/* -------------------------------------------------------------------------- */
+
+export type ManualGoodsReceiptLineInput = {
+  product_id: string;
+  qty: number;
+  /**
+   * Gross unit price/cost as entered by staff (before VAT strip / bill discount).
+   * Server recomputes net unit cost via Apportionment Math Engine.
+   */
+  unit_cost: number;
+  description?: string | null;
+  sku?: string | null;
+};
+
+export type SaveManualGoodsReceiptInput = {
+  vendorId: string;
+  /** ISO `YYYY-MM-DD` */
+  docDate: string;
+  /** Required vendor invoice / reference number. */
+  documentRef: string;
+  docType?: GoodsReceiptDocType;
+  vatType?: VatCalculationType;
+  /** Bill discount text e.g. "10%" or "500". */
+  discountText?: string | null;
+  lines: ManualGoodsReceiptLineInput[];
+};
+
+export type SaveManualGoodsReceiptResult = {
+  data: {
+    document_id: string;
+    doc_no: string;
+    ledger_count: number;
+  } | null;
+  error: string | null;
+};
+
+/**
+ * Manual Goods Receipt (no OCR): create Phase 4 `documents` + items,
+ * post `inventory_ledger` IN, and push LPP to `products.cost_price`.
+ *
+ * Net unit cost always goes through Apportionment Math Engine
+ * (INCLUSIVE strips VAT before discount; bill discount is prorated).
+ * Service Role only — Zero Client-Side Fetching.
+ */
+export async function saveManualGoodsReceipt(
+  input: SaveManualGoodsReceiptInput,
+): Promise<SaveManualGoodsReceiptResult> {
+  try {
+    const vendorId = input?.vendorId?.trim() ?? "";
+    const lines = Array.isArray(input?.lines) ? input.lines : [];
+    const documentRef = input?.documentRef?.trim() ?? "";
+    const isValidIsoDate = /^\d{4}-\d{2}-\d{2}$/.test(input?.docDate?.trim() ?? "");
+    const docDate = isValidIsoDate
+      ? input.docDate.trim()
+      : new Date().toISOString().slice(0, 10);
+
+    const resolvedDocType: GoodsReceiptDocType = isGoodsReceiptDocType(
+      String(input?.docType ?? "REC"),
+    )
+      ? (input.docType as GoodsReceiptDocType)
+      : "REC";
+    const resolvedVatType: VatCalculationType = isVatCalculationType(
+      String(input?.vatType ?? "NONE"),
+    )
+      ? (input.vatType as VatCalculationType)
+      : "NONE";
+    const vatRate = resolvedVatType === "NONE" ? 0 : 7;
+    const discountText = input?.discountText?.trim() || null;
+
+    if (!vendorId) {
+      return { data: null, error: "กรุณาเลือกผู้จำหน่าย (Vendor)" };
+    }
+    if (!documentRef) {
+      return { data: null, error: "กรุณากรอกเลขที่เอกสารอ้างอิง (Vendor Ref No.)" };
+    }
+    if (lines.length === 0) {
+      return { data: null, error: "กรุณาเพิ่มรายการสินค้ารับเข้าอย่างน้อย 1 รายการ" };
+    }
+
+    for (const [index, line] of lines.entries()) {
+      if (!line.product_id?.trim()) {
+        return { data: null, error: `รายการที่ ${index + 1}: ไม่มี product_id` };
+      }
+      if (!Number.isFinite(line.qty) || line.qty <= 0) {
+        return {
+          data: null,
+          error: `รายการที่ ${index + 1}: จำนวนต้องมากกว่า 0`,
+        };
+      }
+      if (!Number.isFinite(line.unit_cost) || line.unit_cost < 0) {
+        return {
+          data: null,
+          error: `รายการที่ ${index + 1}: ต้นทุนต่อหน่วยไม่ถูกต้อง`,
+        };
+      }
+    }
+
+    const supabaseAdmin = createSupabaseAdminClient();
+
+    const { data: vendor, error: vendorError } = await supabaseAdmin
+      .from("contacts")
+      .select("id")
+      .eq("id", vendorId)
+      .eq("contact_type", "Vendor")
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (vendorError) {
+      return { data: null, error: vendorError.message };
+    }
+    if (!vendor) {
+      return { data: null, error: "ไม่พบผู้จำหน่าย หรือถูกปิดใช้งาน" };
+    }
+
+    const productIds = [
+      ...new Set(lines.map((line) => line.product_id.trim()).filter(Boolean)),
+    ];
+    const { data: products, error: productsError } = await supabaseAdmin
+      .from("products")
+      .select("id, name, sku, base_uom, is_active")
+      .in("id", productIds);
+
+    if (productsError) {
+      return { data: null, error: productsError.message };
+    }
+
+    const productById = new Map(
+      (products ?? []).map((row) => [row.id as string, row]),
+    );
+    for (const productId of productIds) {
+      const product = productById.get(productId);
+      if (!product || product.is_active === false) {
+        return {
+          data: null,
+          error: `ไม่พบสินค้าในระบบ หรือถูกปิดใช้งาน: ${productId}`,
+        };
+      }
+    }
+
+    const preparedLines = lines.map((line, index) => {
+      const productId = line.product_id.trim();
+      const product = productById.get(productId)!;
+      const qty = Math.round(Number(line.qty));
+      const unitPrice = Number(line.unit_cost) || 0;
+      const lineKey = `line-${index}-${productId}`;
+      return {
+        lineKey,
+        product_id: productId,
+        description: (
+          line.description?.trim() ||
+          String(product.name ?? "") ||
+          ""
+        ).slice(0, 255),
+        sku: line.sku?.trim() || String(product.sku ?? ""),
+        qty,
+        uom_used: String(product.base_uom ?? "ตัว"),
+        unitPrice,
+        sort_order: index,
+      };
+    });
+
+    const apportionmentItems: ApportionmentItem[] = preparedLines.map((line) => ({
+      id: line.lineKey,
+      unitPrice: line.unitPrice,
+      qty: line.qty,
+      discountText: null,
+      isFoc: false,
+    }));
+
+    // Cost path — INCLUSIVE strips VAT before bill-discount apportionment (LPP).
+    const costByLineKey = new Map(
+      calculateNetCostApportionment(apportionmentItems, discountText, {
+        vatType: resolvedVatType,
+        vatRate,
+      }).map((result) => [result.id, result]),
+    );
+
+    // Invoice path — as-entered amounts for document money / VAT summary.
+    const invoiceByLineKey = new Map(
+      calculateNetCostApportionment(apportionmentItems, discountText, {
+        vatType: "NONE",
+        vatRate: 0,
+      }).map((result) => [result.id, result]),
+    );
+
+    const normalizedLines = preparedLines.map((line) => {
+      const cost = costByLineKey.get(line.lineKey);
+      const invoice = invoiceByLineKey.get(line.lineKey);
+      const invoiceLineTotal = roundMoney(invoice?.finalLineTotal ?? 0);
+      const unitCostPrice = roundMoney(cost?.finalUnitCost ?? 0);
+      const discountAmount = roundMoney(line.unitPrice * line.qty - invoiceLineTotal);
+      return {
+        product_id: line.product_id,
+        description: line.description,
+        sku: line.sku,
+        qty: line.qty,
+        uom_used: line.uom_used,
+        unit_price: roundMoney(line.unitPrice),
+        unit_cost: unitCostPrice,
+        discount_amount: discountAmount,
+        line_total: invoiceLineTotal,
+        sort_order: line.sort_order,
+      };
+    });
+
+    const subTotal = roundMoney(
+      normalizedLines.reduce((sum, line) => sum + line.unit_price * line.qty, 0),
+    );
+    const discountAmount = roundMoney(
+      normalizedLines.reduce((sum, line) => sum + line.discount_amount, 0),
+    );
+    const vatSummary = calculateDocumentSummary({
+      lineTotals: normalizedLines.map((line) => line.line_total),
+      discountText: null,
+      vatType: resolvedVatType,
+      vatRate,
+    });
+    const grandTotal = roundMoney(vatSummary.grand_total);
+
+    const runningPrefix =
+      DOCUMENT_TYPE_PREFIX[resolvedDocType as DocumentType] ?? "REC";
+    const { data: phase4DocNoRaw, error: phase4NoError } = await supabaseAdmin.rpc(
+      "generate_document_no",
+      { p_doc_type: runningPrefix, p_doc_date: docDate },
+    );
+
+    if (phase4NoError || typeof phase4DocNoRaw !== "string" || !phase4DocNoRaw) {
+      return {
+        data: null,
+        error:
+          phase4NoError?.message ?? "สร้างเลขที่เอกสารรับสินค้าไม่สำเร็จ",
+      };
+    }
+
+    const phase4DocNo = phase4DocNoRaw;
+    const nowIso = new Date().toISOString();
+    const notes = `รับสินค้าแบบ Manual · อ้างอิงบิลซัพพลายเออร์: ${documentRef}`;
+
+    const { data: docHeader, error: docHeaderError } = await supabaseAdmin
+      .from("doc_headers")
+      .insert({
+        doc_no: documentRef,
+        doc_type: resolvedDocType,
+        doc_date: docDate,
+        contact_id: vendorId,
+        sub_total: subTotal,
+        discount_amount: discountAmount,
+        grand_total: grandTotal,
+      })
+      .select("id")
+      .single();
+
+    if (docHeaderError || !docHeader) {
+      const isDuplicate = docHeaderError?.code === "23505";
+      return {
+        data: null,
+        error: isDuplicate
+          ? `เลขที่อ้างอิง "${documentRef}" ลงวันที่ ${docDate} ถูกบันทึกแล้วสำหรับผู้จำหน่ายรายนี้`
+          : (docHeaderError?.message ?? "สร้างเอกสารอ้างอิง (doc_headers) ไม่สำเร็จ"),
+      };
+    }
+
+    const docHeaderId = docHeader.id as string;
+
+    const { error: detailsError } = await supabaseAdmin.from("doc_details").insert(
+      normalizedLines.map((line) => ({
+        doc_header_id: docHeaderId,
+        product_id: line.product_id,
+        description: line.description,
+        qty: line.qty,
+        uom_used: line.uom_used,
+        unit_price: line.unit_price,
+        unit_cost_price: line.unit_cost,
+        discount_text: "",
+        discount_amount: line.discount_amount,
+        line_total: line.line_total,
+      })),
+    );
+
+    if (detailsError) {
+      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+      return {
+        data: null,
+        error: detailsError.message ?? "บันทึกรายการ (doc_details) ไม่สำเร็จ",
+      };
+    }
+
+    const { data: document, error: documentError } = await supabaseAdmin
+      .from("documents")
+      .insert({
+        doc_no: phase4DocNo,
+        doc_type: resolvedDocType,
+        status: "COMPLETED",
+        doc_date: docDate,
+        contact_id: vendorId,
+        contact_person_id: null,
+        sub_total: subTotal,
+        discount_amount: discountAmount,
+        tax_rate: vatSummary.vat_rate,
+        tax_amount: vatSummary.vat_amount,
+        grand_total: grandTotal,
+        vat_type: resolvedVatType,
+        vat_rate: vatSummary.vat_rate,
+        total_amount: vatSummary.total_amount,
+        net_before_vat: vatSummary.net_before_vat,
+        vat_amount: vatSummary.vat_amount,
+        discount_text: discountText,
+        payment_status: "Pending",
+        notes,
+        updated_at: nowIso,
+      })
+      .select("id, doc_no")
+      .single();
+
+    if (documentError || !document) {
+      await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", docHeaderId);
+      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+      return {
+        data: null,
+        error: documentError?.message ?? "สร้างเอกสารรับสินค้า (documents) ไม่สำเร็จ",
+      };
+    }
+
+    const documentId = document.id as string;
+
+    const { error: itemsError } = await supabaseAdmin.from("document_items").insert(
+      normalizedLines.map((line) => ({
+        document_id: documentId,
+        product_id: line.product_id,
+        description: line.description,
+        qty: line.qty,
+        uom_used: line.uom_used,
+        unit_price: line.unit_price,
+        unit_cost_price: line.unit_cost,
+        discount_text: null,
+        discount_amount: line.discount_amount,
+        line_total: line.line_total,
+        sort_order: line.sort_order,
+      })),
+    );
+
+    if (itemsError) {
+      await supabaseAdmin.from("documents").delete().eq("id", documentId);
+      await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", docHeaderId);
+      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+      return {
+        data: null,
+        error: itemsError.message ?? "บันทึกรายการสินค้าในเอกสารไม่สำเร็จ",
+      };
+    }
+
+    const ledgerPayload = normalizedLines.map((line) => ({
+      product_id: line.product_id,
+      doc_header_id: docHeaderId,
+      trans_type: "IN",
+      qty: line.qty,
+      notes: `รับสินค้า Manual จากเอกสาร ${phase4DocNo} (อ้างอิง ${documentRef}) | document_id=${documentId} | net_cost=${line.unit_cost} | SKU: ${line.sku || "-"}`,
+    }));
+
+    const { error: ledgerError } = await supabaseAdmin
+      .from("inventory_ledger")
+      .insert(ledgerPayload);
+
+    if (ledgerError) {
+      await supabaseAdmin.from("documents").delete().eq("id", documentId);
+      await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", docHeaderId);
+      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+      return {
+        data: null,
+        error:
+          ledgerError.message ?? "บันทึกการรับเข้าคลัง (inventory_ledger) ไม่สำเร็จ",
+      };
+    }
+
+    const costByProductId = new Map<string, number>();
+    for (const line of normalizedLines) {
+      costByProductId.set(line.product_id, line.unit_cost);
+    }
+
+    const lppResults = await Promise.all(
+      [...costByProductId.entries()].map(([productId, costPrice]) =>
+        supabaseAdmin
+          .from("products")
+          .update({ cost_price: costPrice })
+          .eq("id", productId),
+      ),
+    );
+
+    const lppError = lppResults.find((result) => result.error)?.error;
+    if (lppError) {
+      await supabaseAdmin
+        .from("inventory_ledger")
+        .delete()
+        .eq("doc_header_id", docHeaderId);
+      await supabaseAdmin.from("documents").delete().eq("id", documentId);
+      await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", docHeaderId);
+      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+      return {
+        data: null,
+        error:
+          lppError.message ??
+          "อัปเดตราคาต้นทุนล่าสุด (products.cost_price) ไม่สำเร็จ",
+      };
+    }
+
+    return {
+      data: {
+        document_id: documentId,
+        doc_no: (document.doc_no as string) || phase4DocNo,
+        ledger_count: ledgerPayload.length,
+      },
+      error: null,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "บันทึกรับสินค้าแบบ Manual ไม่สำเร็จ";
+    return { data: null, error: message };
   }
 }
 

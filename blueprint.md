@@ -1,6 +1,6 @@
 # System Blueprint: Supthavee ERP SuperApp
 
-**Version:** 4.1 (Enterprise Standard, Fixed-3 Color, Multi-Zone Size Weights, OCR Pattern Config, Server Action Refactor, Quick Create SKU, Invoice Extraction, System Guardrails, Net Cost Engine, LPP Auto-Update)
+**Version:** 4.2 (Enterprise Standard, Fixed-3 Color, Multi-Zone Size Weights, OCR Pattern Config, Server Action Refactor, Quick Create SKU, Invoice Extraction, System Guardrails, Net Cost Engine, LPP Auto-Update, Document Flow, Auto-Running Number, Document Lineage, Document Attachment)
 
 **Company:** บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด
 
@@ -44,8 +44,12 @@
 
 ### Module B: Document Flow & Profit Analysis (ระบบเอกสารและการวิเคราะห์กำไร)
 *   **Document Types:** QT, PO, ABB, DEP, INV_DO, REC, TAX_INV, และ INT_REC
-*   **Auto-Running Number:** รันเลขที่เอกสารอัตโนมัติแยกตามประเภทและเดือน
-*   **Cost & Profit Snapshot:** ดึงราคาต้นทุนมาฝังไว้ที่รายการบิล (`unit_cost_price`) ทันทีที่ขาย เพื่อคำนวณกำไรขั้นต้น
+*   **[อัปเดต] Auto-Running Number (Atomic RPC):** รันเลขที่เอกสารอัตโนมัติแยกตามประเภทและเดือน (เช่น QT-2607-0001) โดยใช้ฟังก์ชัน PostgreSQL RPC (`generate_document_no`) พร้อมระบบ `LOCK TABLE` ป้องกันการแย่งกันรันเลข (Race Condition) 100%
+*   **[อัปเดต] Cost & Profit Snapshot:** ดึงราคาต้นทุน (LPP) มาฝังไว้ที่รายการบิล (`unit_cost_price`) ทันทีที่ขาย เพื่อคำนวณกำไรขั้นต้นอย่างแม่นยำ ไม่ว่าต้นทุนในอนาคตจะเปลี่ยนไปอย่างไร
+*   **[เพิ่มเติม] Document Summary Engine:** ระบบประมวลผลคำนวณยอดรวม, ส่วนลดท้ายบิล, และภาษีมูลค่าเพิ่ม 3 รูปแบบ (INCLUSIVE, EXCLUSIVE, NONE) แบบ Real-time พร้อมถอดฐานภาษีได้อย่างแม่นยำ
+*   **[เพิ่มเติม] Document Lineage (สายสัมพันธ์เอกสาร):** รองรับการแปลงเอกสาร (Document Conversion) เช่น ดึงใบเสนอราคา (QT) มาสร้างเป็นใบส่งของ (INV_DO) เพื่อรักษาสถานะและผูก `ref_document_id` อ้างอิงกลับไปยังเอกสารต้นทางเสมอ
+*   **[เพิ่มเติม] URL-Based State Filter:** ระบบค้นหาและกรองประวัติเอกสารใช้ URL Search Parameters แทน React State เพื่อให้สามารถแชร์ลิงก์ได้ และสอดคล้องกับโครงสร้าง Server Components (Zero Client-Side Fetching)
+*   **[เพิ่มเติม] Print Layout A4:** รองรับการสั่งพิมพ์เป็นเอกสารบิล (A4) ผ่าน Browser ด้วย CSS `@media print` โดยซ่อน UI ส่วนเกินของแอปพลิเคชันอย่างสมบูรณ์แบบ
 
 ### Module C: Smart Procurement & Inventory (ระบบจัดซื้อและคลังสินค้า)
 *   **Strict Server-Side Fetching (Architecture Pivot):** การดึงและบันทึกข้อมูลที่เกี่ยวข้องกับ Procurement และ Master Data ทั้งหมด ต้องทำผ่าน Next.js Server Actions และใช้ `createClient` ร่วมกับ `SUPABASE_SERVICE_ROLE_KEY` (Admin Client) เท่านั้น เพื่อหลีกเลี่ยงปัญหา RLS Permission Denied จาก Client Component ในช่วง Local Development
@@ -59,10 +63,13 @@
     *   **UPSERT Mapping Protection:** กรณีที่ซัพพลายเออร์พิมพ์รหัส `raw_vendor_sku` เดียวกันมาหลายบรรทัดบนบิลเดียว ระบบจะใช้คำสั่ง UPSERT ในการบันทึก Mapping เพื่ออัปเดตข้อมูลทับของเดิมโดยไม่เกิด Error ชนกัน
     *   **Quick Create SKU (กรณีสินค้าใหม่ไซส์/สี):** พนักงานสามารถสร้าง SKU ใหม่กลางอากาศได้ทันทีผ่าน Server Actions โดยดึงข้อมูล Model เดิมมา Auto-fill ป้อนเพียงรหัสสี 3 หลักและไซส์ เพื่อลด Human Error สูงสุด
 *   **Net Cost Apportionment:** มีฟังก์ชันประมวลผลคำนวณราคาตั้ง (`unit_price`) และข้อความส่วนลดระดับบรรทัด (`discount_text` เช่น "40%" หรือ "41.8%") ออกมาเป็นราคาต้นทุนที่แท้จริง (`unit_cost_price`) ก่อนบันทึกลงสมุดคลัง
-*   **Inventory Ledger:** ห้ามแก้สต็อกที่ตาราง Products ตรงๆ ต้องบันทึกผ่าน Ledger เสมอ การบันทึกรับของเข้าคลังใช้ระบบ 2-Step Confirmation ยืนยันรายการสินค้าและหัวเอกสารเพื่อความถูกต้อง
+*   **Inventory Ledger:** ห้ามแก้สต็อกที่ตาราง Products ตรงๆ ต้องบันทึกผ่าน Ledger เสมอ การบันทึกรับของเข้าคลังใช้ระบบ 2-Step Confirmation ยืนยันรายการสินค้าและหัวเอกสารเพื่อความถูกต้อง (ขา IN สำหรับซื้อ, ขา OUT สำหรับขาย เฉพาะเอกสารที่ตัดสต็อกจริง)
 *   **[เพิ่มเติม] Apportionment Math Engine:** สมการบัญชีในระบบรองรับการคำนวณของแถม (FOC), ส่วนลดเหมาบรรทัด, ส่วนลดขั้นบันได (20+5), และการกระจายส่วนลดท้ายบิลแบบสัดส่วน (Prorate) พร้อมปัดเศษทศนิยม 4 ตำแหน่ง
 *   **[เพิ่มเติม] LPP Auto-Update:** ระบบอัปเดตต้นทุนสั่งซื้อล่าสุด (Last Purchase Price) วิ่งกลับไปบันทึกทับใน `products.cost_price` อัตโนมัติเมื่อทำรายการรับของเข้าคลังสำเร็จ
 *   **[เพิ่มเติม] OCR UI Text Wrap:** หน้า Dropdown จับคู่สินค้า OCR บังคับแสดงข้อความแบบห่อบรรทัด (Text Wrap) ป้องกันชื่อสินค้าและไซส์โดนตัดคำ
+*   **[เพิ่มเติม] AI Document Intelligence (OCR Upgrade):** ขยายขีดความสามารถ Gemini Vision AI ให้อ่านและระบุ "ประเภทเอกสาร" (`doc_type`) และ "ประเภทภาษี" (`vat_type`) อัตโนมัติ เพื่อทำ Auto-fill (Human-in-the-loop) ลงฟอร์มบัญชี
+*   **[เพิ่มเติม] Manual Goods Receipt:** เพิ่มระบบรับสินค้าเข้าคลังแบบกรอกข้อมูลเอง (Manual) ที่ใช้ฟอร์มมาตรฐานเดียวกับระบบ OCR เพื่อประมวลผลและอัปเดตราคาต้นทุน LPP
+*   **[เพิ่มเติม] Document Image Attachment:** รองรับการอัปโหลดไฟล์ภาพบิลซื้อ (Supabase Storage) พร้อมผูก `attachment_url` เก็บไว้ที่หัวเอกสารเพื่อเป็นหลักฐานอ้างอิง
 
 ## 5. Database Schema (PostgreSQL for Supabase)
-*(Schema คงเดิมตาม Blueprint v4.1 ครอบคลุมตารางทั้งหมดรวมถึง `contacts.ocr_pattern_config`, RLS Policies `USING (true)`)*
+*(Schema คงเดิมตาม Blueprint v4.1 ครอบคลุมตารางทั้งหมดรวมถึง `contacts.ocr_pattern_config`, เพิ่มเติมตาราง `documents`, `document_items`, `inventory_ledger`, Enum Document/VAT Types และ RLS Policies `USING (true)`)*

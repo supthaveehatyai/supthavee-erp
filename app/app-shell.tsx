@@ -37,8 +37,9 @@ const navigationGroups: NavigationGroup[] = [
     label: "เอกสาร / บัญชี",
     icon: "document",
     items: [
-      { label: "เอกสารขาย", href: "/documents/sales" },
-      { label: "เอกสารซื้อ", href: "/documents/purchases" },
+      { label: "เอกสารขาย", href: "/sales" },
+      { label: "เปิดบิลขาย", href: "/sales/create" },
+      { label: "เอกสารซื้อ", href: "/purchases" },
       { label: "วิเคราะห์กำไร", href: "/documents/profit" },
     ],
   },
@@ -47,6 +48,7 @@ const navigationGroups: NavigationGroup[] = [
     icon: "wallet",
     items: [
       { label: "รับสินค้าอัจฉริยะ", href: "/dashboard/procurement/goods-receipt" },
+      { label: "รับสินค้า (Manual)", href: "/purchases/manual-receipt" },
       { label: "ผูกรหัสซัพพลายเออร์", href: "/dashboard/procurement/vendor-mapping" },
       { label: "รับและจ่ายเงิน", href: "/finance/payments" },
       { label: "เจ้าหนี้ / ลูกหนี้", href: "/finance/ap-ar" },
@@ -229,7 +231,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-dvh bg-slate-50">
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-blue-700 lg:flex">
+      <aside className="app-shell-sidebar fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-blue-700 print:hidden lg:flex">
         <SidebarContent closeMenu={() => setIsMenuOpen(false)} />
       </aside>
 
@@ -237,21 +239,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <button
           type="button"
           aria-label="ปิดเมนู"
-          className="fixed inset-0 z-40 bg-slate-950/45 backdrop-blur-[2px] lg:hidden"
+          className="app-shell-mobile-overlay fixed inset-0 z-40 bg-slate-950/45 backdrop-blur-[2px] print:hidden lg:hidden"
           onClick={() => setIsMenuOpen(false)}
         />
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-blue-700 shadow-2xl transition-transform duration-200 lg:hidden ${
+        className={`app-shell-sidebar fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-blue-700 shadow-2xl transition-transform duration-200 print:hidden lg:hidden ${
           isMenuOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         <SidebarContent closeMenu={() => setIsMenuOpen(false)} />
       </aside>
 
-      <div className="lg:pl-64">
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 backdrop-blur md:px-7">
+      <div className="app-shell-content lg:pl-64 print:pl-0">
+        <header className="app-shell-header sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 backdrop-blur print:hidden md:px-7">
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -285,7 +287,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="min-h-[calc(100dvh-4rem)] p-4 md:p-7">{children}</main>
+        <main className="app-shell-main min-h-[calc(100dvh-4rem)] p-4 md:p-7 print:min-h-0 print:p-0">
+          {children}
+        </main>
       </div>
     </div>
   );

@@ -52,10 +52,13 @@ import {
   type ReceiptLineRow,
   type ReceiptProductSummary,
 } from "@/lib/actions/receipt";
+import { uploadDocumentImage } from "@/lib/actions/document-actions";
 import {
   calculateNetCostApportionment,
   type ApportionmentItem,
 } from "@/lib/utils/accounting";
+import type { GoodsReceiptDocType } from "@/lib/constants/document";
+import type { VatCalculationType } from "@/lib/utils/document-summary";
 import VendorCombobox from "@/components/procurement/VendorCombobox";
 import InternalProductCombobox from "@/components/procurement/InternalProductCombobox";
 import QuickCreateDialog from "@/components/procurement/QuickCreateDialog";
@@ -127,6 +130,10 @@ export default function GoodsReceiptUI() {
   const [ocrDocNumber, setOcrDocNumber] = useState("");
   /** Document/invoice date Gemini extracted from the receipt header (ISO `YYYY-MM-DD`, editable at Save time). */
   const [ocrDocDate, setOcrDocDate] = useState("");
+  /** AI-classified document type — seeds Save to Ledger dropdown (human can override). */
+  const [aiDocType, setAiDocType] = useState<GoodsReceiptDocType>("REC");
+  /** AI-classified VAT type — seeds Save to Ledger dropdown (human can override). */
+  const [aiVatType, setAiVatType] = useState<VatCalculationType>("NONE");
 
   /** End-of-bill discount text (e.g. "40%", "1500") — fed into calculateNetCostApportionment. */
   const [billDiscountText, setBillDiscountText] = useState("");
@@ -205,6 +212,8 @@ export default function GoodsReceiptUI() {
     setDraftProductByLineKey({});
     setOcrDocNumber("");
     setOcrDocDate("");
+    setAiDocType("REC");
+    setAiVatType("NONE");
     setBillDiscountText("");
   }, [previewUrl]);
 
@@ -219,6 +228,8 @@ export default function GoodsReceiptUI() {
       setDraftProductByLineKey({});
       setOcrDocNumber("");
       setOcrDocDate("");
+      setAiDocType("REC");
+      setAiVatType("NONE");
       setBillDiscountText("");
       setFileName(file.name);
       if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -260,6 +271,8 @@ export default function GoodsReceiptUI() {
 
       setOcrDocNumber(parsed.documentNumber ?? "");
       setOcrDocDate(parsed.documentDate ?? "");
+      setAiDocType(parsed.docType);
+      setAiVatType(parsed.vatType);
 
       const matched = await matchReceiptItemsToProducts(vendorId, parsed.data);
       if (matched.error) {
@@ -279,12 +292,14 @@ export default function GoodsReceiptUI() {
       const docDateSuffix = parsed.documentDate
         ? ` ลงวันที่ ${parsed.documentDate}`
         : "";
+      const typeSuffix = ` · ${parsed.docType} / VAT ${parsed.vatType}`;
       toast.success(
         (unmatchedCount > 0
           ? `AI วิเคราะห์สำเร็จ — พบ ${matched.data.length} รายการ (${unmatchedCount} ยังไม่จับคู่)`
           : `AI วิเคราะห์สำเร็จ — พบ ${matched.data.length} รายการ จับคู่ครบ`) +
           docNumberSuffix +
-          docDateSuffix,
+          docDateSuffix +
+          typeSuffix,
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "วิเคราะห์บิลไม่สำเร็จ");
@@ -477,11 +492,29 @@ export default function GoodsReceiptUI() {
     // Sync bill discount from the dialog (user may have edited it there).
     setBillDiscountText(payload.billDiscountText);
     try {
+      let attachmentUrl: string | null = null;
+
+      if (pendingFile) {
+        const uploadForm = new FormData();
+        uploadForm.append("file", pendingFile);
+        const uploadResult = await uploadDocumentImage(uploadForm);
+        if (uploadResult.error || !uploadResult.data?.url) {
+          toast.error(
+            uploadResult.error ?? "อัปโหลดภาพบิลไม่สำเร็จ — ยกเลิกการบันทึก",
+          );
+          return;
+        }
+        attachmentUrl = uploadResult.data.url;
+      }
+
       const result = await saveGoodsReceiptToLedger(
         rows,
         payload.docNumber,
         payload.docDate,
         payload.billDiscountText || null,
+        payload.docType,
+        payload.vatType,
+        attachmentUrl,
       );
       if (result.error || !result.docHeaderId) {
         toast.error(result.error ?? "บันทึกรับสินค้าเข้าคลังไม่สำเร็จ");
@@ -489,7 +522,8 @@ export default function GoodsReceiptUI() {
       }
 
       toast.success(
-        `บันทึกรับสินค้าเข้าคลังสำเร็จ — เอกสาร ${result.docNo ?? result.docHeaderId} (${stats.matched.toLocaleString("th-TH")} รายการ)`,
+        `บันทึกรับสินค้าเข้าคลังสำเร็จ — เอกสาร ${result.docNo ?? result.docHeaderId} (${stats.matched.toLocaleString("th-TH")} รายการ)` +
+          (attachmentUrl ? " · แนบภาพบิลแล้ว" : ""),
       );
       setIsSaveDialogOpen(false);
       clearInvoice();
@@ -981,6 +1015,8 @@ export default function GoodsReceiptUI() {
         initialDocNumber={ocrDocNumber}
         initialDocDate={ocrDocDate}
         initialBillDiscountText={billDiscountText}
+        initialDocType={aiDocType}
+        initialVatType={aiVatType}
         matchedCount={stats.matched}
         isSaving={isSavingToLedger}
         onConfirm={(payload) => void handleConfirmSaveToLedger(payload)}

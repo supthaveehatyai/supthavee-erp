@@ -16,6 +16,19 @@ export interface ApportionmentResult {
   finalLineTotal: number; // ราคารวมสุทธิของบรรทัดนั้น
 }
 
+export type ApportionmentVatType = "NONE" | "INCLUSIVE" | "EXCLUSIVE";
+
+export type ApportionmentOptions = {
+  /**
+   * INCLUSIVE: strip VAT from unit prices BEFORE line/bill discount apportionment
+   * so LPP (`products.cost_price`) stores true vatable / ex-VAT cost.
+   * EXCLUSIVE / NONE: use OCR amounts as-is.
+   */
+  vatType?: ApportionmentVatType | null;
+  /** Percent, default 7. */
+  vatRate?: number;
+};
+
 /**
  * บังคับปัดเศษทศนิยม 4 ตำแหน่ง สำหรับการบันทึกบัญชี (Internal Cost Precision)
  */
@@ -30,32 +43,32 @@ function applyLineDiscount(
   baseAmount: number,
   discountText: string | null | undefined,
   qty: number,
-  isFlatPerLine: boolean = true
+  isFlatPerLine: boolean = true,
 ): number {
   if (!discountText) return baseAmount;
-  
+
   let currentAmount = baseAmount;
-  
+
   // Clean string: ลบช่องว่าง, คำว่า บาท, B, หรือเครื่องหมายลบออก
-  const cleanText = discountText.replace(/\s|บาท|B|-/gi, '').trim();
+  const cleanText = discountText.replace(/\s|บาท|B|-/gi, "").trim();
   if (!cleanText) return baseAmount;
 
   // รองรับส่วนลดขั้นบันได (Chain Discount) เช่น "20%+5%" หรือ "20+5"
-  const steps = cleanText.split('+');
+  const steps = cleanText.split("+");
 
   for (const step of steps) {
     const match = step.match(/[\d.]+/);
     if (!match) continue;
-    
+
     const val = parseFloat(match[0]);
     if (isNaN(val)) continue;
 
     // ตรวจสอบว่าเป็นเปอร์เซ็นต์หรือไม่ (ถ้ามี % หรือเป็น Chain Discount ให้ตีเป็น % ไว้ก่อน)
     // Business Rule: Chain discount terms like "20+5" are always treated as percentages.
-    const isPercent = step.includes('%') || steps.length > 1;
+    const isPercent = step.includes("%") || steps.length > 1;
 
     if (isPercent) {
-      currentAmount = currentAmount * (1 - (val / 100));
+      currentAmount = currentAmount * (1 - val / 100);
     } else {
       // กรณีเป็นส่วนลดเงินบาท (Flat Discount)
       const flatDiscount = isFlatPerLine ? val : val * qty;
@@ -66,28 +79,61 @@ function applyLineDiscount(
   return Math.max(0, currentAmount); // ป้องกันไม่ให้ยอดติดลบ
 }
 
+function resolveEffectiveUnitPrice(
+  unitPrice: number,
+  vatType: ApportionmentVatType,
+  vatRate: number,
+): number {
+  if (vatType !== "INCLUSIVE" || vatRate <= 0) {
+    return unitPrice;
+  }
+  return unitPrice / (1 + vatRate / 100);
+}
+
 /**
  * Main Function: คำนวณต้นทุนสุทธิและการกระจายส่วนลดท้ายบิล (Prorate Apportionment)
+ *
+ * When `options.vatType === "INCLUSIVE"`, VAT is stripped from unit prices
+ * before line discounts and bill-discount apportionment so net unit cost
+ * (LPP) is the true vatable amount.
  */
 export function calculateNetCostApportionment(
   items: ApportionmentItem[],
-  billDiscountText?: string | null
+  billDiscountText?: string | null,
+  options?: ApportionmentOptions | null,
 ): ApportionmentResult[] {
+  const vatType: ApportionmentVatType =
+    options?.vatType === "INCLUSIVE" ||
+    options?.vatType === "EXCLUSIVE" ||
+    options?.vatType === "NONE"
+      ? options.vatType
+      : "NONE";
+  const vatRate =
+    typeof options?.vatRate === "number" && Number.isFinite(options.vatRate)
+      ? Math.max(0, options.vatRate)
+      : 7;
+
   let totalValueBeforeBillDiscount = 0;
 
   // Step 1: คำนวณยอดรวมของแต่ละบรรทัด (หักส่วนลดบรรทัดแล้ว แต่ยังไม่หักท้ายบิล)
-  const lineResults = items.map(item => {
+  // INCLUSIVE → ถอด VAT ออกจากราคาต่อหน่วยก่อนคำนวณ
+  const lineResults = items.map((item) => {
     // ถ้าเป็นของแถม (FOC) ต้นทุนบรรทัดเป็น 0 ทันที
     if (item.isFoc) {
       return { ...item, lineTotalBeforeBillDisc: 0 };
     }
 
-    const baseLineTotal = item.unitPrice * item.qty;
+    const effectiveUnitPrice = resolveEffectiveUnitPrice(
+      item.unitPrice,
+      vatType,
+      vatRate,
+    );
+    const baseLineTotal = effectiveUnitPrice * item.qty;
     const lineTotalBeforeBillDisc = applyLineDiscount(
       baseLineTotal,
       item.discountText,
       item.qty,
-      item.isFlatDiscountPerLine !== false // Default เป็น true เสมอ
+      item.isFlatDiscountPerLine !== false, // Default เป็น true เสมอ
     );
 
     totalValueBeforeBillDiscount += lineTotalBeforeBillDisc;
@@ -97,38 +143,38 @@ export function calculateNetCostApportionment(
   // Step 2: คำนวณมูลค่าส่วนลดท้ายบิล (ถ้ามี)
   let billDiscountAmount = 0;
   if (billDiscountText && totalValueBeforeBillDiscount > 0) {
-     const cleanBillText = billDiscountText.replace(/\s|บาท|B|-/gi, '').trim();
-     const match = cleanBillText.match(/[\d.]+/);
-     if (match) {
-        const val = parseFloat(match[0]);
-        if (cleanBillText.includes('%')) {
-           billDiscountAmount = totalValueBeforeBillDiscount * (val / 100);
-        } else {
-           billDiscountAmount = val; // ส่วนลดท้ายบิลแบบเงินบาท
-        }
-     }
+    const cleanBillText = billDiscountText.replace(/\s|บาท|B|-/gi, "").trim();
+    const match = cleanBillText.match(/[\d.]+/);
+    if (match) {
+      const val = parseFloat(match[0]);
+      if (cleanBillText.includes("%")) {
+        billDiscountAmount = totalValueBeforeBillDiscount * (val / 100);
+      } else {
+        billDiscountAmount = val; // ส่วนลดท้ายบิลแบบเงินบาท
+      }
+    }
   }
 
   // Step 3: กระจายส่วนลดท้ายบิลลงแต่ละรายการตามสัดส่วน (Prorate)
-  return lineResults.map(item => {
+  return lineResults.map((item) => {
     if (item.isFoc || totalValueBeforeBillDiscount === 0) {
       return {
         id: item.id,
         originalUnitPrice: item.unitPrice,
         finalUnitCost: 0,
-        finalLineTotal: 0
+        finalLineTotal: 0,
       };
     }
 
     // หาสัดส่วนมูลค่าของสินค้านี้ ต่อยอดรวมทั้งบิล (Weight Ratio)
     const prorateRatio = item.lineTotalBeforeBillDisc / totalValueBeforeBillDiscount;
-    
+
     // มูลค่าส่วนลดท้ายบิลที่ต้องนำมาหักออกจากสินค้านี้
     const apportionedDiscount = billDiscountAmount * prorateRatio;
-    
+
     // ยอดรวมสุทธิของบรรทัดนี้
     const finalLineTotal = item.lineTotalBeforeBillDisc - apportionedDiscount;
-    
+
     // ต้นทุนสุทธิต่อหน่วย (เฉลี่ยกลับเป็นรายชิ้น) — กัน Division by Zero
     const finalUnitCost = item.qty > 0 ? finalLineTotal / item.qty : 0;
 
@@ -136,7 +182,7 @@ export function calculateNetCostApportionment(
       id: item.id,
       originalUnitPrice: item.unitPrice,
       finalUnitCost: roundTo4Decimals(finalUnitCost),
-      finalLineTotal: roundTo4Decimals(finalLineTotal)
+      finalLineTotal: roundTo4Decimals(finalLineTotal),
     };
   });
 }

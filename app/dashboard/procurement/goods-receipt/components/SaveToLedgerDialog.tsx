@@ -3,19 +3,17 @@
 /**
  * "Save to Ledger" confirmation dialog — the last checkpoint before
  * `saveGoodsReceiptToLedger` writes `doc_headers`/`doc_details` +
- * `inventory_ledger`. Replaces the old `window.prompt` flow so the user can
- * review/edit BOTH the invoice number and invoice date Gemini extracted,
- * plus the optional end-of-bill discount (`billDiscountText`) that feeds
- * `calculateNetCostApportionment`.
+ * Phase 4 `documents` + `inventory_ledger`.
  *
  * Zero Client-Side Fetching: the only network call this component makes is
- * `checkDuplicateInvoice` (a Server Action) — the Early Warning check for
- * `doc_headers_contact_doc_no_date_key` (vendor + doc_no + doc_date).
+ * `checkDuplicateInvoice` (a Server Action).
  */
 
 import { useEffect, useState } from "react";
 import { AlertTriangle, Loader2, PackageCheck } from "lucide-react";
 import { checkDuplicateInvoice } from "@/lib/actions/receipt";
+import type { GoodsReceiptDocType } from "@/lib/constants/document";
+import type { VatCalculationType } from "@/lib/utils/document-summary";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,11 +25,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
 export type SaveToLedgerConfirmPayload = {
   docNumber: string;
   docDate: string;
   billDiscountText: string;
+  docType: GoodsReceiptDocType;
+  vatType: VatCalculationType;
 };
 
 export type SaveToLedgerDialogProps = {
@@ -41,10 +42,32 @@ export type SaveToLedgerDialogProps = {
   initialDocNumber: string;
   initialDocDate: string;
   initialBillDiscountText: string;
+  /** AI-suggested document type (human can override). */
+  initialDocType?: GoodsReceiptDocType;
+  /** AI-suggested VAT type (human can override). */
+  initialVatType?: VatCalculationType;
   matchedCount: number;
   isSaving: boolean;
   onConfirm: (payload: SaveToLedgerConfirmPayload) => void;
 };
+
+const selectClassName = cn(
+  "flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm outline-none transition",
+  "focus:border-blue-400 focus:ring-2 focus:ring-blue-100",
+  "disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400",
+);
+
+const DOC_TYPE_OPTIONS: { value: GoodsReceiptDocType; label: string }[] = [
+  { value: "REC", label: "ใบรับสินค้า (REC)" },
+  { value: "INV_DO", label: "ใบส่งของ (INV_DO)" },
+  { value: "TAX_INV", label: "ใบกำกับภาษี (TAX_INV)" },
+];
+
+const VAT_TYPE_OPTIONS: { value: VatCalculationType; label: string }[] = [
+  { value: "NONE", label: "ไม่มีภาษี (NONE)" },
+  { value: "INCLUSIVE", label: "รวมภาษี (INCLUSIVE)" },
+  { value: "EXCLUSIVE", label: "แยกภาษี (EXCLUSIVE)" },
+];
 
 export default function SaveToLedgerDialog({
   open,
@@ -53,6 +76,8 @@ export default function SaveToLedgerDialog({
   initialDocNumber,
   initialDocDate,
   initialBillDiscountText,
+  initialDocType = "REC",
+  initialVatType = "NONE",
   matchedCount,
   isSaving,
   onConfirm,
@@ -60,15 +85,14 @@ export default function SaveToLedgerDialog({
   const [docNumber, setDocNumber] = useState(initialDocNumber);
   const [docDate, setDocDate] = useState(initialDocDate);
   const [billDiscountText, setBillDiscountText] = useState(initialBillDiscountText);
+  const [docType, setDocType] = useState<GoodsReceiptDocType>(initialDocType);
+  const [vatType, setVatType] = useState<VatCalculationType>(initialVatType);
 
   const [duplicateCheck, setDuplicateCheck] = useState<{
     isDuplicate: boolean;
     isChecking: boolean;
   }>({ isDuplicate: false, isChecking: false });
 
-  // Reset the form to the latest OCR / parent values every time the dialog
-  // transitions from closed -> open (adjusting state during render,
-  // React-sanctioned, instead of a `useEffect`).
   const [wasOpen, setWasOpen] = useState(open);
   if (wasOpen !== open) {
     setWasOpen(open);
@@ -76,15 +100,11 @@ export default function SaveToLedgerDialog({
       setDocNumber(initialDocNumber);
       setDocDate(initialDocDate);
       setBillDiscountText(initialBillDiscountText);
+      setDocType(initialDocType);
+      setVatType(initialVatType);
     }
   }
 
-  /**
-   * Early Warning check — debounced, fires on open and whenever the vendor,
-   * doc number, or doc date change, matching the
-   * `doc_headers_contact_doc_no_date_key` composite UNIQUE constraint
-   * exactly (vendor_id + doc_no + doc_date).
-   */
   useEffect(() => {
     if (!open) return;
 
@@ -103,7 +123,6 @@ export default function SaveToLedgerDialog({
         (result) => {
           if (cancelled) return;
           if (result.error) {
-            // Fail-open: don't block confirmation on a check-failure.
             setDuplicateCheck({ isDuplicate: false, isChecking: false });
             return;
           }
@@ -132,6 +151,8 @@ export default function SaveToLedgerDialog({
       docNumber: docNumber.trim(),
       docDate: docDate.trim(),
       billDiscountText: billDiscountText.trim(),
+      docType,
+      vatType,
     });
   }
 
@@ -141,8 +162,8 @@ export default function SaveToLedgerDialog({
         <DialogHeader>
           <DialogTitle>บันทึกรับสินค้าเข้าคลัง (Save to Ledger)</DialogTitle>
           <DialogDescription>
-            ตรวจสอบ/แก้ไขเลขที่และวันที่เอกสารอ้างอิงก่อนบันทึก —{" "}
-            {matchedCount.toLocaleString("th-TH")} รายการที่จับคู่แล้วจะถูกบันทึกเข้าคลัง
+            ตรวจสอบเลขที่ / วันที่ / ประเภทเอกสารและภาษีก่อนบันทึก — ค่าเริ่มต้นมาจาก AI
+            (แก้ไขได้หากอ่านพลาด) · {matchedCount.toLocaleString("th-TH")} รายการที่จับคู่แล้วจะถูกบันทึกเข้าคลัง
           </DialogDescription>
         </DialogHeader>
 
@@ -172,6 +193,41 @@ export default function SaveToLedgerDialog({
           </div>
         </div>
 
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <div>
+            <Label htmlFor="save-ledger-doc-type">ประเภทเอกสาร (Document Type)</Label>
+            <select
+              id="save-ledger-doc-type"
+              value={docType}
+              onChange={(e) => setDocType(e.target.value as GoodsReceiptDocType)}
+              disabled={isSaving}
+              className={selectClassName}
+            >
+              {DOC_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <Label htmlFor="save-ledger-vat-type">ประเภทภาษี (VAT Type)</Label>
+            <select
+              id="save-ledger-vat-type"
+              value={vatType}
+              onChange={(e) => setVatType(e.target.value as VatCalculationType)}
+              disabled={isSaving}
+              className={selectClassName}
+            >
+              {VAT_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         <div className="mt-3">
           <Label htmlFor="save-ledger-bill-discount">ส่วนลดท้ายบิล (%, บาท)</Label>
           <Input
@@ -182,7 +238,10 @@ export default function SaveToLedgerDialog({
             disabled={isSaving}
           />
           <p className="mt-1 text-[11px] text-slate-400">
-            เช่น 40%, 1500 — ระบบจะกระจายส่วนลดนี้ลงทุกรายการตามสัดส่วนมูลค่า (ไม่รวมของแถม)
+            เช่น 40%, 1500 — ระบบจะกระจายส่วนลดนี้ลงทุกรายการตามสัดส่วนมูลค่า
+            {vatType === "INCLUSIVE"
+              ? " (โหมดรวมภาษี: ถอด VAT 7% ออกก่อนคำนวณต้นทุน LPP)"
+              : ""}
           </p>
         </div>
 

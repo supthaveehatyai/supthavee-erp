@@ -20,14 +20,15 @@ function Command({
   );
 }
 
-function CommandInput({
-  className,
-  ...props
-}: React.ComponentProps<typeof CommandPrimitive.Input>) {
+const CommandInput = React.forwardRef<
+  HTMLInputElement,
+  React.ComponentProps<typeof CommandPrimitive.Input>
+>(function CommandInput({ className, ...props }, ref) {
   return (
     <div className="flex items-center border-b border-slate-100 px-3" cmdk-input-wrapper="">
       <Search className="mr-2 size-4 shrink-0 text-slate-400" />
       <CommandPrimitive.Input
+        ref={ref}
         className={cn(
           "flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:opacity-50",
           className,
@@ -36,7 +37,8 @@ function CommandInput({
       />
     </div>
   );
-}
+});
+CommandInput.displayName = "CommandInput";
 
 function CommandList({
   className,
