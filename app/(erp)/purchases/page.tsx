@@ -58,11 +58,11 @@ function formatDate(value: string | null | undefined): string {
 function docTypeLabel(docType: DocumentType): string {
   const labels: Partial<Record<DocumentType, string>> = {
     PO: "ใบสั่งซื้อ",
-    REC: "ใบรับสินค้า / บิลซื้อ",
-    INV_DO: "ใบส่งของ (ซื้อ)",
-    TAX_INV: "ใบกำกับภาษี (ซื้อ)",
-    INT_REC: "รับภายใน",
-    QT: "ใบเสนอราคา",
+    AP_TAX: "ใบส่งของ/ใบกำกับ (ตั้งหนี้)",
+    AP_INV: "บิลธรรมดา (ตั้งหนี้ Non-VAT)",
+    AP_CASH: "บิลเงินสด/ใบกำกับ (จ่ายทันที)",
+    DEP_OUT: "มัดจำจ่าย",
+    PAY: "ใบจ่ายชำระ",
   };
   return labels[docType] ?? docType;
 }

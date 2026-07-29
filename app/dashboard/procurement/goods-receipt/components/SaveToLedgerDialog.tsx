@@ -58,9 +58,18 @@ const selectClassName = cn(
 );
 
 const DOC_TYPE_OPTIONS: { value: GoodsReceiptDocType; label: string }[] = [
-  { value: "REC", label: "ใบรับสินค้า (REC)" },
-  { value: "INV_DO", label: "ใบส่งของ (INV_DO)" },
-  { value: "TAX_INV", label: "ใบกำกับภาษี (TAX_INV)" },
+  {
+    value: "AP_TAX",
+    label: "ใบส่งของ/ใบกำกับภาษี (ตั้งหนี้) — AP_TAX",
+  },
+  {
+    value: "AP_INV",
+    label: "ใบส่งของ/บิลธรรมดา (ตั้งหนี้ Non-VAT) — AP_INV",
+  },
+  {
+    value: "AP_CASH",
+    label: "บิลเงินสด/ใบกำกับภาษี (จ่ายทันที) — AP_CASH",
+  },
 ];
 
 const VAT_TYPE_OPTIONS: { value: VatCalculationType; label: string }[] = [
@@ -76,7 +85,7 @@ export default function SaveToLedgerDialog({
   initialDocNumber,
   initialDocDate,
   initialBillDiscountText,
-  initialDocType = "REC",
+  initialDocType = "AP_TAX",
   initialVatType = "NONE",
   matchedCount,
   isSaving,
@@ -85,7 +94,13 @@ export default function SaveToLedgerDialog({
   const [docNumber, setDocNumber] = useState(initialDocNumber);
   const [docDate, setDocDate] = useState(initialDocDate);
   const [billDiscountText, setBillDiscountText] = useState(initialBillDiscountText);
-  const [docType, setDocType] = useState<GoodsReceiptDocType>(initialDocType);
+  const [docType, setDocType] = useState<GoodsReceiptDocType>(
+    initialDocType === "AP_TAX" ||
+      initialDocType === "AP_INV" ||
+      initialDocType === "AP_CASH"
+      ? initialDocType
+      : "AP_TAX",
+  );
   const [vatType, setVatType] = useState<VatCalculationType>(initialVatType);
 
   const [duplicateCheck, setDuplicateCheck] = useState<{
@@ -100,7 +115,13 @@ export default function SaveToLedgerDialog({
       setDocNumber(initialDocNumber);
       setDocDate(initialDocDate);
       setBillDiscountText(initialBillDiscountText);
-      setDocType(initialDocType);
+      setDocType(
+        initialDocType === "AP_TAX" ||
+          initialDocType === "AP_INV" ||
+          initialDocType === "AP_CASH"
+          ? initialDocType
+          : "AP_TAX",
+      );
       setVatType(initialVatType);
     }
   }

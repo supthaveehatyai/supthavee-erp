@@ -1,16 +1,29 @@
 /**
- * Phase 4 — Document constants (shared by Server Actions + UI).
+ * Document type constants — Sales / Purchases architecture.
  * Kept outside `"use server"` modules — Next.js only allows async function exports there.
  */
 
+/** Canonical document types (DB enum `public.document_type`). */
 export const DOCUMENT_TYPES = [
+  // Sales
   "QT",
-  "PO",
-  "ABB",
-  "DEP",
+  "SO",
   "INV_DO",
-  "REC",
   "TAX_INV",
+  "CS_TAX",
+  "ABB",
+  "DEP_IN",
+  "REC",
+  "CN",
+  // Purchases
+  "PO",
+  "AP_TAX",
+  "AP_INV",
+  "AP_CASH",
+  "DEP_OUT",
+  "PAY",
+  // Legacy (readable until fully migrated)
+  "DEP",
   "INT_REC",
 ] as const;
 
@@ -23,47 +36,124 @@ export const DOCUMENT_STATUSES = [
   "VOID",
 ] as const;
 
-/** Running-number prefix per Blueprint type (e.g. TAX_INV → INV-YYMM-XXXX). */
+/** Running-number prefix per type → `{PREFIX}-{YYMM}-{XXXX}`. */
 export const DOCUMENT_TYPE_PREFIX = {
   QT: "QT",
-  PO: "PO",
-  ABB: "ABB",
-  DEP: "DEP",
+  SO: "SO",
   INV_DO: "DO",
-  REC: "REC",
   TAX_INV: "INV",
+  CS_TAX: "CS",
+  ABB: "ABB",
+  DEP_IN: "DIN",
+  REC: "REC",
+  CN: "CN",
+  PO: "PO",
+  AP_TAX: "APT",
+  AP_INV: "API",
+  AP_CASH: "APC",
+  DEP_OUT: "DOUT",
+  PAY: "PAY",
+  DEP: "DEP",
   INT_REC: "INT",
 } as const;
 
 /**
- * Purchase Document List — strict allow-list (prevents sales INV_DO/TAX_INV leakage).
+ * Sales Document List — strict allow-list.
  */
-export const PURCHASE_DOC_TYPES = ["PO", "REC"] as const;
+export const SALES_DOC_TYPES = [
+  "QT",
+  "SO",
+  "INV_DO",
+  "TAX_INV",
+  "CS_TAX",
+  "ABB",
+  "DEP_IN",
+  "REC",
+  "CN",
+] as const;
 
 /**
- * Document types selectable on Smart Goods Receipt (Save to Ledger).
- * Note: Purchase List only surfaces PO/REC; INV_DO/TAX_INV here still write Phase 4 docs
- * but are classified as sales-side types for list views.
+ * Purchases Document List — strict allow-list.
  */
-export const GOODS_RECEIPT_DOC_TYPES = ["REC", "INV_DO", "TAX_INV"] as const;
+export const PURCHASE_DOC_TYPES = [
+  "PO",
+  "AP_TAX",
+  "AP_INV",
+  "AP_CASH",
+  "DEP_OUT",
+  "PAY",
+] as const;
+
+/**
+ * Smart Goods Receipt / Manual Receipt — vendor bill types only.
+ */
+export const GOODS_RECEIPT_DOC_TYPES = [
+  "AP_TAX",
+  "AP_INV",
+  "AP_CASH",
+] as const;
 
 export type GoodsReceiptDocType = (typeof GOODS_RECEIPT_DOC_TYPES)[number];
 
 /**
- * Doc types that deduct stock on complete (Blueprint Module B + C).
- * QT / DEP / PO do not move inventory.
+ * Doc types that deduct stock on complete (sales outflow).
  */
 export const STOCK_OUT_DOC_TYPES = [
   "ABB",
   "INV_DO",
   "TAX_INV",
-  "INT_REC",
+  "CS_TAX",
 ] as const;
 
-/**
- * Sales Document List — strict allow-list (prevents purchase PO/REC leakage).
- */
-export const SALES_DOC_TYPES = ["QT", "ABB", "INV_DO", "TAX_INV"] as const;
-
 /** Target types allowed by `convertDocument` (QT → sales bill). */
-export const CONVERT_TARGET_DOC_TYPES = ["INV_DO", "TAX_INV", "ABB"] as const;
+export const CONVERT_TARGET_DOC_TYPES = [
+  "INV_DO",
+  "TAX_INV",
+  "CS_TAX",
+  "ABB",
+] as const;
+
+/** Credit invoices — open AR/AP until paid (Knock-off). */
+export const CREDIT_DOC_TYPES = [
+  "INV_DO",
+  "TAX_INV",
+  "AP_TAX",
+  "AP_INV",
+] as const;
+
+/** Cash / settled-on-issue documents. */
+export const CASH_DOC_TYPES = ["CS_TAX", "ABB", "AP_CASH"] as const;
+
+/** Sales AR invoice types (customer receivables). */
+export const AR_INVOICE_DOC_TYPES = ["INV_DO", "TAX_INV"] as const;
+
+export type FinancePaymentStatus = "UNPAID" | "PARTIAL" | "PAID";
+
+/**
+ * Initial `payment_status` for a document type.
+ * Credit → UNPAID; Cash → PAID; others (QT/SO/PO/…) → UNPAID by default.
+ */
+export function resolveInitialPaymentStatus(
+  docType: string,
+): FinancePaymentStatus {
+  if ((CASH_DOC_TYPES as readonly string[]).includes(docType)) {
+    return "PAID";
+  }
+  if ((CREDIT_DOC_TYPES as readonly string[]).includes(docType)) {
+    return "UNPAID";
+  }
+  // QT / SO / PO / DEP_* / REC / CN / PAY — no open trade receivable by default
+  if (docType === "REC" || docType === "PAY") return "PAID";
+  return "UNPAID";
+}
+
+/**
+ * Lifecycle status after issue/save:
+ * - QT only → COMPLETED (convertible quotation)
+ * - Accounting docs → ISSUED
+ */
+export function resolveIssuedDocumentStatus(
+  docType: string,
+): "ISSUED" | "COMPLETED" {
+  return docType === "QT" ? "COMPLETED" : "ISSUED";
+}

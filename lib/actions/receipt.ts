@@ -21,6 +21,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   DOCUMENT_TYPE_PREFIX,
   GOODS_RECEIPT_DOC_TYPES,
+  resolveInitialPaymentStatus,
+  resolveIssuedDocumentStatus,
   type GoodsReceiptDocType,
 } from "@/lib/constants/document";
 import { calculateNetUnitCost } from "@/lib/utils/pricing";
@@ -157,23 +159,50 @@ function emptyParseReceiptOcrResult(
     data: [],
     documentNumber: null,
     documentDate: null,
-    docType: "REC",
+    docType: "AP_TAX",
     vatType: "NONE",
     error,
   };
 }
 
+/**
+ * Goods Receipt persists as purchase-side AP_* only.
+ * OCR/vendor labels (TAX_INV / INV_DO / REC / CASH) map into AP_TAX / AP_INV / AP_CASH.
+ */
 function normalizeGoodsReceiptDocType(value: unknown): GoodsReceiptDocType {
   const raw = String(value ?? "")
     .trim()
     .toUpperCase()
     .replace(/[\s-]+/g, "_");
+
   if (isGoodsReceiptDocType(raw)) return raw;
-  if (raw.includes("TAX")) return "TAX_INV";
-  if (raw.includes("INV_DO") || raw === "DO" || raw.includes("DELIVERY")) {
-    return "INV_DO";
+
+  if (
+    raw.includes("CASH") ||
+    raw.includes("เงินสด") ||
+    raw === "AP_CASH"
+  ) {
+    return "AP_CASH";
   }
-  return "REC";
+  if (
+    raw.includes("TAX") ||
+    raw === "TAX_INV" ||
+    raw.includes("VAT") ||
+    raw === "AP_TAX"
+  ) {
+    return "AP_TAX";
+  }
+  if (
+    raw === "INV_DO" ||
+    raw === "REC" ||
+    raw === "PO" ||
+    raw.includes("DELIVERY") ||
+    raw === "AP_INV"
+  ) {
+    return "AP_INV";
+  }
+
+  return "AP_TAX";
 }
 
 function normalizeOcrVatType(value: unknown): VatCalculationType {
@@ -635,7 +664,7 @@ export async function saveGoodsReceiptToLedger(
   documentRef: string,
   documentDate: string,
   billDiscountText?: string | null,
-  docType: GoodsReceiptDocType = "REC",
+  docType: GoodsReceiptDocType = "AP_TAX",
   vatType: VatCalculationType = "NONE",
   attachmentUrl?: string | null,
 ): Promise<SaveGoodsReceiptToLedgerResult> {
@@ -645,7 +674,7 @@ export async function saveGoodsReceiptToLedger(
 
   const resolvedDocType: GoodsReceiptDocType = isGoodsReceiptDocType(docType)
     ? docType
-    : "REC";
+    : "AP_TAX";
   const resolvedVatType: VatCalculationType = isVatCalculationType(vatType)
     ? vatType
     : "NONE";
@@ -775,6 +804,7 @@ export async function saveGoodsReceiptToLedger(
         sub_total: subTotal,
         discount_amount: discountAmount,
         grand_total: grandTotal,
+        payment_status: resolveInitialPaymentStatus(resolvedDocType),
       })
       .select("id, doc_no")
       .single();
@@ -821,7 +851,7 @@ export async function saveGoodsReceiptToLedger(
 
     // 2b. Phase 4 `documents` + `document_items` (Purchase Document List bridge)
     const runningPrefix =
-      DOCUMENT_TYPE_PREFIX[resolvedDocType as DocumentType] ?? "REC";
+      DOCUMENT_TYPE_PREFIX[resolvedDocType as DocumentType] ?? "APT";
     const { data: phase4DocNoRaw, error: phase4NoError } = await supabaseAdmin.rpc(
       "generate_document_no",
       { p_doc_type: runningPrefix, p_doc_date: docDate },
@@ -849,7 +879,7 @@ export async function saveGoodsReceiptToLedger(
       .insert({
         doc_no: phase4DocNo,
         doc_type: resolvedDocType,
-        status: "COMPLETED",
+        status: resolveIssuedDocumentStatus(resolvedDocType),
         doc_date: docDate,
         contact_id: vendorId,
         contact_person_id: null,
@@ -864,7 +894,11 @@ export async function saveGoodsReceiptToLedger(
         net_before_vat: vatSummary.net_before_vat,
         vat_amount: vatSummary.vat_amount,
         discount_text: billDiscountText?.trim() || null,
-        payment_status: "Pending",
+        payment_status: resolveInitialPaymentStatus(resolvedDocType),
+        paid_amount:
+          resolveInitialPaymentStatus(resolvedDocType) === "PAID"
+            ? grandTotal
+            : 0,
         notes: vendorInvoiceNote,
         attachment_url: resolvedAttachmentUrl,
         attached_file_url: resolvedAttachmentUrl,
@@ -1065,10 +1099,10 @@ export async function saveManualGoodsReceipt(
       : new Date().toISOString().slice(0, 10);
 
     const resolvedDocType: GoodsReceiptDocType = isGoodsReceiptDocType(
-      String(input?.docType ?? "REC"),
+      String(input?.docType ?? "AP_TAX"),
     )
       ? (input.docType as GoodsReceiptDocType)
-      : "REC";
+      : "AP_TAX";
     const resolvedVatType: VatCalculationType = isVatCalculationType(
       String(input?.vatType ?? "NONE"),
     )
@@ -1228,7 +1262,7 @@ export async function saveManualGoodsReceipt(
     const grandTotal = roundMoney(vatSummary.grand_total);
 
     const runningPrefix =
-      DOCUMENT_TYPE_PREFIX[resolvedDocType as DocumentType] ?? "REC";
+      DOCUMENT_TYPE_PREFIX[resolvedDocType as DocumentType] ?? "APT";
     const { data: phase4DocNoRaw, error: phase4NoError } = await supabaseAdmin.rpc(
       "generate_document_no",
       { p_doc_type: runningPrefix, p_doc_date: docDate },
@@ -1256,6 +1290,7 @@ export async function saveManualGoodsReceipt(
         sub_total: subTotal,
         discount_amount: discountAmount,
         grand_total: grandTotal,
+        payment_status: resolveInitialPaymentStatus(resolvedDocType),
       })
       .select("id")
       .single();
@@ -1300,7 +1335,7 @@ export async function saveManualGoodsReceipt(
       .insert({
         doc_no: phase4DocNo,
         doc_type: resolvedDocType,
-        status: "COMPLETED",
+        status: resolveIssuedDocumentStatus(resolvedDocType),
         doc_date: docDate,
         contact_id: vendorId,
         contact_person_id: null,
@@ -1315,7 +1350,11 @@ export async function saveManualGoodsReceipt(
         net_before_vat: vatSummary.net_before_vat,
         vat_amount: vatSummary.vat_amount,
         discount_text: discountText,
-        payment_status: "Pending",
+        payment_status: resolveInitialPaymentStatus(resolvedDocType),
+        paid_amount:
+          resolveInitialPaymentStatus(resolvedDocType) === "PAID"
+            ? grandTotal
+            : 0,
         notes,
         updated_at: nowIso,
       })

@@ -13,7 +13,11 @@ import {
   CONVERT_TARGET_DOC_TYPES,
   DOCUMENT_TYPE_PREFIX,
   DOCUMENT_TYPES,
+  PURCHASE_DOC_TYPES,
+  SALES_DOC_TYPES,
   STOCK_OUT_DOC_TYPES,
+  resolveInitialPaymentStatus,
+  resolveIssuedDocumentStatus,
 } from "@/lib/constants/document";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import {
@@ -320,7 +324,7 @@ export async function createDraftDocument(
         net_before_vat: summary.net_before_vat,
         vat_amount: summary.vat_amount,
         discount_text: discountText,
-        payment_status: "Pending",
+        payment_status: resolveInitialPaymentStatus(docType),
         updated_at: nowIso,
       })
       .select("id, doc_no")
@@ -440,7 +444,7 @@ export async function createDocument(
       doc_date: nowIso.slice(0, 10),
       contact_id: contactId,
       contact_person_id: contactPersonId,
-      payment_status: "Pending",
+      payment_status: resolveInitialPaymentStatus(docType),
       updated_at: nowIso,
     };
     const selectColumns =
@@ -901,6 +905,11 @@ export async function completeDocument(
         sub_total: Math.round(subTotal * 100) / 100,
         tax_amount: taxAmount,
         grand_total: grandTotal,
+        payment_status: resolveInitialPaymentStatus(document.doc_type as string),
+        paid_amount:
+          resolveInitialPaymentStatus(document.doc_type as string) === "PAID"
+            ? grandTotal
+            : 0,
         updated_at: nowIso,
       })
       .eq("id", documentId)
@@ -1172,7 +1181,8 @@ export async function getDocumentByNo(
 /* -------------------------------------------------------------------------- */
 
 /**
- * Confirm a DRAFT document → COMPLETED and post inventory_ledger OUT rows.
+ * Confirm a DRAFT document → ISSUED (or COMPLETED for QT only)
+ * and post inventory_ledger OUT rows when applicable.
  * Never mutates `products` stock directly — ledger only.
  */
 export async function issueDocument(
@@ -1188,7 +1198,7 @@ export async function issueDocument(
 
     const { data: document, error: documentError } = await supabase
       .from("documents")
-      .select("id, doc_no, doc_type, status")
+      .select("id, doc_no, doc_type, status, grand_total, paid_amount")
       .eq("id", id)
       .maybeSingle();
 
@@ -1223,13 +1233,20 @@ export async function issueDocument(
       };
     }
 
-    const completedStatus: DocumentStatus = "COMPLETED";
+    const docType = document.doc_type as DocumentType;
+    const issuedStatus = resolveIssuedDocumentStatus(docType);
+    const paymentStatus = resolveInitialPaymentStatus(docType);
+    const grandTotal = Number(document.grand_total ?? 0);
+    const paidAmount =
+      paymentStatus === "PAID" ? grandTotal : Number(document.paid_amount ?? 0);
     const nowIso = new Date().toISOString();
 
     const { error: statusError } = await supabase
       .from("documents")
       .update({
-        status: completedStatus,
+        status: issuedStatus,
+        payment_status: paymentStatus,
+        paid_amount: paidAmount,
         updated_at: nowIso,
       })
       .eq("id", id)
@@ -1238,11 +1255,12 @@ export async function issueDocument(
     if (statusError) {
       return {
         data: null,
-        error: statusError.message ?? "อัปเดตสถานะเอกสารเป็น COMPLETED ไม่สำเร็จ",
+        error:
+          statusError.message ??
+          `อัปเดตสถานะเอกสารเป็น ${issuedStatus} ไม่สำเร็จ`,
       };
     }
 
-    const docType = document.doc_type as DocumentType;
     let ledgerCount = 0;
 
     if (isStockOutDocType(docType)) {
@@ -1253,7 +1271,7 @@ export async function issueDocument(
           doc_header_id: null as string | null,
           trans_type: "OUT",
           qty: Math.round(Number(row.qty ?? 0)),
-          notes: `ขายจากเอกสาร ${document.doc_no} | document_id=${id} | ออกเอกสาร COMPLETED`,
+          notes: `ขายจากเอกสาร ${document.doc_no} | document_id=${id} | ออกเอกสาร ${issuedStatus}`,
         }))
         .filter((row) => row.qty > 0);
 
@@ -1287,7 +1305,7 @@ export async function issueDocument(
       data: {
         document_id: id,
         document_no: document.doc_no as string,
-        status: completedStatus,
+        status: issuedStatus,
         ledger_count: ledgerCount,
       },
       error: null,
@@ -1348,7 +1366,7 @@ export async function getSalesDocuments(
         )
       `,
       )
-      .in("doc_type", ["QT", "ABB", "INV_DO", "TAX_INV"]);
+      .in("doc_type", [...SALES_DOC_TYPES]);
 
     if (search) {
       const pattern = `%${search}%`;
@@ -1453,7 +1471,7 @@ export async function getPurchaseDocuments(
         )
       `,
       )
-      .in("doc_type", ["PO", "REC"]);
+      .in("doc_type", [...PURCHASE_DOC_TYPES]);
 
     if (search) {
       const pattern = `%${search}%`;
@@ -1662,7 +1680,7 @@ export async function convertDocument(
         total_amount: Number(source.total_amount ?? source.sub_total ?? 0),
         net_before_vat: Number(source.net_before_vat ?? 0),
         vat_amount: Number(source.vat_amount ?? source.tax_amount ?? 0),
-        payment_status: "Pending",
+        payment_status: resolveInitialPaymentStatus(targetDocType),
         notes,
         updated_at: nowIso,
       })

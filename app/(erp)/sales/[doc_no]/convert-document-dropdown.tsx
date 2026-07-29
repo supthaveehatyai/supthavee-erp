@@ -26,6 +26,7 @@ export type ConvertDocumentDropdownProps = {
 const OPTIONS: { type: ConvertTargetDocType; label: string }[] = [
   { type: "INV_DO", label: "สร้างใบส่งของ (INV_DO)" },
   { type: "TAX_INV", label: "สร้างใบกำกับภาษี (TAX_INV)" },
+  { type: "CS_TAX", label: "สร้างใบกำกับเงินสด (CS_TAX)" },
 ];
 
 export default function ConvertDocumentDropdown({

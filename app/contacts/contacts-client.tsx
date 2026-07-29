@@ -1,19 +1,21 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
 import VendorForm, { validateVendorOcrConfig } from "@/app/contacts/VendorForm";
 import {
-  contactSelect,
   DEFAULT_OCR_PATTERN_JSON,
   formatOcrPatternConfig,
-  normalizeContactRow,
   type Contact,
   type ContactFormValues,
   type ContactPersonInput,
   type ContactType,
   type CustomerType,
 } from "@/app/contacts/contacts";
+import {
+  createContact,
+  getContacts,
+  importContacts,
+} from "@/lib/actions/contacts";
 
 type TypeFilter = "All" | ContactType;
 type SortDirection = "asc" | "desc";
@@ -326,10 +328,16 @@ function Icon({
 const fieldClass =
   "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50";
 
-export default function ContactsClient() {
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
+export default function ContactsClient({
+  initialContacts = [],
+  initialError = "",
+}: {
+  initialContacts?: Contact[];
+  initialError?: string;
+}) {
+  const [contacts, setContacts] = useState<Contact[]>(initialContacts);
+  const [isLoading, setIsLoading] = useState(initialContacts.length === 0 && !initialError);
+  const [loadError, setLoadError] = useState(initialError);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("All");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
@@ -348,41 +356,23 @@ export default function ContactsClient() {
     setIsLoading(true);
     setLoadError("");
 
-    const { data, error } = await supabase
-      .from("contacts")
-      .select(contactSelect)
-      .order("created_at", { ascending: false });
-
-    if (error) {
+    const result = await getContacts();
+    if (result.error) {
       setContacts([]);
-      setLoadError(error.message);
+      setLoadError(result.error);
     } else {
-      setContacts((data ?? []).map((row) => normalizeContactRow(row)));
+      setContacts(result.data);
     }
     setIsLoading(false);
   }, []);
 
   useEffect(() => {
-    let active = true;
-
-    void supabase
-      .from("contacts")
-      .select(contactSelect)
-      .order("created_at", { ascending: false })
-      .then(({ data, error }) => {
-        if (!active) return;
-        if (error) {
-          setLoadError(error.message);
-        } else {
-          setContacts((data ?? []).map((row) => normalizeContactRow(row)));
-        }
-        setIsLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
+    if (initialContacts.length > 0 || initialError) {
+      setIsLoading(false);
+      return;
+    }
+    void loadContacts();
+  }, [initialContacts.length, initialError, loadContacts]);
 
   useEffect(() => {
     if (!isDialogOpen && !isImportOpen) return;
@@ -514,12 +504,11 @@ export default function ContactsClient() {
           ? row.default_price_tier
           : "Retail",
       credit_days: row.credit_days ? Number(row.credit_days) : 0,
-      is_active: true,
     }));
 
-    const { error } = await supabase.from("contacts").insert(payload);
-    if (error) {
-      setImportError(error.message);
+    const result = await importContacts(payload);
+    if (!result.success) {
+      setImportError(result.error ?? "นำเข้าข้อมูลไม่สำเร็จ");
       setIsImporting(false);
       return;
     }
@@ -611,59 +600,30 @@ export default function ContactsClient() {
     const persons = form.persons.filter((person) => person.name.trim());
     setIsSaving(true);
 
-    const { data: contact, error: contactError } = await supabase
-      .from("contacts")
-      .insert({
-        contact_type: form.contactType,
-        customer_type: form.customerType,
-        company_name: companyName,
-        tax_id: form.taxId.trim() || null,
-        branch_code: form.branchCode.trim() || "สำนักงานใหญ่",
-        address: form.address.trim() || null,
-        phone: form.phone.trim() || null,
-        ocr_pattern_config:
-          form.contactType === "Vendor" ? ocrPatternConfig : {},
-      })
-      .select(contactSelect)
-      .single();
+    const result = await createContact({
+      contactType: form.contactType,
+      customerType: form.customerType,
+      companyName,
+      taxId: form.taxId.trim() || null,
+      branchCode: form.branchCode.trim() || "สำนักงานใหญ่",
+      address: form.address.trim() || null,
+      phone: form.phone.trim() || null,
+      ocrPatternConfig:
+        form.contactType === "Vendor" ? ocrPatternConfig : {},
+      persons: persons.map((person) => ({
+        name: person.name.trim(),
+        phone: person.phone.trim() || null,
+        departmentOrRole: person.departmentOrRole.trim() || null,
+      })),
+    });
 
-    if (contactError || !contact) {
-      setFormError(contactError?.message ?? "ไม่สามารถสร้างข้อมูลคู่ค้าได้");
+    if (result.error || !result.data) {
+      setFormError(result.error ?? "ไม่สามารถสร้างข้อมูลคู่ค้าได้");
       setIsSaving(false);
       return;
     }
 
-    const created = normalizeContactRow(contact);
-
-    if (persons.length > 0) {
-      const { error: personsError } = await supabase
-        .from("contact_persons")
-        .insert(
-          persons.map((person, index) => ({
-            contact_id: created.id,
-            name: person.name.trim(),
-            phone: person.phone.trim() || null,
-            department_or_role: person.departmentOrRole.trim() || null,
-            is_primary: index === 0,
-          })),
-        );
-
-      if (personsError) {
-        const { error: rollbackError } = await supabase
-          .from("contacts")
-          .delete()
-          .eq("id", created.id);
-        setFormError(
-          rollbackError
-            ? `บันทึกผู้ประสานงานไม่สำเร็จ และไม่สามารถยกเลิกข้อมูลคู่ค้าอัตโนมัติได้: ${personsError.message}`
-            : `บันทึกผู้ประสานงานไม่สำเร็จ ระบบยกเลิกข้อมูลคู่ค้าแล้ว: ${personsError.message}`,
-        );
-        setIsSaving(false);
-        return;
-      }
-    }
-
-    setContacts((current) => [created, ...current]);
+    setContacts((current) => [result.data!, ...current]);
     setIsSaving(false);
     setIsDialogOpen(false);
     setForm(createEmptyForm());

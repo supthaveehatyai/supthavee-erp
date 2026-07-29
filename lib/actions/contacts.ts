@@ -1,0 +1,240 @@
+"use server";
+
+/**
+ * Contacts / Contact Persons Server Actions.
+ *
+ * Zero Client-Side Fetching: Service Role via `createSupabaseServerClient` only
+ * (bypasses RLS on `contacts` / `contact_persons`).
+ */
+
+import { revalidatePath } from "next/cache";
+import {
+  contactSelect,
+  normalizeContactRow,
+  type Contact,
+  type ContactType,
+  type CustomerType,
+  type OcrPatternConfig,
+  type PriceTier,
+} from "@/app/contacts/contacts";
+import { createSupabaseServerClient } from "@/lib/supabase-server";
+
+const CONTACTS_PATH = "/contacts";
+
+export type ContactPersonPayload = {
+  name: string;
+  phone?: string | null;
+  departmentOrRole?: string | null;
+};
+
+export type CreateContactInput = {
+  contactType: ContactType;
+  customerType: CustomerType | string;
+  companyName: string;
+  taxId?: string | null;
+  branchCode?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  ocrPatternConfig?: OcrPatternConfig;
+  persons?: ContactPersonPayload[];
+};
+
+export type CreateContactResult = {
+  data: Contact | null;
+  error: string | null;
+};
+
+export type GetContactsResult = {
+  data: Contact[];
+  error: string | null;
+};
+
+export type ImportContactRow = {
+  contact_type: ContactType;
+  customer_type: string;
+  company_name: string;
+  tax_id?: string | null;
+  branch_code?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  default_price_tier?: PriceTier | string | null;
+  credit_days?: number | null;
+};
+
+export type ImportContactsResult = {
+  success: boolean;
+  error: string | null;
+  inserted?: number;
+};
+
+/** List all contacts — Service Role (bypass RLS). */
+export async function getContacts(): Promise<GetContactsResult> {
+  try {
+    const supabaseAdmin = createSupabaseServerClient();
+    const { data, error } = await supabaseAdmin
+      .from("contacts")
+      .select(contactSelect)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      return { data: [], error: error.message };
+    }
+
+    return {
+      data: (data ?? []).map((row) => normalizeContactRow(row)),
+      error: null,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "โหลดรายการคู่ค้าไม่สำเร็จ";
+    return { data: [], error: message };
+  }
+}
+
+/**
+ * Create a contact (+ optional contact_persons).
+ * Rolls back the contact if persons insert fails.
+ */
+export async function createContact(
+  input: CreateContactInput,
+): Promise<CreateContactResult> {
+  try {
+    const companyName = input.companyName?.trim() ?? "";
+    if (!companyName) {
+      return { data: null, error: "กรุณากรอกชื่อบริษัทหรือชื่อคู่ค้า" };
+    }
+
+    const contactType: ContactType =
+      input.contactType === "Vendor" ? "Vendor" : "Customer";
+    const persons = (input.persons ?? [])
+      .map((person) => ({
+        name: person.name?.trim() ?? "",
+        phone: person.phone?.trim() || null,
+        departmentOrRole: person.departmentOrRole?.trim() || null,
+      }))
+      .filter((person) => person.name.length > 0);
+
+    const incomplete = (input.persons ?? []).find(
+      (person) =>
+        !(person.name?.trim() ?? "") &&
+        ((person.phone?.trim() ?? "") ||
+          (person.departmentOrRole?.trim() ?? "")),
+    );
+    if (incomplete) {
+      return { data: null, error: "กรุณากรอกชื่อของผู้ประสานงานให้ครบถ้วน" };
+    }
+
+    const supabaseAdmin = createSupabaseServerClient();
+
+    const { data: contact, error: contactError } = await supabaseAdmin
+      .from("contacts")
+      .insert({
+        contact_type: contactType,
+        customer_type: input.customerType || "นิติบุคคล",
+        company_name: companyName,
+        tax_id: input.taxId?.trim() || null,
+        branch_code: input.branchCode?.trim() || "สำนักงานใหญ่",
+        address: input.address?.trim() || null,
+        phone: input.phone?.trim() || null,
+        ocr_pattern_config:
+          contactType === "Vendor" ? (input.ocrPatternConfig ?? {}) : {},
+        is_active: true,
+      })
+      .select(contactSelect)
+      .single();
+
+    if (contactError || !contact) {
+      return {
+        data: null,
+        error: contactError?.message ?? "ไม่สามารถสร้างข้อมูลคู่ค้าได้",
+      };
+    }
+
+    const created = normalizeContactRow(contact);
+
+    if (persons.length > 0) {
+      const { error: personsError } = await supabaseAdmin
+        .from("contact_persons")
+        .insert(
+          persons.map((person, index) => ({
+            contact_id: created.id,
+            name: person.name,
+            phone: person.phone,
+            department_or_role: person.departmentOrRole,
+            is_primary: index === 0,
+          })),
+        );
+
+      if (personsError) {
+        const { error: rollbackError } = await supabaseAdmin
+          .from("contacts")
+          .delete()
+          .eq("id", created.id);
+
+        return {
+          data: null,
+          error: rollbackError
+            ? `บันทึกผู้ประสานงานไม่สำเร็จ และไม่สามารถยกเลิกข้อมูลคู่ค้าอัตโนมัติได้: ${personsError.message}`
+            : `บันทึกผู้ประสานงานไม่สำเร็จ ระบบยกเลิกข้อมูลคู่ค้าแล้ว: ${personsError.message}`,
+        };
+      }
+    }
+
+    revalidatePath(CONTACTS_PATH);
+    return { data: created, error: null };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "สร้างข้อมูลคู่ค้าไม่สำเร็จ";
+    return { data: null, error: message };
+  }
+}
+
+/** Bulk CSV import into `contacts`. */
+export async function importContacts(
+  rows: ImportContactRow[],
+): Promise<ImportContactsResult> {
+  try {
+    if (!rows.length) {
+      return { success: false, error: "ไม่มีแถวข้อมูลสำหรับนำเข้า" };
+    }
+
+    const payload = rows.map((row) => ({
+      contact_type:
+        row.contact_type === "Vendor" ? ("Vendor" as const) : ("Customer" as const),
+      customer_type: row.customer_type || "บุคคลธรรมดา",
+      company_name: row.company_name.trim(),
+      tax_id: row.tax_id?.trim() || null,
+      branch_code: row.branch_code?.trim() || "สำนักงานใหญ่",
+      phone: row.phone?.trim() || null,
+      address: row.address?.trim() || null,
+      default_price_tier:
+        row.default_price_tier === "Wholesale" ||
+        row.default_price_tier === "Retail"
+          ? row.default_price_tier
+          : "Retail",
+      credit_days:
+        typeof row.credit_days === "number" && Number.isFinite(row.credit_days)
+          ? row.credit_days
+          : 0,
+      is_active: true,
+    }));
+
+    if (payload.some((row) => !row.company_name)) {
+      return { success: false, error: "พบแถวที่ไม่มีชื่อบริษัท" };
+    }
+
+    const supabaseAdmin = createSupabaseServerClient();
+    const { error } = await supabaseAdmin.from("contacts").insert(payload);
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    revalidatePath(CONTACTS_PATH);
+    return { success: true, error: null, inserted: payload.length };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "นำเข้าข้อมูลคู่ค้าไม่สำเร็จ";
+    return { success: false, error: message };
+  }
+}

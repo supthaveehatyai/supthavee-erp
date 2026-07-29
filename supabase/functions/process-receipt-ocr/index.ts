@@ -57,8 +57,8 @@ type RawOcrExtraction = {
   document_number: string | null;
   /** ISO `YYYY-MM-DD`, already normalized from Thai Buddhist Era if needed — or `null` if not found. */
   document_date: string | null;
-  /** ERP `document_type` subset for goods receipt: TAX_INV | INV_DO | REC */
-  doc_type: "TAX_INV" | "INV_DO" | "REC";
+  /** Purchase goods-receipt types: AP_TAX | AP_INV | AP_CASH */
+  doc_type: "AP_TAX" | "AP_INV" | "AP_CASH";
   /** ERP `vat_calculation_type`: NONE | INCLUSIVE | EXCLUSIVE */
   vat_type: "NONE" | "INCLUSIVE" | "EXCLUSIVE";
   items: RawOcrLine[];
@@ -92,16 +92,28 @@ function normalizeOcrDocType(value: unknown): RawOcrExtraction["doc_type"] {
     .trim()
     .toUpperCase()
     .replace(/[\s-]+/g, "_");
-  if (raw === "TAX_INV" || raw === "TAXINV" || raw.includes("TAX")) {
-    return "TAX_INV";
+  if (raw === "AP_TAX" || raw === "TAX_INV" || raw === "TAXINV" || raw.includes("TAX")) {
+    return "AP_TAX";
   }
-  if (raw === "INV_DO" || raw === "INVDO" || raw === "DO" || raw.includes("INV_DO")) {
-    return "INV_DO";
+  if (
+    raw === "AP_CASH" ||
+    raw.includes("CASH") ||
+    raw.includes("เงินสด")
+  ) {
+    return "AP_CASH";
   }
-  if (raw === "REC" || raw === "RECEIPT" || raw === "ABB") {
-    return "REC";
+  if (
+    raw === "AP_INV" ||
+    raw === "INV_DO" ||
+    raw === "INVDO" ||
+    raw === "DO" ||
+    raw === "REC" ||
+    raw === "RECEIPT" ||
+    raw.includes("INV_DO")
+  ) {
+    return "AP_INV";
   }
-  return "REC";
+  return "AP_TAX";
 }
 
 function normalizeOcrVatType(value: unknown): RawOcrExtraction["vat_type"] {
@@ -157,11 +169,11 @@ ${
 }
 Thai invoices commonly print the date in Buddhist Era (พ.ศ., e.g. "15/03/2567"). You MUST convert Buddhist Era years to the Gregorian equivalent (subtract 543) and normalize the result to ISO format "YYYY-MM-DD" (e.g. "15/03/2567" → "2024-03-15"). Return it as "document_date" in the JSON response root. If it is truly not visible anywhere on the page, or you cannot confidently parse day/month/year, return an empty string "" — NEVER invent or guess one.
 
-DOCUMENT TYPE (doc_type) — analyze the document TITLE / header label and classify into ONE of these ERP enum values only:
-- "TAX_INV" if the header says ใบกำกับภาษี / Tax Invoice / ใบกำกับภาษีอย่างย่อ
-- "INV_DO" if the header says ใบส่งของ / Delivery Order / ใบส่งสินค้า
-- "REC" if the header says ใบเสร็จ / ใบเสร็จรับเงิน / บิลเงินสด / ใบรับสินค้า / Cash Bill / Receipt, or when the type is unclear
-Return exactly one of: "TAX_INV", "INV_DO", "REC".
+DOCUMENT TYPE (doc_type) — analyze the document TITLE / header label and classify into ONE of these purchase ERP enum values only:
+- "AP_TAX" if the header says ใบกำกับภาษี / Tax Invoice / ใบส่งของ+ใบกำกับ (credit purchase with VAT)
+- "AP_INV" if the header says ใบส่งของ / Delivery Order / บิลธรรมดา / Non-VAT invoice (credit purchase without VAT)
+- "AP_CASH" if the header says บิลเงินสด / ใบเสร็จ / Cash Bill / paid immediately
+Return exactly one of: "AP_TAX", "AP_INV", "AP_CASH".
 
 VAT TYPE (vat_type) — analyze the TOTALS / summary footer (ยอดรวม, ส่วนลด, ภาษีมูลค่าเพิ่ม, ยอดสุทธิ):
 - "EXCLUSIVE" if VAT 7% is ADDED separately after a net/subtotal (e.g. lines show "ภาษีมูลค่าเพิ่ม 7%" or "VAT 7%" as an added amount)
@@ -180,7 +192,7 @@ Other rules:
 - "discount_text" examples: "40%", "41.8%", "40+5%", "50", or "" if no discount.
 - "qty" and "unit_price" MUST be plain numbers — no currency symbols, no thousands separators.
 - Respond with ONLY a valid JSON OBJECT — no markdown code fences, no commentary, no trailing text — matching EXACTLY this shape:
-{"document_number": "", "document_date": "", "doc_type": "REC", "vat_type": "NONE", "items": [{"raw_vendor_sku": "", "raw_description": "", "qty": 0, "unit_price": 0, "discount_text": ""}]}
+{"document_number": "", "document_date": "", "doc_type": "AP_TAX", "vat_type": "NONE", "items": [{"raw_vendor_sku": "", "raw_description": "", "qty": 0, "unit_price": 0, "discount_text": ""}]}
 `.trim();
 }
 

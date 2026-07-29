@@ -61,11 +61,14 @@ const VAT_TYPE_OPTIONS: { value: VatCalculationType; label: string }[] = [
 
 const SALES_DOC_TYPES: { value: DocumentType; label: string }[] = [
   { value: "QT", label: "ใบเสนอราคา (QT)" },
+  { value: "SO", label: "ใบสั่งขาย (SO)" },
   { value: "ABB", label: "ใบเสร็จอย่างย่อ (ABB)" },
-  { value: "DEP", label: "ใบมัดจำ (DEP)" },
+  { value: "DEP_IN", label: "ใบมัดจำรับ (DEP_IN)" },
   { value: "INV_DO", label: "ใบส่งของ / แจ้งหนี้ (INV_DO)" },
   { value: "TAX_INV", label: "ใบกำกับภาษี (TAX_INV)" },
+  { value: "CS_TAX", label: "ใบกำกับเงินสด (CS_TAX)" },
   { value: "REC", label: "ใบเสร็จรับเงิน (REC)" },
+  { value: "CN", label: "ใบลดหนี้ (CN)" },
 ];
 
 const ITEM_COLUMNS = [

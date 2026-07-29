@@ -61,9 +61,18 @@ export type ManualReceiptWorkspaceProps = {
 };
 
 const DOC_TYPE_OPTIONS: { value: GoodsReceiptDocType; label: string }[] = [
-  { value: "REC", label: "ใบรับสินค้า (REC)" },
-  { value: "INV_DO", label: "ใบส่งของ (INV_DO)" },
-  { value: "TAX_INV", label: "ใบกำกับภาษี (TAX_INV)" },
+  {
+    value: "AP_TAX",
+    label: "ใบส่งของ/ใบกำกับภาษี (ตั้งหนี้) — AP_TAX",
+  },
+  {
+    value: "AP_INV",
+    label: "ใบส่งของ/บิลธรรมดา (ตั้งหนี้ Non-VAT) — AP_INV",
+  },
+  {
+    value: "AP_CASH",
+    label: "บิลเงินสด/ใบกำกับภาษี (จ่ายทันที) — AP_CASH",
+  },
 ];
 
 const VAT_TYPE_OPTIONS: { value: VatCalculationType; label: string }[] = [
@@ -103,7 +112,7 @@ export default function ManualReceiptWorkspace({
   const [vendorId, setVendorId] = useState("");
   const [docDate, setDocDate] = useState(todayIsoDate);
   const [documentRef, setDocumentRef] = useState("");
-  const [docType, setDocType] = useState<GoodsReceiptDocType>("REC");
+  const [docType, setDocType] = useState<GoodsReceiptDocType>("AP_TAX");
   const [vatType, setVatType] = useState<VatCalculationType>("NONE");
   const [discountText, setDiscountText] = useState("");
   const [lines, setLines] = useState<ManualReceiptLine[]>([]);
@@ -423,9 +432,9 @@ export default function ManualReceiptWorkspace({
                     ต้นทุน/หน่วย
                   </TableHead>
                   <TableHead className="w-[130px] text-right">
-                    Net Cost/หน่วย
+                    Net Unit Cost
                   </TableHead>
-                  <TableHead className="w-[120px] text-right">รวมสุทธิ</TableHead>
+                  <TableHead className="w-[120px] text-right">Total Amount</TableHead>
                   <TableHead className="w-[56px]" />
                 </TableRow>
               </TableHeader>

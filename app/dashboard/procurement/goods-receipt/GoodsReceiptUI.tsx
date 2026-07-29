@@ -58,7 +58,10 @@ import {
   type ApportionmentItem,
 } from "@/lib/utils/accounting";
 import type { GoodsReceiptDocType } from "@/lib/constants/document";
-import type { VatCalculationType } from "@/lib/utils/document-summary";
+import {
+  calculateDocumentSummary,
+  type VatCalculationType,
+} from "@/lib/utils/document-summary";
 import VendorCombobox from "@/components/procurement/VendorCombobox";
 import InternalProductCombobox from "@/components/procurement/InternalProductCombobox";
 import QuickCreateDialog from "@/components/procurement/QuickCreateDialog";
@@ -131,7 +134,7 @@ export default function GoodsReceiptUI() {
   /** Document/invoice date Gemini extracted from the receipt header (ISO `YYYY-MM-DD`, editable at Save time). */
   const [ocrDocDate, setOcrDocDate] = useState("");
   /** AI-classified document type — seeds Save to Ledger dropdown (human can override). */
-  const [aiDocType, setAiDocType] = useState<GoodsReceiptDocType>("REC");
+  const [aiDocType, setAiDocType] = useState<GoodsReceiptDocType>("AP_TAX");
   /** AI-classified VAT type — seeds Save to Ledger dropdown (human can override). */
   const [aiVatType, setAiVatType] = useState<VatCalculationType>("NONE");
 
@@ -212,7 +215,7 @@ export default function GoodsReceiptUI() {
     setDraftProductByLineKey({});
     setOcrDocNumber("");
     setOcrDocDate("");
-    setAiDocType("REC");
+    setAiDocType("AP_TAX");
     setAiVatType("NONE");
     setBillDiscountText("");
   }, [previewUrl]);
@@ -228,7 +231,7 @@ export default function GoodsReceiptUI() {
       setDraftProductByLineKey({});
       setOcrDocNumber("");
       setOcrDocDate("");
-      setAiDocType("REC");
+      setAiDocType("AP_TAX");
       setAiVatType("NONE");
       setBillDiscountText("");
       setFileName(file.name);
@@ -471,6 +474,28 @@ export default function GoodsReceiptUI() {
       0,
     ),
   };
+
+  /** Live VAT preview from AI vat_type + line totals (for staff verification). */
+  const vatPreview = useMemo(() => {
+    const lineTotals = rows.map((row) => {
+      const qty = Math.max(0, Number(row.qty) || 0);
+      const unitPrice = Number(row.unit_price) || 0;
+      return qty * unitPrice;
+    });
+    return calculateDocumentSummary({
+      lineTotals,
+      discountText: billDiscountText || null,
+      vatType: aiVatType,
+      vatRate: aiVatType === "NONE" ? 0 : 7,
+    });
+  }, [rows, billDiscountText, aiVatType]);
+
+  const vatTypeLabel =
+    aiVatType === "NONE"
+      ? "NON_VAT (ไม่มีภาษี)"
+      : aiVatType === "INCLUSIVE"
+        ? "INCLUSIVE (ราคารวม VAT)"
+        : "EXCLUSIVE (แยก VAT)";
 
   const canSaveToLedger =
     rows.length > 0 && stats.unmatched === 0 && !isSavingToLedger && !isOcrRunning;
@@ -738,7 +763,7 @@ export default function GoodsReceiptUI() {
                 </div>
               ) : null}
 
-              <Table className="min-w-[1180px]">
+              <Table className="min-w-[1320px]">
                 <TableHeader>
                   <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
                     <TableHead>สถานะ</TableHead>
@@ -750,7 +775,8 @@ export default function GoodsReceiptUI() {
                     <TableHead className="text-right">Qty</TableHead>
                     <TableHead className="text-right">Unit Price</TableHead>
                     <TableHead>Discount</TableHead>
-                    <TableHead className="text-right">Net Cost</TableHead>
+                    <TableHead className="text-right">Net Unit Cost</TableHead>
+                    <TableHead className="text-right">Total Amount</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -759,9 +785,13 @@ export default function GoodsReceiptUI() {
                     const isBusy = confirmingLineKey === row.lineKey;
                     const draftProductId = draftProductByLineKey[row.lineKey] ?? "";
                     const preview = apportionmentByLineKey.get(row.lineKey);
-                    const displayNetCost = row.isFoc
+                    const displayNetUnitCost = row.isFoc
                       ? 0
                       : (preview?.finalUnitCost ?? row.netCost);
+                    const displayTotalAmount = row.isFoc
+                      ? 0
+                      : (preview?.finalLineTotal ??
+                        Number(row.qty) * Number(displayNetUnitCost));
 
                     return (
                       <TableRow
@@ -936,7 +966,19 @@ export default function GoodsReceiptUI() {
                                 : "text-amber-800",
                           )}
                         >
-                          {row.isFoc ? "0.00" : formatMoney(displayNetCost)}
+                          {row.isFoc ? "0.00" : formatMoney(displayNetUnitCost)}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "text-right font-bold tabular-nums",
+                            row.isFoc
+                              ? "text-slate-400"
+                              : isMatched
+                                ? "text-slate-900"
+                                : "text-amber-900",
+                          )}
+                        >
+                          {row.isFoc ? "0.00" : formatMoney(displayTotalAmount)}
                         </TableCell>
                       </TableRow>
                     );
@@ -947,6 +989,52 @@ export default function GoodsReceiptUI() {
           </Card>
         )}
       </section>
+
+      {/* VAT summary (AI) — above sticky Save footer */}
+      {rows.length > 0 ? (
+        <Card className="border-violet-200 bg-violet-50/40">
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-500">
+                AI VAT Analysis — ตรวจสอบก่อนบันทึก
+              </p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">
+                โหมดภาษี:{" "}
+                <span className="text-violet-700">{vatTypeLabel}</span>
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                ประเภทเอกสารจาก AI: {aiDocType} · แก้ไขได้ในหน้าต่าง Save to Ledger
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
+                <p className="text-[10px] font-medium text-slate-400">ยอดก่อน VAT</p>
+                <p className="text-sm font-bold tabular-nums text-slate-900">
+                  ฿{formatMoney(vatPreview.net_before_vat)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
+                <p className="text-[10px] font-medium text-slate-400">VAT Amount</p>
+                <p className="text-sm font-bold tabular-nums text-violet-700">
+                  ฿{formatMoney(vatPreview.vat_amount)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
+                <p className="text-[10px] font-medium text-slate-400">ส่วนลดท้ายบิล</p>
+                <p className="text-sm font-bold tabular-nums text-slate-900">
+                  ฿{formatMoney(vatPreview.discount_amount)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
+                <p className="text-[10px] font-medium text-slate-400">Grand Total</p>
+                <p className="text-sm font-bold tabular-nums text-slate-900">
+                  ฿{formatMoney(vatPreview.grand_total)}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Sticky summary footer — appears once there's something to save */}
       {rows.length > 0 && (

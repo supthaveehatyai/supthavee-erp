@@ -56,13 +56,15 @@ function formatDate(value: string | null | undefined): string {
 function docTypeLabel(docType: DocumentType): string {
   const labels: Partial<Record<DocumentType, string>> = {
     QT: "ใบเสนอราคา",
+    SO: "ใบสั่งขาย",
     ABB: "ใบเสร็จอย่างย่อ",
+    DEP_IN: "ใบมัดจำรับ",
     DEP: "ใบมัดจำ",
     INV_DO: "ใบส่งของ",
-    REC: "ใบเสร็จ",
     TAX_INV: "ใบกำกับภาษี",
-    INT_REC: "รับภายใน",
-    PO: "ใบสั่งซื้อ",
+    CS_TAX: "ใบกำกับเงินสด",
+    REC: "ใบเสร็จรับเงิน",
+    CN: "ใบลดหนี้",
   };
   return labels[docType] ?? docType;
 }

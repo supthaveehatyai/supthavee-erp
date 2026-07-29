@@ -3,13 +3,22 @@ import { cn } from "@/lib/utils";
 
 const DOC_TYPE_LABELS: Record<DocumentType, string> = {
   QT: "ใบเสนอราคา (Quotation)",
-  PO: "ใบสั่งซื้อ (Purchase Order)",
-  ABB: "ใบเสร็จอย่างย่อ (ABB)",
-  DEP: "ใบมัดจำ (Deposit)",
+  SO: "ใบสั่งขาย (Sales Order)",
   INV_DO: "ใบส่งของ / แจ้งหนี้ (Invoice / DO)",
-  REC: "ใบเสร็จรับเงิน (Receipt)",
   TAX_INV: "ใบกำกับภาษี / ใบส่งของ (Tax Invoice)",
-  INT_REC: "ใบรับภายใน (Internal Receipt)",
+  CS_TAX: "ใบกำกับเงินสด (Cash Tax Invoice)",
+  ABB: "ใบเสร็จอย่างย่อ (ABB)",
+  DEP_IN: "ใบมัดจำรับ (Deposit In)",
+  REC: "ใบเสร็จรับเงิน (Receipt)",
+  CN: "ใบลดหนี้ (Credit Note)",
+  PO: "ใบสั่งซื้อ (Purchase Order)",
+  AP_TAX: "ใบส่งของ/ใบกำกับภาษีซื้อ (AP Tax)",
+  AP_INV: "บิลซื้อธรรมดา (AP Invoice)",
+  AP_CASH: "บิลเงินสดซื้อ (AP Cash)",
+  DEP_OUT: "มัดจำจ่าย (Deposit Out)",
+  PAY: "ใบจ่ายชำระ (Payment)",
+  DEP: "ใบมัดจำ (Deposit — legacy)",
+  INT_REC: "ใบรับภายใน (Internal Receipt — legacy)",
 };
 
 function formatMoney(value: number): string {
