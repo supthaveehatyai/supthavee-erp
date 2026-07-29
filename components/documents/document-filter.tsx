@@ -18,7 +18,7 @@ export type DocumentFilterProps = {
  * Updates query params via router.replace — Server Components re-fetch data.
  */
 export default function DocumentFilter({
-  searchPlaceholder = "ชื่อคู่ค้า / เลขที่เอกสาร",
+  searchPlaceholder = "เลขภายใน / เลขอ้างอิงบิล / ชื่อคู่ค้า",
 }: DocumentFilterProps) {
   const router = useRouter();
   const pathname = usePathname();

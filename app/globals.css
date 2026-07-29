@@ -66,15 +66,18 @@ a {
   }
 
   /* Avoid breaking signature / totals awkwardly across pages */
-  #sales-print-document {
+  #sales-print-document,
+  #payment-print-document {
     break-inside: avoid;
   }
 
-  #sales-print-document table {
+  #sales-print-document table,
+  #payment-print-document table {
     break-inside: auto;
   }
 
-  #sales-print-document tr {
+  #sales-print-document tr,
+  #payment-print-document tr {
     break-inside: avoid;
     break-after: auto;
   }

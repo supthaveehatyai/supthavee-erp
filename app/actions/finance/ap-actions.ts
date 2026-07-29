@@ -1,14 +1,16 @@
 "use server";
 
 /**
- * Phase 5 — Receive Payment Server Actions.
- * Zero Client-Side Fetching: Service Role via `createSupabaseServerClient` only.
+ * Phase 5 — AP Payment (จ่ายชำระหนี้ซัพพลายเออร์) Server Actions.
+ * Zero Client-Side Fetching: Service Role (`supabaseAdmin`) only.
+ *
+ * Ledger source: Phase 4/5 `documents` (internal doc_no).
+ * Vendor invoice ref lives in `notes` — no dedicated reference_no column yet.
  */
 
 import { revalidatePath } from "next/cache";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
-import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { roundMoney } from "@/lib/utils/payment-fifo";
 import {
   isOverdue,
@@ -16,16 +18,16 @@ import {
   todayIsoDate,
 } from "@/lib/utils/outstanding-summary";
 import type {
-  DebtorOption,
-  KnockoffAllocationInput,
-  ProcessPaymentKnockoffResult,
-  UnpaidInvoice,
-} from "@/types/payment";
+  ApAllocationInput,
+  ApVendorOption,
+  OutstandingApInvoice,
+  SubmitAPPaymentResult,
+} from "@/types/ap-payment";
 
 const OPEN_PAYMENT_STATUSES = ["UNPAID", "PARTIAL", "Pending"] as const;
-const AR_DOC_TYPES = ["INV_DO", "TAX_INV"] as const;
+const AP_DOC_TYPES = ["AP_TAX", "AP_INV"] as const;
+const MONEY_EPS = 0.02;
 const DOCUMENT_ATTACHMENTS_BUCKET = "document_attachments";
-const CASH_ACCOUNT_SENTINEL = "CASH";
 const ALLOWED_SLIP_MIME_TYPES = new Set([
   "image/jpeg",
   "image/jpg",
@@ -34,6 +36,31 @@ const ALLOWED_SLIP_MIME_TYPES = new Set([
   "image/gif",
   "application/pdf",
 ]);
+const CASH_ACCOUNT_SENTINEL = "CASH";
+
+
+/**
+ * Raw service-role client — bypasses RLS.
+ * Never falls back to anon / SSR cookie clients.
+ */
+function createSupabaseAdminClient(): SupabaseClient {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error(
+      "Missing SUPABASE_SERVICE_ROLE_KEY (หรือ NEXT_PUBLIC_SUPABASE_URL) — ตั้งค่าใน .env.development แล้วรีสตาร์ท next dev",
+    );
+  }
+
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
 
 type ContactJoin = {
   id?: string;
@@ -41,30 +68,31 @@ type ContactJoin = {
   credit_days?: number | null;
 };
 
-type DebtorDocRow = {
+type ApDocRow = {
+  id: string;
   contact_id: string | null;
-  doc_date?: string | null;
+  doc_no: string | null;
+  notes?: string | null;
+  doc_date: string | null;
   due_date?: string | null;
-  grand_total?: number | string | null;
+  grand_total: number | string | null;
   total_amount?: number | string | null;
   paid_amount?: number | string | null;
-  contacts: ContactJoin | ContactJoin[] | null;
+  payment_status: string | null;
+  doc_type: string | null;
+  contacts?: ContactJoin | ContactJoin[] | null;
 };
 
-type InvoiceDocRow = {
-  id: string;
-  doc_no: string | null;
-  doc_date: string | null;
-  doc_type: string | null;
-  payment_status: string | null;
-  grand_total: number | string | null;
-  total_amount: number | string | null;
-  paid_amount: number | string | null;
-  contact_id: string | null;
+type SummaryBucket = {
+  name: string;
+  outstanding_total: number;
+  overdue_amount: number;
+  invoice_count: number;
+  oldest_invoice_date: string | null;
 };
 
 function unwrapContact(
-  value: ContactJoin | ContactJoin[] | null,
+  value: ContactJoin | ContactJoin[] | null | undefined,
 ): ContactJoin | null {
   if (value == null) return null;
   return Array.isArray(value) ? (value[0] ?? null) : value;
@@ -75,23 +103,41 @@ function toMoney(value: number | string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/**
- * Outstanding AR summary by customer (Server-calculated overdue + oldest invoice).
- */
-export async function getOutstandingSummary(): Promise<DebtorOption[]> {
-  return getDebtorsList();
+function minDate(
+  current: string | null,
+  next: string,
+): string | null {
+  if (!next) return current;
+  if (!current) return next;
+  return next < current ? next : current;
+}
+
+/** Extract vendor invoice no from Goods Receipt notes pattern. */
+function extractVendorReference(notes: string | null | undefined): string | null {
+  const raw = notes?.trim() ?? "";
+  if (!raw) return null;
+  const match = raw.match(/อ้างอิงบิลซัพพลายเออร์:\s*(.+)$/m);
+  const value = match?.[1]?.trim() ?? "";
+  return value || null;
 }
 
 /**
- * Customers with open AR invoices and remaining balance > 0.
- * Includes outstanding_total / overdue_amount / oldest_invoice_date.
+ * Outstanding AP summary by vendor (Server-calculated overdue + oldest invoice).
+ * Alias used by Outstanding Summary Table / Smart Combobox.
  */
-export async function getDebtorsList(): Promise<DebtorOption[]> {
+export async function getOutstandingSummary(): Promise<ApVendorOption[]> {
+  return getVendors();
+}
+
+/**
+ * Vendors with outstanding AP > 0 (from `documents`).
+ */
+export async function getVendors(): Promise<ApVendorOption[]> {
   try {
-    const supabase = createSupabaseServerClient();
+    const supabaseAdmin = createSupabaseAdminClient();
     const today = todayIsoDate();
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("documents")
       .select(
         `
@@ -101,6 +147,7 @@ export async function getDebtorsList(): Promise<DebtorOption[]> {
         grand_total,
         total_amount,
         paid_amount,
+        payment_status,
         contacts:contact_id (
           id,
           company_name,
@@ -108,44 +155,35 @@ export async function getDebtorsList(): Promise<DebtorOption[]> {
         )
       `,
       )
+      .in("doc_type", [...AP_DOC_TYPES])
       .in("payment_status", [...OPEN_PAYMENT_STATUSES])
-      .in("doc_type", [...AR_DOC_TYPES])
       .in("status", ["ISSUED", "COMPLETED"])
       .or("is_voided.is.null,is_voided.eq.false");
 
     if (error) {
-      console.error("Error fetching debtors:", error.message);
+      console.error("Error fetching AP outstanding summary:", error.message);
       return [];
     }
 
-    const grouped = new Map<
-      string,
-      {
-        name: string;
-        outstanding_total: number;
-        overdue_amount: number;
-        invoice_count: number;
-        oldest_invoice_date: string | null;
-      }
-    >();
+    const grouped = new Map<string, SummaryBucket>();
 
-    for (const doc of (data ?? []) as DebtorDocRow[]) {
-      const contact = unwrapContact(doc.contacts);
-      const contactId = doc.contact_id?.trim() || contact?.id || "";
-      if (!contactId) continue;
+    for (const raw of (data ?? []) as ApDocRow[]) {
+      const contact = unwrapContact(raw.contacts);
+      const vendorId = raw.contact_id?.trim() || contact?.id || "";
+      if (!vendorId) continue;
 
-      const grand = toMoney(doc.grand_total ?? doc.total_amount);
-      const remaining = roundMoney(grand - toMoney(doc.paid_amount));
+      const grand = toMoney(raw.grand_total ?? raw.total_amount);
+      const remaining = roundMoney(grand - toMoney(raw.paid_amount));
       if (remaining <= 0) continue;
 
-      const docDate = doc.doc_date ? String(doc.doc_date) : "";
-      const due = resolveDueDate(docDate, doc.due_date, contact?.credit_days);
+      const docDate = raw.doc_date ? String(raw.doc_date) : "";
+      const due = resolveDueDate(docDate, raw.due_date, contact?.credit_days);
       const overdue = isOverdue(due, today) ? remaining : 0;
 
-      const existing = grouped.get(contactId);
+      const existing = grouped.get(vendorId);
       if (!existing) {
-        grouped.set(contactId, {
-          name: contact?.company_name?.trim() || "ไม่ระบุชื่อ",
+        grouped.set(vendorId, {
+          name: contact?.company_name?.trim() || "ไม่ระบุชื่อผู้จำหน่าย",
           outstanding_total: remaining,
           overdue_amount: overdue,
           invoice_count: 1,
@@ -159,14 +197,10 @@ export async function getDebtorsList(): Promise<DebtorOption[]> {
       );
       existing.overdue_amount = roundMoney(existing.overdue_amount + overdue);
       existing.invoice_count += 1;
-      if (docDate) {
-        if (
-          !existing.oldest_invoice_date ||
-          docDate < existing.oldest_invoice_date
-        ) {
-          existing.oldest_invoice_date = docDate;
-        }
-      }
+      existing.oldest_invoice_date = minDate(
+        existing.oldest_invoice_date,
+        docDate,
+      );
     }
 
     return Array.from(grouped.entries())
@@ -181,75 +215,83 @@ export async function getDebtorsList(): Promise<DebtorOption[]> {
       .filter((row) => row.outstanding_total > 0)
       .sort((a, b) => b.outstanding_total - a.outstanding_total);
   } catch (err) {
-    console.error("Error fetching debtors:", err);
+    console.error("Error fetching AP outstanding summary:", err);
     return [];
   }
 }
 
-/** Unpaid invoices for one customer (`contact_id` from URL). */
-export async function getUnpaidInvoicesByCustomer(
-  contactId: string,
-): Promise<UnpaidInvoice[]> {
-  const trimmed = contactId?.trim() ?? "";
+/**
+ * Outstanding AP invoices for one vendor (`vendor_id` from URL).
+ * Internal `document_no` = documents.doc_no.
+ * Vendor ref parsed from `notes` (documents has no reference_no column yet).
+ * Sorted by document_date ASC for FIFO.
+ */
+export async function getOutstandingAP(
+  vendorId: string,
+): Promise<OutstandingApInvoice[]> {
+  const trimmed = vendorId?.trim() ?? "";
   if (!trimmed) return [];
 
   try {
-    const supabase = createSupabaseServerClient();
-    const { data, error } = await supabase
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data, error } = await supabaseAdmin
       .from("documents")
       .select(
         `
         id,
+        contact_id,
         doc_no,
+        notes,
         doc_date,
-        doc_type,
-        payment_status,
         grand_total,
         total_amount,
         paid_amount,
-        contact_id
+        payment_status,
+        doc_type
       `,
       )
       .eq("contact_id", trimmed)
+      .in("doc_type", [...AP_DOC_TYPES])
       .in("payment_status", [...OPEN_PAYMENT_STATUSES])
-      .in("doc_type", [...AR_DOC_TYPES])
       .in("status", ["ISSUED", "COMPLETED"])
       .or("is_voided.is.null,is_voided.eq.false")
       .order("doc_date", { ascending: true });
 
     if (error) {
-      console.error("Error fetching invoices for customer:", error.message);
+      console.error("Error fetching outstanding AP:", error.message);
       return [];
     }
 
-    return ((data ?? []) as InvoiceDocRow[])
+    return ((data ?? []) as ApDocRow[])
       .map((doc) => {
-        const netAmount = toMoney(doc.grand_total ?? doc.total_amount);
-        const paidAmount = toMoney(doc.paid_amount);
-        const remaining = netAmount - paidAmount;
-
+        const grandTotal = roundMoney(
+          toMoney(doc.grand_total ?? doc.total_amount),
+        );
+        const paidAmount = roundMoney(toMoney(doc.paid_amount));
+        const remaining = roundMoney(grandTotal - paidAmount);
         return {
           id: doc.id,
-          display_doc_no: doc.doc_no?.trim() || "ไม่ระบุ",
+          contact_id: doc.contact_id?.trim() || trimmed,
+          document_no: doc.doc_no?.trim() || "ไม่ระบุ",
+          reference_no: extractVendorReference(doc.notes),
           document_date: doc.doc_date ? String(doc.doc_date) : "",
-          doc_type: doc.doc_type ?? "",
-          payment_status: String(doc.payment_status ?? "UNPAID"),
-          net_amount_calc: netAmount,
+          grand_total: grandTotal,
           paid_amount: paidAmount,
           remaining_balance: remaining,
-          contact_id: doc.contact_id ?? trimmed,
-        } satisfies UnpaidInvoice;
+          payment_status: String(doc.payment_status ?? "UNPAID"),
+          doc_type: doc.doc_type ?? "",
+        } satisfies OutstandingApInvoice;
       })
       .filter((inv) => inv.remaining_balance > 0);
   } catch (err) {
-    console.error("Error fetching invoices for customer:", err);
+    console.error("Error fetching outstanding AP:", err);
     return [];
   }
 }
 
-const MONEY_EPS = 0.02;
-
-function parseAllocationsJson(raw: FormDataEntryValue | null): KnockoffAllocationInput[] {
+function parseAllocationsJson(
+  raw: FormDataEntryValue | null,
+): ApAllocationInput[] {
   if (typeof raw !== "string" || !raw.trim()) return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -260,7 +302,6 @@ function parseAllocationsJson(raw: FormDataEntryValue | null): KnockoffAllocatio
         return {
           invoice_id: String(item.invoice_id ?? "").trim(),
           allocated_amount: roundMoney(Number(item.allocated_amount ?? 0)),
-          wht_amount: roundMoney(Number(item.wht_amount ?? 0)),
         };
       })
       .filter((row) => row.invoice_id.length > 0);
@@ -278,8 +319,8 @@ function resolvePaymentStatus(
   return "PARTIAL";
 }
 
-async function uploadArPaymentSlip(
-  supabase: SupabaseClient,
+async function uploadPaymentSlip(
+  supabaseAdmin: SupabaseClient,
   file: File,
 ): Promise<{ url: string; path: string } | { error: string }> {
   const mimeType = (file.type || "").toLowerCase();
@@ -312,10 +353,10 @@ async function uploadArPaymentSlip(
           : mimeType === "image/gif"
             ? ".gif"
             : ".jpg";
-  const objectPath = `ar-payment/${yyyy}/${mm}/${crypto.randomUUID()}${extFromName}`;
+  const objectPath = `ap-payment/${yyyy}/${mm}/${crypto.randomUUID()}${extFromName}`;
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  const { error: uploadError } = await supabase.storage
+  const { error: uploadError } = await supabaseAdmin.storage
     .from(DOCUMENT_ATTACHMENTS_BUCKET)
     .upload(objectPath, buffer, {
       contentType: mimeType || "application/octet-stream",
@@ -328,7 +369,7 @@ async function uploadArPaymentSlip(
     };
   }
 
-  const { data: publicData } = supabase.storage
+  const { data: publicData } = supabaseAdmin.storage
     .from(DOCUMENT_ATTACHMENTS_BUCKET)
     .getPublicUrl(objectPath);
 
@@ -341,28 +382,27 @@ async function uploadArPaymentSlip(
 }
 
 /**
- * Knock-off payment (AR):
- * 1) Upload slip → Storage (optional)
- * 2) Create REC receipt document (+ attachment URL)
- * 3) Insert payment_transactions
- * 4) Insert document_allocations per invoice
- * 5) Update invoice paid_amount + payment_status
+ * Submit AP Payment (Knock-off):
+ * A) generate PAY doc no
+ * B) upload slip → Storage
+ * C) insert PAY header (documents + doc_headers)
+ * D) insert document_allocations
+ * E) update AP invoice paid_amount / payment_status
  */
-export async function processPaymentKnockoff(
+export async function submitAPPayment(
   formData: FormData,
-): Promise<ProcessPaymentKnockoffResult> {
-  const supabase = createSupabaseServerClient();
-  let receiptDocId: string | null = null;
+): Promise<SubmitAPPaymentResult> {
+  const supabaseAdmin = createSupabaseAdminClient();
+  let payDocId: string | null = null;
+  let payHeaderId: string | null = null;
   let slipStoragePath: string | null = null;
 
   try {
-    const contactId = String(formData.get("contact_id") ?? "").trim();
+    const vendorId = String(formData.get("vendor_id") ?? "").trim();
     const paymentDateRaw = String(formData.get("payment_date") ?? "").trim();
     const bankAccountRaw = String(formData.get("bank_account_id") ?? "").trim();
     const referenceNo =
       String(formData.get("reference_no") ?? "").trim() || null;
-    const cashAmount = roundMoney(Number(formData.get("amount") ?? 0));
-    const headerWht = roundMoney(Number(formData.get("wht_amount") ?? 0));
     const allocations = parseAllocationsJson(formData.get("allocations_json"));
     const slipFile = formData.get("slip_file");
 
@@ -370,8 +410,21 @@ export async function processPaymentKnockoff(
       ? paymentDateRaw
       : todayIsoDate();
 
-    if (!contactId) {
-      return { success: false, error: "ไม่พบรหัสลูกค้า" };
+    const activeAllocations = allocations.filter(
+      (row) => row.allocated_amount > 0,
+    );
+    const totalPaid = roundMoney(
+      activeAllocations.reduce((sum, row) => sum + row.allocated_amount, 0),
+    );
+
+    if (!vendorId) {
+      return { success: false, error: "ไม่พบรหัสผู้จำหน่าย" };
+    }
+    if (activeAllocations.length === 0 || totalPaid <= 0) {
+      return {
+        success: false,
+        error: "ห้ามบันทึก — ผลรวมยอดตัดหนี้ (Allocations) ต้องมากกว่า 0",
+      };
     }
     if (!bankAccountRaw) {
       return {
@@ -379,19 +432,13 @@ export async function processPaymentKnockoff(
         error: "กรุณาเลือกสมุดบัญชีธนาคาร หรือเงินสด",
       };
     }
-    if (cashAmount < 0 || headerWht < 0) {
-      return { success: false, error: "ยอดเงินต้องไม่ติดลบ" };
-    }
-    if (cashAmount <= 0 && headerWht <= 0) {
-      return { success: false, error: "กรุณาระบุยอดเงินโอนหรือ WHT" };
-    }
 
     const isCash = bankAccountRaw === CASH_ACCOUNT_SENTINEL;
     let bankAccountId: string | null = null;
 
     if (!isCash) {
       bankAccountId = bankAccountRaw;
-      const { data: bank, error: bankError } = await supabase
+      const { data: bank, error: bankError } = await supabaseAdmin
         .from("mst_bank_accounts")
         .select("id, is_active")
         .eq("id", bankAccountId)
@@ -405,38 +452,8 @@ export async function processPaymentKnockoff(
       }
     }
 
-    const activeAllocations = allocations.filter(
-      (row) => row.allocated_amount > 0 || row.wht_amount > 0,
-    );
-    if (activeAllocations.length === 0) {
-      return {
-        success: false,
-        error: "กรุณากด Auto-Allocate หรือระบุยอดตัดหนี้ในบิลอย่างน้อย 1 รายการ",
-      };
-    }
-
-    const sumAllocated = roundMoney(
-      activeAllocations.reduce((sum, row) => sum + row.allocated_amount, 0),
-    );
-    const sumWht = roundMoney(
-      activeAllocations.reduce((sum, row) => sum + row.wht_amount, 0),
-    );
-
-    if (Math.abs(sumAllocated - cashAmount) > MONEY_EPS) {
-      return {
-        success: false,
-        error: `ยอด Allocated รวม (${sumAllocated.toFixed(2)}) ไม่ตรงกับยอดโอนจริง (${cashAmount.toFixed(2)})`,
-      };
-    }
-    if (Math.abs(sumWht - headerWht) > MONEY_EPS) {
-      return {
-        success: false,
-        error: `ยอด WHT รวมในบิล (${sumWht.toFixed(2)}) ไม่ตรงกับยอด WHT ส่วนหัว (${headerWht.toFixed(2)})`,
-      };
-    }
-
     const invoiceIds = activeAllocations.map((row) => row.invoice_id);
-    const { data: invoices, error: invoicesError } = await supabase
+    const { data: invoices, error: invoicesError } = await supabaseAdmin
       .from("documents")
       .select(
         "id, contact_id, grand_total, total_amount, paid_amount, payment_status, doc_type, status, is_voided",
@@ -462,10 +479,10 @@ export async function processPaymentKnockoff(
           error: `ไม่พบบิลต้นทาง ${alloc.invoice_id}`,
         };
       }
-      if (invoice.contact_id !== contactId) {
+      if (invoice.contact_id !== vendorId) {
         return {
           success: false,
-          error: "พบบิลที่ไม่ใช่ของลูกค้ารายนี้",
+          error: "พบบิลที่ไม่ใช่ของผู้จำหน่ายรายนี้",
         };
       }
       if (invoice.is_voided === true) {
@@ -474,12 +491,12 @@ export async function processPaymentKnockoff(
       if (invoice.status !== "ISSUED" && invoice.status !== "COMPLETED") {
         return {
           success: false,
-          error: "ตัดยอดได้เฉพาะบิลที่ออกแล้ว (ISSUED)",
+          error: "ตัดยอดได้เฉพาะบิลที่ออกแล้ว (ISSUED/COMPLETED)",
         };
       }
       if (
-        !AR_DOC_TYPES.includes(
-          invoice.doc_type as (typeof AR_DOC_TYPES)[number],
+        !AP_DOC_TYPES.includes(
+          invoice.doc_type as (typeof AP_DOC_TYPES)[number],
         )
       ) {
         return {
@@ -491,9 +508,8 @@ export async function processPaymentKnockoff(
       const grandTotal = toMoney(invoice.grand_total ?? invoice.total_amount);
       const paidAmount = toMoney(invoice.paid_amount);
       const remaining = roundMoney(grandTotal - paidAmount);
-      const apply = roundMoney(alloc.allocated_amount + alloc.wht_amount);
 
-      if (apply > remaining + MONEY_EPS) {
+      if (alloc.allocated_amount > remaining + MONEY_EPS) {
         return {
           success: false,
           error: `ยอดตัดหนี้เกินยอดค้างของบิล (เหลือ ${remaining.toFixed(2)})`,
@@ -501,17 +517,22 @@ export async function processPaymentKnockoff(
       }
     }
 
-    const numberResult = await generateDocumentNumber("REC", paymentDate);
+    // Step A — PAY running number
+    const numberResult = await generateDocumentNumber("PAY", paymentDate);
     if (!numberResult.data) {
       return {
         success: false,
-        error: numberResult.error ?? "สร้างเลขที่ใบเสร็จไม่สำเร็จ",
+        error: numberResult.error ?? "สร้างเลขที่เอกสาร PAY ไม่สำเร็จ",
       };
     }
+    const payDocNo = numberResult.data;
+    const nowIso = new Date().toISOString();
+    const paymentDateIso = `${paymentDate}T00:00:00.000Z`;
 
+    // Step B — Slip upload (optional)
     let slipUrl: string | null = null;
     if (slipFile instanceof File && slipFile.size > 0) {
-      const uploaded = await uploadArPaymentSlip(supabase, slipFile);
+      const uploaded = await uploadPaymentSlip(supabaseAdmin, slipFile);
       if ("error" in uploaded) {
         return { success: false, error: uploaded.error };
       }
@@ -519,32 +540,28 @@ export async function processPaymentKnockoff(
       slipStoragePath = uploaded.path;
     }
 
-    const receiptGrandTotal = roundMoney(cashAmount + headerWht);
-    const nowIso = new Date().toISOString();
-    const paymentDateIso = `${paymentDate}T00:00:00.000Z`;
-
-    // 1) REC receipt document
-    const { data: receipt, error: receiptError } = await supabase
+    // Step C — PAY header on documents (ledger used by allocations FK)
+    const { data: payDoc, error: payDocError } = await supabaseAdmin
       .from("documents")
       .insert({
-        doc_no: numberResult.data,
-        doc_type: "REC",
-        status: "ISSUED",
+        doc_no: payDocNo,
+        doc_type: "PAY",
+        status: "COMPLETED",
         doc_date: paymentDate,
-        contact_id: contactId,
-        sub_total: cashAmount,
+        contact_id: vendorId,
+        sub_total: totalPaid,
         discount_amount: 0,
         tax_rate: 0,
         tax_amount: 0,
         wht_rate: 0,
-        wht_amount: headerWht,
-        grand_total: receiptGrandTotal,
-        total_amount: cashAmount,
-        net_before_vat: cashAmount,
+        wht_amount: 0,
+        grand_total: totalPaid,
+        total_amount: totalPaid,
+        net_before_vat: totalPaid,
         vat_amount: 0,
         vat_rate: 0,
         vat_type: "NONE",
-        paid_amount: cashAmount,
+        paid_amount: totalPaid,
         payment_status: "PAID",
         attachment_url: slipUrl,
         attached_file_url: slipUrl,
@@ -552,35 +569,70 @@ export async function processPaymentKnockoff(
           slipFile instanceof File && slipFile.size > 0
             ? slipFile.name.slice(0, 255)
             : null,
-        notes: `AR Knock-off | cash=${cashAmount} | wht=${headerWht}${referenceNo ? ` | ref=${referenceNo}` : ""}`,
+        notes: `AP Knock-off | total=${totalPaid}${referenceNo ? ` | ref=${referenceNo}` : ""}`,
         updated_at: nowIso,
       })
       .select("id, doc_no")
       .single();
 
-    if (receiptError || !receipt) {
+    if (payDocError || !payDoc) {
       if (slipStoragePath) {
-        await supabase.storage
+        await supabaseAdmin.storage
           .from(DOCUMENT_ATTACHMENTS_BUCKET)
           .remove([slipStoragePath]);
       }
       return {
         success: false,
-        error: receiptError?.message ?? "สร้างใบเสร็จรับเงิน (REC) ไม่สำเร็จ",
+        error: payDocError?.message ?? "สร้างเอกสารจ่ายชำระ (PAY) ไม่สำเร็จ",
       };
     }
 
-    receiptDocId = receipt.id as string;
-    const receiptDocNo = String(receipt.doc_no);
+    payDocId = payDoc.id as string;
 
-    // 2) payment_transactions
-    const { error: txError } = await supabase
+    // Legacy mirror on doc_headers (Blueprint Step C)
+    const { data: payHeader, error: payHeaderError } = await supabaseAdmin
+      .from("doc_headers")
+      .insert({
+        doc_no: payDocNo,
+        doc_type: "PAY",
+        doc_date: paymentDate,
+        contact_id: vendorId,
+        sub_total: totalPaid,
+        discount_amount: 0,
+        grand_total: totalPaid,
+        payment_status: "PAID",
+        attached_file_url: slipUrl,
+        original_file_name:
+          slipFile instanceof File && slipFile.size > 0
+            ? slipFile.name.slice(0, 255)
+            : null,
+      })
+      .select("id")
+      .single();
+
+    if (payHeaderError || !payHeader) {
+      await supabaseAdmin.from("documents").delete().eq("id", payDocId);
+      if (slipStoragePath) {
+        await supabaseAdmin.storage
+          .from(DOCUMENT_ATTACHMENTS_BUCKET)
+          .remove([slipStoragePath]);
+      }
+      return {
+        success: false,
+        error:
+          payHeaderError?.message ??
+          "สร้างหัวเอกสาร PAY (doc_headers) ไม่สำเร็จ",
+      };
+    }
+    payHeaderId = payHeader.id as string;
+
+    const { error: txError } = await supabaseAdmin
       .from("payment_transactions")
       .insert({
-        document_id: receiptDocId,
+        document_id: payDocId,
         payment_method: isCash ? "CASH" : "BANK_TRANSFER",
         bank_account_id: bankAccountId,
-        amount: cashAmount,
+        amount: totalPaid,
         reference_no: referenceNo,
         payment_date: paymentDateIso,
         attachment_url: slipUrl,
@@ -589,9 +641,10 @@ export async function processPaymentKnockoff(
       });
 
     if (txError) {
-      await supabase.from("documents").delete().eq("id", receiptDocId);
+      await supabaseAdmin.from("doc_headers").delete().eq("id", payHeaderId);
+      await supabaseAdmin.from("documents").delete().eq("id", payDocId);
       if (slipStoragePath) {
-        await supabase.storage
+        await supabaseAdmin.storage
           .from(DOCUMENT_ATTACHMENTS_BUCKET)
           .remove([slipStoragePath]);
       }
@@ -601,27 +654,28 @@ export async function processPaymentKnockoff(
       };
     }
 
-    // 3) document_allocations
+    // Step D — allocations (PAY → AP invoices)
     const allocationRows = activeAllocations.map((row) => ({
-      receipt_doc_id: receiptDocId,
+      receipt_doc_id: payDocId,
       invoice_doc_id: row.invoice_id,
       allocated_amount: row.allocated_amount,
-      wht_amount: row.wht_amount,
+      wht_amount: 0,
       adjustment_amount: 0,
     }));
 
-    const { error: allocError } = await supabase
+    const { error: allocError } = await supabaseAdmin
       .from("document_allocations")
       .insert(allocationRows);
 
     if (allocError) {
-      await supabase
+      await supabaseAdmin
         .from("payment_transactions")
         .delete()
-        .eq("document_id", receiptDocId);
-      await supabase.from("documents").delete().eq("id", receiptDocId);
+        .eq("document_id", payDocId);
+      await supabaseAdmin.from("doc_headers").delete().eq("id", payHeaderId);
+      await supabaseAdmin.from("documents").delete().eq("id", payDocId);
       if (slipStoragePath) {
-        await supabase.storage
+        await supabaseAdmin.storage
           .from(DOCUMENT_ATTACHMENTS_BUCKET)
           .remove([slipStoragePath]);
       }
@@ -631,16 +685,15 @@ export async function processPaymentKnockoff(
       };
     }
 
-    // 4) Update source invoices
+    // Step E — update source AP invoices
     for (const alloc of activeAllocations) {
       const invoice = invoiceMap.get(alloc.invoice_id)!;
       const grandTotal = toMoney(invoice.grand_total ?? invoice.total_amount);
       const prevPaid = toMoney(invoice.paid_amount);
-      const apply = roundMoney(alloc.allocated_amount + alloc.wht_amount);
-      const newPaid = roundMoney(prevPaid + apply);
+      const newPaid = roundMoney(prevPaid + alloc.allocated_amount);
       const nextStatus = resolvePaymentStatus(grandTotal, newPaid);
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await supabaseAdmin
         .from("documents")
         .update({
           paid_amount: newPaid,
@@ -652,40 +705,43 @@ export async function processPaymentKnockoff(
       if (updateError) {
         return {
           success: false,
-          error: `บันทึกใบเสร็จ ${receiptDocNo} แล้ว แต่อัปเดตบิลต้นทางไม่สำเร็จ: ${updateError.message}`,
-          receipt_doc_no: receiptDocNo,
+          error: `บันทึก PAY ${payDocNo} แล้ว แต่อัปเดตบิลต้นทางไม่สำเร็จ: ${updateError.message}`,
+          payment_doc_no: payDocNo,
         };
       }
     }
 
-    revalidatePath("/finance/payments");
+    revalidatePath("/finance/ap-payment");
     revalidatePath("/finance/ap-ar");
-    revalidatePath("/sales");
+    revalidatePath("/purchases");
 
     return {
       success: true,
       error: null,
-      receipt_doc_no: receiptDocNo,
+      payment_doc_no: payDocNo,
     };
   } catch (err) {
-    if (receiptDocId) {
-      await supabase
+    if (payDocId) {
+      await supabaseAdmin
         .from("document_allocations")
         .delete()
-        .eq("receipt_doc_id", receiptDocId);
-      await supabase
+        .eq("receipt_doc_id", payDocId);
+      await supabaseAdmin
         .from("payment_transactions")
         .delete()
-        .eq("document_id", receiptDocId);
-      await supabase.from("documents").delete().eq("id", receiptDocId);
+        .eq("document_id", payDocId);
+      await supabaseAdmin.from("documents").delete().eq("id", payDocId);
+    }
+    if (payHeaderId) {
+      await supabaseAdmin.from("doc_headers").delete().eq("id", payHeaderId);
     }
     if (slipStoragePath) {
-      await supabase.storage
+      await supabaseAdmin.storage
         .from(DOCUMENT_ATTACHMENTS_BUCKET)
         .remove([slipStoragePath]);
     }
     const message =
-      err instanceof Error ? err.message : "ตัดยอดชำระเงินไม่สำเร็จ";
+      err instanceof Error ? err.message : "บันทึกการจ่ายชำระหนี้ไม่สำเร็จ";
     return { success: false, error: message };
   }
 }

@@ -1048,8 +1048,13 @@ export async function getDocumentByNo(
         total_amount,
         net_before_vat,
         vat_amount,
+        wht_amount,
         payment_status,
         notes,
+        attachment_url,
+        attached_file_url,
+        wht_attachment_url,
+        original_receipt_url,
         created_at,
         updated_at,
         contacts:contact_id (
@@ -1135,6 +1140,10 @@ export async function getDocumentByNo(
       })
       .sort((left, right) => left.sort_order - right.sort_order);
 
+    const notes = (data.notes as string | null) ?? null;
+    const vendorRefMatch = notes?.match(/อ้างอิงบิลซัพพลายเออร์:\s*(.+)$/m);
+    const referenceNo = vendorRefMatch?.[1]?.trim() || null;
+
     const detail: DocumentDetail = {
       id: data.id as string,
       doc_no: data.doc_no as string,
@@ -1159,8 +1168,15 @@ export async function getDocumentByNo(
         data.net_before_vat == null ? null : Number(data.net_before_vat),
       vat_amount:
         data.vat_amount == null ? null : Number(data.vat_amount),
+      wht_amount: Number(data.wht_amount ?? 0),
       payment_status: String(data.payment_status ?? "Pending"),
-      notes: (data.notes as string | null) ?? null,
+      notes,
+      reference_no: referenceNo,
+      attachment_url: (data.attachment_url as string | null) ?? null,
+      attached_file_url: (data.attached_file_url as string | null) ?? null,
+      wht_attachment_url: (data.wht_attachment_url as string | null) ?? null,
+      original_receipt_url:
+        (data.original_receipt_url as string | null) ?? null,
       created_at: String(data.created_at),
       updated_at: String(data.updated_at),
       contact,
@@ -1424,7 +1440,9 @@ export async function getSalesDocuments(
 
 /**
  * List purchase documents (newest first) with vendor name.
- * Optional URL-driven filters: search (doc_no / vendor), doc_date from/to.
+ * Optional URL-driven filters: search (doc_no / vendor name), doc_date from/to.
+ * Note: documents has no dedicated vendor-ref column yet — search uses doc_no only
+ * (+ contact name match). Vendor ref for display is parsed from notes.
  * Service Role only — Zero Client-Side Fetching.
  */
 export async function getPurchaseDocuments(
@@ -1460,6 +1478,7 @@ export async function getPurchaseDocuments(
         `
         id,
         doc_no,
+        notes,
         doc_type,
         status,
         doc_date,
@@ -1475,6 +1494,7 @@ export async function getPurchaseDocuments(
 
     if (search) {
       const pattern = `%${search}%`;
+      // doc_no only (+ vendor name) — no reference_no column on documents yet
       if (contactIds.length > 0) {
         query = query.or(
           `doc_no.ilike.${pattern},contact_id.in.(${contactIds.join(",")})`,
@@ -1503,10 +1523,14 @@ export async function getPurchaseDocuments(
       const contact = Array.isArray(row.contacts)
         ? row.contacts[0]
         : row.contacts;
+      const notes = (row.notes as string | null) ?? null;
+      const vendorRefMatch = notes?.match(/อ้างอิงบิลซัพพลายเออร์:\s*(.+)$/m);
+      const vendorRef = vendorRefMatch?.[1]?.trim() || null;
 
       return {
         id: row.id as string,
         doc_no: row.doc_no as string,
+        reference_no: vendorRef,
         doc_type: row.doc_type as DocumentType,
         status: row.status as DocumentStatus,
         doc_date: row.doc_date as string,

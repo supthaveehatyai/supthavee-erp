@@ -203,7 +203,12 @@ export default async function PurchaseDocumentsPage({
                         {formatDate(doc.doc_date || doc.created_at)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap font-mono text-sm font-semibold text-slate-900">
-                        {doc.doc_no}
+                        <div>{doc.doc_no}</div>
+                        {doc.reference_no ? (
+                          <div className="mt-0.5 text-xs font-normal text-slate-500">
+                            Ref: {doc.reference_no}
+                          </div>
+                        ) : null}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         <span className="text-sm text-slate-700">

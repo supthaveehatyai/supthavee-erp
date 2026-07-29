@@ -1,10 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, FileInput } from "lucide-react";
+import { ArrowLeft, ExternalLink, FileInput } from "lucide-react";
 import { getDocumentByNo } from "@/lib/actions/document-actions";
+import { getDocumentAllocationsByReceiptId } from "@/lib/actions/finance/allocations";
 import { PURCHASE_DOC_TYPES } from "@/lib/constants/document";
 import type { DocumentDetail, DocumentStatus, DocumentType } from "@/types/document";
+import { AllocatedDocumentsTable } from "@/components/finance/AllocatedDocumentsTable";
+import PrintPaymentReceiptTemplate from "@/components/finance/PrintPaymentReceiptTemplate";
+import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
+import { ReferenceDocumentsSection } from "@/components/finance/ReferenceDocumentsSection";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -70,6 +75,12 @@ function isPurchaseDocType(docType: DocumentType): boolean {
   return (PURCHASE_DOC_TYPES as readonly string[]).includes(docType);
 }
 
+function resolveSlipUrl(doc: DocumentDetail): string | null {
+  const url =
+    doc.attachment_url?.trim() || doc.attached_file_url?.trim() || "";
+  return url || null;
+}
+
 export async function generateMetadata({
   params,
 }: PageProps): Promise<Metadata> {
@@ -101,11 +112,31 @@ export default async function PurchaseDocumentDetailPage({
     notFound();
   }
 
+  const isPaymentDoc = doc.doc_type === "PAY";
+  const allocationsResult = isPaymentDoc
+    ? await getDocumentAllocationsByReceiptId(doc.id)
+    : { data: [], error: null };
+
   const grandTotal = Number(doc.grand_total ?? 0);
+  const subTotal = Number(
+    doc.net_before_vat ?? doc.total_amount ?? doc.sub_total ?? 0,
+  );
+  const vatAmount = Number(doc.vat_amount ?? doc.tax_amount ?? 0);
+  const vatRate = Number(doc.vat_rate ?? doc.tax_rate ?? 0);
+  const vatType = doc.vat_type ?? "NONE";
+  const vatTypeLabel =
+    vatType === "NONE"
+      ? "Non-VAT"
+      : vatType === "INCLUSIVE"
+        ? `รวม VAT ${vatRate}%`
+        : vatType === "EXCLUSIVE"
+          ? `แยก VAT ${vatRate}%`
+          : String(vatType);
+  const slipUrl = resolveSlipUrl(doc);
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6 print:max-w-none print:gap-0 print:p-0">
+      <div className="flex flex-wrap items-start justify-between gap-3 print:hidden">
         <div className="flex items-start gap-3">
           <div className="grid size-11 place-items-center rounded-xl bg-blue-50 text-blue-600">
             <FileInput className="size-5" />
@@ -123,15 +154,21 @@ export default async function PurchaseDocumentDetailPage({
           </div>
         </div>
 
-        <Link
-          href="/purchases"
-          className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
-        >
-          <ArrowLeft className="size-4" />
-          กลับรายการเอกสารซื้อ
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/purchases"
+            className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
+          >
+            <ArrowLeft className="size-4" />
+            กลับรายการเอกสารซื้อ
+          </Link>
+          {isPaymentDoc ? (
+            <PrintDocumentButton className="h-10 gap-2" />
+          ) : null}
+        </div>
       </div>
 
+      <div className="flex flex-col gap-4 print:hidden">
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="border-slate-200 shadow-sm">
           <CardHeader className="pb-3">
@@ -150,81 +187,183 @@ export default async function PurchaseDocumentDetailPage({
             {doc.contact?.phone ? (
               <p className="text-slate-500">โทร: {doc.contact.phone}</p>
             ) : null}
+            {!isPaymentDoc ? (
+              <div className="border-t border-slate-100 pt-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  เลขที่บิลผู้จำหน่าย (Reference No.)
+                </p>
+                <p className="mt-0.5 font-mono text-sm font-semibold text-slate-800">
+                  {doc.reference_no?.trim() || "—"}
+                </p>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 
         <Card className="border-slate-200 shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">สรุปยอด</CardTitle>
+            <CardTitle className="text-base">สรุปยอด (Summary)</CardTitle>
             <CardDescription>สถานะ {doc.payment_status}</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-base font-bold text-slate-900">ยอดสุทธิ</span>
-              <span className="text-lg font-bold tabular-nums text-blue-700">
-                {formatMoney(grandTotal)}
-              </span>
-            </div>
+          <CardContent className="space-y-2 text-sm">
+            {isPaymentDoc ? (
+              <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-2">
+                <span className="text-base font-bold text-slate-900">
+                  ยอดจ่ายชำระ (Grand Total)
+                </span>
+                <span className="text-lg font-bold tabular-nums text-orange-700">
+                  {formatMoney(grandTotal)}
+                </span>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between gap-3 text-slate-600">
+                  <span>ยอดรวมสินค้า (Subtotal / Net Before VAT)</span>
+                  <span className="tabular-nums font-medium text-slate-800">
+                    {formatMoney(subTotal)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-slate-600">
+                  <span>
+                    ภาษีมูลค่าเพิ่ม (VAT){" "}
+                    <span className="text-xs text-slate-400">
+                      · {vatTypeLabel}
+                    </span>
+                  </span>
+                  <span className="tabular-nums font-medium text-slate-800">
+                    {formatMoney(vatAmount)}
+                  </span>
+                </div>
+                {doc.discount_amount > 0 ? (
+                  <div className="flex items-center justify-between gap-3 text-slate-600">
+                    <span>ส่วนลดท้ายบิล</span>
+                    <span className="tabular-nums font-medium text-slate-800">
+                      -{formatMoney(doc.discount_amount)}
+                    </span>
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-2">
+                  <span className="text-base font-bold text-slate-900">
+                    ยอดสุทธิ (Grand Total)
+                  </span>
+                  <span className="text-lg font-bold tabular-nums text-blue-700">
+                    {formatMoney(grandTotal)}
+                  </span>
+                </div>
+              </>
+            )}
+
+            {slipUrl ? (
+              <a
+                href={slipUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-orange-200 bg-orange-50 text-sm font-semibold text-orange-800 transition hover:bg-orange-100"
+              >
+                <ExternalLink className="size-4" />
+                ดูสลิปโอนเงิน
+              </a>
+            ) : null}
           </CardContent>
         </Card>
       </div>
 
-      <Card className="border-slate-200 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">รายการสินค้า</CardTitle>
-          <CardDescription>{doc.items.length} รายการ</CardDescription>
-        </CardHeader>
-        <CardContent className="px-0 sm:px-6">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>รายการ</TableHead>
-                  <TableHead className="text-right">จำนวน</TableHead>
-                  <TableHead className="text-right">ราคา/หน่วย</TableHead>
-                  <TableHead className="text-right">รวม</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {doc.items.length === 0 ? (
+      {isPaymentDoc ? (
+        <Card className="border-slate-200 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">
+              รายการเอกสารที่ตัดชำระ (Allocated Documents)
+            </CardTitle>
+            <CardDescription>
+              {allocationsResult.data.length} รายการจาก document_allocations
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="px-0 sm:px-6">
+            <AllocatedDocumentsTable
+              rows={allocationsResult.data}
+              detailBasePath="/purchases"
+              statusLabelMode="PAY"
+              error={allocationsResult.error}
+            />
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="border-slate-200 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">รายการสินค้า</CardTitle>
+            <CardDescription>{doc.items.length} รายการ</CardDescription>
+          </CardHeader>
+          <CardContent className="px-0 sm:px-6">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell
-                      colSpan={4}
-                      className="h-20 text-center text-slate-500"
-                    >
-                      ไม่มีรายการสินค้า
-                    </TableCell>
+                    <TableHead>รายการ</TableHead>
+                    <TableHead className="text-right">จำนวน</TableHead>
+                    <TableHead className="text-right">ราคา/หน่วย</TableHead>
+                    <TableHead className="text-right">รวม</TableHead>
                   </TableRow>
-                ) : (
-                  doc.items.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell>
-                        <div className="font-medium text-slate-900">
-                          {item.description || item.product_name || "—"}
-                        </div>
-                        {item.sku ? (
-                          <div className="font-mono text-xs text-slate-400">
-                            {item.sku}
-                          </div>
-                        ) : null}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {item.qty} {item.uom_used ?? ""}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatMoney(item.unit_price)}
-                      </TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">
-                        {formatMoney(item.line_total)}
+                </TableHeader>
+                <TableBody>
+                  {doc.items.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="h-20 text-center text-slate-500"
+                      >
+                        ไม่มีรายการสินค้า
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
+                  ) : (
+                    doc.items.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell>
+                          <div className="font-medium text-slate-900">
+                            {item.description || item.product_name || "—"}
+                          </div>
+                          {item.sku ? (
+                            <div className="font-mono text-xs text-slate-400">
+                              {item.sku}
+                            </div>
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {item.qty} {item.uom_used ?? ""}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatMoney(item.unit_price)}
+                        </TableCell>
+                        <TableCell className="text-right font-medium tabular-nums">
+                          {formatMoney(item.line_total)}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {isPaymentDoc ? (
+        <ReferenceDocumentsSection
+          documentId={doc.id}
+          mode="PAY"
+          whtAttachmentUrl={doc.wht_attachment_url}
+          originalReceiptUrl={doc.original_receipt_url}
+        />
+      ) : null}
+      </div>
+
+      {isPaymentDoc ? (
+        <PrintPaymentReceiptTemplate
+          document={doc}
+          allocations={allocationsResult.data}
+          mode="PAY"
+          className="mt-2 print:mt-0"
+        />
+      ) : null}
     </div>
   );
 }

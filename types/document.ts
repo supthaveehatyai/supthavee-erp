@@ -252,8 +252,17 @@ export type DocumentDetail = {
   total_amount: number | null;
   net_before_vat: number | null;
   vat_amount: number | null;
+  wht_amount: number;
   payment_status: string;
   notes: string | null;
+  /** Vendor invoice / external reference — parsed from notes when no DB column. */
+  reference_no: string | null;
+  attachment_url: string | null;
+  attached_file_url: string | null;
+  /** Scanned WHT certificate (REC). */
+  wht_attachment_url: string | null;
+  /** Scanned original vendor receipt / tax invoice (PAY). */
+  original_receipt_url: string | null;
   created_at: string;
   updated_at: string;
   contact: DocumentDetailContact | null;
@@ -305,6 +314,8 @@ export type GetSalesDocumentsResult = {
 export type PurchaseDocumentListItem = {
   id: string;
   doc_no: string;
+  /** Vendor invoice / external reference — parsed from notes when no DB column. */
+  reference_no: string | null;
   doc_type: DocumentType;
   status: DocumentStatus;
   doc_date: string;

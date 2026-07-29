@@ -6,6 +6,13 @@
 export type DebtorOption = {
   id: string;
   name: string;
+  /** Sum of remaining balances across open AR invoices (> 0 only). */
+  outstanding_total: number;
+  invoice_count: number;
+  /** Remaining amount on invoices past due (Server-calculated). */
+  overdue_amount: number;
+  /** Oldest open invoice document_date (YYYY-MM-DD). */
+  oldest_invoice_date: string | null;
 };
 
 export type UnpaidInvoice = {

@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, FileText } from "lucide-react";
+import { ArrowLeft, ExternalLink, FileText } from "lucide-react";
 import { getDocumentByNo } from "@/lib/actions/document-actions";
+import { getDocumentAllocationsByReceiptId } from "@/lib/actions/finance/allocations";
 import type { DocumentDetail, DocumentStatus } from "@/types/document";
 import PrintDocumentTemplate from "@/components/sales/print-document-template";
+import PrintPaymentReceiptTemplate from "@/components/finance/PrintPaymentReceiptTemplate";
+import { AllocatedDocumentsTable } from "@/components/finance/AllocatedDocumentsTable";
+import { ReferenceDocumentsSection } from "@/components/finance/ReferenceDocumentsSection";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -22,7 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import IssueDocumentButton from "./issue-document-button";
-import PrintDocumentButton from "./print-document-button";
+import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
 import ConvertDocumentDropdown from "./convert-document-dropdown";
 
 type PageProps = {
@@ -131,8 +135,18 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   }
 
   const doc: DocumentDetail = result.data;
+  const isReceiptDoc = doc.doc_type === "REC";
+  const allocationsResult = isReceiptDoc
+    ? await getDocumentAllocationsByReceiptId(doc.id)
+    : { data: [], error: null };
+  const slipUrl =
+    doc.attachment_url?.trim() || doc.attached_file_url?.trim() || "";
   const canIssue = doc.status === "DRAFT";
-  const canPrint = doc.status === "DRAFT" || doc.status === "COMPLETED";
+  const canPrint =
+    isReceiptDoc ||
+    doc.status === "DRAFT" ||
+    doc.status === "COMPLETED" ||
+    doc.status === "ISSUED";
   const canConvert = doc.doc_type === "QT" && doc.status === "COMPLETED";
   const subtotal = Number(doc.total_amount ?? doc.sub_total ?? 0);
   const discountAmount = Number(doc.discount_amount ?? 0);
@@ -241,112 +255,169 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
             <CardHeader className="pb-3">
               <CardTitle className="text-base">สรุปยอดเงิน</CardTitle>
               <CardDescription>
-                VAT {doc.vat_type ?? "—"} · อัตรา {vatRate}%
+                {isReceiptDoc
+                  ? `เอกสารรับชำระ · สถานะ ${doc.payment_status}`
+                  : `VAT ${doc.vat_type ?? "—"} · อัตรา ${vatRate}%`}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2.5">
-              <SummaryRow
-                label="ยอดรวมสินค้า"
-                value={`${formatMoney(subtotal)} ฿`}
-              />
-              <SummaryRow
-                label={`ส่วนลดท้ายบิล${doc.discount_text ? ` (${doc.discount_text})` : ""}`}
-                value={`−${formatMoney(discountAmount)} ฿`}
-                negative
-              />
-              <SummaryRow
-                label="ยอดหลังหักส่วนลด (Net Before VAT)"
-                value={`${formatMoney(netBeforeVat)} ฿`}
-              />
-              <SummaryRow
-                label={`ภาษีมูลค่าเพิ่ม ${vatRate}%`}
-                value={`${formatMoney(vatAmount)} ฿`}
-              />
-              <div className="border-t border-slate-200 pt-2.5">
+              {isReceiptDoc ? (
                 <SummaryRow
-                  label="ยอดสุทธิ (Grand Total)"
+                  label="ยอดรับชำระ (Grand Total)"
                   value={`${formatMoney(grandTotal)} ฿`}
                   emphasize
                 />
-              </div>
+              ) : (
+                <>
+                  <SummaryRow
+                    label="ยอดรวมสินค้า"
+                    value={`${formatMoney(subtotal)} ฿`}
+                  />
+                  <SummaryRow
+                    label={`ส่วนลดท้ายบิล${doc.discount_text ? ` (${doc.discount_text})` : ""}`}
+                    value={`−${formatMoney(discountAmount)} ฿`}
+                    negative
+                  />
+                  <SummaryRow
+                    label="ยอดหลังหักส่วนลด (Net Before VAT)"
+                    value={`${formatMoney(netBeforeVat)} ฿`}
+                  />
+                  <SummaryRow
+                    label={`ภาษีมูลค่าเพิ่ม ${vatRate}%`}
+                    value={`${formatMoney(vatAmount)} ฿`}
+                  />
+                  <div className="border-t border-slate-200 pt-2.5">
+                    <SummaryRow
+                      label="ยอดสุทธิ (Grand Total)"
+                      value={`${formatMoney(grandTotal)} ฿`}
+                      emphasize
+                    />
+                  </div>
+                </>
+              )}
+              {slipUrl ? (
+                <a
+                  href={slipUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 text-sm font-semibold text-blue-800 transition hover:bg-blue-100"
+                >
+                  <ExternalLink className="size-4" />
+                  ดูสลิปโอนเงิน
+                </a>
+              ) : null}
             </CardContent>
           </Card>
         </div>
 
-        <Card className="border-slate-200 shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">รายการสินค้า</CardTitle>
-            <CardDescription>
-              {doc.items.length} รายการ — แสดงแบบอ่านอย่างเดียว
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
-                    {[
-                      "#",
-                      "SKU",
-                      "รายละเอียด",
-                      "จำนวน",
-                      "หน่วย",
-                      "ราคา/หน่วย",
-                      "รวม",
-                    ].map((heading) => (
-                      <TableHead
-                        key={heading}
-                        className="px-4 text-xs font-semibold text-slate-500"
-                      >
-                        {heading}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {doc.items.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={7}
-                        className="px-4 py-10 text-center text-sm text-slate-400"
-                      >
-                        ไม่มีรายการสินค้า
-                      </TableCell>
+        {isReceiptDoc ? (
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">
+                รายการเอกสารที่ตัดชำระ (Allocated Documents)
+              </CardTitle>
+              <CardDescription>
+                {allocationsResult.data.length} รายการจาก document_allocations
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="px-0 sm:px-6">
+              <AllocatedDocumentsTable
+                rows={allocationsResult.data}
+                detailBasePath="/sales"
+                statusLabelMode="REC"
+                error={allocationsResult.error}
+              />
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">รายการสินค้า</CardTitle>
+              <CardDescription>
+                {doc.items.length} รายการ — แสดงแบบอ่านอย่างเดียว
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                      {[
+                        "#",
+                        "SKU",
+                        "รายละเอียด",
+                        "จำนวน",
+                        "หน่วย",
+                        "ราคา/หน่วย",
+                        "รวม",
+                      ].map((heading) => (
+                        <TableHead
+                          key={heading}
+                          className="px-4 text-xs font-semibold text-slate-500"
+                        >
+                          {heading}
+                        </TableHead>
+                      ))}
                     </TableRow>
-                  ) : (
-                    doc.items.map((item, index) => (
-                      <TableRow key={item.id}>
-                        <TableCell className="px-4 text-xs tabular-nums text-slate-500">
-                          {index + 1}
-                        </TableCell>
-                        <TableCell className="px-4 font-mono text-xs font-semibold text-slate-800">
-                          {item.sku ?? "—"}
-                        </TableCell>
-                        <TableCell className="max-w-[18rem] px-4 text-sm text-slate-700">
-                          <span className="line-clamp-2">
-                            {item.description || item.product_name || "—"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="px-4 text-right text-sm tabular-nums text-slate-700">
-                          {item.qty}
-                        </TableCell>
-                        <TableCell className="px-4 text-xs text-slate-600">
-                          {item.uom_used ?? "—"}
-                        </TableCell>
-                        <TableCell className="px-4 text-right text-sm tabular-nums text-slate-700">
-                          {formatMoney(item.unit_price)}
-                        </TableCell>
-                        <TableCell className="px-4 text-right text-sm font-semibold tabular-nums text-slate-900">
-                          {formatMoney(item.line_total)}
+                  </TableHeader>
+                  <TableBody>
+                    {doc.items.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={7}
+                          className="px-4 py-10 text-center text-sm text-slate-400"
+                        >
+                          ไม่มีรายการสินค้า
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
+                    ) : (
+                      doc.items.map((item, index) => (
+                        <TableRow key={item.id}>
+                          <TableCell className="px-4 text-xs tabular-nums text-slate-500">
+                            {index + 1}
+                          </TableCell>
+                          <TableCell className="px-4 font-mono text-xs font-semibold text-slate-800">
+                            {item.sku ?? "—"}
+                          </TableCell>
+                          <TableCell className="max-w-[18rem] px-4 text-sm text-slate-700">
+                            <span className="line-clamp-2">
+                              {item.description || item.product_name || "—"}
+                            </span>
+                          </TableCell>
+                          <TableCell className="px-4 text-right text-sm tabular-nums text-slate-700">
+                            {item.qty}
+                          </TableCell>
+                          <TableCell className="px-4 text-xs text-slate-600">
+                            {item.uom_used ?? "—"}
+                          </TableCell>
+                          <TableCell className="px-4 text-right text-sm tabular-nums text-slate-700">
+                            {formatMoney(item.unit_price)}
+                          </TableCell>
+                          <TableCell className="px-4 text-right text-sm font-semibold tabular-nums text-slate-900">
+                            {formatMoney(item.line_total)}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {isReceiptDoc ? (
+          <ReferenceDocumentsSection
+            documentId={doc.id}
+            mode="REC"
+            showWhtUpload={
+              Number(doc.wht_amount ?? 0) > 0 ||
+              allocationsResult.data.some((row) => row.wht_amount > 0)
+            }
+            whtAttachmentUrl={doc.wht_attachment_url}
+            originalReceiptUrl={doc.original_receipt_url}
+          />
+        ) : null}
 
         <p className="text-center text-xs text-slate-400">
           ตัวอย่างสำหรับพิมพ์ (A4) — กด &quot;พิมพ์เอกสาร&quot; เพื่อสั่งพิมพ์เฉพาะแผ่นนี้
@@ -354,7 +425,16 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
       </div>
 
       {/* A4 print layout — preview on screen, sole content when printing */}
-      <PrintDocumentTemplate document={doc} className="mt-2 print:mt-0" />
+      {isReceiptDoc ? (
+        <PrintPaymentReceiptTemplate
+          document={doc}
+          allocations={allocationsResult.data}
+          mode="REC"
+          className="mt-2 print:mt-0"
+        />
+      ) : (
+        <PrintDocumentTemplate document={doc} className="mt-2 print:mt-0" />
+      )}
     </div>
   );
 }

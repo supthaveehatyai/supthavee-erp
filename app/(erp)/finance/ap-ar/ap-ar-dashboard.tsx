@@ -247,9 +247,9 @@ export function ApArDashboard({
               rows={apData}
               emptyLabel="ไม่มีข้อมูลเจ้าหนี้ค้างชำระในระบบ"
               actionHref={(id) =>
-                `/finance/payments?contact_id=${encodeURIComponent(id)}`
+                `/finance/ap-payment?vendor_id=${encodeURIComponent(id)}`
               }
-              actionLabel="ดูรายละเอียด"
+              actionLabel="จ่ายชำระหนี้"
             />
           </CardContent>
         </Card>
