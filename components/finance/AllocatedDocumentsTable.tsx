@@ -20,6 +20,16 @@ function formatMoney(value: number): string {
   });
 }
 
+function isDepositAllocation(docType: string): boolean {
+  return docType === "DEP_IN" || docType === "DEP_OUT";
+}
+
+/** Signed display amount: invoices positive, deposits negative. */
+function signedAllocatedAmount(row: DocumentAllocationRow): number {
+  const amount = Number(row.allocated_amount ?? 0);
+  return isDepositAllocation(row.target_doc_type) ? -amount : amount;
+}
+
 export type AllocatedDocumentsTableProps = {
   rows: DocumentAllocationRow[];
   /** Base path for target document links — `/purchases` or `/sales`. */
@@ -31,6 +41,7 @@ export type AllocatedDocumentsTableProps = {
 
 /**
  * Allocated invoices under PAY / REC.
+ * Deposit rows render as deductions (negative) so totals are not double-counted.
  * Status column uses client toggle → Server Action updateReceiptStatus.
  */
 export function AllocatedDocumentsTable({
@@ -60,6 +71,15 @@ export function AllocatedDocumentsTable({
     );
   }
 
+  const netTotal = rows.reduce(
+    (sum, row) => sum + signedAllocatedAmount(row),
+    0,
+  );
+  const totalWht = rows.reduce(
+    (sum, row) => sum + Number(row.wht_amount ?? 0),
+    0,
+  );
+
   return (
     <div className="overflow-x-auto">
       <Table>
@@ -72,36 +92,92 @@ export function AllocatedDocumentsTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((row) => (
-            <TableRow key={row.id}>
-              <TableCell>
-                <Link
-                  href={`${detailBasePath}/${encodeURIComponent(row.target_doc_no)}`}
-                  className="font-mono text-sm font-semibold text-blue-700 underline-offset-2 hover:underline"
+          {rows.map((row) => {
+            const isDeposit = isDepositAllocation(row.target_doc_type);
+            const signed = signedAllocatedAmount(row);
+            // Deposits link to their own detail path
+            const hrefBase =
+              row.target_doc_type === "DEP_OUT" ||
+              row.target_doc_type.startsWith("AP_") ||
+              row.target_doc_type === "PO" ||
+              row.target_doc_type === "PAY"
+                ? "/purchases"
+                : detailBasePath;
+
+            return (
+              <TableRow
+                key={row.id}
+                className={isDeposit ? "bg-emerald-50/40" : undefined}
+              >
+                <TableCell>
+                  <Link
+                    href={`${hrefBase}/${encodeURIComponent(row.target_doc_no)}`}
+                    className={
+                      isDeposit
+                        ? "font-mono text-sm font-semibold text-emerald-800 underline-offset-2 hover:underline"
+                        : "font-mono text-sm font-semibold text-blue-700 underline-offset-2 hover:underline"
+                    }
+                  >
+                    {isDeposit
+                      ? `(หัก) มัดจำ ${row.target_doc_no}`
+                      : row.target_doc_no}
+                  </Link>
+                  {row.target_doc_type ? (
+                    <span className="ml-1.5 text-xs text-slate-400">
+                      ({row.target_doc_type})
+                    </span>
+                  ) : null}
+                </TableCell>
+                <TableCell className="font-mono text-sm text-slate-600">
+                  {row.reference_no?.trim() || "—"}
+                </TableCell>
+                <TableCell
+                  className={
+                    isDeposit
+                      ? "text-right font-semibold tabular-nums text-emerald-700"
+                      : "text-right font-semibold tabular-nums text-slate-900"
+                  }
                 >
-                  {row.target_doc_no}
-                </Link>
-              </TableCell>
-              <TableCell className="font-mono text-sm text-slate-600">
-                {row.reference_no?.trim() || "—"}
-              </TableCell>
-              <TableCell className="text-right font-semibold tabular-nums text-slate-900">
-                {formatMoney(row.allocated_amount)}
-                {row.wht_amount > 0 ? (
-                  <span className="ml-1 text-xs font-normal text-slate-400">
-                    (+WHT {formatMoney(row.wht_amount)})
-                  </span>
-                ) : null}
-              </TableCell>
-              <TableCell className="text-center">
-                <OriginalReceiptStatusToggle
-                  allocationId={row.id}
-                  isReceived={row.original_receipt_received}
-                  labelMode={statusLabelMode}
-                />
-              </TableCell>
-            </TableRow>
-          ))}
+                  {isDeposit
+                    ? `(${formatMoney(Math.abs(signed))})`
+                    : formatMoney(signed)}
+                  {row.wht_amount > 0 ? (
+                    <span className="ml-1 text-xs font-normal text-slate-400">
+                      (+WHT {formatMoney(row.wht_amount)})
+                    </span>
+                  ) : null}
+                </TableCell>
+                <TableCell className="text-center">
+                  {isDeposit ? (
+                    <span className="text-xs text-slate-400">—</span>
+                  ) : (
+                    <OriginalReceiptStatusToggle
+                      allocationId={row.id}
+                      isReceived={row.original_receipt_received}
+                      labelMode={statusLabelMode}
+                    />
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+          <TableRow className="bg-slate-50/80">
+            <TableCell
+              colSpan={2}
+              className="text-right text-sm font-semibold text-slate-700"
+            >
+              รวมสุทธิ (บิล − มัดจำ)
+            </TableCell>
+            <TableCell className="text-right text-sm font-bold tabular-nums text-blue-800">
+              {formatMoney(netTotal)}
+              {totalWht > 0 ? (
+                <span className="ml-1 text-xs font-normal text-slate-400">
+                  (+WHT {formatMoney(totalWht)})
+                </span>
+              ) : null}
+            </TableCell>
+            <TableCell />
+          </TableRow>
         </TableBody>
       </Table>
     </div>

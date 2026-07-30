@@ -1,14 +1,15 @@
 -- ==============================================================================
--- Phase 5 — Split Refund / Write-off by AR (Sales) vs AP (Purchases)
+-- Phase 5 — generate_document_no: REFUND → RFD, WRITE_OFF → WRO
+-- Created via: `supabase migration new generate_document_no_refund_writeoff_prefix`
+--
+-- Examples:
+--   REFUND    → RFD-2607-0001
+--   WRITE_OFF → WRO-2607-0001
+--
+-- RPC still accepts raw prefixes (RFD / WRO / INV / …).
+-- When callers pass enum labels REFUND / WRITE_OFF, normalize to RFD / WRO.
+-- Architecture: race-safe PREFIX-YYMM-XXXX (EXCLUSIVE lock on documents).
 -- ==============================================================================
-
-ALTER TYPE public.document_type ADD VALUE IF NOT EXISTS 'AR_REFUND';
-ALTER TYPE public.document_type ADD VALUE IF NOT EXISTS 'AP_REFUND';
-ALTER TYPE public.document_type ADD VALUE IF NOT EXISTS 'AR_WRITEOFF';
-ALTER TYPE public.document_type ADD VALUE IF NOT EXISTS 'AP_WRITEOFF';
-
-COMMENT ON TYPE public.document_type IS
-  'Sales: QT SO INV_DO TAX_INV CS_TAX ABB DEP_IN REC CN AR_REFUND AR_WRITEOFF | Purchases: PO AP_TAX AP_INV AP_CASH DEP_OUT PAY AP_REFUND AP_WRITEOFF | Legacy: REFUND WRITE_OFF';
 
 CREATE OR REPLACE FUNCTION public.generate_document_no(
   p_doc_type text,
@@ -37,13 +38,9 @@ BEGIN
 
   v_raw := upper(btrim(p_doc_type));
 
-  -- Map document_type enum labels → running-number prefixes.
+  -- Normalize known document_type enum labels → running-number prefixes.
+  -- Callers that already pass prefixes (RFD, WRO, INV, …) pass through unchanged.
   v_prefix := CASE v_raw
-    WHEN 'AR_REFUND' THEN 'SRF'
-    WHEN 'AP_REFUND' THEN 'PRF'
-    WHEN 'AR_WRITEOFF' THEN 'SWO'
-    WHEN 'AP_WRITEOFF' THEN 'PWO'
-    -- Legacy settlement types (kept for backward compatibility)
     WHEN 'REFUND' THEN 'RFD'
     WHEN 'WRITE_OFF' THEN 'WRO'
     ELSE v_raw
@@ -52,6 +49,7 @@ BEGIN
   v_year_month := to_char(p_doc_date, 'YYMM');
   v_search_prefix := v_prefix || '-' || v_year_month || '-';
 
+  -- Serialize concurrent callers for the same documents table.
   LOCK TABLE public.documents IN EXCLUSIVE MODE;
 
   SELECT d.doc_no
@@ -77,7 +75,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.generate_document_no(text, date) IS
-  'Race-safe PREFIX-YYMM-XXXX. Maps AR_REFUND→SRF, AP_REFUND→PRF, AR_WRITEOFF→SWO, AP_WRITEOFF→PWO (legacy REFUND→RFD, WRITE_OFF→WRO).';
+  'Race-safe document running number: PREFIX-YYMM-XXXX. Maps REFUND→RFD, WRITE_OFF→WRO; other values used as prefix as-is.';
 
 REVOKE ALL ON FUNCTION public.generate_document_no(text, date) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.generate_document_no(text, date) FROM anon, authenticated;

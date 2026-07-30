@@ -65,6 +65,8 @@ function docTypeLabel(docType: DocumentType): string {
     CS_TAX: "ใบกำกับเงินสด",
     REC: "ใบเสร็จรับเงิน",
     CN: "ใบลดหนี้",
+    AR_REFUND: "ใบสำคัญจ่ายเงินคืน (Refund Payment)",
+    AR_WRITEOFF: "ใบสำคัญปรับปรุงบัญชี - รับรู้รายได้ (Write-off Income)",
   };
   return labels[docType] ?? docType;
 }

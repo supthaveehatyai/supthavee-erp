@@ -20,9 +20,12 @@ import {
 import type {
   ApAllocationInput,
   ApVendorOption,
+  DepositAllocationInput,
   OutstandingApInvoice,
   SubmitAPPaymentResult,
+  VendorPaymentContext,
 } from "@/types/ap-payment";
+import { getAvailableDepositsForContact } from "@/lib/actions/finance/available-deposits";
 
 const OPEN_PAYMENT_STATUSES = ["UNPAID", "PARTIAL", "Pending"] as const;
 const AP_DOC_TYPES = ["AP_TAX", "AP_INV"] as const;
@@ -221,16 +224,18 @@ export async function getVendors(): Promise<ApVendorOption[]> {
 }
 
 /**
- * Outstanding AP invoices for one vendor (`vendor_id` from URL).
+ * Outstanding AP invoices + available DEP_OUT for one vendor (`vendor_id` from URL).
  * Internal `document_no` = documents.doc_no.
  * Vendor ref parsed from `notes` (documents has no reference_no column yet).
  * Sorted by document_date ASC for FIFO.
  */
 export async function getOutstandingAP(
   vendorId: string,
-): Promise<OutstandingApInvoice[]> {
+): Promise<VendorPaymentContext> {
   const trimmed = vendorId?.trim() ?? "";
-  if (!trimmed) return [];
+  if (!trimmed) {
+    return { invoices: [], availableDeposits: [] };
+  }
 
   try {
     const supabaseAdmin = createSupabaseAdminClient();
@@ -259,10 +264,10 @@ export async function getOutstandingAP(
 
     if (error) {
       console.error("Error fetching outstanding AP:", error.message);
-      return [];
+      return { invoices: [], availableDeposits: [] };
     }
 
-    return ((data ?? []) as ApDocRow[])
+    const invoices = ((data ?? []) as ApDocRow[])
       .map((doc) => {
         const grandTotal = roundMoney(
           toMoney(doc.grand_total ?? doc.total_amount),
@@ -283,9 +288,17 @@ export async function getOutstandingAP(
         } satisfies OutstandingApInvoice;
       })
       .filter((inv) => inv.remaining_balance > 0);
+
+    const availableDeposits = await getAvailableDepositsForContact(
+      trimmed,
+      "DEP_OUT",
+      supabaseAdmin,
+    );
+
+    return { invoices, availableDeposits };
   } catch (err) {
     console.error("Error fetching outstanding AP:", err);
-    return [];
+    return { invoices: [], availableDeposits: [] };
   }
 }
 
@@ -305,6 +318,27 @@ function parseAllocationsJson(
         };
       })
       .filter((row) => row.invoice_id.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function parseDepositsJson(
+  raw: FormDataEntryValue | null,
+): DepositAllocationInput[] {
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((row) => {
+        const item = row as Record<string, unknown>;
+        return {
+          deposit_id: String(item.deposit_id ?? "").trim(),
+          allocated_amount: roundMoney(Number(item.allocated_amount ?? 0)),
+        };
+      })
+      .filter((row) => row.deposit_id.length > 0 && row.allocated_amount > 0);
   } catch {
     return [];
   }
@@ -404,6 +438,9 @@ export async function submitAPPayment(
     const referenceNo =
       String(formData.get("reference_no") ?? "").trim() || null;
     const allocations = parseAllocationsJson(formData.get("allocations_json"));
+    const depositAllocations = parseDepositsJson(
+      formData.get("deposits_json"),
+    );
     const slipFile = formData.get("slip_file");
 
     const paymentDate = /^\d{4}-\d{2}-\d{2}$/.test(paymentDateRaw)
@@ -413,17 +450,28 @@ export async function submitAPPayment(
     const activeAllocations = allocations.filter(
       (row) => row.allocated_amount > 0,
     );
-    const totalPaid = roundMoney(
+    const totalInvoicePaid = roundMoney(
       activeAllocations.reduce((sum, row) => sum + row.allocated_amount, 0),
     );
+    const depositTotal = roundMoney(
+      depositAllocations.reduce((sum, row) => sum + row.allocated_amount, 0),
+    );
+    // Net cash out = invoices − deposits (floored at 0)
+    const totalPaid = roundMoney(Math.max(0, totalInvoicePaid - depositTotal));
 
     if (!vendorId) {
       return { success: false, error: "ไม่พบรหัสผู้จำหน่าย" };
     }
-    if (activeAllocations.length === 0 || totalPaid <= 0) {
+    if (activeAllocations.length === 0 || totalInvoicePaid <= 0) {
       return {
         success: false,
         error: "ห้ามบันทึก — ผลรวมยอดตัดหนี้ (Allocations) ต้องมากกว่า 0",
+      };
+    }
+    if (depositTotal > totalInvoicePaid + MONEY_EPS) {
+      return {
+        success: false,
+        error: `ยอดมัดจำที่ใช้ (${depositTotal.toFixed(2)}) เกินยอดตัดหนี้ (${totalInvoicePaid.toFixed(2)})`,
       };
     }
     if (!bankAccountRaw) {
@@ -517,6 +565,83 @@ export async function submitAPPayment(
       }
     }
 
+    // Validate DEP_OUT deposits
+    if (depositAllocations.length > 0) {
+      const depositIds = depositAllocations.map((row) => row.deposit_id);
+      const { data: deposits, error: depositsError } = await supabaseAdmin
+        .from("documents")
+        .select(
+          "id, contact_id, grand_total, deposit_deducted, doc_type, status, is_voided",
+        )
+        .in("id", depositIds);
+
+      if (depositsError) {
+        return {
+          success: false,
+          error: depositsError.message ?? "โหลดเอกสารมัดจำไม่สำเร็จ",
+        };
+      }
+
+      const depositMap = new Map(
+        (deposits ?? []).map((row) => [row.id as string, row]),
+      );
+
+      const { data: priorDepositAllocs } = await supabaseAdmin
+        .from("document_allocations")
+        .select("invoice_doc_id, allocated_amount")
+        .in("invoice_doc_id", depositIds);
+
+      const usedByDeposit = new Map<string, number>();
+      for (const row of priorDepositAllocs ?? []) {
+        const id = String(row.invoice_doc_id);
+        usedByDeposit.set(
+          id,
+          roundMoney(
+            (usedByDeposit.get(id) ?? 0) + toMoney(row.allocated_amount),
+          ),
+        );
+      }
+
+      for (const alloc of depositAllocations) {
+        const deposit = depositMap.get(alloc.deposit_id);
+        if (!deposit) {
+          return {
+            success: false,
+            error: `ไม่พบเอกสารมัดจำ ${alloc.deposit_id}`,
+          };
+        }
+        if (deposit.contact_id !== vendorId) {
+          return {
+            success: false,
+            error: "พบมัดจำที่ไม่ใช่ของผู้จำหน่ายรายนี้",
+          };
+        }
+        if (deposit.is_voided === true) {
+          return { success: false, error: "มีมัดจำที่ถูกยกเลิก" };
+        }
+        if (deposit.doc_type !== "DEP_OUT") {
+          return {
+            success: false,
+            error: `ประเภทมัดจำไม่ถูกต้อง: ${deposit.doc_type}`,
+          };
+        }
+        const grand = toMoney(deposit.grand_total);
+        const used = roundMoney(
+          Math.max(
+            usedByDeposit.get(alloc.deposit_id) ?? 0,
+            toMoney(deposit.deposit_deducted),
+          ),
+        );
+        const remaining = roundMoney(grand - used);
+        if (alloc.allocated_amount > remaining + MONEY_EPS) {
+          return {
+            success: false,
+            error: `ยอดมัดจำเกินคงเหลือ (เหลือ ${remaining.toFixed(2)})`,
+          };
+        }
+      }
+    }
+
     // Step A — PAY running number
     const numberResult = await generateDocumentNumber("PAY", paymentDate);
     if (!numberResult.data) {
@@ -541,6 +666,8 @@ export async function submitAPPayment(
     }
 
     // Step C — PAY header on documents (ledger used by allocations FK)
+    // grand_total = มูลค่าบิลที่ตัดยอด (ไม่หักมัดจำ)
+    // cash fields = เงินจ่ายจริงหลังหักมัดจำ (totalPaid)
     const { data: payDoc, error: payDocError } = await supabaseAdmin
       .from("documents")
       .insert({
@@ -555,7 +682,7 @@ export async function submitAPPayment(
         tax_amount: 0,
         wht_rate: 0,
         wht_amount: 0,
-        grand_total: totalPaid,
+        grand_total: totalInvoicePaid,
         total_amount: totalPaid,
         net_before_vat: totalPaid,
         vat_amount: 0,
@@ -569,7 +696,7 @@ export async function submitAPPayment(
           slipFile instanceof File && slipFile.size > 0
             ? slipFile.name.slice(0, 255)
             : null,
-        notes: `AP Knock-off | total=${totalPaid}${referenceNo ? ` | ref=${referenceNo}` : ""}`,
+        notes: `AP Knock-off | invoices=${totalInvoicePaid} | deposit=${depositTotal} | cash=${totalPaid}${referenceNo ? ` | ref=${referenceNo}` : ""}`,
         updated_at: nowIso,
       })
       .select("id, doc_no")
@@ -599,7 +726,7 @@ export async function submitAPPayment(
         contact_id: vendorId,
         sub_total: totalPaid,
         discount_amount: 0,
-        grand_total: totalPaid,
+        grand_total: totalInvoicePaid,
         payment_status: "PAID",
         attached_file_url: slipUrl,
         original_file_name:
@@ -654,14 +781,25 @@ export async function submitAPPayment(
       };
     }
 
-    // Step D — allocations (PAY → AP invoices)
-    const allocationRows = activeAllocations.map((row) => ({
-      receipt_doc_id: payDocId,
-      invoice_doc_id: row.invoice_id,
-      allocated_amount: row.allocated_amount,
-      wht_amount: 0,
-      adjustment_amount: 0,
-    }));
+    // Step D — allocations (PAY → AP invoices + DEP_OUT)
+    const allocationRows = [
+      ...activeAllocations.map((row) => ({
+        receipt_doc_id: payDocId,
+        invoice_doc_id: row.invoice_id,
+        allocated_amount: row.allocated_amount,
+        wht_amount: 0,
+        adjustment_amount: 0,
+        adjustment_reason: null as string | null,
+      })),
+      ...depositAllocations.map((row) => ({
+        receipt_doc_id: payDocId,
+        invoice_doc_id: row.deposit_id,
+        allocated_amount: row.allocated_amount,
+        wht_amount: 0,
+        adjustment_amount: 0,
+        adjustment_reason: "DEPOSIT_APPLY",
+      })),
+    ];
 
     const { error: allocError } = await supabaseAdmin
       .from("document_allocations")
@@ -711,8 +849,53 @@ export async function submitAPPayment(
       }
     }
 
+    // Step F — update deposit_deducted on DEP_OUT
+    for (const alloc of depositAllocations) {
+      const { data: depositRow, error: depositLoadError } = await supabaseAdmin
+        .from("documents")
+        .select("id, deposit_deducted, grand_total, doc_no")
+        .eq("id", alloc.deposit_id)
+        .maybeSingle();
+
+      if (depositLoadError || !depositRow) {
+        return {
+          success: false,
+          error: `บันทึก PAY ${payDocNo} แล้ว แต่อัปเดตมัดจำไม่สำเร็จ`,
+          payment_doc_no: payDocNo,
+        };
+      }
+
+      const prevDeducted = toMoney(depositRow.deposit_deducted);
+      const newDeducted = roundMoney(prevDeducted + alloc.allocated_amount);
+
+      const { error: depositUpdateError } = await supabaseAdmin
+        .from("documents")
+        .update({
+          deposit_deducted: newDeducted,
+          updated_at: nowIso,
+        })
+        .eq("id", alloc.deposit_id);
+
+      if (depositUpdateError) {
+        return {
+          success: false,
+          error: `บันทึก PAY ${payDocNo} แล้ว แต่อัปเดตมัดจำไม่สำเร็จ: ${depositUpdateError.message}`,
+          payment_doc_no: payDocNo,
+        };
+      }
+
+      if (depositRow.doc_no) {
+        await supabaseAdmin
+          .from("doc_headers")
+          .update({ deposit_deducted: newDeducted })
+          .eq("doc_no", depositRow.doc_no)
+          .eq("doc_type", "DEP_OUT");
+      }
+    }
+
     revalidatePath("/finance/ap-payment");
     revalidatePath("/finance/ap-ar");
+    revalidatePath("/finance/deposits");
     revalidatePath("/purchases");
 
     return {

@@ -63,6 +63,8 @@ function docTypeLabel(docType: DocumentType): string {
     AP_CASH: "บิลเงินสด/ใบกำกับ (จ่ายทันที)",
     DEP_OUT: "มัดจำจ่าย",
     PAY: "ใบจ่ายชำระ",
+    AP_REFUND: "ใบสำคัญรับเงินคืน (Refund Receipt)",
+    AP_WRITEOFF: "ใบสำคัญปรับปรุงบัญชี - ตัดเป็นค่าใช้จ่าย (Write-off Expense)",
   };
   return labels[docType] ?? docType;
 }

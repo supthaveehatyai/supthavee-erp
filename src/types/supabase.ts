@@ -1198,6 +1198,12 @@ export type Database = {
         | "AP_CASH"
         | "DEP_OUT"
         | "PAY"
+        | "AR_REFUND"
+        | "AR_WRITEOFF"
+        | "AP_REFUND"
+        | "AP_WRITEOFF"
+        | "REFUND"
+        | "WRITE_OFF"
       payment_method_enum:
         | "CASH"
         | "BANK_TRANSFER"
@@ -1362,6 +1368,12 @@ export const Constants = {
         "AP_CASH",
         "DEP_OUT",
         "PAY",
+        "AR_REFUND",
+        "AR_WRITEOFF",
+        "AP_REFUND",
+        "AP_WRITEOFF",
+        "REFUND",
+        "WRITE_OFF",
       ],
       payment_method_enum: [
         "CASH",

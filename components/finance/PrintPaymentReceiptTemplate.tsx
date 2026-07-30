@@ -20,6 +20,15 @@ function formatDate(value: string | null | undefined): string {
   });
 }
 
+function isDepositAllocation(docType: string): boolean {
+  return docType === "DEP_IN" || docType === "DEP_OUT";
+}
+
+function signedAllocatedAmount(row: DocumentAllocationRow): number {
+  const amount = Number(row.allocated_amount ?? 0);
+  return isDepositAllocation(row.target_doc_type) ? -amount : amount;
+}
+
 export type PrintPaymentReceiptTemplateProps = {
   document: DocumentDetail;
   allocations: DocumentAllocationRow[];
@@ -31,6 +40,12 @@ export type PrintPaymentReceiptTemplateProps = {
 /**
  * A4 print layout for REC / PAY (finance knock-off receipts).
  * Screen: preview card. Print: sole visible content via #payment-print-document.
+ *
+ * Accounting display:
+ * - Invoice allocations = positive
+ * - Deposit allocations = negative deduction
+ * - Table net = invoices − deposits (= Net Cash)
+ * - Header grand_total on document = invoice settlement value (not net cash)
  */
 export default function PrintPaymentReceiptTemplate({
   document: doc,
@@ -38,9 +53,9 @@ export default function PrintPaymentReceiptTemplate({
   mode,
   className,
 }: PrintPaymentReceiptTemplateProps) {
-  const grandTotal = Number(doc.grand_total ?? 0);
+  const invoiceSettlement = Number(doc.grand_total ?? 0);
   const whtAmount = Number(doc.wht_amount ?? 0);
-  const cashAmount = Number(doc.total_amount ?? doc.sub_total ?? grandTotal);
+  const netCash = Number(doc.total_amount ?? doc.sub_total ?? 0);
   const partyLabel = mode === "REC" ? "ลูกค้า / Customer" : "ผู้จำหน่าย / Vendor";
   const titleLabel =
     mode === "REC"
@@ -48,8 +63,15 @@ export default function PrintPaymentReceiptTemplate({
       : "ใบจ่ายชำระหนี้ (Payment Voucher)";
   const totalLabel =
     mode === "REC" ? "ยอดรับชำระสุทธิ" : "ยอดจ่ายชำระสุทธิ";
-  const allocatedSum = allocations.reduce(
-    (sum, row) => sum + Number(row.allocated_amount ?? 0),
+
+  const invoiceSum = allocations
+    .filter((row) => !isDepositAllocation(row.target_doc_type))
+    .reduce((sum, row) => sum + Number(row.allocated_amount ?? 0), 0);
+  const depositSum = allocations
+    .filter((row) => isDepositAllocation(row.target_doc_type))
+    .reduce((sum, row) => sum + Number(row.allocated_amount ?? 0), 0);
+  const netFromAllocations = allocations.reduce(
+    (sum, row) => sum + signedAllocatedAmount(row),
     0,
   );
   const allocatedWht = allocations.reduce(
@@ -171,41 +193,90 @@ export default function PrintPaymentReceiptTemplate({
                 </td>
               </tr>
             ) : (
-              allocations.map((row, index) => (
-                <tr
-                  key={row.id}
-                  className="border-b border-neutral-200 align-top"
-                >
-                  <td className="py-2 pr-2 tabular-nums text-neutral-500">
-                    {index + 1}
-                  </td>
-                  <td className="py-2 pr-2 font-mono text-[11px] font-medium text-neutral-800">
-                    {row.target_doc_no}
-                  </td>
-                  <td className="py-2 pr-2 font-mono text-[11px] text-neutral-700">
-                    {row.reference_no?.trim() || "—"}
-                  </td>
-                  <td className="py-2 pr-2 text-right tabular-nums text-neutral-900">
-                    {formatMoney(row.allocated_amount)}
-                  </td>
-                  <td className="py-2 text-right tabular-nums text-neutral-700">
-                    {formatMoney(row.wht_amount)}
-                  </td>
-                </tr>
-              ))
+              allocations.map((row, index) => {
+                const isDeposit = isDepositAllocation(row.target_doc_type);
+                const signed = signedAllocatedAmount(row);
+                return (
+                  <tr
+                    key={row.id}
+                    className="border-b border-neutral-200 align-top"
+                  >
+                    <td className="py-2 pr-2 tabular-nums text-neutral-500">
+                      {index + 1}
+                    </td>
+                    <td className="py-2 pr-2 font-mono text-[11px] font-medium text-neutral-800">
+                      {isDeposit
+                        ? `(หัก) มัดจำ ${row.target_doc_no}`
+                        : row.target_doc_no}
+                      {row.target_doc_type ? (
+                        <span className="ml-1 text-[10px] text-neutral-400">
+                          ({row.target_doc_type})
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="py-2 pr-2 font-mono text-[11px] text-neutral-700">
+                      {row.reference_no?.trim() || "—"}
+                    </td>
+                    <td
+                      className={
+                        isDeposit
+                          ? "py-2 pr-2 text-right tabular-nums text-neutral-700"
+                          : "py-2 pr-2 text-right tabular-nums text-neutral-900"
+                      }
+                    >
+                      {isDeposit
+                        ? `(${formatMoney(Math.abs(signed))})`
+                        : formatMoney(signed)}
+                    </td>
+                    <td className="py-2 text-right tabular-nums text-neutral-700">
+                      {formatMoney(row.wht_amount)}
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
           {allocations.length > 0 ? (
             <tfoot>
+              <tr className="border-t border-neutral-200">
+                <td
+                  colSpan={3}
+                  className="py-1.5 pr-2 text-right text-neutral-600"
+                >
+                  รวมบิลตั้งหนี้
+                </td>
+                <td className="py-1.5 pr-2 text-right tabular-nums text-neutral-800">
+                  {formatMoney(invoiceSum)}
+                </td>
+                <td className="py-1.5 text-right tabular-nums text-neutral-800">
+                  {formatMoney(allocatedWht)}
+                </td>
+              </tr>
+              {depositSum > 0 ? (
+                <tr>
+                  <td
+                    colSpan={3}
+                    className="py-1.5 pr-2 text-right text-neutral-600"
+                  >
+                    หักมัดจำ
+                  </td>
+                  <td className="py-1.5 pr-2 text-right tabular-nums text-neutral-800">
+                    ({formatMoney(depositSum)})
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums text-neutral-500">
+                    —
+                  </td>
+                </tr>
+              ) : null}
               <tr className="border-t border-neutral-400">
                 <td
                   colSpan={3}
                   className="py-2 pr-2 text-right font-semibold text-neutral-800"
                 >
-                  รวม
+                  รวมสุทธิ (บิล − มัดจำ)
                 </td>
                 <td className="py-2 pr-2 text-right font-semibold tabular-nums text-neutral-950">
-                  {formatMoney(allocatedSum)}
+                  {formatMoney(netFromAllocations)}
                 </td>
                 <td className="py-2 text-right font-semibold tabular-nums text-neutral-950">
                   {formatMoney(allocatedWht)}
@@ -236,11 +307,25 @@ export default function PrintPaymentReceiptTemplate({
 
         <div className="w-full max-w-xs space-y-1.5 border border-neutral-300 p-3 text-xs sm:ml-auto">
           <div className="flex justify-between gap-4">
+            <span className="text-neutral-600">มูลค่าบิลที่ตัดยอด</span>
+            <span className="tabular-nums text-neutral-900">
+              {formatMoney(invoiceSettlement)}
+            </span>
+          </div>
+          {depositSum > 0 ? (
+            <div className="flex justify-between gap-4">
+              <span className="text-neutral-600">หักมัดจำ</span>
+              <span className="tabular-nums text-neutral-900">
+                ({formatMoney(depositSum)})
+              </span>
+            </div>
+          ) : null}
+          <div className="flex justify-between gap-4">
             <span className="text-neutral-600">
               {mode === "REC" ? "ยอดเงินโอน/รับจริง" : "ยอดเงินโอน/จ่ายจริง"}
             </span>
             <span className="tabular-nums text-neutral-900">
-              {formatMoney(cashAmount)}
+              {formatMoney(netCash)}
             </span>
           </div>
           {whtAmount > 0 || allocatedWht > 0 ? (
@@ -254,7 +339,7 @@ export default function PrintPaymentReceiptTemplate({
           <div className="flex justify-between gap-4 border-t border-neutral-400 pt-2">
             <span className="font-bold text-neutral-950">{totalLabel}</span>
             <span className="font-bold tabular-nums text-neutral-950">
-              {formatMoney(grandTotal)}
+              {formatMoney(netFromAllocations)}
             </span>
           </div>
         </div>

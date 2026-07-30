@@ -1364,7 +1364,7 @@ export async function getSalesDocuments(
       contactIds = (matchedContacts ?? []).map((c) => c.id as string);
     }
 
-    // Base query — sales allow-list ONLY (blocks purchase PO/REC leakage).
+    // Base query — sales allow-list ONLY (blocks purchase PO/PAY leakage).
     let query = supabase
       .from("documents")
       .select(

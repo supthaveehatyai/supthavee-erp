@@ -17,6 +17,12 @@ const DOC_TYPE_LABELS: Record<DocumentType, string> = {
   AP_CASH: "บิลเงินสดซื้อ (AP Cash)",
   DEP_OUT: "มัดจำจ่าย (Deposit Out)",
   PAY: "ใบจ่ายชำระ (Payment)",
+  AR_REFUND: "ใบสำคัญจ่ายเงินคืน (Refund Payment)",
+  AR_WRITEOFF: "ใบสำคัญปรับปรุงบัญชี - รับรู้รายได้ (Write-off Income)",
+  AP_REFUND: "ใบสำคัญรับเงินคืน (Refund Receipt)",
+  AP_WRITEOFF: "ใบสำคัญปรับปรุงบัญชี - ตัดเป็นค่าใช้จ่าย (Write-off Expense)",
+  REFUND: "ใบสำคัญคืนเงิน (Refund — legacy)",
+  WRITE_OFF: "ใบสำคัญตัดเศษ (Write-off — legacy)",
   DEP: "ใบมัดจำ (Deposit — legacy)",
   INT_REC: "ใบรับภายใน (Internal Receipt — legacy)",
 };
@@ -52,13 +58,28 @@ export default function PrintDocumentTemplate({
   document: doc,
   className,
 }: PrintDocumentTemplateProps) {
+  const isDepositDoc =
+    doc.doc_type === "DEP_IN" || doc.doc_type === "DEP_OUT";
   const subtotal = Number(doc.total_amount ?? doc.sub_total ?? 0);
   const discountAmount = Number(doc.discount_amount ?? 0);
   const netBeforeVat = Number(doc.net_before_vat ?? subtotal - discountAmount);
   const vatAmount = Number(doc.vat_amount ?? doc.tax_amount ?? 0);
   const vatRate = Number(doc.vat_rate ?? doc.tax_rate ?? 7);
+  const vatType = doc.vat_type ?? "NONE";
+  const hasVat = vatType !== "NONE" && vatAmount > 0;
   const grandTotal = Number(doc.grand_total ?? 0);
   const docTypeLabel = DOC_TYPE_LABELS[doc.doc_type] ?? doc.doc_type;
+  const partyLabel =
+    doc.doc_type === "DEP_OUT" ||
+    doc.doc_type === "PO" ||
+    doc.doc_type === "AP_TAX" ||
+    doc.doc_type === "AP_INV" ||
+    doc.doc_type === "AP_CASH" ||
+    doc.doc_type === "PAY" ||
+    doc.doc_type === "AP_REFUND" ||
+    doc.doc_type === "AP_WRITEOFF"
+      ? "ซัพพลายเออร์ / Vendor"
+      : "ลูกค้า / Customer";
 
   return (
     <article
@@ -111,7 +132,7 @@ export default function PrintDocumentTemplate({
         <div className="mt-5 grid gap-4 border-t border-neutral-200 pt-4 sm:grid-cols-2">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
-              ลูกค้า / Customer
+              {partyLabel}
             </p>
             <p className="mt-1 text-sm font-semibold text-neutral-900">
               {doc.contact?.company_name ?? "—"}
@@ -158,81 +179,121 @@ export default function PrintDocumentTemplate({
             ) : (
               <p className="mt-1 text-xs text-neutral-500">—</p>
             )}
-            {doc.vat_type && (
+            {(doc.vat_type || hasVat) && (
               <p className="mt-3 text-xs text-neutral-600">
-                ประเภท VAT: {doc.vat_type} · อัตรา {vatRate}%
+                ประเภท VAT: {vatType}
+                {hasVat ? ` · อัตรา ${vatRate}%` : ""}
               </p>
             )}
+            {doc.reference_no?.trim() ? (
+              <p className="mt-1 text-xs text-neutral-600">
+                อ้างอิง: {doc.reference_no.trim()}
+              </p>
+            ) : null}
           </div>
         </div>
       </header>
 
-      {/* Body — line items */}
+      {/* Body — deposit summary or line items */}
       <section className="mt-6">
-        <table className="w-full border-collapse text-left text-xs">
-          <thead>
-            <tr className="border-b border-neutral-400">
-              <th className="py-2 pr-2 font-semibold text-neutral-700">#</th>
-              <th className="py-2 pr-2 font-semibold text-neutral-700">SKU</th>
-              <th className="py-2 pr-2 font-semibold text-neutral-700">
-                รายละเอียด
-              </th>
-              <th className="py-2 pr-2 text-right font-semibold text-neutral-700">
-                จำนวน
-              </th>
-              <th className="py-2 pr-2 text-center font-semibold text-neutral-700">
-                หน่วย
-              </th>
-              <th className="py-2 pr-2 text-right font-semibold text-neutral-700">
-                ราคา/หน่วย
-              </th>
-              <th className="py-2 text-right font-semibold text-neutral-700">
-                รวม
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {doc.items.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={7}
-                  className="py-8 text-center text-neutral-400"
-                >
-                  ไม่มีรายการสินค้า
+        {isDepositDoc ? (
+          <table className="w-full border-collapse text-left text-xs">
+            <thead>
+              <tr className="border-b border-neutral-400">
+                <th className="py-2 pr-2 font-semibold text-neutral-700">#</th>
+                <th className="py-2 pr-2 font-semibold text-neutral-700">
+                  รายละเอียด
+                </th>
+                <th className="py-2 text-right font-semibold text-neutral-700">
+                  ยอดเงิน
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-b border-neutral-200">
+                <td className="py-3 pr-2 tabular-nums text-neutral-500">1</td>
+                <td className="py-3 pr-2 text-neutral-800">
+                  {doc.doc_type === "DEP_IN"
+                    ? "เงินมัดจำรับจากลูกค้า"
+                    : "เงินมัดจำจ่ายให้ซัพพลายเออร์"}
+                  {hasVat ? (
+                    <span className="mt-0.5 block text-[10px] text-neutral-500">
+                      รวมภาษีมูลค่าเพิ่ม {vatRate}% ({vatType})
+                    </span>
+                  ) : null}
+                </td>
+                <td className="py-3 text-right font-medium tabular-nums text-neutral-900">
+                  {formatMoney(grandTotal)}
                 </td>
               </tr>
-            ) : (
-              doc.items.map((item, index) => (
-                <tr
-                  key={item.id}
-                  className="border-b border-neutral-200 align-top"
-                >
-                  <td className="py-2 pr-2 tabular-nums text-neutral-500">
-                    {index + 1}
-                  </td>
-                  <td className="py-2 pr-2 font-mono text-[11px] font-medium text-neutral-800">
-                    {item.sku ?? "—"}
-                  </td>
-                  <td className="max-w-[12rem] py-2 pr-2 text-neutral-800">
-                    {item.description || item.product_name || "—"}
-                  </td>
-                  <td className="py-2 pr-2 text-right tabular-nums text-neutral-800">
-                    {item.qty}
-                  </td>
-                  <td className="py-2 pr-2 text-center text-neutral-600">
-                    {item.uom_used ?? "—"}
-                  </td>
-                  <td className="py-2 pr-2 text-right tabular-nums text-neutral-800">
-                    {formatMoney(item.unit_price)}
-                  </td>
-                  <td className="py-2 text-right font-medium tabular-nums text-neutral-900">
-                    {formatMoney(item.line_total)}
+            </tbody>
+          </table>
+        ) : (
+          <table className="w-full border-collapse text-left text-xs">
+            <thead>
+              <tr className="border-b border-neutral-400">
+                <th className="py-2 pr-2 font-semibold text-neutral-700">#</th>
+                <th className="py-2 pr-2 font-semibold text-neutral-700">SKU</th>
+                <th className="py-2 pr-2 font-semibold text-neutral-700">
+                  รายละเอียด
+                </th>
+                <th className="py-2 pr-2 text-right font-semibold text-neutral-700">
+                  จำนวน
+                </th>
+                <th className="py-2 pr-2 text-center font-semibold text-neutral-700">
+                  หน่วย
+                </th>
+                <th className="py-2 pr-2 text-right font-semibold text-neutral-700">
+                  ราคา/หน่วย
+                </th>
+                <th className="py-2 text-right font-semibold text-neutral-700">
+                  รวม
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {doc.items.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="py-8 text-center text-neutral-400"
+                  >
+                    ไม่มีรายการสินค้า
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                doc.items.map((item, index) => (
+                  <tr
+                    key={item.id}
+                    className="border-b border-neutral-200 align-top"
+                  >
+                    <td className="py-2 pr-2 tabular-nums text-neutral-500">
+                      {index + 1}
+                    </td>
+                    <td className="py-2 pr-2 font-mono text-[11px] font-medium text-neutral-800">
+                      {item.sku ?? "—"}
+                    </td>
+                    <td className="max-w-[12rem] py-2 pr-2 text-neutral-800">
+                      {item.description || item.product_name || "—"}
+                    </td>
+                    <td className="py-2 pr-2 text-right tabular-nums text-neutral-800">
+                      {item.qty}
+                    </td>
+                    <td className="py-2 pr-2 text-center text-neutral-600">
+                      {item.uom_used ?? "—"}
+                    </td>
+                    <td className="py-2 pr-2 text-right tabular-nums text-neutral-800">
+                      {formatMoney(item.unit_price)}
+                    </td>
+                    <td className="py-2 text-right font-medium tabular-nums text-neutral-900">
+                      {formatMoney(item.line_total)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        )}
       </section>
 
       {/* Footer — totals + signatures */}
@@ -240,7 +301,9 @@ export default function PrintDocumentTemplate({
         <div className="grid flex-1 grid-cols-2 gap-8 pt-6 text-center text-xs text-neutral-700">
           <div>
             <div className="mx-auto mb-10 h-16 w-40 border-b border-neutral-400" />
-            <p className="font-semibold">ผู้รับของ</p>
+            <p className="font-semibold">
+              {isDepositDoc ? "ผู้รับเงิน / ผู้จ่ายเงิน" : "ผู้รับของ"}
+            </p>
             <p className="mt-1 text-[10px] text-neutral-500">
               ลายเซ็น / วันที่
             </p>
@@ -255,41 +318,74 @@ export default function PrintDocumentTemplate({
         </div>
 
         <div className="w-full max-w-xs space-y-1.5 border border-neutral-300 p-3 text-xs sm:ml-auto">
-          <div className="flex justify-between gap-4">
-            <span className="text-neutral-600">ยอดรวมสินค้า</span>
-            <span className="tabular-nums text-neutral-900">
-              {formatMoney(subtotal)}
-            </span>
-          </div>
-          <div className="flex justify-between gap-4">
-            <span className="text-neutral-600">
-              ส่วนลดท้ายบิล
-              {doc.discount_text ? ` (${doc.discount_text})` : ""}
-            </span>
-            <span className="tabular-nums text-neutral-900">
-              −{formatMoney(discountAmount)}
-            </span>
-          </div>
-          <div className="flex justify-between gap-4 border-t border-neutral-200 pt-1.5">
-            <span className="text-neutral-600">ยอดหลังหักส่วนลด</span>
-            <span className="tabular-nums text-neutral-900">
-              {formatMoney(netBeforeVat)}
-            </span>
-          </div>
-          <div className="flex justify-between gap-4">
-            <span className="text-neutral-600">
-              ภาษีมูลค่าเพิ่ม {vatRate}%
-            </span>
-            <span className="tabular-nums text-neutral-900">
-              {formatMoney(vatAmount)}
-            </span>
-          </div>
-          <div className="flex justify-between gap-4 border-t border-neutral-400 pt-2">
-            <span className="font-bold text-neutral-950">ยอดสุทธิ</span>
-            <span className="font-bold tabular-nums text-neutral-950">
-              {formatMoney(grandTotal)}
-            </span>
-          </div>
+          {isDepositDoc ? (
+            <>
+              <div className="flex justify-between gap-4">
+                <span className="text-neutral-600">ยอดก่อนภาษี (Net Total)</span>
+                <span className="tabular-nums text-neutral-900">
+                  {formatMoney(netBeforeVat)}
+                </span>
+              </div>
+              {hasVat || vatType !== "NONE" ? (
+                <div className="flex justify-between gap-4">
+                  <span className="text-neutral-600">
+                    ภาษีมูลค่าเพิ่ม {vatRate}% ({vatType})
+                  </span>
+                  <span className="tabular-nums text-neutral-900">
+                    {formatMoney(vatAmount)}
+                  </span>
+                </div>
+              ) : null}
+              <div className="flex justify-between gap-4 border-t border-neutral-400 pt-2">
+                <span className="font-bold text-neutral-950">
+                  ยอดรวมสุทธิ (Grand Total)
+                </span>
+                <span className="font-bold tabular-nums text-neutral-950">
+                  {formatMoney(grandTotal)}
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex justify-between gap-4">
+                <span className="text-neutral-600">ยอดรวมสินค้า</span>
+                <span className="tabular-nums text-neutral-900">
+                  {formatMoney(subtotal)}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-neutral-600">
+                  ส่วนลดท้ายบิล
+                  {doc.discount_text ? ` (${doc.discount_text})` : ""}
+                </span>
+                <span className="tabular-nums text-neutral-900">
+                  −{formatMoney(discountAmount)}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4 border-t border-neutral-200 pt-1.5">
+                <span className="text-neutral-600">ยอดก่อนภาษี (Net Total)</span>
+                <span className="tabular-nums text-neutral-900">
+                  {formatMoney(netBeforeVat)}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-neutral-600">
+                  ภาษีมูลค่าเพิ่ม {vatRate}%
+                </span>
+                <span className="tabular-nums text-neutral-900">
+                  {formatMoney(vatAmount)}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4 border-t border-neutral-400 pt-2">
+                <span className="font-bold text-neutral-950">
+                  ยอดรวมสุทธิ (Grand Total)
+                </span>
+                <span className="font-bold tabular-nums text-neutral-950">
+                  {formatMoney(grandTotal)}
+                </span>
+              </div>
+            </>
+          )}
         </div>
       </footer>
 

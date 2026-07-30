@@ -15,6 +15,8 @@ export const DOCUMENT_TYPES = [
   "DEP_IN",
   "REC",
   "CN",
+  "AR_REFUND",
+  "AR_WRITEOFF",
   // Purchases
   "PO",
   "AP_TAX",
@@ -22,6 +24,11 @@ export const DOCUMENT_TYPES = [
   "AP_CASH",
   "DEP_OUT",
   "PAY",
+  "AP_REFUND",
+  "AP_WRITEOFF",
+  // Legacy settlement (readable until fully migrated)
+  "REFUND",
+  "WRITE_OFF",
   // Legacy (readable until fully migrated)
   "DEP",
   "INT_REC",
@@ -47,12 +54,19 @@ export const DOCUMENT_TYPE_PREFIX = {
   DEP_IN: "DIN",
   REC: "REC",
   CN: "CN",
+  AR_REFUND: "SRF",
+  AR_WRITEOFF: "SWO",
   PO: "PO",
   AP_TAX: "APT",
   AP_INV: "API",
   AP_CASH: "APC",
   DEP_OUT: "DOUT",
   PAY: "PAY",
+  AP_REFUND: "PRF",
+  AP_WRITEOFF: "PWO",
+  // Legacy
+  REFUND: "RFD",
+  WRITE_OFF: "WRO",
   DEP: "DEP",
   INT_REC: "INT",
 } as const;
@@ -70,6 +84,8 @@ export const SALES_DOC_TYPES = [
   "DEP_IN",
   "REC",
   "CN",
+  "AR_REFUND",
+  "AR_WRITEOFF",
 ] as const;
 
 /**
@@ -82,6 +98,24 @@ export const PURCHASE_DOC_TYPES = [
   "AP_CASH",
   "DEP_OUT",
   "PAY",
+  "AP_REFUND",
+  "AP_WRITEOFF",
+] as const;
+
+/** AR settlement docs (Sales / DEP_IN). */
+export const AR_SETTLEMENT_DOC_TYPES = ["AR_REFUND", "AR_WRITEOFF"] as const;
+
+/** AP settlement docs (Purchases / DEP_OUT). */
+export const AP_SETTLEMENT_DOC_TYPES = ["AP_REFUND", "AP_WRITEOFF"] as const;
+
+/** All deposit settlement docs (AR + AP + legacy). */
+export const SETTLEMENT_DOC_TYPES = [
+  "AR_REFUND",
+  "AR_WRITEOFF",
+  "AP_REFUND",
+  "AP_WRITEOFF",
+  "REFUND",
+  "WRITE_OFF",
 ] as const;
 
 /**

@@ -15,7 +15,7 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
   const params = await searchParams;
   const selectedContactId = params.contact_id?.trim() || "";
 
-  const [debtors, bankAccountsResult, unpaidInvoices] = await Promise.all([
+  const [debtors, bankAccountsResult, paymentContext] = await Promise.all([
     getDebtorsList(),
     getBankAccounts(),
     getUnpaidInvoicesByCustomer(selectedContactId),
@@ -27,7 +27,8 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
     <ARPaymentClient
       key={selectedContactId || "summary"}
       debtors={debtors}
-      invoices={unpaidInvoices}
+      invoices={paymentContext.invoices}
+      availableDeposits={paymentContext.availableDeposits}
       bankAccounts={bankAccounts}
       selectedContactId={selectedContactId}
     />

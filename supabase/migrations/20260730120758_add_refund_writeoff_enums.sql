@@ -1,14 +1,21 @@
 -- ==============================================================================
--- Phase 5 — Split Refund / Write-off by AR (Sales) vs AP (Purchases)
+-- Phase 5 — Add REFUND / WRITE_OFF to enum document_type + update RPC prefixes
+-- Created via: `supabase migration new add_refund_writeoff_enums`
+--
+-- Fixes: invalid input value for enum document_type: "REFUND" / "WRITE_OFF"
+-- Running numbers:
+--   REFUND    → RFD-YYMM-XXXX  (e.g. RFD-2607-0001)
+--   WRITE_OFF → WRO-YYMM-XXXX  (e.g. WRO-2607-0001)
+--
+-- NOTE: ADD VALUE IF NOT EXISTS is idempotent (safe if earlier migrations ran).
+-- RPC CASE compares text params — does not cast to enum in this transaction.
 -- ==============================================================================
 
-ALTER TYPE public.document_type ADD VALUE IF NOT EXISTS 'AR_REFUND';
-ALTER TYPE public.document_type ADD VALUE IF NOT EXISTS 'AP_REFUND';
-ALTER TYPE public.document_type ADD VALUE IF NOT EXISTS 'AR_WRITEOFF';
-ALTER TYPE public.document_type ADD VALUE IF NOT EXISTS 'AP_WRITEOFF';
+ALTER TYPE public.document_type ADD VALUE IF NOT EXISTS 'REFUND';
+ALTER TYPE public.document_type ADD VALUE IF NOT EXISTS 'WRITE_OFF';
 
 COMMENT ON TYPE public.document_type IS
-  'Sales: QT SO INV_DO TAX_INV CS_TAX ABB DEP_IN REC CN AR_REFUND AR_WRITEOFF | Purchases: PO AP_TAX AP_INV AP_CASH DEP_OUT PAY AP_REFUND AP_WRITEOFF | Legacy: REFUND WRITE_OFF';
+  'Sales: QT SO INV_DO TAX_INV CS_TAX ABB DEP_IN REC CN | Purchases: PO AP_TAX AP_INV AP_CASH DEP_OUT PAY | Finance: REFUND WRITE_OFF';
 
 CREATE OR REPLACE FUNCTION public.generate_document_no(
   p_doc_type text,
@@ -38,12 +45,8 @@ BEGIN
   v_raw := upper(btrim(p_doc_type));
 
   -- Map document_type enum labels → running-number prefixes.
+  -- Raw prefixes (RFD, WRO, INV, …) pass through unchanged.
   v_prefix := CASE v_raw
-    WHEN 'AR_REFUND' THEN 'SRF'
-    WHEN 'AP_REFUND' THEN 'PRF'
-    WHEN 'AR_WRITEOFF' THEN 'SWO'
-    WHEN 'AP_WRITEOFF' THEN 'PWO'
-    -- Legacy settlement types (kept for backward compatibility)
     WHEN 'REFUND' THEN 'RFD'
     WHEN 'WRITE_OFF' THEN 'WRO'
     ELSE v_raw
@@ -77,7 +80,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.generate_document_no(text, date) IS
-  'Race-safe PREFIX-YYMM-XXXX. Maps AR_REFUND→SRF, AP_REFUND→PRF, AR_WRITEOFF→SWO, AP_WRITEOFF→PWO (legacy REFUND→RFD, WRITE_OFF→WRO).';
+  'Race-safe PREFIX-YYMM-XXXX. Maps REFUND→RFD, WRITE_OFF→WRO; other values used as prefix as-is.';
 
 REVOKE ALL ON FUNCTION public.generate_document_no(text, date) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.generate_document_no(text, date) FROM anon, authenticated;

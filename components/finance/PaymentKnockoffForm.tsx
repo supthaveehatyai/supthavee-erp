@@ -11,8 +11,12 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { processPaymentKnockoff } from "@/lib/actions/finance/payment";
 import { allocateFifo, roundMoney } from "@/lib/utils/payment-fifo";
+import {
+  checkedDepositIdsFromAmounts,
+  redistributeCheckedDeposits,
+} from "@/lib/utils/deposit-apply";
 import type { BankAccount } from "@/types/bank-account";
-import type { UnpaidInvoice } from "@/types/payment";
+import type { AvailableDeposit, UnpaidInvoice } from "@/types/payment";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,10 +28,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Wand2, CheckCircle2, Eye, FileUp } from "lucide-react";
+import { Wand2, CheckCircle2, Eye, FileUp, HandCoins } from "lucide-react";
 
 export type PaymentKnockoffFormProps = {
   invoices: UnpaidInvoice[];
+  availableDeposits?: AvailableDeposit[];
   bankAccounts: BankAccount[];
   contactId: string;
 };
@@ -56,6 +61,7 @@ function todayIsoLocal(): string {
 
 export function PaymentKnockoffForm({
   invoices,
+  availableDeposits = [],
   bankAccounts,
   contactId,
 }: PaymentKnockoffFormProps) {
@@ -72,6 +78,9 @@ export function PaymentKnockoffForm({
   const [referenceNo, setReferenceNo] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
   const [lines, setLines] = useState<LineState[]>(() => emptyLines(invoices));
+  const [depositAmounts, setDepositAmounts] = useState<Record<string, string>>(
+    {},
+  );
 
   const cash = roundMoney(Number(amount) || 0);
   const wht = roundMoney(Number(whtAmount) || 0);
@@ -87,10 +96,81 @@ export function PaymentKnockoffForm({
   );
   const sumApplied = roundMoney(sumAllocated + sumWht);
 
+  const depositTotal = useMemo(
+    () =>
+      roundMoney(
+        availableDeposits.reduce((sum, dep) => {
+          const n = Number(depositAmounts[dep.id] || 0);
+          return Number.isFinite(n) && n > 0 ? sum + n : sum;
+        }, 0),
+      ),
+    [availableDeposits, depositAmounts],
+  );
+
+  const netPaymentAmount = roundMoney(Math.max(0, sumAllocated - depositTotal));
+
   const allocationsJson = useMemo(() => JSON.stringify(lines), [lines]);
+  const depositsJson = useMemo(
+    () =>
+      JSON.stringify(
+        availableDeposits
+          .map((dep) => ({
+            deposit_id: dep.id,
+            allocated_amount: roundMoney(Number(depositAmounts[dep.id] || 0)),
+          }))
+          .filter((row) => row.allocated_amount > 0),
+      ),
+    [availableDeposits, depositAmounts],
+  );
+
+  function syncNetCash(nextAllocated: number, nextDepositTotal: number) {
+    const net = roundMoney(Math.max(0, nextAllocated - nextDepositTotal));
+    setAmount(net > 0 ? String(net) : net === 0 && nextAllocated > 0 ? "0" : "");
+  }
+
+  function currentDepositTotal(next: Record<string, string>): number {
+    return roundMoney(
+      availableDeposits.reduce((sum, dep) => {
+        const n = Number(next[dep.id] || 0);
+        return Number.isFinite(n) && n > 0 ? sum + n : sum;
+      }, 0),
+    );
+  }
+
+  /** Auto-fill checked deposits = min(invoiceTotal leftover FIFO, remaining). */
+  function syncDepositsToInvoiceTotal(
+    invoiceTotal: number,
+    baseAmounts: Record<string, string>,
+    checkedIds: string[],
+  ): Record<string, string> {
+    if (checkedIds.length === 0) return {};
+    return redistributeCheckedDeposits(
+      invoiceTotal,
+      availableDeposits,
+      checkedIds,
+    );
+  }
+
+  function applyInvoiceTotalAndDeposits(
+    nextLines: LineState[],
+    baseDepositAmounts: Record<string, string> = depositAmounts,
+  ) {
+    const nextAllocated = roundMoney(
+      nextLines.reduce((sum, line) => sum + line.allocated_amount, 0),
+    );
+    const checkedIds = checkedDepositIdsFromAmounts(baseDepositAmounts);
+    const nextDeposits = syncDepositsToInvoiceTotal(
+      nextAllocated,
+      baseDepositAmounts,
+      checkedIds,
+    );
+    setLines(nextLines);
+    setDepositAmounts(nextDeposits);
+    syncNetCash(nextAllocated, currentDepositTotal(nextDeposits));
+  }
 
   function handleAutoAllocate() {
-    if (poolTotal <= 0) {
+    if (poolTotal <= 0 && depositTotal <= 0) {
       toast.error("กรุณาระบุยอดเงินโอนจริง และ/หรือ ยอด WHT ก่อน Auto-Allocate");
       return;
     }
@@ -102,26 +182,26 @@ export function PaymentKnockoffForm({
       return a.display_doc_no.localeCompare(b.display_doc_no);
     });
 
+    // Allocate cash+deposit pool against invoices (FIFO), WHT separate
     const fifo = allocateFifo(
       sorted.map((inv) => ({
         id: inv.id,
         remaining_balance: inv.remaining_balance,
       })),
-      cash,
+      roundMoney(cash + depositTotal),
       wht,
     );
 
     const byId = new Map(fifo.map((row) => [row.invoice_id, row]));
-    setLines(
-      invoices.map((inv) => {
-        const row = byId.get(inv.id);
-        return {
-          invoice_id: inv.id,
-          allocated_amount: row?.allocated_amount ?? 0,
-          wht_amount: row?.wht_amount ?? 0,
-        };
-      }),
-    );
+    const next = invoices.map((inv) => {
+      const row = byId.get(inv.id);
+      return {
+        invoice_id: inv.id,
+        allocated_amount: row?.allocated_amount ?? 0,
+        wht_amount: row?.wht_amount ?? 0,
+      };
+    });
+    applyInvoiceTotalAndDeposits(next);
     toast.success("กระจายยอดแบบ FIFO เรียบร้อย — แก้ไขรายบิลได้ก่อนบันทึก");
   }
 
@@ -134,11 +214,15 @@ export function PaymentKnockoffForm({
     const next = lines.map((line) =>
       line.invoice_id === invoiceId ? { ...line, [field]: value } : line,
     );
+    if (field === "allocated_amount") {
+      applyInvoiceTotalAndDeposits(next);
+      return;
+    }
     setLines(next);
     const nextAllocated = roundMoney(
       next.reduce((sum, line) => sum + line.allocated_amount, 0),
     );
-    setAmount(nextAllocated > 0 ? String(nextAllocated) : "");
+    syncNetCash(nextAllocated, depositTotal);
   }
 
   function handleRowCheck(invoiceId: string, checked: boolean) {
@@ -154,11 +238,7 @@ export function PaymentKnockoffForm({
         allocated_amount: roundMoney(invoice.remaining_balance),
       };
     });
-    setLines(next);
-    const nextAllocated = roundMoney(
-      next.reduce((sum, line) => sum + line.allocated_amount, 0),
-    );
-    setAmount(nextAllocated > 0 ? String(nextAllocated) : "");
+    applyInvoiceTotalAndDeposits(next);
   }
 
   function handleSelectAll(checked: boolean) {
@@ -166,6 +246,10 @@ export function PaymentKnockoffForm({
       setLines(emptyLines(invoices));
       setAmount("");
       setWhtAmount("");
+      // Keep deposits checked but recalc against 0 invoice total
+      const checkedIds = checkedDepositIdsFromAmounts(depositAmounts);
+      const nextDeposits = syncDepositsToInvoiceTotal(0, depositAmounts, checkedIds);
+      setDepositAmounts(nextDeposits);
       return;
     }
     const next = invoices.map((inv) => ({
@@ -173,11 +257,40 @@ export function PaymentKnockoffForm({
       allocated_amount: roundMoney(inv.remaining_balance),
       wht_amount: 0,
     }));
-    setLines(next);
-    const total = roundMoney(
-      next.reduce((sum, line) => sum + line.allocated_amount, 0),
+    applyInvoiceTotalAndDeposits(next);
+  }
+
+  function handleDepositCheck(depositId: string, checked: boolean) {
+    const deposit = availableDeposits.find((d) => d.id === depositId);
+    if (!deposit) return;
+
+    const prevChecked = checkedDepositIdsFromAmounts(depositAmounts);
+    const nextChecked = checked
+      ? Array.from(new Set([...prevChecked, depositId]))
+      : prevChecked.filter((id) => id !== depositId);
+
+    const next = syncDepositsToInvoiceTotal(
+      sumAllocated,
+      depositAmounts,
+      nextChecked,
     );
-    setAmount(String(total));
+    setDepositAmounts(next);
+    syncNetCash(sumAllocated, currentDepositTotal(next));
+  }
+
+  function handleDepositSelectAll(checked: boolean) {
+    if (!checked) {
+      setDepositAmounts({});
+      syncNetCash(sumAllocated, 0);
+      return;
+    }
+    const next = redistributeCheckedDeposits(
+      sumAllocated,
+      availableDeposits,
+      availableDeposits.map((d) => d.id),
+    );
+    setDepositAmounts(next);
+    syncNetCash(sumAllocated, currentDepositTotal(next));
   }
 
   const selectedCount = useMemo(
@@ -190,6 +303,16 @@ export function PaymentKnockoffForm({
   const allSelected =
     invoices.length > 0 && selectedCount === invoices.length;
   const someSelected = selectedCount > 0 && !allSelected;
+
+  const selectedDepositCount = useMemo(
+    () => checkedDepositIdsFromAmounts(depositAmounts).length,
+    [depositAmounts],
+  );
+  const allDepositsSelected =
+    availableDeposits.length > 0 &&
+    selectedDepositCount === availableDeposits.length;
+  const someDepositsSelected =
+    selectedDepositCount > 0 && !allDepositsSelected;
 
   function handleSlipChange(fileList: FileList | null) {
     const file = fileList?.[0] ?? null;
@@ -239,6 +362,7 @@ export function PaymentKnockoffForm({
       setReferenceNo("");
       setSlipFile(null);
       setLines(emptyLines(invoices));
+      setDepositAmounts({});
       router.refresh();
     });
   }
@@ -252,18 +376,20 @@ export function PaymentKnockoffForm({
           3. ฟอร์มตัดยอดชำระเงิน (Knock-off)
         </h3>
         <p className="text-sm text-slate-500">
-          กรอกยอดโอน + WHT แล้วกด Auto-Allocate (FIFO) หรือแก้ไขยอดรายบิลเองก่อนบันทึก
+          เลือกบิล + มัดจำ → ยอดรับจริง = บิล − มัดจำ (ไม่ติดลบ) · หรือ Auto-Allocate
+          (FIFO)
         </p>
       </div>
 
       <form action={handleSubmit} className="space-y-4">
         <input type="hidden" name="contact_id" value={contactId} />
         <input type="hidden" name="allocations_json" value={allocationsJson} />
+        <input type="hidden" name="deposits_json" value={depositsJson} />
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <div className="space-y-2">
             <Label htmlFor="amount">
-              ยอดเงินที่โอนจริง <span className="text-red-500">*</span>
+              ยอดรับชำระจริง (Net) <span className="text-red-500">*</span>
             </Label>
             <Input
               id="amount"
@@ -276,6 +402,13 @@ export function PaymentKnockoffForm({
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
             />
+            <p className="text-xs text-slate-500">
+              คำนวณอัตโนมัติ = บิลที่เลือก − มัดจำที่เลือก (฿
+              {netPaymentAmount.toLocaleString("th-TH", {
+                minimumFractionDigits: 2,
+              })}
+              )
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -310,13 +443,7 @@ export function PaymentKnockoffForm({
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
           <div className="flex flex-wrap gap-4 text-slate-600">
             <span>
-              Pool รวม:{" "}
-              <strong className="text-slate-900">
-                {poolTotal.toLocaleString("th-TH", { minimumFractionDigits: 2 })}
-              </strong>
-            </span>
-            <span>
-              Allocated:{" "}
+              บิลที่ตัด:{" "}
               <strong className="text-slate-900">
                 {sumAllocated.toLocaleString("th-TH", {
                   minimumFractionDigits: 2,
@@ -324,16 +451,35 @@ export function PaymentKnockoffForm({
               </strong>
             </span>
             <span>
-              WHT กระจาย:{" "}
+              มัดจำใช้:{" "}
+              <strong className="text-emerald-700">
+                {depositTotal.toLocaleString("th-TH", {
+                  minimumFractionDigits: 2,
+                })}
+              </strong>
+            </span>
+            <span>
+              ยอดรับจริง:{" "}
+              <strong className="text-blue-800">
+                {netPaymentAmount.toLocaleString("th-TH", {
+                  minimumFractionDigits: 2,
+                })}
+              </strong>
+            </span>
+            <span>
+              WHT:{" "}
               <strong className="text-slate-900">
-                {sumWht.toLocaleString("th-TH", { minimumFractionDigits: 2 })}
+                {sumWht.toLocaleString("th-TH", {
+                  minimumFractionDigits: 2,
+                })}
               </strong>
             </span>
             <span>
               ตัดรวม:{" "}
               <strong
                 className={
-                  Math.abs(sumApplied - poolTotal) > 0.02
+                  Math.abs(sumApplied - roundMoney(cash + depositTotal + wht)) >
+                  0.02
                     ? "text-amber-700"
                     : "text-emerald-700"
                 }
@@ -347,6 +493,9 @@ export function PaymentKnockoffForm({
         </div>
 
         <div className="overflow-hidden rounded-md border border-slate-200">
+          <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-800">
+            เอกสารค้างชำระ (Outstanding Invoices)
+          </div>
           <Table>
             <TableHeader>
               <TableRow className="bg-slate-50">
@@ -483,8 +632,7 @@ export function PaymentKnockoffForm({
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-blue-200 bg-blue-50/60 px-4 py-3 text-sm">
           <span className="text-slate-600">
             เลือกแล้ว {selectedCount}/{invoices.length} บิล
-            {allSelected ? " · เลือกทั้งหมด" : ""} · ยอด Allocated ต้องตรงกับยอดโอน +
-            WHT
+            {allSelected ? " · เลือกทั้งหมด" : ""} · ยอดตัดบิล = ยอดรับจริง + มัดจำ
           </span>
           <span className="text-slate-700">
             ตัดรวม:{" "}
@@ -496,6 +644,142 @@ export function PaymentKnockoffForm({
             </strong>
           </span>
         </div>
+
+        {availableDeposits.length > 0 ? (
+          <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4">
+            <div className="flex items-center gap-2">
+              <HandCoins className="h-5 w-5 text-emerald-700" />
+              <div>
+                <h4 className="font-semibold text-slate-900">
+                  เงินมัดจำที่สามารถใช้ได้ (DEP_IN)
+                </h4>
+                <p className="text-xs text-slate-500">
+                  ติ๊กเลือกมัดจำเพื่อหักจากยอดรับชำระจริง
+                </p>
+              </div>
+            </div>
+            <div className="overflow-hidden rounded-md border border-emerald-200 bg-white">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-emerald-50/80">
+                    <TableHead className="w-14 px-2 text-center">
+                      <div className="flex flex-col items-center gap-1">
+                        <input
+                          type="checkbox"
+                          className="size-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                          checked={allDepositsSelected}
+                          ref={(el) => {
+                            if (el) el.indeterminate = someDepositsSelected;
+                          }}
+                          onChange={(e) =>
+                            handleDepositSelectAll(e.target.checked)
+                          }
+                          aria-label="เลือกมัดจำทั้งหมด"
+                        />
+                        <span className="text-[10px] font-medium leading-none text-slate-500">
+                          ทั้งหมด
+                        </span>
+                      </div>
+                    </TableHead>
+                    <TableHead>เลขที่มัดจำ</TableHead>
+                    <TableHead>วันที่</TableHead>
+                    <TableHead className="text-right">ยอดมัดจำเต็ม</TableHead>
+                    <TableHead className="text-right">คงเหลือใช้ได้</TableHead>
+                    <TableHead className="text-right">ยอดที่ใช้</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {availableDeposits.map((dep) => {
+                    const raw = depositAmounts[dep.id];
+                    const isChecked = raw !== undefined && raw !== "";
+                    const used = Number(raw || 0);
+                    const overLimit =
+                      Number.isFinite(used) &&
+                      used > dep.remaining_balance + 0.02;
+                    return (
+                      <TableRow
+                        key={dep.id}
+                        className={isChecked ? "bg-emerald-50/50" : undefined}
+                      >
+                        <TableCell className="text-center">
+                          <input
+                            type="checkbox"
+                            className="size-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                            checked={isChecked}
+                            onChange={(e) =>
+                              handleDepositCheck(dep.id, e.target.checked)
+                            }
+                            aria-label={`เลือกมัดจำ ${dep.doc_no}`}
+                          />
+                        </TableCell>
+                        <TableCell className="font-mono text-sm font-semibold">
+                          {dep.doc_no}
+                        </TableCell>
+                        <TableCell>
+                          {dep.document_date
+                            ? new Date(dep.document_date).toLocaleDateString(
+                                "th-TH",
+                              )
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="text-right text-slate-500">
+                          {dep.grand_total.toLocaleString("th-TH", {
+                            minimumFractionDigits: 2,
+                          })}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold text-emerald-700">
+                          {dep.remaining_balance.toLocaleString("th-TH", {
+                            minimumFractionDigits: 2,
+                          })}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Input
+                            type="number"
+                            inputMode="decimal"
+                            step="0.01"
+                            min="0"
+                            max={dep.remaining_balance}
+                            className={
+                              overLimit
+                                ? "ml-auto h-9 w-32 border-red-300 text-right"
+                                : "ml-auto h-9 w-32 text-right"
+                            }
+                            value={raw ?? ""}
+                            onChange={(e) => {
+                              const next = {
+                                ...depositAmounts,
+                                [dep.id]: e.target.value,
+                              };
+                              setDepositAmounts(next);
+                              syncNetCash(
+                                sumAllocated,
+                                currentDepositTotal(next),
+                              );
+                            }}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="flex flex-wrap justify-between gap-2 text-sm text-slate-600">
+              <span>
+                เลือกมัดจำ {selectedDepositCount}/{availableDeposits.length} ใบ
+              </span>
+              <span>
+                รวมมัดจำที่ใช้:{" "}
+                <strong className="text-emerald-800">
+                  ฿
+                  {depositTotal.toLocaleString("th-TH", {
+                    minimumFractionDigits: 2,
+                  })}
+                </strong>
+              </span>
+            </div>
+          </div>
+        ) : null}
 
         <div className="space-y-4 rounded-lg border border-blue-200 bg-white p-4">
           <div>

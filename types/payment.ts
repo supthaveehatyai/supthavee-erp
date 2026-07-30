@@ -3,6 +3,13 @@
  * Kept outside `"use server"` modules.
  */
 
+import type {
+  AvailableDeposit,
+  DepositAllocationInput,
+} from "@/types/available-deposit";
+
+export type { AvailableDeposit, DepositAllocationInput };
+
 export type DebtorOption = {
   id: string;
   name: string;
@@ -25,6 +32,11 @@ export type UnpaidInvoice = {
   paid_amount: number;
   remaining_balance: number;
   contact_id: string;
+};
+
+export type CustomerPaymentContext = {
+  invoices: UnpaidInvoice[];
+  availableDeposits: AvailableDeposit[];
 };
 
 export type KnockoffAllocationInput = {

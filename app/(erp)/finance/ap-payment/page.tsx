@@ -17,7 +17,7 @@ export default async function ApPaymentPage({
   const params = await searchParams;
   const selectedVendorId = params.vendor_id?.trim() || "";
 
-  const [vendors, invoices, bankAccountsResult] = await Promise.all([
+  const [vendors, paymentContext, bankAccountsResult] = await Promise.all([
     getVendors(),
     getOutstandingAP(selectedVendorId),
     getBankAccounts(),
@@ -27,7 +27,8 @@ export default async function ApPaymentPage({
     <APPaymentClient
       key={selectedVendorId || "none"}
       vendors={vendors}
-      invoices={invoices}
+      invoices={paymentContext.invoices}
+      availableDeposits={paymentContext.availableDeposits}
       bankAccounts={bankAccountsResult.data ?? []}
       selectedVendorId={selectedVendorId}
     />

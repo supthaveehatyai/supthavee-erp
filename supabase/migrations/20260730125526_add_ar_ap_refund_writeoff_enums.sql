@@ -1,5 +1,14 @@
 -- ==============================================================================
 -- Phase 5 — Split Refund / Write-off by AR (Sales) vs AP (Purchases)
+-- Created via: `supabase migration new add_ar_ap_refund_writeoff_enums`
+--
+-- New document_type values + running-number prefixes:
+--   AR_REFUND   → SRF-YYMM-XXXX
+--   AP_REFUND   → PRF-YYMM-XXXX
+--   AR_WRITEOFF → SWO-YYMM-XXXX
+--   AP_WRITEOFF → PWO-YYMM-XXXX
+--
+-- Legacy REFUND / WRITE_OFF (if present) still map to RFD / WRO for old docs.
 -- ==============================================================================
 
 ALTER TYPE public.document_type ADD VALUE IF NOT EXISTS 'AR_REFUND';
@@ -38,6 +47,7 @@ BEGIN
   v_raw := upper(btrim(p_doc_type));
 
   -- Map document_type enum labels → running-number prefixes.
+  -- Raw prefixes (SRF, PRF, SWO, PWO, INV, …) pass through unchanged.
   v_prefix := CASE v_raw
     WHEN 'AR_REFUND' THEN 'SRF'
     WHEN 'AP_REFUND' THEN 'PRF'

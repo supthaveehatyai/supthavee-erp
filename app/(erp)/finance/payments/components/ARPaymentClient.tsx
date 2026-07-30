@@ -9,7 +9,11 @@
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import type { BankAccount } from "@/types/bank-account";
-import type { DebtorOption, UnpaidInvoice } from "@/types/payment";
+import type {
+  AvailableDeposit,
+  DebtorOption,
+  UnpaidInvoice,
+} from "@/types/payment";
 import { OutstandingPartyCombobox } from "@/components/finance/OutstandingPartyCombobox";
 import { PaymentKnockoffForm } from "@/components/finance/PaymentKnockoffForm";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +39,7 @@ import { ArrowLeft, Eye, Wallet } from "lucide-react";
 export type ARPaymentClientProps = {
   debtors: DebtorOption[];
   invoices: UnpaidInvoice[];
+  availableDeposits: AvailableDeposit[];
   bankAccounts: BankAccount[];
   selectedContactId: string;
 };
@@ -58,6 +63,7 @@ function salesDocumentHref(docNo: string): string {
 export function ARPaymentClient({
   debtors,
   invoices,
+  availableDeposits,
   bankAccounts,
   selectedContactId,
 }: ARPaymentClientProps) {
@@ -280,8 +286,12 @@ export function ARPaymentClient({
                 </div>
 
                 <PaymentKnockoffForm
-                  key={invoices.map((inv) => inv.id).join("|")}
+                  key={[
+                    ...invoices.map((inv) => inv.id),
+                    ...availableDeposits.map((d) => d.id),
+                  ].join("|")}
                   invoices={invoices}
+                  availableDeposits={availableDeposits}
                   bankAccounts={bankAccounts}
                   contactId={selectedContactId}
                 />

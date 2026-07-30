@@ -52,6 +52,7 @@ const navigationGroups: NavigationGroup[] = [
       { label: "ผูกรหัสซัพพลายเออร์", href: "/dashboard/procurement/vendor-mapping" },
       { label: "รับและจ่ายเงิน", href: "/finance/payments" },
       { label: "จ่ายชำระหนี้ซัพพลายเออร์", href: "/finance/ap-payment" },
+      { label: "รับ/จ่าย เงินมัดจำ", href: "/finance/deposits" },
       { label: "สมุดบัญชีธนาคาร", href: "/finance/bank-accounts" },
       { label: "เจ้าหนี้ / ลูกหนี้", href: "/finance/ap-ar" },
     ],

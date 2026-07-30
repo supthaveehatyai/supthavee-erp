@@ -12,9 +12,14 @@ import { toast } from "sonner";
 import { submitAPPayment } from "@/app/actions/finance/ap-actions";
 import type {
   ApVendorOption,
+  AvailableDeposit,
   OutstandingApInvoice,
 } from "@/types/ap-payment";
 import type { BankAccount } from "@/types/bank-account";
+import {
+  checkedDepositIdsFromAmounts,
+  redistributeCheckedDeposits,
+} from "@/lib/utils/deposit-apply";
 import { OutstandingPartyCombobox } from "@/components/finance/OutstandingPartyCombobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,12 +46,14 @@ import {
   CheckCircle2,
   Eye,
   FileUp,
+  HandCoins,
   Wallet,
 } from "lucide-react";
 
 export type APPaymentClientProps = {
   vendors: ApVendorOption[];
   invoices: OutstandingApInvoice[];
+  availableDeposits: AvailableDeposit[];
   bankAccounts: BankAccount[];
   selectedVendorId: string;
 };
@@ -89,6 +96,7 @@ function formatDocLabel(documentNo: string, referenceNo: string | null): string 
 export function APPaymentClient({
   vendors,
   invoices,
+  availableDeposits,
   bankAccounts,
   selectedVendorId,
 }: APPaymentClientProps) {
@@ -99,6 +107,9 @@ export function APPaymentClient({
   const [paymentAmounts, setPaymentAmounts] = useState<Record<string, string>>(
     {},
   );
+  const [depositAmounts, setDepositAmounts] = useState<Record<string, string>>(
+    {},
+  );
   const [paymentDate, setPaymentDate] = useState(todayIsoLocal);
   const [bankAccountId, setBankAccountId] = useState(
     activeBanks[0]?.id ?? "CASH",
@@ -106,7 +117,7 @@ export function APPaymentClient({
   const [referenceNo, setReferenceNo] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
 
-  const totalPaymentAmount = useMemo(() => {
+  const totalInvoiceAmount = useMemo(() => {
     return roundMoney(
       invoices.reduce((sum, inv) => {
         const raw = paymentAmounts[inv.id] ?? "";
@@ -116,6 +127,22 @@ export function APPaymentClient({
       }, 0),
     );
   }, [invoices, paymentAmounts]);
+
+  const depositTotal = useMemo(() => {
+    return roundMoney(
+      availableDeposits.reduce((sum, dep) => {
+        const raw = depositAmounts[dep.id] ?? "";
+        const amount = Number(raw);
+        if (!Number.isFinite(amount) || amount <= 0) return sum;
+        return sum + amount;
+      }, 0),
+    );
+  }, [availableDeposits, depositAmounts]);
+
+  /** Net cash to pay = invoices − deposits (never negative). */
+  const totalPaymentAmount = roundMoney(
+    Math.max(0, totalInvoiceAmount - depositTotal),
+  );
 
   const allocationsJson = useMemo(
     () =>
@@ -128,6 +155,19 @@ export function APPaymentClient({
     [invoices, paymentAmounts],
   );
 
+  const depositsJson = useMemo(
+    () =>
+      JSON.stringify(
+        availableDeposits
+          .map((dep) => ({
+            deposit_id: dep.id,
+            allocated_amount: roundMoney(Number(depositAmounts[dep.id] || 0)),
+          }))
+          .filter((row) => row.allocated_amount > 0),
+      ),
+    [availableDeposits, depositAmounts],
+  );
+
   const summaryGrandTotal = useMemo(
     () =>
       roundMoney(vendors.reduce((sum, row) => sum + row.outstanding_total, 0)),
@@ -136,6 +176,7 @@ export function APPaymentClient({
 
   function handleVendorChange(vendorId: string) {
     setPaymentAmounts({});
+    setDepositAmounts({});
     setSlipFile(null);
     setReferenceNo("");
     if (!vendorId) {
@@ -147,24 +188,55 @@ export function APPaymentClient({
     );
   }
 
+  function syncDepositsToInvoiceTotal(
+    invoiceTotal: number,
+    checkedIds: string[],
+  ): Record<string, string> {
+    if (checkedIds.length === 0) return {};
+    return redistributeCheckedDeposits(
+      invoiceTotal,
+      availableDeposits,
+      checkedIds,
+    );
+  }
+
+  function invoiceTotalFromAmounts(amounts: Record<string, string>): number {
+    return roundMoney(
+      invoices.reduce((sum, inv) => {
+        const n = Number(amounts[inv.id] || 0);
+        return Number.isFinite(n) && n > 0 ? sum + n : sum;
+      }, 0),
+    );
+  }
+
   function handlePaymentAmountChange(invoiceId: string, raw: string) {
-    setPaymentAmounts((prev) => ({ ...prev, [invoiceId]: raw }));
+    const nextPayments = { ...paymentAmounts, [invoiceId]: raw };
+    const invTotal = invoiceTotalFromAmounts(nextPayments);
+    const checkedIds = checkedDepositIdsFromAmounts(depositAmounts);
+    setPaymentAmounts(nextPayments);
+    setDepositAmounts(syncDepositsToInvoiceTotal(invTotal, checkedIds));
   }
 
   function handleRowCheck(invoiceId: string, checked: boolean) {
     const invoice = invoices.find((inv) => inv.id === invoiceId);
     if (!invoice) return;
-    setPaymentAmounts((prev) => ({
-      ...prev,
+    const nextPayments = {
+      ...paymentAmounts,
       [invoiceId]: checked
         ? String(roundMoney(invoice.remaining_balance))
         : "",
-    }));
+    };
+    const invTotal = invoiceTotalFromAmounts(nextPayments);
+    const checkedIds = checkedDepositIdsFromAmounts(depositAmounts);
+    setPaymentAmounts(nextPayments);
+    setDepositAmounts(syncDepositsToInvoiceTotal(invTotal, checkedIds));
   }
 
   function handleSelectAll(checked: boolean) {
     if (!checked) {
       setPaymentAmounts({});
+      const checkedIds = checkedDepositIdsFromAmounts(depositAmounts);
+      setDepositAmounts(syncDepositsToInvoiceTotal(0, checkedIds));
       return;
     }
     const next: Record<string, string> = {};
@@ -172,6 +244,9 @@ export function APPaymentClient({
       next[inv.id] = String(roundMoney(inv.remaining_balance));
     }
     setPaymentAmounts(next);
+    const invTotal = invoiceTotalFromAmounts(next);
+    const checkedIds = checkedDepositIdsFromAmounts(depositAmounts);
+    setDepositAmounts(syncDepositsToInvoiceTotal(invTotal, checkedIds));
   }
 
   const selectedCount = useMemo(
@@ -185,6 +260,44 @@ export function APPaymentClient({
   const allSelected =
     invoices.length > 0 && selectedCount === invoices.length;
   const someSelected = selectedCount > 0 && !allSelected;
+
+  const selectedDepositCount = useMemo(
+    () => checkedDepositIdsFromAmounts(depositAmounts).length,
+    [depositAmounts],
+  );
+  const allDepositsSelected =
+    availableDeposits.length > 0 &&
+    selectedDepositCount === availableDeposits.length;
+  const someDepositsSelected =
+    selectedDepositCount > 0 && !allDepositsSelected;
+
+  function handleDepositCheck(depositId: string, checked: boolean) {
+    const deposit = availableDeposits.find((d) => d.id === depositId);
+    if (!deposit) return;
+
+    const prevChecked = checkedDepositIdsFromAmounts(depositAmounts);
+    const nextChecked = checked
+      ? Array.from(new Set([...prevChecked, depositId]))
+      : prevChecked.filter((id) => id !== depositId);
+
+    setDepositAmounts(
+      syncDepositsToInvoiceTotal(totalInvoiceAmount, nextChecked),
+    );
+  }
+
+  function handleDepositSelectAll(checked: boolean) {
+    if (!checked) {
+      setDepositAmounts({});
+      return;
+    }
+    setDepositAmounts(
+      redistributeCheckedDeposits(
+        totalInvoiceAmount,
+        availableDeposits,
+        availableDeposits.map((d) => d.id),
+      ),
+    );
+  }
 
   function handleSlipChange(fileList: FileList | null) {
     const file = fileList?.[0] ?? null;
@@ -207,8 +320,12 @@ export function APPaymentClient({
   }
 
   function handleSubmit(formData: FormData) {
-    if (totalPaymentAmount <= 0) {
+    if (totalInvoiceAmount <= 0) {
       toast.error("ห้ามบันทึก — ผลรวมยอดตัดหนี้ต้องมากกว่า 0");
+      return;
+    }
+    if (depositTotal > totalInvoiceAmount + 0.02) {
+      toast.error("ยอดมัดจำที่ใช้เกินยอดตัดหนี้ของบิล");
       return;
     }
 
@@ -230,6 +347,7 @@ export function APPaymentClient({
           : "บันทึกจ่ายชำระสำเร็จ",
       );
       setPaymentAmounts({});
+      setDepositAmounts({});
       setSlipFile(null);
       setReferenceNo("");
       router.refresh();
@@ -387,8 +505,12 @@ export function APPaymentClient({
                   name="allocations_json"
                   value={allocationsJson}
                 />
+                <input type="hidden" name="deposits_json" value={depositsJson} />
 
                 <div className="overflow-hidden rounded-md border border-slate-200">
+                  <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-800">
+                    เอกสารค้างชำระ (Outstanding Invoices)
+                  </div>
                   <Table>
                     <TableHeader>
                       <TableRow className="bg-slate-50">
@@ -527,13 +649,143 @@ export function APPaymentClient({
                     เลือกแล้ว {selectedCount}/{invoices.length} บิล
                     {allSelected ? " · เลือกทั้งหมด" : ""}
                   </span>
-                  <span className="text-slate-700">
-                    Total Payment Amount:{" "}
-                    <strong className="text-lg text-orange-800">
-                      ฿{formatMoney(totalPaymentAmount)}
-                    </strong>
-                  </span>
+                  <div className="flex flex-wrap gap-4 text-slate-700">
+                    <span>
+                      ยอดบิล:{" "}
+                      <strong>฿{formatMoney(totalInvoiceAmount)}</strong>
+                    </span>
+                    <span>
+                      มัดจำ:{" "}
+                      <strong className="text-emerald-700">
+                        ฿{formatMoney(depositTotal)}
+                      </strong>
+                    </span>
+                    <span>
+                      ยอดจ่ายจริง (Net):{" "}
+                      <strong className="text-lg text-orange-800">
+                        ฿{formatMoney(totalPaymentAmount)}
+                      </strong>
+                    </span>
+                  </div>
                 </div>
+
+                {availableDeposits.length > 0 ? (
+                  <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4">
+                    <div className="flex items-center gap-2">
+                      <HandCoins className="h-5 w-5 text-emerald-700" />
+                      <div>
+                        <h4 className="font-semibold text-slate-900">
+                          เงินมัดจำที่สามารถใช้ได้ (DEP_OUT)
+                        </h4>
+                        <p className="text-xs text-slate-500">
+                          ติ๊กเลือกมัดจำเพื่อหักจากยอดจ่ายจริง
+                        </p>
+                      </div>
+                    </div>
+                    <div className="overflow-hidden rounded-md border border-emerald-200 bg-white">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-emerald-50/80">
+                            <TableHead className="w-14 px-2 text-center">
+                              <div className="flex flex-col items-center gap-1">
+                                <input
+                                  type="checkbox"
+                                  className="size-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                  checked={allDepositsSelected}
+                                  ref={(el) => {
+                                    if (el)
+                                      el.indeterminate = someDepositsSelected;
+                                  }}
+                                  onChange={(e) =>
+                                    handleDepositSelectAll(e.target.checked)
+                                  }
+                                  aria-label="เลือกมัดจำทั้งหมด"
+                                />
+                                <span className="text-[10px] font-medium leading-none text-slate-500">
+                                  ทั้งหมด
+                                </span>
+                              </div>
+                            </TableHead>
+                            <TableHead>เลขที่มัดจำ</TableHead>
+                            <TableHead>วันที่</TableHead>
+                            <TableHead className="text-right">
+                              คงเหลือใช้ได้
+                            </TableHead>
+                            <TableHead className="text-right">ยอดที่ใช้</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {availableDeposits.map((dep) => {
+                            const raw = depositAmounts[dep.id];
+                            const isChecked = raw !== undefined && raw !== "";
+                            const used = Number(raw || 0);
+                            return (
+                              <TableRow
+                                key={dep.id}
+                                className={
+                                  isChecked ? "bg-emerald-50/50" : undefined
+                                }
+                              >
+                                <TableCell className="text-center">
+                                  <input
+                                    type="checkbox"
+                                    className="size-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                    checked={isChecked}
+                                    onChange={(e) =>
+                                      handleDepositCheck(
+                                        dep.id,
+                                        e.target.checked,
+                                      )
+                                    }
+                                    aria-label={`เลือกมัดจำ ${dep.doc_no}`}
+                                  />
+                                </TableCell>
+                                <TableCell className="font-mono text-sm font-semibold">
+                                  {dep.doc_no}
+                                </TableCell>
+                                <TableCell>
+                                  {formatDate(dep.document_date)}
+                                </TableCell>
+                                <TableCell className="text-right font-semibold text-emerald-700">
+                                  {formatMoney(dep.remaining_balance)}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Input
+                                    type="number"
+                                    inputMode="decimal"
+                                    step="0.01"
+                                    min="0"
+                                    max={dep.remaining_balance}
+                                    className="ml-auto h-9 w-32 text-right"
+                                    value={raw ?? ""}
+                                    onChange={(e) =>
+                                      setDepositAmounts((prev) => ({
+                                        ...prev,
+                                        [dep.id]: e.target.value,
+                                      }))
+                                    }
+                                  />
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    <div className="flex justify-between text-sm text-slate-600">
+                      <span>
+                        เลือกมัดจำ {selectedDepositCount}/
+                        {availableDeposits.length} ใบ
+                      </span>
+                      <span>
+                        รวมมัดจำ:{" "}
+                        <strong className="text-emerald-800">
+                          ฿{formatMoney(depositTotal)}
+                        </strong>
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="space-y-4 rounded-lg border border-orange-200 bg-white p-4">
                   <div>
@@ -636,13 +888,13 @@ export function APPaymentClient({
                   <Button
                     type="submit"
                     size="lg"
-                    disabled={isPending || totalPaymentAmount <= 0}
+                    disabled={isPending || totalInvoiceAmount <= 0}
                     className="h-12 gap-2 bg-orange-600 px-8 text-base font-semibold shadow-md hover:bg-orange-700"
                   >
                     <CheckCircle2 className="h-5 w-5" />
                     {isPending
                       ? "กำลังบันทึก..."
-                      : "ยืนยันการชำระเงิน (Submit Payment)"}
+                      : `ยืนยันจ่าย ฿${formatMoney(totalPaymentAmount)}`}
                   </Button>
                 </div>
               </form>

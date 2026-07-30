@@ -3,12 +3,19 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ExternalLink, FileInput } from "lucide-react";
 import { getDocumentByNo } from "@/lib/actions/document-actions";
-import { getDocumentAllocationsByReceiptId } from "@/lib/actions/finance/allocations";
+import {
+  getDepositAllocationHistory,
+  getDocumentAllocationsByReceiptId,
+} from "@/lib/actions/finance/allocations";
 import { PURCHASE_DOC_TYPES } from "@/lib/constants/document";
 import type { DocumentDetail, DocumentStatus, DocumentType } from "@/types/document";
 import { AllocatedDocumentsTable } from "@/components/finance/AllocatedDocumentsTable";
+import { DepositAllocationHistoryTable } from "@/components/finance/DepositAllocationHistoryTable";
+import { DepositBalanceActions } from "@/components/finance/DepositBalanceActions";
 import PrintPaymentReceiptTemplate from "@/components/finance/PrintPaymentReceiptTemplate";
 import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
+import PrintDocumentTemplate from "@/components/sales/print-document-template";
+import PrintSettlementVoucherTemplate from "@/components/finance/PrintSettlementVoucherTemplate";
 import { ReferenceDocumentsSection } from "@/components/finance/ReferenceDocumentsSection";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -81,6 +88,15 @@ function resolveSlipUrl(doc: DocumentDetail): string | null {
   return url || null;
 }
 
+function extractSettlementRemark(notes: string | null | undefined): string {
+  const raw = String(notes ?? "").trim();
+  if (!raw) return "—";
+  const match = raw.match(/remark=([^|]+)/i);
+  const fromFlag = match?.[1]?.trim() ?? "";
+  if (fromFlag) return fromFlag;
+  return raw;
+}
+
 export async function generateMetadata({
   params,
 }: PageProps): Promise<Metadata> {
@@ -113,11 +129,25 @@ export default async function PurchaseDocumentDetailPage({
   }
 
   const isPaymentDoc = doc.doc_type === "PAY";
-  const allocationsResult = isPaymentDoc
-    ? await getDocumentAllocationsByReceiptId(doc.id)
+  const isDepositDoc = doc.doc_type === "DEP_OUT";
+  const isSettlementDoc =
+    doc.doc_type === "AP_REFUND" || doc.doc_type === "AP_WRITEOFF";
+  const allocationsResult =
+    isPaymentDoc || isSettlementDoc
+      ? await getDocumentAllocationsByReceiptId(doc.id)
+      : { data: [], error: null };
+  const depositHistoryResult = isDepositDoc
+    ? await getDepositAllocationHistory(doc.id)
     : { data: [], error: null };
 
   const grandTotal = Number(doc.grand_total ?? 0);
+  const depositDeducted = Number(doc.deposit_deducted ?? 0);
+  const depositUsedFromHistory = depositHistoryResult.data.reduce(
+    (sum, row) => sum + row.allocated_amount,
+    0,
+  );
+  const depositUsed = Math.max(depositDeducted, depositUsedFromHistory);
+  const depositAvailable = Math.max(0, grandTotal - depositUsed);
   const subTotal = Number(
     doc.net_before_vat ?? doc.total_amount ?? doc.sub_total ?? 0,
   );
@@ -133,6 +163,10 @@ export default async function PurchaseDocumentDetailPage({
           ? `แยก VAT ${vatRate}%`
           : String(vatType);
   const slipUrl = resolveSlipUrl(doc);
+  const settlementTitle =
+    doc.doc_type === "AP_REFUND"
+      ? "ใบสำคัญรับเงินคืน (Refund Receipt)"
+      : "ใบสำคัญปรับปรุงบัญชี - ตัดเป็นค่าใช้จ่าย (Write-off Expense)";
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6 print:max-w-none print:gap-0 print:p-0">
@@ -162,7 +196,7 @@ export default async function PurchaseDocumentDetailPage({
             <ArrowLeft className="size-4" />
             กลับรายการเอกสารซื้อ
           </Link>
-          {isPaymentDoc ? (
+          {isPaymentDoc || isDepositDoc || isSettlementDoc ? (
             <PrintDocumentButton className="h-10 gap-2" />
           ) : null}
         </div>
@@ -203,18 +237,125 @@ export default async function PurchaseDocumentDetailPage({
         <Card className="border-slate-200 shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">สรุปยอด (Summary)</CardTitle>
-            <CardDescription>สถานะ {doc.payment_status}</CardDescription>
+            <CardDescription>
+              {isSettlementDoc
+                ? `${settlementTitle} · ${vatTypeLabel}`
+                : isDepositDoc
+                  ? `เอกสารมัดจำจ่าย · ${vatTypeLabel} · สถานะ ${doc.payment_status}`
+                  : `สถานะ ${doc.payment_status}`}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             {isPaymentDoc ? (
-              <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-2">
-                <span className="text-base font-bold text-slate-900">
-                  ยอดจ่ายชำระ (Grand Total)
-                </span>
-                <span className="text-lg font-bold tabular-nums text-orange-700">
-                  {formatMoney(grandTotal)}
-                </span>
-              </div>
+              <>
+                <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-2">
+                  <span className="text-base font-bold text-slate-900">
+                    มูลค่าบิลที่ตัดยอด (Grand Total)
+                  </span>
+                  <span className="text-lg font-bold tabular-nums text-orange-700">
+                    {formatMoney(grandTotal)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-slate-600">
+                  <span>ยอดจ่ายชำระจริง (Net Cash)</span>
+                  <span className="tabular-nums font-semibold text-slate-900">
+                    {formatMoney(
+                      Number(doc.total_amount ?? doc.sub_total ?? 0),
+                    )}
+                  </span>
+                </div>
+              </>
+            ) : isSettlementDoc ? (
+              <>
+                <div className="flex items-center justify-between gap-3 text-slate-600">
+                  <span>วันที่เอกสาร</span>
+                  <span className="tabular-nums font-medium text-slate-800">
+                    {formatDate(doc.doc_date)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-slate-600">
+                  <span>หมายเหตุ</span>
+                  <span className="max-w-[14rem] text-right text-slate-800">
+                    {extractSettlementRemark(doc.notes)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-slate-600">
+                  <span>ยอดก่อนภาษี (Net Total)</span>
+                  <span className="tabular-nums font-medium text-slate-800">
+                    {formatMoney(subTotal)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-slate-600">
+                  <span>
+                    ภาษีมูลค่าเพิ่ม{" "}
+                    {vatType !== "NONE" ? `${vatRate}%` : ""}{" "}
+                    <span className="text-xs text-slate-400">
+                      · {vatTypeLabel}
+                    </span>
+                  </span>
+                  <span className="tabular-nums font-medium text-slate-800">
+                    {formatMoney(vatAmount)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-2">
+                  <span className="text-base font-bold text-slate-900">
+                    ยอดรวมสุทธิ (Grand Total)
+                  </span>
+                  <span className="text-lg font-bold tabular-nums text-orange-700">
+                    {formatMoney(grandTotal)}
+                  </span>
+                </div>
+              </>
+            ) : isDepositDoc ? (
+              <>
+                <div className="flex items-center justify-between gap-3 text-slate-600">
+                  <span>ยอดก่อนภาษี (Net Total)</span>
+                  <span className="tabular-nums font-medium text-slate-800">
+                    {formatMoney(subTotal)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-slate-600">
+                  <span>
+                    ภาษีมูลค่าเพิ่ม{" "}
+                    {vatType !== "NONE" ? `${vatRate}%` : ""}{" "}
+                    <span className="text-xs text-slate-400">
+                      · {vatTypeLabel}
+                    </span>
+                  </span>
+                  <span className="tabular-nums font-medium text-slate-800">
+                    {formatMoney(vatAmount)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-2">
+                  <span className="text-base font-bold text-slate-900">
+                    ยอดรวมสุทธิ (Grand Total)
+                  </span>
+                  <span className="text-lg font-bold tabular-nums text-orange-700">
+                    {formatMoney(grandTotal)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-slate-600">
+                  <span>ยอดที่นำไปใช้แล้ว</span>
+                  <span className="tabular-nums font-medium text-slate-800">
+                    {formatMoney(depositUsed)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-slate-600">
+                  <span>ยอดคงเหลือ (Balance)</span>
+                  <span className="tabular-nums font-semibold text-emerald-700">
+                    {formatMoney(depositAvailable)}
+                  </span>
+                </div>
+                {depositAvailable > 0.02 ? (
+                  <div className="border-t border-slate-100 pt-3">
+                    <DepositBalanceActions
+                      documentId={doc.id}
+                      docNo={doc.doc_no}
+                      availableBalance={depositAvailable}
+                    />
+                  </div>
+                ) : null}
+              </>
             ) : (
               <>
                 <div className="flex items-center justify-between gap-3 text-slate-600">
@@ -284,6 +425,44 @@ export default async function PurchaseDocumentDetailPage({
               detailBasePath="/purchases"
               statusLabelMode="PAY"
               error={allocationsResult.error}
+            />
+          </CardContent>
+        </Card>
+      ) : isSettlementDoc ? (
+        <Card className="border-slate-200 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">
+              เอกสารต้นทางที่อ้างอิง (Source Deposit)
+            </CardTitle>
+            <CardDescription>
+              {allocationsResult.data.length} รายการจาก document_allocations
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="px-0 sm:px-6">
+            <AllocatedDocumentsTable
+              rows={allocationsResult.data}
+              detailBasePath="/purchases"
+              statusLabelMode="PAY"
+              error={allocationsResult.error}
+            />
+          </CardContent>
+        </Card>
+      ) : isDepositDoc ? (
+        <Card className="border-slate-200 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">
+              ประวัติการใช้งานมัดจำ (Allocation History)
+            </CardTitle>
+            <CardDescription>
+              {depositHistoryResult.data.length} รายการที่นำไปตัดชำระผ่าน PAY
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="px-0 sm:px-6">
+            <DepositAllocationHistoryTable
+              rows={depositHistoryResult.data}
+              receiptBasePath="/purchases"
+              invoiceBasePath="/purchases"
+              error={depositHistoryResult.error}
             />
           </CardContent>
         </Card>
@@ -363,6 +542,15 @@ export default async function PurchaseDocumentDetailPage({
           mode="PAY"
           className="mt-2 print:mt-0"
         />
+      ) : isSettlementDoc ? (
+        <PrintSettlementVoucherTemplate
+          document={doc}
+          allocations={allocationsResult.data}
+          detailBasePath="/purchases"
+          className="mt-2 print:mt-0"
+        />
+      ) : isDepositDoc ? (
+        <PrintDocumentTemplate document={doc} className="mt-2 print:mt-0" />
       ) : null}
     </div>
   );

@@ -3,11 +3,18 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ExternalLink, FileText } from "lucide-react";
 import { getDocumentByNo } from "@/lib/actions/document-actions";
-import { getDocumentAllocationsByReceiptId } from "@/lib/actions/finance/allocations";
-import type { DocumentDetail, DocumentStatus } from "@/types/document";
+import {
+  getDepositAllocationHistory,
+  getDocumentAllocationsByReceiptId,
+} from "@/lib/actions/finance/allocations";
+import type { DocumentDetail, DocumentStatus, DocumentType } from "@/types/document";
+import { SALES_DOC_TYPES } from "@/lib/constants/document";
 import PrintDocumentTemplate from "@/components/sales/print-document-template";
 import PrintPaymentReceiptTemplate from "@/components/finance/PrintPaymentReceiptTemplate";
+import PrintSettlementVoucherTemplate from "@/components/finance/PrintSettlementVoucherTemplate";
 import { AllocatedDocumentsTable } from "@/components/finance/AllocatedDocumentsTable";
+import { DepositAllocationHistoryTable } from "@/components/finance/DepositAllocationHistoryTable";
+import { DepositBalanceActions } from "@/components/finance/DepositBalanceActions";
 import { ReferenceDocumentsSection } from "@/components/finance/ReferenceDocumentsSection";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -121,6 +128,19 @@ export async function generateMetadata({
   };
 }
 
+function isSalesDocType(docType: DocumentType): boolean {
+  return (SALES_DOC_TYPES as readonly string[]).includes(docType);
+}
+
+function extractSettlementRemark(notes: string | null | undefined): string {
+  const raw = String(notes ?? "").trim();
+  if (!raw) return "—";
+  const match = raw.match(/remark=([^|]+)/i);
+  const fromFlag = match?.[1]?.trim() ?? "";
+  if (fromFlag) return fromFlag;
+  return raw;
+}
+
 /**
  * Server Component — document read-only view + A4 print layout.
  * Data via `getDocumentByNo` (Service Role). No client Supabase.
@@ -135,15 +155,27 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   }
 
   const doc: DocumentDetail = result.data;
+  if (!isSalesDocType(doc.doc_type)) {
+    notFound();
+  }
+
   const isReceiptDoc = doc.doc_type === "REC";
-  const allocationsResult = isReceiptDoc
-    ? await getDocumentAllocationsByReceiptId(doc.id)
+  const isDepositDoc = doc.doc_type === "DEP_IN";
+  const isSettlementDoc =
+    doc.doc_type === "AR_REFUND" || doc.doc_type === "AR_WRITEOFF";
+  const allocationsResult =
+    isReceiptDoc || isSettlementDoc
+      ? await getDocumentAllocationsByReceiptId(doc.id)
+      : { data: [], error: null };
+  const depositHistoryResult = isDepositDoc
+    ? await getDepositAllocationHistory(doc.id)
     : { data: [], error: null };
   const slipUrl =
     doc.attachment_url?.trim() || doc.attached_file_url?.trim() || "";
   const canIssue = doc.status === "DRAFT";
   const canPrint =
     isReceiptDoc ||
+    isSettlementDoc ||
     doc.status === "DRAFT" ||
     doc.status === "COMPLETED" ||
     doc.status === "ISSUED";
@@ -154,6 +186,17 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   const vatAmount = Number(doc.vat_amount ?? doc.tax_amount ?? 0);
   const vatRate = Number(doc.vat_rate ?? doc.tax_rate ?? 7);
   const grandTotal = Number(doc.grand_total ?? 0);
+  const depositDeducted = Number(doc.deposit_deducted ?? 0);
+  const depositUsedFromHistory = depositHistoryResult.data.reduce(
+    (sum, row) => sum + row.allocated_amount,
+    0,
+  );
+  const depositUsed = Math.max(depositDeducted, depositUsedFromHistory);
+  const depositAvailable = Math.max(0, grandTotal - depositUsed);
+  const settlementTitle =
+    doc.doc_type === "AR_REFUND"
+      ? "ใบสำคัญจ่ายเงินคืน (Refund Payment)"
+      : "ใบสำคัญปรับปรุงบัญชี - รับรู้รายได้ (Write-off Income)";
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6 print:max-w-none print:gap-0 print:p-0">
@@ -257,16 +300,118 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               <CardDescription>
                 {isReceiptDoc
                   ? `เอกสารรับชำระ · สถานะ ${doc.payment_status}`
-                  : `VAT ${doc.vat_type ?? "—"} · อัตรา ${vatRate}%`}
+                  : isDepositDoc
+                    ? `เอกสารมัดจำรับ · VAT ${doc.vat_type ?? "NONE"} · สถานะ ${doc.payment_status}`
+                    : isSettlementDoc
+                      ? `${settlementTitle} · VAT ${doc.vat_type ?? "NONE"}`
+                      : `VAT ${doc.vat_type ?? "—"} · อัตรา ${vatRate}%`}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2.5">
               {isReceiptDoc ? (
-                <SummaryRow
-                  label="ยอดรับชำระ (Grand Total)"
-                  value={`${formatMoney(grandTotal)} ฿`}
-                  emphasize
-                />
+                <>
+                  <SummaryRow
+                    label="มูลค่าบิลที่ตัดยอด (Grand Total)"
+                    value={`${formatMoney(grandTotal)} ฿`}
+                    emphasize
+                  />
+                  <SummaryRow
+                    label="ยอดรับชำระจริง (Net Cash)"
+                    value={`${formatMoney(Number(doc.total_amount ?? doc.sub_total ?? 0))} ฿`}
+                  />
+                  {Number(doc.wht_amount ?? 0) > 0 ? (
+                    <SummaryRow
+                      label="ภาษีหัก ณ ที่จ่าย (WHT)"
+                      value={`${formatMoney(Number(doc.wht_amount ?? 0))} ฿`}
+                    />
+                  ) : null}
+                </>
+              ) : isSettlementDoc ? (
+                <>
+                  <SummaryRow
+                    label="วันที่เอกสาร"
+                    value={formatDate(doc.doc_date)}
+                  />
+                  <SummaryRow
+                    label="หมายเหตุ"
+                    value={extractSettlementRemark(doc.notes)}
+                  />
+                  <SummaryRow
+                    label="ยอดก่อนภาษี (Net Total)"
+                    value={`${formatMoney(netBeforeVat)} ฿`}
+                  />
+                  {(doc.vat_type && doc.vat_type !== "NONE") || vatAmount > 0 ? (
+                    <SummaryRow
+                      label={`ภาษีมูลค่าเพิ่ม ${vatRate}% (${doc.vat_type ?? "—"})`}
+                      value={`${formatMoney(vatAmount)} ฿`}
+                    />
+                  ) : (
+                    <SummaryRow
+                      label="ภาษีมูลค่าเพิ่ม"
+                      value={`${formatMoney(0)} ฿`}
+                    />
+                  )}
+                  <div className="border-t border-slate-200 pt-2.5">
+                    <SummaryRow
+                      label="ยอดรวมสุทธิ (Grand Total)"
+                      value={`${formatMoney(grandTotal)} ฿`}
+                      emphasize
+                    />
+                  </div>
+                  {slipUrl ? (
+                    <a
+                      href={slipUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 text-sm font-semibold text-sky-800 transition hover:bg-sky-100"
+                    >
+                      <ExternalLink className="size-4" />
+                      ดูสลิปโอนเงิน
+                    </a>
+                  ) : null}
+                </>
+              ) : isDepositDoc ? (
+                <>
+                  <SummaryRow
+                    label="ยอดก่อนภาษี (Net Total)"
+                    value={`${formatMoney(netBeforeVat)} ฿`}
+                  />
+                  {(doc.vat_type && doc.vat_type !== "NONE") || vatAmount > 0 ? (
+                    <SummaryRow
+                      label={`ภาษีมูลค่าเพิ่ม ${vatRate}% (${doc.vat_type ?? "—"})`}
+                      value={`${formatMoney(vatAmount)} ฿`}
+                    />
+                  ) : (
+                    <SummaryRow
+                      label="ภาษีมูลค่าเพิ่ม"
+                      value={`${formatMoney(0)} ฿`}
+                    />
+                  )}
+                  <div className="border-t border-slate-200 pt-2.5">
+                    <SummaryRow
+                      label="ยอดรวมสุทธิ (Grand Total)"
+                      value={`${formatMoney(grandTotal)} ฿`}
+                      emphasize
+                    />
+                  </div>
+                  <SummaryRow
+                    label="ยอดที่นำไปใช้แล้ว"
+                    value={`${formatMoney(depositUsed)} ฿`}
+                  />
+                  <SummaryRow
+                    label="ยอดคงเหลือ (Balance)"
+                    value={`${formatMoney(depositAvailable)} ฿`}
+                  />
+                  {depositAvailable > 0.02 ? (
+                    <div className="border-t border-slate-100 pt-3">
+                      <DepositBalanceActions
+                        documentId={doc.id}
+                        docNo={doc.doc_no}
+                        availableBalance={depositAvailable}
+                      />
+                    </div>
+                  ) : null}
+                </>
               ) : (
                 <>
                   <SummaryRow
@@ -295,7 +440,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                   </div>
                 </>
               )}
-              {slipUrl ? (
+              {slipUrl && !isSettlementDoc ? (
                 <a
                   href={slipUrl}
                   target="_blank"
@@ -326,6 +471,44 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                 detailBasePath="/sales"
                 statusLabelMode="REC"
                 error={allocationsResult.error}
+              />
+            </CardContent>
+          </Card>
+        ) : isSettlementDoc ? (
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">
+                เอกสารต้นทางที่อ้างอิง (Source Deposit)
+              </CardTitle>
+              <CardDescription>
+                {allocationsResult.data.length} รายการจาก document_allocations
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="px-0 sm:px-6">
+              <AllocatedDocumentsTable
+                rows={allocationsResult.data}
+                detailBasePath="/sales"
+                statusLabelMode="REC"
+                error={allocationsResult.error}
+              />
+            </CardContent>
+          </Card>
+        ) : isDepositDoc ? (
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">
+                ประวัติการใช้งานมัดจำ (Allocation History)
+              </CardTitle>
+              <CardDescription>
+                {depositHistoryResult.data.length} รายการที่นำไปตัดชำระผ่าน REC
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="px-0 sm:px-6">
+              <DepositAllocationHistoryTable
+                rows={depositHistoryResult.data}
+                receiptBasePath="/sales"
+                invoiceBasePath="/sales"
+                error={depositHistoryResult.error}
               />
             </CardContent>
           </Card>
@@ -430,6 +613,13 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
           document={doc}
           allocations={allocationsResult.data}
           mode="REC"
+          className="mt-2 print:mt-0"
+        />
+      ) : isSettlementDoc ? (
+        <PrintSettlementVoucherTemplate
+          document={doc}
+          allocations={allocationsResult.data}
+          detailBasePath="/sales"
           className="mt-2 print:mt-0"
         />
       ) : (
