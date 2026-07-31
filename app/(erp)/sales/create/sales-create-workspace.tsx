@@ -46,6 +46,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { Contact } from "@/app/contacts/contacts";
+import QuickEditContactButton from "@/components/contacts/QuickEditContactButton";
 import ContactPersonCombobox from "./contact-person-combobox";
 import CustomerCombobox from "./customer-combobox";
 
@@ -126,6 +128,7 @@ export default function SalesCreateWorkspace({
   const [docType, setDocType] = useState<DocumentType>(INITIAL_DOC_TYPE);
   const [contactId, setContactId] = useState("");
   const [contactPersonId, setContactPersonId] = useState("");
+  const [customerOptions, setCustomerOptions] = useState(customers);
   const [contactPersons, setContactPersons] = useState<ContactPersonOption[]>(
     [],
   );
@@ -135,6 +138,10 @@ export default function SalesCreateWorkspace({
   const [discountText, setDiscountText] = useState("");
   const [vatType, setVatType] = useState<VatCalculationType>(INITIAL_VAT_TYPE);
   const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    setCustomerOptions(customers);
+  }, [customers]);
 
   const billSummary = useMemo(
     () =>
@@ -177,6 +184,30 @@ export default function SalesCreateWorkspace({
       active = false;
     };
   }, [contactId]);
+
+  /** After Quick Edit master-data save — keep draft form state intact. */
+  function handleContactMasterSaved(contact: Contact) {
+    setCustomerOptions((current) =>
+      current.map((row) =>
+        row.id === contact.id
+          ? { ...row, company_name: contact.company_name }
+          : row,
+      ),
+    );
+
+    void getContactPersons(contact.id).then((result) => {
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      setContactPersons(result.data);
+      setContactPersonId((current) =>
+        result.data.some((person) => person.id === current)
+          ? current
+          : (result.data.find((person) => person.is_primary)?.id ?? ""),
+      );
+    });
+  }
 
   /** Hide "ล่าสุด: …" as soon as the user starts a new draft. */
   function clearLastSavedArtifact() {
@@ -402,12 +433,21 @@ export default function SalesCreateWorkspace({
 
             <div className="space-y-1.5">
               <Label>ลูกค้า (contact_id)</Label>
-              <CustomerCombobox
-                options={customers}
-                value={contactId}
-                onChange={handleCustomerChange}
-                disabled={isPending || customers.length === 0}
-              />
+              <div className="flex gap-2">
+                <div className="min-w-0 flex-1">
+                  <CustomerCombobox
+                    options={customerOptions}
+                    value={contactId}
+                    onChange={handleCustomerChange}
+                    disabled={isPending || customerOptions.length === 0}
+                  />
+                </div>
+                <QuickEditContactButton
+                  contactId={contactId}
+                  disabled={isPending}
+                  onSaved={handleContactMasterSaved}
+                />
+              </div>
             </div>
 
             <div className="space-y-1.5">

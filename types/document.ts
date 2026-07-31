@@ -119,6 +119,32 @@ export type CreateDraftDocumentResult = {
   error: string | null;
 };
 
+export type UpdateDraftDocumentInput = {
+  document_id: string;
+  contact_id: string;
+  contact_person_id?: string | null;
+  doc_date?: string | null;
+  items?: CreateDraftDocumentItemInput[];
+  discount_text?: string | null;
+  vat_type?: VatCalculationType;
+  vat_rate?: number;
+  /** Remark / หมายเหตุ — maps to `documents.notes`. */
+  notes?: string | null;
+  total_amount?: number;
+  discount_amount?: number;
+  net_before_vat?: number;
+  vat_amount?: number;
+  grand_total?: number;
+};
+
+export type UpdateDraftDocumentResult = {
+  data: {
+    document_id: string;
+    document_no: string;
+  } | null;
+  error: string | null;
+};
+
 export type GenerateDocumentNumberResult = {
   data: string | null;
   error: string | null;
@@ -232,6 +258,14 @@ export type DocumentDetailItem = {
   product_name: string | null;
 };
 
+/** Child document that references this row via `ref_document_id` (lineage). */
+export type DocumentLineageChild = {
+  id: string;
+  doc_no: string;
+  doc_type: DocumentType;
+  status: DocumentStatus;
+};
+
 export type DocumentDetail = {
   id: string;
   doc_no: string;
@@ -241,12 +275,19 @@ export type DocumentDetail = {
   due_date: string | null;
   contact_id: string;
   contact_person_id: string | null;
+  /**
+   * When set, this DRAFT is a Cancel & Replace clone.
+   * Edit UI/server may only change customer/contact (not line items / amounts).
+   */
+  ref_document_id: string | null;
   sub_total: number;
   discount_amount: number;
   discount_text: string | null;
   tax_rate: number;
   tax_amount: number;
   grand_total: number;
+  /** Cumulative knock-off / cash paid — void blocked when > 0. */
+  paid_amount: number;
   vat_type: VatCalculationType | null;
   vat_rate: number | null;
   total_amount: number | null;
@@ -268,6 +309,11 @@ export type DocumentDetail = {
   contact: DocumentDetailContact | null;
   contact_person: DocumentDetailContactPerson | null;
   items: DocumentDetailItem[];
+  /**
+   * Documents that point at this one via `documents.ref_document_id`
+   * (e.g. QT → INV_DO). Used to lock further conversion.
+   */
+  child_documents: DocumentLineageChild[];
 };
 
 export type GetDocumentByNoResult = {
@@ -281,6 +327,34 @@ export type IssueDocumentResult = {
     document_no: string;
     status: DocumentStatus;
     ledger_count: number;
+  } | null;
+  error: string | null;
+};
+
+export type VoidDocumentResult = {
+  data: {
+    document_id: string;
+    document_no: string;
+    status: DocumentStatus;
+    reversed_ledger_count: number;
+  } | null;
+  error: string | null;
+};
+
+export type CloneDocumentToNewDraftResult = {
+  data: {
+    document_id: string;
+    document_no: string;
+    ref_document_id: string;
+  } | null;
+  error: string | null;
+};
+
+/** Repeat-order copy — no lineage (`ref_document_id` left null). */
+export type DuplicateDocumentResult = {
+  data: {
+    document_id: string;
+    document_no: string;
   } | null;
   error: string | null;
 };

@@ -14,6 +14,7 @@ import type {
   DebtorOption,
   UnpaidInvoice,
 } from "@/types/payment";
+import type { OpenBillingNoteOption } from "@/app/actions/billing";
 import { OutstandingPartyCombobox } from "@/components/finance/OutstandingPartyCombobox";
 import { PaymentKnockoffForm } from "@/components/finance/PaymentKnockoffForm";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +43,7 @@ export type ARPaymentClientProps = {
   availableDeposits: AvailableDeposit[];
   bankAccounts: BankAccount[];
   selectedContactId: string;
+  billingNotes?: OpenBillingNoteOption[];
 };
 
 function formatMoney(value: number): string {
@@ -66,6 +68,7 @@ export function ARPaymentClient({
   availableDeposits,
   bankAccounts,
   selectedContactId,
+  billingNotes = [],
 }: ARPaymentClientProps) {
   const router = useRouter();
 
@@ -289,11 +292,13 @@ export function ARPaymentClient({
                   key={[
                     ...invoices.map((inv) => inv.id),
                     ...availableDeposits.map((d) => d.id),
+                    ...billingNotes.map((n) => n.id),
                   ].join("|")}
                   invoices={invoices}
                   availableDeposits={availableDeposits}
                   bankAccounts={bankAccounts}
                   contactId={selectedContactId}
+                  billingNotes={billingNotes}
                 />
               </>
             )}

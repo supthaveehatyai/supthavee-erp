@@ -296,6 +296,18 @@ export default function PrintDocumentTemplate({
         )}
       </section>
 
+      {/* Remark / หมายเหตุ — includes replacement lineage for auditors */}
+      {doc.notes?.trim() ? (
+        <section className="mt-6 rounded-md border border-neutral-300 bg-neutral-50 px-3 py-2.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+            หมายเหตุ / Remark
+          </p>
+          <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-neutral-800">
+            {doc.notes.trim()}
+          </p>
+        </section>
+      ) : null}
+
       {/* Footer — totals + signatures */}
       <footer className="mt-8 flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
         <div className="grid flex-1 grid-cols-2 gap-8 pt-6 text-center text-xs text-neutral-700">

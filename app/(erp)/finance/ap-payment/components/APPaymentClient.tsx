@@ -6,10 +6,14 @@
  * Submit via Server Action `submitAPPayment` + FormData (Zero Client-Side Fetching).
  */
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { submitAPPayment } from "@/app/actions/finance/ap-actions";
+import {
+  getInvoicesByBillingNote,
+  type OpenBillingNoteOption,
+} from "@/app/actions/billing";
 import type {
   ApVendorOption,
   AvailableDeposit,
@@ -47,6 +51,7 @@ import {
   Eye,
   FileUp,
   HandCoins,
+  Loader2,
   Wallet,
 } from "lucide-react";
 
@@ -56,6 +61,7 @@ export type APPaymentClientProps = {
   availableDeposits: AvailableDeposit[];
   bankAccounts: BankAccount[];
   selectedVendorId: string;
+  billingNotes?: OpenBillingNoteOption[];
 };
 
 function formatMoney(value: number): string {
@@ -95,14 +101,20 @@ function formatDocLabel(documentNo: string, referenceNo: string | null): string 
 
 export function APPaymentClient({
   vendors,
-  invoices,
+  invoices: initialInvoices,
   availableDeposits,
   bankAccounts,
   selectedVendorId,
+  billingNotes = [],
 }: APPaymentClientProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [isLoadingBn, setIsLoadingBn] = useState(false);
   const activeBanks = bankAccounts.filter((b) => b.is_active);
+
+  const [selectedBillingNoteId, setSelectedBillingNoteId] = useState("");
+  const [invoices, setInvoices] =
+    useState<OutstandingApInvoice[]>(initialInvoices);
 
   const [paymentAmounts, setPaymentAmounts] = useState<Record<string, string>>(
     {},
@@ -116,6 +128,62 @@ export function APPaymentClient({
   );
   const [referenceNo, setReferenceNo] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    setInvoices(initialInvoices);
+    setSelectedBillingNoteId("");
+    setPaymentAmounts({});
+    setDepositAmounts({});
+  }, [initialInvoices]);
+
+  async function handleBillingNoteChange(noteId: string) {
+    setSelectedBillingNoteId(noteId);
+    setPaymentAmounts({});
+    setDepositAmounts({});
+    if (!noteId) {
+      setInvoices(initialInvoices);
+      return;
+    }
+
+    setIsLoadingBn(true);
+    try {
+      const result = await getInvoicesByBillingNote(noteId);
+      if (result.error) {
+        toast.error(result.error);
+        setSelectedBillingNoteId("");
+        setInvoices(initialInvoices);
+        return;
+      }
+
+      const mapped: OutstandingApInvoice[] = result.data.map((row) => ({
+        id: row.id,
+        contact_id: row.contact_id || selectedVendorId,
+        document_no: row.doc_no,
+        reference_no: null,
+        document_date: row.doc_date,
+        grand_total: row.grand_total,
+        paid_amount: row.paid_amount,
+        remaining_balance: row.outstanding,
+        payment_status: row.payment_status,
+        doc_type: row.doc_type,
+      }));
+
+      if (mapped.length === 0) {
+        toast.message("ใบรับวางบิลนี้ไม่มีบิลค้างชำระแล้ว");
+      } else {
+        toast.success(`โหลด ${mapped.length} บิลจากใบรับวางบิลแล้ว`);
+      }
+      setInvoices(mapped);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "โหลดบิลจากใบรับวางบิลไม่สำเร็จ";
+      toast.error(message);
+      setSelectedBillingNoteId("");
+      setInvoices(initialInvoices);
+    } finally {
+      setIsLoadingBn(false);
+    }
+  }
 
   const totalInvoiceAmount = useMemo(() => {
     return roundMoney(
@@ -493,9 +561,46 @@ export function APPaymentClient({
             </div>
           </CardHeader>
           <CardContent className="space-y-4 pt-6">
+            {billingNotes.length > 0 ? (
+              <div className="space-y-2 rounded-xl border border-orange-100 bg-orange-50/40 p-4">
+                <Label htmlFor="ap_billing_note_id">
+                  ใบรับวางบิล (Bill Receipt / BR) — โหลดบิลอัตโนมัติ
+                </Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    id="ap_billing_note_id"
+                    className="h-10 min-w-[280px] flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
+                    value={selectedBillingNoteId}
+                    disabled={isLoadingBn || isPending}
+                    onChange={(e) => void handleBillingNoteChange(e.target.value)}
+                  >
+                    <option value="">
+                      — ใช้บิลค้างชำระทั้งหมดของผู้จำหน่าย —
+                    </option>
+                    {billingNotes.map((note) => (
+                      <option key={note.id} value={note.id}>
+                        {note.doc_no} · {note.invoice_count} บิล · ฿
+                        {note.grand_total.toLocaleString("th-TH", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}{" "}
+                        ({note.payment_status})
+                      </option>
+                    ))}
+                  </select>
+                  {isLoadingBn ? (
+                    <Loader2 className="size-4 animate-spin text-orange-600" />
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
             {invoices.length === 0 ? (
               <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 py-10 text-center text-slate-500">
-                ไม่พบบิลค้างชำระสำหรับผู้จำหน่ายรายนี้
+                ไม่พบบิลค้างชำระ
+                {selectedBillingNoteId
+                  ? " ในใบรับวางบิลที่เลือก"
+                  : " สำหรับผู้จำหน่ายรายนี้"}
               </div>
             ) : (
               <form action={handleSubmit} className="space-y-4">

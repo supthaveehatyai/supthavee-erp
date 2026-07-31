@@ -9,6 +9,7 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
+import { syncBillingNotesAfterInvoicePayment } from "@/lib/actions/finance/billing-note-status";
 import { roundMoney } from "@/lib/utils/payment-fifo";
 import {
   isOverdue,
@@ -780,20 +781,25 @@ export async function processPaymentKnockoff(
       };
     }
 
-    // 4) Update source invoices
+    // 4) Update source invoices (paid_amount + payment_status + lifecycle status)
+    const touchedInvoiceIds: string[] = [];
     for (const alloc of activeAllocations) {
       const invoice = invoiceMap.get(alloc.invoice_id)!;
       const grandTotal = toMoney(invoice.grand_total ?? invoice.total_amount);
       const prevPaid = toMoney(invoice.paid_amount);
       const apply = roundMoney(alloc.allocated_amount + alloc.wht_amount);
       const newPaid = roundMoney(prevPaid + apply);
-      const nextStatus = resolvePaymentStatus(grandTotal, newPaid);
+      const nextPaymentStatus = resolvePaymentStatus(grandTotal, newPaid);
+      // document_status ENUM has no PARTIAL — COMPLETED only when fully paid.
+      const nextDocStatus =
+        nextPaymentStatus === "PAID" ? "COMPLETED" : "ISSUED";
 
       const { error: updateError } = await supabase
         .from("documents")
         .update({
           paid_amount: newPaid,
-          payment_status: nextStatus,
+          payment_status: nextPaymentStatus,
+          status: nextDocStatus,
           updated_at: nowIso,
         })
         .eq("id", alloc.invoice_id);
@@ -802,6 +808,22 @@ export async function processPaymentKnockoff(
         return {
           success: false,
           error: `บันทึกใบเสร็จ ${receiptDocNo} แล้ว แต่อัปเดตบิลต้นทางไม่สำเร็จ: ${updateError.message}`,
+          receipt_doc_no: receiptDocNo,
+        };
+      }
+      touchedInvoiceIds.push(alloc.invoice_id);
+    }
+
+    // 4b) Sync parent BN/BR payment_status (COMPLETED / PARTIAL)
+    if (touchedInvoiceIds.length > 0) {
+      const bnSync = await syncBillingNotesAfterInvoicePayment(
+        supabase,
+        touchedInvoiceIds,
+      );
+      if (bnSync.error) {
+        return {
+          success: false,
+          error: `บันทึกใบเสร็จ ${receiptDocNo} แล้ว แต่อัปเดตสถานะใบวางบิลไม่สำเร็จ: ${bnSync.error}`,
           receipt_doc_no: receiptDocNo,
         };
       }
@@ -855,6 +877,7 @@ export async function processPaymentKnockoff(
     revalidatePath("/finance/payments");
     revalidatePath("/finance/ap-ar");
     revalidatePath("/finance/deposits");
+    revalidatePath("/finance/billing-notes");
     revalidatePath("/sales");
 
     return {

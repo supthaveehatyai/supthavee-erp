@@ -2,6 +2,7 @@ import {
   getOutstandingAP,
   getVendors,
 } from "@/app/actions/finance/ap-actions";
+import { getOpenBillingNotesForContact } from "@/app/actions/billing";
 import { getBankAccounts } from "@/lib/actions/bank-accounts";
 import { APPaymentClient } from "@/app/(erp)/finance/ap-payment/components/APPaymentClient";
 
@@ -17,11 +18,15 @@ export default async function ApPaymentPage({
   const params = await searchParams;
   const selectedVendorId = params.vendor_id?.trim() || "";
 
-  const [vendors, paymentContext, bankAccountsResult] = await Promise.all([
-    getVendors(),
-    getOutstandingAP(selectedVendorId),
-    getBankAccounts(),
-  ]);
+  const [vendors, paymentContext, bankAccountsResult, billingNotesResult] =
+    await Promise.all([
+      getVendors(),
+      getOutstandingAP(selectedVendorId),
+      getBankAccounts(),
+      selectedVendorId
+        ? getOpenBillingNotesForContact(selectedVendorId, "AP")
+        : Promise.resolve({ data: [], error: null }),
+    ]);
 
   return (
     <APPaymentClient
@@ -31,6 +36,7 @@ export default async function ApPaymentPage({
       availableDeposits={paymentContext.availableDeposits}
       bankAccounts={bankAccountsResult.data ?? []}
       selectedVendorId={selectedVendorId}
+      billingNotes={billingNotesResult.data}
     />
   );
 }

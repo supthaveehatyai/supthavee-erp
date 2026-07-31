@@ -19,12 +19,17 @@ import {
   resolveInitialPaymentStatus,
   resolveIssuedDocumentStatus,
 } from "@/lib/constants/document";
+import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import {
   calculateDocumentSummary,
   isVatCalculationType,
   type VatCalculationType,
 } from "@/lib/utils/document-summary";
+import {
+  generateDraftDocumentNo,
+  isTemporaryDraftDocNo,
+} from "@/lib/utils/draft-document-no";
 import type {
   CompleteDocumentInput,
   CompleteDocumentResult,
@@ -48,12 +53,18 @@ import type {
   GetDocumentByNoResult,
   GetPurchaseDocumentsResult,
   GetSalesDocumentsResult,
+  CloneDocumentToNewDraftResult,
+  DocumentLineageChild,
+  DuplicateDocumentResult,
   IssueDocumentResult,
   PurchaseDocumentListItem,
   SalesDocumentListItem,
   SalesProductSearchItem,
   SearchProductsForSalesResult,
+  UpdateDraftDocumentInput,
+  UpdateDraftDocumentResult,
   UploadDocumentImageResult,
+  VoidDocumentResult,
 } from "@/types/document";
 
 const DOCUMENT_ATTACHMENTS_BUCKET = "document_attachments";
@@ -134,7 +145,8 @@ export async function generateDocumentNumber(
 
 /**
  * Create a DRAFT document header + optional line items.
- * Running number comes from `generate_document_no` RPC (Service Role only).
+ * Late Numbering: uses temporary `DRAFT-YYYYMMDDHHmmss` — official running
+ * number from `generate_document_no` is assigned only in `issueDocument`.
  * Returns `{ document_id, document_no }` for the sales UI.
  */
 export async function createDraftDocument(
@@ -176,15 +188,8 @@ export async function createDraftDocument(
       }
     }
 
-    const numberResult = await generateDocumentNumber(docType, docDate);
-    if (numberResult.error || !numberResult.data) {
-      return {
-        data: null,
-        error: numberResult.error ?? "สร้างเลขที่เอกสารไม่สำเร็จ",
-      };
-    }
-
-    const documentNo = numberResult.data;
+    // Late Numbering — do NOT call generate_document_no for drafts.
+    const documentNo = generateDraftDocumentNo();
     const supabase = createSupabaseServerClient();
 
     const { data: contact, error: contactError } = await supabase
@@ -375,7 +380,7 @@ export async function createDraftDocument(
 
 /**
  * Create a DRAFT document header for the given type + customer/vendor contact.
- * Running number is generated server-side — never trust client-supplied doc_no.
+ * Late Numbering: temporary `DRAFT-YYYYMMDDHHmmss` only — official no. on issue.
  */
 export async function createDocument(
   input: CreateDocumentInput,
@@ -390,14 +395,6 @@ export async function createDocument(
     }
     if (!contactId) {
       return { data: null, error: "กรุณาเลือกลูกค้า / คู่ค้า" };
-    }
-
-    const numberResult = await generateDocumentNumber(docType);
-    if (numberResult.error || !numberResult.data) {
-      return {
-        data: null,
-        error: numberResult.error ?? "สร้างเลขที่เอกสารไม่สำเร็จ",
-      };
     }
 
     const supabase = createSupabaseServerClient();
@@ -438,7 +435,7 @@ export async function createDocument(
     const nowIso = new Date().toISOString();
     const draftStatus: DocumentStatus = "DRAFT";
     const insertPayload = {
-      doc_no: numberResult.data,
+      doc_no: generateDraftDocumentNo(),
       doc_type: docType,
       status: draftStatus,
       doc_date: nowIso.slice(0, 10),
@@ -458,19 +455,11 @@ export async function createDocument(
 
     if (error || !data) {
       if (error?.code === "23505") {
-        const retryNumber = await generateDocumentNumber(docType);
-        if (retryNumber.error || !retryNumber.data) {
-          return {
-            data: null,
-            error: retryNumber.error ?? "สร้างเลขที่เอกสารไม่สำเร็จ (retry)",
-          };
-        }
-
         const retry = await supabase
           .from("documents")
           .insert({
             ...insertPayload,
-            doc_no: retryNumber.data,
+            doc_no: generateDraftDocumentNo(),
           })
           .select(selectColumns)
           .single();
@@ -884,8 +873,26 @@ export async function completeDocument(
         : 0;
     const grandTotal = Math.round((subTotal + taxAmount) * 100) / 100;
     const nowIso = new Date().toISOString();
+    const issueDate = nowIso.slice(0, 10);
     const issuedStatus: DocumentStatus = "ISSUED";
     const draftStatus: DocumentStatus = "DRAFT";
+    const docType = document.doc_type as DocumentType;
+
+    const previousDocNo = String(document.doc_no ?? "");
+    let officialDocNo = previousDocNo;
+    const needsOfficialNumber = isTemporaryDraftDocNo(previousDocNo);
+    if (needsOfficialNumber) {
+      const numberResult = await generateDocumentNumber(docType, issueDate);
+      if (numberResult.error || !numberResult.data) {
+        return {
+          data: null,
+          error:
+            numberResult.error ??
+            "สร้างเลขที่เอกสารทางการไม่สำเร็จ — ยังไม่ปิดบิล",
+        };
+      }
+      officialDocNo = numberResult.data;
+    }
 
     const { error: itemsError } = await supabase
       .from("document_items")
@@ -898,20 +905,26 @@ export async function completeDocument(
       };
     }
 
+    const headerUpdate: Record<string, unknown> = {
+      status: issuedStatus,
+      doc_no: officialDocNo,
+      sub_total: Math.round(subTotal * 100) / 100,
+      tax_amount: taxAmount,
+      grand_total: grandTotal,
+      payment_status: resolveInitialPaymentStatus(document.doc_type as string),
+      paid_amount:
+        resolveInitialPaymentStatus(document.doc_type as string) === "PAID"
+          ? grandTotal
+          : 0,
+      updated_at: nowIso,
+    };
+    if (needsOfficialNumber) {
+      headerUpdate.doc_date = issueDate;
+    }
+
     const { error: headerError } = await supabase
       .from("documents")
-      .update({
-        status: issuedStatus,
-        sub_total: Math.round(subTotal * 100) / 100,
-        tax_amount: taxAmount,
-        grand_total: grandTotal,
-        payment_status: resolveInitialPaymentStatus(document.doc_type as string),
-        paid_amount:
-          resolveInitialPaymentStatus(document.doc_type as string) === "PAID"
-            ? grandTotal
-            : 0,
-        updated_at: nowIso,
-      })
+      .update(headerUpdate)
       .eq("id", documentId)
       .eq("status", "DRAFT");
 
@@ -923,7 +936,6 @@ export async function completeDocument(
       };
     }
 
-    const docType = document.doc_type as DocumentType;
     let ledgerCount = 0;
 
     if (isStockOutDocType(docType)) {
@@ -932,7 +944,7 @@ export async function completeDocument(
         doc_header_id: null as string | null,
         trans_type: "OUT",
         qty: Math.round(Number(row.qty)),
-        notes: `ขายจากเอกสาร ${document.doc_no} | document_id=${documentId} | SKU cost snapshot ${row.unit_cost_price}`,
+        notes: `ขายจากเอกสาร ${officialDocNo} | document_id=${documentId} | SKU cost snapshot ${row.unit_cost_price}`,
       }));
 
       const { error: ledgerError } = await supabase
@@ -948,6 +960,7 @@ export async function completeDocument(
           .from("documents")
           .update({
             status: draftStatus,
+            // Keep official doc_no if sequence was already consumed.
             sub_total: 0,
             tax_amount: 0,
             grand_total: 0,
@@ -969,7 +982,7 @@ export async function completeDocument(
     return {
       data: {
         document_id: documentId,
-        doc_no: document.doc_no as string,
+        doc_no: officialDocNo,
         status: issuedStatus,
         item_count: lineRows.length,
         ledger_count: ledgerCount,
@@ -1037,12 +1050,14 @@ export async function getDocumentByNo(
         due_date,
         contact_id,
         contact_person_id,
+        ref_document_id,
         sub_total,
         discount_amount,
         discount_text,
         tax_rate,
         tax_amount,
         grand_total,
+        paid_amount,
         vat_type,
         vat_rate,
         total_amount,
@@ -1102,6 +1117,28 @@ export async function getDocumentByNo(
       return { data: null, error: `ไม่พบเอกสารเลขที่ ${trimmed}` };
     }
 
+    const documentId = data.id as string;
+
+    // Lineage: children on Phase 4 `documents` (not legacy doc_headers).
+    const { data: childRows, error: childError } = await supabase
+      .from("documents")
+      .select("id, doc_no, doc_type, status, created_at")
+      .eq("ref_document_id", documentId)
+      .order("created_at", { ascending: false });
+
+    if (childError) {
+      return { data: null, error: childError.message };
+    }
+
+    const childDocuments: DocumentLineageChild[] = (childRows ?? []).map(
+      (row) => ({
+        id: String(row.id),
+        doc_no: String(row.doc_no ?? ""),
+        doc_type: row.doc_type as DocumentType,
+        status: row.status as DocumentStatus,
+      }),
+    );
+
     const contact = unwrapJoin(
       data.contacts as
         | DocumentDetail["contact"]
@@ -1145,7 +1182,7 @@ export async function getDocumentByNo(
     const referenceNo = vendorRefMatch?.[1]?.trim() || null;
 
     const detail: DocumentDetail = {
-      id: data.id as string,
+      id: documentId,
       doc_no: data.doc_no as string,
       doc_type: data.doc_type as DocumentType,
       status: data.status as DocumentStatus,
@@ -1153,12 +1190,14 @@ export async function getDocumentByNo(
       due_date: data.due_date ? String(data.due_date) : null,
       contact_id: data.contact_id as string,
       contact_person_id: (data.contact_person_id as string | null) ?? null,
+      ref_document_id: (data.ref_document_id as string | null) ?? null,
       sub_total: Number(data.sub_total ?? 0),
       discount_amount: Number(data.discount_amount ?? 0),
       discount_text: (data.discount_text as string | null) ?? null,
       tax_rate: Number(data.tax_rate ?? 7),
       tax_amount: Number(data.tax_amount ?? 0),
       grand_total: Number(data.grand_total ?? 0),
+      paid_amount: Number(data.paid_amount ?? 0),
       vat_type: (data.vat_type as DocumentDetail["vat_type"]) ?? null,
       vat_rate:
         data.vat_rate == null ? null : Number(data.vat_rate),
@@ -1182,12 +1221,345 @@ export async function getDocumentByNo(
       contact,
       contact_person: contactPerson,
       items,
+      child_documents: childDocuments,
     };
 
     return { data: detail, error: null };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "โหลดเอกสารไม่สำเร็จ";
+    return { data: null, error: message };
+  }
+}
+
+/**
+ * Load sales document by UUID (edit route). Delegates to `getDocumentByNo`.
+ */
+export async function getDocumentById(
+  documentId: string,
+): Promise<GetDocumentByNoResult> {
+  try {
+    const id = documentId?.trim() ?? "";
+    if (!id) {
+      return { data: null, error: "ไม่พบรหัสเอกสาร" };
+    }
+
+    const supabase = createSupabaseServerClient();
+    const { data, error } = await supabase
+      .from("documents")
+      .select("doc_no")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error) {
+      return { data: null, error: error.message };
+    }
+    if (!data?.doc_no) {
+      return { data: null, error: "ไม่พบเอกสาร" };
+    }
+
+    return getDocumentByNo(String(data.doc_no));
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "โหลดเอกสารไม่สำเร็จ";
+    return { data: null, error: message };
+  }
+}
+
+/**
+ * Update an existing DRAFT document header + replace line items.
+ * Preserves `doc_no`, `doc_type`, and lineage (`ref_document_id`).
+ *
+ * Cancel & Replace drafts (`ref_document_id` set): only `contact_id`,
+ * `contact_person_id`, and `notes` may change — line items and money
+ * totals are frozen.
+ */
+export async function updateDraftDocument(
+  payload: UpdateDraftDocumentInput,
+): Promise<UpdateDraftDocumentResult> {
+  try {
+    const documentId = payload?.document_id?.trim() ?? "";
+    const contactId = payload?.contact_id?.trim() ?? "";
+    const contactPersonId = payload?.contact_person_id?.trim() || null;
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    const docDate =
+      typeof payload?.doc_date === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(payload.doc_date.trim())
+        ? payload.doc_date.trim()
+        : new Date().toISOString().slice(0, 10);
+    const notes =
+      typeof payload?.notes === "string" ? payload.notes.trim() || null : null;
+
+    if (!documentId) {
+      return { data: null, error: "ไม่พบรหัสเอกสาร" };
+    }
+    if (!contactId) {
+      return { data: null, error: "กรุณาเลือกลูกค้า / คู่ค้า" };
+    }
+
+    const supabase = createSupabaseServerClient();
+
+    const { data: existing, error: existingError } = await supabase
+      .from("documents")
+      .select("id, doc_no, doc_type, status, ref_document_id")
+      .eq("id", documentId)
+      .maybeSingle();
+
+    if (existingError) {
+      return { data: null, error: existingError.message };
+    }
+    if (!existing) {
+      return { data: null, error: "ไม่พบเอกสาร" };
+    }
+    if (existing.status !== "DRAFT") {
+      return {
+        data: null,
+        error: `แก้ไขได้เฉพาะเอกสารสถานะ DRAFT (ปัจจุบัน: ${existing.status})`,
+      };
+    }
+
+    const isReplacement = Boolean(existing.ref_document_id);
+
+    const { data: contact, error: contactError } = await supabase
+      .from("contacts")
+      .select("id")
+      .eq("id", contactId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (contactError) {
+      return { data: null, error: contactError.message };
+    }
+    if (!contact) {
+      return { data: null, error: "ไม่พบคู่ค้าที่เลือก หรือถูกปิดใช้งาน" };
+    }
+
+    if (contactPersonId) {
+      const { data: person, error: personError } = await supabase
+        .from("contact_persons")
+        .select("id")
+        .eq("id", contactPersonId)
+        .eq("contact_id", contactId)
+        .maybeSingle();
+
+      if (personError) {
+        return { data: null, error: personError.message };
+      }
+      if (!person) {
+        return {
+          data: null,
+          error: "ผู้ติดต่อที่เลือกไม่ตรงกับลูกค้ารายนี้",
+        };
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+
+    // Revenue Department: replacement draft — contact + notes only.
+    if (isReplacement) {
+      const { error: headerError } = await supabase
+        .from("documents")
+        .update({
+          contact_id: contactId,
+          contact_person_id: contactPersonId,
+          notes,
+          updated_at: nowIso,
+        })
+        .eq("id", documentId)
+        .eq("status", "DRAFT");
+
+      if (headerError) {
+        return {
+          data: null,
+          error: headerError.message ?? "อัปเดตข้อมูลลูกค้าไม่สำเร็จ",
+        };
+      }
+
+      revalidatePath("/sales");
+      revalidatePath(
+        `/sales/${encodeURIComponent(String(existing.doc_no ?? ""))}`,
+      );
+
+      return {
+        data: {
+          document_id: documentId,
+          document_no: String(existing.doc_no ?? ""),
+        },
+        error: null,
+      };
+    }
+
+    if (items.length === 0) {
+      return { data: null, error: "กรุณาเพิ่มรายการสินค้าอย่างน้อย 1 รายการ" };
+    }
+
+    for (const [index, item] of items.entries()) {
+      if (!item.product_id?.trim()) {
+        return { data: null, error: `รายการที่ ${index + 1}: ไม่มี product_id` };
+      }
+      if (!Number.isFinite(item.qty) || item.qty <= 0) {
+        return {
+          data: null,
+          error: `รายการที่ ${index + 1}: จำนวนต้องมากกว่า 0`,
+        };
+      }
+      if (!Number.isFinite(item.unit_price) || item.unit_price < 0) {
+        return {
+          data: null,
+          error: `รายการที่ ${index + 1}: ราคาต่อหน่วยไม่ถูกต้อง`,
+        };
+      }
+    }
+
+    const productIds = [
+      ...new Set(items.map((item) => item.product_id.trim()).filter(Boolean)),
+    ];
+    const costByProductId = new Map<string, number>();
+    const nameByProductId = new Map<string, string>();
+    const uomByProductId = new Map<string, string>();
+
+    if (productIds.length > 0) {
+      const { data: products, error: productsError } = await supabase
+        .from("products")
+        .select("id, name, cost_price, base_uom")
+        .in("id", productIds)
+        .eq("is_active", true);
+
+      if (productsError) {
+        return { data: null, error: productsError.message };
+      }
+
+      for (const row of products ?? []) {
+        const id = row.id as string;
+        const cost = Number(row.cost_price ?? 0);
+        costByProductId.set(id, Number.isFinite(cost) ? cost : 0);
+        nameByProductId.set(id, String(row.name ?? ""));
+        if (row.base_uom) uomByProductId.set(id, String(row.base_uom));
+      }
+
+      for (const productId of productIds) {
+        if (!costByProductId.has(productId)) {
+          return {
+            data: null,
+            error: `ไม่พบสินค้าในระบบ หรือถูกปิดใช้งาน: ${productId}`,
+          };
+        }
+      }
+    }
+
+    const lineRows = items.map((item, index) => {
+      const productId = item.product_id.trim();
+      const snapshotCost = costByProductId.has(productId)
+        ? costByProductId.get(productId)!
+        : Number(item.unit_cost_price ?? 0);
+      const discountAmount = Number(item.discount_amount ?? 0);
+      const lineTotal = Number(item.line_total);
+
+      return {
+        product_id: productId,
+        description: (
+          item.description?.trim() ||
+          nameByProductId.get(productId) ||
+          ""
+        ).slice(0, 255),
+        qty: item.qty,
+        uom_used:
+          item.uom_used?.trim() || uomByProductId.get(productId) || "ตัว",
+        unit_price: item.unit_price,
+        unit_cost_price: Number.isFinite(snapshotCost) ? snapshotCost : 0,
+        discount_text: item.discount_text?.trim() || null,
+        discount_amount: Number.isFinite(discountAmount) ? discountAmount : 0,
+        line_total: Number.isFinite(lineTotal) ? lineTotal : 0,
+        sort_order: item.sort_order ?? index,
+      };
+    });
+
+    const vatType: VatCalculationType = isVatCalculationType(
+      String(payload.vat_type ?? "EXCLUSIVE"),
+    )
+      ? (payload.vat_type as VatCalculationType)
+      : "EXCLUSIVE";
+    const vatRate = Number(payload.vat_rate ?? 7);
+    const discountText = payload.discount_text?.trim() || null;
+
+    const summary = calculateDocumentSummary({
+      lineTotals: lineRows.map((row) => Number(row.line_total)),
+      discountText,
+      vatType,
+      vatRate: Number.isFinite(vatRate) ? vatRate : 7,
+    });
+
+    const { error: headerError } = await supabase
+      .from("documents")
+      .update({
+        doc_date: docDate,
+        contact_id: contactId,
+        contact_person_id: contactPersonId,
+        sub_total: summary.total_amount,
+        discount_amount: summary.discount_amount,
+        tax_rate: summary.vat_rate,
+        tax_amount: summary.vat_amount,
+        grand_total: summary.grand_total,
+        vat_type: summary.vat_type,
+        vat_rate: summary.vat_rate,
+        total_amount: summary.total_amount,
+        net_before_vat: summary.net_before_vat,
+        vat_amount: summary.vat_amount,
+        discount_text: discountText,
+        notes,
+        updated_at: nowIso,
+      })
+      .eq("id", documentId)
+      .eq("status", "DRAFT");
+
+    if (headerError) {
+      return {
+        data: null,
+        error: headerError.message ?? "อัปเดตหัวเอกสารไม่สำเร็จ",
+      };
+    }
+
+    const { error: deleteItemsError } = await supabase
+      .from("document_items")
+      .delete()
+      .eq("document_id", documentId);
+
+    if (deleteItemsError) {
+      return {
+        data: null,
+        error: deleteItemsError.message ?? "ล้างรายการสินค้าร่างไม่สำเร็จ",
+      };
+    }
+
+    const { error: itemsError } = await supabase.from("document_items").insert(
+      lineRows.map((row) => ({
+        ...row,
+        document_id: documentId,
+      })),
+    );
+
+    if (itemsError) {
+      return {
+        data: null,
+        error: itemsError.message ?? "บันทึกรายการสินค้าไม่สำเร็จ",
+      };
+    }
+
+    revalidatePath("/sales");
+    revalidatePath(
+      `/sales/${encodeURIComponent(String(existing.doc_no ?? ""))}`,
+    );
+
+    return {
+      data: {
+        document_id: documentId,
+        document_no: String(existing.doc_no ?? ""),
+      },
+      error: null,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "อัปเดตเอกสารร่างไม่สำเร็จ";
     return { data: null, error: message };
   }
 }
@@ -1199,6 +1571,10 @@ export async function getDocumentByNo(
 /**
  * Confirm a DRAFT document → ISSUED (or COMPLETED for QT only)
  * and post inventory_ledger OUT rows when applicable.
+ *
+ * Late Numbering: if `doc_no` starts with `DRAFT-`, assign the official
+ * running number via `generate_document_no` and set `doc_date` to today
+ * before flipping status (sales ledger table: `documents`).
  * Never mutates `products` stock directly — ledger only.
  */
 export async function issueDocument(
@@ -1256,15 +1632,42 @@ export async function issueDocument(
     const paidAmount =
       paymentStatus === "PAID" ? grandTotal : Number(document.paid_amount ?? 0);
     const nowIso = new Date().toISOString();
+    const issueDate = nowIso.slice(0, 10);
+
+    let officialDocNo = String(document.doc_no ?? "");
+    const updatePayload: {
+      status: DocumentStatus;
+      payment_status: string;
+      paid_amount: number;
+      updated_at: string;
+      doc_no?: string;
+      doc_date?: string;
+    } = {
+      status: issuedStatus,
+      payment_status: paymentStatus,
+      paid_amount: paidAmount,
+      updated_at: nowIso,
+    };
+
+    // Late Numbering — consume sequence only when issuing.
+    if (isTemporaryDraftDocNo(officialDocNo)) {
+      const numberResult = await generateDocumentNumber(docType, issueDate);
+      if (numberResult.error || !numberResult.data) {
+        return {
+          data: null,
+          error:
+            numberResult.error ??
+            "สร้างเลขที่เอกสารทางการไม่สำเร็จ — ยังไม่ออกเอกสาร",
+        };
+      }
+      officialDocNo = numberResult.data;
+      updatePayload.doc_no = officialDocNo;
+      updatePayload.doc_date = issueDate;
+    }
 
     const { error: statusError } = await supabase
       .from("documents")
-      .update({
-        status: issuedStatus,
-        payment_status: paymentStatus,
-        paid_amount: paidAmount,
-        updated_at: nowIso,
-      })
+      .update(updatePayload)
       .eq("id", id)
       .eq("status", "DRAFT");
 
@@ -1287,7 +1690,7 @@ export async function issueDocument(
           doc_header_id: null as string | null,
           trans_type: "OUT",
           qty: Math.round(Number(row.qty ?? 0)),
-          notes: `ขายจากเอกสาร ${document.doc_no} | document_id=${id} | ออกเอกสาร ${issuedStatus}`,
+          notes: `ขายจากเอกสาร ${officialDocNo} | document_id=${id} | ออกเอกสาร ${issuedStatus}`,
         }))
         .filter((row) => row.qty > 0);
 
@@ -1297,6 +1700,7 @@ export async function issueDocument(
           .insert(ledgerPayload);
 
         if (ledgerError) {
+          // Keep official doc_no if already assigned (sequence already consumed).
           await supabase
             .from("documents")
             .update({
@@ -1320,7 +1724,7 @@ export async function issueDocument(
     return {
       data: {
         document_id: id,
-        document_no: document.doc_no as string,
+        document_no: officialDocNo,
         status: issuedStatus,
         ledger_count: ledgerCount,
       },
@@ -1655,16 +2059,33 @@ export async function convertDocument(
       return { data: null, error: "เอกสารต้นทางไม่มีข้อมูลลูกค้า" };
     }
 
-    const docDate = new Date().toISOString().slice(0, 10);
-    const numberResult = await generateDocumentNumber(targetDocType, docDate);
-    if (numberResult.error || !numberResult.data) {
+    // One active child only — QT already converted cannot convert again.
+    const { data: existingChildren, error: childCheckError } = await supabase
+      .from("documents")
+      .select("id, doc_no, status")
+      .eq("ref_document_id", id)
+      .order("created_at", { ascending: false });
+
+    if (childCheckError) {
+      return { data: null, error: childCheckError.message };
+    }
+    const activeChild = (existingChildren ?? []).find((row) => {
+      const status = String(row.status ?? "");
+      return status !== "CANCELLED" && status !== "VOID";
+    });
+    if (activeChild) {
+      const childNo = String(activeChild.doc_no ?? "");
       return {
         data: null,
-        error: numberResult.error ?? "สร้างเลขที่เอกสารใหม่ไม่สำเร็จ",
+        error: childNo
+          ? `ใบเสนอราคานี้ถูกนำไปสร้างเป็นเอกสาร ${childNo} แล้ว — ไม่สามารถสร้างต่อยอดซ้ำได้`
+          : "ใบเสนอราคานี้ถูกนำไปสร้างเอกสารต่อยอดแล้ว — ไม่สามารถสร้างซ้ำได้",
       };
     }
 
-    const newDocNo = numberResult.data;
+    const docDate = new Date().toISOString().slice(0, 10);
+    // Late Numbering — converted target stays DRAFT with temporary doc_no.
+    const newDocNo = generateDraftDocumentNo();
     const draftStatus: DocumentStatus = "DRAFT";
     const nowIso = new Date().toISOString();
     const sourceItems = Array.isArray(source.document_items)
@@ -1762,6 +2183,556 @@ export async function convertDocument(
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "แปลงเอกสารไม่สำเร็จ";
+    return { data: null, error: message };
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* voidDocument / cloneDocumentToNewDraft                                     */
+/* -------------------------------------------------------------------------- */
+
+type VoidRpcPayload = {
+  success?: boolean;
+  doc_no?: string;
+  reversed_count?: number;
+  error?: string | null;
+};
+
+function mirrorTransType(transType: string): "IN" | "OUT" | null {
+  const normalized = transType.trim().toUpperCase();
+  if (normalized === "OUT") return "IN";
+  if (normalized === "IN") return "OUT";
+  return null;
+}
+
+/**
+ * Fallback void path when RPC is unavailable — compensatory rollback on failure.
+ * Ledger association for Phase 4 sales: notes contain `document_id=<uuid>`.
+ */
+async function voidDocumentFallback(
+  documentId: string,
+): Promise<VoidDocumentResult> {
+  const supabase = createSupabaseServerClient();
+
+  const { data: document, error: documentError } = await supabase
+    .from("documents")
+    .select("id, doc_no, status, paid_amount")
+    .eq("id", documentId)
+    .maybeSingle();
+
+  if (documentError) {
+    return { data: null, error: documentError.message };
+  }
+  if (!document) {
+    return { data: null, error: "ไม่พบเอกสาร" };
+  }
+
+  const status = String(document.status ?? "");
+  if (status !== "ISSUED" && status !== "COMPLETED") {
+    return {
+      data: null,
+      error: `ยกเลิกได้เฉพาะเอกสารสถานะ ISSUED หรือ COMPLETED (ปัจจุบัน: ${status})`,
+    };
+  }
+
+  const paidAmount = Number(document.paid_amount ?? 0);
+  if (paidAmount > 0) {
+    return {
+      data: null,
+      error: "เอกสารมียอดชำระแล้ว — ต้องยกเลิกการตัดชำระ (payments) ก่อน",
+    };
+  }
+
+  const docNo = String(document.doc_no ?? "");
+  const previousStatus = status as DocumentStatus;
+  const nowIso = new Date().toISOString();
+
+  const { error: statusError } = await supabase
+    .from("documents")
+    .update({
+      status: "CANCELLED" satisfies DocumentStatus,
+      updated_at: nowIso,
+    })
+    .eq("id", documentId)
+    .in("status", ["ISSUED", "COMPLETED"]);
+
+  if (statusError) {
+    return {
+      data: null,
+      error: statusError.message ?? "อัปเดตสถานะเอกสารเป็น CANCELLED ไม่สำเร็จ",
+    };
+  }
+
+  const { data: ledgerRows, error: ledgerFetchError } = await supabase
+    .from("inventory_ledger")
+    .select("id, product_id, trans_type, qty, notes")
+    .ilike("notes", `%document_id=${documentId}%`);
+
+  if (ledgerFetchError) {
+    await supabase
+      .from("documents")
+      .update({ status: previousStatus, updated_at: nowIso })
+      .eq("id", documentId);
+    return { data: null, error: ledgerFetchError.message };
+  }
+
+  const originals = (ledgerRows ?? []).filter((row) => {
+    const notes = String(row.notes ?? "");
+    return !/VOID reverse/i.test(notes);
+  });
+
+  const reversals = originals
+    .map((row) => {
+      const mirror = mirrorTransType(String(row.trans_type ?? ""));
+      if (!mirror) return null;
+      const qty = Math.round(Number(row.qty ?? 0));
+      if (qty <= 0 || !row.product_id) return null;
+      return {
+        product_id: row.product_id as string,
+        doc_header_id: null as string | null,
+        trans_type: mirror,
+        qty,
+        notes: `VOID reverse | source_ledger=${row.id} | document_id=${documentId} | ยกเลิกเอกสาร ${docNo}`.slice(
+          0,
+          255,
+        ),
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row != null);
+
+  if (reversals.length > 0) {
+    const { error: insertError } = await supabase
+      .from("inventory_ledger")
+      .insert(reversals);
+
+    if (insertError) {
+      await supabase
+        .from("documents")
+        .update({ status: previousStatus, updated_at: nowIso })
+        .eq("id", documentId);
+      return {
+        data: null,
+        error:
+          insertError.message ??
+          "บันทึกสต็อกกลับ (inventory reverse) ไม่สำเร็จ — คืนสถานะเอกสารแล้ว",
+      };
+    }
+  }
+
+  return {
+    data: {
+      document_id: documentId,
+      document_no: docNo,
+      status: "CANCELLED",
+      reversed_ledger_count: reversals.length,
+    },
+    error: null,
+  };
+}
+
+/**
+ * Void an ISSUED/COMPLETED document → CANCELLED + inventory_ledger mirrors.
+ * Prefer transactional RPC `void_document_with_stock_reversal`.
+ */
+export async function voidDocument(
+  documentId: string,
+): Promise<VoidDocumentResult> {
+  try {
+    const id = documentId?.trim() ?? "";
+    if (!id) {
+      return { data: null, error: "ไม่พบรหัสเอกสาร (document_id)" };
+    }
+
+    const supabase = createSupabaseServerClient();
+    const { data: rpcData, error: rpcError } = await supabase.rpc(
+      "void_document_with_stock_reversal",
+      { p_document_id: id },
+    );
+
+    if (!rpcError && rpcData && typeof rpcData === "object") {
+      const payload = rpcData as VoidRpcPayload;
+      if (payload.success) {
+        revalidatePath("/sales");
+        return {
+          data: {
+            document_id: id,
+            document_no: String(payload.doc_no ?? ""),
+            status: "CANCELLED",
+            reversed_ledger_count: Number(payload.reversed_count ?? 0),
+          },
+          error: null,
+        };
+      }
+      return {
+        data: null,
+        error: payload.error ?? "ยกเลิกเอกสารไม่สำเร็จ",
+      };
+    }
+
+    // RPC missing / unavailable — compensatory fallback.
+    if (
+      rpcError &&
+      !/function|does not exist|PGRST202|42883/i.test(rpcError.message)
+    ) {
+      return { data: null, error: rpcError.message };
+    }
+
+    const fallback = await voidDocumentFallback(id);
+    if (fallback.data) {
+      revalidatePath("/sales");
+    }
+    return fallback;
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "ยกเลิกเอกสาร (voidDocument) ไม่สำเร็จ";
+    return { data: null, error: message };
+  }
+}
+
+/**
+ * Clone a document into a new DRAFT with Late Numbering + lineage
+ * (`ref_document_id` → source document).
+ */
+export async function cloneDocumentToNewDraft(
+  documentId: string,
+): Promise<CloneDocumentToNewDraftResult> {
+  try {
+    const id = documentId?.trim() ?? "";
+    if (!id) {
+      return { data: null, error: "ไม่พบรหัสเอกสารต้นทาง" };
+    }
+
+    const supabase = createSupabaseServerClient();
+
+    const { data: source, error: sourceError } = await supabase
+      .from("documents")
+      .select(
+        `
+        id,
+        doc_no,
+        doc_type,
+        status,
+        doc_date,
+        due_date,
+        contact_id,
+        contact_person_id,
+        sub_total,
+        discount_amount,
+        discount_text,
+        tax_rate,
+        tax_amount,
+        wht_rate,
+        wht_amount,
+        grand_total,
+        deposit_deducted,
+        vat_type,
+        vat_rate,
+        total_amount,
+        net_before_vat,
+        vat_amount,
+        notes,
+        document_items (
+          product_id,
+          description,
+          qty,
+          uom_used,
+          unit_price,
+          unit_cost_price,
+          discount_text,
+          discount_amount,
+          line_total,
+          sort_order
+        )
+      `,
+      )
+      .eq("id", id)
+      .maybeSingle();
+
+    if (sourceError) {
+      return { data: null, error: sourceError.message };
+    }
+    if (!source) {
+      return { data: null, error: "ไม่พบเอกสารต้นทาง" };
+    }
+    if (!source.contact_id) {
+      return { data: null, error: "เอกสารต้นทางไม่มีข้อมูลลูกค้า" };
+    }
+    if (!isDocumentType(String(source.doc_type ?? ""))) {
+      return { data: null, error: "ประเภทเอกสารต้นทางไม่ถูกต้อง" };
+    }
+
+    const docType = source.doc_type as DocumentType;
+    const oldDocumentNo = String(source.doc_no ?? "").trim();
+    const draftDocNo = generateDraftDocumentNo();
+    const nowIso = new Date().toISOString();
+    const docDate = nowIso.slice(0, 10);
+    const sourceItems = Array.isArray(source.document_items)
+      ? source.document_items
+      : [];
+
+    // DB column is `notes` (remark / หมายเหตุ) — auditor-visible replacement text.
+    const replacementRemark = `ออกทดแทนเอกสารเลขที่ ${oldDocumentNo}`;
+    const existingRemark =
+      typeof source.notes === "string" ? source.notes.trim() : "";
+    const notes = existingRemark
+      ? `${replacementRemark}\n${existingRemark}`
+      : replacementRemark;
+
+    const { data: created, error: createError } = await supabase
+      .from("documents")
+      .insert({
+        doc_no: draftDocNo,
+        doc_type: docType,
+        status: "DRAFT" satisfies DocumentStatus,
+        doc_date: docDate,
+        due_date: source.due_date ?? null,
+        contact_id: source.contact_id,
+        contact_person_id: source.contact_person_id ?? null,
+        ref_document_id: source.id,
+        ref_doc_id: source.id,
+        sub_total: Number(source.sub_total ?? 0),
+        discount_amount: Number(source.discount_amount ?? 0),
+        discount_text: source.discount_text ?? null,
+        tax_rate: Number(source.tax_rate ?? 7),
+        tax_amount: Number(source.tax_amount ?? 0),
+        wht_rate: Number(source.wht_rate ?? 0),
+        wht_amount: Number(source.wht_amount ?? 0),
+        grand_total: Number(source.grand_total ?? 0),
+        deposit_deducted: Number(source.deposit_deducted ?? 0),
+        vat_type: source.vat_type ?? "EXCLUSIVE",
+        vat_rate: Number(source.vat_rate ?? source.tax_rate ?? 7),
+        total_amount: Number(source.total_amount ?? source.sub_total ?? 0),
+        net_before_vat: Number(source.net_before_vat ?? 0),
+        vat_amount: Number(source.vat_amount ?? source.tax_amount ?? 0),
+        paid_amount: 0,
+        payment_status: resolveInitialPaymentStatus(docType),
+        notes,
+        updated_at: nowIso,
+      })
+      .select("id, doc_no")
+      .single();
+
+    if (createError || !created) {
+      return {
+        data: null,
+        error: createError?.message ?? "สร้างเอกสารร่างทดแทนไม่สำเร็จ",
+      };
+    }
+
+    const newDocumentId = created.id as string;
+
+    if (sourceItems.length > 0) {
+      const itemsPayload = sourceItems.map((item, index) => ({
+        document_id: newDocumentId,
+        product_id: item.product_id ?? null,
+        description: item.description ?? null,
+        qty: Number(item.qty ?? 0),
+        uom_used: item.uom_used ?? null,
+        unit_price: Number(item.unit_price ?? 0),
+        unit_cost_price: Number(item.unit_cost_price ?? 0),
+        discount_text: item.discount_text ?? null,
+        discount_amount: Number(item.discount_amount ?? 0),
+        line_total: Number(item.line_total ?? 0),
+        sort_order:
+          typeof item.sort_order === "number" ? item.sort_order : index,
+      }));
+
+      const { error: itemsError } = await supabase
+        .from("document_items")
+        .insert(itemsPayload);
+
+      if (itemsError) {
+        await supabase.from("documents").delete().eq("id", newDocumentId);
+        return {
+          data: null,
+          error:
+            itemsError.message ??
+            "คัดลอกรายการสินค้าไม่สำเร็จ — ยกเลิกเอกสารร่างแล้ว",
+        };
+      }
+    }
+
+    revalidatePath("/sales");
+    return {
+      data: {
+        document_id: newDocumentId,
+        document_no: String(created.doc_no ?? draftDocNo),
+        ref_document_id: id,
+      },
+      error: null,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "โคลนเอกสารเป็นร่างใหม่ไม่สำเร็จ";
+    return { data: null, error: message };
+  }
+}
+
+/**
+ * Repeat Order — copy header + items into a new DRAFT.
+ * Uses `generateDraftDocumentNo()`, today's `doc_date`, same contact.
+ * Does NOT set `ref_document_id` (copy, not lineage).
+ */
+export async function duplicateDocument(
+  documentId: string,
+): Promise<DuplicateDocumentResult> {
+  try {
+    const id = documentId?.trim() ?? "";
+    if (!id) {
+      return { data: null, error: "ไม่พบรหัสเอกสารต้นทาง" };
+    }
+
+    const supabase = createSupabaseServerClient();
+
+    const { data: source, error: sourceError } = await supabase
+      .from("documents")
+      .select(
+        `
+        id,
+        doc_no,
+        doc_type,
+        contact_id,
+        contact_person_id,
+        sub_total,
+        discount_amount,
+        discount_text,
+        tax_rate,
+        tax_amount,
+        wht_rate,
+        wht_amount,
+        grand_total,
+        deposit_deducted,
+        vat_type,
+        vat_rate,
+        total_amount,
+        net_before_vat,
+        vat_amount,
+        document_items (
+          product_id,
+          description,
+          qty,
+          uom_used,
+          unit_price,
+          unit_cost_price,
+          discount_text,
+          discount_amount,
+          line_total,
+          sort_order
+        )
+      `,
+      )
+      .eq("id", id)
+      .maybeSingle();
+
+    if (sourceError) {
+      return { data: null, error: sourceError.message };
+    }
+    if (!source) {
+      return { data: null, error: "ไม่พบเอกสารต้นทาง" };
+    }
+    if (!source.contact_id) {
+      return { data: null, error: "เอกสารต้นทางไม่มีข้อมูลลูกค้า" };
+    }
+    if (!isDocumentType(String(source.doc_type ?? ""))) {
+      return { data: null, error: "ประเภทเอกสารต้นทางไม่ถูกต้อง" };
+    }
+
+    const docType = source.doc_type as DocumentType;
+    const draftDocNo = generateDraftDocumentNo();
+    const nowIso = new Date().toISOString();
+    const docDate = nowIso.slice(0, 10);
+    const sourceItems = Array.isArray(source.document_items)
+      ? source.document_items
+      : [];
+
+    const { data: created, error: createError } = await supabase
+      .from("documents")
+      .insert({
+        doc_no: draftDocNo,
+        doc_type: docType,
+        status: "DRAFT" satisfies DocumentStatus,
+        doc_date: docDate,
+        due_date: null,
+        contact_id: source.contact_id,
+        contact_person_id: source.contact_person_id ?? null,
+        // Repeat order — no lineage link
+        ref_document_id: null,
+        ref_doc_id: null,
+        sub_total: Number(source.sub_total ?? 0),
+        discount_amount: Number(source.discount_amount ?? 0),
+        discount_text: source.discount_text ?? null,
+        tax_rate: Number(source.tax_rate ?? 7),
+        tax_amount: Number(source.tax_amount ?? 0),
+        wht_rate: Number(source.wht_rate ?? 0),
+        wht_amount: Number(source.wht_amount ?? 0),
+        grand_total: Number(source.grand_total ?? 0),
+        deposit_deducted: 0,
+        vat_type: source.vat_type ?? "EXCLUSIVE",
+        vat_rate: Number(source.vat_rate ?? source.tax_rate ?? 7),
+        total_amount: Number(source.total_amount ?? source.sub_total ?? 0),
+        net_before_vat: Number(source.net_before_vat ?? 0),
+        vat_amount: Number(source.vat_amount ?? source.tax_amount ?? 0),
+        paid_amount: 0,
+        payment_status: resolveInitialPaymentStatus(docType),
+        notes: `คัดลอกจาก ${source.doc_no}`,
+        updated_at: nowIso,
+      })
+      .select("id, doc_no")
+      .single();
+
+    if (createError || !created) {
+      return {
+        data: null,
+        error: createError?.message ?? "คัดลอกเอกสารไม่สำเร็จ",
+      };
+    }
+
+    const newDocumentId = created.id as string;
+
+    if (sourceItems.length > 0) {
+      const itemsPayload = sourceItems.map((item, index) => ({
+        document_id: newDocumentId,
+        product_id: item.product_id ?? null,
+        description: item.description ?? null,
+        qty: Number(item.qty ?? 0),
+        uom_used: item.uom_used ?? null,
+        unit_price: Number(item.unit_price ?? 0),
+        unit_cost_price: Number(item.unit_cost_price ?? 0),
+        discount_text: item.discount_text ?? null,
+        discount_amount: Number(item.discount_amount ?? 0),
+        line_total: Number(item.line_total ?? 0),
+        sort_order:
+          typeof item.sort_order === "number" ? item.sort_order : index,
+      }));
+
+      const { error: itemsError } = await supabase
+        .from("document_items")
+        .insert(itemsPayload);
+
+      if (itemsError) {
+        await supabase.from("documents").delete().eq("id", newDocumentId);
+        return {
+          data: null,
+          error:
+            itemsError.message ??
+            "คัดลอกรายการสินค้าไม่สำเร็จ — ยกเลิกเอกสารร่างแล้ว",
+        };
+      }
+    }
+
+    revalidatePath("/sales");
+    return {
+      data: {
+        document_id: newDocumentId,
+        document_no: String(created.doc_no ?? draftDocNo),
+      },
+      error: null,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "คัดลอกเอกสารไม่สำเร็จ";
     return { data: null, error: message };
   }
 }

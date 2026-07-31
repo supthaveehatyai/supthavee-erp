@@ -38,7 +38,14 @@ export default function IssueDocumentButton({
             ? ` — ตัดสต็อก ${result.data.ledger_count} รายการ`
             : ""),
       );
-      router.refresh();
+
+      // Late Numbering may replace DRAFT-* with the official running number.
+      const nextDocNo = result.data.document_no;
+      if (nextDocNo && nextDocNo !== docNo) {
+        router.replace(`/sales/${encodeURIComponent(nextDocNo)}`);
+      } else {
+        router.refresh();
+      }
     });
   }
 

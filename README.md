@@ -87,7 +87,7 @@ supabase functions deploy process-receipt-ocr
 Optional:
 
 ```bash
-supabase secrets set GEMINI_MODEL=gemini-3.5-flash
+supabase secrets set GEMINI_MODEL=gemini-3.6-flash
 ```
 
 `SUPABASE_URL` and `SUPABASE_ANON_KEY` are injected automatically by the Edge runtime.

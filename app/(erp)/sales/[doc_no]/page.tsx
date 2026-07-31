@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ExternalLink, FileText } from "lucide-react";
+import { ArrowLeft, ExternalLink, FileText, Link2, Pencil } from "lucide-react";
 import { getDocumentByNo } from "@/lib/actions/document-actions";
 import {
   getDepositAllocationHistory,
@@ -33,6 +33,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import IssueDocumentButton from "./issue-document-button";
+import DeleteDraftDocumentButton from "./delete-draft-document-button";
+import VoidDocumentActions from "./void-document-actions";
+import DuplicateDocumentButton from "./duplicate-document-button";
 import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
 import ConvertDocumentDropdown from "./convert-document-dropdown";
 
@@ -179,7 +182,22 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
     doc.status === "DRAFT" ||
     doc.status === "COMPLETED" ||
     doc.status === "ISSUED";
-  const canConvert = doc.doc_type === "QT" && doc.status === "COMPLETED";
+  const activeChildren = (doc.child_documents ?? []).filter(
+    (child) => child.status !== "CANCELLED" && child.status !== "VOID",
+  );
+  const primaryChild = activeChildren[0] ?? null;
+  const isAlreadyConverted = activeChildren.length > 0;
+  const canConvert =
+    doc.doc_type === "QT" &&
+    doc.status === "COMPLETED" &&
+    !isAlreadyConverted;
+  const canVoid =
+    doc.status === "ISSUED" && Number(doc.paid_amount ?? 0) === 0;
+  const canDuplicate =
+    !isReceiptDoc &&
+    !isSettlementDoc &&
+    doc.doc_type !== "DEP_IN" &&
+    doc.status !== "DRAFT";
   const subtotal = Number(doc.total_amount ?? doc.sub_total ?? 0);
   const discountAmount = Number(doc.discount_amount ?? 0);
   const netBeforeVat = Number(doc.net_before_vat ?? subtotal - discountAmount);
@@ -228,6 +246,9 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
             เปิดบิลใหม่
           </Link>
           {canPrint && <PrintDocumentButton className="h-10 gap-2" />}
+          {canDuplicate && (
+            <DuplicateDocumentButton documentId={doc.id} docNo={doc.doc_no} />
+          )}
           {canConvert && (
             <ConvertDocumentDropdown
               sourceDocId={doc.id}
@@ -235,13 +256,76 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
             />
           )}
           {canIssue && (
+            <Link
+              href={`/sales/edit/${encodeURIComponent(doc.id)}`}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-800 transition hover:bg-blue-100"
+            >
+              <Pencil className="size-4" />
+              แก้ไขเอกสาร
+            </Link>
+          )}
+          {canIssue && (
             <IssueDocumentButton documentId={doc.id} docNo={doc.doc_no} />
+          )}
+          {canIssue && (
+            <DeleteDraftDocumentButton documentId={doc.id} docNo={doc.doc_no} />
+          )}
+          {canVoid && (
+            <VoidDocumentActions documentId={doc.id} docNo={doc.doc_no} />
           )}
         </div>
       </div>
 
       {/* Screen-only interactive / card view */}
       <div className="flex flex-col gap-4 print:hidden">
+        {primaryChild ? (
+          <div
+            role="status"
+            className="flex flex-wrap items-start gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sky-950"
+          >
+            <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-sky-100 text-sky-700">
+              <Link2 className="size-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold">
+                เอกสารถูกอ้างอิงไปแล้ว: นำไปสร้างเป็นเอกสาร{" "}
+                <Link
+                  href={`/sales/${encodeURIComponent(primaryChild.doc_no)}`}
+                  className="font-mono underline decoration-sky-400 underline-offset-2 hover:text-sky-800"
+                >
+                  {primaryChild.doc_no}
+                </Link>
+              </p>
+              <p className="mt-0.5 text-xs text-sky-800/80">
+                ประเภท {primaryChild.doc_type} · สถานะ {primaryChild.status}
+                {activeChildren.length > 1
+                  ? ` · รวม ${activeChildren.length} เอกสารต่อยอด`
+                  : ""}
+                {" — "}ไม่สามารถสร้างเอกสารต่อยอดซ้ำได้
+              </p>
+            </div>
+            <Badge className="border-sky-200 bg-white text-sky-800 hover:bg-white">
+              Lineage Locked
+            </Badge>
+          </div>
+        ) : null}
+
+        {doc.notes?.trim() ? (
+          <Card className="border-amber-200 bg-amber-50/40 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">หมายเหตุ / Remark</CardTitle>
+              <CardDescription>
+                แสดงบนเอกสารพิมพ์สำหรับผู้ตรวจสอบ
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="whitespace-pre-wrap text-sm text-slate-800">
+                {doc.notes.trim()}
+              </p>
+            </CardContent>
+          </Card>
+        ) : null}
+
         <div className="grid gap-4 lg:grid-cols-2">
           <Card className="border-slate-200 shadow-sm">
             <CardHeader className="pb-3">

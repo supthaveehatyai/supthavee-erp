@@ -67,17 +67,23 @@ a {
 
   /* Avoid breaking signature / totals awkwardly across pages */
   #sales-print-document,
-  #payment-print-document {
+  #payment-print-document,
+  #billing-note-print-document,
+  #settlement-print-document {
     break-inside: avoid;
   }
 
   #sales-print-document table,
-  #payment-print-document table {
+  #payment-print-document table,
+  #billing-note-print-document table,
+  #settlement-print-document table {
     break-inside: auto;
   }
 
   #sales-print-document tr,
-  #payment-print-document tr {
+  #payment-print-document tr,
+  #billing-note-print-document tr,
+  #settlement-print-document tr {
     break-inside: avoid;
     break-after: auto;
   }

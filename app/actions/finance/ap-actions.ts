@@ -11,6 +11,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
+import { syncBillingNotesAfterInvoicePayment } from "@/lib/actions/finance/billing-note-status";
 import { roundMoney } from "@/lib/utils/payment-fifo";
 import {
   isOverdue,
@@ -824,18 +825,23 @@ export async function submitAPPayment(
     }
 
     // Step E — update source AP invoices
+    const touchedInvoiceIds: string[] = [];
     for (const alloc of activeAllocations) {
       const invoice = invoiceMap.get(alloc.invoice_id)!;
       const grandTotal = toMoney(invoice.grand_total ?? invoice.total_amount);
       const prevPaid = toMoney(invoice.paid_amount);
       const newPaid = roundMoney(prevPaid + alloc.allocated_amount);
-      const nextStatus = resolvePaymentStatus(grandTotal, newPaid);
+      const nextPaymentStatus = resolvePaymentStatus(grandTotal, newPaid);
+      // document_status ENUM has no PARTIAL — COMPLETED only when fully paid.
+      const nextDocStatus =
+        nextPaymentStatus === "PAID" ? "COMPLETED" : "ISSUED";
 
       const { error: updateError } = await supabaseAdmin
         .from("documents")
         .update({
           paid_amount: newPaid,
-          payment_status: nextStatus,
+          payment_status: nextPaymentStatus,
+          status: nextDocStatus,
           updated_at: nowIso,
         })
         .eq("id", alloc.invoice_id);
@@ -844,6 +850,21 @@ export async function submitAPPayment(
         return {
           success: false,
           error: `บันทึก PAY ${payDocNo} แล้ว แต่อัปเดตบิลต้นทางไม่สำเร็จ: ${updateError.message}`,
+          payment_doc_no: payDocNo,
+        };
+      }
+      touchedInvoiceIds.push(alloc.invoice_id);
+    }
+
+    if (touchedInvoiceIds.length > 0) {
+      const bnSync = await syncBillingNotesAfterInvoicePayment(
+        supabaseAdmin,
+        touchedInvoiceIds,
+      );
+      if (bnSync.error) {
+        return {
+          success: false,
+          error: `บันทึก PAY ${payDocNo} แล้ว แต่อัปเดตสถานะใบรับวางบิลไม่สำเร็จ: ${bnSync.error}`,
           payment_doc_no: payDocNo,
         };
       }
@@ -896,6 +917,7 @@ export async function submitAPPayment(
     revalidatePath("/finance/ap-payment");
     revalidatePath("/finance/ap-ar");
     revalidatePath("/finance/deposits");
+    revalidatePath("/finance/billing-notes");
     revalidatePath("/purchases");
 
     return {

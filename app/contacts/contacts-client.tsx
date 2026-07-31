@@ -16,6 +16,8 @@ import {
   getContacts,
   importContacts,
 } from "@/lib/actions/contacts";
+import ManageContactDialog from "@/components/contacts/ManageContactDialog";
+import ViewContactDialog from "@/components/contacts/ViewContactDialog";
 
 type TypeFilter = "All" | ContactType;
 type SortDirection = "asc" | "desc";
@@ -351,6 +353,18 @@ export default function ContactsClient({
   const [importRows, setImportRows] = useState<CsvPreviewRow[]>([]);
   const [importError, setImportError] = useState("");
   const [isImporting, setIsImporting] = useState(false);
+  const [manageContact, setManageContact] = useState<Contact | null>(null);
+  const [isManageOpen, setIsManageOpen] = useState(false);
+  const [viewContactId, setViewContactId] = useState<string | null>(null);
+  const [isViewOpen, setIsViewOpen] = useState(false);
+
+  useEffect(() => {
+    setContacts(initialContacts);
+    setLoadError(initialError);
+    if (initialContacts.length > 0 || initialError) {
+      setIsLoading(false);
+    }
+  }, [initialContacts, initialError]);
 
   const loadContacts = useCallback(async () => {
     setIsLoading(true);
@@ -739,7 +753,7 @@ export default function ContactsClient({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-left">
+          <table className="w-full min-w-[1080px] text-left">
             <thead className="border-b border-slate-200 bg-slate-50/80">
               <tr>
                 {[
@@ -751,6 +765,7 @@ export default function ContactsClient({
                   "ระดับราคา",
                   "เครดิต (วัน)",
                   "สถานะ",
+                  "จัดการ",
                 ].map((heading) => (
                   <th
                     key={heading}
@@ -765,7 +780,7 @@ export default function ContactsClient({
               {isLoading ? (
                 Array.from({ length: 5 }).map((_, row) => (
                   <tr key={row} className="animate-pulse">
-                    {Array.from({ length: 8 }).map((__, cell) => (
+                    {Array.from({ length: 9 }).map((__, cell) => (
                       <td key={cell} className="px-5 py-4">
                         <div className="h-3.5 rounded bg-slate-100" />
                       </td>
@@ -774,7 +789,7 @@ export default function ContactsClient({
                 ))
               ) : loadError ? (
                 <tr>
-                  <td colSpan={8} className="px-5 py-16 text-center">
+                  <td colSpan={9} className="px-5 py-16 text-center">
                     <p className="text-sm font-medium text-red-600">
                       ไม่สามารถโหลดข้อมูลคู่ค้าได้
                     </p>
@@ -790,7 +805,7 @@ export default function ContactsClient({
                 </tr>
               ) : filteredContacts.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-5 py-16 text-center">
+                  <td colSpan={9} className="px-5 py-16 text-center">
                     <div className="mx-auto grid size-11 place-items-center rounded-full bg-slate-100 text-slate-400">
                       <Icon
                         name={
@@ -870,6 +885,30 @@ export default function ContactsClient({
                         {contact.is_active ? "ใช้งาน" : "ปิดใช้งาน"}
                       </span>
                     </td>
+                    <td className="px-5 py-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setViewContactId(contact.id);
+                            setIsViewOpen(true);
+                          }}
+                          className="inline-flex h-8 items-center rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+                        >
+                          ดูรายละเอียด
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setManageContact(contact);
+                            setIsManageOpen(true);
+                          }}
+                          className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                        >
+                          จัดการ
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
@@ -877,6 +916,24 @@ export default function ContactsClient({
           </table>
         </div>
       </section>
+
+      <ViewContactDialog
+        contactId={viewContactId}
+        open={isViewOpen}
+        onOpenChange={(next) => {
+          setIsViewOpen(next);
+          if (!next) setViewContactId(null);
+        }}
+      />
+
+      <ManageContactDialog
+        contact={manageContact}
+        open={isManageOpen}
+        onOpenChange={(next) => {
+          setIsManageOpen(next);
+          if (!next) setManageContact(null);
+        }}
+      />
 
       {isDialogOpen && (
         <div

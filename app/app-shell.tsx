@@ -53,6 +53,7 @@ const navigationGroups: NavigationGroup[] = [
       { label: "รับและจ่ายเงิน", href: "/finance/payments" },
       { label: "จ่ายชำระหนี้ซัพพลายเออร์", href: "/finance/ap-payment" },
       { label: "รับ/จ่าย เงินมัดจำ", href: "/finance/deposits" },
+      { label: "ระบบวางบิล", href: "/finance/billing-notes" },
       { label: "สมุดบัญชีธนาคาร", href: "/finance/bank-accounts" },
       { label: "เจ้าหนี้ / ลูกหนี้", href: "/finance/ap-ar" },
     ],

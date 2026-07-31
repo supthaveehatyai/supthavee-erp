@@ -6,9 +6,13 @@
  * Payment Details (date / bank / ref / slip) mirrors AP Payment layout.
  */
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import {
+  getInvoicesByBillingNote,
+  type OpenBillingNoteOption,
+} from "@/app/actions/billing";
 import { processPaymentKnockoff } from "@/lib/actions/finance/payment";
 import { allocateFifo, roundMoney } from "@/lib/utils/payment-fifo";
 import {
@@ -28,13 +32,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Wand2, CheckCircle2, Eye, FileUp, HandCoins } from "lucide-react";
+import { Wand2, CheckCircle2, Eye, FileUp, HandCoins, Loader2 } from "lucide-react";
 
 export type PaymentKnockoffFormProps = {
   invoices: UnpaidInvoice[];
   availableDeposits?: AvailableDeposit[];
   bankAccounts: BankAccount[];
   contactId: string;
+  /** Open BN documents for this contact (from Server Component). */
+  billingNotes?: OpenBillingNoteOption[];
 };
 
 type LineState = {
@@ -60,14 +66,19 @@ function todayIsoLocal(): string {
 }
 
 export function PaymentKnockoffForm({
-  invoices,
+  invoices: initialInvoices,
   availableDeposits = [],
   bankAccounts,
   contactId,
+  billingNotes = [],
 }: PaymentKnockoffFormProps) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingBn, setIsLoadingBn] = useState(false);
   const activeBanks = bankAccounts.filter((b) => b.is_active);
+
+  const [selectedBillingNoteId, setSelectedBillingNoteId] = useState("");
+  const [invoices, setInvoices] = useState<UnpaidInvoice[]>(initialInvoices);
 
   const [amount, setAmount] = useState("");
   const [whtAmount, setWhtAmount] = useState("");
@@ -77,10 +88,71 @@ export function PaymentKnockoffForm({
   );
   const [referenceNo, setReferenceNo] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
-  const [lines, setLines] = useState<LineState[]>(() => emptyLines(invoices));
+  const [lines, setLines] = useState<LineState[]>(() =>
+    emptyLines(initialInvoices),
+  );
   const [depositAmounts, setDepositAmounts] = useState<Record<string, string>>(
     {},
   );
+
+  useEffect(() => {
+    setInvoices(initialInvoices);
+    setLines(emptyLines(initialInvoices));
+    setSelectedBillingNoteId("");
+    setDepositAmounts({});
+  }, [initialInvoices]);
+
+  function applyInvoiceList(nextInvoices: UnpaidInvoice[]) {
+    setInvoices(nextInvoices);
+    setLines(emptyLines(nextInvoices));
+    setDepositAmounts({});
+  }
+
+  async function handleBillingNoteChange(noteId: string) {
+    setSelectedBillingNoteId(noteId);
+    if (!noteId) {
+      applyInvoiceList(initialInvoices);
+      return;
+    }
+
+    setIsLoadingBn(true);
+    try {
+      const result = await getInvoicesByBillingNote(noteId);
+      if (result.error) {
+        toast.error(result.error);
+        setSelectedBillingNoteId("");
+        applyInvoiceList(initialInvoices);
+        return;
+      }
+
+      const mapped: UnpaidInvoice[] = result.data.map((row) => ({
+        id: row.id,
+        display_doc_no: row.doc_no,
+        document_date: row.doc_date,
+        doc_type: row.doc_type,
+        payment_status: row.payment_status,
+        net_amount_calc: row.grand_total,
+        paid_amount: row.paid_amount,
+        remaining_balance: row.outstanding,
+        contact_id: row.contact_id || contactId,
+      }));
+
+      if (mapped.length === 0) {
+        toast.message("ใบวางบิลนี้ไม่มีบิลค้างชำระแล้ว");
+      } else {
+        toast.success(`โหลด ${mapped.length} บิลจากใบวางบิลแล้ว`);
+      }
+      applyInvoiceList(mapped);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "โหลดบิลจากใบวางบิลไม่สำเร็จ";
+      toast.error(message);
+      setSelectedBillingNoteId("");
+      applyInvoiceList(initialInvoices);
+    } finally {
+      setIsLoadingBn(false);
+    }
+  }
 
   const cash = roundMoney(Number(amount) || 0);
   const wht = roundMoney(Number(whtAmount) || 0);
@@ -334,7 +406,8 @@ export function PaymentKnockoffForm({
     setSlipFile(file);
   }
 
-  function handleSubmit(formData: FormData) {
+  async function handleSubmit(formData: FormData) {
+    if (isSubmitting) return;
     if (sumApplied <= 0) {
       toast.error("ห้ามบันทึก — ผลรวมยอดตัดหนี้ต้องมากกว่า 0");
       return;
@@ -346,7 +419,8 @@ export function PaymentKnockoffForm({
       formData.delete("slip_file");
     }
 
-    startTransition(async () => {
+    setIsSubmitting(true);
+    try {
       const result = await processPaymentKnockoff(formData);
       if (!result.success) {
         toast.error(result.error ?? "ตัดยอดไม่สำเร็จ");
@@ -363,11 +437,16 @@ export function PaymentKnockoffForm({
       setSlipFile(null);
       setLines(emptyLines(invoices));
       setDepositAmounts({});
+      setSelectedBillingNoteId("");
       router.refresh();
-    });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "ตัดยอดไม่สำเร็จ";
+      toast.error(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   }
-
-  if (invoices.length === 0) return null;
 
   return (
     <div className="space-y-4 rounded-lg border border-blue-200 bg-white p-4">
@@ -376,11 +455,50 @@ export function PaymentKnockoffForm({
           3. ฟอร์มตัดยอดชำระเงิน (Knock-off)
         </h3>
         <p className="text-sm text-slate-500">
-          เลือกบิล + มัดจำ → ยอดรับจริง = บิล − มัดจำ (ไม่ติดลบ) · หรือ Auto-Allocate
-          (FIFO)
+          เลือกใบวางบิล (ถ้ามี) หรือเลือกบิลทีละใบ → Auto-Allocate (FIFO)
         </p>
       </div>
 
+      {billingNotes.length > 0 ? (
+        <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+          <Label htmlFor="billing_note_id">
+            ใบวางบิล (Billing Note) — โหลดบิลอัตโนมัติ
+          </Label>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              id="billing_note_id"
+              className="h-10 min-w-[280px] flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              value={selectedBillingNoteId}
+              disabled={isLoadingBn || isSubmitting}
+              onChange={(e) => void handleBillingNoteChange(e.target.value)}
+            >
+              <option value="">— ใช้บิลค้างชำระทั้งหมดของลูกค้า —</option>
+              {billingNotes.map((note) => (
+                <option key={note.id} value={note.id}>
+                  {note.doc_no} · {note.invoice_count} บิล · ฿
+                  {note.grand_total.toLocaleString("th-TH", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}{" "}
+                  ({note.payment_status})
+                </option>
+              ))}
+            </select>
+            {isLoadingBn ? (
+              <Loader2 className="size-4 animate-spin text-blue-600" />
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {invoices.length === 0 ? (
+        <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 py-8 text-center text-sm text-slate-500">
+          ไม่พบบิลค้างชำระสำหรับตัดยอด
+          {selectedBillingNoteId ? " ในใบวางบิลที่เลือก" : ""}
+        </div>
+      ) : null}
+
+      {invoices.length === 0 ? null : (
       <form action={handleSubmit} className="space-y-4">
         <input type="hidden" name="contact_id" value={contactId} />
         <input type="hidden" name="allocations_json" value={allocationsJson} />
@@ -431,7 +549,7 @@ export function PaymentKnockoffForm({
               type="button"
               variant="secondary"
               onClick={handleAutoAllocate}
-              disabled={isPending}
+              disabled={isSubmitting}
               className="w-full gap-2 md:w-auto"
             >
               <Wand2 className="h-4 w-4" />
@@ -880,16 +998,17 @@ export function PaymentKnockoffForm({
           <Button
             type="submit"
             size="lg"
-            disabled={isPending || sumApplied <= 0}
+            disabled={isSubmitting || sumApplied <= 0}
             className="h-12 gap-2 bg-blue-600 px-8 text-base font-semibold shadow-md hover:bg-blue-700"
           >
             <CheckCircle2 className="h-5 w-5" />
-            {isPending
+            {isSubmitting
               ? "กำลังบันทึก..."
               : "ยืนยันการชำระเงิน (Submit Payment)"}
           </Button>
         </div>
       </form>
+      )}
     </div>
   );
 }

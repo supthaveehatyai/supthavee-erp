@@ -12,13 +12,13 @@
 //
 // Deploy: supabase functions deploy process-receipt-ocr
 // Secret:  supabase secrets set GEMINI_API_KEY=...
-// Optional: supabase secrets set GEMINI_MODEL=gemini-1.5-pro-001 (default)
+// Optional: supabase secrets set GEMINI_MODEL=... (overrides cascade primary)
 //
-// NOTE: intentionally UNpinned (no @version) — always resolves to the
-// latest stable @google/generative-ai. If a future SDK version starts
-// 404-ing again, the fallback model string below is the safety net; also
+// Model cascade (primary → fallback):
+//   gemini-3.6-flash → gemini-3.5-flash → gemini-2.5-flash
+// Retry only on 503/429; 404/400 skip straight to next model.
 // check https://ai.google.dev/gemini-api/docs/models/gemini for currently
-// supported model IDs before re-pinning.
+// supported model IDs.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // Deno / Supabase Edge: use npm: specifiers (do NOT use bare `@supabase/...` or esm.sh)
@@ -48,8 +48,129 @@ function getErrorMessage(error: unknown): string {
   try {
     return JSON.stringify(error);
   } catch {
-    return "Unknown OCR error";
+    return String(error);
   }
+}
+
+function getErrorStatus(error: unknown): number | undefined {
+  if (error == null || typeof error !== "object") {
+    // Fall through to message parse below for non-objects
+  } else {
+    const record = error as Record<string, unknown>;
+    const direct = record.status ?? record.statusCode;
+    if (typeof direct === "number") return direct;
+
+    const nested = record.error;
+    if (nested != null && typeof nested === "object") {
+      const nestedRecord = nested as Record<string, unknown>;
+      const nestedStatus = nestedRecord.status ?? nestedRecord.code;
+      if (typeof nestedStatus === "number") return nestedStatus;
+    }
+  }
+
+  const message = getErrorMessage(error);
+  const match = message.match(/\b(400|404|429|503)\b/);
+  if (match) return Number(match[1]);
+  return undefined;
+}
+
+/**
+ * Active v1beta model cascade (retired 1.5 / 2.0 removed).
+ * Optional `GEMINI_MODEL` secret prepends as the first attempt.
+ */
+const DEFAULT_MODEL_CASCADE = [
+  "gemini-3.6-flash", // Primary
+  "gemini-3.5-flash", // Secondary fallback
+  "gemini-2.5-flash", // Final fallback
+] as const;
+
+function resolveModelCascade(): string[] {
+  const override = Deno.env.get("GEMINI_MODEL")?.trim();
+  const cascade = [...DEFAULT_MODEL_CASCADE];
+  if (
+    override &&
+    !cascade.includes(override as (typeof DEFAULT_MODEL_CASCADE)[number])
+  ) {
+    return [override, ...cascade];
+  }
+  if (override) {
+    return [override, ...cascade.filter((m) => m !== override)];
+  }
+  return cascade;
+}
+
+type GenerativePart =
+  | string
+  | { inlineData: { mimeType: string; data: string } };
+
+/**
+ * Try each Gemini model in cascade.
+ * - 503 / 429 → retry up to 3× with exponential backoff, then next model
+ * - 404 / 400 → do NOT retry; fall through to next model immediately
+ * Preserves JSON responseMimeType for OCR parsing.
+ */
+async function generateWithRetryAndFallback(
+  genAI: GoogleGenerativeAI,
+  prompt: string,
+  imageParts: GenerativePart[],
+): Promise<string> {
+  let lastError: unknown = null;
+  const models = resolveModelCascade();
+
+  for (const modelName of models) {
+    console.log(`[OCR Engine] Attempting with model: ${modelName}`);
+    const model = genAI.getGenerativeModel({
+      model: modelName,
+      generationConfig: {
+        temperature: 0.1,
+        responseMimeType: "application/json",
+      },
+    });
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const result = await model.generateContent([prompt, ...imageParts]);
+        const text = result.response.text();
+        if (!text?.trim()) {
+          throw new Error("Gemini returned empty response");
+        }
+        console.log(`[OCR Engine] Success with model: ${modelName}`);
+        return text;
+      } catch (error: unknown) {
+        lastError = error;
+        const status = getErrorStatus(error);
+
+        // Retired / invalid model or bad request — skip retries, next model.
+        if (status === 404 || status === 400) {
+          console.error(
+            `[OCR Engine] Model ${modelName} returned ${status}. Skipping retries, falling back to next model...`,
+            getErrorMessage(error),
+          );
+          break;
+        }
+
+        // Capacity / rate limit — exponential backoff retry.
+        if ((status === 503 || status === 429) && attempt < 3) {
+          const delayMs = attempt * 1500; // 1.5s, 3.0s
+          console.warn(
+            `[OCR Engine] Model ${modelName} hit ${status}. Retrying in ${delayMs}ms... (Attempt ${attempt}/3)`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+
+        console.error(
+          `[OCR Engine] Model ${modelName} failed on attempt ${attempt}. Switching model...`,
+          getErrorMessage(error),
+        );
+        break;
+      }
+    }
+  }
+
+  throw new Error(
+    `All Gemini Models failed. Last error: ${getErrorMessage(lastError) || "Service Unavailable"}`,
+  );
 }
 
 /** Result of parsing Gemini's response — header fields + flattened line items. */
@@ -344,30 +465,15 @@ serve(async (req: Request) => {
       );
     }
 
-    // 5. Gemini Vision — flatten the Size Matrix into RawOcrLine[]
-    const geminiModel = Deno.env.get("GEMINI_MODEL")?.trim() || "gemini-1.5-pro-001";
-    const model = genAI.getGenerativeModel({
-      model: geminiModel,
-      generationConfig: {
-        temperature: 0.1,
-        responseMimeType: "application/json",
-      },
-    });
-
+    // 5. Gemini Vision — cascade + retry, flatten Size Matrix into RawOcrLine[]
     const systemPrompt = buildOcrSystemPrompt(
       vendor.company_name ?? vendorId,
       vendor.ocr_pattern_config,
     );
 
-    const result = await model.generateContent([
-      systemPrompt,
+    const rawText = await generateWithRetryAndFallback(genAI, systemPrompt, [
       { inlineData: { mimeType, data: imageBase64 } },
     ]);
-
-    const rawText = result.response.text();
-    if (!rawText?.trim()) {
-      throw new Error("Gemini ไม่ได้ตอบข้อมูลใดๆ กลับมา (empty response)");
-    }
 
     const extraction = parseOcrExtractionJson(rawText);
 
