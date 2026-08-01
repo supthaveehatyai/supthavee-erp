@@ -8,6 +8,7 @@ import {
   getDocumentAllocationsByReceiptId,
 } from "@/lib/actions/finance/allocations";
 import type { DocumentDetail, DocumentStatus, DocumentType } from "@/types/document";
+import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import { SALES_DOC_TYPES } from "@/lib/constants/document";
 import PrintDocumentTemplate from "@/components/sales/print-document-template";
 import PrintPaymentReceiptTemplate from "@/components/finance/PrintPaymentReceiptTemplate";
@@ -261,7 +262,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               className="inline-flex h-10 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-800 transition hover:bg-blue-100"
             >
               <Pencil className="size-4" />
-              แก้ไขเอกสาร
+              {DOCUMENT_ACTIONS.EDIT}
             </Link>
           )}
           {canIssue && (

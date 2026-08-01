@@ -54,6 +54,7 @@ const navigationGroups: NavigationGroup[] = [
       { label: "จ่ายชำระหนี้ซัพพลายเออร์", href: "/finance/ap-payment" },
       { label: "รับ/จ่าย เงินมัดจำ", href: "/finance/deposits" },
       { label: "ระบบวางบิล", href: "/finance/billing-notes" },
+      { label: "ค่าใช้จ่าย (Expenses)", href: "/expenses" },
       { label: "สมุดบัญชีธนาคาร", href: "/finance/bank-accounts" },
       { label: "เจ้าหนี้ / ลูกหนี้", href: "/finance/ap-ar" },
     ],
@@ -159,10 +160,10 @@ function SidebarContent({ closeMenu }: { closeMenu: () => void }) {
           ภาพรวม
         </p>
         <Link
-          href="/"
+          href="/dashboard"
           onNavigate={closeMenu}
           className={`mb-6 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition ${
-            pathname === "/"
+            pathname === "/dashboard"
               ? "bg-white text-blue-700 shadow-sm"
               : "text-blue-100 hover:bg-white/10 hover:text-white"
           }`}

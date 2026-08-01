@@ -22,6 +22,7 @@ import {
   calculateNetCostApportionment,
   type ApportionmentItem,
 } from "@/lib/utils/accounting";
+import { VAT_OPTIONS } from "@/lib/constants/accounting";
 import type { VatCalculationType } from "@/lib/utils/document-summary";
 import type { SalesProductSearchItem } from "@/types/document";
 import SmartSkuPicker from "@/components/sales/smart-sku-picker";
@@ -75,11 +76,6 @@ const DOC_TYPE_OPTIONS: { value: GoodsReceiptDocType; label: string }[] = [
   },
 ];
 
-const VAT_TYPE_OPTIONS: { value: VatCalculationType; label: string }[] = [
-  { value: "NONE", label: "ไม่มีภาษี (NONE)" },
-  { value: "INCLUSIVE", label: "รวมภาษี (INCLUSIVE)" },
-  { value: "EXCLUSIVE", label: "แยกภาษี (EXCLUSIVE)" },
-];
 
 const selectClassName = cn(
   "flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm outline-none transition",
@@ -368,7 +364,7 @@ export default function ManualReceiptWorkspace({
               disabled={isPending}
               className={selectClassName}
             >
-              {VAT_TYPE_OPTIONS.map((option) => (
+              {VAT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>

@@ -14,6 +14,8 @@ import {
   getContactPersons,
   updateDraftDocument,
 } from "@/lib/actions/document-actions";
+import { VAT_OPTIONS } from "@/lib/constants/accounting";
+import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import {
   calculateDocumentSummary,
   type VatCalculationType,
@@ -52,11 +54,6 @@ import { cn } from "@/lib/utils";
 
 const DEFAULT_VAT_RATE = 7;
 
-const VAT_TYPE_OPTIONS: { value: VatCalculationType; label: string }[] = [
-  { value: "EXCLUSIVE", label: "แยกนอก (EXCLUSIVE)" },
-  { value: "INCLUSIVE", label: "รวมใน (INCLUSIVE)" },
-  { value: "NONE", label: "ไม่มี VAT (NONE)" },
-];
 
 function formatMoney(value: number): string {
   return value.toLocaleString("th-TH", {
@@ -451,7 +448,7 @@ export default function SalesEditWorkspace({
               disabled={isPending || isReplacement}
               className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60"
             >
-              {VAT_TYPE_OPTIONS.map((option) => (
+              {VAT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -662,7 +659,7 @@ export default function SalesEditWorkspace({
                 ? "กำลังบันทึก..."
                 : isReplacement
                   ? "บันทึกข้อมูลลูกค้า"
-                  : "บันทึกเอกสารร่าง"}
+                  : DOCUMENT_ACTIONS.SAVE_DRAFT}
             </Button>
           </div>
         </CardContent>

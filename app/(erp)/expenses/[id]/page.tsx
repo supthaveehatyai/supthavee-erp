@@ -1,0 +1,205 @@
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { ArrowLeft, Receipt } from "lucide-react";
+import { getExpenseById } from "@/app/actions/expenses";
+import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { ExpenseDetailActions } from "./expense-detail-actions";
+
+export const dynamic = "force-dynamic";
+
+type PageProps = {
+  params: Promise<{ id: string }>;
+};
+
+function formatThaiBaht(value: number): string {
+  return new Intl.NumberFormat("th-TH", {
+    style: "currency",
+    currency: "THB",
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
+function formatDate(value: string): string {
+  if (!value) return "—";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("th-TH", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const normalized = status.trim().toUpperCase();
+  if (normalized === "ISSUED") {
+    return <Badge variant="emerald">ISSUED</Badge>;
+  }
+  if (normalized === "VOID") {
+    return (
+      <Badge variant="amber" className="bg-red-100 text-red-700">
+        VOID
+      </Badge>
+    );
+  }
+  return <Badge variant="slate">DRAFT</Badge>;
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+        {label}
+      </p>
+      <div className="text-sm font-medium text-slate-900">{children}</div>
+    </div>
+  );
+}
+
+export async function generateMetadata({
+  params,
+}: PageProps): Promise<Metadata> {
+  const { id } = await params;
+  const result = await getExpenseById(id);
+  return {
+    title: result.data
+      ? `${result.data.document_no} | ค่าใช้จ่าย`
+      : "รายละเอียดค่าใช้จ่าย",
+  };
+}
+
+export default async function ExpenseDetailPage({ params }: PageProps) {
+  const { id } = await params;
+  const { data: expense, error } = await getExpenseById(id);
+
+  if (!expense) {
+    if (error) {
+      return (
+        <div className="flex flex-col gap-4 p-6">
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+          <Link
+            href="/expenses"
+            className="inline-flex h-10 w-fit items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            กลับรายการ
+          </Link>
+        </div>
+      );
+    }
+    notFound();
+  }
+
+  return (
+    <div className="flex flex-col gap-6 p-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
+              <Receipt className="h-8 w-8 text-blue-600" />
+              {expense.document_no}
+            </h1>
+            <StatusBadge status={expense.status} />
+          </div>
+          <p className="text-slate-500">
+            รายละเอียดเอกสารค่าใช้จ่าย — อ่านอย่างเดียว · Lifecycle: DRAFT →
+            ISSUED / VOID
+          </p>
+        </div>
+
+        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+          <ExpenseDetailActions
+            expenseId={expense.id}
+            documentNo={expense.document_no}
+            status={expense.status}
+          />
+          <Link
+            href="/expenses"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            กลับรายการ
+          </Link>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <Card className="xl:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">ข้อมูลเอกสาร</CardTitle>
+            <CardDescription>Read-only document header</CardDescription>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            <Field label="Document No">{expense.document_no}</Field>
+            <Field label="Expense Date">
+              {formatDate(expense.expense_date)}
+            </Field>
+            <Field label="Vendor / ผู้ให้บริการ">{expense.vendor_name}</Field>
+            <Field label="Category / หมวดหมู่">{expense.category_name}</Field>
+            <Field label="Payment Method">
+              {expense.payment_method || "—"}
+            </Field>
+            <Field label="Bank Account">
+              {expense.bank_account_label || "—"}
+            </Field>
+            <Field label="Remark">
+              <span className="whitespace-pre-wrap font-normal text-slate-700">
+                {expense.remark?.trim() || "—"}
+              </span>
+            </Field>
+            <Field label="Status">
+              <StatusBadge status={expense.status} />
+            </Field>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">สรุปยอดเงิน</CardTitle>
+            <CardDescription>Net / VAT / Grand Total</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-slate-500">Net Amount</span>
+              <span className="font-semibold tabular-nums">
+                {formatThaiBaht(expense.net_amount)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-slate-500">VAT Amount</span>
+              <span className="font-semibold tabular-nums">
+                {formatThaiBaht(expense.vat_amount)}
+              </span>
+            </div>
+            <div className="border-t border-slate-100 pt-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-slate-700">
+                  Grand Total
+                </span>
+                <span className="text-2xl font-bold tabular-nums text-slate-900">
+                  {formatThaiBaht(expense.grand_total)}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

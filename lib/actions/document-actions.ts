@@ -20,6 +20,7 @@ import {
   resolveIssuedDocumentStatus,
 } from "@/lib/constants/document";
 import { revalidatePath } from "next/cache";
+import { logAuditTrail } from "@/lib/supabase/auditService";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import {
   calculateDocumentSummary,
@@ -76,6 +77,36 @@ const ALLOWED_ATTACHMENT_MIME_TYPES = new Set([
   "image/gif",
   "application/pdf",
 ]);
+
+/**
+ * Phase 6 — fire-and-forget audit write.
+ * Never awaited on the critical path so ISSUE/VOID transactions are not blocked.
+ */
+function fireDocumentAuditLog(params: {
+  recordId: string;
+  oldData: Record<string, unknown> | null;
+  newData: Record<string, unknown> | null;
+  changedByName: string;
+  userId?: string | null;
+}): void {
+  void logAuditTrail(
+    "documents",
+    params.recordId,
+    "UPDATE",
+    params.oldData,
+    params.newData,
+    params.userId ?? null,
+    { changedByName: params.changedByName },
+  ).then((result) => {
+    if (!result.success) {
+      console.error(
+        "[fireDocumentAuditLog]",
+        params.changedByName,
+        result.error,
+      );
+    }
+  });
+}
 
 function isDocumentType(value: string): value is DocumentType {
   return (DOCUMENT_TYPES as readonly string[]).includes(value);
@@ -1721,6 +1752,31 @@ export async function issueDocument(
       }
     }
 
+    // Audit Trail (non-blocking) — DRAFT → ISSUED / COMPLETED
+    fireDocumentAuditLog({
+      recordId: id,
+      changedByName: "ISSUE",
+      oldData: {
+        id: document.id,
+        doc_no: document.doc_no,
+        doc_type: document.doc_type,
+        status: document.status,
+        grand_total: document.grand_total,
+        paid_amount: document.paid_amount,
+      },
+      newData: {
+        id,
+        doc_no: officialDocNo,
+        doc_type: docType,
+        status: issuedStatus,
+        payment_status: paymentStatus,
+        paid_amount: paidAmount,
+        ...(updatePayload.doc_date
+          ? { doc_date: updatePayload.doc_date }
+          : {}),
+      },
+    });
+
     return {
       data: {
         document_id: id,
@@ -2344,16 +2400,27 @@ export async function voidDocument(
     }
 
     const supabase = createSupabaseServerClient();
+
+    // Snapshot before mutation (for Audit Trail old_data)
+    const { data: beforeDoc } = await supabase
+      .from("documents")
+      .select(
+        "id, doc_no, doc_type, status, grand_total, paid_amount, payment_status",
+      )
+      .eq("id", id)
+      .maybeSingle();
+
     const { data: rpcData, error: rpcError } = await supabase.rpc(
       "void_document_with_stock_reversal",
       { p_document_id: id },
     );
 
+    let result: VoidDocumentResult;
+
     if (!rpcError && rpcData && typeof rpcData === "object") {
       const payload = rpcData as VoidRpcPayload;
       if (payload.success) {
-        revalidatePath("/sales");
-        return {
+        result = {
           data: {
             document_id: id,
             document_no: String(payload.doc_no ?? ""),
@@ -2362,26 +2429,40 @@ export async function voidDocument(
           },
           error: null,
         };
+      } else {
+        result = {
+          data: null,
+          error: payload.error ?? "ยกเลิกเอกสารไม่สำเร็จ",
+        };
       }
-      return {
-        data: null,
-        error: payload.error ?? "ยกเลิกเอกสารไม่สำเร็จ",
-      };
-    }
-
-    // RPC missing / unavailable — compensatory fallback.
-    if (
+    } else if (
       rpcError &&
       !/function|does not exist|PGRST202|42883/i.test(rpcError.message)
     ) {
-      return { data: null, error: rpcError.message };
+      result = { data: null, error: rpcError.message };
+    } else {
+      // RPC missing / unavailable — compensatory fallback.
+      result = await voidDocumentFallback(id);
     }
 
-    const fallback = await voidDocumentFallback(id);
-    if (fallback.data) {
+    if (result.data) {
       revalidatePath("/sales");
+
+      // Audit Trail (non-blocking) — ISSUED/COMPLETED → CANCELLED
+      fireDocumentAuditLog({
+        recordId: id,
+        changedByName: "VOID",
+        oldData: (beforeDoc as Record<string, unknown> | null) ?? null,
+        newData: {
+          ...(beforeDoc ?? {}),
+          id,
+          doc_no: result.data.document_no,
+          status: "CANCELLED",
+        },
+      });
     }
-    return fallback;
+
+    return result;
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "ยกเลิกเอกสาร (voidDocument) ไม่สำเร็จ";

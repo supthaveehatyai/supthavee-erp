@@ -13,6 +13,7 @@ import {
   cloneDocumentToNewDraft,
   voidDocument,
 } from "@/lib/actions/document-actions";
+import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -122,7 +123,7 @@ export default function VoidDocumentActions({
         onClick={() => setConfirmMode("void")}
       >
         <Ban className="size-4" />
-        ยกเลิกเอกสาร
+        {DOCUMENT_ACTIONS.VOID}
       </Button>
 
       <Button

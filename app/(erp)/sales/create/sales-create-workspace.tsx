@@ -16,6 +16,8 @@ import {
   createDraftDocument,
   getContactPersons,
 } from "@/lib/actions/document-actions";
+import { VAT_OPTIONS } from "@/lib/constants/accounting";
+import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import {
   calculateDocumentSummary,
   type VatCalculationType,
@@ -55,11 +57,6 @@ const INITIAL_DOC_TYPE: DocumentType = "TAX_INV";
 const INITIAL_VAT_TYPE: VatCalculationType = "EXCLUSIVE";
 const DEFAULT_VAT_RATE = 7;
 
-const VAT_TYPE_OPTIONS: { value: VatCalculationType; label: string }[] = [
-  { value: "EXCLUSIVE", label: "แยกนอก (EXCLUSIVE)" },
-  { value: "INCLUSIVE", label: "รวมใน (INCLUSIVE)" },
-  { value: "NONE", label: "ไม่มี VAT (NONE)" },
-];
 
 const SALES_DOC_TYPES: { value: DocumentType; label: string }[] = [
   { value: "QT", label: "ใบเสนอราคา (QT)" },
@@ -480,7 +477,7 @@ export default function SalesCreateWorkspace({
                 className="h-10 w-full gap-2"
               >
                 <FilePlus2 className="size-4" />
-                {isPending ? "กำลังบันทึก..." : "สร้างเอกสารร่าง"}
+                {isPending ? "กำลังบันทึก..." : DOCUMENT_ACTIONS.SAVE_DRAFT}
               </Button>
             </div>
           </form>
@@ -501,8 +498,8 @@ export default function SalesCreateWorkspace({
             onSelectProduct={handleSelectProduct}
           />
           <p className="mt-2 text-[11px] text-slate-500">
-            เลือกสินค้า ปรับราคา/จำนวน แล้วกด &quot;สร้างเอกสารร่าง&quot; เพื่อรันเลขที่บิล +
-            บันทึก
+            เลือกสินค้า ปรับราคา/จำนวน แล้วกด &quot;{DOCUMENT_ACTIONS.SAVE_DRAFT}
+            &quot; เพื่อรันเลขที่บิล + บันทึก
           </p>
         </CardContent>
       </Card>
@@ -641,7 +638,7 @@ export default function SalesCreateWorkspace({
                   }}
                   className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60"
                 >
-                  {VAT_TYPE_OPTIONS.map((option) => (
+                  {VAT_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>

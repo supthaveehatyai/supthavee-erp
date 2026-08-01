@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, Loader2, PackageCheck } from "lucide-react";
 import { checkDuplicateInvoice } from "@/lib/actions/receipt";
 import type { GoodsReceiptDocType } from "@/lib/constants/document";
+import { VAT_OPTIONS } from "@/lib/constants/accounting";
 import type { VatCalculationType } from "@/lib/utils/document-summary";
 import { Button } from "@/components/ui/button";
 import {
@@ -72,11 +73,6 @@ const DOC_TYPE_OPTIONS: { value: GoodsReceiptDocType; label: string }[] = [
   },
 ];
 
-const VAT_TYPE_OPTIONS: { value: VatCalculationType; label: string }[] = [
-  { value: "NONE", label: "ไม่มีภาษี (NONE)" },
-  { value: "INCLUSIVE", label: "รวมภาษี (INCLUSIVE)" },
-  { value: "EXCLUSIVE", label: "แยกภาษี (EXCLUSIVE)" },
-];
 
 export default function SaveToLedgerDialog({
   open,
@@ -240,7 +236,7 @@ export default function SaveToLedgerDialog({
               disabled={isSaving}
               className={selectClassName}
             >
-              {VAT_TYPE_OPTIONS.map((option) => (
+              {VAT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>

@@ -11,3 +11,39 @@ Tech Stack หลัก: Supabase (PostgreSQL, Auth, Edge Functions, RLS), Next.
 
 # Output Format
 ตอบเป็นภาษาไทย สไตล์มืออาชีพ กระชับ เน้นผลลัพธ์ ใช้ Markdown จัดรูปแบบโค้ดให้ชัดเจน และสรุป Next Steps เสมอ
+
+---
+# 🛡️ Enterprise Global Standards & UI/UX Consistency (Supthavee ERP)
+
+To maintain a consistent Enterprise ERP experience and prevent technical debt across all modules (Sales, Procurement, Finance, Expenses, etc.), the following global standards MUST be strictly enforced:
+
+### 1. Document Lifecycle & State Management (The "Late Numbering" Doctrine)
+*   **Draft Phase:** Documents with `status === 'DRAFT'` (e.g., `DRAFT-YYYYMMDDHHmmss`) are temporary. 
+    *   They MUST be fully editable.
+    *   They MUST NOT affect inventory (`inventory_ledger`) or financial ledgers.
+    *   They MUST display a **Delete** action (Hard delete or soft delete depending on the module), NOT a 'Void' action.
+*   **Issued Phase:** Upon confirmation, documents receive an official running number via RPC (`generate_document_no`).
+    *   `status` MUST change to `ISSUED`.
+    *   The document becomes **Read-Only** (Inputs disabled).
+    *   It MUST display a **Void** action.
+*   **Void Phase:** Once `status === 'VOID'`, the document is permanently locked. Stock/financial reversals must be handled automatically (Cancel & Replace logic).
+*   **Post-Submit Redirection:** Always redirect the user away from a creation form (e.g., `router.push('/expenses/[id]')`) immediately after a successful Server Action to prevent duplicate submissions.
+
+### 2. Global UI Components & Pop-ups
+*   **NO NATIVE ALERTS:** Absolutely NO usage of `window.confirm()`, `window.alert()`, or native browser prompts anywhere in the application.
+*   **Confirmation Dialogs:** Always use the `AlertDialog` component from `shadcn/ui` (or shared wrappers like `<IssueDocumentButton />` / `<VoidDocumentButton />`) for destructive or state-changing actions.
+*   **Buttons:** Standardize button labels using a global constant file (e.g., `lib/constants/document-actions.ts`). Always use `disabled={isSubmitting}` to prevent double-clicks during server requests.
+*   **Forms:** Stick to the established 2-column grid layout for document headers.
+*   **Print Layout:** Support A4 printing via CSS `@media print`, automatically hiding Navbars and Sidebars.
+
+### 3. Terminology & Global Dictionary
+*   All UI labels and button texts representing document actions must be derived from a single source of truth (e.g., `DOCUMENT_ACTIONS.ISSUE`, `DOCUMENT_ACTIONS.SAVE_DRAFT`).
+*   VAT Types MUST strictly follow the standard ENUM representation in the UI:
+    *   `NONE` -> 'ไม่มีภาษี (None)'
+    *   `INCLUSIVE` -> 'รวมภาษีมูลค่าเพิ่ม (Inclusive)'
+    *   `EXCLUSIVE` -> 'แยกภาษีมูลค่าเพิ่ม (Exclusive)'
+
+### 4. Zero Client-Side Fetching (Golden Rule)
+*   Do not deviate from the Server Action + `supabaseAdmin` (Service Role Key) architecture.
+*   Client components must ONLY handle state (React Hooks) and UI rendering, passing user intent to Server Actions.
+*   Never write Client-side `supabase.from()` calls to avoid RLS permission errors and Turbopack Cache bugs.

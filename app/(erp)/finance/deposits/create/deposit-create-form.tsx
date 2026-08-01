@@ -17,6 +17,10 @@ import VendorCombobox from "@/components/procurement/VendorCombobox";
 import type { VendorOption } from "@/lib/actions/mapping";
 import type { CustomerOption } from "@/types/document";
 import {
+  DEFAULT_VAT_RATE,
+  VAT_OPTIONS,
+} from "@/lib/constants/accounting";
+import {
   calculateDocumentSummary,
   type VatCalculationType,
 } from "@/lib/utils/document-summary";
@@ -32,14 +36,7 @@ import {
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-const DEFAULT_VAT_RATE = 7;
 const INITIAL_VAT_TYPE: VatCalculationType = "NONE";
-
-const VAT_TYPE_OPTIONS: { value: VatCalculationType; label: string }[] = [
-  { value: "NONE", label: "ไม่มี VAT (NONE)" },
-  { value: "EXCLUSIVE", label: "แยกนอก (EXCLUSIVE)" },
-  { value: "INCLUSIVE", label: "รวมใน (INCLUSIVE)" },
-];
 
 function formatMoney(value: number): string {
   return value.toLocaleString("th-TH", {
@@ -343,7 +340,7 @@ export function DepositCreateForm({
                   }
                   className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60"
                 >
-                  {VAT_TYPE_OPTIONS.map((option) => (
+                  {VAT_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>

@@ -1,6 +1,6 @@
 # System Blueprint: Supthavee ERP SuperApp
 
-**Version:** 5.3 (Billing Note, Document Lineage & Late Numbering Complete)
+**Version:** 6.0 (Dashboard Initiated & Expanded Master Roadmap)
 
 **Company:** บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด
 
@@ -64,11 +64,20 @@
 *   **Receipt Status Tracking:** ระบบติดตามและอัปเดตสถานะเอกสารตัวจริง ("รอออกเอกสาร/รอเอกสาร" -> "ออกเอกสารแล้ว/ได้รับแล้ว") พร้อม Database Migration `original_receipt_received`
 *   **Deposit Management:** ระบบรับและจ่ายเงินมัดจำ (DEP_IN / DEP_OUT) ทำงานร่วมกับระบบ Allocation สามารถนำยอดคงเหลือไปเป็นส่วนลดในใบเสร็จ (REC/PAY) ได้ รองรับการคืนเงิน (Refund) และตัดเศษบัญชี (Write-off) พร้อมสืบทอดภาษีมูลค่าเพิ่ม (VAT Inheritance)
 
-### Module E: Dashboard & Audit (ระบบรายงานและความปลอดภัย) - [🔥 Next Phase]
-*   Executive Dashboard และระบบ Audit Trail บันทึกประวัติการเปลี่ยนแปลง
+### Module E: Dashboard & Audit (ระบบรายงานและความปลอดภัย) - [🔥 Current Phase]
+*   **Executive Dashboard:** หน้าจอสรุปยอดขาย (YTD) และยอดหนี้คงค้าง (AR/AP) แบบ Real-time
+*   **System Audit Trail:** ระบบบันทึกประวัติการเปลี่ยนแปลงข้อมูลสำคัญระดับ Database (JSONB Log)
 
-### Module F: Data Backup & Restore (ระบบสำรองและฟื้นฟูข้อมูล) - [⏳ Planned]
+### Module F: Inventory UI & Production Workflow (ระบบคลังสินค้าและสายการผลิต) - [⏳ Planned]
+*   **Stock Card UI:** หน้าจอสำหรับตรวจสอบการเคลื่อนไหวของสินค้า เข้า-ออก ผ่าน `inventory_ledger`
+*   **Service Workflow Kanban:** ระบบติดตามสถานะงานบริการ (ปัก/สกรีน/เย็บ) ตั้งแต่รับงานจนถึงส่งมอบ
+
+### Module G: Expense Management (ระบบจัดการค่าใช้จ่าย) - [⏳ Planned]
+*   **Expense Records:** ฟอร์มบันทึกค่าใช้จ่ายดำเนินงาน (OPEX) เช่น ค่าขนส่ง ค่าน้ำ ค่าไฟ พร้อมระบบแนบใบเสร็จ
+*   **Net Profit Calculation:** อัปเกรดระบบเพื่อนำ Expense ไปหักลบรายได้ และหา True Net Profit ประจำเดือน
+
+### Module H: Data Backup & Restore (ระบบสำรองและฟื้นฟูข้อมูล) - [⏳ Planned]
 *   Automated PostgreSQL Dump & Storage Backup / Point-in-time Recovery
 
 ## 5. Database Schema (PostgreSQL for Supabase)
-*(Schema ตาม Blueprint v5.3 ครอบคลุมตาราง `billing_note_items` และการอัปเดต Enum ทั้งหมดเรียบร้อยแล้ว)*
+*(Schema ตาม Blueprint v6.0 ครอบคลุมตาราง audit_logs และเตรียมความพร้อมสำหรับ Phase ถัดไป)*
