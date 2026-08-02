@@ -12,6 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ExpenseAttachmentPreview } from "./expense-attachment-preview";
 import { ExpenseDetailActions } from "./expense-detail-actions";
 
 export const dynamic = "force-dynamic";
@@ -118,8 +119,8 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
             <StatusBadge status={expense.status} />
           </div>
           <p className="text-slate-500">
-            รายละเอียดเอกสารค่าใช้จ่าย — อ่านอย่างเดียว · Lifecycle: DRAFT →
-            ISSUED / VOID
+            รายละเอียดเอกสารค่าใช้จ่าย — อ่านอย่างเดียว · DRAFT = ลบได้ ·
+            ISSUED = ยกเลิก (Void) ได้
           </p>
         </div>
 
@@ -149,6 +150,9 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
             <Field label="Document No">{expense.document_no}</Field>
             <Field label="Expense Date">
               {formatDate(expense.expense_date)}
+            </Field>
+            <Field label="เลขที่บิลผู้จำหน่าย">
+              {expense.vendor_doc_no?.trim() || "—"}
             </Field>
             <Field label="Vendor / ผู้ให้บริการ">{expense.vendor_name}</Field>
             <Field label="Category / หมวดหมู่">{expense.category_name}</Field>
@@ -197,6 +201,48 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
                 </span>
               </div>
             </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">ใบเสร็จแนบ (Receipt)</CardTitle>
+            <CardDescription>
+              ไฟล์จาก Storage bucket expense_documents
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ExpenseAttachmentPreview
+              url={expense.receipt_url}
+              documentNo={expense.document_no}
+              title="ใบเสร็จ"
+              emptyLabel="ไม่มีไฟล์แนบ"
+              fileLabel="ไฟล์แนบใบเสร็จ"
+              viewFullLabel="ดูใบเสร็จเต็มจอ"
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">
+              สลิปโอนเงิน (Payment Slip)
+            </CardTitle>
+            <CardDescription>
+              หลักฐานการโอน (Optional) · bucket expense_documents
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ExpenseAttachmentPreview
+              url={expense.payment_slip_url}
+              documentNo={expense.document_no}
+              title="สลิปโอนเงิน"
+              emptyLabel="ไม่มีสลิปโอนเงินแนบ"
+              fileLabel="ไฟล์แนบสลิปโอนเงิน"
+              viewFullLabel="ดูสลิปเต็มจอ"
+            />
           </CardContent>
         </Card>
       </div>

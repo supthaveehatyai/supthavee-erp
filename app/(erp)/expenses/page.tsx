@@ -33,14 +33,30 @@ function formatThaiBaht(value: number): string {
   }).format(Number.isFinite(value) ? value : 0);
 }
 
-function formatDate(value: string): string {
+/** Document Date — calendar date only (expense_date / bill date). */
+function formatDocDate(value: string): string {
   if (!value) return "—";
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("th-TH", {
-    year: "numeric",
+    day: "2-digit",
     month: "short",
-    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+/** Posting Date — created_at with time (dd MMM yyyy HH:mm). */
+function formatPostingDate(value: string): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("th-TH", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
   }).format(date);
 }
 
@@ -95,7 +111,7 @@ export default async function ExpensesPage() {
         <CardHeader>
           <CardTitle className="text-base">รายการค่าใช้จ่าย</CardTitle>
           <CardDescription>
-            แสดง Date · Document No · Category · Remark · Grand Total · ดึงผ่าน
+            เรียงตามวันที่บันทึก (Posting Date) · แยกจากวันที่บิล (Doc Date) ·
             Server Action + supabaseAdmin
           </CardDescription>
         </CardHeader>
@@ -110,7 +126,18 @@ export default async function ExpensesPage() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-slate-50">
-                    <TableHead className="whitespace-nowrap">Date</TableHead>
+                    <TableHead className="whitespace-nowrap">
+                      วันที่บันทึก
+                      <span className="mt-0.5 block text-[10px] font-normal text-slate-400">
+                        Posting Date
+                      </span>
+                    </TableHead>
+                    <TableHead className="whitespace-nowrap">
+                      วันที่บิล
+                      <span className="mt-0.5 block text-[10px] font-normal text-slate-400">
+                        Doc Date
+                      </span>
+                    </TableHead>
                     <TableHead>Document No</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Remark</TableHead>
@@ -122,8 +149,11 @@ export default async function ExpensesPage() {
                 <TableBody>
                   {expenses.map((row) => (
                     <TableRow key={row.id}>
-                      <TableCell className="whitespace-nowrap text-sm text-slate-700">
-                        {formatDate(row.expense_date)}
+                      <TableCell className="whitespace-nowrap text-sm font-medium tabular-nums text-slate-900">
+                        {formatPostingDate(row.created_at)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-sm tabular-nums text-slate-600">
+                        {formatDocDate(row.expense_date)}
                       </TableCell>
                       <TableCell>
                         <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-700">

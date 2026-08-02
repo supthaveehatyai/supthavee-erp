@@ -8,10 +8,8 @@
 import { useMemo, useState, useTransition } from "react";
 import { Check, ChevronsUpDown, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
-import {
-  createExpenseCategory,
-  type ExpenseCategory,
-} from "@/app/actions/expenses";
+import { createExpenseCategory } from "@/app/actions/expenses";
+import type { ExpenseCategory } from "@/types/expense";
 import { Button } from "@/components/ui/button";
 import {
   Command,

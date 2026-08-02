@@ -4,6 +4,7 @@ import {
   getPendingAP,
   getPendingAR,
   getRecentAuditLogs,
+  getYTDExpenses,
   getYTDSales,
   type GetRecentAuditLogsResult,
   type KpiMoneyResult,
@@ -27,6 +28,10 @@ function formatThaiBaht(value: number): string {
     style: "currency",
     currency: "THB",
   }).format(Number.isFinite(value) ? value : 0);
+}
+
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 function unwrapKpi(
@@ -91,11 +96,12 @@ function toDisplayKpi(result: KpiMoneyResult): DisplayKpi {
 
 export default async function ExecutiveDashboardPage() {
   // allSettled — no unhandled rejections even if a Server Action throws
-  const [ytdSettled, arSettled, apSettled, auditSettled] =
+  const [ytdSettled, arSettled, apSettled, opexSettled, auditSettled] =
     await Promise.allSettled([
       getYTDSales(),
       getPendingAR(),
       getPendingAP(),
+      getYTDExpenses(),
       getRecentAuditLogs(),
     ]);
 
@@ -108,7 +114,26 @@ export default async function ExecutiveDashboardPage() {
   const pendingAp = toDisplayKpi(
     unwrapKpi(apSettled, "Failed to load pending AP"),
   );
+  const totalExpenses = toDisplayKpi(
+    unwrapKpi(opexSettled, "Failed to load YTD expenses"),
+  );
   const auditResult = unwrapAudit(auditSettled);
+
+  // True Net Profit = Gross (YTD Sales, pre-COGS) − OPEX
+  const netProfitAmount = roundMoney(ytdSales.amount - totalExpenses.amount);
+  const netProfitError =
+    ytdSales.error || totalExpenses.error
+      ? [ytdSales.error, totalExpenses.error]
+          .filter((msg): msg is string => Boolean(msg))
+          .join(" · ")
+      : null;
+  const netProfit: DisplayKpi = netProfitError
+    ? { amount: 0, formatted: "—", error: netProfitError }
+    : {
+        amount: netProfitAmount,
+        formatted: formatThaiBaht(netProfitAmount),
+        error: null,
+      };
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -118,8 +143,8 @@ export default async function ExecutiveDashboardPage() {
           Executive Dashboard
         </h1>
         <p className="text-slate-500">
-          ภาพรวมธุรกิจและประวัติการเปลี่ยนแปลงระบบ — Phase 6 Dashboard &amp;
-          Audit (Zero Client-Side Fetching)
+          ภาพรวมธุรกิจ · True Net Profit (Sales − OPEX) · Audit Trail — Phase 8
+          (Zero Client-Side Fetching)
         </p>
       </div>
 
@@ -128,6 +153,8 @@ export default async function ExecutiveDashboardPage() {
           ytdSales,
           pendingAr,
           pendingAp,
+          totalExpenses,
+          netProfit,
         }}
         auditLogs={auditResult.data}
         auditError={auditResult.error}

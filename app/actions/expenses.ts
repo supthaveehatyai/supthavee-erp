@@ -11,138 +11,137 @@
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import {
+  DUPLICATE_INVOICE_ERROR,
+  DUPLICATE_INVOICE_MESSAGE,
+  EXPENSE_MONEY_EPSILON,
+} from "@/lib/constants/expense-constants";
 import { logAuditTrail } from "@/lib/supabase/auditService";
 import {
   generateDraftDocumentNo,
   isTemporaryDraftDocNo,
 } from "@/lib/utils/draft-document-no";
+import type {
+  CreateDraftExpenseInput,
+  CreateDraftExpenseResult,
+  CreateExpenseCategoryResult,
+  ExpenseBankAccountOption,
+  ExpenseCategory,
+  ExpenseDetail,
+  ExpenseListItem,
+  ExpenseRecord,
+  ExpenseVendorOption,
+  GetExpenseBankAccountsResult,
+  GetExpenseByIdResult,
+  GetExpenseCategoriesResult,
+  GetExpensesResult,
+  GetExpenseVendorsResult,
+  MutateExpenseResult,
+  UpdateDraftExpenseInput,
+  UpdateDraftExpenseResult,
+  UploadExpenseReceiptResult,
+} from "@/types/expense";
 
-/* -------------------------------------------------------------------------- */
-/* Strict local types (payload / rows)                                        */
-/* -------------------------------------------------------------------------- */
+/**
+ * Purge Next.js Router Cache for Expense routes after mutations.
+ * Call immediately after a successful INSERT/UPDATE — before return.
+ * - `/expenses` page + layout (list must show new DRAFT rows)
+ * - detail segment when an id is known
+ */
+function revalidateExpenseCaches(expenseId?: string | null) {
+  revalidatePath("/expenses");
+  revalidatePath("/expenses", "layout");
+  if (expenseId) {
+    revalidatePath(`/expenses/${expenseId}`);
+    revalidatePath("/expenses/[id]", "page");
+  }
+}
 
-export type ExpenseCategory = {
-  id: string;
-  category_name: string;
-  description: string | null;
-  is_active: boolean;
-  created_at: string;
-};
+const EXPENSE_ROW_SELECT =
+  "id, document_no, expense_date, category_id, vendor_id, vendor_doc_no, bank_account_id, net_amount, vat_amount, grand_total, wht_type, wht_rate, wht_amount, net_payable, payment_method, receipt_url, payment_slip_url, status, remark, recorded_by, created_at, updated_at";
 
-export type ExpenseRecord = {
-  id: string;
-  document_no: string;
-  expense_date: string;
-  category_id: string | null;
-  vendor_id: string | null;
-  bank_account_id: string | null;
-  net_amount: number;
-  vat_amount: number;
-  grand_total: number;
-  payment_method: string | null;
-  receipt_url: string | null;
-  status: "DRAFT" | "ISSUED" | "VOID" | string;
-  remark: string | null;
-  recorded_by: string | null;
-  created_at: string;
-  updated_at: string;
-};
+function mapDuplicateExpenseError(error: {
+  code?: string;
+  message?: string;
+}): MutateExpenseResult | null {
+  const code = error.code ?? "";
+  const message = error.message ?? "";
+  if (
+    code === "23505" ||
+    /idx_expenses_duplicate_prevent|duplicate key/i.test(message)
+  ) {
+    return {
+      data: null,
+      error: DUPLICATE_INVOICE_ERROR,
+      message: DUPLICATE_INVOICE_MESSAGE,
+    };
+  }
+  return null;
+}
 
-export type ExpenseDetail = ExpenseRecord & {
-  category_name: string;
-  vendor_name: string;
-  bank_account_label: string | null;
-};
+/**
+ * Early Warning — same composite key as `idx_expenses_duplicate_prevent`:
+ * vendor_id + expense_date + vendor_doc_no (exclude VOID + current row on edit).
+ */
+async function findDuplicateExpense(
+  supabaseAdmin: SupabaseClient,
+  params: {
+    vendorId: string;
+    expenseDate: string;
+    vendorDocNo: string | null;
+    excludeId?: string | null;
+  },
+): Promise<{ isDuplicate: boolean; error: string | null }> {
+  const vendorId = params.vendorId.trim();
+  const expenseDate = params.expenseDate.trim();
+  const vendorDocNo = (params.vendorDocNo ?? "").trim();
 
-export type GetExpenseByIdResult = {
-  data: ExpenseDetail | null;
-  error: string | null;
-};
+  // Incomplete identity — skip (matches partial unique index WHERE clause).
+  if (!vendorId || !expenseDate || !vendorDocNo) {
+    return { isDuplicate: false, error: null };
+  }
 
-export type MutateExpenseResult = {
-  data: ExpenseRecord | null;
-  error: string | null;
-};
+  let query = supabaseAdmin
+    .from("expenses")
+    .select("id")
+    .eq("vendor_id", vendorId)
+    .eq("expense_date", expenseDate)
+    .eq("vendor_doc_no", vendorDocNo)
+    .neq("status", "VOID")
+    .limit(1);
 
-export type ExpenseVendorOption = {
-  id: string;
-  company_name: string;
-};
+  const excludeId = params.excludeId?.trim();
+  if (excludeId) {
+    query = query.neq("id", excludeId);
+  }
 
-export type CreateDraftExpenseInput = {
-  category_id: string;
-  vendor_id: string;
-  expense_date: string;
-  net_amount: number;
-  vat_amount?: number;
-  remark?: string | null;
-  payment_method?: string | null;
-  bank_account_id?: string | null;
-  recorded_by?: string | null;
-};
+  const { data, error } = await query;
+  if (error) {
+    return { isDuplicate: false, error: error.message };
+  }
 
-/** Same mutable fields as create — used by `updateDraftExpense`. */
-export type UpdateDraftExpenseInput = {
-  category_id: string;
-  vendor_id: string;
-  expense_date: string;
-  net_amount: number;
-  vat_amount?: number;
-  remark?: string | null;
-  payment_method?: string | null;
-  bank_account_id?: string | null;
-};
+  const rows = data ?? [];
+  return { isDuplicate: rows.length > 0, error: null };
+}
 
-export type ExpenseBankAccountOption = {
-  id: string;
-  bank_name: string;
-  account_no: string;
-  account_name: string;
-  label: string;
-};
+function duplicateInvoiceResult(): MutateExpenseResult {
+  return {
+    data: null,
+    error: DUPLICATE_INVOICE_ERROR,
+    message: DUPLICATE_INVOICE_MESSAGE,
+  };
+}
 
-export type GetExpenseBankAccountsResult = {
-  data: ExpenseBankAccountOption[];
-  error: string | null;
-};
+const EXPENSE_DOCUMENTS_BUCKET = "expense_documents";
 
-export type CreateExpenseCategoryResult = {
-  data: ExpenseCategory | null;
-  error: string | null;
-};
-
-export type GetExpenseCategoriesResult = {
-  data: ExpenseCategory[];
-  error: string | null;
-};
-
-export type GetExpenseVendorsResult = {
-  data: ExpenseVendorOption[];
-  error: string | null;
-};
-
-export type CreateDraftExpenseResult = {
-  data: ExpenseRecord | null;
-  error: string | null;
-};
-
-export type UpdateDraftExpenseResult = MutateExpenseResult;
-
-export type ExpenseListItem = {
-  id: string;
-  document_no: string;
-  expense_date: string;
-  category_id: string | null;
-  category_name: string;
-  remark: string | null;
-  grand_total: number;
-  status: string;
-};
-
-export type GetExpensesResult = {
-  data: ExpenseListItem[];
-  error: string | null;
-};
+const ALLOWED_EXPENSE_ATTACHMENT_MIME = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+]);
 
 /* -------------------------------------------------------------------------- */
 /* Admin client                                                               */
@@ -189,14 +188,27 @@ function mapExpenseRow(row: Record<string, unknown>): ExpenseRecord {
     category_id:
       row.category_id == null ? null : String(row.category_id),
     vendor_id: row.vendor_id == null ? null : String(row.vendor_id),
+    vendor_doc_no:
+      row.vendor_doc_no == null || String(row.vendor_doc_no).trim() === ""
+        ? null
+        : String(row.vendor_doc_no).trim(),
     bank_account_id:
       row.bank_account_id == null ? null : String(row.bank_account_id),
     net_amount: Number(row.net_amount ?? 0),
     vat_amount: Number(row.vat_amount ?? 0),
     grand_total: Number(row.grand_total ?? 0),
+    wht_type:
+      row.wht_type == null || String(row.wht_type).trim() === ""
+        ? null
+        : String(row.wht_type).trim(),
+    wht_rate: Number(row.wht_rate ?? 0),
+    wht_amount: Number(row.wht_amount ?? 0),
+    net_payable: Number(row.net_payable ?? 0),
     payment_method:
       row.payment_method == null ? null : String(row.payment_method),
     receipt_url: row.receipt_url == null ? null : String(row.receipt_url),
+    payment_slip_url:
+      row.payment_slip_url == null ? null : String(row.payment_slip_url),
     status: String(row.status ?? "DRAFT"),
     remark: row.remark == null ? null : String(row.remark),
     recorded_by:
@@ -262,7 +274,8 @@ function unwrapCategoryName(
 
 /**
  * Expense list for UI — joins mst_expense_categories for category_name.
- * Newest expense_date first.
+ * Sorted by Posting Date (`created_at` DESC) so new DRAFTs stay on top,
+ * even when Document Date (`expense_date`) is a prior month.
  */
 export async function getExpenses(
   limit = 100,
@@ -278,6 +291,7 @@ export async function getExpenses(
         id,
         document_no,
         expense_date,
+        created_at,
         category_id,
         remark,
         grand_total,
@@ -287,7 +301,6 @@ export async function getExpenses(
         )
       `,
       )
-      .order("expense_date", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(safeLimit);
 
@@ -302,6 +315,7 @@ export async function getExpenses(
         id: String(raw.id),
         document_no: String(raw.document_no ?? ""),
         expense_date: String(raw.expense_date ?? ""),
+        created_at: String(raw.created_at ?? ""),
         category_id:
           raw.category_id == null ? null : String(raw.category_id),
         category_name: unwrapCategoryName(
@@ -498,12 +512,298 @@ export async function createExpenseCategory(
 }
 
 /**
- * Create a DRAFT expense with Late Numbering document_no (`DRAFT-YYYYMMDDHHmmss`).
+ * Cross-realm safe File check — Next.js Server Actions may wrap uploads so
+ * `instanceof File` is unreliable.
+ */
+function isReceiptUploadFile(value: unknown): value is File {
+  if (value == null || typeof value !== "object") return false;
+  const candidate = value as {
+    size?: unknown;
+    name?: unknown;
+    arrayBuffer?: unknown;
+    type?: unknown;
+  };
+  // Duck-type File/Blob — `instanceof File` can fail across Node/undici realms.
+  const hasBuffer = typeof candidate.arrayBuffer === "function";
+  const hasSize = typeof candidate.size === "number" && candidate.size > 0;
+  if (!hasBuffer || !hasSize) return false;
+  if (typeof candidate.name === "string" && candidate.name.length > 0) {
+    return true;
+  }
+  // Blob-only payloads may omit `name` — still treat as uploadable file.
+  return typeof candidate.type === "string";
+}
+
+function sanitizeReceiptFileName(fileName: string): string {
+  return fileName
+    .replace(/[^\w.\-ก-๙]+/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, 120);
+}
+
+type ExpenseAttachmentKind = "receipt" | "payment_slip";
+
+function extensionForExpenseAttachment(
+  file: File,
+  mimeType: string,
+): string {
+  const fromName = file.name?.split(".").pop()?.toLowerCase();
+  if (fromName && /^[a-z0-9]{2,5}$/.test(fromName)) return fromName;
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "image/webp") return "webp";
+  if (mimeType === "application/pdf") return "pdf";
+  return "jpg";
+}
+
+/**
+ * Upload raw File to `expense_documents` via supabaseAdmin only.
+ * - receipt: `EXP-{timestamp}-{safeFileName}`
+ * - payment_slip: `SLIP-{timestamp}.{ext}`
+ */
+async function uploadExpenseFileToStorage(
+  file: File,
+  kind: ExpenseAttachmentKind = "receipt",
+): Promise<UploadExpenseReceiptResult> {
+  try {
+    const mimeType = (file.type || "").toLowerCase();
+    if (mimeType && !ALLOWED_EXPENSE_ATTACHMENT_MIME.has(mimeType)) {
+      return {
+        data: null,
+        error: `ประเภทไฟล์ไม่รองรับ (${mimeType || "unknown"}) — ใช้ JPG/PNG/WEBP/PDF`,
+      };
+    }
+
+    const maxBytes = 10 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      return { data: null, error: "ไฟล์ใหญ่เกิน 10MB" };
+    }
+
+    const objectPath =
+      kind === "payment_slip"
+        ? `SLIP-${Date.now()}.${extensionForExpenseAttachment(file, mimeType)}`
+        : `EXP-${Date.now()}-${sanitizeReceiptFileName(file.name || "receipt.jpg")}`;
+
+    const supabaseAdmin = createSupabaseAdminClient();
+    const buffer = Buffer.from(await file.arrayBuffer());
+
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from(EXPENSE_DOCUMENTS_BUCKET)
+      .upload(objectPath, buffer, {
+        contentType: mimeType || "application/octet-stream",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      console.error("[uploadExpenseFileToStorage]", uploadError.message);
+      return {
+        data: null,
+        error: uploadError.message ?? "อัปโหลดไฟล์ภาพขึ้น Storage ไม่สำเร็จ",
+      };
+    }
+
+    const { data: publicData } = supabaseAdmin.storage
+      .from(EXPENSE_DOCUMENTS_BUCKET)
+      .getPublicUrl(objectPath);
+
+    const url = publicData?.publicUrl?.trim();
+    if (!url) {
+      return {
+        data: null,
+        error: "อัปโหลดสำเร็จ แต่สร้าง URL ของไฟล์ไม่ได้",
+      };
+    }
+
+    return { data: { url, path: objectPath }, error: null };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "อัปโหลดไฟล์ค่าใช้จ่ายไม่สำเร็จ";
+    console.error("[uploadExpenseFileToStorage]", message);
+    return { data: null, error: message };
+  }
+}
+
+/** @deprecated Prefer uploadExpenseFileToStorage — kept for receipt callers. */
+async function uploadReceiptFileToStorage(
+  file: File,
+): Promise<UploadExpenseReceiptResult> {
+  return uploadExpenseFileToStorage(file, "receipt");
+}
+
+/**
+ * Upload an expense receipt image to Storage bucket `expense_documents`.
+ * Service Role only — Zero Client-Side Fetching.
+ *
+ * FormData keys: `receipt_file` (preferred) or `file`
+ */
+export async function uploadExpenseReceipt(
+  formData: FormData,
+): Promise<UploadExpenseReceiptResult> {
+  const file =
+    formData.get("receipt_file") ?? formData.get("file");
+  if (!isReceiptUploadFile(file)) {
+    return { data: null, error: "ไม่พบไฟล์ภาพสำหรับอัปโหลด" };
+  }
+  return uploadReceiptFileToStorage(file);
+}
+
+type ParsedExpenseDraftForm = {
+  input: CreateDraftExpenseInput;
+  receiptFile: File | null;
+  /** When true, clear receipt_url even if no new file is provided. */
+  clearReceipt: boolean;
+  paymentSlipFile: File | null;
+  /** When true, clear payment_slip_url even if no new file is provided. */
+  clearPaymentSlip: boolean;
+};
+
+/**
+ * Parse Manual Expense FormData (fields + optional receipt / payment slip files).
+ */
+function parseExpenseDraftFormData(formData: FormData): ParsedExpenseDraftForm {
+  const receiptEntry =
+    formData.get("receipt_file") ?? formData.get("file");
+  const receiptFile = isReceiptUploadFile(receiptEntry) ? receiptEntry : null;
+  const existingUrl = String(formData.get("receipt_url") ?? "").trim();
+  const clearReceipt = String(formData.get("clear_receipt") ?? "") === "1";
+
+  const slipEntry = formData.get("payment_slip_file");
+  const paymentSlipFile = isReceiptUploadFile(slipEntry) ? slipEntry : null;
+  const existingSlipUrl = String(
+    formData.get("payment_slip_url") ?? "",
+  ).trim();
+  const clearPaymentSlip =
+    String(formData.get("clear_payment_slip") ?? "") === "1";
+
+  const paymentMethod = String(formData.get("payment_method") ?? "").trim();
+  const bankAccountId = String(formData.get("bank_account_id") ?? "").trim();
+
+  return {
+    receiptFile,
+    clearReceipt,
+    paymentSlipFile,
+    clearPaymentSlip,
+    input: {
+      category_id: String(formData.get("category_id") ?? "").trim(),
+      vendor_id: String(formData.get("vendor_id") ?? "").trim(),
+      expense_date: String(formData.get("expense_date") ?? "").trim(),
+      net_amount: Number(formData.get("net_amount") ?? 0),
+      vat_amount: Number(formData.get("vat_amount") ?? 0),
+      payment_method: paymentMethod || null,
+      bank_account_id:
+        paymentMethod === "TRANSFER" && bankAccountId ? bankAccountId : null,
+      remark: String(formData.get("remark") ?? "").trim() || null,
+      // Prefer vendor_doc_no; accept document_number alias (OCR / form label).
+      vendor_doc_no:
+        String(
+          formData.get("vendor_doc_no") ??
+            formData.get("document_number") ??
+            "",
+        ).trim() || null,
+      wht_type: String(formData.get("wht_type") ?? "").trim() || null,
+      wht_rate: Number(formData.get("wht_rate") ?? 0),
+      wht_amount: Number(formData.get("wht_amount") ?? 0),
+      // Optional client-supplied value — verified server-side against grand_total - wht_amount
+      net_payable:
+        formData.get("net_payable") == null ||
+        String(formData.get("net_payable")).trim() === ""
+          ? undefined
+          : Number(formData.get("net_payable")),
+      receipt_url: existingUrl || null,
+      payment_slip_url: existingSlipUrl || null,
+      recorded_by: String(formData.get("recorded_by") ?? "").trim() || null,
+    },
+  };
+}
+
+/**
+ * Resolve final receipt_url: upload new file → keep existing → or clear.
+ */
+async function resolveReceiptUrlFromForm(
+  parsed: ParsedExpenseDraftForm,
+): Promise<{ url: string | null; error: string | null }> {
+  if (parsed.receiptFile) {
+    const uploaded = await uploadExpenseFileToStorage(
+      parsed.receiptFile,
+      "receipt",
+    );
+    if (uploaded.error || !uploaded.data?.url) {
+      return {
+        url: null,
+        error: uploaded.error ?? "อัปโหลดใบเสร็จขึ้น Storage ไม่สำเร็จ",
+      };
+    }
+    return { url: uploaded.data.url, error: null };
+  }
+
+  if (parsed.clearReceipt) {
+    return { url: null, error: null };
+  }
+
+  return { url: parsed.input.receipt_url ?? null, error: null };
+}
+
+/**
+ * Resolve final payment_slip_url: upload SLIP-* → keep existing → or clear.
+ */
+async function resolvePaymentSlipUrlFromForm(
+  parsed: ParsedExpenseDraftForm,
+): Promise<{ url: string | null; error: string | null }> {
+  if (parsed.paymentSlipFile) {
+    const uploaded = await uploadExpenseFileToStorage(
+      parsed.paymentSlipFile,
+      "payment_slip",
+    );
+    if (uploaded.error || !uploaded.data?.url) {
+      return {
+        url: null,
+        error: uploaded.error ?? "อัปโหลดสลิปโอนเงินขึ้น Storage ไม่สำเร็จ",
+      };
+    }
+    return { url: uploaded.data.url, error: null };
+  }
+
+  if (parsed.clearPaymentSlip) {
+    return { url: null, error: null };
+  }
+
+  return { url: parsed.input.payment_slip_url ?? null, error: null };
+}
+
+/**
+ * Create a DRAFT expense from FormData (Late Numbering `DRAFT-…`).
+ * Uploads `receipt_file` to `expense_documents` and persists `receipt_url`.
  */
 export async function createDraftExpense(
-  data: CreateDraftExpenseInput,
+  formData: FormData,
 ): Promise<CreateDraftExpenseResult> {
   try {
+    const parsed = parseExpenseDraftFormData(formData);
+    const receipt = await resolveReceiptUrlFromForm(parsed);
+    if (receipt.error) {
+      return { data: null, error: receipt.error };
+    }
+    const paymentSlip = await resolvePaymentSlipUrlFromForm(parsed);
+    if (paymentSlip.error) {
+      return { data: null, error: paymentSlip.error };
+    }
+
+    // Authoritative URLs from Storage resolve — assign BEFORE validate/insert.
+    const receiptUrl = receipt.url;
+    const paymentSlipUrl = paymentSlip.url;
+
+    if (parsed.paymentSlipFile && !paymentSlipUrl) {
+      return {
+        data: null,
+        error: "อัปโหลดสลิปโอนเงินสำเร็จ แต่ไม่ได้ URL สำหรับบันทึก",
+      };
+    }
+
+    const data: CreateDraftExpenseInput = {
+      ...parsed.input,
+      receipt_url: receiptUrl,
+      payment_slip_url: paymentSlipUrl,
+    };
+
     const supabaseAdmin = createSupabaseAdminClient();
     const validated = await validateExpenseDraftPayload(supabaseAdmin, data);
     if (validated.error || !validated.data) {
@@ -511,31 +811,60 @@ export async function createDraftExpense(
     }
 
     const v = validated.data;
+
+    // Duplicate Invoice Early Warning (before INSERT)
+    const dup = await findDuplicateExpense(supabaseAdmin, {
+      vendorId: v.vendorId,
+      expenseDate: v.expenseDate,
+      vendorDocNo: v.vendorDocNo,
+    });
+    if (dup.error) {
+      return { data: null, error: dup.error };
+    }
+    if (dup.isDuplicate) {
+      return duplicateInvoiceResult();
+    }
+
+    // Late Numbering — Draft ID from CURRENT system time only.
+    // Never pass v.expenseDate (receipt date) into the Draft number generator.
     const documentNo = generateDraftDocumentNo();
+
+    const insertPayload = {
+      document_no: documentNo,
+      expense_date: v.expenseDate,
+      category_id: v.categoryId,
+      vendor_id: v.vendorId,
+      vendor_doc_no: v.vendorDocNo,
+      bank_account_id: v.bankAccountId,
+      net_amount: v.netAmount,
+      vat_amount: v.vatAmount,
+      wht_type: v.whtType,
+      wht_rate: v.whtRate,
+      wht_amount: v.whtAmount,
+      net_payable: v.netPayable,
+      payment_method: v.paymentMethod,
+      receipt_url: receiptUrl,
+      // Strict write: use Storage-resolved URL (not a stale form field).
+      payment_slip_url: paymentSlipUrl,
+      status: "DRAFT" as const,
+      remark: v.remark,
+      recorded_by: data.recorded_by ?? null,
+    };
 
     const { data: inserted, error: insertError } = await supabaseAdmin
       .from("expenses")
-      .insert({
-        document_no: documentNo,
-        expense_date: v.expenseDate,
-        category_id: v.categoryId,
-        vendor_id: v.vendorId,
-        bank_account_id: v.bankAccountId,
-        net_amount: v.netAmount,
-        vat_amount: v.vatAmount,
-        payment_method: v.paymentMethod,
-        status: "DRAFT",
-        remark: v.remark,
-        recorded_by: data.recorded_by ?? null,
-      })
-      .select(
-        "id, document_no, expense_date, category_id, vendor_id, bank_account_id, net_amount, vat_amount, grand_total, payment_method, receipt_url, status, remark, recorded_by, created_at, updated_at",
-      )
+      .insert(insertPayload)
+      .select(EXPENSE_ROW_SELECT)
       .single();
 
     if (insertError) {
       console.error("[createDraftExpense]", insertError.message);
-      return { data: null, error: insertError.message };
+      return (
+        mapDuplicateExpenseError(insertError) ?? {
+          data: null,
+          error: insertError.message,
+        }
+      );
     }
 
     if (!inserted) {
@@ -543,8 +872,7 @@ export async function createDraftExpense(
     }
 
     const mapped = mapExpenseRow(inserted as Record<string, unknown>);
-    revalidatePath("/expenses");
-    revalidatePath(`/expenses/${mapped.id}`);
+    revalidateExpenseCaches(mapped.id);
     return {
       data: mapped,
       error: null,
@@ -565,9 +893,17 @@ type ValidatedExpenseDraft = {
   expenseDate: string;
   netAmount: number;
   vatAmount: number;
+  whtType: string | null;
+  whtRate: number;
+  whtAmount: number;
+  /** Server-authoritative: grand_total - wht_amount */
+  netPayable: number;
   paymentMethod: string | null;
   bankAccountId: string | null;
   remark: string | null;
+  vendorDocNo: string | null;
+  receiptUrl: string | null;
+  paymentSlipUrl: string | null;
 };
 
 /**
@@ -609,6 +945,51 @@ async function validateExpenseDraftPayload(
       data: null,
       error: "vat_amount must be a number >= 0",
     };
+  }
+
+  const whtType =
+    data.wht_type == null || !String(data.wht_type).trim()
+      ? null
+      : String(data.wht_type).trim();
+
+  const whtRate = toMoney(data.wht_rate ?? 0);
+  if (!Number.isFinite(whtRate) || whtRate < 0 || whtRate > 100) {
+    return {
+      data: null,
+      error: "wht_rate must be a number between 0 and 100",
+    };
+  }
+
+  const whtAmount = toMoney(data.wht_amount ?? 0);
+  if (!Number.isFinite(whtAmount) || whtAmount < 0) {
+    return {
+      data: null,
+      error: "wht_amount must be a number >= 0",
+    };
+  }
+
+  // Mirror DB generated grand_total (= net_amount + vat_amount) for WHT guardrail
+  const grandTotal = toMoney(netAmount + vatAmount);
+  if (whtAmount > grandTotal + EXPENSE_MONEY_EPSILON) {
+    return {
+      data: null,
+      error: "wht_amount ต้องไม่เกินยอดรวม (grand_total)",
+    };
+  }
+
+  const expectedNetPayable = toMoney(grandTotal - whtAmount);
+
+  // Guardrail: client net_payable (if provided) must equal grand_total - wht_amount
+  if (data.net_payable != null && Number.isFinite(Number(data.net_payable))) {
+    const clientNetPayable = toMoney(Number(data.net_payable));
+    if (
+      Math.abs(clientNetPayable - expectedNetPayable) > EXPENSE_MONEY_EPSILON
+    ) {
+      return {
+        data: null,
+        error: `net_payable ไม่ตรงกับ grand_total - wht_amount (คาดหวัง ${expectedNetPayable.toFixed(2)})`,
+      };
+    }
   }
 
   const paymentMethod = data.payment_method?.trim() || null;
@@ -680,6 +1061,22 @@ async function validateExpenseDraftPayload(
       ? null
       : String(data.remark).trim();
 
+  const receiptUrl =
+    data.receipt_url == null || !String(data.receipt_url).trim()
+      ? null
+      : String(data.receipt_url).trim();
+
+  const paymentSlipUrl =
+    data.payment_slip_url == null || !String(data.payment_slip_url).trim()
+      ? null
+      : String(data.payment_slip_url).trim();
+
+  // TEXT column — trim only; empty → null (partial unique index skips null/blank)
+  const vendorDocNo =
+    data.vendor_doc_no == null || !String(data.vendor_doc_no).trim()
+      ? null
+      : String(data.vendor_doc_no).trim();
+
   return {
     data: {
       categoryId,
@@ -687,21 +1084,29 @@ async function validateExpenseDraftPayload(
       expenseDate,
       netAmount,
       vatAmount,
+      whtType,
+      whtRate,
+      whtAmount,
+      netPayable: expectedNetPayable,
       paymentMethod,
       bankAccountId:
         paymentMethod === "TRANSFER" ? bankAccountId : null,
       remark,
+      vendorDocNo,
+      receiptUrl,
+      paymentSlipUrl,
     },
     error: null,
   };
 }
 
 /**
- * Update an existing DRAFT expense only. Audits via `logAuditTrail` (UPDATE).
+ * Update an existing DRAFT expense from FormData.
+ * Uploads `receipt_file` (if present) and persists `receipt_url`.
  */
 export async function updateDraftExpense(
   id: string,
-  payload: UpdateDraftExpenseInput,
+  formData: FormData,
 ): Promise<UpdateDraftExpenseResult> {
   try {
     const expenseId = id?.trim() ?? "";
@@ -709,13 +1114,38 @@ export async function updateDraftExpense(
       return { data: null, error: "ไม่พบรหัสเอกสารค่าใช้จ่าย" };
     }
 
+    const parsed = parseExpenseDraftFormData(formData);
+    const receipt = await resolveReceiptUrlFromForm(parsed);
+    if (receipt.error) {
+      return { data: null, error: receipt.error };
+    }
+    const paymentSlip = await resolvePaymentSlipUrlFromForm(parsed);
+    if (paymentSlip.error) {
+      return { data: null, error: paymentSlip.error };
+    }
+
+    // Authoritative URLs from Storage resolve — assign BEFORE validate/update.
+    const receiptUrl = receipt.url;
+    const paymentSlipUrl = paymentSlip.url;
+
+    if (parsed.paymentSlipFile && !paymentSlipUrl) {
+      return {
+        data: null,
+        error: "อัปโหลดสลิปโอนเงินสำเร็จ แต่ไม่ได้ URL สำหรับบันทึก",
+      };
+    }
+
+    const payload: UpdateDraftExpenseInput = {
+      ...parsed.input,
+      receipt_url: receiptUrl,
+      payment_slip_url: paymentSlipUrl,
+    };
+
     const supabaseAdmin = createSupabaseAdminClient();
 
     const { data: before, error: beforeError } = await supabaseAdmin
       .from("expenses")
-      .select(
-        "id, document_no, expense_date, category_id, vendor_id, bank_account_id, net_amount, vat_amount, grand_total, payment_method, receipt_url, status, remark, recorded_by, created_at, updated_at",
-      )
+      .select(EXPENSE_ROW_SELECT)
       .eq("id", expenseId)
       .maybeSingle();
 
@@ -741,31 +1171,59 @@ export async function updateDraftExpense(
     }
 
     const v = validated.data;
+
+    // Duplicate Invoice Early Warning (before UPDATE) — exclude self
+    const dup = await findDuplicateExpense(supabaseAdmin, {
+      vendorId: v.vendorId,
+      expenseDate: v.expenseDate,
+      vendorDocNo: v.vendorDocNo,
+      excludeId: expenseId,
+    });
+    if (dup.error) {
+      return { data: null, error: dup.error };
+    }
+    if (dup.isDuplicate) {
+      return duplicateInvoiceResult();
+    }
+
     const nowIso = new Date().toISOString();
+
+    const updatePayload = {
+      expense_date: v.expenseDate,
+      category_id: v.categoryId,
+      vendor_id: v.vendorId,
+      vendor_doc_no: v.vendorDocNo,
+      bank_account_id: v.bankAccountId,
+      net_amount: v.netAmount,
+      vat_amount: v.vatAmount,
+      wht_type: v.whtType,
+      wht_rate: v.whtRate,
+      wht_amount: v.whtAmount,
+      net_payable: v.netPayable,
+      payment_method: v.paymentMethod,
+      remark: v.remark,
+      receipt_url: receiptUrl,
+      // Strict write: use Storage-resolved URL (not a stale form field).
+      payment_slip_url: paymentSlipUrl,
+      updated_at: nowIso,
+    };
 
     const { data: updated, error: updateError } = await supabaseAdmin
       .from("expenses")
-      .update({
-        expense_date: v.expenseDate,
-        category_id: v.categoryId,
-        vendor_id: v.vendorId,
-        bank_account_id: v.bankAccountId,
-        net_amount: v.netAmount,
-        vat_amount: v.vatAmount,
-        payment_method: v.paymentMethod,
-        remark: v.remark,
-        updated_at: nowIso,
-      })
+      .update(updatePayload)
       .eq("id", expenseId)
       .eq("status", "DRAFT")
-      .select(
-        "id, document_no, expense_date, category_id, vendor_id, bank_account_id, net_amount, vat_amount, grand_total, payment_method, receipt_url, status, remark, recorded_by, created_at, updated_at",
-      )
+      .select(EXPENSE_ROW_SELECT)
       .maybeSingle();
 
     if (updateError) {
       console.error("[updateDraftExpense]", updateError.message);
-      return { data: null, error: updateError.message };
+      return (
+        mapDuplicateExpenseError(updateError) ?? {
+          data: null,
+          error: updateError.message,
+        }
+      );
     }
     if (!updated) {
       return {
@@ -782,8 +1240,7 @@ export async function updateDraftExpense(
       newData: mapped as unknown as Record<string, unknown>,
     });
 
-    revalidatePath("/expenses");
-    revalidatePath(`/expenses/${expenseId}`);
+    revalidateExpenseCaches(expenseId);
     revalidatePath(`/expenses/${expenseId}/edit`);
     return { data: mapped, error: null };
   } catch (err) {
@@ -809,26 +1266,12 @@ export async function getExpenseById(
     }
 
     const supabaseAdmin = createSupabaseAdminClient();
+    // Must include payment_slip_url (+ WHT) — explicit column lists strip omitted fields.
     const { data, error } = await supabaseAdmin
       .from("expenses")
       .select(
         `
-        id,
-        document_no,
-        expense_date,
-        category_id,
-        vendor_id,
-        bank_account_id,
-        net_amount,
-        vat_amount,
-        grand_total,
-        payment_method,
-        receipt_url,
-        status,
-        remark,
-        recorded_by,
-        created_at,
-        updated_at,
+        ${EXPENSE_ROW_SELECT},
         mst_expense_categories ( category_name ),
         contacts:vendor_id ( company_name ),
         mst_bank_accounts (
@@ -880,6 +1323,7 @@ export async function getExpenseById(
 
 /**
  * Confirm DRAFT → ISSUED and assign EXP-YYMM-XXXX via generate_expense_no.
+ * YYMM bucket uses CURRENT_DATE at ISSUE time (not expense_date) — see RPC.
  */
 export async function issueExpense(id: string): Promise<MutateExpenseResult> {
   try {
@@ -944,13 +1388,16 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
       })
       .eq("id", expenseId)
       .eq("status", "DRAFT")
-      .select(
-        "id, document_no, expense_date, category_id, vendor_id, bank_account_id, net_amount, vat_amount, grand_total, payment_method, receipt_url, status, remark, recorded_by, created_at, updated_at",
-      )
+      .select(EXPENSE_ROW_SELECT)
       .maybeSingle();
 
     if (updateError) {
-      return { data: null, error: updateError.message };
+      return (
+        mapDuplicateExpenseError(updateError) ?? {
+          data: null,
+          error: updateError.message,
+        }
+      );
     }
     if (!updated) {
       return {
@@ -971,8 +1418,7 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
       },
     });
 
-    revalidatePath("/expenses");
-    revalidatePath(`/expenses/${expenseId}`);
+    revalidateExpenseCaches(expenseId);
     return { data: mapped, error: null };
   } catch (err) {
     const message =
@@ -983,7 +1429,71 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
 }
 
 /**
- * Void a DRAFT expense → VOID (lifecycle cancel before issue).
+ * Hard-delete a DRAFT expense row (Late Numbering cleanup).
+ * ISSUED documents must use `voidExpense` instead — never hard-delete.
+ */
+export async function deleteDraftExpense(
+  id: string,
+): Promise<MutateExpenseResult> {
+  try {
+    const expenseId = id?.trim() ?? "";
+    if (!expenseId) {
+      return { data: null, error: "ไม่พบรหัสเอกสารค่าใช้จ่าย" };
+    }
+
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data: before, error: beforeError } = await supabaseAdmin
+      .from("expenses")
+      .select(EXPENSE_ROW_SELECT)
+      .eq("id", expenseId)
+      .maybeSingle();
+
+    if (beforeError) {
+      return { data: null, error: beforeError.message };
+    }
+    if (!before) {
+      return { data: null, error: "ไม่พบเอกสารค่าใช้จ่าย" };
+    }
+    if (String(before.status).toUpperCase() !== "DRAFT") {
+      return {
+        data: null,
+        error: `ลบได้เฉพาะสถานะ DRAFT (ปัจจุบัน: ${before.status}) — เอกสาร ISSUED ต้องใช้ยกเลิก (Void)`,
+      };
+    }
+
+    const mapped = mapExpenseRow(before as Record<string, unknown>);
+
+    const { error: deleteError } = await supabaseAdmin
+      .from("expenses")
+      .delete()
+      .eq("id", expenseId)
+      .eq("status", "DRAFT");
+
+    if (deleteError) {
+      console.error("[deleteDraftExpense]", deleteError.message);
+      return { data: null, error: deleteError.message };
+    }
+
+    fireExpenseAuditLog({
+      recordId: expenseId,
+      changedByName: "DELETE",
+      oldData: before as Record<string, unknown>,
+      newData: { deleted: true, document_no: mapped.document_no },
+    });
+
+    revalidateExpenseCaches(expenseId);
+    return { data: mapped, error: null };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "ลบเอกสารร่างค่าใช้จ่ายไม่สำเร็จ";
+    console.error("[deleteDraftExpense]", message);
+    return { data: null, error: message };
+  }
+}
+
+/**
+ * Void an ISSUED expense → VOID (row retained for audit).
+ * DRAFT documents must use `deleteDraftExpense` (hard delete) instead.
  */
 export async function voidExpense(id: string): Promise<MutateExpenseResult> {
   try {
@@ -1007,10 +1517,10 @@ export async function voidExpense(id: string): Promise<MutateExpenseResult> {
     if (!before) {
       return { data: null, error: "ไม่พบเอกสารค่าใช้จ่าย" };
     }
-    if (String(before.status) !== "DRAFT") {
+    if (String(before.status).toUpperCase() !== "ISSUED") {
       return {
         data: null,
-        error: `ยกเลิกได้เฉพาะสถานะ DRAFT (ปัจจุบัน: ${before.status})`,
+        error: `ยกเลิกได้เฉพาะสถานะ ISSUED (ปัจจุบัน: ${before.status}) — เอกสาร DRAFT ต้องใช้ลบเอกสารร่าง`,
       };
     }
 
@@ -1022,10 +1532,8 @@ export async function voidExpense(id: string): Promise<MutateExpenseResult> {
         updated_at: nowIso,
       })
       .eq("id", expenseId)
-      .eq("status", "DRAFT")
-      .select(
-        "id, document_no, expense_date, category_id, vendor_id, bank_account_id, net_amount, vat_amount, grand_total, payment_method, receipt_url, status, remark, recorded_by, created_at, updated_at",
-      )
+      .eq("status", "ISSUED")
+      .select(EXPENSE_ROW_SELECT)
       .maybeSingle();
 
     if (updateError) {
@@ -1046,8 +1554,7 @@ export async function voidExpense(id: string): Promise<MutateExpenseResult> {
       newData: { ...mapped, status: "VOID" },
     });
 
-    revalidatePath("/expenses");
-    revalidatePath(`/expenses/${expenseId}`);
+    revalidateExpenseCaches(expenseId);
     return { data: mapped, error: null };
   } catch (err) {
     const message =

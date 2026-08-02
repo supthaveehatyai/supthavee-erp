@@ -57,6 +57,24 @@ type SalesDocRow = {
   grand_total: number | string | null;
 };
 
+type ExpenseNetRow = {
+  net_amount: number | string | null;
+};
+
+/** True Net Profit KPI — Sales (gross proxy) − OPEX. */
+export type ProfitabilityKpiResult = {
+  /** Σ expenses.net_amount · ISSUED · YTD */
+  totalExpenses: number;
+  /**
+   * Gross base for Phase 8 — currently YTD Sales (pre-COGS).
+   * When Cost Snapshot lands, replace with Sales − COGS.
+   */
+  grossProfit: number;
+  /** grossProfit − totalExpenses */
+  netProfit: number;
+  error: string | null;
+};
+
 const YTD_SALES_DOC_TYPES = ["INV_DO", "TAX_INV", "ABB"] as const;
 const AR_PENDING_DOC_TYPES = ["INV_DO", "TAX_INV"] as const;
 const AP_PENDING_DOC_TYPES = ["AP_INV", "AP_TAX"] as const;
@@ -355,5 +373,80 @@ export async function getYTDSales(): Promise<KpiMoneyResult> {
       err instanceof Error ? err.message : "Failed to calculate YTD sales";
     console.error("[getYTDSales]", message);
     return { amount: 0, error: message };
+  }
+}
+
+/**
+ * YTD Operating Expenses (OPEX) — Σ expenses.net_amount.
+ * Critical filters: status = ISSUED · expense_date in current calendar year.
+ * DRAFT / VOID excluded by the ISSUED filter.
+ */
+export async function getYTDExpenses(): Promise<KpiMoneyResult> {
+  try {
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { from, to } = currentYearBounds();
+
+    const { data, error } = await supabaseAdmin
+      .from("expenses")
+      .select("net_amount")
+      .eq("status", "ISSUED")
+      .gte("expense_date", from)
+      .lte("expense_date", to);
+
+    if (error) {
+      console.error("[getYTDExpenses]", error.message);
+      return { amount: 0, error: error.message };
+    }
+
+    const total = ((data ?? []) as ExpenseNetRow[]).reduce(
+      (sum, row) => roundMoney(sum + toMoney(row.net_amount)),
+      0,
+    );
+
+    return { amount: total, error: null };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Failed to calculate YTD expenses";
+    console.error("[getYTDExpenses]", message);
+    return { amount: 0, error: message };
+  }
+}
+
+/**
+ * True Net Profit (Phase 8) — grossProfit − totalExpenses.
+ * grossProfit currently = YTD Sales (pre-COGS Cost Snapshot).
+ */
+export async function getTrueNetProfit(): Promise<ProfitabilityKpiResult> {
+  try {
+    const [sales, expenses] = await Promise.all([
+      getYTDSales(),
+      getYTDExpenses(),
+    ]);
+
+    const errors = [sales.error, expenses.error].filter(
+      (msg): msg is string => Boolean(msg),
+    );
+    const grossProfit = roundMoney(sales.amount);
+    const totalExpenses = roundMoney(expenses.amount);
+    const netProfit = roundMoney(grossProfit - totalExpenses);
+
+    return {
+      totalExpenses,
+      grossProfit,
+      netProfit,
+      error: errors.length > 0 ? errors.join(" · ") : null,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "Failed to calculate true net profit";
+    console.error("[getTrueNetProfit]", message);
+    return {
+      totalExpenses: 0,
+      grossProfit: 0,
+      netProfit: 0,
+      error: message,
+    };
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Phase 6 — Executive Dashboard tabs (Client island for Tabs state only).
+ * Phase 8 — Executive Dashboard tabs (Client island for Tabs state only).
  * All data is loaded by the Server Component parent — Zero Client-Side Fetching.
  */
 
@@ -11,6 +11,7 @@ import {
   CircleDollarSign,
   HandCoins,
   Landmark,
+  Receipt,
   ScrollText,
   TrendingUp,
 } from "lucide-react";
@@ -32,6 +33,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 
 export type DisplayKpi = {
   amount: number;
@@ -44,6 +46,8 @@ export type ExecutiveKpis = {
   ytdSales: DisplayKpi;
   pendingAr: DisplayKpi;
   pendingAp: DisplayKpi;
+  totalExpenses: DisplayKpi;
+  netProfit: DisplayKpi;
 };
 
 export type ExecutiveDashboardProps = {
@@ -59,8 +63,8 @@ type KpiCard = {
   hint: string;
   icon: ReactNode;
   accent: string;
+  valueClassName?: string;
   error?: string | null;
-  isPlaceholder?: boolean;
 };
 
 function formatDateTime(iso: string): string {
@@ -111,6 +115,13 @@ function ActionBadge({ action }: { action: RecentAuditLog["action"] }) {
   );
 }
 
+function netProfitValueClass(amount: number, hasError: boolean): string {
+  if (hasError) return "text-slate-700";
+  if (amount > 0) return "text-green-600";
+  if (amount < 0) return "text-red-600";
+  return "text-slate-800";
+}
+
 function buildKpiCards(kpis: ExecutiveKpis): KpiCard[] {
   return [
     {
@@ -147,13 +158,33 @@ function buildKpiCards(kpis: ExecutiveKpis): KpiCard[] {
       error: kpis.pendingAp.error,
     },
     {
-      key: "profit",
-      label: "Estimated Net Profit",
-      value: "—",
-      hint: "จะคำนวณจาก Cost Snapshot ในสปรินต์ถัดไป",
+      key: "opex",
+      label: "Total Expenses (OPEX)",
+      value: kpis.totalExpenses.formatted,
+      hint: kpis.totalExpenses.error
+        ? "โหลดค่าใช้จ่ายไม่สำเร็จ"
+        : "Σ net_amount · expenses · ISSUED · YTD (expense_date)",
+      icon: <Receipt className="h-5 w-5 text-red-600" />,
+      accent: "bg-red-50 text-red-700 border-red-100",
+      valueClassName: kpis.totalExpenses.error
+        ? undefined
+        : "text-red-600",
+      error: kpis.totalExpenses.error,
+    },
+    {
+      key: "net-profit",
+      label: "Net Profit (กำไรสุทธิ)",
+      value: kpis.netProfit.formatted,
+      hint: kpis.netProfit.error
+        ? "คำนวณกำไรสุทธิไม่สำเร็จ"
+        : "True Net Profit = YTD Sales − OPEX (Phase 8)",
       icon: <TrendingUp className="h-5 w-5" />,
       accent: "bg-slate-50 text-slate-700 border-slate-200",
-      isPlaceholder: true,
+      valueClassName: netProfitValueClass(
+        kpis.netProfit.amount,
+        Boolean(kpis.netProfit.error),
+      ),
+      error: kpis.netProfit.error,
     },
   ];
 }
@@ -164,6 +195,8 @@ function BusinessOverviewTab({ kpis }: { kpis: ExecutiveKpis }) {
     kpis.ytdSales.error,
     kpis.pendingAr.error,
     kpis.pendingAp.error,
+    kpis.totalExpenses.error,
+    kpis.netProfit.error,
   ].filter((msg): msg is string => Boolean(msg));
 
   return (
@@ -179,7 +212,7 @@ function BusinessOverviewTab({ kpis }: { kpis: ExecutiveKpis }) {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
         {cards.map((kpi) => (
           <Card key={kpi.key} className={`border ${kpi.accent}`}>
             <CardHeader className="border-b-0 pb-0">
@@ -188,7 +221,12 @@ function BusinessOverviewTab({ kpis }: { kpis: ExecutiveKpis }) {
                   <CardDescription className="text-[11px] font-semibold uppercase tracking-wide text-inherit/80">
                     {kpi.label}
                   </CardDescription>
-                  <CardTitle className="mt-2 truncate text-2xl font-bold tracking-tight sm:text-3xl">
+                  <CardTitle
+                    className={cn(
+                      "mt-2 truncate text-2xl font-bold tracking-tight sm:text-3xl",
+                      kpi.valueClassName,
+                    )}
+                  >
                     {kpi.value}
                   </CardTitle>
                 </div>
@@ -200,9 +238,7 @@ function BusinessOverviewTab({ kpis }: { kpis: ExecutiveKpis }) {
             <CardContent className="pt-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs text-slate-500">{kpi.hint}</p>
-                {kpi.isPlaceholder ? (
-                  <Badge variant="slate">Soon</Badge>
-                ) : kpi.error ? (
+                {kpi.error ? (
                   <Badge variant="amber">Error</Badge>
                 ) : (
                   <Badge variant="emerald">Live</Badge>
@@ -220,10 +256,10 @@ function BusinessOverviewTab({ kpis }: { kpis: ExecutiveKpis }) {
             Business Overview
           </CardTitle>
           <CardDescription>
-            YTD / AR / AP ดึงจาก Server Actions แบบ Real-time — ค่า{" "}
+            YTD Sales / AR / AP / OPEX ดึงจาก Server Actions แบบ Real-time — ค่า{" "}
             <span className="font-medium text-slate-600">฿0.00</span>{" "}
-            หมายถึงยังไม่มีเอกสารตรงเงื่อนไข (ไม่ใช่ placeholder) · Estimated
-            Net Profit ยังรอ Phase ถัดไป
+            หมายถึงยังไม่มีเอกสารตรงเงื่อนไข · Net Profit = Sales − OPEX
+            (ก่อนหัก COGS จาก Cost Snapshot)
           </CardDescription>
         </CardHeader>
       </Card>

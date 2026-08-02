@@ -1,12 +1,19 @@
 /**
  * Temporary draft document numbers (Late Numbering).
- * Official running numbers come from RPC `generate_document_no` only on issue.
+ * Official running numbers come from RPC only on ISSUE.
  *
- * Uses local server time with zero-padded components:
- * `DRAFT-YYYYMMDDHHmmss` e.g. `DRAFT-20260731172545`
+ * CRITICAL: Always use CURRENT system date/time (`new Date()` at click/save).
+ * NEVER derive the prefix from user-input `expense_date` / receipt date —
+ * that field is business data only and must not affect Draft IDs.
+ *
+ * Format: `DRAFT-YYYYMMDDHHmmss` e.g. `DRAFT-20260802080015`
  */
 
-export function generateDraftDocumentNo(): string {
+export function generateDraftDocumentNo(_ignored?: unknown): string {
+  // Parameter intentionally unused — blocks accidental callers from passing
+  // expense_date / receipt date into the Draft ID generator.
+  void _ignored;
+
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, "0");

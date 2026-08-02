@@ -114,9 +114,16 @@ export default async function EditExpensePage({ params }: PageProps) {
           net_amount: expense.net_amount,
           vat_amount: expense.vat_amount,
           grand_total: expense.grand_total,
+          wht_type: expense.wht_type,
+          wht_rate: expense.wht_rate,
+          wht_amount: expense.wht_amount,
+          net_payable: expense.net_payable,
           payment_method: expense.payment_method,
           bank_account_id: expense.bank_account_id,
           remark: expense.remark,
+          receipt_url: expense.receipt_url,
+          payment_slip_url: expense.payment_slip_url,
+          vendor_doc_no: expense.vendor_doc_no,
         }}
       />
     </div>

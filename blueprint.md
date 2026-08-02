@@ -1,19 +1,19 @@
 # System Blueprint: Supthavee ERP SuperApp
 
-**Version:** 6.0 (Dashboard Initiated & Expanded Master Roadmap)
+**Version:** 6.2 (Net Profit Engine & WHT Foundation Enforced)
 
 **Company:** บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด
 
 **Document Purpose:** System Requirements, Business Logic, and Database Schema for AI Assistants (Claude, Cursor, Gemini)
 
 ## 1. System Overview (ภาพรวมระบบ)
-ระบบ ERP แบบ Web Application สถาปัตยกรรม Full-Code ที่ออกแบบมาเพื่อบริหารจัดการธุรกิจค้าปลีก-ค้าส่ง (เสื้อผ้า, ชุดกีฬา, ถ้วยรางวัล) และงานบริการสั่งทำ (งานปัก, สกรีน) ครอบคลุมการจัดการบิลซื้อ/ขาย, การแยกบัญชี VAT/Non-VAT, ระบบรับเข้าอัจฉริยะ (OCR), การจัดการสต็อกหลายหน่วยนับ, การสร้างรหัสสินค้าแบบชาญฉลาด (Product Matrix & Auto-SKU), การวิเคราะห์กำไรต่อบิล, การจัดการเจ้าหนี้-ลูกหนี้ (AP/AR), และระบบสำรองข้อมูล (Backup/Restore)
+ระบบ ERP แบบ Web Application สถาปัตยกรรม Full-Code ที่ออกแบบมาเพื่อบริหารจัดการธุรกิจค้าปลีก-ค้าส่ง (เสื้อผ้า, ชุดกีฬา, ถ้วยรางวัล) และงานบริการสั่งทำ (งานปัก, สกรีน) ครอบคลุมการจัดการบิลซื้อ/ขาย, การแยกบัญชี VAT/Non-VAT, ระบบรับเข้าอัจฉริยะ (OCR), การจัดการสต็อกหลายหน่วยนับ, การสร้างรหัสสินค้าแบบชาญฉลาด (Product Matrix & Auto-SKU), การวิเคราะห์กำไรต่อบิล, การจัดการเจ้าหนี้-ลูกหนี้ (AP/AR), การจัดการค่าใช้จ่าย (OPEX/Net Profit) และระบบสำรองข้อมูล (Backup/Restore)
 
 ## 2. Tech Stack & AI Integration (เทคโนโลยีที่ใช้)
 *   **Frontend:** Next.js 16.2.10 (App Router + Turbopack), React, Tailwind CSS, shadcn/ui
 *   **Backend & Database:** Supabase (PostgreSQL, RLS) พร้อมระบบ Database Migrations ผ่าน Supabase CLI
 *   **Environment:** แยก `.env.development` สำหรับ Local DB (127.0.0.1) และ `.env.production` สำหรับ Cloud อย่างเด็ดขาด
-*   **AI Integration:** Gemini Vision AI (Cascade Fallback 3.6 -> 3.5 -> 2.5) สำหรับอ่านเอกสารบิลซื้อ (Smart Goods Receipt) ผ่าน Edge Functions
+*   **AI Integration:** Gemini Vision AI (Cascade Fallback 3.6 -> 3.5 -> 2.5) สำหรับอ่านเอกสารบิลซื้อ และบิลค่าใช้จ่าย (Smart OCR) ผ่าน Edge Functions
 *   **Development Tools:** Cursor Code Editor, Claude 3.5 Sonnet / Gemini
 
 ## 3. User Roles (สิทธิ์การใช้งาน)
@@ -45,7 +45,7 @@
 
 ### Module C: Smart Procurement & Inventory (ระบบจัดซื้อและคลังสินค้า)
 *   **Strict Server-Side Fetching:** บังคับใช้ Server Actions ร่วมกับ Service Role Key (supabaseAdmin) 100% หลีกเลี่ยงปัญหา RLS
-*   **Project Guardrails:** บังคับใช้ไฟล์ `.cursorrules` ล็อกสถาปัตยกรรมโค้ด
+*   **Project Guardrails:** บังคับใช้ไฟล์ `.cursorrules` ล็อกสถาปัตยกรรมโค้ด และบังคับใช้ Global UI Component อย่างเคร่งครัด
 *   **Smart Goods Receipt (AI OCR):** อัปโหลดรูปบิลเข้า -> AI OCR สกัด `raw_vendor_sku`, ส่วนลด, ภาษี, `document_number`, `document_date`
 *   **Duplicate Invoice Early Warning:** ระบบตรวจสอบและดักจับบิลซ้ำซ้อนผ่าน Composite Key (`vendor_id` + `document_number` + `document_date`)
 *   **On-the-fly Vendor Mapping & Quick Create:** ตรวจสอบและ UPSERT Mapping อัตโนมัติ รองรับการสร้าง SKU ใหม่กลางอากาศ (Quick Create)
@@ -64,7 +64,7 @@
 *   **Receipt Status Tracking:** ระบบติดตามและอัปเดตสถานะเอกสารตัวจริง ("รอออกเอกสาร/รอเอกสาร" -> "ออกเอกสารแล้ว/ได้รับแล้ว") พร้อม Database Migration `original_receipt_received`
 *   **Deposit Management:** ระบบรับและจ่ายเงินมัดจำ (DEP_IN / DEP_OUT) ทำงานร่วมกับระบบ Allocation สามารถนำยอดคงเหลือไปเป็นส่วนลดในใบเสร็จ (REC/PAY) ได้ รองรับการคืนเงิน (Refund) และตัดเศษบัญชี (Write-off) พร้อมสืบทอดภาษีมูลค่าเพิ่ม (VAT Inheritance)
 
-### Module E: Dashboard & Audit (ระบบรายงานและความปลอดภัย) - [🔥 Current Phase]
+### Module E: Dashboard & Audit (ระบบรายงานและความปลอดภัย) 
 *   **Executive Dashboard:** หน้าจอสรุปยอดขาย (YTD) และยอดหนี้คงค้าง (AR/AP) แบบ Real-time
 *   **System Audit Trail:** ระบบบันทึกประวัติการเปลี่ยนแปลงข้อมูลสำคัญระดับ Database (JSONB Log)
 
@@ -72,12 +72,20 @@
 *   **Stock Card UI:** หน้าจอสำหรับตรวจสอบการเคลื่อนไหวของสินค้า เข้า-ออก ผ่าน `inventory_ledger`
 *   **Service Workflow Kanban:** ระบบติดตามสถานะงานบริการ (ปัก/สกรีน/เย็บ) ตั้งแต่รับงานจนถึงส่งมอบ
 
-### Module G: Expense Management (ระบบจัดการค่าใช้จ่าย) - [⏳ Planned]
-*   **Expense Records:** ฟอร์มบันทึกค่าใช้จ่ายดำเนินงาน (OPEX) เช่น ค่าขนส่ง ค่าน้ำ ค่าไฟ พร้อมระบบแนบใบเสร็จ
-*   **Net Profit Calculation:** อัปเกรดระบบเพื่อนำ Expense ไปหักลบรายได้ และหา True Net Profit ประจำเดือน
+### Module G: Expense Management (ระบบจัดการค่าใช้จ่าย) - [✅ Completed]
+*   **Expense Records:** ฟอร์มบันทึกค่าใช้จ่ายดำเนินงาน (OPEX) พร้อมระบบแนบใบเสร็จ รองรับ Late Numbering และ Document Lifecycle (DRAFT/ISSUED/VOID) มาตรฐานเดียวกับระบบหลัก
+*   **Expense AI OCR:** ระบบสแกนและอ่านบิลค่าใช้จ่ายบริษัทผ่าน Gemini Edge Function (มี Resiliency Fallback)
+*   **Duplicate Invoice Protection:** ตรวจสอบบิลซ้ำซ้อนแบบ On-the-fly และ Database Unique Index (อ้างอิง `vendor_id` + `expense_date` + `vendor_doc_no`)
+*   **Withholding Tax (WHT) Foundation:** โครงสร้างคำนวณหัก ณ ที่จ่าย หาค่า `net_payable` อัตโนมัติ พร้อมรองรับแนบสลิปโอนเงิน (Payment Slip)
+*   **True Net Profit Engine:** Dashboard ดึง OPEX ไปหักลบ Gross Profit เพื่อแสดงกำไรสุทธิแบบ Real-time
 
-### Module H: Data Backup & Restore (ระบบสำรองและฟื้นฟูข้อมูล) - [⏳ Planned]
+### Module H: Tax & WHT Management (ระบบจัดการภาษีหัก ณ ที่จ่าย) - [🔥 Current Phase]
+*   **WHT Report:** หน้าต่างรายงานสรุปยอดภาษีหัก ณ ที่จ่ายประจำเดือน แยกตามประเภท (1%, 2%, 3%, 5%)
+*   **Tax Compliance Export:** ระบบตรวจสอบความถูกต้อง Master Data (Tax ID, ที่อยู่) และสร้างไฟล์ Excel แบบฟอร์ม ภ.ง.ด.3 / ภ.ง.ด.53
+*   **50 Tawi Generation:** ระบบพิมพ์หนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) เป็น PDF
+
+### Module I: Data Backup & Restore (ระบบสำรองและฟื้นฟูข้อมูล) - [⏳ Planned]
 *   Automated PostgreSQL Dump & Storage Backup / Point-in-time Recovery
 
 ## 5. Database Schema (PostgreSQL for Supabase)
-*(Schema ตาม Blueprint v6.0 ครอบคลุมตาราง audit_logs และเตรียมความพร้อมสำหรับ Phase ถัดไป)*
+*(Schema ตาม Blueprint v6.2 ครอบคลุมตาราง expenses, expense_categories และ audit_logs)*

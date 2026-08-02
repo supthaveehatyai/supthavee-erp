@@ -7,6 +7,7 @@ export const DOCUMENT_ACTIONS = {
   EDIT: "แก้ไขเอกสาร (Edit)",
   ISSUE: "ยืนยันและออกเอกสาร (Confirm & Issue)",
   VOID: "ยกเลิกเอกสาร (Void)",
+  DELETE_DRAFT: "ลบเอกสารร่าง (Delete Draft)",
   SAVE_DRAFT: "บันทึกร่าง (Save Draft)",
 } as const;
 
