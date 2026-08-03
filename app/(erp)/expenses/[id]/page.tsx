@@ -125,6 +125,16 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
         </div>
 
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+          {Number(expense.wht_amount) > 0 ? (
+            <Link
+              href={`/expenses/${expense.id}/print-wht`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
+            >
+              🖨️ พิมพ์ 50 ทวิ (WHT)
+            </Link>
+          ) : null}
           <ExpenseDetailActions
             expenseId={expense.id}
             documentNo={expense.document_no}

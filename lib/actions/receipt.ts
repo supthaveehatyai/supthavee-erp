@@ -28,6 +28,7 @@ import {
 import { calculateNetUnitCost } from "@/lib/utils/pricing";
 import {
   calculateNetCostApportionment,
+  roundTo4Decimals,
   type ApportionmentItem,
 } from "@/lib/utils/accounting";
 import {
@@ -131,9 +132,36 @@ export type ReceiptLineRow = {
   matchedProduct: ReceiptProductSummary | null;
   discountAmountPerUnit: number;
   netCost: number;
+  /**
+   * Invoice-facing line total (บาท) — editable Ground Truth from paper.
+   * Net Unit Cost UI = totalAmount / qty. Sent to save for apportionment.
+   */
+  totalAmount: number;
+  /**
+   * true when user manually edited Total Amount — skip auto re-seed from
+   * bill-discount apportionment.
+   */
+  totalAmountManual?: boolean;
   /** Free-of-Charge (ของแถม) — when true, Net Cost Apportionment forces cost = 0. */
   isFoc: boolean;
 };
+
+/** Manual header totals from AI VAT Analysis box (Decimal Leakage fix). */
+export type GoodsReceiptLedgerOverrides = {
+  netBeforeVat: number;
+  vatAmount: number;
+  grandTotal: number;
+  /**
+   * Manual Grand Total − Total Document Value (ผลรวม Total Amount รายบรรทัด)
+   * หรือส่วนต่างปัดเศษเทียบยอดคำนวณ — เก็บลง documents.rounding_difference
+   */
+  roundingDifference?: number | null;
+};
+
+/** Round to 2 decimal places for DECIMAL(12,2) columns (doc_headers/doc_details). */
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
 
 /* -------------------------------------------------------------------------- */
 /* parseReceiptOcr (invokes process-receipt-ocr Edge Function)               */
@@ -389,11 +417,12 @@ export async function matchReceiptItemsToProducts(
         item.discount_text,
       );
 
+      const qty = Number(item.qty) || 0;
       return {
         lineKey: `${index}:${normalizedSku}:${item.unit_price}:${item.discount_text ?? ""}`,
         raw_vendor_sku: item.raw_vendor_sku,
         raw_description: item.raw_description ?? null,
-        qty: Number(item.qty) || 0,
+        qty,
         unit_price: Number(item.unit_price) || 0,
         discount_text: item.discount_text ?? "",
         status: match ? "matched" : "unmatched",
@@ -401,6 +430,8 @@ export async function matchReceiptItemsToProducts(
         matchedProduct: match?.product ?? null,
         discountAmountPerUnit,
         netCost: unitCostPrice,
+        totalAmount: roundMoney(unitCostPrice * qty),
+        totalAmountManual: false,
         isFoc: false,
       };
     });
@@ -604,11 +635,6 @@ export type SaveGoodsReceiptToLedgerResult = {
   error: string | null;
 };
 
-/** Round to 2 decimal places for DECIMAL(12,2) columns (doc_headers/doc_details). */
-function roundMoney(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
-}
-
 /**
  * Finalize a Goods Receipt: creates the financial document (`doc_headers` +
  * `doc_details`), mirrors a Phase 4 Purchase Document (`documents` +
@@ -667,6 +693,8 @@ export async function saveGoodsReceiptToLedger(
   docType: GoodsReceiptDocType = "AP_TAX",
   vatType: VatCalculationType = "NONE",
   attachmentUrl?: string | null,
+  /** Manual override จากกล่อง AI VAT Analysis — ยึดตัวเลขที่ผู้ใช้พิมพ์ */
+  ledgerOverrides?: GoodsReceiptLedgerOverrides | null,
 ): Promise<SaveGoodsReceiptToLedgerResult> {
   if (!Array.isArray(rows) || rows.length === 0) {
     return { docHeaderId: null, docNo: null, error: "ไม่มีรายการให้บันทึกรับสินค้า" };
@@ -734,10 +762,10 @@ export async function saveGoodsReceiptToLedger(
       };
     }
 
-    // Recompute net pricing server-side via the Net Cost Apportionment
-    // engine — never trust client-supplied netCost.
-    // INCLUSIVE: strip VAT 7% from unit prices BEFORE line/bill discount so
-    // LPP (`products.cost_price`) is true vatable cost.
+    // Net Cost Apportionment Engine — baseline from unit_price/discount/FOC.
+    // When the UI supplies `totalAmount` (paper Ground Truth / manual override),
+    // that value becomes the invoice `line_total` and net unit cost = total/qty
+    // (INCLUSIVE: strip VAT from the overridden total before LPP).
     const apportionmentItems: ApportionmentItem[] = rows.map((row) => ({
       id: row.lineKey,
       unitPrice: Number(row.unit_price) || 0,
@@ -753,7 +781,6 @@ export async function saveGoodsReceiptToLedger(
       }).map((result) => [result.id, result]),
     );
 
-    // Invoice-facing line totals (as printed) — no VAT strip; used for document money + VAT summary.
     const invoiceApportionmentByLineKey = new Map(
       calculateNetCostApportionment(apportionmentItems, billDiscountText ?? null, {
         vatType: "NONE",
@@ -766,8 +793,34 @@ export async function saveGoodsReceiptToLedger(
       const unitPrice = Number(row.unit_price) || 0;
       const costApportioned = costApportionmentByLineKey.get(row.lineKey);
       const invoiceApportioned = invoiceApportionmentByLineKey.get(row.lineKey);
-      const lineTotal = roundMoney(invoiceApportioned?.finalLineTotal ?? 0);
-      const unitCostPrice = roundMoney(costApportioned?.finalUnitCost ?? 0);
+      const isFoc = Boolean(row.isFoc);
+
+      let lineTotal: number;
+      let unitCostPrice: number;
+
+      if (isFoc) {
+        lineTotal = 0;
+        unitCostPrice = 0;
+      } else if (
+        row.totalAmount != null &&
+        Number.isFinite(Number(row.totalAmount))
+      ) {
+        // Paper / manual Total Amount is source of truth for this line
+        lineTotal = roundMoney(Math.max(0, Number(row.totalAmount)));
+        let costLineTotal = lineTotal;
+        if (resolvedVatType === "INCLUSIVE" && vatRate > 0) {
+          costLineTotal = lineTotal / (1 + vatRate / 100);
+        }
+        // LPP / ledger cost — keep 4+ decimal places (no 2-dp money rounding)
+        unitCostPrice =
+          qty > 0 ? roundTo4Decimals(costLineTotal / qty) : 0;
+      } else {
+        lineTotal = roundMoney(invoiceApportioned?.finalLineTotal ?? 0);
+        unitCostPrice = roundTo4Decimals(
+          costApportioned?.finalUnitCost ?? 0,
+        );
+      }
+
       const discountAmount = roundMoney(unitPrice * qty - lineTotal);
       return { row, qty, unitPrice, unitCostPrice, discountAmount, lineTotal };
     });
@@ -785,7 +838,41 @@ export async function saveGoodsReceiptToLedger(
       vatType: resolvedVatType,
       vatRate,
     });
-    const grandTotal = roundMoney(vatSummary.grand_total);
+
+    // Header money: prefer manual AI VAT Analysis overrides when provided
+    const overrideNet =
+      ledgerOverrides && Number.isFinite(Number(ledgerOverrides.netBeforeVat))
+        ? roundMoney(Number(ledgerOverrides.netBeforeVat))
+        : null;
+    const overrideVat =
+      ledgerOverrides && Number.isFinite(Number(ledgerOverrides.vatAmount))
+        ? roundMoney(Number(ledgerOverrides.vatAmount))
+        : null;
+    const overrideGrand =
+      ledgerOverrides && Number.isFinite(Number(ledgerOverrides.grandTotal))
+        ? roundMoney(Number(ledgerOverrides.grandTotal))
+        : null;
+
+    const netBeforeVat = overrideNet ?? roundMoney(vatSummary.net_before_vat);
+    const vatAmountPersisted = overrideVat ?? roundMoney(vatSummary.vat_amount);
+    const grandTotal = overrideGrand ?? roundMoney(vatSummary.grand_total);
+    const totalAmountHeader =
+      resolvedVatType === "INCLUSIVE"
+        ? grandTotal
+        : netBeforeVat;
+
+    // ส่วนต่างปัดเศษ: Manual/override Grand − ยอดคำนวณจากผลรวมรายการ (+ VAT)
+    const roundingDifference = roundMoney(
+      ledgerOverrides?.roundingDifference != null &&
+        Number.isFinite(Number(ledgerOverrides.roundingDifference))
+        ? Number(ledgerOverrides.roundingDifference)
+        : grandTotal - roundMoney(vatSummary.grand_total),
+    );
+
+    // TODO (Phase X - GL Integration): ดึงค่า GL_ROUNDING_EXPENSE_ACC หรือ GL_ROUNDING_INCOME_ACC จาก system_settings
+    // หาก rounding_difference > 0 ให้บันทึกเข้าบัญชีค่าใช้จ่ายเบ็ดเตล็ด
+    // หาก rounding_difference < 0 ให้บันทึกเข้าบัญชีรายได้เบ็ดเตล็ด
+    // (Future-proof สำหรับ General Ledger / GAAP-TFRS — ยังไม่ลง DR/CR ในเฟสนี้)
 
     const docNo = documentRef?.trim() || `REC-${Date.now()}`;
     const isValidIsoDate = /^\d{4}-\d{2}-\d{2}$/.test(documentDate?.trim() ?? "");
@@ -885,14 +972,15 @@ export async function saveGoodsReceiptToLedger(
         contact_person_id: null,
         sub_total: subTotal,
         discount_amount: discountAmount,
-        tax_rate: vatSummary.vat_rate,
-        tax_amount: vatSummary.vat_amount,
+        tax_rate: vatRate,
+        tax_amount: vatAmountPersisted,
         grand_total: grandTotal,
         vat_type: resolvedVatType,
-        vat_rate: vatSummary.vat_rate,
-        total_amount: vatSummary.total_amount,
-        net_before_vat: vatSummary.net_before_vat,
-        vat_amount: vatSummary.vat_amount,
+        vat_rate: vatRate,
+        total_amount: totalAmountHeader,
+        net_before_vat: netBeforeVat,
+        vat_amount: vatAmountPersisted,
+        rounding_difference: roundingDifference,
         discount_text: billDiscountText?.trim() || null,
         payment_status: resolveInitialPaymentStatus(resolvedDocType),
         paid_amount:
@@ -960,12 +1048,13 @@ export async function saveGoodsReceiptToLedger(
     }
 
     // 3. inventory_ledger — the ONLY table allowed to move stock ("IN")
+    // Net unit cost (4 dp) is stamped in notes — ledger table has no cost column.
     const ledgerPayload = lines.map((line) => ({
       product_id: line.row.matchedProduct!.id,
       doc_header_id: docHeaderId,
       trans_type: "IN",
       qty: line.qty,
-      notes: `รับสินค้าจากเอกสาร ${docNo} (${phase4DocNo}) — Vendor SKU: ${line.row.raw_vendor_sku}`,
+      notes: `รับสินค้าจากเอกสาร ${docNo} (${phase4DocNo}) — Vendor SKU: ${line.row.raw_vendor_sku} | unit_cost=${line.unitCostPrice.toFixed(4)}`,
     }));
 
     const { error: ledgerError } = await supabaseAdmin

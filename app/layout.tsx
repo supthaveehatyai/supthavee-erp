@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Sarabun } from "next/font/google";
 import { Toaster } from "sonner";
 import AppShell from "./app-shell";
 import "./globals.css";
@@ -12,6 +12,14 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+});
+
+/** Official Thai government-document font (50 ทวิ / ภ.ง.ด. print) */
+const sarabun = Sarabun({
+  variable: "--font-sarabun",
+  weight: ["300", "400", "500", "600", "700"],
+  subsets: ["thai", "latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -29,7 +37,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="th" className={`${geistSans.variable} ${geistMono.variable}`}>
-      <body>
+      <body className={sarabun.variable}>
         <AppShell>{children}</AppShell>
         <Toaster richColors position="top-right" closeButton />
       </body>

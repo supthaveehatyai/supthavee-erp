@@ -39,6 +39,7 @@ import VoidDocumentActions from "./void-document-actions";
 import DuplicateDocumentButton from "./duplicate-document-button";
 import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
 import ConvertDocumentDropdown from "./convert-document-dropdown";
+import { CreateJobModal } from "@/components/production/create-job-modal";
 
 type PageProps = {
   params: Promise<{ doc_no: string }>;
@@ -194,6 +195,12 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
     !isAlreadyConverted;
   const canVoid =
     doc.status === "ISSUED" && Number(doc.paid_amount ?? 0) === 0;
+  /** MTO — ส่งงานผลิตได้เฉพาะบิลขายที่ ISSUED (ไม่รวมใบเสร็จ/มัดจำ/ตัดหนี้) */
+  const canSendToProduction =
+    doc.status === "ISSUED" &&
+    !isReceiptDoc &&
+    !isDepositDoc &&
+    !isSettlementDoc;
   const canDuplicate =
     !isReceiptDoc &&
     !isSettlementDoc &&
@@ -247,6 +254,9 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
             เปิดบิลใหม่
           </Link>
           {canPrint && <PrintDocumentButton className="h-10 gap-2" />}
+          {canSendToProduction && (
+            <CreateJobModal document_id={doc.id} docNo={doc.doc_no} />
+          )}
           {canDuplicate && (
             <DuplicateDocumentButton documentId={doc.id} docNo={doc.doc_no} />
           )}

@@ -55,6 +55,7 @@ const navigationGroups: NavigationGroup[] = [
       { label: "รับ/จ่าย เงินมัดจำ", href: "/finance/deposits" },
       { label: "ระบบวางบิล", href: "/finance/billing-notes" },
       { label: "ค่าใช้จ่าย (Expenses)", href: "/expenses" },
+      { label: "รายงานหัก ณ ที่จ่าย (WHT)", href: "/tax/wht-report" },
       { label: "สมุดบัญชีธนาคาร", href: "/finance/bank-accounts" },
       { label: "เจ้าหนี้ / ลูกหนี้", href: "/finance/ap-ar" },
     ],
@@ -63,8 +64,8 @@ const navigationGroups: NavigationGroup[] = [
     label: "คลังสินค้า / ผลิต",
     icon: "warehouse",
     items: [
-      { label: "ความเคลื่อนไหวสต็อก", href: "/inventory/ledger" },
-      { label: "งานปักและสกรีน", href: "/production/services" },
+      { label: "บัตรสต็อก (Stock Card)", href: "/inventory/ledger" },
+      { label: "Production Kanban", href: "/production/kanban" },
     ],
   },
 ];

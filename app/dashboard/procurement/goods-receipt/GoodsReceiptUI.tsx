@@ -89,6 +89,62 @@ import {
 } from "@/components/ui/table";
 import { InvoiceDropzone } from "./components/InvoiceDropzone";
 
+function roundMoney2(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function parseMoneyInput(raw: string): number {
+  const cleaned = raw.replace(/,/g, "").trim();
+  if (!cleaned) return 0;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Seed / refresh Total Amount from apportionment (skip manually edited lines). */
+function applyApportionedTotals(
+  rows: ReceiptLineRow[],
+  billDiscountText: string,
+): ReceiptLineRow[] {
+  const items: ApportionmentItem[] = rows.map((row) => ({
+    id: row.lineKey,
+    unitPrice: Number(row.unit_price) || 0,
+    qty: Math.max(0, Math.round(Number(row.qty) || 0)),
+    discountText: row.discount_text,
+    isFoc: Boolean(row.isFoc),
+  }));
+  const byKey = new Map(
+    calculateNetCostApportionment(items, billDiscountText || null).map((r) => [
+      r.id,
+      r,
+    ]),
+  );
+
+  return rows.map((row) => {
+    if (row.isFoc) {
+      return { ...row, totalAmount: 0, netCost: 0 };
+    }
+    if (row.totalAmountManual) {
+      const qty = Math.max(0, Number(row.qty) || 0);
+      const total = roundMoney2(Number(row.totalAmount) || 0);
+      return {
+        ...row,
+        totalAmount: total,
+        netCost: qty > 0 ? roundMoney2(total / qty) : 0,
+      };
+    }
+    const preview = byKey.get(row.lineKey);
+    const total = roundMoney2(
+      Number(preview?.finalLineTotal ?? row.totalAmount) || 0,
+    );
+    const qty = Math.max(0, Number(row.qty) || 0);
+    return {
+      ...row,
+      totalAmount: total,
+      netCost: qty > 0 ? roundMoney2(total / qty) : 0,
+    };
+  });
+}
+
 function formatMoney(value: number): string {
   return value.toLocaleString("th-TH", {
     minimumFractionDigits: 2,
@@ -140,6 +196,12 @@ export default function GoodsReceiptUI() {
 
   /** End-of-bill discount text (e.g. "40%", "1500") — fed into calculateNetCostApportionment. */
   const [billDiscountText, setBillDiscountText] = useState("");
+
+  /** AI VAT Analysis — controlled amounts (auto from lines until user overrides). */
+  const [netBeforeVatInput, setNetBeforeVatInput] = useState("");
+  const [vatAmountInput, setVatAmountInput] = useState("");
+  const [grandTotalInput, setGrandTotalInput] = useState("");
+  const [vatTotalsManual, setVatTotalsManual] = useState(false);
 
   /** "Save to Ledger" confirmation dialog — final review + Early Warning duplicate check. */
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
@@ -218,6 +280,10 @@ export default function GoodsReceiptUI() {
     setAiDocType("AP_TAX");
     setAiVatType("NONE");
     setBillDiscountText("");
+    setNetBeforeVatInput("");
+    setVatAmountInput("");
+    setGrandTotalInput("");
+    setVatTotalsManual(false);
   }, [previewUrl]);
 
   /**
@@ -234,6 +300,10 @@ export default function GoodsReceiptUI() {
       setAiDocType("AP_TAX");
       setAiVatType("NONE");
       setBillDiscountText("");
+      setVatTotalsManual(false);
+      setNetBeforeVatInput("");
+      setVatAmountInput("");
+      setGrandTotalInput("");
       setFileName(file.name);
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(
@@ -284,7 +354,9 @@ export default function GoodsReceiptUI() {
         return;
       }
 
-      setRows(matched.data);
+      setRows(applyApportionedTotals(matched.data, ""));
+      setBillDiscountText("");
+      setVatTotalsManual(false);
       setDraftProductByLineKey({});
       const unmatchedCount = matched.data.filter(
         (row) => row.status === "unmatched",
@@ -434,11 +506,52 @@ export default function GoodsReceiptUI() {
     toast.success(`บันทึก Ground Truth แล้ว: ${row.raw_vendor_sku} ↔ ${result.product.sku}`);
   }
 
-  /** Toggle FOC (ของแถม) for a review-table row — drives calculateNetCostApportionment. */
+  /** Toggle FOC (ของแถม) — FOC forces Total Amount / Net Cost = 0. */
   function handleToggleFoc(lineKey: string, isFoc: boolean) {
+    setRows((current) => {
+      const next = current.map((row) => {
+        if (row.lineKey !== lineKey) return row;
+        if (isFoc) {
+          return {
+            ...row,
+            isFoc: true,
+            totalAmount: 0,
+            netCost: 0,
+            totalAmountManual: false,
+          };
+        }
+        return { ...row, isFoc: false, totalAmountManual: false };
+      });
+      return applyApportionedTotals(next, billDiscountText);
+    });
+    setVatTotalsManual(false);
+  }
+
+  /** Manual Total Amount (paper Ground Truth) → Net Unit Cost = Total / Qty. */
+  function handleTotalAmountChange(lineKey: string, raw: string) {
+    const total = roundMoney2(Math.max(0, parseMoneyInput(raw)));
     setRows((current) =>
-      current.map((row) => (row.lineKey === lineKey ? { ...row, isFoc } : row)),
+      current.map((row) => {
+        if (row.lineKey !== lineKey) return row;
+        if (row.isFoc) {
+          return { ...row, totalAmount: 0, netCost: 0, totalAmountManual: true };
+        }
+        const qty = Math.max(0, Number(row.qty) || 0);
+        return {
+          ...row,
+          totalAmount: total,
+          netCost: qty > 0 ? roundMoney2(total / qty) : 0,
+          totalAmountManual: true,
+        };
+      }),
     );
+    setVatTotalsManual(false);
+  }
+
+  function handleBillDiscountChange(value: string) {
+    setBillDiscountText(value);
+    setRows((current) => applyApportionedTotals(current, value));
+    setVatTotalsManual(false);
   }
 
   const stats = {
@@ -447,48 +560,46 @@ export default function GoodsReceiptUI() {
     unmatched: rows.filter((row) => row.status === "unmatched").length,
   };
 
-  /**
-   * Live preview of Net Cost Apportionment — same engine the Server Action
-   * uses on Save, so Total Document Value / per-row Net Cost stay in sync
-   * with FOC toggles and bill-level discount before the user commits.
-   */
-  const apportionmentPreview = useMemo(() => {
-    const items: ApportionmentItem[] = rows.map((row) => ({
-      id: row.lineKey,
-      unitPrice: Number(row.unit_price) || 0,
-      qty: Math.max(0, Math.round(Number(row.qty) || 0)),
-      discountText: row.discount_text,
-      isFoc: Boolean(row.isFoc),
-    }));
-    return calculateNetCostApportionment(items, billDiscountText || null);
-  }, [rows, billDiscountText]);
-
-  const apportionmentByLineKey = useMemo(() => {
-    return new Map(apportionmentPreview.map((result) => [result.id, result]));
-  }, [apportionmentPreview]);
-
   const totals = {
     qty: rows.reduce((sum, row) => sum + (Number(row.qty) || 0), 0),
-    value: apportionmentPreview.reduce(
-      (sum, result) => sum + (Number(result.finalLineTotal) || 0),
+    value: rows.reduce(
+      (sum, row) => sum + (row.isFoc ? 0 : Number(row.totalAmount) || 0),
       0,
     ),
   };
 
-  /** Live VAT preview from AI vat_type + line totals (for staff verification). */
+  /**
+   * Auto VAT from line Total Amounts (already include line/bill discounts).
+   * When `vatTotalsManual` is false, controlled inputs stay synced to this.
+   */
   const vatPreview = useMemo(() => {
-    const lineTotals = rows.map((row) => {
-      const qty = Math.max(0, Number(row.qty) || 0);
-      const unitPrice = Number(row.unit_price) || 0;
-      return qty * unitPrice;
-    });
+    const lineTotals = rows.map((row) =>
+      row.isFoc ? 0 : Math.max(0, Number(row.totalAmount) || 0),
+    );
     return calculateDocumentSummary({
       lineTotals,
-      discountText: billDiscountText || null,
+      discountText: null,
       vatType: aiVatType,
       vatRate: aiVatType === "NONE" ? 0 : 7,
     });
-  }, [rows, billDiscountText, aiVatType]);
+  }, [rows, aiVatType]);
+
+  useEffect(() => {
+    if (vatTotalsManual) return;
+    setNetBeforeVatInput(formatMoney(vatPreview.net_before_vat));
+    setVatAmountInput(formatMoney(vatPreview.vat_amount));
+    setGrandTotalInput(formatMoney(vatPreview.grand_total));
+  }, [vatPreview, vatTotalsManual]);
+
+  /**
+   * roundingDifference = Manual Grand Total − Calculated Grand Total
+   * (Calculated มาจากผลรวม Total Amount รายบรรทัด + โหมด VAT)
+   */
+  const roundingDifference = useMemo(() => {
+    const manualGrand = roundMoney2(parseMoneyInput(grandTotalInput));
+    const calculatedGrand = roundMoney2(vatPreview.grand_total);
+    return roundMoney2(manualGrand - calculatedGrand);
+  }, [grandTotalInput, vatPreview.grand_total]);
 
   const vatTypeLabel =
     aiVatType === "NONE"
@@ -514,8 +625,10 @@ export default function GoodsReceiptUI() {
    */
   async function handleConfirmSaveToLedger(payload: SaveToLedgerConfirmPayload) {
     setIsSavingToLedger(true);
-    // Sync bill discount from the dialog (user may have edited it there).
+    // Sync bill discount from dialog → re-seed non-manual line totals only
+    const rowsForSave = applyApportionedTotals(rows, payload.billDiscountText);
     setBillDiscountText(payload.billDiscountText);
+    setRows(rowsForSave);
     try {
       let attachmentUrl: string | null = null;
 
@@ -533,13 +646,31 @@ export default function GoodsReceiptUI() {
       }
 
       const result = await saveGoodsReceiptToLedger(
-        rows,
+        rowsForSave,
         payload.docNumber,
         payload.docDate,
         payload.billDiscountText || null,
         payload.docType,
         payload.vatType,
         attachmentUrl,
+        {
+          netBeforeVat: roundMoney2(parseMoneyInput(netBeforeVatInput)),
+          vatAmount: roundMoney2(parseMoneyInput(vatAmountInput)),
+          grandTotal: roundMoney2(parseMoneyInput(grandTotalInput)),
+          roundingDifference: roundMoney2(
+            roundMoney2(parseMoneyInput(grandTotalInput)) -
+              roundMoney2(
+                calculateDocumentSummary({
+                  lineTotals: rowsForSave.map((row) =>
+                    row.isFoc ? 0 : Math.max(0, Number(row.totalAmount) || 0),
+                  ),
+                  discountText: null,
+                  vatType: payload.vatType,
+                  vatRate: payload.vatType === "NONE" ? 0 : 7,
+                }).grand_total,
+              ),
+          ),
+        },
       );
       if (result.error || !result.docHeaderId) {
         toast.error(result.error ?? "บันทึกรับสินค้าเข้าคลังไม่สำเร็จ");
@@ -775,8 +906,18 @@ export default function GoodsReceiptUI() {
                     <TableHead className="text-right">Qty</TableHead>
                     <TableHead className="text-right">Unit Price</TableHead>
                     <TableHead>Discount</TableHead>
-                    <TableHead className="text-right">Net Unit Cost</TableHead>
-                    <TableHead className="text-right">Total Amount</TableHead>
+                    <TableHead className="text-right">
+                      Net Unit Cost
+                      <span className="block text-[10px] font-normal text-slate-400">
+                        = Total ÷ Qty
+                      </span>
+                    </TableHead>
+                    <TableHead className="text-right">
+                      Total Amount
+                      <span className="block text-[10px] font-normal text-slate-400">
+                        แก้ได้ตามกระดาษ
+                      </span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -784,14 +925,15 @@ export default function GoodsReceiptUI() {
                     const isMatched = row.status === "matched";
                     const isBusy = confirmingLineKey === row.lineKey;
                     const draftProductId = draftProductByLineKey[row.lineKey] ?? "";
-                    const preview = apportionmentByLineKey.get(row.lineKey);
-                    const displayNetUnitCost = row.isFoc
-                      ? 0
-                      : (preview?.finalUnitCost ?? row.netCost);
+                    const qty = Math.max(0, Number(row.qty) || 0);
                     const displayTotalAmount = row.isFoc
                       ? 0
-                      : (preview?.finalLineTotal ??
-                        Number(row.qty) * Number(displayNetUnitCost));
+                      : roundMoney2(Number(row.totalAmount) || 0);
+                    const displayNetUnitCost = row.isFoc
+                      ? 0
+                      : qty > 0
+                        ? roundMoney2(displayTotalAmount / qty)
+                        : 0;
 
                     return (
                       <TableRow
@@ -965,20 +1107,34 @@ export default function GoodsReceiptUI() {
                                 ? "text-emerald-700"
                                 : "text-amber-800",
                           )}
+                          title="Net Unit Cost = Total Amount ÷ Qty"
                         >
                           {row.isFoc ? "0.00" : formatMoney(displayNetUnitCost)}
                         </TableCell>
-                        <TableCell
-                          className={cn(
-                            "text-right font-bold tabular-nums",
-                            row.isFoc
-                              ? "text-slate-400"
-                              : isMatched
-                                ? "text-slate-900"
-                                : "text-amber-900",
+                        <TableCell className="text-right">
+                          {row.isFoc ? (
+                            <span className="font-bold tabular-nums text-slate-400">
+                              0.00
+                            </span>
+                          ) : (
+                            <Input
+                              type="number"
+                              inputMode="decimal"
+                              step="0.01"
+                              min="0"
+                              value={Number.isFinite(displayTotalAmount) ? displayTotalAmount : 0}
+                              onChange={(e) =>
+                                handleTotalAmountChange(row.lineKey, e.target.value)
+                              }
+                              className={cn(
+                                "ml-auto h-8 w-[7.5rem] text-right font-bold tabular-nums",
+                                isMatched ? "text-slate-900" : "text-amber-900",
+                                row.totalAmountManual &&
+                                  "border-blue-300 bg-blue-50/50",
+                              )}
+                              aria-label={`Total Amount ${row.raw_vendor_sku}`}
+                            />
                           )}
-                        >
-                          {row.isFoc ? "0.00" : formatMoney(displayTotalAmount)}
                         </TableCell>
                       </TableRow>
                     );
@@ -1004,32 +1160,107 @@ export default function GoodsReceiptUI() {
               </p>
               <p className="mt-0.5 text-xs text-slate-500">
                 ประเภทเอกสารจาก AI: {aiDocType} · แก้ไขได้ในหน้าต่าง Save to Ledger
+                {vatTotalsManual
+                  ? " · ใช้ยอดที่พิมพ์ทับ (Manual Override)"
+                  : " · Auto จาก Total Amount รายบรรทัด"}
               </p>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
-                <p className="text-[10px] font-medium text-slate-400">ยอดก่อน VAT</p>
-                <p className="text-sm font-bold tabular-nums text-slate-900">
-                  ฿{formatMoney(vatPreview.net_before_vat)}
-                </p>
+                <Label
+                  htmlFor="vat-net-before"
+                  className="text-[10px] font-medium text-slate-400"
+                >
+                  ยอดก่อน VAT
+                </Label>
+                <div className="mt-0.5 flex items-center gap-1">
+                  <span className="text-xs text-slate-400">฿</span>
+                  <Input
+                    id="vat-net-before"
+                    type="text"
+                    inputMode="decimal"
+                    value={netBeforeVatInput}
+                    onChange={(e) => {
+                      setVatTotalsManual(true);
+                      setNetBeforeVatInput(e.target.value);
+                    }}
+                    className={cn(
+                      "h-8 text-right text-sm font-bold tabular-nums",
+                      vatTotalsManual && "border-blue-300 bg-blue-50/40",
+                    )}
+                  />
+                </div>
               </div>
               <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
-                <p className="text-[10px] font-medium text-slate-400">VAT Amount</p>
-                <p className="text-sm font-bold tabular-nums text-violet-700">
-                  ฿{formatMoney(vatPreview.vat_amount)}
-                </p>
+                <Label
+                  htmlFor="vat-amount"
+                  className="text-[10px] font-medium text-slate-400"
+                >
+                  VAT Amount
+                </Label>
+                <div className="mt-0.5 flex items-center gap-1">
+                  <span className="text-xs text-slate-400">฿</span>
+                  <Input
+                    id="vat-amount"
+                    type="text"
+                    inputMode="decimal"
+                    value={vatAmountInput}
+                    onChange={(e) => {
+                      setVatTotalsManual(true);
+                      setVatAmountInput(e.target.value);
+                    }}
+                    className={cn(
+                      "h-8 text-right text-sm font-bold tabular-nums text-violet-700",
+                      vatTotalsManual && "border-blue-300 bg-blue-50/40",
+                    )}
+                  />
+                </div>
               </div>
               <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
                 <p className="text-[10px] font-medium text-slate-400">ส่วนลดท้ายบิล</p>
-                <p className="text-sm font-bold tabular-nums text-slate-900">
-                  ฿{formatMoney(vatPreview.discount_amount)}
+                <p className="mt-1 text-sm font-bold tabular-nums text-slate-900">
+                  {billDiscountText?.trim() || "—"}
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  (กระจายลง Total แล้ว)
                 </p>
               </div>
               <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
-                <p className="text-[10px] font-medium text-slate-400">Grand Total</p>
-                <p className="text-sm font-bold tabular-nums text-slate-900">
-                  ฿{formatMoney(vatPreview.grand_total)}
-                </p>
+                <Label
+                  htmlFor="vat-grand-total"
+                  className="text-[10px] font-medium text-slate-400"
+                >
+                  Grand Total
+                </Label>
+                <div className="mt-0.5 flex items-center gap-1">
+                  <span className="text-xs text-slate-400">฿</span>
+                  <Input
+                    id="vat-grand-total"
+                    type="text"
+                    inputMode="decimal"
+                    value={grandTotalInput}
+                    onChange={(e) => {
+                      setVatTotalsManual(true);
+                      setGrandTotalInput(e.target.value);
+                    }}
+                    className={cn(
+                      "h-8 text-right text-sm font-bold tabular-nums",
+                      vatTotalsManual && "border-blue-300 bg-blue-50/40",
+                    )}
+                  />
+                </div>
+                {Math.abs(roundingDifference) >= 0.005 ? (
+                  <p className="mt-1 text-[11px] font-medium text-orange-600">
+                    มีการปรับปัดเศษ:{" "}
+                    {roundingDifference > 0 ? "+" : ""}
+                    {formatMoney(roundingDifference)} บาท
+                    {Math.abs(roundingDifference) > 1 ? (
+                      <span className="block text-[10px] text-orange-500">
+                        (เกิน ±1.00 บาท — ตรวจสอบอีกครั้ง)
+                      </span>
+                    ) : null}
+                  </p>
+                ) : null}
               </div>
             </div>
           </CardContent>
@@ -1069,7 +1300,7 @@ export default function GoodsReceiptUI() {
               <Input
                 id="bill-discount-text"
                 value={billDiscountText}
-                onChange={(event) => setBillDiscountText(event.target.value)}
+                onChange={(event) => handleBillDiscountChange(event.target.value)}
                 placeholder="เช่น 40%, 1500"
                 className="mt-1 h-9 text-sm"
               />
