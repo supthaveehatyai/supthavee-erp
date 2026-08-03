@@ -39,7 +39,7 @@ import VoidDocumentActions from "./void-document-actions";
 import DuplicateDocumentButton from "./duplicate-document-button";
 import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
 import ConvertDocumentDropdown from "./convert-document-dropdown";
-import { CreateJobModal } from "@/components/production/create-job-modal";
+import { SendToProductionButton } from "@/components/production/send-to-production-button";
 
 type PageProps = {
   params: Promise<{ doc_no: string }>;
@@ -195,12 +195,13 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
     !isAlreadyConverted;
   const canVoid =
     doc.status === "ISSUED" && Number(doc.paid_amount ?? 0) === 0;
-  /** MTO — ส่งงานผลิตได้เฉพาะบิลขายที่ ISSUED (ไม่รวมใบเสร็จ/มัดจำ/ตัดหนี้) */
+  /** MTO — TAX_INV / ABB / CS_TAX / INV_DO ที่ ISSUED เท่านั้น (ห้าม DRAFT) */
   const canSendToProduction =
-    doc.status === "ISSUED" &&
-    !isReceiptDoc &&
-    !isDepositDoc &&
-    !isSettlementDoc;
+    (doc.doc_type === "TAX_INV" ||
+      doc.doc_type === "ABB" ||
+      doc.doc_type === "CS_TAX" ||
+      doc.doc_type === "INV_DO") &&
+    doc.status === "ISSUED";
   const canDuplicate =
     !isReceiptDoc &&
     !isSettlementDoc &&
@@ -255,7 +256,10 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
           </Link>
           {canPrint && <PrintDocumentButton className="h-10 gap-2" />}
           {canSendToProduction && (
-            <CreateJobModal document_id={doc.id} docNo={doc.doc_no} />
+            <SendToProductionButton
+              documentId={doc.id}
+              documentNo={doc.doc_no}
+            />
           )}
           {canDuplicate && (
             <DuplicateDocumentButton documentId={doc.id} docNo={doc.doc_no} />

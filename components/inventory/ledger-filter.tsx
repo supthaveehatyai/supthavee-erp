@@ -1,36 +1,36 @@
 "use client";
 
 /**
- * Stock Card filter — URL-driven (productId / startDate / endDate).
- * Product search via SmartSkuPicker → Server Action only.
+ * Inventory Overview filter — URL-driven (`q` / productId / dates).
+ * Search filters models server-side via `getInventoryOverview(q)`.
  */
 
-import { useTransition } from "react";
+import { useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { X } from "lucide-react";
-import SmartSkuPicker from "@/components/sales/smart-sku-picker";
-import type { SalesProductSearchItem } from "@/types/document";
+import { Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export type LedgerFilterProps = {
+  q?: string;
   productId?: string;
-  /** ข้อความแสดงสินค้าที่เลือกจาก Server (SKU · รุ่น · สี · ไซส์) */
-  productLabel?: string | null;
   startDate?: string;
   endDate?: string;
 };
 
 function buildLedgerUrl(next: {
+  q?: string;
   productId?: string;
   startDate?: string;
   endDate?: string;
 }): string {
   const params = new URLSearchParams();
+  const q = next.q?.trim() ?? "";
   const productId = next.productId?.trim() ?? "";
   const startDate = next.startDate?.trim() ?? "";
   const endDate = next.endDate?.trim() ?? "";
+  if (q) params.set("q", q);
   if (productId) params.set("productId", productId);
   if (startDate) params.set("startDate", startDate);
   if (endDate) params.set("endDate", endDate);
@@ -39,8 +39,8 @@ function buildLedgerUrl(next: {
 }
 
 export function LedgerFilter({
+  q = "",
   productId = "",
-  productLabel = null,
   startDate = "",
   endDate = "",
 }: LedgerFilterProps) {
@@ -48,6 +48,7 @@ export function LedgerFilter({
   const [isPending, startTransition] = useTransition();
 
   function pushUrl(next: {
+    q?: string;
     productId?: string;
     startDate?: string;
     endDate?: string;
@@ -57,20 +58,24 @@ export function LedgerFilter({
     });
   }
 
-  function onSelectProduct(product: SalesProductSearchItem) {
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const nextQ = String(formData.get("q") ?? "").trim();
     pushUrl({
-      productId: product.id,
+      q: nextQ,
+      productId: "",
       startDate,
       endDate,
     });
   }
 
   function onStartDateChange(value: string) {
-    pushUrl({ productId, startDate: value, endDate });
+    pushUrl({ q, productId, startDate: value, endDate });
   }
 
   function onEndDateChange(value: string) {
-    pushUrl({ productId, startDate, endDate: value });
+    pushUrl({ q, productId, startDate, endDate: value });
   }
 
   function onClear() {
@@ -79,34 +84,33 @@ export function LedgerFilter({
     });
   }
 
-  const hasFilters = Boolean(productId || startDate || endDate);
+  const hasFilters = Boolean(q || productId || startDate || endDate);
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3 sm:p-4">
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.6fr)_repeat(2,minmax(0,1fr))_auto]">
+      <form
+        onSubmit={onSubmit}
+        className="grid gap-3 lg:grid-cols-[minmax(0,1.8fr)_repeat(2,minmax(0,1fr))_auto]"
+      >
         <div className="space-y-1.5">
-          <Label className="text-xs font-medium text-slate-600">
-            สินค้า (Product)
+          <Label htmlFor="inventory-q" className="text-xs font-medium text-slate-600">
+            ค้นหารุ่น (Model Code / Name)
           </Label>
-          <SmartSkuPicker
-            placeholder="ค้นหา SKU, รุ่น, สี, ไซส์..."
-            onSelectProduct={onSelectProduct}
-            disabled={isPending}
-          />
-          {productId && productLabel ? (
-            <p className="truncate text-xs text-slate-600">
-              เลือกแล้ว:{" "}
-              <span className="font-semibold text-slate-800">{productLabel}</span>
-            </p>
-          ) : productId ? (
-            <p className="truncate font-mono text-xs text-slate-500">
-              productId: {productId.slice(0, 8)}…
-            </p>
-          ) : (
-            <p className="text-xs text-slate-400">
-              เลือกสินค้าเพื่อดูบัตรสต็อก (Stock Card)
-            </p>
-          )}
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              id="inventory-q"
+              name="q"
+              defaultValue={q}
+              disabled={isPending}
+              placeholder="เว้นว่าง = แสดงทุกรุ่น · หรือพิมพ์รหัส/ชื่อรุ่น..."
+              className="h-11 bg-white pl-9"
+            />
+          </div>
+          <p className="text-xs text-slate-400">
+            กรองที่ Server ผ่าน URL param <span className="font-mono">q</span> ·
+            จัดกลุ่ม Brand → Model → Color → Size
+          </p>
         </div>
 
         <div className="space-y-1.5">
@@ -114,7 +118,7 @@ export function LedgerFilter({
             htmlFor="ledger-start-date"
             className="text-xs font-medium text-slate-600"
           >
-            ตั้งแต่วันที่
+            ตั้งแต่วันที่ (Ledger)
           </Label>
           <Input
             id="ledger-start-date"
@@ -131,7 +135,7 @@ export function LedgerFilter({
             htmlFor="ledger-end-date"
             className="text-xs font-medium text-slate-600"
           >
-            ถึงวันที่
+            ถึงวันที่ (Ledger)
           </Label>
           <Input
             id="ledger-end-date"
@@ -143,7 +147,14 @@ export function LedgerFilter({
           />
         </div>
 
-        <div className="flex items-end">
+        <div className="flex items-end gap-2">
+          <Button
+            type="submit"
+            disabled={isPending}
+            className="h-11 w-full lg:w-auto"
+          >
+            ค้นหา
+          </Button>
           <Button
             type="button"
             variant="outline"
@@ -152,10 +163,10 @@ export function LedgerFilter({
             className="h-11 w-full gap-1.5 lg:w-auto"
           >
             <X className="h-3.5 w-3.5" />
-            ล้างตัวกรอง
+            ล้าง
           </Button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }

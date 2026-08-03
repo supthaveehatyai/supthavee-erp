@@ -15,7 +15,8 @@ import {
   ScrollText,
   TrendingUp,
 } from "lucide-react";
-import type { RecentAuditLog } from "@/app/actions/dashboard";
+import type { RecentAuditLog } from "@/types/audit";
+import { AuditTrailTable } from "@/components/dashboard/audit-trail-table";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -24,14 +25,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
@@ -66,54 +59,6 @@ type KpiCard = {
   valueClassName?: string;
   error?: string | null;
 };
-
-function formatDateTime(iso: string): string {
-  try {
-    return new Intl.DateTimeFormat("th-TH", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
-}
-
-function truncateId(id: string, max = 10): string {
-  if (id.length <= max) return id;
-  return `${id.slice(0, 8)}…`;
-}
-
-function dataSnippet(
-  newData: RecentAuditLog["new_data"],
-  oldData: RecentAuditLog["old_data"],
-  maxLen = 72,
-): string {
-  const source = newData ?? oldData;
-  if (source == null) return "—";
-
-  try {
-    const text =
-      typeof source === "string" ? source : JSON.stringify(source);
-    if (!text || text === "null") return "—";
-    return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
-  } catch {
-    return "—";
-  }
-}
-
-function ActionBadge({ action }: { action: RecentAuditLog["action"] }) {
-  if (action === "INSERT") {
-    return <Badge variant="emerald">INSERT</Badge>;
-  }
-  if (action === "UPDATE") {
-    return <Badge variant="blue">UPDATE</Badge>;
-  }
-  return (
-    <Badge variant="amber" className="bg-red-100 text-red-700">
-      DELETE
-    </Badge>
-  );
-}
 
 function netProfitValueClass(amount: number, hasError: boolean): string {
   if (hasError) return "text-slate-700";
@@ -289,81 +234,12 @@ function AuditTrailTab({
             System Audit Trail
           </CardTitle>
           <CardDescription>
-            50 รายการล่าสุดจาก <code className="text-[11px]">audit_logs</code>{" "}
-            · บันทึกอัตโนมัติตอน ISSUE / VOID เอกสาร · Zero Client-Side Fetching
+            50 รายการล่าสุด · สรุปการเปลี่ยนแปลงจาก JSONB อัตโนมัติ · Zero
+            Client-Side Fetching
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {logs.length === 0 ? (
-            <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 py-12 text-center text-sm text-slate-500">
-              ยังไม่มีรายการ Audit Log ในระบบ
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-md border border-slate-200">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-slate-50">
-                    <TableHead className="whitespace-nowrap">Date/Time</TableHead>
-                    <TableHead>User</TableHead>
-                    <TableHead className="text-center">Action</TableHead>
-                    <TableHead>Table</TableHead>
-                    <TableHead>Record ID</TableHead>
-                    <TableHead className="min-w-[12rem]">Data Snippet</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {logs.map((row) => {
-                    const snippet = dataSnippet(row.new_data, row.old_data);
-                    return (
-                      <TableRow key={row.id}>
-                        <TableCell className="whitespace-nowrap text-xs text-slate-600">
-                          {formatDateTime(row.changed_at)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex min-w-0 flex-col">
-                            <span className="truncate text-sm font-medium text-slate-900">
-                              {row.changed_by_display}
-                            </span>
-                            {row.changed_by_email &&
-                            row.changed_by_email !==
-                              row.changed_by_display ? (
-                              <span className="truncate text-[11px] text-slate-400">
-                                {row.changed_by_email}
-                              </span>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <ActionBadge action={row.action} />
-                        </TableCell>
-                        <TableCell>
-                          <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-700">
-                            {row.table_name}
-                          </code>
-                        </TableCell>
-                        <TableCell>
-                          <code
-                            className="text-[11px] text-slate-600"
-                            title={row.record_id}
-                          >
-                            {truncateId(row.record_id, 12)}
-                          </code>
-                        </TableCell>
-                        <TableCell>
-                          <code
-                            className="block max-w-[18rem] truncate text-[11px] text-slate-500"
-                            title={snippet}
-                          >
-                            {snippet}
-                          </code>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          )}
+          <AuditTrailTable logs={logs} />
         </CardContent>
       </Card>
     </div>

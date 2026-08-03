@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import { KanbanSquare } from "lucide-react";
-import { getProductionJobs } from "@/app/actions/kanban-actions";
+import {
+  getJobDetails,
+  getKanbanBoardData,
+} from "@/app/actions/kanban-actions";
+import { JobDetailSheet } from "@/components/production/job-detail-sheet";
 import { KanbanBoard } from "@/components/production/kanban-board";
 
 export const dynamic = "force-dynamic";
@@ -10,8 +14,17 @@ export const metadata: Metadata = {
   description: "กระดานงานผลิต — สกรีน ปัก เย็บ (Phase 7)",
 };
 
-export default async function ProductionKanbanPage() {
-  const result = await getProductionJobs();
+type PageProps = {
+  searchParams: Promise<{ jobId?: string }>;
+};
+
+export default async function ProductionKanbanPage({ searchParams }: PageProps) {
+  const params = await searchParams;
+  const jobId = params.jobId?.trim() ?? "";
+
+  const result = await getKanbanBoardData();
+
+  const jobDetailsResult = jobId ? await getJobDetails(jobId) : null;
 
   if (!result.success) {
     return (
@@ -35,11 +48,21 @@ export default async function ProductionKanbanPage() {
           Production Kanban
         </h1>
         <p className="text-sm text-slate-500">
-          ติดตามงานสกรีน / ปัก / เย็บ — ลากการ์ดเพื่ออัปเดตสถานะแบบ Real-time
+          Make-to-Order — ส่งงานจาก INV_DO · ลากการ์ดเพื่ออัปเดตสถานะ ·
+          คลิกการ์ดเพื่อดูรายละเอียด
         </p>
       </div>
 
-      <KanbanBoard initialJobs={result.flat} />
+      <KanbanBoard initialJobs={result.flat} selectedJobId={jobId || null} />
+
+      <JobDetailSheet
+        job={jobDetailsResult?.success ? jobDetailsResult.data : null}
+        error={
+          jobDetailsResult && !jobDetailsResult.success
+            ? jobDetailsResult.error
+            : null
+        }
+      />
     </div>
   );
 }

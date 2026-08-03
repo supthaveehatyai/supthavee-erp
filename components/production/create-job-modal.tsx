@@ -1,13 +1,14 @@
 "use client";
 
 /**
- * Phase 7 MTO — Create Production Job modal.
- * Opens from sales document detail (ISSUED) → Server Action createProductionJob.
+ * Phase 7 MTO — Create Production Job dialog (form only).
+ * Trigger lives in SendToProductionButton — Zero Client-Side Fetching.
  */
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Factory } from "lucide-react";
+import { ImagePlus, X } from "lucide-react";
 import { toast } from "sonner";
 import { createProductionJob } from "@/app/actions/kanban-actions";
 import {
@@ -35,156 +36,251 @@ const JOB_TYPE_LABEL: Record<ProductionJobType, string> = {
   OTHER: "อื่นๆ (OTHER)",
 };
 
+const ACCEPT_IMAGES = "image/jpeg,image/png,image/webp";
+
+type PreviewItem = {
+  id: string;
+  name: string;
+  url: string;
+};
+
 export type CreateJobModalProps = {
-  document_id: string;
-  /** แสดงบนคำอธิบาย modal */
+  documentId: string;
+  documentNo?: string | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** @deprecated use documentId */
+  document_id?: string;
+  /** @deprecated use documentNo */
   docNo?: string | null;
 };
 
-export function CreateJobModal({ document_id, docNo }: CreateJobModalProps) {
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [isPending, startTransition] = useTransition();
+function SubmitJobButton() {
+  const { pending } = useFormStatus();
+  return (
+    <Button type="submit" disabled={pending}>
+      {pending ? "กำลังอัปโหลดและสร้าง..." : "สร้างใบสั่งผลิต"}
+    </Button>
+  );
+}
 
-  const [jobType, setJobType] = useState<ProductionJobType>("SCREEN");
-  const [dueDate, setDueDate] = useState("");
-  const [details, setDetails] = useState("");
+function CancelJobButton({ onCancel }: { onCancel: () => void }) {
+  const { pending } = useFormStatus();
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      disabled={pending}
+      onClick={onCancel}
+    >
+      ยกเลิก
+    </Button>
+  );
+}
+
+export function CreateJobModal({
+  documentId,
+  documentNo,
+  open,
+  onOpenChange,
+  document_id,
+  docNo,
+}: CreateJobModalProps) {
+  const router = useRouter();
+  const resolvedDocumentId = (documentId || document_id || "").trim();
+  const resolvedDocumentNo = documentNo ?? docNo ?? null;
+
+  const [formKey, setFormKey] = useState(0);
+  const [previews, setPreviews] = useState<PreviewItem[]>([]);
+  const previewUrlsRef = useRef<string[]>([]);
+
+  function revokePreviews() {
+    for (const url of previewUrlsRef.current) URL.revokeObjectURL(url);
+    previewUrlsRef.current = [];
+    setPreviews([]);
+  }
 
   useEffect(() => {
     if (!open) return;
-    setJobType("SCREEN");
-    setDueDate("");
-    setDetails("");
+    setFormKey((k) => k + 1);
+    for (const url of previewUrlsRef.current) URL.revokeObjectURL(url);
+    previewUrlsRef.current = [];
+    setPreviews([]);
   }, [open]);
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  useEffect(() => {
+    return () => {
+      for (const url of previewUrlsRef.current) URL.revokeObjectURL(url);
+    };
+  }, []);
 
-    if (!document_id?.trim()) {
-      toast.error("ไม่พบรหัสเอกสาร (document_id)");
+  function handleFilesChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    for (const url of previewUrlsRef.current) URL.revokeObjectURL(url);
+    const next = files.map((file, index) => ({
+      id: `${file.name}-${file.size}-${index}`,
+      name: file.name,
+      url: URL.createObjectURL(file),
+    }));
+    previewUrlsRef.current = next.map((p) => p.url);
+    setPreviews(next);
+  }
+
+  async function formAction(formData: FormData) {
+    const result = await createProductionJob(formData);
+
+    if (!result.success || !result.data) {
+      toast.error(result.error ?? "สร้างใบสั่งผลิตไม่สำเร็จ");
       return;
     }
-    if (!dueDate) {
-      toast.error("กรุณาเลือกวันกำหนดส่ง");
-      return;
-    }
-    if (!details.trim()) {
-      toast.error("กรุณากรอกรายละเอียดคำสั่งทำ");
-      return;
-    }
 
-    startTransition(async () => {
-      const result = await createProductionJob({
-        document_id,
-        job_type: jobType,
-        due_date: dueDate,
-        details: details.trim(),
-      });
-
-      if (!result.success || !result.data) {
-        toast.error(result.error ?? "สร้างใบสั่งผลิตไม่สำเร็จ");
-        return;
-      }
-
-      toast.success(`สร้างใบสั่งผลิต ${result.data.job_no} แล้ว`);
-      setOpen(false);
-      router.refresh();
-      router.push("/production/kanban");
-    });
+    const count = result.data.attachment_count ?? 0;
+    toast.success(
+      count > 0
+        ? `สร้างใบสั่งผลิต ${result.data.job_no} แล้ว · แนบรูป ${count} ไฟล์`
+        : `สร้างใบสั่งผลิต ${result.data.job_no} แล้ว`,
+    );
+    revokePreviews();
+    onOpenChange(false);
+    router.refresh();
+    router.push("/production/kanban");
   }
 
   return (
-    <>
-      <Button
-        type="button"
-        variant="outline"
-        disabled={isPending}
-        onClick={() => setOpen(true)}
-        className="h-10 gap-2 border-violet-200 bg-violet-50 font-semibold text-violet-800 hover:bg-violet-100"
-      >
-        <Factory className="size-4" />
-        🛠️ ส่งงานผลิต (Send to Production)
-      </Button>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90dvh] max-w-lg overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>สร้างใบสั่งผลิต (MTO)</DialogTitle>
+          <DialogDescription>
+            ส่งเอกสารขายเข้าสายการผลิต — สถานะเริ่มต้น TODO · เลขงาน
+            JOB-YYMM-XXXX
+            {resolvedDocumentNo ? (
+              <>
+                {" "}
+                · อ้างอิง{" "}
+                <span className="font-mono font-semibold text-slate-700">
+                  {resolvedDocumentNo}
+                </span>
+              </>
+            ) : null}
+          </DialogDescription>
+        </DialogHeader>
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[90dvh] max-w-lg overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>สร้างใบสั่งผลิต (MTO)</DialogTitle>
-            <DialogDescription>
-              เชื่อมบิลขายเข้าสายการผลิต — สถานะเริ่มต้น TODO
-              {docNo ? (
-                <>
-                  {" "}
-                  · อ้างอิง{" "}
-                  <span className="font-mono font-semibold text-slate-700">
-                    {docNo}
-                  </span>
-                </>
-              ) : null}
-            </DialogDescription>
-          </DialogHeader>
+        <form key={formKey} action={formAction} className="space-y-4">
+          <input type="hidden" name="documentId" value={resolvedDocumentId} />
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="mto-job-type">ประเภทงาน</Label>
-              <Select
-                id="mto-job-type"
-                value={jobType}
-                disabled={isPending}
-                onChange={(e) =>
-                  setJobType(e.target.value as ProductionJobType)
-                }
-              >
-                {PRODUCTION_JOB_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {JOB_TYPE_LABEL[type]}
-                  </option>
+          <div className="space-y-1.5">
+            <Label htmlFor="mto-job-type">ประเภทงาน</Label>
+            <Select
+              id="mto-job-type"
+              name="jobType"
+              defaultValue="SCREEN"
+              required
+            >
+              {PRODUCTION_JOB_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {JOB_TYPE_LABEL[type]}
+                </option>
+              ))}
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="mto-due-date">วันกำหนดส่ง</Label>
+            <Input
+              id="mto-due-date"
+              name="targetDate"
+              type="date"
+              required
+              className="h-10"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="mto-details">รายละเอียดคำสั่งทำ</Label>
+            <Textarea
+              id="mto-details"
+              name="description"
+              required
+              rows={4}
+              placeholder="เช่น สกรีนอกซ้าย 1 สี · ปักโลโก้หน้าอก"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="mto-attachments">
+              แนบรูป Mockup / Logo{" "}
+              <span className="font-normal text-slate-400">
+                (JPG/PNG/WEBP · สูงสุด 8 ไฟล์)
+              </span>
+            </Label>
+            <label
+              htmlFor="mto-attachments"
+              className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/80 px-4 py-6 text-center transition hover:border-violet-300 hover:bg-violet-50/40"
+            >
+              <ImagePlus className="size-6 text-violet-500" />
+              <span className="text-sm font-medium text-slate-700">
+                คลิกเพื่อเลือกไฟล์ หรือลากวางหลายรูป
+              </span>
+              <span className="text-xs text-slate-400">
+                รองรับ image/jpeg, image/png, image/webp
+              </span>
+              <input
+                id="mto-attachments"
+                name="attachments"
+                type="file"
+                multiple
+                accept={ACCEPT_IMAGES}
+                className="sr-only"
+                onChange={handleFilesChange}
+              />
+            </label>
+
+            {previews.length > 0 ? (
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                {previews.map((item) => (
+                  <div
+                    key={item.id}
+                    className="group relative overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={item.url}
+                      alt={item.name}
+                      className="aspect-square w-full object-cover"
+                    />
+                    <p className="truncate px-1.5 py-1 text-[10px] text-slate-500">
+                      {item.name}
+                    </p>
+                  </div>
                 ))}
-              </Select>
-            </div>
+              </div>
+            ) : null}
 
-            <div className="space-y-1.5">
-              <Label htmlFor="mto-due-date">วันกำหนดส่ง</Label>
-              <Input
-                id="mto-due-date"
-                type="date"
-                value={dueDate}
-                disabled={isPending}
-                required
-                onChange={(e) => setDueDate(e.target.value)}
-                className="h-10"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="mto-details">รายละเอียดคำสั่งทำ</Label>
-              <Textarea
-                id="mto-details"
-                value={details}
-                disabled={isPending}
-                required
-                rows={4}
-                placeholder="เช่น สกรีนอกซ้าย 1 สี · ปักโลโก้หน้าอก"
-                onChange={(e) => setDetails(e.target.value)}
-              />
-            </div>
-
-            <DialogFooter>
-              <Button
+            {previews.length > 0 ? (
+              <button
                 type="button"
-                variant="outline"
-                disabled={isPending}
-                onClick={() => setOpen(false)}
+                onClick={() => {
+                  revokePreviews();
+                  const input = document.getElementById(
+                    "mto-attachments",
+                  ) as HTMLInputElement | null;
+                  if (input) input.value = "";
+                }}
+                className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-red-600"
               >
-                ยกเลิก
-              </Button>
-              <Button type="submit" disabled={isPending}>
-                {isPending ? "กำลังสร้าง..." : "สร้างใบสั่งผลิต"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-    </>
+                <X className="size-3.5" />
+                ล้างรูปที่เลือก
+              </button>
+            ) : null}
+          </div>
+
+          <DialogFooter>
+            <CancelJobButton onCancel={() => onOpenChange(false)} />
+            <SubmitJobButton />
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

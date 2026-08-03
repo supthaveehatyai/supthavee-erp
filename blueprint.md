@@ -1,6 +1,6 @@
 # System Blueprint: Supthavee ERP SuperApp
 
-**Version:** 6.2 (Net Profit Engine & WHT Foundation Enforced)
+**Version:** 6.4 (Phase 7 Kanban Completed, pg_cron Archive, Audit Trail Upgraded)
 
 **Company:** บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด
 
@@ -42,6 +42,7 @@
 *   **Document Lineage:** รองรับการแปลงเอกสาร (เช่น QT -> INV_DO) พร้อมผูก `ref_document_id` อ้างอิงกลับไปยังเอกสารต้นทางเสมอ
 *   **URL-Based State Filter:** ระบบค้นหาและกรองประวัติเอกสารใช้ URL Search Parameters แทน React State
 *   **Print Layout A4:** รองรับการสั่งพิมพ์เป็นเอกสารบิล (A4) ผ่าน Browser ด้วย CSS `@media print` พร้อมซ่อน Navbar/Sidebar อัตโนมัติ
+*   **Rounding Difference Logic (GAAP):** รองรับการทำ Manual Override ยอด Grand Total เพื่อแก้ปัญหา Decimal Leakage ตามหลักบัญชี และบันทึกส่วนต่างลง `rounding_difference`
 
 ### Module C: Smart Procurement & Inventory (ระบบจัดซื้อและคลังสินค้า)
 *   **Strict Server-Side Fetching:** บังคับใช้ Server Actions ร่วมกับ Service Role Key (supabaseAdmin) 100% หลีกเลี่ยงปัญหา RLS
@@ -49,7 +50,7 @@
 *   **Smart Goods Receipt (AI OCR):** อัปโหลดรูปบิลเข้า -> AI OCR สกัด `raw_vendor_sku`, ส่วนลด, ภาษี, `document_number`, `document_date`
 *   **Duplicate Invoice Early Warning:** ระบบตรวจสอบและดักจับบิลซ้ำซ้อนผ่าน Composite Key (`vendor_id` + `document_number` + `document_date`)
 *   **On-the-fly Vendor Mapping & Quick Create:** ตรวจสอบและ UPSERT Mapping อัตโนมัติ รองรับการสร้าง SKU ใหม่กลางอากาศ (Quick Create)
-*   **Net Cost Apportionment Engine:** ประมวลผลคำนวณราคาตั้ง ของแถม (FOC) และส่วนลดท้ายบิลแบบสัดส่วน (Prorate)
+*   **Net Cost Apportionment Engine:** ประมวลผลคำนวณราคาตั้ง ของแถม (FOC) และส่วนลดท้ายบิลแบบสัดส่วน (Prorate) พร้อมความละเอียดต้นทุน 4 ทศนิยม
 *   **LPP Auto-Update:** ระบบอัปเดตต้นทุนสั่งซื้อล่าสุด (Last Purchase Price) ทับใน `products.cost_price` อัตโนมัติ
 *   **Inventory Ledger:** ห้ามแก้สต็อกที่ตาราง Products ตรงๆ ต้องบันทึกเข้า-ออกผ่าน `inventory_ledger` เสมอ
 
@@ -67,10 +68,14 @@
 ### Module E: Dashboard & Audit (ระบบรายงานและความปลอดภัย) 
 *   **Executive Dashboard:** หน้าจอสรุปยอดขาย (YTD) และยอดหนี้คงค้าง (AR/AP) แบบ Real-time
 *   **System Audit Trail:** ระบบบันทึกประวัติการเปลี่ยนแปลงข้อมูลสำคัญระดับ Database (JSONB Log)
+*   **Audit Trail Parsing:** รองรับระบบ Human-Readable แปลงโครงสร้าง JSONB (old_data/new_data) ให้อ่านง่าย เพื่อแสดงความแตกต่าง (Diff) อัตโนมัติ
 
-### Module F: Inventory UI & Production Workflow (ระบบคลังสินค้าและสายการผลิต) - [⏳ Planned]
-*   **Stock Card UI:** หน้าจอสำหรับตรวจสอบการเคลื่อนไหวของสินค้า เข้า-ออก ผ่าน `inventory_ledger`
-*   **Service Workflow Kanban:** ระบบติดตามสถานะงานบริการ (ปัก/สกรีน/เย็บ) ตั้งแต่รับงานจนถึงส่งมอบ
+### Module F: Inventory UI & Production Workflow (ระบบคลังสินค้าและสายการผลิต) - [✅ Completed]
+*   **Stock Card UI:** สมุดบัญชีคลังสินค้า จัดกลุ่มตาม Brand -> Model -> Color -> Size ค้นหาผ่าน URL-Driven เรียงลำดับตามน้ำหนักไซส์ (`sort_order`) แสดงยอดยกมา รับเข้า จ่ายออก ผ่าน Slide-over Sheet
+*   **Service Workflow Kanban:** กระดานบอร์ด Kanban 5 สถานะ สำหรับงาน MTO รองรับระบบ Drag & Drop ย้ายสถานะแบบ Real-time
+*   **Production Attachment:** รองรับการแนบไฟล์ภาพ Mockup โลโก้ เข้าสู่ `Supabase Storage (production_attachments)` เพื่อให้ฝ่ายผลิตดูเป็นแบบอ้างอิง
+*   **Job Details & Cancellation:** ระบบเปิดดูรายละเอียดใบงานผ่าน URL-Driven Sheet พร้อมปุ่มกดยกเลิกงาน (CANCELLED)
+*   **Kanban Auto-Archive:** ใช้ `pg_cron` สร้าง Schedule Job รันทุกคืนเพื่อซ่อนการ์ดที่ 'DELIVERED' และ 'CANCELLED' ที่มีอายุเกิน 7 วันอัตโนมัติ
 
 ### Module G: Expense Management (ระบบจัดการค่าใช้จ่าย) - [✅ Completed]
 *   **Expense Records:** ฟอร์มบันทึกค่าใช้จ่ายดำเนินงาน (OPEX) พร้อมระบบแนบใบเสร็จ รองรับ Late Numbering และ Document Lifecycle (DRAFT/ISSUED/VOID) มาตรฐานเดียวกับระบบหลัก
@@ -79,13 +84,15 @@
 *   **Withholding Tax (WHT) Foundation:** โครงสร้างคำนวณหัก ณ ที่จ่าย หาค่า `net_payable` อัตโนมัติ พร้อมรองรับแนบสลิปโอนเงิน (Payment Slip)
 *   **True Net Profit Engine:** Dashboard ดึง OPEX ไปหักลบ Gross Profit เพื่อแสดงกำไรสุทธิแบบ Real-time
 
-### Module H: Tax & WHT Management (ระบบจัดการภาษีหัก ณ ที่จ่าย) - [🔥 Current Phase]
+### Module H: Tax & WHT Management (ระบบจัดการภาษีหัก ณ ที่จ่าย) - [✅ Completed]
 *   **WHT Report:** หน้าต่างรายงานสรุปยอดภาษีหัก ณ ที่จ่ายประจำเดือน แยกตามประเภท (1%, 2%, 3%, 5%)
 *   **Tax Compliance Export:** ระบบตรวจสอบความถูกต้อง Master Data (Tax ID, ที่อยู่) และสร้างไฟล์ Excel แบบฟอร์ม ภ.ง.ด.3 / ภ.ง.ด.53
-*   **50 Tawi Generation:** ระบบพิมพ์หนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) เป็น PDF
+*   **50 Tawi Generation:** ระบบพิมพ์หนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) เป็น PDF รองรับการแปลงตัวอักษรภาษาไทย (Thai Baht Text)
 
-### Module I: Data Backup & Restore (ระบบสำรองและฟื้นฟูข้อมูล) - [⏳ Planned]
-*   Automated PostgreSQL Dump & Storage Backup / Point-in-time Recovery
+### Module I: Data Backup & System Environment (ระบบสำรองและตั้งค่า) - [🔥 Current Phase]
+*   **Master Data Seed:** ระบบดึงข้อมูล Master Data สู่ไฟล์ `seed.sql` ผ่านสคริปต์ `generate-seed.mjs` (--column-inserts) เพื่อความเสถียรในการ Reset ฐานข้อมูล
+*   **System Settings:** ตาราง `system_settings` สำหรับตั้งค่าตัวแปรระดับ Global (เช่น รหัสผังบัญชีรายได้/ค่าใช้จ่ายเบ็ดเตล็ด)
+*   **Disaster Recovery:** สคริปต์อัตโนมัติสำหรับ Backup ฐานข้อมูล PostgreSQL และ Storage
 
 ## 5. Database Schema (PostgreSQL for Supabase)
-*(Schema ตาม Blueprint v6.2 ครอบคลุมตาราง expenses, expense_categories และ audit_logs)*
+*(Schema ตาม Blueprint v6.4 ครอบคลุมตาราง expenses, expense_categories, audit_logs, production_jobs และ system_settings)*

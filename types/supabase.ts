@@ -1206,33 +1206,39 @@ export type Database = {
       }
       production_jobs: {
         Row: {
+          attachment_paths: string[]
           created_at: string | null
           details: string | null
           document_id: string | null
           due_date: string | null
           id: string
+          is_archived: boolean
           job_no: string
           job_type: Database["public"]["Enums"]["production_job_type"]
           status: Database["public"]["Enums"]["production_job_status"]
           updated_at: string | null
         }
         Insert: {
+          attachment_paths?: string[]
           created_at?: string | null
           details?: string | null
           document_id?: string | null
           due_date?: string | null
           id?: string
+          is_archived?: boolean
           job_no: string
           job_type?: Database["public"]["Enums"]["production_job_type"]
           status?: Database["public"]["Enums"]["production_job_status"]
           updated_at?: string | null
         }
         Update: {
+          attachment_paths?: string[]
           created_at?: string | null
           details?: string | null
           document_id?: string | null
           due_date?: string | null
           id?: string
+          is_archived?: boolean
           job_no?: string
           job_type?: Database["public"]["Enums"]["production_job_type"]
           status?: Database["public"]["Enums"]["production_job_status"]
@@ -1487,6 +1493,7 @@ export type Database = {
         | "QC"
         | "READY_TO_SHIP"
         | "DELIVERED"
+        | "CANCELLED"
       production_job_type: "SCREEN" | "EMBROIDERY" | "SEWING" | "OTHER"
       vat_calculation_type: "NONE" | "INCLUSIVE" | "EXCLUSIVE"
     }
@@ -1667,6 +1674,7 @@ export const Constants = {
         "QC",
         "READY_TO_SHIP",
         "DELIVERED",
+        "CANCELLED",
       ],
       production_job_type: ["SCREEN", "EMBROIDERY", "SEWING", "OTHER"],
       vat_calculation_type: ["NONE", "INCLUSIVE", "EXCLUSIVE"],

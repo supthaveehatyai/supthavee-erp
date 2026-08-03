@@ -3,12 +3,12 @@ import { LayoutDashboard } from "lucide-react";
 import {
   getPendingAP,
   getPendingAR,
-  getRecentAuditLogs,
   getYTDExpenses,
   getYTDSales,
-  type GetRecentAuditLogsResult,
-  type KpiMoneyResult,
 } from "@/app/actions/dashboard";
+import { getRecentAuditLogs } from "@/lib/actions/audit-actions";
+import type { GetRecentAuditLogsResult } from "@/types/audit";
+import type { KpiMoneyResult } from "@/types/dashboard";
 import { ExecutiveDashboard } from "./executive-dashboard";
 
 export const dynamic = "force-dynamic";

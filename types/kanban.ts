@@ -9,13 +9,16 @@ export type ProductionJobType =
 export type ProductionJobStatus =
   Database["public"]["Enums"]["production_job_status"];
 
-export const KANBAN_STATUSES: ProductionJobStatus[] = [
+/** Active Kanban columns — CANCELLED is excluded from the board */
+export const KANBAN_STATUSES = [
   "TODO",
   "IN_PROGRESS",
   "QC",
   "READY_TO_SHIP",
   "DELIVERED",
-];
+] as const satisfies readonly ProductionJobStatus[];
+
+export type KanbanColumnStatus = (typeof KANBAN_STATUSES)[number];
 
 export type ProductionJobCard = {
   id: string;
@@ -24,6 +27,8 @@ export type ProductionJobCard = {
   status: ProductionJobStatus;
   due_date: string | null;
   details: string | null;
+  /** Public URLs / storage paths of mockup images */
+  attachment_paths: string[];
   created_at: string | null;
   updated_at: string | null;
   document_id: string | null;
@@ -34,7 +39,7 @@ export type ProductionJobCard = {
 };
 
 export type ProductionJobsByStatus = Record<
-  ProductionJobStatus,
+  KanbanColumnStatus,
   ProductionJobCard[]
 >;
 
@@ -47,12 +52,46 @@ export type UpdateJobStatusResult = {
   error: string | null;
 };
 
+export type CancelProductionJobResult = {
+  success: boolean;
+  error: string | null;
+  data: { id: string; job_no: string } | null;
+};
+
+export type ProductionJobLineItem = {
+  id: string;
+  sku: string;
+  name: string;
+  qty: number;
+  uom: string | null;
+  color: string | null;
+  size: string | null;
+  description: string | null;
+};
+
+export type ProductionJobDetails = ProductionJobCard & {
+  line_items: ProductionJobLineItem[];
+};
+
+export type GetJobDetailsResult =
+  | { success: true; data: ProductionJobDetails }
+  | { success: false; error: string; data: null };
+
 export const PRODUCTION_JOB_TYPES: ProductionJobType[] = [
   "SCREEN",
   "EMBROIDERY",
   "SEWING",
   "OTHER",
 ];
+
+export const JOB_STATUS_LABEL: Record<ProductionJobStatus, string> = {
+  TODO: "รอดำเนินการ",
+  IN_PROGRESS: "กำลังทำ",
+  QC: "ตรวจคุณภาพ",
+  READY_TO_SHIP: "พร้อมส่งมอบ",
+  DELIVERED: "ส่งมอบแล้ว",
+  CANCELLED: "ยกเลิกแล้ว",
+};
 
 export type CreateProductionJobInput = {
   document_id: string;
@@ -64,5 +103,5 @@ export type CreateProductionJobInput = {
 export type CreateProductionJobResult = {
   success: boolean;
   error: string | null;
-  data: { id: string; job_no: string } | null;
+  data: { id: string; job_no: string; attachment_count?: number } | null;
 };

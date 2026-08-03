@@ -10,15 +10,36 @@ import { createClient } from "@/lib/supabase/server-admin";
 import {
   KANBAN_STATUSES,
   PRODUCTION_JOB_TYPES,
-  type CreateProductionJobInput,
+  type CancelProductionJobResult,
   type CreateProductionJobResult,
+  type GetJobDetailsResult,
   type GetProductionJobsResult,
+  type KanbanColumnStatus,
   type ProductionJobCard,
+  type ProductionJobDetails,
+  type ProductionJobLineItem,
   type ProductionJobStatus,
   type ProductionJobType,
   type ProductionJobsByStatus,
   type UpdateJobStatusResult,
 } from "@/types/kanban";
+
+const PRODUCTION_ATTACHMENTS_BUCKET = "production_attachments";
+/** Sales doc types ที่ส่งเข้าสายผลิต (MTO) ได้ */
+const MTO_ELIGIBLE_DOC_TYPES = new Set([
+  "TAX_INV",
+  "ABB",
+  "CS_TAX",
+  "INV_DO",
+]);
+const ALLOWED_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+]);
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENTS = 8;
 
 type ContactJoin = {
   company_name?: string | null;
@@ -37,6 +58,7 @@ type ProductionJobRow = {
   status: ProductionJobStatus;
   due_date: string | null;
   details: string | null;
+  attachment_paths: string[] | null;
   created_at: string | null;
   updated_at: string | null;
   document_id: string | null;
@@ -60,28 +82,125 @@ function emptyBoard(): ProductionJobsByStatus {
   };
 }
 
-function isProductionJobStatus(value: string): value is ProductionJobStatus {
-  return (KANBAN_STATUSES as string[]).includes(value);
+function isKanbanColumnStatus(value: string): value is KanbanColumnStatus {
+  return (KANBAN_STATUSES as readonly string[]).includes(value);
 }
 
 function isProductionJobType(value: string): value is ProductionJobType {
   return (PRODUCTION_JOB_TYPES as string[]).includes(value);
 }
 
-/** PROD-YYMM-XXXX (Bangkok calendar + short UUID) */
-function generateProductionJobNo(): string {
+function bangkokYyMm(): { yy: string; mm: string } {
   const ymd = new Date().toLocaleDateString("en-CA", {
     timeZone: "Asia/Bangkok",
-  }); // YYYY-MM-DD
-  const yy = ymd.slice(2, 4);
-  const mm = ymd.slice(5, 7);
-  const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 4).toUpperCase();
-  return `PROD-${yy}${mm}-${suffix}`;
+  });
+  return { yy: ymd.slice(2, 4), mm: ymd.slice(5, 7) };
+}
+
+function sanitizeFileName(name: string): string {
+  return name
+    .replace(/[^\w.\-ก-๙]+/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, 80);
+}
+
+function collectAttachmentFiles(formData: FormData): File[] {
+  const files: File[] = [];
+  for (const value of formData.getAll("attachments")) {
+    if (value instanceof File && value.size > 0 && value.name) {
+      files.push(value);
+    }
+  }
+  return files;
+}
+
+/**
+ * JOB-YYMM-XXXX — running number ต่อเดือน (Bangkok)
+ */
+async function nextProductionJobNo(
+  supabase: ReturnType<typeof createClient>,
+): Promise<string> {
+  const { yy, mm } = bangkokYyMm();
+  const prefix = `JOB-${yy}${mm}-`;
+
+  const { data, error } = await supabase
+    .from("production_jobs")
+    .select("job_no")
+    .like("job_no", `${prefix}%`)
+    .order("job_no", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    const suffix = crypto
+      .randomUUID()
+      .replace(/-/g, "")
+      .slice(0, 4)
+      .toUpperCase();
+    return `${prefix}${suffix}`;
+  }
+
+  let seq = 1;
+  const latest = data?.[0]?.job_no ?? "";
+  const match = latest.match(/JOB-\d{4}-(\d+)$/i);
+  if (match?.[1]) {
+    const n = Number(match[1]);
+    if (Number.isFinite(n) && n > 0) seq = n + 1;
+  }
+
+  return `${prefix}${String(seq).padStart(4, "0")}`;
+}
+
+async function uploadProductionAttachments(
+  supabase: ReturnType<typeof createClient>,
+  jobNo: string,
+  files: File[],
+): Promise<{ paths: string[]; error: string | null }> {
+  const paths: string[] = [];
+
+  for (const file of files) {
+    const mimeType = (file.type || "").toLowerCase();
+    if (mimeType && !ALLOWED_MIME_TYPES.has(mimeType)) {
+      return {
+        paths: [],
+        error: `ประเภทไฟล์ไม่รองรับ (${mimeType || "unknown"}) — ใช้ JPG/PNG/WEBP`,
+      };
+    }
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      return { paths: [], error: `ไฟล์ ${file.name} ใหญ่เกิน 10MB` };
+    }
+
+    const safeName = sanitizeFileName(file.name || "image.jpg");
+    const objectPath = `${jobNo}-${Date.now()}-${safeName}`;
+    const buffer = Buffer.from(await file.arrayBuffer());
+
+    const { error: uploadError } = await supabase.storage
+      .from(PRODUCTION_ATTACHMENTS_BUCKET)
+      .upload(objectPath, buffer, {
+        contentType: mimeType || "image/jpeg",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      return {
+        paths: [],
+        error: uploadError.message ?? `อัปโหลด ${file.name} ไม่สำเร็จ`,
+      };
+    }
+
+    const { data: publicData } = supabase.storage
+      .from(PRODUCTION_ATTACHMENTS_BUCKET)
+      .getPublicUrl(objectPath);
+
+    const url = publicData?.publicUrl?.trim();
+    // Store public URL for Kanban thumbnails (bucket is public)
+    paths.push(url || objectPath);
+  }
+
+  return { paths, error: null };
 }
 
 /**
  * ดึงใบสั่งผลิตทั้งหมดสำหรับบอร์ด Kanban
- * Join documents.doc_no + contacts.company_name แล้วจัดกลุ่มตาม status
  */
 export async function getProductionJobs(): Promise<GetProductionJobsResult> {
   try {
@@ -97,6 +216,7 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
         status,
         due_date,
         details,
+        attachment_paths,
         created_at,
         updated_at,
         document_id,
@@ -109,6 +229,7 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
         )
       `,
       )
+      .eq("is_archived", false)
       .order("due_date", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
 
@@ -132,6 +253,9 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
         status: row.status,
         due_date: row.due_date,
         details: row.details,
+        attachment_paths: Array.isArray(row.attachment_paths)
+          ? row.attachment_paths.filter(Boolean)
+          : [],
         created_at: row.created_at,
         updated_at: row.updated_at,
         document_id: row.document_id,
@@ -140,13 +264,13 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
       };
     });
 
+    // Active board only — CANCELLED jobs are hidden from columns
+    const active = flat.filter((job) => job.status !== "CANCELLED");
+
     const byStatus = emptyBoard();
-    for (const job of flat) {
-      const bucket = byStatus[job.status];
-      if (bucket) {
-        bucket.push(job);
-      } else {
-        byStatus.TODO.push(job);
+    for (const job of active) {
+      if (isKanbanColumnStatus(job.status)) {
+        byStatus[job.status].push(job);
       }
     }
 
@@ -154,7 +278,7 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
       byStatus[status] = byStatus[status] ?? [];
     }
 
-    return { success: true, data: byStatus, flat };
+    return { success: true, data: byStatus, flat: active };
   } catch (err) {
     return {
       success: false,
@@ -164,27 +288,47 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
   }
 }
 
+/** Alias ตามสเปก E2E */
+export async function getKanbanBoardData(): Promise<GetProductionJobsResult> {
+  return getProductionJobs();
+}
+
 /**
- * สร้างใบสั่งผลิตจากบิลขาย (MTO) — status เริ่มต้น TODO
+ * สร้างใบสั่งผลิตจากเอกสารขาย (TAX_INV / ABB / CS_TAX / INV_DO) พร้อมแนบรูป Mockup
+ *
+ * Fields: documentId | document_id, jobType | job_type,
+ * description | details, targetDate | due_date, attachments (File[])
  */
 export async function createProductionJob(
-  data: CreateProductionJobInput,
+  formData: FormData,
 ): Promise<CreateProductionJobResult> {
-  const documentId = data.document_id?.trim() ?? "";
-  if (!documentId) {
-    return { success: false, error: "ไม่พบรหัสเอกสาร (document_id)", data: null };
-  }
+  const documentId = String(
+    formData.get("documentId") ?? formData.get("document_id") ?? "",
+  ).trim();
+  const jobTypeRaw = String(
+    formData.get("jobType") ?? formData.get("job_type") ?? "OTHER",
+  )
+    .trim()
+    .toUpperCase();
+  const details = String(
+    formData.get("description") ?? formData.get("details") ?? "",
+  ).trim();
+  const dueDate = String(
+    formData.get("targetDate") ?? formData.get("due_date") ?? "",
+  )
+    .trim()
+    .slice(0, 10);
 
-  const jobTypeRaw = data.job_type?.trim().toUpperCase() ?? "";
+  if (!documentId) {
+    return { success: false, error: "ไม่พบรหัสเอกสาร (documentId)", data: null };
+  }
   if (!isProductionJobType(jobTypeRaw)) {
     return {
       success: false,
-      error: `ประเภทงานไม่ถูกต้อง: ${data.job_type || "(ว่าง)"}`,
+      error: `ประเภทงานไม่ถูกต้อง: ${jobTypeRaw || "(ว่าง)"}`,
       data: null,
     };
   }
-
-  const dueDate = data.due_date?.trim().slice(0, 10) ?? "";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
     return {
       success: false,
@@ -192,12 +336,19 @@ export async function createProductionJob(
       data: null,
     };
   }
-
-  const details = data.details?.trim() ?? "";
   if (!details) {
     return {
       success: false,
       error: "กรุณาระบุรายละเอียดคำสั่งทำ",
+      data: null,
+    };
+  }
+
+  const files = collectAttachmentFiles(formData);
+  if (files.length > MAX_ATTACHMENTS) {
+    return {
+      success: false,
+      error: `แนบรูปได้สูงสุด ${MAX_ATTACHMENTS} ไฟล์`,
       data: null,
     };
   }
@@ -207,7 +358,7 @@ export async function createProductionJob(
 
     const { data: doc, error: docError } = await supabase
       .from("documents")
-      .select("id, doc_no, status")
+      .select("id, doc_no, doc_type, status")
       .eq("id", documentId)
       .maybeSingle();
 
@@ -221,6 +372,13 @@ export async function createProductionJob(
     if (!doc) {
       return { success: false, error: "ไม่พบเอกสารต้นทางในระบบ", data: null };
     }
+    if (!MTO_ELIGIBLE_DOC_TYPES.has(doc.doc_type)) {
+      return {
+        success: false,
+        error: `ส่งงานผลิตได้เฉพาะ TAX_INV / ABB / CS_TAX / INV_DO (ปัจจุบัน: ${doc.doc_type})`,
+        data: null,
+      };
+    }
     if (doc.status !== "ISSUED") {
       return {
         success: false,
@@ -229,10 +387,46 @@ export async function createProductionJob(
       };
     }
 
-    // Retry on rare job_no unique collision
+    const { data: existing, error: existingError } = await supabase
+      .from("production_jobs")
+      .select("id, job_no, status")
+      .eq("document_id", documentId)
+      .neq("status", "CANCELLED")
+      .limit(1)
+      .maybeSingle();
+
+    if (existingError) {
+      return {
+        success: false,
+        error: existingError.message ?? "ตรวจสอบใบงานซ้ำไม่สำเร็จ",
+        data: null,
+      };
+    }
+    if (existing) {
+      return {
+        success: false,
+        error: `เอกสารนี้มีใบสั่งผลิตแล้ว (${existing.job_no} · ${existing.status})`,
+        data: null,
+      };
+    }
+
     let lastError: string | null = null;
     for (let attempt = 0; attempt < 5; attempt++) {
-      const jobNo = generateProductionJobNo();
+      const jobNo = await nextProductionJobNo(supabase);
+
+      let attachmentPaths: string[] = [];
+      if (files.length > 0) {
+        const uploaded = await uploadProductionAttachments(
+          supabase,
+          jobNo,
+          files,
+        );
+        if (uploaded.error) {
+          return { success: false, error: uploaded.error, data: null };
+        }
+        attachmentPaths = uploaded.paths;
+      }
+
       const { data: created, error: insertError } = await supabase
         .from("production_jobs")
         .insert({
@@ -242,6 +436,7 @@ export async function createProductionJob(
           status: "TODO",
           due_date: dueDate,
           details,
+          attachment_paths: attachmentPaths,
         })
         .select("id, job_no")
         .maybeSingle();
@@ -252,12 +447,15 @@ export async function createProductionJob(
         return {
           success: true,
           error: null,
-          data: { id: created.id, job_no: created.job_no },
+          data: {
+            id: created.id,
+            job_no: created.job_no,
+            attachment_count: attachmentPaths.length,
+          },
         };
       }
 
       lastError = insertError?.message ?? "สร้างใบสั่งผลิตไม่สำเร็จ";
-      // Unique violation on job_no → retry
       if (insertError?.code !== "23505") {
         break;
       }
@@ -285,8 +483,12 @@ export async function updateJobStatus(
     return { success: false, error: "ไม่พบรหัสงาน (jobId)" };
   }
 
-  const status = newStatus?.trim() ?? "";
-  if (!isProductionJobStatus(status)) {
+  const normalized =
+    newStatus?.trim() === "READY_FOR_DELIVERY"
+      ? "READY_TO_SHIP"
+      : (newStatus?.trim() ?? "");
+
+  if (!isKanbanColumnStatus(normalized)) {
     return {
       success: false,
       error: `สถานะไม่ถูกต้อง: ${newStatus || "(ว่าง)"}`,
@@ -295,10 +497,36 @@ export async function updateJobStatus(
 
   try {
     const supabase = createClient();
+
+    const { data: current, error: currentError } = await supabase
+      .from("production_jobs")
+      .select("id, status")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (currentError) {
+      return {
+        success: false,
+        error: currentError.message ?? "ตรวจสอบสถานะงานไม่สำเร็จ",
+      };
+    }
+    if (!current) {
+      return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ" };
+    }
+    if (current.status === "CANCELLED") {
+      return { success: false, error: "งานถูกยกเลิกแล้ว ไม่สามารถย้ายสถานะได้" };
+    }
+    if (current.status === "DELIVERED" && normalized !== "DELIVERED") {
+      return {
+        success: false,
+        error: "งานส่งมอบแล้ว — ไม่สามารถย้ายกลับได้",
+      };
+    }
+
     const { data, error } = await supabase
       .from("production_jobs")
       .update({
-        status,
+        status: normalized,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)
@@ -321,6 +549,252 @@ export async function updateJobStatus(
     return {
       success: false,
       error: err instanceof Error ? err.message : "อัปเดตสถานะงานไม่สำเร็จ",
+    };
+  }
+}
+
+/**
+ * ดึงรายละเอียดใบสั่งผลิตสำหรับ Job Detail Sheet
+ * รวมลูกค้า + รายการสินค้าจากเอกสารต้นทาง (document_items → products)
+ */
+export async function getJobDetails(
+  jobId: string,
+): Promise<GetJobDetailsResult> {
+  const id = jobId?.trim() ?? "";
+  if (!id) {
+    return { success: false, error: "ไม่พบรหัสงาน (jobId)", data: null };
+  }
+
+  try {
+    const supabase = createClient();
+
+    const { data: job, error: jobError } = await supabase
+      .from("production_jobs")
+      .select(
+        `
+        id,
+        job_no,
+        job_type,
+        status,
+        due_date,
+        details,
+        attachment_paths,
+        created_at,
+        updated_at,
+        document_id,
+        documents!production_jobs_document_id_fkey (
+          id,
+          doc_no,
+          contacts!documents_contact_id_fkey (
+            company_name
+          )
+        )
+      `,
+      )
+      .eq("id", id)
+      .maybeSingle();
+
+    if (jobError) {
+      return {
+        success: false,
+        error: jobError.message ?? "ดึงรายละเอียดงานไม่สำเร็จ",
+        data: null,
+      };
+    }
+    if (!job) {
+      return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ", data: null };
+    }
+
+    const row = job as ProductionJobRow;
+    const doc = unwrapJoin(row.documents);
+    const contact = unwrapJoin(doc?.contacts ?? null);
+
+    let lineItems: ProductionJobLineItem[] = [];
+
+    if (row.document_id) {
+      const { data: items, error: itemsError } = await supabase
+        .from("document_items")
+        .select(
+          `
+          id,
+          qty,
+          description,
+          uom_used,
+          sort_order,
+          products!document_items_product_id_fkey (
+            id,
+            sku,
+            name,
+            short_name,
+            color,
+            size
+          )
+        `,
+        )
+        .eq("document_id", row.document_id)
+        .order("sort_order", { ascending: true });
+
+      if (itemsError) {
+        return {
+          success: false,
+          error: itemsError.message ?? "ดึงรายการสินค้าไม่สำเร็จ",
+          data: null,
+        };
+      }
+
+      type ItemRow = {
+        id: string;
+        qty: number;
+        description: string | null;
+        uom_used: string | null;
+        products:
+          | {
+              id?: string;
+              sku?: string | null;
+              name?: string | null;
+              short_name?: string | null;
+              color?: string | null;
+              size?: string | null;
+            }
+          | {
+              id?: string;
+              sku?: string | null;
+              name?: string | null;
+              short_name?: string | null;
+              color?: string | null;
+              size?: string | null;
+            }[]
+          | null;
+      };
+
+      lineItems = ((items as ItemRow[] | null) ?? []).map((item) => {
+        const product = unwrapJoin(item.products);
+        const sku = product?.sku?.trim() || "—";
+        const name =
+          product?.name?.trim() ||
+          product?.short_name?.trim() ||
+          item.description?.trim() ||
+          "ไม่ระบุสินค้า";
+
+        return {
+          id: item.id,
+          sku,
+          name,
+          qty: Number(item.qty) || 0,
+          uom: item.uom_used?.trim() || null,
+          color: product?.color?.trim() || null,
+          size: product?.size?.trim() || null,
+          description: item.description?.trim() || null,
+        };
+      });
+    }
+
+    const details: ProductionJobDetails = {
+      id: row.id,
+      job_no: row.job_no,
+      job_type: row.job_type,
+      status: row.status,
+      due_date: row.due_date,
+      details: row.details,
+      attachment_paths: Array.isArray(row.attachment_paths)
+        ? row.attachment_paths.filter(Boolean)
+        : [],
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      document_id: row.document_id,
+      document_no: doc?.doc_no?.trim() || null,
+      customer_name: contact?.company_name?.trim() || null,
+      line_items: lineItems,
+    };
+
+    return { success: true, data: details };
+  } catch (err) {
+    return {
+      success: false,
+      error:
+        err instanceof Error ? err.message : "ดึงรายละเอียดงานไม่สำเร็จ",
+      data: null,
+    };
+  }
+}
+
+/**
+ * ยกเลิกใบสั่งผลิต (status → CANCELLED) — ไม่สามารถยกเลิกงานที่ส่งมอบแล้ว
+ */
+export async function cancelProductionJob(
+  jobId: string,
+): Promise<CancelProductionJobResult> {
+  const id = jobId?.trim() ?? "";
+  if (!id) {
+    return { success: false, error: "ไม่พบรหัสงาน (jobId)", data: null };
+  }
+
+  try {
+    const supabase = createClient();
+
+    const { data: current, error: currentError } = await supabase
+      .from("production_jobs")
+      .select("id, job_no, status")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (currentError) {
+      return {
+        success: false,
+        error: currentError.message ?? "ตรวจสอบใบสั่งผลิตไม่สำเร็จ",
+        data: null,
+      };
+    }
+    if (!current) {
+      return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ", data: null };
+    }
+    if (current.status === "CANCELLED") {
+      return {
+        success: false,
+        error: `งาน ${current.job_no} ถูกยกเลิกไปแล้ว`,
+        data: null,
+      };
+    }
+    if (current.status === "DELIVERED") {
+      return {
+        success: false,
+        error: `งาน ${current.job_no} ส่งมอบแล้ว — ไม่สามารถยกเลิกได้`,
+        data: null,
+      };
+    }
+
+    const { data: updated, error: updateError } = await supabase
+      .from("production_jobs")
+      .update({
+        status: "CANCELLED",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select("id, job_no")
+      .maybeSingle();
+
+    if (updateError) {
+      return {
+        success: false,
+        error: updateError.message ?? "ยกเลิกงานไม่สำเร็จ",
+        data: null,
+      };
+    }
+    if (!updated) {
+      return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ", data: null };
+    }
+
+    revalidatePath("/production/kanban");
+    return {
+      success: true,
+      error: null,
+      data: { id: updated.id, job_no: updated.job_no },
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "ยกเลิกงานไม่สำเร็จ",
+      data: null,
     };
   }
 }
