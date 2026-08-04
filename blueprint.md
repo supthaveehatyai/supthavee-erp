@@ -1,6 +1,6 @@
 # System Blueprint: Supthavee ERP SuperApp
 
-**Version:** 6.4 (Phase 7 Kanban Completed, pg_cron Archive, Audit Trail Upgraded)
+**Version:** 7.0 (Phase 9 Backup/Restore Completed, Pre-Go-Live Hardening Initiated)
 
 **Company:** บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด
 
@@ -89,10 +89,17 @@
 *   **Tax Compliance Export:** ระบบตรวจสอบความถูกต้อง Master Data (Tax ID, ที่อยู่) และสร้างไฟล์ Excel แบบฟอร์ม ภ.ง.ด.3 / ภ.ง.ด.53
 *   **50 Tawi Generation:** ระบบพิมพ์หนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) เป็น PDF รองรับการแปลงตัวอักษรภาษาไทย (Thai Baht Text)
 
-### Module I: Data Backup & System Environment (ระบบสำรองและตั้งค่า) - [🔥 Current Phase]
+### Module I: Data Backup & System Environment (ระบบสำรองและตั้งค่า) - [✅ Completed]
 *   **Master Data Seed:** ระบบดึงข้อมูล Master Data สู่ไฟล์ `seed.sql` ผ่านสคริปต์ `generate-seed.mjs` (--column-inserts) เพื่อความเสถียรในการ Reset ฐานข้อมูล
-*   **System Settings:** ตาราง `system_settings` สำหรับตั้งค่าตัวแปรระดับ Global (เช่น รหัสผังบัญชีรายได้/ค่าใช้จ่ายเบ็ดเตล็ด)
-*   **Disaster Recovery:** สคริปต์อัตโนมัติสำหรับ Backup ฐานข้อมูล PostgreSQL และ Storage
+*   **Disaster Recovery (Database):** สคริปต์อัตโนมัติ `backup-db.mjs` สำหรับสำรองโครงสร้าง PostgreSQL ด้วย `pg_dump` ยิงตรงผ่านพอร์ต 5432 (Pooler) และบีบอัดเป็น `.sql.gz` ผ่าน Node.js Streams
+*   **Disaster Recovery (Storage):** สคริปต์อัตโนมัติ `backup-storage.mjs` ดูดไฟล์จาก Supabase Storage โดยใช้ S3-Compatible API (AWS SDK)
+*   **Manual Trigger & Audit:** ระบบกด Backup แบบ On-demand ผ่าน Server Actions (Zero Client-Side) คุมสิทธิ์ระดับ Admin และบันทึกประวัติลง `audit_logs` อัตโนมัติ
+
+### Module J: Pre-Go-Live Readiness & System Hardening (เตรียมความพร้อมก่อนขึ้นระบบจริง) - [🔥 Current Focus]
+*   **Phase 10 (Enterprise Foundation & Security):** การจัดการ Global Standard & UI Pattern Library (ล็อกใน `.cursorrules`), ระบบตารางตั้งค่าบริษัท (`system_settings`), Authentication และ Role-Based Access Control (RBAC), การจัดการ Sidebar ตามสิทธิ์
+*   **Phase 11 (Operational Refinement):** การแสดงรูปสินค้า Thumbnail ในรายการเปิดบิล (Visual Verification), การปรับปรุง Document Templates (ดึงข้อมูลบริษัทอัตโนมัติและอิง TFRS)
+*   **Phase 12 (Knowledge Management & UAT):** จัดทำคู่มือมาตรฐานระบบ (Taxonomy & Document Lineage), กระบวนการ Data Seeding, การทดสอบ User Acceptance Testing (UAT)
+*   **Phase 13 (Deployment & ALM):** การ Deploy ขึ้น Cloud, การจัดการ Application Lifecycle Management (ALM) วางแผนอัปเดตแบบ Zero-Downtime
 
 ## 5. Database Schema (PostgreSQL for Supabase)
-*(Schema ตาม Blueprint v6.4 ครอบคลุมตาราง expenses, expense_categories, audit_logs, production_jobs และ system_settings)*
+*(Schema ตาม Blueprint v7.0 ครอบคลุมตาราง expenses, expense_categories, audit_logs, production_jobs และ system_settings)*

@@ -25,6 +25,8 @@ export const AUDIT_TABLE_LABELS: Record<string, string> = {
   billing_notes: "ใบวางบิล",
   billing_note_items: "รายการใบวางบิล",
   audit_logs: "บันทึกตรวจสอบ",
+  system_backup: "สำรองข้อมูลระบบ",
+  system: "ระบบ (System)",
 };
 
 /** Critical fields shown first in UPDATE summaries */
@@ -155,6 +157,21 @@ export function parseAuditChangeSummary(
 
   if (normalized === "INSERT") {
     if (!newRec) return "สร้างรายการใหม่";
+
+    // Phase 9 — Manual Backup audit payload
+    if (newRec.action === "MANUAL_BACKUP_TRIGGERED") {
+      const status =
+        typeof newRec.status === "string" ? newRec.status : "unknown";
+      if (status === "failed") {
+        const errMsg =
+          typeof newRec.error === "string"
+            ? formatAuditValue(newRec.error)
+            : "—";
+        return `Manual Backup ล้มเหลว · ${errMsg}`;
+      }
+      return "Manual Backup สำเร็จ (Database + Storage)";
+    }
+
     const highlights: string[] = [];
     for (const key of CRITICAL_FIELDS) {
       if (newRec[key] === undefined || newRec[key] === null) continue;

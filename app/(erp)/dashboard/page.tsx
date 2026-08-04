@@ -6,6 +6,7 @@ import {
   getYTDExpenses,
   getYTDSales,
 } from "@/app/actions/dashboard";
+import { ManualBackupButton } from "@/components/dashboard/manual-backup-button";
 import { getRecentAuditLogs } from "@/lib/actions/audit-actions";
 import type { GetRecentAuditLogsResult } from "@/types/audit";
 import type { KpiMoneyResult } from "@/types/dashboard";
@@ -137,15 +138,18 @@ export default async function ExecutiveDashboardPage() {
 
   return (
     <div className="flex flex-col gap-6 p-6">
-      <div className="flex flex-col gap-2">
-        <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
-          <LayoutDashboard className="h-8 w-8 text-blue-600" />
-          Executive Dashboard
-        </h1>
-        <p className="text-slate-500">
-          ภาพรวมธุรกิจ · True Net Profit (Sales − OPEX) · Audit Trail — Phase 8
-          (Zero Client-Side Fetching)
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-2">
+          <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
+            <LayoutDashboard className="h-8 w-8 text-blue-600" />
+            Executive Dashboard
+          </h1>
+          <p className="text-slate-500">
+            ภาพรวมธุรกิจ · True Net Profit (Sales − OPEX) · Audit Trail · Manual
+            Backup — Phase 9 (Zero Client-Side Fetching)
+          </p>
+        </div>
+        <ManualBackupButton />
       </div>
 
       <ExecutiveDashboard

@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "env:check": "node -e \"const e=process.env.NODE_ENV||'development'; console.log('NODE_ENV='+e); console.log('URL='+(process.env.NEXT_PUBLIC_SUPABASE_URL||'(missing)'));\"",
-    "generate-seed": "node scripts/generate-seed.mjs"
+    "generate-seed": "node scripts/generate-seed.mjs",
+    "backup:db": "node scripts/backup/backup-db.mjs",
+    "backup:storage": "node scripts/backup/backup-storage.mjs"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
@@ -29,10 +31,12 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1102.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
