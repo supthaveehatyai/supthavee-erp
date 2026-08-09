@@ -173,6 +173,8 @@ export type SalesProductSearchItem = {
   color_name: string | null;
   size_label: string | null;
   base_uom: string | null;
+  /** Public URL จาก `product_models.image_url` (Visual Verification). */
+  image_url: string | null;
 };
 
 export type SearchProductsForSalesResult = {
@@ -193,6 +195,8 @@ export type SalesLineItem = {
   discount_text: string;
   discount_amount: number;
   line_total: number;
+  /** Snapshot จาก product_models.image_url ตอนเลือกสินค้า */
+  image_url: string | null;
 };
 
 export type CompleteDocumentLineInput = {
@@ -256,6 +260,8 @@ export type DocumentDetailItem = {
   sort_order: number;
   sku: string | null;
   product_name: string | null;
+  /** จาก products → product_models.image_url */
+  image_url: string | null;
 };
 
 /** Child document that references this row via `ref_document_id` (lineage). */

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getBillingNoteById } from "@/app/actions/billing";
 import { BillingNoteDetail } from "@/components/finance/BillingNoteDetail";
+import BillingNotePrintTemplate from "@/components/finance/BillingNotePrintTemplate";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,7 @@ export default async function BillingNoteDetailPage({ params }: PageProps) {
   return (
     <div className="flex flex-col gap-6 p-6 print:gap-0 print:p-0">
       <BillingNoteDetail document={data} />
+      <BillingNotePrintTemplate document={data} />
     </div>
   );
 }

@@ -28,6 +28,7 @@ import type {
   SalesProductSearchItem,
 } from "@/types/document";
 import SmartSkuPicker from "@/components/sales/smart-sku-picker";
+import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -81,6 +82,7 @@ function createLineFromProduct(product: SalesProductSearchItem): SalesLineItem {
     discount_text: "",
     discount_amount: 0,
     line_total: calcLineTotal(qty, unitPrice),
+    image_url: product.image_url ?? null,
   };
 }
 
@@ -97,6 +99,7 @@ function linesFromDocument(doc: DocumentDetail): SalesLineItem[] {
     discount_text: item.discount_text ?? "",
     discount_amount: Number(item.discount_amount ?? 0),
     line_total: Number(item.line_total ?? 0),
+    image_url: item.image_url ?? null,
   }));
 }
 
@@ -507,6 +510,7 @@ export default function SalesEditWorkspace({
               <TableHeader>
                 <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
                   {[
+                    "รูปภาพ",
                     "#",
                     "SKU",
                     "รายละเอียด",
@@ -529,7 +533,7 @@ export default function SalesEditWorkspace({
                 {lineItems.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={isReplacement ? 7 : 8}
+                      colSpan={isReplacement ? 8 : 9}
                       className="px-3 py-10 text-center text-sm text-slate-400"
                     >
                       ยังไม่มีรายการสินค้า
@@ -538,6 +542,12 @@ export default function SalesEditWorkspace({
                 ) : (
                   lineItems.map((row, index) => (
                     <TableRow key={row.key}>
+                      <TableCell className="px-3">
+                        <LineItemProductThumb
+                          imageUrl={row.image_url}
+                          alt={row.sku}
+                        />
+                      </TableCell>
                       <TableCell className="px-3 text-xs tabular-nums text-slate-500">
                         {index + 1}
                       </TableCell>

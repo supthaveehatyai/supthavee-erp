@@ -220,12 +220,12 @@ function SidebarContent({ closeMenu }: { closeMenu: () => void }) {
           ประวัติการทำงาน
         </Link>
         <Link
-          href="/settings"
+          href="/settings/company"
           onNavigate={closeMenu}
           className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs text-blue-200 transition hover:bg-white/10 hover:text-white"
         >
           <Icon name="settings" className="size-[18px]" />
-          ตั้งค่าระบบ
+          ตั้งค่าข้อมูลบริษัท
         </Link>
       </div>
     </>

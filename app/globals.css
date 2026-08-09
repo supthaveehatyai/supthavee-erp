@@ -39,15 +39,24 @@ a {
 /* Print — sales A4 document                                                  */
 /* -------------------------------------------------------------------------- */
 @media print {
+  /* Default fallback — PrintLayout injects size/margin via dynamic <style> */
   @page {
-    size: A4 portrait;
-    margin: 0;
+    margin: 10mm;
   }
 
   html,
   body {
     background: white !important;
     color: black !important;
+  }
+
+  /* Strip preview chrome (shadow / ring) on shared print documents */
+  .erp-print-document {
+    box-shadow: none !important;
+    background: transparent !important;
+    outline: none !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
   }
 
   /* Force page breaks between 50 ทวิ copies */
@@ -77,22 +86,35 @@ a {
   #sales-print-document,
   #payment-print-document,
   #billing-note-print-document,
-  #settlement-print-document {
+  #settlement-print-document,
+  #expense-print-document,
+  #erp-print-document,
+  .erp-print-document {
     break-inside: avoid;
   }
 
   #sales-print-document table,
   #payment-print-document table,
   #billing-note-print-document table,
-  #settlement-print-document table {
+  #settlement-print-document table,
+  #expense-print-document table,
+  #erp-print-document table,
+  .erp-print-document table {
     break-inside: auto;
   }
 
   #sales-print-document tr,
   #payment-print-document tr,
   #billing-note-print-document tr,
-  #settlement-print-document tr {
+  #settlement-print-document tr,
+  #expense-print-document tr,
+  #erp-print-document tr,
+  .erp-print-document tr {
     break-inside: avoid;
     break-after: auto;
+  }
+
+  .erp-print-document footer {
+    break-inside: avoid;
   }
 }

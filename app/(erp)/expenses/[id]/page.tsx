@@ -12,6 +12,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import PrintExpenseTemplate from "@/components/expenses/PrintExpenseTemplate";
+import { ExpensePrintButton } from "@/components/expenses/expense-print-button";
 import { ExpenseAttachmentPreview } from "./expense-attachment-preview";
 import { ExpenseDetailActions } from "./expense-detail-actions";
 
@@ -108,8 +110,8 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div className="flex flex-col gap-6 p-6 print:gap-0 print:p-0">
+      <div className="flex flex-col gap-4 print:hidden lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
@@ -120,11 +122,12 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
           </div>
           <p className="text-slate-500">
             รายละเอียดเอกสารค่าใช้จ่าย — อ่านอย่างเดียว · DRAFT = ลบได้ ·
-            ISSUED = ยกเลิก (Void) ได้
+            ISSUED = ยกเลิก (Void) ได้ · พิมพ์ A4
           </p>
         </div>
 
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+          <ExpensePrintButton />
           {Number(expense.wht_amount) > 0 ? (
             <Link
               href={`/expenses/${expense.id}/print-wht`}
@@ -132,7 +135,7 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
               rel="noopener noreferrer"
               className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
             >
-              🖨️ พิมพ์ 50 ทวิ (WHT)
+              พิมพ์ 50 ทวิ (WHT)
             </Link>
           ) : null}
           <ExpenseDetailActions
@@ -150,7 +153,7 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 print:hidden xl:grid-cols-3">
         <Card className="xl:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">ข้อมูลเอกสาร</CardTitle>
@@ -215,7 +218,7 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 print:hidden md:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">ใบเสร็จแนบ (Receipt)</CardTitle>
@@ -256,6 +259,8 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
           </CardContent>
         </Card>
       </div>
+
+      <PrintExpenseTemplate expense={expense} />
     </div>
   );
 }

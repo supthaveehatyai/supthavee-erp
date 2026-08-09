@@ -38,6 +38,7 @@ import DeleteDraftDocumentButton from "./delete-draft-document-button";
 import VoidDocumentActions from "./void-document-actions";
 import DuplicateDocumentButton from "./duplicate-document-button";
 import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
+import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import ConvertDocumentDropdown from "./convert-document-dropdown";
 import { SendToProductionButton } from "@/components/production/send-to-production-button";
 
@@ -625,6 +626,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                   <TableHeader>
                     <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
                       {[
+                        "รูปภาพ",
                         "#",
                         "SKU",
                         "รายละเอียด",
@@ -646,7 +648,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                     {doc.items.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={7}
+                          colSpan={8}
                           className="px-4 py-10 text-center text-sm text-slate-400"
                         >
                           ไม่มีรายการสินค้า
@@ -655,6 +657,12 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                     ) : (
                       doc.items.map((item, index) => (
                         <TableRow key={item.id}>
+                          <TableCell className="px-3">
+                            <LineItemProductThumb
+                              imageUrl={item.image_url}
+                              alt={item.sku ?? "สินค้า"}
+                            />
+                          </TableCell>
                           <TableCell className="px-4 text-xs tabular-nums text-slate-500">
                             {index + 1}
                           </TableCell>
@@ -702,7 +710,8 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
         ) : null}
 
         <p className="text-center text-xs text-slate-400">
-          ตัวอย่างสำหรับพิมพ์ (A4) — กด &quot;พิมพ์เอกสาร&quot; เพื่อสั่งพิมพ์เฉพาะแผ่นนี้
+          ตัวอย่างสำหรับพิมพ์ — กด &quot;พิมพ์เอกสาร&quot; เพื่อสั่งพิมพ์เฉพาะแผ่นนี้
+          (ขนาดกระดาษตามประเภทเอกสาร: A4 / A5 Landscape)
         </p>
       </div>
 

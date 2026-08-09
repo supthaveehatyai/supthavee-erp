@@ -30,6 +30,7 @@ import type {
   SalesProductSearchItem,
 } from "@/types/document";
 import SmartSkuPicker from "@/components/sales/smart-sku-picker";
+import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -71,6 +72,7 @@ const SALES_DOC_TYPES: { value: DocumentType; label: string }[] = [
 ];
 
 const ITEM_COLUMNS = [
+  "รูปภาพ",
   "#",
   "SKU",
   "รายละเอียด",
@@ -109,6 +111,7 @@ function createLineFromProduct(product: SalesProductSearchItem): SalesLineItem {
     discount_text: "",
     discount_amount: 0,
     line_total: calcLineTotal(qty, unitPrice),
+    image_url: product.image_url ?? null,
   };
 }
 
@@ -543,6 +546,12 @@ export default function SalesCreateWorkspace({
                 ) : (
                   lineItems.map((row, index) => (
                     <TableRow key={row.key}>
+                      <TableCell className="px-3">
+                        <LineItemProductThumb
+                          imageUrl={row.image_url}
+                          alt={row.sku}
+                        />
+                      </TableCell>
                       <TableCell className="px-4 text-xs tabular-nums text-slate-500">
                         {index + 1}
                       </TableCell>

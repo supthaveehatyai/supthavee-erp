@@ -598,8 +598,18 @@ type ProductSearchRow = {
   color: string | null;
   size: string | null;
   product_models:
-    | { id: string; name: string | null; model_code: string | null }
-    | { id: string; name: string | null; model_code: string | null }[]
+    | {
+        id: string;
+        name: string | null;
+        model_code: string | null;
+        image_url: string | null;
+      }
+    | {
+        id: string;
+        name: string | null;
+        model_code: string | null;
+        image_url: string | null;
+      }[]
     | null;
 };
 
@@ -634,7 +644,8 @@ export async function searchProductsForSales(
       product_models (
         id,
         name,
-        model_code
+        model_code,
+        image_url
       )
     `;
 
@@ -776,6 +787,7 @@ export async function searchProductsForSales(
         color_name: colorName,
         size_label: sizeLabel,
         base_uom: row.base_uom,
+        image_url: model?.image_url?.trim() || null,
       };
     });
 
@@ -1038,6 +1050,10 @@ type NestedProduct = {
   id: string;
   sku: string | null;
   name: string | null;
+  product_models:
+    | { image_url: string | null }
+    | { image_url: string | null }[]
+    | null;
 };
 
 type NestedItemRow = {
@@ -1133,7 +1149,10 @@ export async function getDocumentByNo(
           products:product_id (
             id,
             sku,
-            name
+            name,
+            product_models (
+              image_url
+            )
           )
         )
       `,
@@ -1190,6 +1209,7 @@ export async function getDocumentByNo(
     const items: DocumentDetailItem[] = rawItems
       .map((row) => {
         const product = unwrapJoin(row.products);
+        const model = unwrapJoin(product?.product_models);
         return {
           id: row.id,
           product_id: row.product_id,
@@ -1204,6 +1224,7 @@ export async function getDocumentByNo(
           sort_order: Number(row.sort_order ?? 0),
           sku: product?.sku ?? null,
           product_name: product?.name ?? null,
+          image_url: model?.image_url?.trim() || null,
         };
       })
       .sort((left, right) => left.sort_order - right.sort_order);

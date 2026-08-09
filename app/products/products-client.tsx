@@ -1,9 +1,13 @@
 "use client";
 
 import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+import {
+  ProductModelPreviewSheet,
+  buildPreviewModelHref,
+} from "@/components/products/ProductModelPreviewSheet";
 import {
   getBrands,
   getGenders,
@@ -21,12 +25,14 @@ import CategoryCombobox, { type Category } from "./category-combobox";
 import { type Vendor } from "./vendor-combobox";
 import ModelLoadCombobox from "./model-load-combobox";
 import { ProductMatrixVendorField } from "./ProductMatrixForm";
+import { ProductModelImageUpload } from "@/components/products/ProductModelImageUpload";
 import {
   findProductModelByCode,
   generateSkusFromModel,
   insertDraftProductModel,
   listLoadableProductModels,
   overwriteDraftProductModel,
+  updateProductModel,
   type ExistingProductModel,
   type LoadableProductModel,
   type SaveDraftModelInput,
@@ -125,6 +131,10 @@ type BatchEditForm = {
   taxType: TaxType;
   /** contacts.id where contact_type = Vendor → product_models.vendor_id */
   vendorId: string;
+  /** รหัสรุ่น (model_code) สำหรับตั้งชื่อไฟล์อัปโหลด */
+  modelCode: string;
+  /** Public URL จาก product_models.image_url */
+  imageUrl: string;
   prices: Record<string, SizePrice>;
 };
 
@@ -175,6 +185,8 @@ type MatrixForm = {
   modelCode: string;
   productName: string;
   shortName: string;
+  /** Public URL จาก Storage product_assets (Visual Verification) */
+  imageUrl: string;
   colorIds: string[];
   sizeIds: string[];
 };
@@ -462,6 +474,7 @@ function createEmptyForm(vendorId = ""): MatrixForm {
     modelCode: "",
     productName: "",
     shortName: "",
+    imageUrl: "",
     colorIds: [],
     sizeIds: [],
   };
@@ -778,8 +791,21 @@ export default function ProductsClient() {
    * Pre-fills the Vendor field the next time "สร้าง Product Matrix" is
    * opened, so the operator doesn't have to re-select the vendor manually.
    */
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const vendorIdFromQuery = searchParams.get("vendorId")?.trim() || "";
+
+  function openModelPreview(modelId: string | null | undefined) {
+    const id = modelId?.trim() || "";
+    if (!id) {
+      toast.message("ไม่พบรุ่นสินค้าสำหรับรายการนี้");
+      return;
+    }
+    router.push(buildPreviewModelHref(pathname, searchParams, id), {
+      scroll: false,
+    });
+  }
 
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -1337,6 +1363,7 @@ export default function ProductsClient() {
       modelCode: model.model_code ?? "",
       productName: model.name ?? "",
       shortName: model.short_name ?? "",
+      imageUrl: (model.image_url ?? "").split("?")[0],
       colorIds: [],
       sizeIds: [],
     }));
@@ -1579,6 +1606,7 @@ export default function ProductsClient() {
       gender: identity.data.gender,
       taxType: identity.data.tax_type,
       sizePricingConfig: serializeSizePricingConfig(sizePricing),
+      imageUrl: form.imageUrl.trim() || undefined,
     };
 
     setIsDraftSaving(true);
@@ -1706,6 +1734,7 @@ export default function ProductsClient() {
         gender: identity.data.gender,
         taxType: safeTaxType,
         sizePricingConfig: serializeSizePricingConfig(sizePricing),
+        imageUrl: form.imageUrl.trim() || undefined,
       },
       skus: previewRows.map((row) => ({
         sku: row.sku,
@@ -1888,6 +1917,8 @@ export default function ProductsClient() {
           genders[0];
 
         let vendorId = "";
+        let modelCode = "";
+        let imageUrl = "";
         const modelId =
           group.modelId ??
           group.products.find((item) => item.model_id)?.model_id ??
@@ -1896,7 +1927,7 @@ export default function ProductsClient() {
         if (modelId) {
           const { data: modelRow, error: modelError } = await supabase
             .from("product_models")
-            .select("vendor_id")
+            .select("vendor_id, model_code, image_url")
             .eq("id", modelId)
             .maybeSingle();
 
@@ -1905,6 +1936,10 @@ export default function ProductsClient() {
           }
 
           vendorId = (modelRow?.vendor_id as string | null) ?? "";
+          modelCode = String(modelRow?.model_code ?? "").trim();
+          imageUrl = String(modelRow?.image_url ?? "")
+            .trim()
+            .split("?")[0];
         } else {
           const mappedVendor = vendorByProductId[group.products[0]?.id ?? ""];
           vendorId = mappedVendor?.id ?? "";
@@ -1917,6 +1952,8 @@ export default function ProductsClient() {
           genderId: matched?.id ?? "",
           taxType: group.taxType || "INC_VAT",
           vendorId,
+          modelCode,
+          imageUrl,
           prices,
         });
         setEditError("");
@@ -2009,7 +2046,6 @@ export default function ProductsClient() {
       setIsEditConfirmOpen(false);
       return;
     }
-    const requiredVendorId = vendorResult.data;
 
     let safeTaxType: TaxType = "INC_VAT";
     if (typeof editForm.taxType === "string") {
@@ -2020,8 +2056,7 @@ export default function ProductsClient() {
     }
 
     const baseName = editForm.description.trim();
-    const shortName =
-      editForm.shortName.trim() || baseName;
+    const shortName = editForm.shortName.trim() || baseName;
     const selectedEditGender = masterData.genders.find(
       (item) => item.id === editForm.genderId,
     );
@@ -2032,77 +2067,57 @@ export default function ProductsClient() {
       return;
     }
 
-    const updates = editTarget.products.map((product) => {
-      const sizeLabel = product.size?.trim() || "";
-      const price = editForm.prices[sizeLabel] ?? emptyPrice;
-      const colorPart = product.color ? ` สี${product.color}` : "";
-      const sizePart = sizeLabel ? ` ไซส์ ${sizeLabel}` : "";
-
-      return {
-        id: product.id,
-        name: `${baseName}${colorPart}${sizePart}`,
-        short_name: shortName,
-        description: baseName,
-        gender: selectedEditGender.gender_name,
-        tax_type: safeTaxType,
-        cost_price: toPrice(price.cost),
-        retail_price: toPrice(price.retail),
-        wholesale_price: toPrice(price.wholesale),
-      };
-    });
-
-    const results = await Promise.all(
-      updates.map(({ id, ...payload }) =>
-        supabase.from("products").update(payload).eq("id", id),
-      ),
-    );
-
-    const firstError = results.find((result) => result.error)?.error;
-    if (firstError) {
-      setEditError(firstError.message);
-      setIsEditSaving(false);
-      setIsEditConfirmOpen(false);
-      return;
-    }
-
     const modelId =
       editTarget.modelId ??
       editTarget.products.find((item) => item.model_id)?.model_id ??
       null;
 
-    if (modelId) {
-      const { error: modelError } = await supabase
-        .from("product_models")
-        .update({
-          vendor_id: requiredVendorId,
-          name: baseName,
-          short_name: shortName,
-          gender: selectedEditGender.gender_name,
-          tax_type: safeTaxType,
-        })
-        .eq("id", modelId);
-
-      if (modelError) {
-        setEditError(
-          `อัปเดตสินค้าแล้ว แต่บันทึก product_models ไม่สำเร็จ: ${modelError.message}`,
-        );
-        setIsEditSaving(false);
-        setIsEditConfirmOpen(false);
-        await loadProducts();
-        return;
-      }
-    } else {
+    if (!modelId) {
       setEditError(
-        "อัปเดต SKU แล้ว แต่ไม่พบ model_id — ไม่สามารถบังคับบันทึก Vendor ลง product_models ได้",
+        "ไม่พบ model_id — ไม่สามารถบันทึกผ่าน Server Action ได้",
       );
       setIsEditSaving(false);
       setIsEditConfirmOpen(false);
-      await loadProducts();
       return;
     }
 
-    toast.success("บันทึกการแก้ไขทั้งรุ่นแล้ว");
+    const sizePrices = editSizeLabels.map((sizeLabel) => {
+      const price = editForm.prices[sizeLabel] ?? emptyPrice;
+      return {
+        sizeCode: sizeLabel,
+        sizeLabel,
+        costPrice: toPrice(price.cost),
+        retailPrice: toPrice(price.retail),
+        wholesalePrice: toPrice(price.wholesale),
+      };
+    });
+
+    const formData = new FormData();
+    formData.set("modelId", modelId);
+    formData.set("vendorId", vendorResult.data);
+    formData.set("name", baseName);
+    formData.set("shortName", shortName);
+    formData.set("gender", selectedEditGender.gender_name);
+    formData.set("taxType", safeTaxType);
+    formData.set(
+      "image_url",
+      editForm.imageUrl.trim().split("?")[0] || "",
+    );
+    formData.set("sizePrices", JSON.stringify(sizePrices));
+
+    const result = await updateProductModel(formData);
+    if (!result.ok) {
+      setEditError(result.error ?? "อัปเดตรุ่นสินค้าไม่สำเร็จ");
+      setIsEditSaving(false);
+      setIsEditConfirmOpen(false);
+      return;
+    }
+
+    toast.success(
+      `บันทึกการแก้ไขทั้งรุ่นแล้ว (${result.updatedSkuCount ?? 0} SKU)`,
+    );
     await loadProducts();
+    router.refresh();
     setIsEditSaving(false);
     setIsEditConfirmOpen(false);
     setEditTarget(null);
@@ -2261,14 +2276,21 @@ export default function ProductsClient() {
 
                   return (
                     <Fragment key={group.key}>
-                      <tr className="bg-white transition hover:bg-slate-50/80">
+                      <tr
+                        className="cursor-pointer bg-white transition hover:bg-slate-50/80"
+                        onClick={() => openModelPreview(group.modelId)}
+                      >
                         <td className="px-5 py-4">
-                          <button
-                            type="button"
-                            onClick={() => toggleGroup(group.key)}
-                            className="flex max-w-md items-start gap-2 text-left"
-                          >
-                            <span
+                          <div className="flex max-w-md items-start gap-2 text-left">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleGroup(group.key);
+                              }}
+                              aria-label={
+                                isExpanded ? "ย่อกลุ่มรุ่น" : "ขยายกลุ่มรุ่น"
+                              }
                               className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 transition ${
                                 isExpanded
                                   ? "rotate-90 bg-blue-50 text-blue-600"
@@ -2276,7 +2298,7 @@ export default function ProductsClient() {
                               }`}
                             >
                               <Icon name="chevron" className="size-3.5" />
-                            </span>
+                            </button>
                             <span>
                               <span className="block text-sm font-semibold text-slate-900">
                                 {group.title}
@@ -2291,18 +2313,19 @@ export default function ProductsClient() {
                                 </span>
                               )}
                             </span>
-                          </button>
+                          </div>
                         </td>
                         <td className="px-5 py-4 text-xs">
                           {groupVendor ? (
                             <button
                               type="button"
-                              onClick={() =>
+                              onClick={(event) => {
+                                event.stopPropagation();
                                 setEntitySheet({
                                   kind: "vendor",
                                   data: groupVendor,
-                                })
-                              }
+                                });
+                              }}
                               className="text-left font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 transition hover:text-blue-800 hover:decoration-blue-500"
                             >
                               {groupVendor.company_name}
@@ -2315,12 +2338,13 @@ export default function ProductsClient() {
                           {groupBrand ? (
                             <button
                               type="button"
-                              onClick={() =>
+                              onClick={(event) => {
+                                event.stopPropagation();
                                 setEntitySheet({
                                   kind: "brand",
                                   data: groupBrand,
-                                })
-                              }
+                                });
+                              }}
                               className="text-left font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 transition hover:text-blue-800 hover:decoration-blue-500"
                             >
                               {groupBrand.brand_name}
@@ -2377,7 +2401,10 @@ export default function ProductsClient() {
                           <div className="flex flex-wrap items-center gap-2">
                             <button
                               type="button"
-                              onClick={() => openBatchEdit(group)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openBatchEdit(group);
+                              }}
                               className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
                             >
                               <Icon name="edit" className="size-3.5" />
@@ -2385,7 +2412,10 @@ export default function ProductsClient() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => openDeactivateDialog(group)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openDeactivateDialog(group);
+                              }}
                               disabled={group.activeCount === 0}
                               className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-2.5 text-[11px] font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
                             >
@@ -2486,7 +2516,12 @@ export default function ProductsClient() {
                                 colorGroup.products.map((product) => (
                                   <tr
                                     key={product.id}
-                                    className="bg-white hover:bg-blue-50/30"
+                                    className="cursor-pointer bg-white hover:bg-blue-50/30"
+                                    onClick={() =>
+                                      openModelPreview(
+                                        product.model_id ?? group.modelId,
+                                      )
+                                    }
                                   >
                                     <td className="px-5 py-3 pl-20" colSpan={4}>
                                       <p className="text-xs font-medium text-slate-700">
@@ -2598,6 +2633,14 @@ export default function ProductsClient() {
                     number={1}
                     title="ข้อมูลหลักสินค้า (Model Info)"
                     description="โหลดโมเดลเดิม (DRAFT/ACTIVE) หรือสร้างใหม่จาก Master Data"
+                  />
+
+                  <ProductModelImageUpload
+                    className="mb-4"
+                    value={form.imageUrl}
+                    modelCode={form.modelCode}
+                    disabled={isMasterLoading || isSaving || isDraftSaving}
+                    onChange={(url) => updateForm("imageUrl", url)}
                   />
 
                   <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
@@ -3444,6 +3487,19 @@ export default function ProductsClient() {
                   title="ข้อมูลรุ่นสินค้า"
                   description="แก้ไขชื่อรุ่นและข้อมูลหลักที่ใช้ร่วมกันทั้งกลุ่ม"
                 />
+
+                <ProductModelImageUpload
+                  className="mb-4"
+                  value={editForm.imageUrl}
+                  modelCode={editForm.modelCode}
+                  disabled={isEditSaving}
+                  onChange={(url) =>
+                    setEditForm((current) =>
+                      current ? { ...current, imageUrl: url } : current,
+                    )
+                  }
+                />
+
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="block sm:col-span-2">
                     <span className={labelClass}>
@@ -3949,6 +4005,8 @@ export default function ProductsClient() {
           </div>
         </div>
       )}
+
+      <ProductModelPreviewSheet />
 
       {entitySheet && (
         <div

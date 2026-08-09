@@ -56,10 +56,45 @@ export const productModelSchema = z.object({
   short_name: z.string().trim().max(100).optional(),
   gender: z.string().trim().min(1, "กรุณาเลือกเพศ"),
   tax_type: taxTypeSchema.default("INC_VAT"),
+  /** Public URL จาก Storage product_assets (Visual Verification) */
+  image_url: z.string().nullable().optional(),
 });
 
 export type ProductModelSchemaInput = z.input<typeof productModelSchema>;
 export type ProductModelSchemaOutput = z.output<typeof productModelSchema>;
+
+/** Per-size prices for `updateProductModel` bulk SKU update */
+export const updateProductModelSizePriceSchema = z.object({
+  sizeCode: z.string().trim().min(1, "ต้องระบุ sizeCode"),
+  sizeLabel: z.string().trim().nullable().optional(),
+  costPrice: z.number().finite().nonnegative("ราคาต้นทุนต้องไม่ติดลบ"),
+  retailPrice: z.number().finite().nonnegative("ราคาปลีกต้องไม่ติดลบ"),
+  wholesalePrice: z.number().finite().nonnegative("ราคาส่งต้องไม่ติดลบ"),
+});
+
+/**
+ * Payload สำหรับแก้ไขทั้งรุ่น (Product Model + bulk SKU prices).
+ * `image_url` เป็น Public URL จาก Storage product_assets
+ */
+export const updateProductModelSchema = z.object({
+  modelId: z.uuid({ error: "ต้องระบุ model_id เป็น UUID ที่ถูกต้อง" }),
+  vendorId: vendorIdSchema,
+  name: z.string().trim().min(1, "กรุณาระบุชื่อรุ่นสินค้า"),
+  shortName: z.string().trim().max(100).optional(),
+  gender: z.string().trim().min(1, "กรุณาเลือกเพศ"),
+  taxType: taxTypeSchema,
+  image_url: z.string().nullable().optional(),
+  sizePrices: z
+    .array(updateProductModelSizePriceSchema)
+    .min(1, "ต้องระบุราคาตามไซส์อย่างน้อย 1 รายการ"),
+});
+
+export type UpdateProductModelSchemaInput = z.input<
+  typeof updateProductModelSchema
+>;
+export type UpdateProductModelSchemaOutput = z.output<
+  typeof updateProductModelSchema
+>;
 
 /** First Zod issue message, or a fallback. */
 export function zodFirstError(
@@ -81,6 +116,7 @@ export function parseProductModelIdentity(input: {
   shortName?: string;
   gender: string;
   taxType: "INC_VAT" | "EXC_VAT" | "NON_VAT";
+  imageUrl?: string | null;
 }):
   | { ok: true; data: ProductModelSchemaOutput }
   | { ok: false; error: string } {
@@ -93,6 +129,7 @@ export function parseProductModelIdentity(input: {
     short_name: input.shortName,
     gender: input.gender,
     tax_type: input.taxType,
+    image_url: input.imageUrl ?? null,
   });
 
   if (!result.success) {

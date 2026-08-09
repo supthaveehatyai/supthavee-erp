@@ -1,6 +1,6 @@
 # System Blueprint: Supthavee ERP SuperApp
 
-**Version:** 7.0 (Phase 9 Backup/Restore Completed, Pre-Go-Live Hardening Initiated)
+**Version:** 8.0 (Phase 11 Operational Refinement Completed, Pre-Go-Live UAT Initiated)
 
 **Company:** บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด
 
@@ -16,10 +16,12 @@
 *   **AI Integration:** Gemini Vision AI (Cascade Fallback 3.6 -> 3.5 -> 2.5) สำหรับอ่านเอกสารบิลซื้อ และบิลค่าใช้จ่าย (Smart OCR) ผ่าน Edge Functions
 *   **Development Tools:** Cursor Code Editor, Claude 3.5 Sonnet / Gemini
 
-## 3. User Roles (สิทธิ์การใช้งาน)
-*   **Admin (ผู้บริหาร):** เข้าถึงทุกระบบ, ดูรายงานกำไร-ขาดทุน, อนุมัติหนี้สูญ, เข้าถึงประวัติการแก้ไข (Audit Trail)
+## 3. User Roles (สิทธิ์การใช้งาน Dynamic RBAC)
+*   **โครงสร้างสิทธิ์:** ควบคุมสิทธิ์แบบ Dynamic ผ่านตาราง `app_roles` และผูกกับ `auth.users` ผ่าน `user_profiles` พร้อมระบบ Auth Guard ฝั่ง Server
+*   **Admin (ผู้บริหาร):** เข้าถึงทุกระบบ, ดูรายงานกำไร-ขาดทุน, อนุมัติหนี้สูญ, เข้าถึงประวัติการแก้ไข (Audit Trail), จัดการการตั้งค่าบริษัท
 *   **Sales (พนักงานขาย):** เปิดบิลขาย, รับชำระเงิน/มัดจำ, ติดตามสถานะงานปัก-สกรีน
 *   **Warehouse / Production:** ทำรายการรับของเข้า (สแกนบิล), เบิกของออก, เปลี่ยนสถานะงานสั่งทำ
+*   **Specialists (ช่างเฉพาะทาง):** พนักงานบัญชี, ช่างสกรีน, ช่างปัก, ช่างเย็บ (แยกสิทธิ์การมองเห็น Kanban และเอกสารชัดเจน)
 
 ## 4. Core Modules & Business Logic (โมดูลหลักและกฎเกณฑ์)
 ### Module A: Master Data, Products & Smart 2-Phase Matrix (ฐานข้อมูลหลัก และการสร้างสินค้า)
@@ -29,7 +31,7 @@
 *   **Size Sort Order:** ตาราง `mst_sizes` ใช้ระบบรหัสตรงตามหน้าแคตตาล็อกโรงงานและตั้งน้ำหนักการจัดเรียง (`sort_order`) แบบระบุโซนช่วงห่างทีละ 10 (Gap of 10)
 *   **Data Table UI:** การจัดกลุ่ม 2 ระดับ (Nested Grouping: ชื่อรุ่น -> สี -> ไซส์) เรียงลำดับตามน้ำหนักไซส์จริง
 *   **2-Phase Product Matrix Creation:**
-    *   **Phase 1 (Base Model):** สร้างโครงร่างสินค้ารุ่น (Draft Model) ลง `product_models`
+    *   **Phase 1 (Base Model):** สร้างโครงร่างสินค้ารุ่น (Draft Model) ลง `product_models` พร้อมแนบรูป Thumbnail (อัปโหลดเข้า Supabase Storage `product_assets` โดยบีบอัดเป็น WebP ขนาดไม่เกิน 500KB ฝั่ง Client)
     *   **Phase 2 (SKU Generation):** โหลด Model กลับมาใส่สี และ Generate SKU ลง `products` (เช็กซ้ำ Error 409 อัตโนมัติ)
 *   **สูตรการสร้าง SKU:** `Brand Code` + `Category Code (2 หลัก)` + `Model Code (ล็อก 6 หลัก)` + `Gender Code (1 หลัก)` + `Color Code (3 หลัก)` + `Size Code`
 *   **Global Size Integrity:** การเพิ่มไซส์ใน Product Matrix บังคับให้ใช้ไซส์มาตรฐานจากตาราง `mst_sizes` ผ่าน Selection Grid เท่านั้น
@@ -41,12 +43,12 @@
 *   **Cost & Profit Snapshot:** ดึงราคาต้นทุน (LPP) มาฝังไว้ที่รายการบิล (`unit_cost_price`) ทันทีที่ขาย
 *   **Document Lineage:** รองรับการแปลงเอกสาร (เช่น QT -> INV_DO) พร้อมผูก `ref_document_id` อ้างอิงกลับไปยังเอกสารต้นทางเสมอ
 *   **URL-Based State Filter:** ระบบค้นหาและกรองประวัติเอกสารใช้ URL Search Parameters แทน React State
-*   **Print Layout A4:** รองรับการสั่งพิมพ์เป็นเอกสารบิล (A4) ผ่าน Browser ด้วย CSS `@media print` พร้อมซ่อน Navbar/Sidebar อัตโนมัติ
+*   **Universal Print Engine (TFRS):** ใช้ `<PrintLayout>` ห่อหุ้มเอกสารทุกใบ รองรับการกำหนดขนาดกระดาษ Dynamic (A4, A5-Landscape) ดึงข้อมูลจาก Single Source of Truth (`system_settings`) พร้อมโมดูลประมวลผลภาษี `<DocumentPrintSummary>`
 *   **Rounding Difference Logic (GAAP):** รองรับการทำ Manual Override ยอด Grand Total เพื่อแก้ปัญหา Decimal Leakage ตามหลักบัญชี และบันทึกส่วนต่างลง `rounding_difference`
 
 ### Module C: Smart Procurement & Inventory (ระบบจัดซื้อและคลังสินค้า)
 *   **Strict Server-Side Fetching:** บังคับใช้ Server Actions ร่วมกับ Service Role Key (supabaseAdmin) 100% หลีกเลี่ยงปัญหา RLS
-*   **Project Guardrails:** บังคับใช้ไฟล์ `.cursorrules` ล็อกสถาปัตยกรรมโค้ด และบังคับใช้ Global UI Component อย่างเคร่งครัด
+*   **Project Guardrails:** บังคับใช้ไฟล์ `.cursorrules` ล็อกสถาปัตยกรรมโค้ด (Zero Client-Side Fetching, Document Lifecycle) อย่างเคร่งครัด
 *   **Smart Goods Receipt (AI OCR):** อัปโหลดรูปบิลเข้า -> AI OCR สกัด `raw_vendor_sku`, ส่วนลด, ภาษี, `document_number`, `document_date`
 *   **Duplicate Invoice Early Warning:** ระบบตรวจสอบและดักจับบิลซ้ำซ้อนผ่าน Composite Key (`vendor_id` + `document_number` + `document_date`)
 *   **On-the-fly Vendor Mapping & Quick Create:** ตรวจสอบและ UPSERT Mapping อัตโนมัติ รองรับการสร้าง SKU ใหม่กลางอากาศ (Quick Create)
@@ -96,10 +98,10 @@
 *   **Manual Trigger & Audit:** ระบบกด Backup แบบ On-demand ผ่าน Server Actions (Zero Client-Side) คุมสิทธิ์ระดับ Admin และบันทึกประวัติลง `audit_logs` อัตโนมัติ
 
 ### Module J: Pre-Go-Live Readiness & System Hardening (เตรียมความพร้อมก่อนขึ้นระบบจริง) - [🔥 Current Focus]
-*   **Phase 10 (Enterprise Foundation & Security):** การจัดการ Global Standard & UI Pattern Library (ล็อกใน `.cursorrules`), ระบบตารางตั้งค่าบริษัท (`system_settings`), Authentication และ Role-Based Access Control (RBAC), การจัดการ Sidebar ตามสิทธิ์
-*   **Phase 11 (Operational Refinement):** การแสดงรูปสินค้า Thumbnail ในรายการเปิดบิล (Visual Verification), การปรับปรุง Document Templates (ดึงข้อมูลบริษัทอัตโนมัติและอิง TFRS)
-*   **Phase 12 (Knowledge Management & UAT):** จัดทำคู่มือมาตรฐานระบบ (Taxonomy & Document Lineage), กระบวนการ Data Seeding, การทดสอบ User Acceptance Testing (UAT)
+*   **Phase 10 (Enterprise Foundation & Security):** การจัดการ Global Standard & UI Pattern Library (ล็อกใน `.cursorrules`), ระบบตารางตั้งค่าบริษัท (`system_settings`), Authentication และ Role-Based Access Control (RBAC), การจัดการ Sidebar ตามสิทธิ์ [✅ Completed]
+*   **Phase 11 (Operational Refinement):** การแสดงรูปสินค้า Thumbnail ในรายการเปิดบิล (Visual Verification), การปรับปรุง Document Templates (ดึงข้อมูลบริษัทอัตโนมัติและอิง TFRS) [✅ Completed]
+*   **Phase 12 (Knowledge Management & UAT):** จัดทำคู่มือมาตรฐานระบบ (Taxonomy & Document Lineage), กระบวนการ Data Seeding, การทดสอบ User Acceptance Testing (UAT) [🔥 Current Focus]
 *   **Phase 13 (Deployment & ALM):** การ Deploy ขึ้น Cloud, การจัดการ Application Lifecycle Management (ALM) วางแผนอัปเดตแบบ Zero-Downtime
 
 ## 5. Database Schema (PostgreSQL for Supabase)
-*(Schema ตาม Blueprint v7.0 ครอบคลุมตาราง expenses, expense_categories, audit_logs, production_jobs และ system_settings)*
+*(Schema ตาม Blueprint v8.0 ครอบคลุมตาราง expenses, expense_categories, audit_logs, production_jobs, system_settings, app_roles, user_profiles และ product_models(image_url))*

@@ -34,6 +34,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_roles: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          role_code: string
+          role_name_th: string
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          role_code: string
+          role_name_th: string
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          role_code?: string
+          role_name_th?: string
+        }
+        Relationships: []
+      }
       audit_logs: {
         Row: {
           action: Database["public"]["Enums"]["audit_action_type"]
@@ -664,7 +685,7 @@ export type Database = {
           grand_total: number | null
           id: string
           net_amount: number
-          net_payable: number | null
+          net_payable: number
           payment_method: string | null
           payment_slip_url: string | null
           receipt_url: string | null
@@ -675,10 +696,10 @@ export type Database = {
           vat_amount: number
           vendor_doc_no: string | null
           vendor_id: string | null
-          wht_amount: number | null
+          wht_amount: number
           wht_base_amount: number | null
           wht_doc_no: string | null
-          wht_rate: number | null
+          wht_rate: number
           wht_type: string | null
         }
         Insert: {
@@ -690,7 +711,7 @@ export type Database = {
           grand_total?: number | null
           id?: string
           net_amount?: number
-          net_payable?: number | null
+          net_payable?: number
           payment_method?: string | null
           payment_slip_url?: string | null
           receipt_url?: string | null
@@ -701,10 +722,10 @@ export type Database = {
           vat_amount?: number
           vendor_doc_no?: string | null
           vendor_id?: string | null
-          wht_amount?: number | null
+          wht_amount?: number
           wht_base_amount?: number | null
           wht_doc_no?: string | null
-          wht_rate?: number | null
+          wht_rate?: number
           wht_type?: string | null
         }
         Update: {
@@ -716,7 +737,7 @@ export type Database = {
           grand_total?: number | null
           id?: string
           net_amount?: number
-          net_payable?: number | null
+          net_payable?: number
           payment_method?: string | null
           payment_slip_url?: string | null
           receipt_url?: string | null
@@ -727,10 +748,10 @@ export type Database = {
           vat_amount?: number
           vendor_doc_no?: string | null
           vendor_id?: string | null
-          wht_amount?: number | null
+          wht_amount?: number
           wht_base_amount?: number | null
           wht_doc_no?: string | null
-          wht_rate?: number | null
+          wht_rate?: number
           wht_type?: string | null
         }
         Relationships: [
@@ -1141,6 +1162,7 @@ export type Database = {
           created_at: string | null
           gender: string | null
           id: string
+          image_url: string | null
           is_active: boolean | null
           model_code: string
           name: string
@@ -1156,6 +1178,7 @@ export type Database = {
           created_at?: string | null
           gender?: string | null
           id?: string
+          image_url?: string | null
           is_active?: boolean | null
           model_code: string
           name: string
@@ -1171,6 +1194,7 @@ export type Database = {
           created_at?: string | null
           gender?: string | null
           id?: string
+          image_url?: string | null
           is_active?: boolean | null
           model_code?: string
           name?: string
@@ -1206,7 +1230,7 @@ export type Database = {
       }
       production_jobs: {
         Row: {
-          attachment_paths: string[]
+          attachment_paths: string[] | null
           created_at: string | null
           details: string | null
           document_id: string | null
@@ -1219,7 +1243,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
-          attachment_paths?: string[]
+          attachment_paths?: string[] | null
           created_at?: string | null
           details?: string | null
           document_id?: string | null
@@ -1232,7 +1256,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
-          attachment_paths?: string[]
+          attachment_paths?: string[] | null
           created_at?: string | null
           details?: string | null
           document_id?: string | null
@@ -1362,24 +1386,95 @@ export type Database = {
       }
       system_settings: {
         Row: {
-          description: string | null
-          setting_key: string
-          setting_value: string
+          address: string
+          branch_code: string
+          branch_name: string
+          company_name: string
+          company_name_en: string
+          email: string
+          gl_rounding_expense_acc: string
+          gl_rounding_income_acc: string
+          id: number
+          logo_url: string
+          phone: string
+          tax_id: string
+          updated_at: string
+          updated_by: string | null
+          vat_rate: number
+        }
+        Insert: {
+          address?: string
+          branch_code?: string
+          branch_name?: string
+          company_name?: string
+          company_name_en?: string
+          email?: string
+          gl_rounding_expense_acc?: string
+          gl_rounding_income_acc?: string
+          id?: number
+          logo_url?: string
+          phone?: string
+          tax_id?: string
+          updated_at?: string
+          updated_by?: string | null
+          vat_rate?: number
+        }
+        Update: {
+          address?: string
+          branch_code?: string
+          branch_name?: string
+          company_name?: string
+          company_name_en?: string
+          email?: string
+          gl_rounding_expense_acc?: string
+          gl_rounding_income_acc?: string
+          id?: number
+          logo_url?: string
+          phone?: string
+          tax_id?: string
+          updated_at?: string
+          updated_by?: string | null
+          vat_rate?: number
+        }
+        Relationships: []
+      }
+      user_profiles: {
+        Row: {
+          created_at: string | null
+          email: string
+          full_name: string
+          id: string
+          is_active: boolean | null
+          role_code: string
           updated_at: string | null
         }
         Insert: {
-          description?: string | null
-          setting_key: string
-          setting_value: string
+          created_at?: string | null
+          email: string
+          full_name: string
+          id: string
+          is_active?: boolean | null
+          role_code?: string
           updated_at?: string | null
         }
         Update: {
-          description?: string | null
-          setting_key?: string
-          setting_value?: string
+          created_at?: string | null
+          email?: string
+          full_name?: string
+          id?: string
+          is_active?: boolean | null
+          role_code?: string
           updated_at?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "user_profiles_role_code_fkey"
+            columns: ["role_code"]
+            isOneToOne: false
+            referencedRelation: "app_roles"
+            referencedColumns: ["role_code"]
+          },
+        ]
       }
       vendor_product_mapping: {
         Row: {
@@ -1434,6 +1529,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      fn_is_admin: { Args: never; Returns: boolean }
       generate_document_no: {
         Args: { p_doc_date: string; p_doc_type: string }
         Returns: string
