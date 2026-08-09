@@ -1391,6 +1391,7 @@ export type Database = {
           branch_name: string
           company_name: string
           company_name_en: string
+          document_print_settings: Record<string, string> | null
           email: string
           gl_rounding_expense_acc: string
           gl_rounding_income_acc: string
@@ -1398,6 +1399,7 @@ export type Database = {
           logo_url: string
           phone: string
           tax_id: string
+          allow_negative_inventory: boolean
           updated_at: string
           updated_by: string | null
           vat_rate: number
@@ -1408,6 +1410,7 @@ export type Database = {
           branch_name?: string
           company_name?: string
           company_name_en?: string
+          document_print_settings?: Record<string, string> | null
           email?: string
           gl_rounding_expense_acc?: string
           gl_rounding_income_acc?: string
@@ -1415,6 +1418,7 @@ export type Database = {
           logo_url?: string
           phone?: string
           tax_id?: string
+          allow_negative_inventory?: boolean
           updated_at?: string
           updated_by?: string | null
           vat_rate?: number
@@ -1425,6 +1429,7 @@ export type Database = {
           branch_name?: string
           company_name?: string
           company_name_en?: string
+          document_print_settings?: Record<string, string> | null
           email?: string
           gl_rounding_expense_acc?: string
           gl_rounding_income_acc?: string
@@ -1432,6 +1437,7 @@ export type Database = {
           logo_url?: string
           phone?: string
           tax_id?: string
+          allow_negative_inventory?: boolean
           updated_at?: string
           updated_by?: string | null
           vat_rate?: number
@@ -1526,7 +1532,30 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      vw_monthly_profit_summary: {
+        Row: {
+          cogs: number | null
+          gross_profit: number | null
+          net_profit: number | null
+          opex: number | null
+          profit_month: string | null
+          revenue: number | null
+        }
+        Relationships: []
+      }
+      vw_sales_profit_analysis: {
+        Row: {
+          contact_name: string | null
+          doc_type: Database["public"]["Enums"]["document_type"] | null
+          document_date: string | null
+          document_id: string | null
+          document_number: string | null
+          grand_total: number | null
+          net_revenue: number | null
+          total_cogs: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       fn_is_admin: { Args: never; Returns: boolean }

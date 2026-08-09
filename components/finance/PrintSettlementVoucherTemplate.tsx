@@ -5,7 +5,7 @@
 import Link from "next/link";
 import { PrintLayout } from "@/components/shared/print/PrintLayout";
 import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
-import { resolvePrintPaperSize } from "@/lib/constants/print-paper-size";
+import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
 import type { DocumentDetail } from "@/types/document";
 import type { DocumentAllocationRow } from "@/types/document-allocation";
 import type { PrintVatType } from "@/types/print-document";
@@ -92,7 +92,7 @@ export default async function PrintSettlementVoucherTemplate({
   const vatRate = Number(doc.vat_rate ?? doc.tax_rate ?? 0);
   const vatType = normalizePrintVatType(doc.vat_type);
   const remark = extractRemark(doc.notes);
-  const paperSize = resolvePrintPaperSize(doc.doc_type);
+  const paperSize = await getDocumentPrintPaperSize(doc.doc_type);
 
   return (
     <PrintLayout

@@ -103,8 +103,13 @@ export function AuditTrailTable({ logs, className }: AuditTrailTableProps) {
               <TableCell>
                 <div className="flex min-w-0 flex-col">
                   <span className="truncate text-sm font-medium text-slate-900">
-                    {row.changed_by_display}
+                    {row.changed_by_display || "ระบบ"}
                   </span>
+                  {row.changed_by_role ? (
+                    <span className="truncate text-[11px] text-slate-400">
+                      {row.changed_by_role}
+                    </span>
+                  ) : null}
                   {row.changed_by_email &&
                   row.changed_by_email !== row.changed_by_display ? (
                     <span className="truncate text-[11px] text-slate-400">

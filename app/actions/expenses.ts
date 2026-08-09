@@ -234,25 +234,32 @@ function fireExpenseAuditLog(params: {
   recordId: string;
   oldData: Record<string, unknown> | null;
   newData: Record<string, unknown> | null;
-  changedByName: string;
+  /** Business event for change details — not the actor display name */
+  auditEvent: "ISSUE" | "VOID" | "UPDATE" | "DELETE";
 }): void {
-  void logAuditTrail(
-    "expenses",
-    params.recordId,
-    "UPDATE",
-    params.oldData,
-    params.newData,
-    null,
-    { changedByName: params.changedByName },
-  ).then((result) => {
+  void (async () => {
+    const newDataWithEvent: Record<string, unknown> = {
+      ...(params.newData ?? {}),
+      audit_event: params.auditEvent,
+    };
+
+    // Actor resolved inside logAuditTrail via server-side auth.getUser()
+    const result = await logAuditTrail(
+      "expenses",
+      params.recordId,
+      params.auditEvent === "DELETE" ? "DELETE" : "UPDATE",
+      params.oldData,
+      newDataWithEvent,
+    );
+
     if (!result.success) {
       console.error(
         "[fireExpenseAuditLog]",
-        params.changedByName,
+        params.auditEvent,
         result.error,
       );
     }
-  });
+  })();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1235,7 +1242,7 @@ export async function updateDraftExpense(
     const mapped = mapExpenseRow(updated as Record<string, unknown>);
     fireExpenseAuditLog({
       recordId: expenseId,
-      changedByName: "UPDATE",
+      auditEvent: "UPDATE",
       oldData: before as Record<string, unknown>,
       newData: mapped as unknown as Record<string, unknown>,
     });
@@ -1409,7 +1416,7 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
     const mapped = mapExpenseRow(updated as Record<string, unknown>);
     fireExpenseAuditLog({
       recordId: expenseId,
-      changedByName: "ISSUE",
+      auditEvent: "ISSUE",
       oldData: before as Record<string, unknown>,
       newData: {
         ...mapped,
@@ -1476,7 +1483,7 @@ export async function deleteDraftExpense(
 
     fireExpenseAuditLog({
       recordId: expenseId,
-      changedByName: "DELETE",
+      auditEvent: "DELETE",
       oldData: before as Record<string, unknown>,
       newData: { deleted: true, document_no: mapped.document_no },
     });
@@ -1549,7 +1556,7 @@ export async function voidExpense(id: string): Promise<MutateExpenseResult> {
     const mapped = mapExpenseRow(updated as Record<string, unknown>);
     fireExpenseAuditLog({
       recordId: expenseId,
-      changedByName: "VOID",
+      auditEvent: "VOID",
       oldData: before as Record<string, unknown>,
       newData: { ...mapped, status: "VOID" },
     });

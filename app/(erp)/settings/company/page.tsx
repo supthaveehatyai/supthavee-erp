@@ -16,7 +16,7 @@ export default async function CompanySettingsPage() {
           ตั้งค่าข้อมูลบริษัท
         </h1>
         <p className="text-slate-500">
-          จัดการชื่อ ที่อยู่ เลขภาษี และอัตรา VAT มาตรฐาน
+          จัดการชื่อ ที่อยู่ เลขภาษี อีเมล และอัตรา VAT มาตรฐาน
           ให้เป็น Single Source of Truth ของทั้งระบบ
         </p>
       </div>

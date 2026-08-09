@@ -1,6 +1,6 @@
 # System Blueprint: Supthavee ERP SuperApp
 
-**Version:** 8.0 (Phase 11 Operational Refinement Completed, Pre-Go-Live UAT Initiated)
+**Version:** 9.0 (Phase 12 UAT Completed, Ready for Phase 13 Deployment)
 
 **Company:** บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด
 
@@ -17,8 +17,10 @@
 *   **Development Tools:** Cursor Code Editor, Claude 3.5 Sonnet / Gemini
 
 ## 3. User Roles (สิทธิ์การใช้งาน Dynamic RBAC)
-*   **โครงสร้างสิทธิ์:** ควบคุมสิทธิ์แบบ Dynamic ผ่านตาราง `app_roles` และผูกกับ `auth.users` ผ่าน `user_profiles` พร้อมระบบ Auth Guard ฝั่ง Server
-*   **Admin (ผู้บริหาร):** เข้าถึงทุกระบบ, ดูรายงานกำไร-ขาดทุน, อนุมัติหนี้สูญ, เข้าถึงประวัติการแก้ไข (Audit Trail), จัดการการตั้งค่าบริษัท
+*   **โครงสร้างสิทธิ์:** ควบคุมสิทธิ์แบบ Dynamic ผ่านตาราง `app_roles` และผูกกับ `auth.users` ผ่าน `user_profiles` พร้อมระบบ Auth Guard (Middleware) ฝั่ง Server
+*   **Fast Login (PIN):** บังคับใช้ระบบล็อกอินด้วยอีเมลและรหัส PIN 6 หลัก เพื่อความรวดเร็วของพนักงานหน้าสายการผลิต
+*   **Soft Delete Policy:** ห้ามลบผู้ใช้งานออกจากระบบ (Hard Delete) เพื่อรักษาความสมบูรณ์ของ Audit Trail ให้ใช้ระบบระงับสิทธิ์ (Deactivate/Reactivate) แทน
+*   **Admin (ผู้บริหาร):** เข้าถึงทุกระบบ, ดูรายงานกำไร-ขาดทุน, อนุมัติหนี้สูญ, เข้าถึงประวัติการแก้ไข (Audit Trail), จัดการการตั้งค่าบริษัทและจัดการผู้ใช้งาน
 *   **Sales (พนักงานขาย):** เปิดบิลขาย, รับชำระเงิน/มัดจำ, ติดตามสถานะงานปัก-สกรีน
 *   **Warehouse / Production:** ทำรายการรับของเข้า (สแกนบิล), เบิกของออก, เปลี่ยนสถานะงานสั่งทำ
 *   **Specialists (ช่างเฉพาะทาง):** พนักงานบัญชี, ช่างสกรีน, ช่างปัก, ช่างเย็บ (แยกสิทธิ์การมองเห็น Kanban และเอกสารชัดเจน)
@@ -45,6 +47,7 @@
 *   **URL-Based State Filter:** ระบบค้นหาและกรองประวัติเอกสารใช้ URL Search Parameters แทน React State
 *   **Universal Print Engine (TFRS):** ใช้ `<PrintLayout>` ห่อหุ้มเอกสารทุกใบ รองรับการกำหนดขนาดกระดาษ Dynamic (A4, A5-Landscape) ดึงข้อมูลจาก Single Source of Truth (`system_settings`) พร้อมโมดูลประมวลผลภาษี `<DocumentPrintSummary>`
 *   **Rounding Difference Logic (GAAP):** รองรับการทำ Manual Override ยอด Grand Total เพื่อแก้ปัญหา Decimal Leakage ตามหลักบัญชี และบันทึกส่วนต่างลง `rounding_difference`
+*   **Model-First Matrix Selection:** ระบบค้นหาสินค้าเพื่อเปิดบิลต้องรองรับการเลือกรุ่น (Model) และกางตาราง Matrix สี/ไซส์ เพื่อกรอกจำนวนพร้อมกันแบบ Batch Add
 
 ### Module C: Smart Procurement & Inventory (ระบบจัดซื้อและคลังสินค้า)
 *   **Strict Server-Side Fetching:** บังคับใช้ Server Actions ร่วมกับ Service Role Key (supabaseAdmin) 100% หลีกเลี่ยงปัญหา RLS
@@ -55,6 +58,7 @@
 *   **Net Cost Apportionment Engine:** ประมวลผลคำนวณราคาตั้ง ของแถม (FOC) และส่วนลดท้ายบิลแบบสัดส่วน (Prorate) พร้อมความละเอียดต้นทุน 4 ทศนิยม
 *   **LPP Auto-Update:** ระบบอัปเดตต้นทุนสั่งซื้อล่าสุด (Last Purchase Price) ทับใน `products.cost_price` อัตโนมัติ
 *   **Inventory Ledger:** ห้ามแก้สต็อกที่ตาราง Products ตรงๆ ต้องบันทึกเข้า-ออกผ่าน `inventory_ledger` เสมอ
+*   **Negative Inventory Allowance:** มีสวิตช์เปิด/ปิด `allow_negative_inventory` สำหรับช่วงรอยต่อการขึ้นระบบใหม่ 3-6 เดือนแรก ยอมให้สต็อกติดลบชั่วคราวได้
 
 ### Module D: Finance, Accounting & Billing (ระบบการเงินและบัญชี)
 *   **Document Taxonomy (Sales vs Purchases):** รหัสเอกสารแยกขาดจากกันชัดเจน
@@ -69,7 +73,7 @@
 
 ### Module E: Dashboard & Audit (ระบบรายงานและความปลอดภัย) 
 *   **Executive Dashboard:** หน้าจอสรุปยอดขาย (YTD) และยอดหนี้คงค้าง (AR/AP) แบบ Real-time
-*   **System Audit Trail:** ระบบบันทึกประวัติการเปลี่ยนแปลงข้อมูลสำคัญระดับ Database (JSONB Log)
+*   **System Audit Trail:** ระบบบันทึกประวัติการเปลี่ยนแปลงข้อมูลสำคัญระดับ Database (JSONB Log) โดยบังคับเชื่อมโยง Session ID ผู้ใช้งานจริงเสมอ ป้องกันการบันทึกขยะ (ระบบ)
 *   **Audit Trail Parsing:** รองรับระบบ Human-Readable แปลงโครงสร้าง JSONB (old_data/new_data) ให้อ่านง่าย เพื่อแสดงความแตกต่าง (Diff) อัตโนมัติ
 
 ### Module F: Inventory UI & Production Workflow (ระบบคลังสินค้าและสายการผลิต) - [✅ Completed]
@@ -97,11 +101,16 @@
 *   **Disaster Recovery (Storage):** สคริปต์อัตโนมัติ `backup-storage.mjs` ดูดไฟล์จาก Supabase Storage โดยใช้ S3-Compatible API (AWS SDK)
 *   **Manual Trigger & Audit:** ระบบกด Backup แบบ On-demand ผ่าน Server Actions (Zero Client-Side) คุมสิทธิ์ระดับ Admin และบันทึกประวัติลง `audit_logs` อัตโนมัติ
 
-### Module J: Pre-Go-Live Readiness & System Hardening (เตรียมความพร้อมก่อนขึ้นระบบจริง) - [🔥 Current Focus]
+### Module J: Pre-Go-Live Readiness & System Hardening (เตรียมความพร้อมก่อนขึ้นระบบจริง) - [✅ Completed]
 *   **Phase 10 (Enterprise Foundation & Security):** การจัดการ Global Standard & UI Pattern Library (ล็อกใน `.cursorrules`), ระบบตารางตั้งค่าบริษัท (`system_settings`), Authentication และ Role-Based Access Control (RBAC), การจัดการ Sidebar ตามสิทธิ์ [✅ Completed]
 *   **Phase 11 (Operational Refinement):** การแสดงรูปสินค้า Thumbnail ในรายการเปิดบิล (Visual Verification), การปรับปรุง Document Templates (ดึงข้อมูลบริษัทอัตโนมัติและอิง TFRS) [✅ Completed]
-*   **Phase 12 (Knowledge Management & UAT):** จัดทำคู่มือมาตรฐานระบบ (Taxonomy & Document Lineage), กระบวนการ Data Seeding, การทดสอบ User Acceptance Testing (UAT) [🔥 Current Focus]
-*   **Phase 13 (Deployment & ALM):** การ Deploy ขึ้น Cloud, การจัดการ Application Lifecycle Management (ALM) วางแผนอัปเดตแบบ Zero-Downtime
+*   **Phase 12 (Knowledge Management & UAT):** จัดทำคู่มือมาตรฐานระบบ, ระบบตั้งค่า Interactive Knowledge Base, ระบบ PIN Login, ทะลุกำแพง Auth Guard, เปิดสวิตช์ Negative Stock, UAT Testing [✅ Completed]
+
+### Module K: Post Go-Live Enterprise Enhancements (ส่วนต่อขยาย Phase 14) - [Roadmap]
+*   **Physical Inventory:** ระบบเอกสารยอดยกมา (STK_OB) และระบบปรับปรุงสต็อก (STK_ADJ) 
+*   **Data Archiving (Tiered Storage):** สคริปต์สำรองข้อมูลภาพเย็น (Cold Data) อายุเกิน 1-5 ปี ถ่ายโอนสู่ NAS และลบพ้น Cloud 
+*   **Approval Workflow & Period Closing:** ระบบอนุมัติบิล Maker-Checker และการล็อกบัญชีรายเดือน
+*   **Fixed Asset Management:** ทะเบียนสินทรัพย์ถาวรและคิดค่าเสื่อมราคา
 
 ## 5. Database Schema (PostgreSQL for Supabase)
-*(Schema ตาม Blueprint v8.0 ครอบคลุมตาราง expenses, expense_categories, audit_logs, production_jobs, system_settings, app_roles, user_profiles และ product_models(image_url))*
+*(Schema ตาม Blueprint v9.0 ครอบคลุมตารางทั้งหมด รวมถึงสถานะ Active/Inactive ของ user_profiles และ JSONB print_settings ใน system_settings)*

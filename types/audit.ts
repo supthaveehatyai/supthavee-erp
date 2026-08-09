@@ -20,7 +20,10 @@ export type RecentAuditLog = {
   change_summary: string;
   changed_by: string | null;
   changed_by_email: string | null;
+  /** full_name → email → "ระบบ" (never ISSUE/VOID tokens) */
   changed_by_display: string;
+  /** From user_profiles → app_roles.role_name_th when available */
+  changed_by_role: string | null;
   ip_address: string | null;
   changed_at: string;
   correlation_id: string | null;

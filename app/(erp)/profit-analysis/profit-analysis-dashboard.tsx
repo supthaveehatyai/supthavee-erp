@@ -1,0 +1,268 @@
+"use client";
+
+/**
+ * Phase 12 — Profit Analysis presentation island.
+ * All numbers come from the Server Component parent (Zero Client-Side Fetching).
+ */
+
+import type { ReactNode } from "react";
+import Link from "next/link";
+import {
+  CircleDollarSign,
+  Package,
+  Percent,
+  Receipt,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
+import type { ProfitMonthKpi, SalesProfitRow } from "@/types/profit-analysis";
+import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { cn } from "@/lib/utils";
+
+export type ProfitAnalysisDashboardProps = {
+  monthLabel: string;
+  kpi: ProfitMonthKpi;
+  rows: SalesProfitRow[];
+  formatted: {
+    revenue: string;
+    cogs: string;
+    grossProfit: string;
+    opex: string;
+    netProfit: string;
+  };
+};
+
+type KpiCard = {
+  key: string;
+  label: string;
+  value: string;
+  hint: string;
+  icon: ReactNode;
+  accent: string;
+  valueClassName?: string;
+};
+
+function moneyToneClass(amount: number): string {
+  if (amount > 0) return "text-green-600";
+  if (amount < 0) return "text-red-600";
+  return "text-slate-800";
+}
+
+function formatDocDate(value: string): string {
+  if (!value) return "—";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("th-TH", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatMargin(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${value.toFixed(2)}%`;
+}
+
+function buildKpiCards(
+  kpi: ProfitMonthKpi,
+  formatted: ProfitAnalysisDashboardProps["formatted"],
+): KpiCard[] {
+  return [
+    {
+      key: "revenue",
+      label: "Revenue",
+      value: formatted.revenue,
+      hint: "รายได้สุทธิ (Net Revenue) · ถอด VAT แล้ว",
+      icon: <CircleDollarSign className="h-5 w-5" />,
+      accent: "bg-blue-50 text-blue-700 border-blue-100",
+    },
+    {
+      key: "cogs",
+      label: "COGS",
+      value: formatted.cogs,
+      hint: "ต้นทุนขาย · Σ (unit_cost_price × qty)",
+      icon: <Package className="h-5 w-5" />,
+      accent: "bg-amber-50 text-amber-800 border-amber-100",
+    },
+    {
+      key: "gross",
+      label: "Gross Profit",
+      value: formatted.grossProfit,
+      hint: "กำไรขั้นต้น = Revenue − COGS",
+      icon: <TrendingUp className="h-5 w-5" />,
+      accent: "bg-emerald-50 text-emerald-700 border-emerald-100",
+      valueClassName: moneyToneClass(kpi.grossProfit),
+    },
+    {
+      key: "opex",
+      label: "OPEX",
+      value: formatted.opex,
+      hint: "ค่าใช้จ่ายดำเนินงาน · expenses.net_payable · ISSUED",
+      icon: <Receipt className="h-5 w-5 text-red-600" />,
+      accent: "bg-red-50 text-red-700 border-red-100",
+      valueClassName: "text-red-600",
+    },
+    {
+      key: "net",
+      label: "Net Profit",
+      value: formatted.netProfit,
+      hint: "กำไรสุทธิ = Gross Profit − OPEX",
+      icon: <TrendingDown className="h-5 w-5" />,
+      accent: "bg-slate-50 text-slate-700 border-slate-200",
+      valueClassName: moneyToneClass(kpi.netProfit),
+    },
+  ];
+}
+
+export function ProfitAnalysisDashboard({
+  monthLabel,
+  kpi,
+  rows,
+  formatted,
+}: ProfitAnalysisDashboardProps) {
+  const cards = buildKpiCards(kpi, formatted);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+        {cards.map((card) => (
+          <Card key={card.key} className={`border ${card.accent}`}>
+            <CardHeader className="border-b-0 pb-0">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <CardDescription className="text-[11px] font-semibold uppercase tracking-wide text-inherit/80">
+                    {card.label}
+                  </CardDescription>
+                  <CardTitle
+                    className={cn(
+                      "mt-2 truncate text-2xl font-bold tracking-tight sm:text-3xl",
+                      card.valueClassName,
+                    )}
+                  >
+                    {card.value}
+                  </CardTitle>
+                </div>
+                <div className="shrink-0 rounded-xl bg-white/70 p-2.5 shadow-sm">
+                  {card.icon}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-3">
+              <p className="text-xs text-slate-500">{card.hint}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Percent className="h-4 w-4 text-blue-600" />
+                กำไรแยกตามบิลขาย
+              </CardTitle>
+              <CardDescription className="mt-1">
+                เดือน {monthLabel} · ISSUED · INV_DO / TAX_INV / ABB / CS_TAX ·
+                จาก View vw_sales_profit_analysis
+              </CardDescription>
+            </div>
+            <Badge variant="slate">{rows.length} รายการ</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {rows.length === 0 ? (
+            <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 py-12 text-center text-sm text-slate-500">
+              ไม่พบเอกสารขายที่ออกแล้วในเดือนนี้
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-50/80">
+                    <TableHead>Document No</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead className="hidden md:table-cell">ลูกค้า</TableHead>
+                    <TableHead className="text-right">Revenue</TableHead>
+                    <TableHead className="text-right">COGS</TableHead>
+                    <TableHead className="text-right">Gross Profit</TableHead>
+                    <TableHead className="text-right">GP Margin %</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((row) => (
+                    <TableRow key={row.documentId || row.documentNumber}>
+                      <TableCell className="font-medium text-slate-800">
+                        {row.documentNumber ? (
+                          <Link
+                            href={`/sales/${encodeURIComponent(row.documentNumber)}`}
+                            className="text-blue-700 hover:underline"
+                          >
+                            {row.documentNumber}
+                          </Link>
+                        ) : (
+                          "—"
+                        )}
+                        {row.docType ? (
+                          <span className="mt-0.5 block text-[11px] font-normal text-slate-400">
+                            {row.docType}
+                          </span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-slate-600">
+                        {formatDocDate(row.documentDate)}
+                      </TableCell>
+                      <TableCell className="hidden max-w-[14rem] truncate text-slate-600 md:table-cell">
+                        {row.contactName}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-slate-700">
+                        {formatThaiBaht(row.revenue)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-slate-700">
+                        {formatThaiBaht(row.cogs)}
+                      </TableCell>
+                      <TableCell
+                        className={cn(
+                          "text-right tabular-nums font-medium",
+                          moneyToneClass(row.grossProfit),
+                        )}
+                      >
+                        {formatThaiBaht(row.grossProfit)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-slate-700">
+                        {formatMargin(row.gpMarginPercent)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function formatThaiBaht(value: number): string {
+  return new Intl.NumberFormat("th-TH", {
+    style: "currency",
+    currency: "THB",
+  }).format(Number.isFinite(value) ? value : 0);
+}

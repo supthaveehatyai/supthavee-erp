@@ -79,7 +79,25 @@ const SKIP_KEYS = new Set([
   "updated_at",
   "changed_at",
   "correlation_id",
+  "audit_event",
 ]);
+
+function formatAuditEventLabel(event: unknown): string | null {
+  if (typeof event !== "string" || !event.trim()) return null;
+  const token = event.trim().toUpperCase();
+  const labels: Record<string, string> = {
+    ISSUE: "ยืนยันเอกสาร (ISSUE)",
+    VOID: "ยกเลิกเอกสาร (VOID)",
+    UPDATE: "แก้ไขเอกสาร (UPDATE)",
+    DELETE: "ลบเอกสาร (DELETE)",
+    COMPLETE: "ปิดจบเอกสาร (COMPLETE)",
+    CREATE: "สร้างเอกสาร (CREATE)",
+    CONVERT: "แปลงเอกสาร (CONVERT)",
+    DUPLICATE: "คัดลอกเอกสาร (DUPLICATE)",
+    CLONE: "โคลนเป็นร่างใหม่ (CLONE)",
+  };
+  return labels[token] ?? token;
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -159,10 +177,13 @@ export function parseAuditChangeSummary(
     if (!newRec) return "สร้างรายการใหม่";
 
     // Phase 9 — Manual Backup audit payload
-    if (newRec.action === "MANUAL_BACKUP_TRIGGERED") {
+    if (
+      newRec.action === "MANUAL_BACKUP_TRIGGERED" ||
+      newRec.event === "MANUAL_BACKUP_TRIGGERED"
+    ) {
       const status =
         typeof newRec.status === "string" ? newRec.status : "unknown";
-      if (status === "failed") {
+      if (status === "failed" || status === "FAILED") {
         const errMsg =
           typeof newRec.error === "string"
             ? formatAuditValue(newRec.error)
@@ -172,6 +193,7 @@ export function parseAuditChangeSummary(
       return "Manual Backup สำเร็จ (Database + Storage)";
     }
 
+    const eventLabel = formatAuditEventLabel(newRec.audit_event);
     const highlights: string[] = [];
     for (const key of CRITICAL_FIELDS) {
       if (newRec[key] === undefined || newRec[key] === null) continue;
@@ -180,9 +202,11 @@ export function parseAuditChangeSummary(
       );
       if (highlights.length >= 3) break;
     }
-    return highlights.length > 0
-      ? `สร้างรายการใหม่ · ${highlights.join(", ")}`
-      : "สร้างรายการใหม่";
+    const body =
+      highlights.length > 0
+        ? `สร้างรายการใหม่ · ${highlights.join(", ")}`
+        : "สร้างรายการใหม่";
+    return eventLabel ? `${eventLabel} · ${body}` : body;
   }
 
   if (normalized === "DELETE") {
@@ -261,5 +285,7 @@ export function parseAuditChangeSummary(
     parts.push(`และอีก ${remaining} ฟิลด์`);
   }
 
-  return parts.join(" · ");
+  const eventLabel = formatAuditEventLabel(right.audit_event ?? left.audit_event);
+  const body = parts.join(" · ");
+  return eventLabel ? `${eventLabel} · ${body}` : body;
 }

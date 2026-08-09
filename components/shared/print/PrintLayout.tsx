@@ -39,6 +39,7 @@ function pageRuleFor(paperSize: PrintPaperSize): string {
 /**
  * Print Layout Wrapper (TFRS / Enterprise ERP) — รองรับ A4 / A5.
  * บังคับโครงสร้าง: Header (company SSOT) → Content → Footer (signatures)
+ * Header ใช้ Flex ซ้าย-ขวาตายตัวใน DocumentPrintHeader (ไม่พับแนวตั้งบน A5)
  * `@page size` ถูก inject แบบ dynamic ตาม `paperSize`
  */
 export async function PrintLayout({
@@ -93,7 +94,7 @@ export async function PrintLayout({
           referenceNo={referenceNo}
         />
 
-        <section className="erp-print-content mt-5 flex-1 text-[11px] text-neutral-900">
+        <section className="erp-print-content mt-3 flex-1 text-[11px] text-neutral-900">
           {children}
         </section>
 

@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import { ImagePlus, X } from "lucide-react";
 import { toast } from "sonner";
 import { createProductionJob } from "@/app/actions/kanban-actions";
+import { compressImages } from "@/lib/utils/image-compression";
 import {
   PRODUCTION_JOB_TYPES,
   type ProductionJobType,
@@ -55,11 +56,16 @@ export type CreateJobModalProps = {
   docNo?: string | null;
 };
 
-function SubmitJobButton() {
+function SubmitJobButton({ compressing }: { compressing?: boolean }) {
   const { pending } = useFormStatus();
+  const busy = pending || Boolean(compressing);
   return (
-    <Button type="submit" disabled={pending}>
-      {pending ? "กำลังอัปโหลดและสร้าง..." : "สร้างใบสั่งผลิต"}
+    <Button type="submit" disabled={busy}>
+      {compressing
+        ? "กำลังบีบอัดรูป..."
+        : pending
+          ? "กำลังอัปโหลดและสร้าง..."
+          : "สร้างใบสั่งผลิต"}
     </Button>
   );
 }
@@ -92,12 +98,15 @@ export function CreateJobModal({
 
   const [formKey, setFormKey] = useState(0);
   const [previews, setPreviews] = useState<PreviewItem[]>([]);
+  const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
+  const [isCompressing, setIsCompressing] = useState(false);
   const previewUrlsRef = useRef<string[]>([]);
 
   function revokePreviews() {
     for (const url of previewUrlsRef.current) URL.revokeObjectURL(url);
     previewUrlsRef.current = [];
     setPreviews([]);
+    setAttachmentFiles([]);
   }
 
   useEffect(() => {
@@ -106,6 +115,8 @@ export function CreateJobModal({
     for (const url of previewUrlsRef.current) URL.revokeObjectURL(url);
     previewUrlsRef.current = [];
     setPreviews([]);
+    setAttachmentFiles([]);
+    setIsCompressing(false);
   }, [open]);
 
   useEffect(() => {
@@ -124,9 +135,31 @@ export function CreateJobModal({
     }));
     previewUrlsRef.current = next.map((p) => p.url);
     setPreviews(next);
+    setAttachmentFiles(files);
   }
 
   async function formAction(formData: FormData) {
+    // Rebuild attachments — compress to WebP before Storage upload (production_attachments)
+    formData.delete("attachments");
+    if (attachmentFiles.length > 0) {
+      setIsCompressing(true);
+      try {
+        const compressed = await compressImages(attachmentFiles);
+        for (const file of compressed) {
+          formData.append("attachments", file);
+        }
+      } catch (err) {
+        toast.error(
+          err instanceof Error
+            ? `บีบอัดรูป Mockup ไม่สำเร็จ: ${err.message}`
+            : "บีบอัดรูป Mockup ไม่สำเร็จ",
+        );
+        return;
+      } finally {
+        setIsCompressing(false);
+      }
+    }
+
     const result = await createProductionJob(formData);
 
     if (!result.success || !result.data) {
@@ -223,15 +256,16 @@ export function CreateJobModal({
                 คลิกเพื่อเลือกไฟล์ หรือลากวางหลายรูป
               </span>
               <span className="text-xs text-slate-400">
-                รองรับ image/jpeg, image/png, image/webp
+                รองรับ image/jpeg, image/png, image/webp · บีบอัด WebP ≤0.5MB
+                ก่อนอัปโหลด
               </span>
               <input
                 id="mto-attachments"
-                name="attachments"
                 type="file"
                 multiple
                 accept={ACCEPT_IMAGES}
                 className="sr-only"
+                disabled={isCompressing}
                 onChange={handleFilesChange}
               />
             </label>
@@ -277,7 +311,7 @@ export function CreateJobModal({
 
           <DialogFooter>
             <CancelJobButton onCancel={() => onOpenChange(false)} />
-            <SubmitJobButton />
+            <SubmitJobButton compressing={isCompressing} />
           </DialogFooter>
         </form>
       </DialogContent>

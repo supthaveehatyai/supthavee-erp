@@ -27,7 +27,9 @@ import type {
   SalesLineItem,
   SalesProductSearchItem,
 } from "@/types/document";
-import SmartSkuPicker from "@/components/sales/smart-sku-picker";
+import ModelMatrixPicker, {
+  type ModelMatrixBillItem,
+} from "@/components/sales/model-matrix-picker";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import { Button } from "@/components/ui/button";
 import {
@@ -67,21 +69,24 @@ function calcLineTotal(qty: number, unitPrice: number): number {
   return Math.round(Math.max(0, qty * unitPrice) * 100) / 100;
 }
 
-function createLineFromProduct(product: SalesProductSearchItem): SalesLineItem {
-  const qty = 1;
+function createLineFromProduct(
+  product: SalesProductSearchItem,
+  qty = 1,
+): SalesLineItem {
   const unitPrice = product.unit_price;
+  const nextQty = qty > 0 ? qty : 1;
   return {
-    key: `${product.id}-${Date.now()}`,
+    key: `${product.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     product_id: product.id,
     sku: product.sku,
     description: product.display_name,
-    qty,
+    qty: nextQty,
     uom_used: product.base_uom?.trim() || "ตัว",
     unit_price: unitPrice,
     cost_price: product.cost_price,
     discount_text: "",
     discount_amount: 0,
-    line_total: calcLineTotal(qty, unitPrice),
+    line_total: calcLineTotal(nextQty, unitPrice),
     image_url: product.image_url ?? null,
   };
 }
@@ -215,24 +220,35 @@ export default function SalesEditWorkspace({
     });
   }
 
-  function handleSelectProduct(product: SalesProductSearchItem) {
-    if (isReplacement) return;
+  function handleAddToBill(items: ModelMatrixBillItem[]) {
+    if (isReplacement || items.length === 0) return;
     setLineItems((current) => {
-      const existing = current.find((row) => row.product_id === product.id);
-      if (existing) {
-        return current.map((row) => {
-          if (row.product_id !== product.id) return row;
-          const qty = row.qty + 1;
-          return {
+      let next = [...current];
+      for (const product of items) {
+        const qtyToAdd = product.qty;
+        if (!(qtyToAdd > 0)) continue;
+        const existingIndex = next.findIndex(
+          (row) => row.product_id === product.id,
+        );
+        if (existingIndex >= 0) {
+          const row = next[existingIndex];
+          const qty = row.qty + qtyToAdd;
+          next[existingIndex] = {
             ...row,
             qty,
             line_total: calcLineTotal(qty, row.unit_price),
           };
-        });
+        } else {
+          next = [...next, createLineFromProduct(product, qtyToAdd)];
+        }
       }
-      return [...current, createLineFromProduct(product)];
+      return next;
     });
-    toast.success(`เพิ่ม ${product.sku} ลงบิลแล้ว`);
+    toast.success(
+      items.length === 1
+        ? `เพิ่ม ${items[0].sku} × ${items[0].qty} ลงบิลแล้ว`
+        : `เพิ่ม ${items.length} รายการลงบิลแล้ว`,
+    );
   }
 
   function updateLineQty(key: string, qtyRaw: string) {
@@ -499,8 +515,8 @@ export default function SalesEditWorkspace({
         </CardHeader>
         <CardContent className="space-y-4">
           {!isReplacement ? (
-            <SmartSkuPicker
-              onSelectProduct={handleSelectProduct}
+            <ModelMatrixPicker
+              onAddToBill={handleAddToBill}
               disabled={isPending}
             />
           ) : null}

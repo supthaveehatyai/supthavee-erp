@@ -1,6 +1,6 @@
 import { PrintLayout } from "@/components/shared/print/PrintLayout";
 import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
-import { resolvePrintPaperSize } from "@/lib/constants/print-paper-size";
+import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
 import type { DocumentDetail } from "@/types/document";
 import type { DocumentAllocationRow } from "@/types/document-allocation";
 import type { PrintVatType } from "@/types/print-document";
@@ -72,7 +72,7 @@ export default async function PrintPaymentReceiptTemplate({
 
   const vatType = normalizePrintVatType(doc.vat_type);
   const vatRate = Number(doc.vat_rate ?? doc.tax_rate ?? 7);
-  const paperSize = resolvePrintPaperSize(mode);
+  const paperSize = await getDocumentPrintPaperSize(mode);
 
   return (
     <PrintLayout

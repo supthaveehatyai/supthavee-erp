@@ -11,6 +11,8 @@ export type PrintCustomerData = {
   branch_name?: string | null;
   address?: string | null;
   phone?: string | null;
+  /** Optional — omit / empty when party has no email (conditional print) */
+  email?: string | null;
 };
 
 export type DocumentPrintHeaderProps = {

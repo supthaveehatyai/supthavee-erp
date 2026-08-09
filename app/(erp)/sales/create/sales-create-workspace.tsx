@@ -4,7 +4,7 @@
  * Sales Create workspace — Client island under a Server Component page.
  *
  * Owns interactive state for the fixed header (`doc_type`, `contact_id`,
- * `contact_person_id`), Smart SKU Picker line items, and draft document.
+ * `contact_person_id`), Model-First Matrix line items, and draft document.
  * Persistence / lookups go through Server Actions only — never client Supabase.
  */
 
@@ -29,7 +29,9 @@ import type {
   SalesLineItem,
   SalesProductSearchItem,
 } from "@/types/document";
-import SmartSkuPicker from "@/components/sales/smart-sku-picker";
+import ModelMatrixPicker, {
+  type ModelMatrixBillItem,
+} from "@/components/sales/model-matrix-picker";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import { Button } from "@/components/ui/button";
 import {
@@ -96,21 +98,24 @@ function calcLineTotal(qty: number, unitPrice: number): number {
   return Math.round(Math.max(0, raw) * 100) / 100;
 }
 
-function createLineFromProduct(product: SalesProductSearchItem): SalesLineItem {
-  const qty = 1;
+function createLineFromProduct(
+  product: SalesProductSearchItem,
+  qty = 1,
+): SalesLineItem {
   const unitPrice = product.unit_price;
+  const nextQty = qty > 0 ? qty : 1;
   return {
-    key: `${product.id}-${Date.now()}`,
+    key: `${product.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     product_id: product.id,
     sku: product.sku,
     description: product.display_name,
-    qty,
+    qty: nextQty,
     uom_used: product.base_uom?.trim() || "ตัว",
     unit_price: unitPrice,
     cost_price: product.cost_price,
     discount_text: "",
     discount_amount: 0,
-    line_total: calcLineTotal(qty, unitPrice),
+    line_total: calcLineTotal(nextQty, unitPrice),
     image_url: product.image_url ?? null,
   };
 }
@@ -241,24 +246,36 @@ export default function SalesCreateWorkspace({
     setContactPersonId(nextPersonId);
   }
 
-  function handleSelectProduct(product: SalesProductSearchItem) {
+  function handleAddToBill(items: ModelMatrixBillItem[]) {
+    if (items.length === 0) return;
     clearLastSavedArtifact();
     setLineItems((current) => {
-      const existing = current.find((row) => row.product_id === product.id);
-      if (existing) {
-        return current.map((row) => {
-          if (row.product_id !== product.id) return row;
-          const qty = row.qty + 1;
-          return {
+      let next = [...current];
+      for (const product of items) {
+        const qtyToAdd = product.qty;
+        if (!(qtyToAdd > 0)) continue;
+        const existingIndex = next.findIndex(
+          (row) => row.product_id === product.id,
+        );
+        if (existingIndex >= 0) {
+          const row = next[existingIndex];
+          const qty = row.qty + qtyToAdd;
+          next[existingIndex] = {
             ...row,
             qty,
             line_total: calcLineTotal(qty, row.unit_price),
           };
-        });
+        } else {
+          next = [...next, createLineFromProduct(product, qtyToAdd)];
+        }
       }
-      return [...current, createLineFromProduct(product)];
+      return next;
     });
-    toast.success(`เพิ่ม ${product.sku} ลงบิลแล้ว`);
+    toast.success(
+      items.length === 1
+        ? `เพิ่ม ${items[0].sku} × ${items[0].qty} ลงบิลแล้ว`
+        : `เพิ่ม ${items.length} รายการลงบิลแล้ว`,
+    );
   }
 
   function updateLineQty(key: string, qtyRaw: string) {
@@ -489,20 +506,20 @@ export default function SalesCreateWorkspace({
 
       <Card className="border-slate-200 shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">ค้นหาสินค้าลงบิล</CardTitle>
+          <CardTitle className="text-base">ค้นหารุ่นสินค้าลงบิล</CardTitle>
           <CardDescription>
-            ค้นหาด้วย SKU หรือชื่อรุ่น — แก้ราคา/จำนวนในตารางได้ทันที (รวม = จำนวน ×
+            Model-First — ค้นหารุ่น แล้วเลือกสี/ไซส์/จำนวนจาก Matrix (รวม = จำนวน ×
             ราคา/หน่วย)
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <SmartSkuPicker
+          <ModelMatrixPicker
             disabled={isPending}
-            onSelectProduct={handleSelectProduct}
+            onAddToBill={handleAddToBill}
           />
           <p className="mt-2 text-[11px] text-slate-500">
-            เลือกสินค้า ปรับราคา/จำนวน แล้วกด &quot;{DOCUMENT_ACTIONS.SAVE_DRAFT}
-            &quot; เพื่อรันเลขที่บิล + บันทึก
+            เพิ่มจาก Matrix แล้วปรับราคา/จำนวนในตารางได้ — กด &quot;
+            {DOCUMENT_ACTIONS.SAVE_DRAFT}&quot; เพื่อรันเลขที่บิล + บันทึก
           </p>
         </CardContent>
       </Card>
@@ -514,7 +531,7 @@ export default function SalesCreateWorkspace({
             <CardDescription>
               {lineItems.length > 0
                 ? `${lineItems.length} รายการ · รวม ${formatMoney(linesSubtotal)} ฿`
-                : "เลือกสินค้าจาก Smart SKU Picker เพื่อเพิ่มลงบิล"}
+                : "เลือกรุ่นสินค้าจาก Model Matrix เพื่อเพิ่มลงบิล"}
             </CardDescription>
           </div>
         </CardHeader>

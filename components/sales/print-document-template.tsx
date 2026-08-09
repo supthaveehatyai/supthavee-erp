@@ -1,6 +1,6 @@
 import { PrintLayout } from "@/components/shared/print/PrintLayout";
 import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
-import { resolvePrintPaperSize } from "@/lib/constants/print-paper-size";
+import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
 import type { DocumentDetail, DocumentType } from "@/types/document";
 import type { PrintPaperSize, PrintVatType } from "@/types/print-document";
 import { cn } from "@/lib/utils";
@@ -82,7 +82,7 @@ export default async function PrintDocumentTemplate({
       : "ลูกค้า / Customer";
 
   const resolvedPaperSize =
-    paperSize ?? resolvePrintPaperSize(doc.doc_type);
+    paperSize ?? (await getDocumentPrintPaperSize(doc.doc_type));
   const compact = resolvedPaperSize !== "A4";
 
   return (

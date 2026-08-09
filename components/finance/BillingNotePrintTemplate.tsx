@@ -1,6 +1,6 @@
 import { PrintLayout } from "@/components/shared/print/PrintLayout";
 import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
-import { resolvePrintPaperSize } from "@/lib/constants/print-paper-size";
+import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
 import type { BillingNoteDetailData } from "@/app/actions/billing";
 import { cn } from "@/lib/utils";
 
@@ -43,7 +43,7 @@ export default async function BillingNotePrintTemplate({
     0,
   );
   const grandTotal = Number(doc.grand_total || lineTotal);
-  const paperSize = resolvePrintPaperSize(doc.doc_type);
+  const paperSize = await getDocumentPrintPaperSize(doc.doc_type);
 
   return (
     <PrintLayout

@@ -1,6 +1,6 @@
 import { PrintLayout } from "@/components/shared/print/PrintLayout";
 import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
-import { resolvePrintPaperSize } from "@/lib/constants/print-paper-size";
+import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
 import type { ExpenseDetail } from "@/types/expense";
 import type { PrintVatType } from "@/types/print-document";
 import { cn } from "@/lib/utils";
@@ -23,7 +23,7 @@ export default async function PrintExpenseTemplate({
   const grandTotal = Number(expense.grand_total ?? 0);
   const whtAmount = Number(expense.wht_amount ?? 0);
   const vatType: PrintVatType = vatAmount > 0 ? "EXCLUSIVE" : "NONE";
-  const paperSize = resolvePrintPaperSize("EXPENSE");
+  const paperSize = await getDocumentPrintPaperSize("EXPENSE");
 
   return (
     <PrintLayout

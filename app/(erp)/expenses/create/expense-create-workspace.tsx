@@ -58,6 +58,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VAT_OPTIONS, type VatOptionValue } from "@/lib/constants/accounting";
 import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import { cn } from "@/lib/utils";
+import { compressImage } from "@/lib/utils/image-compression";
 import { ExpenseCategoryCombobox } from "./expense-category-combobox";
 
 export type ExpenseCreateTab = "ocr" | "manual";
@@ -545,7 +546,7 @@ export function ExpenseCreateWorkspace({
     return mime.startsWith("image/") || mime === "application/pdf";
   }
 
-  function setAttachmentFile(file: File | null) {
+  async function setAttachmentFile(file: File | null) {
     if (!file) {
       attachmentFileRef.current = null;
       setValue("attachment_file", null, { shouldValidate: true });
@@ -557,9 +558,27 @@ export function ExpenseCreateWorkspace({
       setValue("attachment_file", null, { shouldValidate: true });
       return;
     }
-    attachmentFileRef.current = file;
+
+    const mime = (file.type || "").toLowerCase();
+    let nextFile = file;
+    if (mime.startsWith("image/")) {
+      try {
+        nextFile = await compressImage(file);
+      } catch (err) {
+        toast.error(
+          err instanceof Error
+            ? `บีบอัดใบเสร็จไม่สำเร็จ: ${err.message}`
+            : "บีบอัดใบเสร็จไม่สำเร็จ",
+        );
+        attachmentFileRef.current = null;
+        setValue("attachment_file", null, { shouldValidate: true });
+        return;
+      }
+    }
+
+    attachmentFileRef.current = nextFile;
     setClearReceiptOnSave(false);
-    setValue("attachment_file", file, { shouldValidate: true });
+    setValue("attachment_file", nextFile, { shouldValidate: true });
   }
 
   function clearAttachment() {
@@ -570,7 +589,7 @@ export function ExpenseCreateWorkspace({
     if (attachmentInputRef.current) attachmentInputRef.current.value = "";
   }
 
-  function setPaymentSlipFile(file: File | null) {
+  async function setPaymentSlipFile(file: File | null) {
     if (!file) {
       paymentSlipFileRef.current = null;
       setValue("payment_slip_file", null, { shouldValidate: true });
@@ -582,9 +601,27 @@ export function ExpenseCreateWorkspace({
       setValue("payment_slip_file", null, { shouldValidate: true });
       return;
     }
-    paymentSlipFileRef.current = file;
+
+    const mime = (file.type || "").toLowerCase();
+    let nextFile = file;
+    if (mime.startsWith("image/")) {
+      try {
+        nextFile = await compressImage(file);
+      } catch (err) {
+        toast.error(
+          err instanceof Error
+            ? `บีบอัดสลิปไม่สำเร็จ: ${err.message}`
+            : "บีบอัดสลิปไม่สำเร็จ",
+        );
+        paymentSlipFileRef.current = null;
+        setValue("payment_slip_file", null, { shouldValidate: true });
+        return;
+      }
+    }
+
+    paymentSlipFileRef.current = nextFile;
     setClearPaymentSlipOnSave(false);
-    setValue("payment_slip_file", file, { shouldValidate: true });
+    setValue("payment_slip_file", nextFile, { shouldValidate: true });
   }
 
   function clearPaymentSlip() {
@@ -717,7 +754,7 @@ export function ExpenseCreateWorkspace({
     setError(null);
     setOcrFileName(file.name);
     // Keep the same file as Manual attachment (upload on Save Draft)
-    setAttachmentFile(file);
+    void setAttachmentFile(file);
 
     try {
       const formData = new FormData();
@@ -1082,7 +1119,7 @@ export function ExpenseCreateWorkspace({
                   className="sr-only"
                   disabled={formBusy}
                   onChange={(e) => {
-                    setAttachmentFile(e.target.files?.[0] ?? null);
+                    void setAttachmentFile(e.target.files?.[0] ?? null);
                   }}
                 />
                 <div
@@ -1105,7 +1142,7 @@ export function ExpenseCreateWorkspace({
                   }}
                   onDrop={(e) => {
                     e.preventDefault();
-                    setAttachmentFile(e.dataTransfer.files?.[0] ?? null);
+                    void setAttachmentFile(e.dataTransfer.files?.[0] ?? null);
                   }}
                 >
                   {attachmentPreviewUrl ? (
@@ -1492,7 +1529,7 @@ export function ExpenseCreateWorkspace({
                     className="sr-only"
                     disabled={formBusy}
                     onChange={(e) => {
-                      setPaymentSlipFile(e.target.files?.[0] ?? null);
+                      void setPaymentSlipFile(e.target.files?.[0] ?? null);
                     }}
                   />
                   <div
@@ -1515,7 +1552,7 @@ export function ExpenseCreateWorkspace({
                     }}
                     onDrop={(e) => {
                       e.preventDefault();
-                      setPaymentSlipFile(e.dataTransfer.files?.[0] ?? null);
+                      void setPaymentSlipFile(e.dataTransfer.files?.[0] ?? null);
                     }}
                   >
                     {paymentSlipPreviewUrl ? (

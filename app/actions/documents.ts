@@ -6,6 +6,7 @@
  */
 
 import { revalidatePath } from "next/cache";
+import { insertAuditLog } from "@/lib/supabase/auditService";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 
 const SALES_PATH = "/sales";
@@ -20,6 +21,7 @@ export type DeleteDraftDocumentResult = {
  * Physically delete a DRAFT document.
  * Only `documents.status === 'DRAFT'` is allowed — no ledger/inventory impact.
  * Line items cascade via `document_items.document_id ON DELETE CASCADE`.
+ * Audit actor is resolved server-side inside `insertAuditLog` (auth.getUser).
  */
 export async function deleteDraftDocument(
   documentId: string,
@@ -34,7 +36,7 @@ export async function deleteDraftDocument(
 
     const { data: document, error: fetchError } = await supabase
       .from("documents")
-      .select("id, doc_no, status")
+      .select("id, doc_no, status, doc_type, contact_id")
       .eq("id", id)
       .maybeSingle();
 
@@ -53,6 +55,14 @@ export async function deleteDraftDocument(
       };
     }
 
+    const snapshot = {
+      id: document.id,
+      doc_no: document.doc_no,
+      doc_type: document.doc_type,
+      status: document.status,
+      contact_id: document.contact_id,
+    };
+
     const { error: deleteError } = await supabase
       .from("documents")
       .delete()
@@ -66,6 +76,18 @@ export async function deleteDraftDocument(
         error: deleteError.message,
       };
     }
+
+    void insertAuditLog({
+      tableName: "documents",
+      recordId: id,
+      action: "DELETE",
+      oldData: snapshot,
+      newData: { deleted: true, audit_event: "DELETE" },
+    }).then((result) => {
+      if (!result.success) {
+        console.error("[deleteDraftDocument] audit:", result.error);
+      }
+    });
 
     revalidatePath(SALES_PATH);
     revalidatePath(`${SALES_PATH}/${encodeURIComponent(String(document.doc_no))}`);

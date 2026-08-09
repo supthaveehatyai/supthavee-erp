@@ -9,6 +9,7 @@
     "lint": "eslint",
     "env:check": "node -e \"const e=process.env.NODE_ENV||'development'; console.log('NODE_ENV='+e); console.log('URL='+(process.env.NEXT_PUBLIC_SUPABASE_URL||'(missing)'));\"",
     "generate-seed": "node scripts/generate-seed.mjs",
+    "seed:uat": "npx tsx scripts/seed-uat-data.ts",
     "backup:db": "node scripts/backup/backup-db.mjs",
     "backup:storage": "node scripts/backup/backup-storage.mjs"
   },
@@ -17,6 +18,7 @@
     "@hookform/resolvers": "^5.7.1",
     "@radix-ui/react-dialog": "^1.1.20",
     "@radix-ui/react-popover": "^1.1.19",
+    "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.110.7",
     "browser-image-compression": "^2.0.2",
     "clsx": "^2.1.1",

@@ -22,6 +22,8 @@ import {
 import { revalidatePath } from "next/cache";
 import { logAuditTrail } from "@/lib/supabase/auditService";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
+import { getSystemSettings } from "@/lib/actions/settings";
+import { assertStockOutAvailability } from "@/lib/inventory/stock-availability";
 import {
   calculateDocumentSummary,
   isVatCalculationType,
@@ -81,31 +83,63 @@ const ALLOWED_ATTACHMENT_MIME_TYPES = new Set([
 /**
  * Phase 6 — fire-and-forget audit write.
  * Never awaited on the critical path so ISSUE/VOID transactions are not blocked.
+ * Actor UUID is resolved inside `logAuditTrail` via server-side auth.getUser().
  */
+type DocumentAuditEvent =
+  | "CREATE"
+  | "UPDATE"
+  | "ISSUE"
+  | "VOID"
+  | "DELETE"
+  | "CONVERT"
+  | "DUPLICATE"
+  | "CLONE"
+  | "COMPLETE";
+
+function resolveDocumentAuditAction(
+  event: DocumentAuditEvent,
+): "INSERT" | "UPDATE" | "DELETE" {
+  if (event === "DELETE") return "DELETE";
+  if (
+    event === "CREATE" ||
+    event === "CONVERT" ||
+    event === "DUPLICATE" ||
+    event === "CLONE"
+  ) {
+    return "INSERT";
+  }
+  return "UPDATE";
+}
+
 function fireDocumentAuditLog(params: {
   recordId: string;
   oldData: Record<string, unknown> | null;
   newData: Record<string, unknown> | null;
-  changedByName: string;
-  userId?: string | null;
+  /** Business event for change details — never used as the actor display name */
+  auditEvent: DocumentAuditEvent;
 }): void {
-  void logAuditTrail(
-    "documents",
-    params.recordId,
-    "UPDATE",
-    params.oldData,
-    params.newData,
-    params.userId ?? null,
-    { changedByName: params.changedByName },
-  ).then((result) => {
+  void (async () => {
+    const newDataWithEvent: Record<string, unknown> = {
+      ...(params.newData ?? {}),
+      audit_event: params.auditEvent,
+    };
+
+    const result = await logAuditTrail(
+      "documents",
+      params.recordId,
+      resolveDocumentAuditAction(params.auditEvent),
+      params.oldData,
+      newDataWithEvent,
+    );
+
     if (!result.success) {
       console.error(
         "[fireDocumentAuditLog]",
-        params.changedByName,
+        params.auditEvent,
         result.error,
       );
     }
-  });
+  })();
 }
 
 function isDocumentType(value: string): value is DocumentType {
@@ -395,6 +429,20 @@ export async function createDraftDocument(
       }
     }
 
+    fireDocumentAuditLog({
+      recordId: documentId,
+      auditEvent: "CREATE",
+      oldData: null,
+      newData: {
+        id: documentId,
+        doc_no: (document.doc_no as string) || documentNo,
+        doc_type: docType,
+        status: "DRAFT",
+        contact_id: contactId,
+        item_count: lineRows.length,
+      },
+    });
+
     return {
       data: {
         document_id: documentId,
@@ -501,7 +549,20 @@ export async function createDocument(
             error: retry.error?.message ?? "บันทึกเอกสารไม่สำเร็จหลัง retry",
           };
         }
-        return { data: retry.data as DocumentRow, error: null };
+        const retryRow = retry.data as DocumentRow;
+        fireDocumentAuditLog({
+          recordId: retryRow.id,
+          auditEvent: "CREATE",
+          oldData: null,
+          newData: {
+            id: retryRow.id,
+            doc_no: retryRow.doc_no,
+            doc_type: retryRow.doc_type,
+            status: retryRow.status,
+            contact_id: retryRow.contact_id,
+          },
+        });
+        return { data: retryRow, error: null };
       }
 
       return {
@@ -510,7 +571,21 @@ export async function createDocument(
       };
     }
 
-    return { data: data as DocumentRow, error: null };
+    const createdRow = data as DocumentRow;
+    fireDocumentAuditLog({
+      recordId: createdRow.id,
+      auditEvent: "CREATE",
+      oldData: null,
+      newData: {
+        id: createdRow.id,
+        doc_no: createdRow.doc_no,
+        doc_type: createdRow.doc_type,
+        status: createdRow.status,
+        contact_id: createdRow.contact_id,
+      },
+    });
+
+    return { data: createdRow, error: null };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "สร้างเอกสารไม่สำเร็จ";
@@ -924,6 +999,30 @@ export async function completeDocument(
     const previousDocNo = String(document.doc_no ?? "");
     let officialDocNo = previousDocNo;
     const needsOfficialNumber = isTemporaryDraftDocNo(previousDocNo);
+
+    if (isStockOutDocType(docType)) {
+      const settingsResult = await getSystemSettings();
+      const allowNegative = settingsResult.success
+        ? settingsResult.data.allow_negative_inventory
+        : false;
+
+      const stockCheck = await assertStockOutAvailability(
+        supabase,
+        lineRows.map((row) => ({
+          product_id: row.product_id,
+          qty: Math.round(Number(row.qty)),
+        })),
+        allowNegative,
+      );
+
+      if (!stockCheck.ok) {
+        return {
+          data: null,
+          error: stockCheck.error,
+        };
+      }
+    }
+
     if (needsOfficialNumber) {
       const numberResult = await generateDocumentNumber(docType, issueDate);
       if (numberResult.error || !numberResult.data) {
@@ -1021,6 +1120,24 @@ export async function completeDocument(
 
       ledgerCount = ledgerPayload.length;
     }
+
+    fireDocumentAuditLog({
+      recordId: documentId,
+      auditEvent: "COMPLETE",
+      oldData: {
+        id: documentId,
+        status: draftStatus,
+      },
+      newData: {
+        id: documentId,
+        doc_no: officialDocNo,
+        doc_type: docType,
+        status: issuedStatus,
+        item_count: lineRows.length,
+        ledger_count: ledgerCount,
+        grand_total: grandTotal,
+      },
+    });
 
     return {
       data: {
@@ -1602,6 +1719,27 @@ export async function updateDraftDocument(
       `/sales/${encodeURIComponent(String(existing.doc_no ?? ""))}`,
     );
 
+    fireDocumentAuditLog({
+      recordId: documentId,
+      auditEvent: "UPDATE",
+      oldData: {
+        id: documentId,
+        doc_no: existing.doc_no,
+        status: existing.status,
+        contact_id: existing.contact_id,
+        grand_total: existing.grand_total,
+      },
+      newData: {
+        id: documentId,
+        doc_no: existing.doc_no,
+        status: "DRAFT",
+        contact_id: contactId,
+        doc_date: docDate,
+        grand_total: summary.grand_total,
+        item_count: lineRows.length,
+      },
+    });
+
     return {
       data: {
         document_id: documentId,
@@ -1701,6 +1839,36 @@ export async function issueDocument(
       updated_at: nowIso,
     };
 
+    const stockOutLines = isStockOutDocType(docType)
+      ? lineItems
+          .filter((row) => Boolean(row.product_id))
+          .map((row) => ({
+            product_id: row.product_id as string,
+            qty: Math.round(Number(row.qty ?? 0)),
+          }))
+          .filter((row) => row.qty > 0)
+      : [];
+
+    if (stockOutLines.length > 0) {
+      const settingsResult = await getSystemSettings();
+      const allowNegative = settingsResult.success
+        ? settingsResult.data.allow_negative_inventory
+        : false;
+
+      const stockCheck = await assertStockOutAvailability(
+        supabase,
+        stockOutLines,
+        allowNegative,
+      );
+
+      if (!stockCheck.ok) {
+        return {
+          data: null,
+          error: stockCheck.error,
+        };
+      }
+    }
+
     // Late Numbering — consume sequence only when issuing.
     if (isTemporaryDraftDocNo(officialDocNo)) {
       const numberResult = await generateDocumentNumber(docType, issueDate);
@@ -1734,49 +1902,44 @@ export async function issueDocument(
 
     let ledgerCount = 0;
 
-    if (isStockOutDocType(docType)) {
-      const ledgerPayload = lineItems
-        .filter((row) => Boolean(row.product_id))
-        .map((row) => ({
-          product_id: row.product_id as string,
-          doc_header_id: null as string | null,
-          trans_type: "OUT",
-          qty: Math.round(Number(row.qty ?? 0)),
-          notes: `ขายจากเอกสาร ${officialDocNo} | document_id=${id} | ออกเอกสาร ${issuedStatus}`,
-        }))
-        .filter((row) => row.qty > 0);
+    if (stockOutLines.length > 0) {
+      const ledgerPayload = stockOutLines.map((row) => ({
+        product_id: row.product_id,
+        doc_header_id: null as string | null,
+        trans_type: "OUT",
+        qty: row.qty,
+        notes: `ขายจากเอกสาร ${officialDocNo} | document_id=${id} | ออกเอกสาร ${issuedStatus}`,
+      }));
 
-      if (ledgerPayload.length > 0) {
-        const { error: ledgerError } = await supabase
-          .from("inventory_ledger")
-          .insert(ledgerPayload);
+      const { error: ledgerError } = await supabase
+        .from("inventory_ledger")
+        .insert(ledgerPayload);
 
-        if (ledgerError) {
-          // Keep official doc_no if already assigned (sequence already consumed).
-          await supabase
-            .from("documents")
-            .update({
-              status: "DRAFT" satisfies DocumentStatus,
-              updated_at: nowIso,
-            })
-            .eq("id", id);
+      if (ledgerError) {
+        // Keep official doc_no if already assigned (sequence already consumed).
+        await supabase
+          .from("documents")
+          .update({
+            status: "DRAFT" satisfies DocumentStatus,
+            updated_at: nowIso,
+          })
+          .eq("id", id);
 
-          return {
-            data: null,
-            error:
-              ledgerError.message ??
-              "ตัดสต็อก (inventory_ledger OUT) ไม่สำเร็จ — คืนสถานะ DRAFT แล้ว",
-          };
-        }
-
-        ledgerCount = ledgerPayload.length;
+        return {
+          data: null,
+          error:
+            ledgerError.message ??
+            "ตัดสต็อก (inventory_ledger OUT) ไม่สำเร็จ — คืนสถานะ DRAFT แล้ว",
+        };
       }
+
+      ledgerCount = ledgerPayload.length;
     }
 
     // Audit Trail (non-blocking) — DRAFT → ISSUED / COMPLETED
     fireDocumentAuditLog({
       recordId: id,
-      changedByName: "ISSUE",
+      auditEvent: "ISSUE",
       oldData: {
         id: document.id,
         doc_no: document.doc_no,
@@ -2249,6 +2412,23 @@ export async function convertDocument(
       }
     }
 
+    fireDocumentAuditLog({
+      recordId: newDocumentId,
+      auditEvent: "CONVERT",
+      oldData: {
+        source_id: source.id,
+        source_doc_no: source.doc_no,
+        source_doc_type: source.doc_type,
+      },
+      newData: {
+        id: newDocumentId,
+        doc_no: (created.doc_no as string) || newDocNo,
+        doc_type: targetDocType,
+        status: "DRAFT",
+        ref_document_id: source.id,
+      },
+    });
+
     return {
       data: {
         document_id: newDocumentId,
@@ -2472,7 +2652,7 @@ export async function voidDocument(
       // Audit Trail (non-blocking) — ISSUED/COMPLETED → CANCELLED
       fireDocumentAuditLog({
         recordId: id,
-        changedByName: "VOID",
+        auditEvent: "VOID",
         oldData: (beforeDoc as Record<string, unknown> | null) ?? null,
         newData: {
           ...(beforeDoc ?? {}),
@@ -2655,6 +2835,21 @@ export async function cloneDocumentToNewDraft(
     }
 
     revalidatePath("/sales");
+
+    fireDocumentAuditLog({
+      recordId: newDocumentId,
+      auditEvent: "CLONE",
+      oldData: {
+        source_id: id,
+      },
+      newData: {
+        id: newDocumentId,
+        doc_no: String(created.doc_no ?? draftDocNo),
+        status: "DRAFT",
+        ref_document_id: id,
+      },
+    });
+
     return {
       data: {
         document_id: newDocumentId,
@@ -2825,6 +3020,20 @@ export async function duplicateDocument(
     }
 
     revalidatePath("/sales");
+
+    fireDocumentAuditLog({
+      recordId: newDocumentId,
+      auditEvent: "DUPLICATE",
+      oldData: {
+        source_id: id,
+      },
+      newData: {
+        id: newDocumentId,
+        doc_no: String(created.doc_no ?? draftDocNo),
+        status: "DRAFT",
+      },
+    });
+
     return {
       data: {
         document_id: newDocumentId,

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ExternalLink, FileText, Link2, Pencil } from "lucide-react";
+import { ArrowLeft, Eye, FileText, Link2, Pencil } from "lucide-react";
 import { getDocumentByNo } from "@/lib/actions/document-actions";
 import {
   getDepositAllocationHistory,
@@ -17,6 +17,7 @@ import { AllocatedDocumentsTable } from "@/components/finance/AllocatedDocuments
 import { DepositAllocationHistoryTable } from "@/components/finance/DepositAllocationHistoryTable";
 import { DepositBalanceActions } from "@/components/finance/DepositBalanceActions";
 import { ReferenceDocumentsSection } from "@/components/finance/ReferenceDocumentsSection";
+import { AttachmentSheetViewer } from "@/components/shared/attachment-sheet-viewer";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -459,15 +460,19 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                     />
                   </div>
                   {slipUrl ? (
-                    <a
-                      href={slipUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 text-sm font-semibold text-sky-800 transition hover:bg-sky-100"
-                    >
-                      <ExternalLink className="size-4" />
-                      ดูสลิปโอนเงิน
-                    </a>
+                    <AttachmentSheetViewer
+                      fileUrl={slipUrl}
+                      title={`สลิปโอนเงิน · ${doc.doc_no}`}
+                      trigger={
+                        <button
+                          type="button"
+                          className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 text-sm font-semibold text-sky-800 transition hover:bg-sky-100"
+                        >
+                          <Eye className="size-4" />
+                          ดูสลิปโอนเงิน
+                        </button>
+                      }
+                    />
                   ) : null}
                 </>
               ) : isDepositDoc ? (
@@ -541,15 +546,19 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                 </>
               )}
               {slipUrl && !isSettlementDoc ? (
-                <a
-                  href={slipUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 text-sm font-semibold text-blue-800 transition hover:bg-blue-100"
-                >
-                  <ExternalLink className="size-4" />
-                  ดูสลิปโอนเงิน
-                </a>
+                <AttachmentSheetViewer
+                  fileUrl={slipUrl}
+                  title={`สลิปโอนเงิน · ${doc.doc_no}`}
+                  trigger={
+                    <button
+                      type="button"
+                      className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 text-sm font-semibold text-blue-800 transition hover:bg-blue-100"
+                    >
+                      <Eye className="size-4" />
+                      ดูสลิปโอนเงิน
+                    </button>
+                  }
+                />
               ) : null}
             </CardContent>
           </Card>

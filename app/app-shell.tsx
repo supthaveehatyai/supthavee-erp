@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { SignOutButton } from "@/components/auth/sign-out-button";
 
 type IconName =
   | "dashboard"
@@ -10,6 +11,7 @@ type IconName =
   | "document"
   | "wallet"
   | "warehouse"
+  | "book"
   | "history"
   | "settings";
 
@@ -40,7 +42,7 @@ const navigationGroups: NavigationGroup[] = [
       { label: "เอกสารขาย", href: "/sales" },
       { label: "เปิดบิลขาย", href: "/sales/create" },
       { label: "เอกสารซื้อ", href: "/purchases" },
-      { label: "วิเคราะห์กำไร", href: "/documents/profit" },
+      { label: "วิเคราะห์กำไร", href: "/profit-analysis" },
     ],
   },
   {
@@ -66,6 +68,16 @@ const navigationGroups: NavigationGroup[] = [
     items: [
       { label: "บัตรสต็อก (Stock Card)", href: "/inventory/ledger" },
       { label: "Production Kanban", href: "/production/kanban" },
+    ],
+  },
+  {
+    label: "คู่มือการใช้งาน (Knowledge Base)",
+    icon: "book",
+    items: [
+      {
+        label: "มาตรฐานเอกสาร (Document Standards)",
+        href: "/knowledge-base/document-standards",
+      },
     ],
   },
 ];
@@ -109,6 +121,13 @@ function Icon({
       <>
         <path d="m3 10 9-6 9 6v11H3z" />
         <path d="M8 21v-7h8v7M3 10h18" />
+      </>
+    ),
+    book: (
+      <>
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+        <path d="M8 7h8M8 11h6" />
       </>
     ),
     history: (
@@ -220,9 +239,27 @@ function SidebarContent({ closeMenu }: { closeMenu: () => void }) {
           ประวัติการทำงาน
         </Link>
         <Link
+          href="/settings/users"
+          onNavigate={closeMenu}
+          className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition ${
+            pathname === "/settings/users" ||
+            pathname.startsWith("/settings/users/")
+              ? "bg-white/15 font-medium text-white"
+              : "text-blue-200 hover:bg-white/10 hover:text-white"
+          }`}
+        >
+          <Icon name="database" className="size-[18px]" />
+          จัดการผู้ใช้งาน
+        </Link>
+        <Link
           href="/settings/company"
           onNavigate={closeMenu}
-          className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs text-blue-200 transition hover:bg-white/10 hover:text-white"
+          className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition ${
+            pathname === "/settings/company" ||
+            pathname.startsWith("/settings/company/")
+              ? "bg-white/15 font-medium text-white"
+              : "text-blue-200 hover:bg-white/10 hover:text-white"
+          }`}
         >
           <Icon name="settings" className="size-[18px]" />
           ตั้งค่าข้อมูลบริษัท
@@ -233,7 +270,16 @@ function SidebarContent({ closeMenu }: { closeMenu: () => void }) {
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  // Auth routes render without ERP chrome (sidebar / top bar).
+  const isAuthRoute =
+    pathname === "/login" || pathname.startsWith("/login/");
+
+  if (isAuthRoute) {
+    return <>{children}</>;
+  }
 
   return (
     <div className="min-h-dvh bg-slate-50">
@@ -284,12 +330,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
           <div className="flex items-center gap-3">
             <div className="hidden text-right sm:block">
-              <p className="text-xs font-semibold text-slate-700">ผู้ดูแลระบบ</p>
-              <p className="text-[11px] text-slate-400">Admin</p>
+              <p className="text-xs font-semibold text-slate-700">ผู้ใช้งาน</p>
+              <p className="text-[11px] text-slate-400">Supthavee ERP</p>
             </div>
-            <div className="grid size-9 place-items-center rounded-full bg-blue-50 text-xs font-bold text-blue-700 ring-1 ring-blue-100">
-              AD
-            </div>
+            <SignOutButton />
           </div>
         </header>
 

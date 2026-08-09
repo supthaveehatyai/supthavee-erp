@@ -163,6 +163,19 @@ function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+/**
+ * LPP guard — products.cost_price ต้องมาจากต้นทุนสุทธิหลังส่วนลดเท่านั้น
+ * (`unit_cost_price` / finalUnitCost จากบิลซื้อ)
+ * ห้ามใช้ retail_price / wholesale_price / unit_price (ราคาตั้งก่อนหักส่วนลด)
+ */
+function resolveLppFromUnitCostPrice(
+  unitCostPrice: number,
+): number | null {
+  const n = Number(unitCostPrice);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return roundTo4Decimals(n);
+}
+
 /* -------------------------------------------------------------------------- */
 /* parseReceiptOcr (invokes process-receipt-ocr Edge Function)               */
 /* -------------------------------------------------------------------------- */
@@ -1073,50 +1086,56 @@ export async function saveGoodsReceiptToLedger(
       };
     }
 
-    // 4. Last Purchase Price (LPP) — push finalUnitCost into products.cost_price.
+    // 4. Last Purchase Price (LPP) — push unit_cost_price (net after discounts)
+    // into products.cost_price. NEVER use retail_price / wholesale_price / unit_price.
     // Skips FOC lines so free goods never wipe a real historical cost.
-    // Uses service-role admin client (Zero Client-Side Fetching).
     const lppTargets = lines.filter(
       (line) => !line.row.isFoc && line.row.matchedProduct?.id,
     );
 
     if (lppTargets.length > 0) {
       // Collapse duplicates (same internal product on multiple receipt rows)
-      // so the latest finalUnitCost for that product wins.
+      // so the latest net unit cost for that product wins.
       const costByProductId = new Map<string, number>();
       for (const line of lppTargets) {
-        costByProductId.set(line.row.matchedProduct!.id, line.unitCostPrice);
+        const lpp = resolveLppFromUnitCostPrice(line.unitCostPrice);
+        if (lpp == null) continue;
+        costByProductId.set(line.row.matchedProduct!.id, lpp);
       }
 
-      const lppResults = await Promise.all(
-        [...costByProductId.entries()].map(([productId, costPrice]) =>
-          supabaseAdmin
-            .from("products")
-            .update({ cost_price: costPrice })
-            .eq("id", productId),
-        ),
-      );
+      if (costByProductId.size === 0) {
+        // No valid net costs — skip LPP (do not fall back to selling prices)
+      } else {
+        const lppResults = await Promise.all(
+          [...costByProductId.entries()].map(([productId, unitCostPrice]) =>
+            supabaseAdmin
+              .from("products")
+              .update({ cost_price: unitCostPrice })
+              .eq("id", productId),
+          ),
+        );
 
-      const lppError = lppResults.find((result) => result.error)?.error;
-      if (lppError) {
-        // Compensating rollback — keep receipt + LPP atomic.
-        await supabaseAdmin
-          .from("inventory_ledger")
-          .delete()
-          .eq("doc_header_id", docHeaderId);
-        await supabaseAdmin.from("documents").delete().eq("id", phase4DocumentId);
-        await supabaseAdmin
-          .from("doc_details")
-          .delete()
-          .eq("doc_header_id", docHeaderId);
-        await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
-        return {
-          docHeaderId: null,
-          docNo: null,
-          error:
-            lppError.message ??
-            "อัปเดตราคาต้นทุนล่าสุด (products.cost_price) ไม่สำเร็จ",
-        };
+        const lppError = lppResults.find((result) => result.error)?.error;
+        if (lppError) {
+          // Compensating rollback — keep receipt + LPP atomic.
+          await supabaseAdmin
+            .from("inventory_ledger")
+            .delete()
+            .eq("doc_header_id", docHeaderId);
+          await supabaseAdmin.from("documents").delete().eq("id", phase4DocumentId);
+          await supabaseAdmin
+            .from("doc_details")
+            .delete()
+            .eq("doc_header_id", docHeaderId);
+          await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+          return {
+            docHeaderId: null,
+            docNo: null,
+            error:
+              lppError.message ??
+              "อัปเดตราคาต้นทุนล่าสุด (products.cost_price) ไม่สำเร็จ",
+          };
+        }
       }
     }
 
@@ -1320,7 +1339,8 @@ export async function saveManualGoodsReceipt(
       const cost = costByLineKey.get(line.lineKey);
       const invoice = invoiceByLineKey.get(line.lineKey);
       const invoiceLineTotal = roundMoney(invoice?.finalLineTotal ?? 0);
-      const unitCostPrice = roundMoney(cost?.finalUnitCost ?? 0);
+      // Net unit cost after discounts (4 dp) — source of truth for LPP / unit_cost_price
+      const unitCostPrice = roundTo4Decimals(cost?.finalUnitCost ?? 0);
       const discountAmount = roundMoney(line.unitPrice * line.qty - invoiceLineTotal);
       return {
         product_id: line.product_id,
@@ -1510,35 +1530,40 @@ export async function saveManualGoodsReceipt(
       };
     }
 
+    // LPP — products.cost_price ← unit_cost (net) only — never retail/selling price
     const costByProductId = new Map<string, number>();
     for (const line of normalizedLines) {
-      costByProductId.set(line.product_id, line.unit_cost);
+      const lpp = resolveLppFromUnitCostPrice(line.unit_cost);
+      if (lpp == null) continue;
+      costByProductId.set(line.product_id, lpp);
     }
 
-    const lppResults = await Promise.all(
-      [...costByProductId.entries()].map(([productId, costPrice]) =>
-        supabaseAdmin
-          .from("products")
-          .update({ cost_price: costPrice })
-          .eq("id", productId),
-      ),
-    );
+    if (costByProductId.size > 0) {
+      const lppResults = await Promise.all(
+        [...costByProductId.entries()].map(([productId, unitCostPrice]) =>
+          supabaseAdmin
+            .from("products")
+            .update({ cost_price: unitCostPrice })
+            .eq("id", productId),
+        ),
+      );
 
-    const lppError = lppResults.find((result) => result.error)?.error;
-    if (lppError) {
-      await supabaseAdmin
-        .from("inventory_ledger")
-        .delete()
-        .eq("doc_header_id", docHeaderId);
-      await supabaseAdmin.from("documents").delete().eq("id", documentId);
-      await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", docHeaderId);
-      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
-      return {
-        data: null,
-        error:
-          lppError.message ??
-          "อัปเดตราคาต้นทุนล่าสุด (products.cost_price) ไม่สำเร็จ",
-      };
+      const lppError = lppResults.find((result) => result.error)?.error;
+      if (lppError) {
+        await supabaseAdmin
+          .from("inventory_ledger")
+          .delete()
+          .eq("doc_header_id", docHeaderId);
+        await supabaseAdmin.from("documents").delete().eq("id", documentId);
+        await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", docHeaderId);
+        await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+        return {
+          data: null,
+          error:
+            lppError.message ??
+            "อัปเดตราคาต้นทุนล่าสุด (products.cost_price) ไม่สำเร็จ",
+        };
+      }
     }
 
     return {

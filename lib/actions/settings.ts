@@ -6,15 +6,23 @@
  * Mutations require requireAdmin().
  */
 
+import { cache } from "react";
 import { revalidatePath } from "next/cache";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { requireAdmin } from "@/lib/auth/require-admin";
+import {
+  normalizePrintPaperSize,
+  resolvePrintPaperSize,
+} from "@/lib/constants/print-paper-size";
 import { companySettingsSchema } from "@/lib/validations/system-settings";
 import type { Database } from "@/src/types/supabase";
+import type { PrintPaperSize } from "@/types/print-document";
 import type {
+  DocumentPrintSettings,
   GetSystemSettingsResult,
   SystemSettings,
   SystemSettingsFormData,
+  UpdateDocumentPrintSettingResult,
   UpdateSystemSettingsResult,
   UploadCompanyLogoResult,
 } from "@/types/system-settings";
@@ -23,6 +31,7 @@ type AdminClient = SupabaseClient<Database>;
 type SystemSettingsRow = Database["public"]["Tables"]["system_settings"]["Row"];
 
 const SETTINGS_PATH = "/settings/company";
+const KNOWLEDGE_BASE_PATH = "/knowledge-base/document-standards";
 const SINGLETON_ID = 1;
 const COMPANY_ASSETS_BUCKET = "company_assets";
 const MAX_LOGO_BYTES = 5 * 1024 * 1024;
@@ -35,7 +44,7 @@ const ALLOWED_LOGO_MIME = new Set([
 ]);
 
 const SETTINGS_SELECT =
-  "id, company_name, company_name_en, tax_id, branch_code, branch_name, address, phone, email, logo_url, vat_rate, gl_rounding_expense_acc, gl_rounding_income_acc, updated_at, updated_by" as const;
+  "id, company_name, company_name_en, tax_id, branch_code, branch_name, address, phone, email, logo_url, vat_rate, gl_rounding_expense_acc, gl_rounding_income_acc, document_print_settings, allow_negative_inventory, updated_at, updated_by" as const;
 
 function createSupabaseAdminClient(): AdminClient {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -56,6 +65,23 @@ function createSupabaseAdminClient(): AdminClient {
   });
 }
 
+function parseDocumentPrintSettings(
+  value: SystemSettingsRow["document_print_settings"] | null | undefined,
+): DocumentPrintSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const out: DocumentPrintSettings = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (typeof raw !== "string") continue;
+    const code = key.trim().toUpperCase();
+    const size = normalizePrintPaperSize(raw);
+    if (!code || !size) continue;
+    out[code] = size;
+  }
+  return out;
+}
+
 function mapRow(row: SystemSettingsRow): SystemSettings {
   return {
     id: Number(row.id ?? SINGLETON_ID),
@@ -71,15 +97,16 @@ function mapRow(row: SystemSettingsRow): SystemSettings {
     vat_rate: Number(row.vat_rate ?? 7),
     gl_rounding_expense_acc: row.gl_rounding_expense_acc ?? "5100-99",
     gl_rounding_income_acc: row.gl_rounding_income_acc ?? "4100-99",
+    document_print_settings: parseDocumentPrintSettings(
+      row.document_print_settings,
+    ),
+    allow_negative_inventory: Boolean(row.allow_negative_inventory),
     updated_at: row.updated_at ?? new Date().toISOString(),
     updated_by: row.updated_by,
   };
 }
 
-/**
- * โหลดข้อมูลบริษัท (singleton id = 1) สำหรับหน้า Settings / เอกสารพิมพ์.
- */
-export async function getSystemSettings(): Promise<GetSystemSettingsResult> {
+async function fetchSystemSettingsRow(): Promise<GetSystemSettingsResult> {
   try {
     const supabaseAdmin = createSupabaseAdminClient();
 
@@ -90,6 +117,38 @@ export async function getSystemSettings(): Promise<GetSystemSettingsResult> {
       .maybeSingle();
 
     if (error) {
+      // Column may not exist yet on older DBs — retry without newer columns.
+      if (
+        error.message?.includes("document_print_settings") ||
+        error.message?.includes("allow_negative_inventory") ||
+        error.code === "42703"
+      ) {
+        const fallback = await supabaseAdmin
+          .from("system_settings")
+          .select(
+            "id, company_name, company_name_en, tax_id, branch_code, branch_name, address, phone, email, logo_url, vat_rate, gl_rounding_expense_acc, gl_rounding_income_acc, updated_at, updated_by",
+          )
+          .eq("id", SINGLETON_ID)
+          .maybeSingle();
+
+        if (fallback.error) {
+          return { success: false, error: fallback.error.message };
+        }
+        if (!fallback.data) {
+          return {
+            success: false,
+            error: "ไม่พบข้อมูลตั้งค่าบริษัท (system_settings id = 1)",
+          };
+        }
+        return {
+          success: true,
+          data: mapRow({
+            ...fallback.data,
+            document_print_settings: {},
+            allow_negative_inventory: false,
+          } as SystemSettingsRow),
+        };
+      }
       return { success: false, error: error.message };
     }
 
@@ -106,6 +165,27 @@ export async function getSystemSettings(): Promise<GetSystemSettingsResult> {
       err instanceof Error ? err.message : "ไม่สามารถโหลดตั้งค่าบริษัทได้";
     return { success: false, error: message };
   }
+}
+
+/**
+ * โหลดข้อมูลบริษัท (singleton id = 1) สำหรับหน้า Settings / เอกสารพิมพ์.
+ * Request-scoped cache — กันซ้ำระหว่าง PrintLayout header + paper resolve.
+ */
+export const getSystemSettings = cache(
+  async (): Promise<GetSystemSettingsResult> => fetchSystemSettingsRow(),
+);
+
+/**
+ * Resolve paper size for print templates — settings override → default → A4.
+ */
+export async function getDocumentPrintPaperSize(
+  docType: string,
+): Promise<PrintPaperSize> {
+  const settings = await getSystemSettings();
+  const overrides = settings.success
+    ? settings.data.document_print_settings
+    : null;
+  return resolvePrintPaperSize(docType, overrides);
 }
 
 /**
@@ -140,8 +220,10 @@ export async function updateSystemSettings(
           branch_name: payload.branch_name,
           address: payload.address,
           phone: payload.phone,
+          email: payload.email,
           vat_rate: payload.vat_rate,
           logo_url: payload.logo_url?.trim() || "",
+          allow_negative_inventory: Boolean(payload.allow_negative_inventory),
           updated_at: new Date().toISOString(),
           updated_by: gate.admin.userId,
         },
@@ -163,6 +245,77 @@ export async function updateSystemSettings(
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "ไม่สามารถบันทึกตั้งค่าบริษัทได้";
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * อัปเดตขนาดกระดาษพิมพ์ต่อประเภทเอกสาร (JSONB merge ตาม docType).
+ */
+export async function updateDocumentPrintSetting(
+  docType: string,
+  paperSize: string,
+): Promise<UpdateDocumentPrintSettingResult> {
+  try {
+    const gate = await requireAdmin();
+    if (!gate.ok) {
+      return { success: false, error: gate.error };
+    }
+
+    const code = String(docType ?? "")
+      .trim()
+      .toUpperCase();
+    if (!code) {
+      return { success: false, error: "ไม่ระบุประเภทเอกสาร (docType)" };
+    }
+
+    const size = normalizePrintPaperSize(paperSize);
+    if (!size) {
+      return {
+        success: false,
+        error: "ขนาดกระดาษไม่ถูกต้อง — เลือก A4, A5 หรือ A5 Landscape",
+      };
+    }
+
+    const current = await fetchSystemSettingsRow();
+    if (!current.success) {
+      return current;
+    }
+
+    const nextSettings: DocumentPrintSettings = {
+      ...current.data.document_print_settings,
+      [code]: size,
+    };
+
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data: row, error } = await supabaseAdmin
+      .from("system_settings")
+      .update({
+        document_print_settings: nextSettings as Database["public"]["Tables"]["system_settings"]["Update"]["document_print_settings"],
+        updated_at: new Date().toISOString(),
+        updated_by: gate.admin.userId,
+      })
+      .eq("id", SINGLETON_ID)
+      .select(SETTINGS_SELECT)
+      .single();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    revalidatePath(KNOWLEDGE_BASE_PATH);
+    revalidatePath(SETTINGS_PATH);
+    revalidatePath("/sales");
+    revalidatePath("/purchases");
+    revalidatePath("/expenses");
+    revalidatePath("/finance");
+
+    return { success: true, data: mapRow(row) };
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "ไม่สามารถบันทึกขนาดกระดาษเอกสารได้";
     return { success: false, error: message };
   }
 }

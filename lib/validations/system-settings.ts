@@ -24,11 +24,21 @@ export const companySettingsSchema = z.object({
     .min(1, "กรุณาระบุชื่อสาขา"),
   address: z.string().trim(),
   phone: z.string().trim(),
+  email: z
+    .string()
+    .trim()
+    .refine(
+      (value) =>
+        value === "" ||
+        z.string().email().safeParse(value).success,
+      "รูปแบบอีเมลไม่ถูกต้อง",
+    ),
   vat_rate: z.coerce
     .number({ error: "กรุณาระบุอัตรา VAT" })
     .min(0, "อัตรา VAT ต้องไม่ต่ำกว่า 0")
     .max(100, "อัตรา VAT ต้องไม่เกิน 100"),
   logo_url: z.string().optional(),
+  allow_negative_inventory: z.boolean().optional().default(false),
 });
 
 export type CompanySettingsFormValues = z.infer<typeof companySettingsSchema>;

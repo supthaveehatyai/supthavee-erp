@@ -24,6 +24,7 @@ import {
   checkedDepositIdsFromAmounts,
   redistributeCheckedDeposits,
 } from "@/lib/utils/deposit-apply";
+import { compressImage } from "@/lib/utils/image-compression";
 import { OutstandingPartyCombobox } from "@/components/finance/OutstandingPartyCombobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -367,7 +368,7 @@ export function APPaymentClient({
     );
   }
 
-  function handleSlipChange(fileList: FileList | null) {
+  async function handleSlipChange(fileList: FileList | null) {
     const file = fileList?.[0] ?? null;
     if (!file) {
       setSlipFile(null);
@@ -384,6 +385,22 @@ export function APPaymentClient({
       toast.error("ไฟล์สลิปใหญ่เกิน 10MB");
       return;
     }
+
+    if (mime.startsWith("image/")) {
+      try {
+        const compressed = await compressImage(file);
+        setSlipFile(compressed);
+      } catch (err) {
+        toast.error(
+          err instanceof Error
+            ? `บีบอัดสลิปไม่สำเร็จ: ${err.message}`
+            : "บีบอัดสลิปไม่สำเร็จ",
+        );
+        setSlipFile(null);
+      }
+      return;
+    }
+
     setSlipFile(file);
   }
 
@@ -983,7 +1000,7 @@ export function APPaymentClient({
                         type="file"
                         accept="image/*,application/pdf,.pdf"
                         className="max-w-xs cursor-pointer bg-white"
-                        onChange={(e) => handleSlipChange(e.target.files)}
+                        onChange={(e) => void handleSlipChange(e.target.files)}
                       />
                     </div>
                   </div>

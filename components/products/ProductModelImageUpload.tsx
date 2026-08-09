@@ -5,10 +5,10 @@ import {
   useState,
   type ChangeEvent,
 } from "react";
-import imageCompression from "browser-image-compression";
 import { ImagePlus, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { uploadProductModelImage } from "@/app/products/actions/product-matrix";
+import { compressImage } from "@/lib/utils/image-compression";
 import { cn } from "@/lib/utils";
 
 type ProductModelImageUploadProps = {
@@ -19,27 +19,9 @@ type ProductModelImageUploadProps = {
   className?: string;
 };
 
-const COMPRESSION_OPTIONS: Parameters<typeof imageCompression>[1] = {
-  maxSizeMB: 0.5,
-  maxWidthOrHeight: 1024,
-  useWebWorker: true,
-  fileType: "image/webp",
-};
-
-/** Rename file extension to .webp (keep basename). */
-function toWebpFile(file: File): File {
-  const base =
-    file.name.replace(/\.[^.]+$/, "").trim() || "product-image";
-  const safeBase = base.replace(/[^\w.-]+/g, "_").slice(0, 80) || "product-image";
-  return new File([file], `${safeBase}.webp`, {
-    type: "image/webp",
-    lastModified: Date.now(),
-  });
-}
-
 /**
  * Phase 11 Visual Verification — อัปโหลดรูปสินค้าเข้า `product_assets`
- * (บีบอัด Client-side เป็น WebP ก่อนส่ง Storage)
+ * (บีบอัด Client-side เป็น WebP ผ่าน compressImage ก่อนส่ง Storage)
  */
 export function ProductModelImageUpload({
   value,
@@ -73,8 +55,7 @@ export function ProductModelImageUpload({
     try {
       let compressed: File;
       try {
-        const result = await imageCompression(file, COMPRESSION_OPTIONS);
-        compressed = toWebpFile(result);
+        compressed = await compressImage(file);
       } catch (err) {
         toast.error(
           err instanceof Error
@@ -141,7 +122,7 @@ export function ProductModelImageUpload({
 
         <div className="min-w-0 flex-1 space-y-2">
           <p className="text-[11px] text-slate-500">
-            บีบอัดเป็น WebP อัตโนมัติ (≤0.5MB / 1024px) แล้วอัปโหลดเข้า Storage{" "}
+            บีบอัดเป็น WebP อัตโนมัติ (≤0.5MB / 1200px) แล้วอัปโหลดเข้า Storage{" "}
             <code>product_assets</code> — ใช้ยืนยันสินค้าตอนเปิดบิล
           </p>
           <div className="flex flex-wrap gap-2">

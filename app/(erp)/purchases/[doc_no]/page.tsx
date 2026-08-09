@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ExternalLink, FileInput } from "lucide-react";
+import { ArrowLeft, Eye, FileInput } from "lucide-react";
 import { getDocumentByNo } from "@/lib/actions/document-actions";
 import {
   getDepositAllocationHistory,
@@ -17,6 +17,7 @@ import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
 import PrintDocumentTemplate from "@/components/sales/print-document-template";
 import PrintSettlementVoucherTemplate from "@/components/finance/PrintSettlementVoucherTemplate";
 import { ReferenceDocumentsSection } from "@/components/finance/ReferenceDocumentsSection";
+import { AttachmentSheetViewer } from "@/components/shared/attachment-sheet-viewer";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -395,15 +396,19 @@ export default async function PurchaseDocumentDetailPage({
             )}
 
             {slipUrl ? (
-              <a
-                href={slipUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-orange-200 bg-orange-50 text-sm font-semibold text-orange-800 transition hover:bg-orange-100"
-              >
-                <ExternalLink className="size-4" />
-                ดูสลิปโอนเงิน
-              </a>
+              <AttachmentSheetViewer
+                fileUrl={slipUrl}
+                title={`สลิปโอนเงิน · ${doc.doc_no}`}
+                trigger={
+                  <button
+                    type="button"
+                    className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-orange-200 bg-orange-50 text-sm font-semibold text-orange-800 transition hover:bg-orange-100"
+                  >
+                    <Eye className="size-4" />
+                    ดูสลิปโอนเงิน
+                  </button>
+                }
+              />
             ) : null}
           </CardContent>
         </Card>

@@ -9,7 +9,7 @@ import {
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Building2, ImagePlus, Loader2, Save, Trash2 } from "lucide-react";
+import { Building2, ImagePlus, Loader2, Save, Trash2, Warehouse } from "lucide-react";
 
 import {
   updateSystemSettings,
@@ -23,6 +23,7 @@ import type { SystemSettings } from "@/types/system-settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
@@ -59,12 +60,15 @@ export function CompanySettingsForm({ initialData }: CompanySettingsFormProps) {
       branch_name: initialData.branch_name || "สำนักงานใหญ่",
       address: initialData.address,
       phone: initialData.phone,
+      email: initialData.email || "",
       vat_rate: Number(initialData.vat_rate ?? 7),
       logo_url: initialData.logo_url || "",
+      allow_negative_inventory: Boolean(initialData.allow_negative_inventory),
     },
   });
 
   const logoUrl = watch("logo_url") || "";
+  const allowNegativeInventory = watch("allow_negative_inventory");
   const baseLogoUrl = logoUrl.split("?")[0];
   // URL จาก DB แสดงตรงๆ; ใส่ ?t= เฉพาะหลังอัปโหลดใหม่
   const previewSrc =
@@ -79,6 +83,7 @@ export function CompanySettingsForm({ initialData }: CompanySettingsFormProps) {
       const result = await updateSystemSettings({
         ...values,
         logo_url: values.logo_url?.trim().split("?")[0] || "",
+        allow_negative_inventory: Boolean(values.allow_negative_inventory),
       });
 
       if (!result.success) {
@@ -93,8 +98,10 @@ export function CompanySettingsForm({ initialData }: CompanySettingsFormProps) {
         branch_name: result.data.branch_name || "สำนักงานใหญ่",
         address: result.data.address,
         phone: result.data.phone,
+        email: result.data.email || "",
         vat_rate: Number(result.data.vat_rate ?? 7),
         logo_url: result.data.logo_url || "",
+        allow_negative_inventory: Boolean(result.data.allow_negative_inventory),
       });
       setCacheBust(null);
       toast.success("บันทึกข้อมูลบริษัทเรียบร้อยแล้ว");
@@ -136,7 +143,8 @@ export function CompanySettingsForm({ initialData }: CompanySettingsFormProps) {
   const busy = isPending || isUploading;
 
   return (
-    <Card className="max-w-3xl">
+    <div className="flex max-w-3xl flex-col gap-6">
+    <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Building2 className="size-5 text-blue-600" />
@@ -148,6 +156,7 @@ export function CompanySettingsForm({ initialData }: CompanySettingsFormProps) {
       </CardHeader>
       <CardContent>
         <form
+          id="company-settings-form"
           onSubmit={handleSubmit(onSubmit)}
           className="grid grid-cols-1 gap-4 md:grid-cols-2"
           noValidate
@@ -310,7 +319,7 @@ export function CompanySettingsForm({ initialData }: CompanySettingsFormProps) {
             ) : null}
           </div>
 
-          <div className="space-y-1.5 md:col-span-2">
+          <div className="space-y-1.5">
             <Label htmlFor="phone">เบอร์โทรศัพท์</Label>
             <Input
               id="phone"
@@ -320,6 +329,20 @@ export function CompanySettingsForm({ initialData }: CompanySettingsFormProps) {
             />
             {errors.phone ? (
               <p className="text-xs text-red-600">{errors.phone.message}</p>
+            ) : null}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="email">อีเมล</Label>
+            <Input
+              id="email"
+              type="email"
+              placeholder="info@example.com"
+              disabled={busy}
+              {...register("email")}
+            />
+            {errors.email ? (
+              <p className="text-xs text-red-600">{errors.email.message}</p>
             ) : null}
           </div>
 
@@ -340,5 +363,58 @@ export function CompanySettingsForm({ initialData }: CompanySettingsFormProps) {
         </form>
       </CardContent>
     </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Warehouse className="size-5 text-orange-600" />
+          ตั้งค่าขั้นสูง (คลังสินค้า)
+        </CardTitle>
+        <CardDescription>
+          ควบคุมนโยบายสต็อกติดลบเมื่อออกบิลขาย (INV_DO / TAX_INV / CS_TAX / ABB)
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-4">
+          <div className="min-w-0 space-y-1">
+            <Label htmlFor="allow_negative_inventory" className="text-sm font-semibold text-slate-900">
+              อนุญาตสต็อกติดลบ (Allow Negative Inventory)
+            </Label>
+            <p className="text-xs leading-relaxed text-slate-500">
+              ปิด = ห้ามตัดสต็อกเมื่อจำนวนไม่พอ (Error: สต็อกไม่เพียงพอ) · เปิด =
+              ยอมให้ Ledger ติดลบได้เมื่อขายเกินของที่มี
+            </p>
+          </div>
+          <Switch
+            id="allow_negative_inventory"
+            checked={Boolean(allowNegativeInventory)}
+            disabled={busy}
+            onCheckedChange={(next) =>
+              setValue("allow_negative_inventory", next, {
+                shouldDirty: true,
+                shouldValidate: true,
+              })
+            }
+          />
+        </div>
+
+        <div className="mt-4 flex justify-end">
+          <Button
+            type="submit"
+            form="company-settings-form"
+            disabled={busy || !isDirty}
+            className="inline-flex items-center gap-2"
+          >
+            {isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Save className="size-4" />
+            )}
+            {isPending ? "กำลังบันทึก..." : "บันทึกการตั้งค่า"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+    </div>
   );
 }
