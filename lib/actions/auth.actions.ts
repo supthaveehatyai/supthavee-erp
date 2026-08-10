@@ -10,7 +10,7 @@ import { redirect } from "next/navigation";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { createClient } from "@/lib/supabase/server-admin";
 import { createSupabaseSSRClient } from "@/lib/supabase/ssr-server";
-import type { SignInWithPinResult, SignOutResult } from "@/types/auth";
+import type { AuthGateProfile, SignInWithPinResult, SignOutResult } from "@/types/auth";
 
 const DASHBOARD_PATH = "/dashboard";
 const LOGIN_PATH = "/login";
@@ -27,6 +27,7 @@ function normalizePin(pin: string): string {
 
 /**
  * Sign in with email + PIN (stored as Auth password via createUserWithPin).
+ * Also gates on user_profiles.is_active and optional pin_code match.
  * On success: redirects to /dashboard (cookies written by SSR client).
  */
 export async function signInWithPin(
@@ -62,19 +63,31 @@ export async function signInWithPin(
       };
     }
 
-    // Soft-delete guard — inactive profiles cannot use the ERP shell.
+    // Soft-delete + optional profile PIN gate (Service Role).
     const admin = createClient();
     const { data: profile } = await admin
       .from("user_profiles")
-      .select("id, is_active, full_name")
+      .select("id, is_active, full_name, pin_code")
       .eq("id", data.user.id)
       .maybeSingle();
 
-    if (profile && profile.is_active === false) {
+    const gateProfile = profile as AuthGateProfile | null;
+
+    if (gateProfile && gateProfile.is_active === false) {
       await supabase.auth.signOut();
       return {
         success: false,
         error: "บัญชีนี้ถูกระงับการใช้งาน — ติดต่อผู้ดูแลระบบ",
+      };
+    }
+
+    // If pin_code is set on profile, require exact 6-digit match (legacy null = Auth-only).
+    const storedPin = gateProfile?.pin_code?.trim() ?? "";
+    if (storedPin && storedPin !== password) {
+      await supabase.auth.signOut();
+      return {
+        success: false,
+        error: "อีเมลหรือรหัส PIN ไม่ถูกต้อง",
       };
     }
 

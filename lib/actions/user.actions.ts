@@ -195,6 +195,12 @@ export async function createUserWithPin(
         error: "รหัสผ่าน (PIN) ต้องมีอย่างน้อย 6 ตัวอักษร",
       };
     }
+    if (!/^\d{6}$/.test(password)) {
+      return {
+        success: false,
+        error: "รหัสผ่าน (PIN) ต้องเป็นตัวเลข 6 หลัก",
+      };
+    }
     if (!normalizedRole) {
       return { success: false, error: "กรุณาเลือกสิทธิ์ (Role)" };
     }
@@ -264,6 +270,7 @@ export async function createUserWithPin(
         full_name: name,
         role_code: normalizedRole,
         is_active: true,
+        pin_code: password,
         updated_at: new Date().toISOString(),
       });
 

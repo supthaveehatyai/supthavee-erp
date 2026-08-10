@@ -1451,6 +1451,7 @@ export type Database = {
           full_name: string
           id: string
           is_active: boolean | null
+          pin_code: string | null
           role_code: string
           updated_at: string | null
         }
@@ -1460,6 +1461,7 @@ export type Database = {
           full_name: string
           id: string
           is_active?: boolean | null
+          pin_code?: string | null
           role_code?: string
           updated_at?: string | null
         }
@@ -1469,6 +1471,7 @@ export type Database = {
           full_name?: string
           id?: string
           is_active?: boolean | null
+          pin_code?: string | null
           role_code?: string
           updated_at?: string | null
         }

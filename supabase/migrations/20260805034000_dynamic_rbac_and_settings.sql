@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
   full_name TEXT NOT NULL,
   role_code TEXT NOT NULL REFERENCES public.app_roles(role_code) DEFAULT 'sales',
   is_active BOOLEAN DEFAULT true,
+  pin_code VARCHAR(6), -- PIN 6 หลัก (nullable สำหรับแถวเก่า / ตั้งค่าทีหลัง)
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -40,6 +41,8 @@ COMMENT ON COLUMN public.user_profiles.role_code IS
   'FK to app_roles — replace hard-coded ENUM / JWT metadata role checks.';
 COMMENT ON COLUMN public.user_profiles.is_active IS
   'false = disabled account (e.g. resigned) — block app access at Server Action gate.';
+COMMENT ON COLUMN public.user_profiles.pin_code IS
+  'Optional 6-digit PIN snapshot on profile; Auth password remains source of login truth.';
 
 -- กรณีเคยมีคอลัมน์ role แบบ ENUM / TEXT เก่า → ย้ายมาเป็น role_code FK
 DO $$

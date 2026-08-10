@@ -8,6 +8,19 @@ export type AppRoleOption = {
   description: string | null;
 };
 
+/** Row shape for `public.user_profiles` (RBAC + Soft Delete + PIN). */
+export type UserProfile = {
+  id: string;
+  email: string;
+  full_name: string;
+  role_code: string;
+  is_active: boolean | null;
+  /** 6-digit PIN snapshot on profile (nullable for legacy rows). */
+  pin_code?: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
 export type ManagedUser = {
   id: string;
   email: string;
