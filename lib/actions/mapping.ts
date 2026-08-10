@@ -448,11 +448,34 @@ export async function getModelsByVendor(
 /* bulkUpsertVendorMapping                                                    */
 /* -------------------------------------------------------------------------- */
 
+function mapUpsertError(error: {
+  code?: string;
+  message: string;
+}): string {
+  if (error.code === "42P01") {
+    return "ยังไม่มีตาราง vendor_product_mapping — รัน migration ก่อน";
+  }
+  if (error.code === "23503") {
+    return "vendor_id หรือ internal_product_id ไม่พบในระบบ";
+  }
+  if (error.code === "23505") {
+    return "รหัส Vendor SKU ซ้ำกับรายการอื่น — ตรวจสอบการจับคู่ซ้ำ";
+  }
+  if (error.code === "42501" || /permission denied/i.test(error.message)) {
+    return "permission denied — ตรวจว่า SUPABASE_SERVICE_ROLE_KEY ถูกตั้งค่าถูกต้อง (ไม่ใช่ anon key)";
+  }
+  return error.message || "บันทึก vendor mapping ไม่สำเร็จ";
+}
+
 /**
- * Bulk upsert into vendor_product_mapping.
- * ON CONFLICT (vendor_id, vendor_sku) DO UPDATE internal_product_id.
+ * Bulk upsert into vendor_product_mapping (Overwrite-safe).
  *
- * Uses a raw service-role client (not the SSR/cookie client) to bypass RLS.
+ * 1) ลบ mapping เดิมของสินค้าในชุดที่บันทึก (vendor_id + internal_product_id)
+ *    เพื่อให้การเปลี่ยน Vendor SKU เป็นการเขียนทับ ไม่เหลือแถวเก่าค้าง
+ * 2) UPSERT ด้วย onConflict `vendor_id,vendor_sku` อัปเดต `internal_product_id`
+ * 3) revalidatePath เสมอเมื่อสำเร็จ — ห้ามคืน success เมื่อมี error
+ *
+ * Uses service-role client only (bypasses RLS).
  */
 export async function bulkUpsertVendorMapping(
   mappings: BulkUpsertMappingInput[],
@@ -480,7 +503,7 @@ export async function bulkUpsertVendorMapping(
 
     const key = `${vendorId}::${vendorSku}`;
     if (seen.has(key)) {
-      // Last write wins within the same batch
+      // Last write wins within the same batch (same vendor_sku)
       const index = rows.findIndex(
         (row) =>
           row.vendor_id === vendorId && row.vendor_sku === vendorSku,
@@ -504,10 +527,34 @@ export async function bulkUpsertVendorMapping(
   }
 
   try {
-    // Raw admin client ONLY — never use SSR/cookie-based clients here
     const supabaseAdmin = createSupabaseAdminClient();
 
-    // Strict: upsert MUST chain off supabaseAdmin (service role), not any SSR client
+    // Group by vendor — overwrite stale product bindings before upsert
+    const productIdsByVendor = new Map<string, string[]>();
+    for (const row of rows) {
+      const list = productIdsByVendor.get(row.vendor_id) ?? [];
+      if (!list.includes(row.internal_product_id)) {
+        list.push(row.internal_product_id);
+      }
+      productIdsByVendor.set(row.vendor_id, list);
+    }
+
+    for (const [vendorId, productIds] of productIdsByVendor) {
+      const { error: deleteError } = await supabaseAdmin
+        .from("vendor_product_mapping")
+        .delete()
+        .eq("vendor_id", vendorId)
+        .in("internal_product_id", productIds);
+
+      if (deleteError) {
+        return {
+          data: [],
+          upserted: 0,
+          error: mapUpsertError(deleteError),
+        };
+      }
+    }
+
     const { data, error } = await supabaseAdmin
       .from("vendor_product_mapping")
       .upsert(
@@ -525,37 +572,33 @@ export async function bulkUpsertVendorMapping(
       .select("id, vendor_id, vendor_sku, internal_product_id");
 
     if (error) {
-      if (error.code === "42P01") {
-        return {
-          data: [],
-          upserted: 0,
-          error: "ยังไม่มีตาราง vendor_product_mapping — รัน migration ก่อน",
-        };
-      }
-      if (error.code === "23503") {
-        return {
-          data: [],
-          upserted: 0,
-          error: "vendor_id หรือ internal_product_id ไม่พบในระบบ",
-        };
-      }
-      if (
-        error.code === "42501" ||
-        /permission denied/i.test(error.message)
-      ) {
-        return {
-          data: [],
-          upserted: 0,
-          error:
-            "permission denied — ตรวจว่า SUPABASE_SERVICE_ROLE_KEY ถูกตั้งค่าถูกต้อง (ไม่ใช่ anon key)",
-        };
-      }
-      return { data: [], upserted: 0, error: error.message };
+      return {
+        data: [],
+        upserted: 0,
+        error: mapUpsertError(error),
+      };
     }
 
     const upsertedRows = (data ?? []) as BulkUpsertVendorMappingResult["data"];
 
-    // Invalidate Next.js caches for vendor-mapping routes after successful write
+    // Guard: never report success when no rows were written
+    if (upsertedRows.length === 0) {
+      return {
+        data: [],
+        upserted: 0,
+        error:
+          "บันทึกไม่สำเร็จ — ไม่มีแถวถูกอัปเดตในฐานข้อมูล (ตรวจ unique constraint vendor_id,vendor_sku)",
+      };
+    }
+
+    if (upsertedRows.length < rows.length) {
+      return {
+        data: [],
+        upserted: 0,
+        error: `บันทึกไม่ครบ — คาดหวัง ${rows.length} แถว แต่ได้ ${upsertedRows.length} แถว`,
+      };
+    }
+
     revalidatePath("/dashboard/procurement/vendor-mapping");
     revalidatePath("/procurement/vendor-mapping");
 

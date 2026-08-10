@@ -384,8 +384,10 @@ export default function BulkMatrixMappingUI() {
     startSaveTransition(async () => {
       const result = await bulkUpsertVendorMapping(payload);
 
-      if (result.error) {
-        toast.error(result.error);
+      if (result.error || !result.upserted) {
+        toast.error(
+          result.error ?? "บันทึกไม่สำเร็จ — ไม่มีการอัปเดตในฐานข้อมูล",
+        );
         return;
       }
 
