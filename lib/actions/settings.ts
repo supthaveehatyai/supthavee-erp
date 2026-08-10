@@ -195,7 +195,10 @@ export async function updateSystemSettings(
   data: SystemSettingsFormData,
 ): Promise<UpdateSystemSettingsResult> {
   try {
-    const gate = await requireAdmin();
+    const gate = await requireAdmin({
+      forbiddenMessage:
+        "Forbidden: เฉพาะผู้ใช้สิทธิ์ Admin เท่านั้นที่แก้ไขข้อมูลบริษัทได้",
+    });
     if (!gate.ok) {
       return { success: false, error: gate.error };
     }
@@ -257,7 +260,10 @@ export async function updateDocumentPrintSetting(
   paperSize: string,
 ): Promise<UpdateDocumentPrintSettingResult> {
   try {
-    const gate = await requireAdmin();
+    const gate = await requireAdmin({
+      forbiddenMessage:
+        "Forbidden: เฉพาะผู้ใช้สิทธิ์ Admin เท่านั้นที่แก้ไขข้อมูลบริษัทได้",
+    });
     if (!gate.ok) {
       return { success: false, error: gate.error };
     }
@@ -328,7 +334,10 @@ export async function uploadCompanyLogo(
   formData: FormData,
 ): Promise<UploadCompanyLogoResult> {
   try {
-    const gate = await requireAdmin();
+    const gate = await requireAdmin({
+      forbiddenMessage:
+        "Forbidden: เฉพาะผู้ใช้สิทธิ์ Admin เท่านั้นที่แก้ไขข้อมูลบริษัทได้",
+    });
     if (!gate.ok) {
       return { success: false, error: gate.error };
     }

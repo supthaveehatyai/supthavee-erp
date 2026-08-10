@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Sarabun } from "next/font/google";
 import { Toaster } from "sonner";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import AppShell from "./app-shell";
 import "./globals.css";
 
@@ -30,15 +31,19 @@ export const metadata: Metadata = {
   description: "ระบบบริหารจัดการทรัพยากรองค์กร บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const currentUser = await getCurrentAuthUser();
+
   return (
     <html lang="th" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className={sarabun.variable}>
-        <AppShell>{children}</AppShell>
+        <AppShell userDisplayName={currentUser?.displayName ?? null}>
+          {children}
+        </AppShell>
         <Toaster richColors position="top-right" closeButton />
       </body>
     </html>

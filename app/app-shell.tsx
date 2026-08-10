@@ -269,7 +269,14 @@ function SidebarContent({ closeMenu }: { closeMenu: () => void }) {
   );
 }
 
-export default function AppShell({ children }: { children: React.ReactNode }) {
+export default function AppShell({
+  children,
+  userDisplayName,
+}: {
+  children: React.ReactNode;
+  /** จาก `user_profiles.full_name` ผ่าน Root Layout — ไม่ใช้ brand เป็น fallback */
+  userDisplayName?: string | null;
+}) {
   const pathname = usePathname();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
@@ -280,6 +287,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   if (isAuthRoute) {
     return <>{children}</>;
   }
+
+  const resolvedUserName = userDisplayName?.trim() || null;
 
   return (
     <div className="min-h-dvh bg-slate-50">
@@ -331,7 +340,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-3">
             <div className="hidden text-right sm:block">
               <p className="text-xs font-semibold text-slate-700">ผู้ใช้งาน</p>
-              <p className="text-[11px] text-slate-400">Supthavee ERP</p>
+              <p className="text-[11px] text-slate-400">
+                {resolvedUserName ?? "—"}
+              </p>
             </div>
             <SignOutButton />
           </div>
