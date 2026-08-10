@@ -33,12 +33,13 @@ export const companySettingsSchema = z.object({
         z.string().email().safeParse(value).success,
       "รูปแบบอีเมลไม่ถูกต้อง",
     ),
-  vat_rate: z.coerce
+  // Use z.number() (not coerce) so input/output match z.infer — RHF uses valueAsNumber.
+  vat_rate: z
     .number({ error: "กรุณาระบุอัตรา VAT" })
     .min(0, "อัตรา VAT ต้องไม่ต่ำกว่า 0")
     .max(100, "อัตรา VAT ต้องไม่เกิน 100"),
   logo_url: z.string().optional(),
-  allow_negative_inventory: z.boolean().optional().default(false),
+  allow_negative_inventory: z.boolean(),
 });
 
 export type CompanySettingsFormValues = z.infer<typeof companySettingsSchema>;

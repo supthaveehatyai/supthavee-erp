@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { toast } from "sonner";
 import { Building2, ImagePlus, Loader2, Save, Trash2, Warehouse } from "lucide-react";
 
@@ -15,10 +16,7 @@ import {
   updateSystemSettings,
   uploadCompanyLogo,
 } from "@/lib/actions/settings";
-import {
-  companySettingsSchema,
-  type CompanySettingsFormValues,
-} from "@/lib/validations/system-settings";
+import { companySettingsSchema } from "@/lib/validations/system-settings";
 import type { SystemSettings } from "@/types/system-settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,9 +31,16 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
+type CompanySettingsFormValues = z.infer<typeof companySettingsSchema>;
+
 type CompanySettingsFormProps = {
   initialData: SystemSettings;
 };
+
+function toVatRate(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : 7;
+}
 
 export function CompanySettingsForm({ initialData }: CompanySettingsFormProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -61,7 +66,7 @@ export function CompanySettingsForm({ initialData }: CompanySettingsFormProps) {
       address: initialData.address,
       phone: initialData.phone,
       email: initialData.email || "",
-      vat_rate: Number(initialData.vat_rate ?? 7),
+      vat_rate: toVatRate(initialData.vat_rate),
       logo_url: initialData.logo_url || "",
       allow_negative_inventory: Boolean(initialData.allow_negative_inventory),
     },
@@ -99,7 +104,7 @@ export function CompanySettingsForm({ initialData }: CompanySettingsFormProps) {
         address: result.data.address,
         phone: result.data.phone,
         email: result.data.email || "",
-        vat_rate: Number(result.data.vat_rate ?? 7),
+        vat_rate: toVatRate(result.data.vat_rate),
         logo_url: result.data.logo_url || "",
         allow_negative_inventory: Boolean(result.data.allow_negative_inventory),
       });
@@ -268,7 +273,7 @@ export function CompanySettingsForm({ initialData }: CompanySettingsFormProps) {
               min={0}
               max={100}
               disabled={busy}
-              {...register("vat_rate")}
+              {...register("vat_rate", { valueAsNumber: true })}
             />
             {errors.vat_rate ? (
               <p className="text-xs text-red-600">{errors.vat_rate.message}</p>

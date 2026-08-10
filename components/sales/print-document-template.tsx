@@ -67,6 +67,7 @@ export default async function PrintDocumentTemplate({
   const discountAmount = Number(doc.discount_amount ?? 0);
   const vatRate = Number(doc.vat_rate ?? doc.tax_rate ?? 7);
   const vatType = normalizePrintVatType(doc.vat_type);
+  const hasVat = vatType !== "NONE" && vatType !== undefined;
   const grandTotal = Number(doc.grand_total ?? 0);
   const docTypeLabel = DOC_TYPE_LABELS[doc.doc_type] ?? doc.doc_type;
   const partyLabel =

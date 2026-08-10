@@ -1221,6 +1221,7 @@ export async function getDocumentByNo(
         tax_rate,
         tax_amount,
         grand_total,
+        deposit_deducted,
         paid_amount,
         vat_type,
         vat_rate,
@@ -1366,6 +1367,7 @@ export async function getDocumentByNo(
       tax_rate: Number(data.tax_rate ?? 7),
       tax_amount: Number(data.tax_amount ?? 0),
       grand_total: Number(data.grand_total ?? 0),
+      deposit_deducted: Number(data.deposit_deducted ?? 0),
       paid_amount: Number(data.paid_amount ?? 0),
       vat_type: (data.vat_type as DocumentDetail["vat_type"]) ?? null,
       vat_rate:
@@ -1470,7 +1472,7 @@ export async function updateDraftDocument(
 
     const { data: existing, error: existingError } = await supabase
       .from("documents")
-      .select("id, doc_no, doc_type, status, ref_document_id")
+      .select("id, doc_no, doc_type, status, ref_document_id, contact_id, grand_total")
       .eq("id", documentId)
       .maybeSingle();
 

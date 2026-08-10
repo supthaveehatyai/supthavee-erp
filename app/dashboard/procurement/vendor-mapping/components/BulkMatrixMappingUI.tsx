@@ -257,7 +257,7 @@ function buildUpsertPayload(
   vendorSkuByProductId: Record<string, string>,
 ): BulkMappingUpsertRow[] {
   return model.products
-    .map((product) => {
+    .map((product): BulkMappingUpsertRow | null => {
       const vendorSku = (vendorSkuByProductId[product.id] ?? "").trim();
       if (!vendorSku) return null;
       return {
@@ -266,7 +266,7 @@ function buildUpsertPayload(
         vendor_product_name: product.name,
         internal_product_id: product.id,
         conversion_factor: 1,
-      } satisfies BulkMappingUpsertRow;
+      };
     })
     .filter((row): row is BulkMappingUpsertRow => row !== null);
 }

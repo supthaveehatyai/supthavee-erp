@@ -57,7 +57,12 @@ export default async function BankAccountsPage() {
             <CardDescription>ระบุข้อมูลบัญชีให้ครบถ้วน</CardDescription>
           </CardHeader>
           <CardContent>
-            <form action={createBankAccount} className="space-y-4">
+            <form
+              action={async (formData) => {
+                await createBankAccount(formData);
+              }}
+              className="space-y-4"
+            >
               <div className="space-y-2">
                 <Label htmlFor="bank_name">
                   ธนาคาร (เช่น KBANK){" "}
@@ -168,11 +173,12 @@ export default async function BankAccountsPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <form
-                            action={toggleBankAccountStatus.bind(
-                              null,
-                              account.id,
-                              account.is_active ?? false,
-                            )}
+                            action={async (_formData) => {
+                              await toggleBankAccountStatus(
+                                account.id,
+                                account.is_active ?? false,
+                              );
+                            }}
                           >
                             <Button
                               type="submit"

@@ -292,6 +292,11 @@ export type DocumentDetail = {
   tax_rate: number;
   tax_amount: number;
   grand_total: number;
+  /**
+   * Deposit Allocation — ยอดมัดจำที่ถูกนำไปหักในเอกสารนี้
+   * (`documents.deposit_deducted`, DECIMAL NOT NULL DEFAULT 0).
+   */
+  deposit_deducted: number;
   /** Cumulative knock-off / cash paid — void blocked when > 0. */
   paid_amount: number;
   vat_type: VatCalculationType | null;

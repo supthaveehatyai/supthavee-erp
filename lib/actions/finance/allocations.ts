@@ -88,6 +88,7 @@ export async function getDocumentAllocationsByReceiptId(
         allocated_amount,
         wht_amount,
         invoice_doc_id,
+        original_receipt_received,
         invoice:invoice_doc_id (
           id,
           doc_no,
