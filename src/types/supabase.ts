@@ -1164,6 +1164,7 @@ export type Database = {
           id: string
           image_url: string | null
           is_active: boolean | null
+          is_service: boolean
           model_code: string
           name: string
           short_name: string | null
@@ -1180,6 +1181,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean | null
+          is_service?: boolean
           model_code: string
           name: string
           short_name?: string | null
@@ -1196,6 +1198,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean | null
+          is_service?: boolean
           model_code?: string
           name?: string
           short_name?: string | null
@@ -1240,7 +1243,9 @@ export type Database = {
           job_no: string
           job_type: Database["public"]["Enums"]["production_job_type"]
           status: Database["public"]["Enums"]["production_job_status"]
+          technician_id: string | null
           updated_at: string | null
+          wage_cost: number
         }
         Insert: {
           attachment_paths?: string[] | null
@@ -1253,7 +1258,9 @@ export type Database = {
           job_no: string
           job_type?: Database["public"]["Enums"]["production_job_type"]
           status?: Database["public"]["Enums"]["production_job_status"]
+          technician_id?: string | null
           updated_at?: string | null
+          wage_cost?: number
         }
         Update: {
           attachment_paths?: string[] | null
@@ -1266,7 +1273,9 @@ export type Database = {
           job_no?: string
           job_type?: Database["public"]["Enums"]["production_job_type"]
           status?: Database["public"]["Enums"]["production_job_status"]
+          technician_id?: string | null
           updated_at?: string | null
+          wage_cost?: number
         }
         Relationships: [
           {
@@ -1274,6 +1283,13 @@ export type Database = {
             columns: ["document_id"]
             isOneToOne: false
             referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "production_jobs_technician_id_fkey"
+            columns: ["technician_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
             referencedColumns: ["id"]
           },
         ]

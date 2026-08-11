@@ -70,13 +70,13 @@ export async function searchProductModels(
     const [byName, byCode] = await Promise.all([
       supabase
         .from("product_models")
-        .select("id, model_code, name, short_name, image_url, status, is_active")
+        .select("id, model_code, name, short_name, image_url, status, is_active, is_service")
         .ilike("name", pattern)
         .order("name", { ascending: true })
         .limit(10),
       supabase
         .from("product_models")
-        .select("id, model_code, name, short_name, image_url, status, is_active")
+        .select("id, model_code, name, short_name, image_url, status, is_active, is_service")
         .ilike("model_code", pattern)
         .order("model_code", { ascending: true })
         .limit(10),
@@ -99,6 +99,7 @@ export async function searchProductModels(
         image_url: string | null;
         status: string | null;
         is_active: boolean | null;
+        is_service: boolean | null;
       }
     >();
 
@@ -113,6 +114,7 @@ export async function searchProductModels(
         image_url: row.image_url,
         status: row.status,
         is_active: row.is_active,
+        is_service: row.is_service ?? false,
       });
     }
 
@@ -131,6 +133,7 @@ export async function searchProductModels(
         short_name: row.short_name,
         image_url: row.image_url,
         display_name: [row.model_code, row.name].filter(Boolean).join(" · "),
+        is_service: Boolean(row.is_service),
       }));
 
     return { success: true, data };
@@ -158,7 +161,7 @@ export async function getModelMatrixForSale(
 
     const { data: model, error: modelError } = await supabase
       .from("product_models")
-      .select("id, model_code, name, short_name, image_url")
+      .select("id, model_code, name, short_name, image_url, is_service")
       .eq("id", id)
       .maybeSingle();
 
@@ -169,11 +172,14 @@ export async function getModelMatrixForSale(
       return { success: false, error: "ไม่พบรุ่นสินค้าในระบบ", data: null };
     }
 
+    const isService = Boolean(model.is_service);
+
     const empty: ModelMatrixForSale = {
       model_id: model.id,
       model_code: model.model_code,
       model_name: model.name || model.short_name || model.model_code,
       image_url: model.image_url,
+      is_service: isService,
       skus: [],
     };
 
@@ -320,6 +326,7 @@ export async function getModelMatrixForSale(
         cost_price: toMoney(product.cost_price),
         base_uom: product.base_uom,
         stock_balance: balanceByProduct.get(product.id) ?? 0,
+        is_service: isService,
       };
     });
 
@@ -337,6 +344,7 @@ export async function getModelMatrixForSale(
         model_code: model.model_code,
         model_name: model.name || model.short_name || model.model_code,
         image_url: model.image_url,
+        is_service: isService,
         skus,
       },
     };

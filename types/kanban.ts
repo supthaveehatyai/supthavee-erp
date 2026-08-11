@@ -36,6 +36,11 @@ export type ProductionJobCard = {
   document_no: string | null;
   /** contacts.company_name via documents.contact_id */
   customer_name: string | null;
+  /** ช่างรับเหมา (contacts.id) */
+  technician_id: string | null;
+  technician_name: string | null;
+  /** ค่าแรงช่าง — หักเป็น COGS */
+  wage_cost: number;
 };
 
 export type ProductionJobsByStatus = Record<
@@ -104,4 +109,25 @@ export type CreateProductionJobResult = {
   success: boolean;
   error: string | null;
   data: { id: string; job_no: string; attachment_count?: number } | null;
+};
+
+export type TechnicianOption = {
+  id: string;
+  company_name: string;
+  contact_type: string;
+};
+
+export type GetTechnicianOptionsResult =
+  | { success: true; data: TechnicianOption[] }
+  | { success: false; error: string; data: TechnicianOption[] };
+
+export type UpdateProductionJobAssignmentInput = {
+  job_id: string;
+  technician_id: string | null;
+  wage_cost: number;
+};
+
+export type UpdateProductionJobAssignmentResult = {
+  success: boolean;
+  error: string | null;
 };

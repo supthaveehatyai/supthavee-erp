@@ -5,7 +5,7 @@
  * Data is fetched on the Server and passed in (Zero Client-Side Fetching).
  */
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Ban,
@@ -15,16 +15,25 @@ import {
   ImageIcon,
   Loader2,
   Package,
+  Save,
   User,
+  Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
-import { cancelProductionJob } from "@/app/actions/kanban-actions";
+import {
+  cancelProductionJob,
+  updateProductionJobAssignment,
+} from "@/app/actions/kanban-actions";
 import {
   JOB_STATUS_LABEL,
   type ProductionJobDetails,
   type ProductionJobStatus,
   type ProductionJobType,
+  type TechnicianOption,
 } from "@/types/kanban";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -97,24 +106,67 @@ function formatQty(value: number): string {
 export type JobDetailSheetProps = {
   job: ProductionJobDetails | null;
   error?: string | null;
+  technicians?: TechnicianOption[];
 };
 
-export function JobDetailSheet({ job, error }: JobDetailSheetProps) {
+export function JobDetailSheet({
+  job,
+  error,
+  technicians = [],
+}: JobDetailSheetProps) {
   const router = useRouter();
   const open = Boolean(job) || Boolean(error);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [isSaving, startSaveTransition] = useTransition();
+  const [technicianId, setTechnicianId] = useState("");
+  const [wageCost, setWageCost] = useState("0");
+
+  const busy = isPending || isSaving;
+
+  useEffect(() => {
+    setTechnicianId(job?.technician_id ?? "");
+    setWageCost(
+      job ? String(Number.isFinite(job.wage_cost) ? job.wage_cost : 0) : "0",
+    );
+  }, [job?.id, job?.technician_id, job?.wage_cost]);
 
   function closeSheet() {
     router.push("/production/kanban");
   }
 
   function handleOpenChange(next: boolean) {
-    if (!next && !isPending) closeSheet();
+    if (!next && !busy) closeSheet();
+  }
+
+  function handleSaveAssignment() {
+    if (!job || isPending || isSaving) return;
+
+    const wage = Number.parseFloat(wageCost);
+    if (!Number.isFinite(wage) || wage < 0) {
+      toast.error("ค่าแรงต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0");
+      return;
+    }
+
+    startSaveTransition(async () => {
+      const result = await updateProductionJobAssignment({
+        job_id: job.id,
+        technician_id: technicianId.trim() || null,
+        wage_cost: wage,
+      });
+
+      if (!result.success) {
+        toast.error(result.error ?? "บันทึกช่างรับเหมา / ค่าแรงไม่สำเร็จ");
+        return;
+      }
+
+      toast.success("บันทึกช่างรับเหมาและค่าแรงแล้ว");
+      router.refresh();
+    });
   }
 
   function handleCancelJob() {
-    if (!job || isPending) return;
+    if (!job || isPending || isSaving) return;
 
     startTransition(async () => {
       const result = await cancelProductionJob(job.id);
@@ -133,6 +185,7 @@ export function JobDetailSheet({ job, error }: JobDetailSheetProps) {
 
   const canCancel =
     job && job.status !== "DELIVERED" && job.status !== "CANCELLED";
+  const canEditAssignment = job && job.status !== "CANCELLED";
 
   return (
     <>
@@ -195,6 +248,17 @@ export function JobDetailSheet({ job, error }: JobDetailSheetProps) {
                       {job.details || "ไม่มีรายละเอียดเพิ่มเติม"}
                     </span>
                   </div>
+                  {job.technician_name ? (
+                    <div className="flex items-center gap-2 text-slate-600">
+                      <Wrench className="size-4 shrink-0 text-slate-400" />
+                      <span>
+                        ช่าง {job.technician_name}
+                        {job.wage_cost > 0
+                          ? ` · ค่าแรง ${job.wage_cost.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+                          : ""}
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -234,6 +298,68 @@ export function JobDetailSheet({ job, error }: JobDetailSheetProps) {
                       ))}
                     </div>
                   )}
+                </section>
+
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Wrench className="size-4 text-amber-600" />
+                    <h3 className="text-sm font-bold text-slate-800">
+                      ช่างรับเหมา / ค่าแรง
+                    </h3>
+                  </div>
+
+                  <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <Label htmlFor="technician_id">ช่างรับเหมา</Label>
+                      <Select
+                        id="technician_id"
+                        value={technicianId}
+                        disabled={!canEditAssignment || busy}
+                        onChange={(event) => setTechnicianId(event.target.value)}
+                      >
+                        <option value="">— ไม่ระบุ —</option>
+                        {technicians.map((tech) => (
+                          <option key={tech.id} value={tech.id}>
+                            {tech.company_name}
+                            {tech.contact_type === "Technician"
+                              ? " (ช่าง)"
+                              : " (Vendor)"}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label htmlFor="wage_cost">ค่าแรง (Wage Cost)</Label>
+                      <Input
+                        id="wage_cost"
+                        type="number"
+                        min={0}
+                        step="0.0001"
+                        inputMode="decimal"
+                        value={wageCost}
+                        disabled={!canEditAssignment || busy}
+                        onChange={(event) => setWageCost(event.target.value)}
+                        className="tabular-nums"
+                      />
+                    </div>
+                    {canEditAssignment ? (
+                      <div className="sm:col-span-2">
+                        <Button
+                          type="button"
+                          className="h-10 w-full gap-2"
+                          disabled={busy}
+                          onClick={handleSaveAssignment}
+                        >
+                          {isSaving ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            <Save className="size-4" />
+                          )}
+                          บันทึกช่าง / ค่าแรง
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
                 </section>
 
                 <section className="space-y-3">
@@ -299,7 +425,7 @@ export function JobDetailSheet({ job, error }: JobDetailSheetProps) {
                     type="button"
                     variant="destructive"
                     className="h-10 w-full gap-2"
-                    disabled={isPending}
+                    disabled={busy}
                     onClick={() => setConfirmOpen(true)}
                   >
                     {isPending ? (
@@ -318,7 +444,7 @@ export function JobDetailSheet({ job, error }: JobDetailSheetProps) {
 
       <AlertDialog
         open={confirmOpen}
-        onOpenChange={(next) => !isPending && setConfirmOpen(next)}
+        onOpenChange={(next) => !busy && setConfirmOpen(next)}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -334,9 +460,9 @@ export function JobDetailSheet({ job, error }: JobDetailSheetProps) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isPending} />
+            <AlertDialogCancel disabled={busy} />
             <AlertDialogAction
-              disabled={isPending}
+              disabled={busy}
               className="bg-red-600 hover:bg-red-700 disabled:bg-red-400"
               onClick={(event) => {
                 event.preventDefault();

@@ -243,21 +243,79 @@ export async function getYTDExpenses(): Promise<KpiMoneyResult> {
   }
 }
 
+const YTD_WAGE_DOC_TYPES = ["INV_DO", "TAX_INV", "ABB", "CS_TAX"] as const;
+
 /**
- * True Net Profit (Phase 8) — grossProfit − totalExpenses.
- * grossProfit currently = YTD Sales (pre-COGS Cost Snapshot).
+ * YTD ค่าแรงช่าง (COGS) — Σ production_jobs.wage_cost
+ * ของงานที่ไม่ถูกยกเลิก และผูกเอกสารขาย ISSUED ในปีปฏิทินปัจจุบัน
+ */
+async function getYTDWageCost(): Promise<KpiMoneyResult> {
+  try {
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { from, to } = currentYearBounds();
+
+    const { data, error } = await supabaseAdmin
+      .from("production_jobs")
+      .select(
+        "wage_cost, documents!production_jobs_document_id_fkey ( doc_date, status, doc_type )",
+      )
+      .neq("status", "CANCELLED");
+
+    if (error) {
+      console.error("[getYTDWageCost]", error.message);
+      return { amount: 0, error: error.message };
+    }
+
+    type WageDocJoin = {
+      doc_date?: string | null;
+      status?: string | null;
+      doc_type?: string | null;
+    };
+
+    type WageRow = {
+      wage_cost: number | string | null;
+      documents: WageDocJoin | WageDocJoin[] | null;
+    };
+
+    let total = 0;
+    for (const row of (data ?? []) as WageRow[]) {
+      const doc = Array.isArray(row.documents)
+        ? (row.documents[0] ?? null)
+        : row.documents;
+      if (!doc) continue;
+      if (doc.status !== "ISSUED") continue;
+      if (!YTD_WAGE_DOC_TYPES.includes(doc.doc_type as (typeof YTD_WAGE_DOC_TYPES)[number])) {
+        continue;
+      }
+      const docDate = String(doc.doc_date ?? "").slice(0, 10);
+      if (docDate < from || docDate > to) continue;
+      total = roundMoney(total + toMoney(row.wage_cost));
+    }
+
+    return { amount: total, error: null };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Failed to calculate YTD wage cost";
+    console.error("[getYTDWageCost]", message);
+    return { amount: 0, error: message };
+  }
+}
+
+/**
+ * True Net Profit — YTD Sales − wage_cost (COGS) − OPEX.
  */
 export async function getTrueNetProfit(): Promise<ProfitabilityKpiResult> {
   try {
-    const [sales, expenses] = await Promise.all([
+    const [sales, expenses, wages] = await Promise.all([
       getYTDSales(),
       getYTDExpenses(),
+      getYTDWageCost(),
     ]);
 
-    const errors = [sales.error, expenses.error].filter(
+    const errors = [sales.error, expenses.error, wages.error].filter(
       (msg): msg is string => Boolean(msg),
     );
-    const grossProfit = roundMoney(sales.amount);
+    const grossProfit = roundMoney(sales.amount - wages.amount);
     const totalExpenses = roundMoney(expenses.amount);
     const netProfit = roundMoney(grossProfit - totalExpenses);
 

@@ -23,7 +23,11 @@ import { revalidatePath } from "next/cache";
 import { logAuditTrail } from "@/lib/supabase/auditService";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { getSystemSettings } from "@/lib/actions/settings";
-import { assertStockOutAvailability } from "@/lib/inventory/stock-availability";
+import {
+  assertStockOutAvailability,
+  excludeServiceLines,
+  loadServiceProductIdSet,
+} from "@/lib/inventory/stock-availability";
 import {
   calculateDocumentSummary,
   isVatCalculationType,
@@ -1000,18 +1004,25 @@ export async function completeDocument(
     let officialDocNo = previousDocNo;
     const needsOfficialNumber = isTemporaryDraftDocNo(previousDocNo);
 
+    const serviceIds = await loadServiceProductIdSet(supabase, productIds);
+
     if (isStockOutDocType(docType)) {
       const settingsResult = await getSystemSettings();
       const allowNegative = settingsResult.success
         ? settingsResult.data.allow_negative_inventory
         : false;
 
-      const stockCheck = await assertStockOutAvailability(
-        supabase,
+      const stockableLines = excludeServiceLines(
         lineRows.map((row) => ({
           product_id: row.product_id,
           qty: Math.round(Number(row.qty)),
         })),
+        serviceIds,
+      );
+
+      const stockCheck = await assertStockOutAvailability(
+        supabase,
+        stockableLines,
         allowNegative,
       );
 
@@ -1081,44 +1092,51 @@ export async function completeDocument(
     let ledgerCount = 0;
 
     if (isStockOutDocType(docType)) {
-      const ledgerPayload = lineRows.map((row) => ({
-        product_id: row.product_id,
-        doc_header_id: null as string | null,
-        trans_type: "OUT",
-        qty: Math.round(Number(row.qty)),
-        notes: `ขายจากเอกสาร ${officialDocNo} | document_id=${documentId} | SKU cost snapshot ${row.unit_cost_price}`,
-      }));
+      const ledgerPayload = excludeServiceLines(
+        lineRows.map((row) => ({
+          product_id: row.product_id,
+          doc_header_id: null as string | null,
+          trans_type: "OUT",
+          qty: Math.round(Number(row.qty)),
+          notes: `ขายจากเอกสาร ${officialDocNo} | document_id=${documentId} | SKU cost snapshot ${row.unit_cost_price}`,
+        })),
+        serviceIds,
+      );
 
-      const { error: ledgerError } = await supabase
-        .from("inventory_ledger")
-        .insert(ledgerPayload);
+      if (ledgerPayload.length === 0) {
+        ledgerCount = 0;
+      } else {
+        const { error: ledgerError } = await supabase
+          .from("inventory_ledger")
+          .insert(ledgerPayload);
 
-      if (ledgerError) {
-        await supabase
-          .from("document_items")
-          .delete()
-          .eq("document_id", documentId);
-        await supabase
-          .from("documents")
-          .update({
-            status: draftStatus,
-            // Keep official doc_no if sequence was already consumed.
-            sub_total: 0,
-            tax_amount: 0,
-            grand_total: 0,
-            updated_at: nowIso,
-          })
-          .eq("id", documentId);
+        if (ledgerError) {
+          await supabase
+            .from("document_items")
+            .delete()
+            .eq("document_id", documentId);
+          await supabase
+            .from("documents")
+            .update({
+              status: draftStatus,
+              // Keep official doc_no if sequence was already consumed.
+              sub_total: 0,
+              tax_amount: 0,
+              grand_total: 0,
+              updated_at: nowIso,
+            })
+            .eq("id", documentId);
 
-        return {
-          data: null,
-          error:
-            ledgerError.message ??
-            "ตัดสต็อก (inventory_ledger OUT) ไม่สำเร็จ — ยกเลิกการปิดบิลแล้ว",
-        };
+          return {
+            data: null,
+            error:
+              ledgerError.message ??
+              "ตัดสต็อก (inventory_ledger OUT) ไม่สำเร็จ — ยกเลิกการปิดบิลแล้ว",
+          };
+        }
+
+        ledgerCount = ledgerPayload.length;
       }
-
-      ledgerCount = ledgerPayload.length;
     }
 
     fireDocumentAuditLog({
@@ -1841,7 +1859,7 @@ export async function issueDocument(
       updated_at: nowIso,
     };
 
-    const stockOutLines = isStockOutDocType(docType)
+    const stockOutLinesRaw = isStockOutDocType(docType)
       ? lineItems
           .filter((row) => Boolean(row.product_id))
           .map((row) => ({
@@ -1850,6 +1868,12 @@ export async function issueDocument(
           }))
           .filter((row) => row.qty > 0)
       : [];
+
+    const serviceIds = await loadServiceProductIdSet(
+      supabase,
+      stockOutLinesRaw.map((row) => row.product_id),
+    );
+    const stockOutLines = excludeServiceLines(stockOutLinesRaw, serviceIds);
 
     if (stockOutLines.length > 0) {
       const settingsResult = await getSystemSettings();

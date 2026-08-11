@@ -3,6 +3,7 @@ import {
   createBankAccount,
   toggleBankAccountStatus,
 } from "@/lib/actions/bank-accounts";
+import type { BankAccount } from "@/types/bank-account";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,13 +23,33 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Building2 } from "lucide-react";
+import { Building2, Landmark } from "lucide-react";
 
 /** บังคับไม่ให้ Next.js cache ข้อมูลหน้าบัญชี */
 export const dynamic = "force-dynamic";
 
+async function loadBankAccounts(): Promise<{
+  accounts: BankAccount[];
+  error: string | null;
+}> {
+  try {
+    const result = await getBankAccounts();
+    const accounts = Array.isArray(result?.data) ? result.data : [];
+    return { accounts, error: result?.error ?? null };
+  } catch (err) {
+    return {
+      accounts: [],
+      error:
+        err instanceof Error
+          ? err.message
+          : "ไม่สามารถดึงข้อมูลสมุดบัญชีได้",
+    };
+  }
+}
+
 export default async function BankAccountsPage() {
-  const { data: bankAccounts, error } = await getBankAccounts();
+  const { accounts: bankAccounts, error } = await loadBankAccounts();
+  const hasAccounts = Boolean(bankAccounts?.length);
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -118,9 +139,15 @@ export default async function BankAccountsPage() {
             <CardTitle>รายการบัญชีทั้งหมด</CardTitle>
           </CardHeader>
           <CardContent>
-            {bankAccounts.length === 0 ? (
-              <div className="rounded-md border border-dashed border-slate-200 bg-slate-50/80 py-12 text-center text-slate-500">
-                ยังไม่มีข้อมูลบัญชีธนาคารในระบบ
+            {!hasAccounts ? (
+              <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-6 py-14 text-center">
+                <Landmark className="h-10 w-10 text-slate-300" />
+                <p className="text-sm font-semibold text-slate-700">
+                  ยังไม่มีบัญชีธนาคาร
+                </p>
+                <p className="max-w-sm text-sm text-slate-500">
+                  ให้กดเพิ่มบัญชีทางซ้าย เพื่อเริ่มรับโอนเงินและตัดชำระหนี้
+                </p>
               </div>
             ) : (
               <div className="overflow-hidden rounded-md border border-slate-200">
@@ -135,66 +162,58 @@ export default async function BankAccountsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {bankAccounts.map((account) => (
-                      <TableRow
-                        key={account.id}
-                        className={
-                          !account.is_active
-                            ? "bg-slate-50/50 opacity-50"
-                            : undefined
-                        }
-                      >
-                        <TableCell className="font-medium text-slate-900">
-                          {account.bank_name}
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {account.account_no}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col">
-                            <span>{account.account_name}</span>
-                            {account.branch_name ? (
-                              <span className="text-xs text-slate-500">
-                                สาขา: {account.branch_name}
-                              </span>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Badge
-                            variant={
-                              account.is_active ? "emerald" : "slate"
-                            }
-                          >
-                            {account.is_active
-                              ? "ใช้งาน"
-                              : "ระงับชั่วคราว"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <form
-                            action={async (_formData) => {
-                              await toggleBankAccountStatus(
-                                account.id,
-                                account.is_active ?? false,
-                              );
-                            }}
-                          >
-                            <Button
-                              type="submit"
-                              variant={
-                                account.is_active ? "destructive" : "outline"
-                              }
-                              size="sm"
+                    {bankAccounts?.map((account) => {
+                      if (!account?.id) return null;
+                      const isActive = Boolean(account.is_active);
+                      return (
+                        <TableRow
+                          key={account.id}
+                          className={
+                            !isActive ? "bg-slate-50/50 opacity-50" : undefined
+                          }
+                        >
+                          <TableCell className="font-medium text-slate-900">
+                            {account.bank_name ?? "—"}
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {account.account_no ?? "—"}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col">
+                              <span>{account.account_name ?? "—"}</span>
+                              {account.branch_name ? (
+                                <span className="text-xs text-slate-500">
+                                  สาขา: {account.branch_name}
+                                </span>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Badge variant={isActive ? "emerald" : "slate"}>
+                              {isActive ? "ใช้งาน" : "ระงับชั่วคราว"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <form
+                              action={async (_formData) => {
+                                await toggleBankAccountStatus(
+                                  account.id,
+                                  isActive,
+                                );
+                              }}
                             >
-                              {account.is_active
-                                ? "ปิดการใช้งาน"
-                                : "เปิดการใช้งาน"}
-                            </Button>
-                          </form>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                              <Button
+                                type="submit"
+                                variant={isActive ? "destructive" : "outline"}
+                                size="sm"
+                              >
+                                {isActive ? "ปิดการใช้งาน" : "เปิดการใช้งาน"}
+                              </Button>
+                            </form>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>

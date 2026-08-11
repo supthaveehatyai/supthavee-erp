@@ -17,8 +17,33 @@ import type {
 
 const BANK_ACCOUNTS_PATH = "/finance/bank-accounts";
 
+function toBankAccountList(data: unknown): BankAccount[] {
+  if (!Array.isArray(data)) return [];
+
+  return data
+    .filter(
+      (row): row is Record<string, unknown> =>
+        row != null && typeof row === "object",
+    )
+    .map((row) => ({
+      id: String(row.id ?? "").trim(),
+      bank_name: String(row.bank_name ?? "").trim(),
+      account_no: String(row.account_no ?? "").trim(),
+      account_name: String(row.account_name ?? "").trim(),
+      branch_name:
+        row.branch_name == null || String(row.branch_name).trim() === ""
+          ? null
+          : String(row.branch_name).trim(),
+      is_active: Boolean(row.is_active),
+      created_at: String(row.created_at ?? ""),
+      updated_at: String(row.updated_at ?? ""),
+    }))
+    .filter((row) => Boolean(row.id));
+}
+
 /**
  * List all company bank books (active + inactive), oldest first.
+ * Always returns `data: []` — never null — to keep the page Error-Boundary-safe.
  */
 export async function getBankAccounts(): Promise<GetBankAccountsResult> {
   try {
@@ -31,11 +56,14 @@ export async function getBankAccounts(): Promise<GetBankAccountsResult> {
       .order("created_at", { ascending: true });
 
     if (error) {
-      return { data: [], error: error.message ?? "ไม่สามารถดึงข้อมูลสมุดบัญชีได้" };
+      return {
+        data: [],
+        error: error.message ?? "ไม่สามารถดึงข้อมูลสมุดบัญชีได้",
+      };
     }
 
     return {
-      data: (data ?? []) as BankAccount[],
+      data: toBankAccountList(data),
       error: null,
     };
   } catch (err) {

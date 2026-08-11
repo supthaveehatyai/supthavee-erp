@@ -11,6 +11,8 @@ export type ProductModelSearchItem = {
   image_url: string | null;
   /** model_code · name */
   display_name: string;
+  /** true = งานบริการ — Bypass เช็คสต็อก */
+  is_service: boolean;
 };
 
 export type SearchProductModelsResult =
@@ -36,6 +38,8 @@ export type ModelMatrixSkuRow = {
    * อนุญาตค่าติดลบตามจริงเมื่อเปิด Allow Negative Inventory
    */
   stock_balance: number;
+  /** สืบทอดจาก product_models.is_service — ไม่ตัดสต็อก */
+  is_service: boolean;
 };
 
 export type ModelMatrixForSale = {
@@ -43,6 +47,8 @@ export type ModelMatrixForSale = {
   model_code: string;
   model_name: string;
   image_url: string | null;
+  /** true = รุ่นงานบริการ — Bypass เช็คสต็อกใน UI */
+  is_service: boolean;
   /** SKUs เรียง color_name แล้วตาม size sort_order */
   skus: ModelMatrixSkuRow[];
 };

@@ -122,7 +122,7 @@ function buildKpiCards(kpis: ExecutiveKpis): KpiCard[] {
       value: kpis.netProfit.formatted,
       hint: kpis.netProfit.error
         ? "คำนวณกำไรสุทธิไม่สำเร็จ"
-        : "True Net Profit = YTD Sales − OPEX (Phase 8)",
+        : "True Net Profit = YTD Sales − Wage Cost (COGS) − OPEX",
       icon: <TrendingUp className="h-5 w-5" />,
       accent: "bg-slate-50 text-slate-700 border-slate-200",
       valueClassName: netProfitValueClass(

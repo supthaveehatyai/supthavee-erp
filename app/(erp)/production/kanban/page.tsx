@@ -3,6 +3,7 @@ import { KanbanSquare } from "lucide-react";
 import {
   getJobDetails,
   getKanbanBoardData,
+  getTechnicianOptions,
 } from "@/app/actions/kanban-actions";
 import { JobDetailSheet } from "@/components/production/job-detail-sheet";
 import { KanbanBoard } from "@/components/production/kanban-board";
@@ -22,7 +23,10 @@ export default async function ProductionKanbanPage({ searchParams }: PageProps) 
   const params = await searchParams;
   const jobId = params.jobId?.trim() ?? "";
 
-  const result = await getKanbanBoardData();
+  const [result, techniciansResult] = await Promise.all([
+    getKanbanBoardData(),
+    getTechnicianOptions(),
+  ]);
 
   const jobDetailsResult = jobId ? await getJobDetails(jobId) : null;
 
@@ -57,6 +61,7 @@ export default async function ProductionKanbanPage({ searchParams }: PageProps) 
 
       <JobDetailSheet
         job={jobDetailsResult?.success ? jobDetailsResult.data : null}
+        technicians={techniciansResult.data}
         error={
           jobDetailsResult && !jobDetailsResult.success
             ? jobDetailsResult.error

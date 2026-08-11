@@ -9,13 +9,12 @@ export type KpiMoneyResult = {
   error: string | null;
 };
 
-/** True Net Profit KPI — Sales (gross proxy) − OPEX. */
+/** True Net Profit KPI — Sales − wage COGS − OPEX. */
 export type ProfitabilityKpiResult = {
   /** Σ expenses.net_amount · ISSUED · YTD */
   totalExpenses: number;
   /**
-   * Gross base for Phase 8 — currently YTD Sales (pre-COGS).
-   * When Cost Snapshot lands, replace with Sales − COGS.
+   * YTD Sales − production_jobs.wage_cost (COGS เพิ่มจากค่าแรงช่าง)
    */
   grossProfit: number;
   /** grossProfit − totalExpenses */

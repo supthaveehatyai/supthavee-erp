@@ -10,6 +10,54 @@ export type StockOutDemandLine = {
   qty: number;
 };
 
+type ServiceJoin = {
+  is_service?: boolean | null;
+};
+
+function unwrapJoin<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+/**
+ * Product IDs whose `product_models.is_service = true` — skip stock check / ledger OUT.
+ */
+export async function loadServiceProductIdSet(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: SupabaseClient<any>,
+  productIds: string[],
+): Promise<Set<string>> {
+  const ids = [...new Set(productIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return new Set();
+
+  const { data, error } = await supabase
+    .from("products")
+    .select("id, product_models!products_model_id_fkey ( is_service )")
+    .in("id", ids);
+
+  if (error) {
+    console.error("[loadServiceProductIdSet]", error.message);
+    return new Set();
+  }
+
+  const serviceIds = new Set<string>();
+  for (const row of data ?? []) {
+    const model = unwrapJoin(row.product_models as ServiceJoin | ServiceJoin[] | null);
+    if (model?.is_service === true) {
+      serviceIds.add(String(row.id));
+    }
+  }
+  return serviceIds;
+}
+
+export function excludeServiceLines<T extends { product_id: string }>(
+  lines: T[],
+  serviceIds: Set<string>,
+): T[] {
+  if (serviceIds.size === 0) return lines;
+  return lines.filter((line) => !serviceIds.has(line.product_id));
+}
+
 function toQty(value: number | string | null | undefined): number {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n)) return 0;

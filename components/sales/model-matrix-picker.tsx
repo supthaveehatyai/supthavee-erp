@@ -234,6 +234,7 @@ export default function ModelMatrixPicker({
       const raw = qtyByProductId[sku.product_id] ?? "";
       const qty = Number.parseFloat(raw);
       if (!Number.isFinite(qty) || qty <= 0) continue;
+      // is_service: Bypass เช็คสต็อกคงเหลือ — เพิ่มลงบิลได้แม้สต็อกเป็น 0
       items.push(toBillItem(sku, matrix, qty));
     }
 
@@ -357,6 +358,11 @@ export default function ModelMatrixPicker({
                           {model.name}
                         </p>
                       </div>
+                      {model.is_service ? (
+                        <span className="shrink-0 rounded-md bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 ring-1 ring-violet-200">
+                          บริการ
+                        </span>
+                      ) : null}
                     </CommandItem>
                   ))}
                 </CommandGroup>
@@ -398,7 +404,9 @@ export default function ModelMatrixPicker({
               </span>
             </DialogTitle>
             <DialogDescription>
-              กรอกจำนวนที่ต้องการขายในแต่ละ SKU แล้วกดเพิ่มรายการลงบิล
+              {matrix?.is_service
+                ? "งานบริการ — ไม่เช็คสต็อกคงเหลือ สามารถเพิ่มลงบิลได้แม้สต็อกเป็น 0"
+                : "กรอกจำนวนที่ต้องการขายในแต่ละ SKU แล้วกดเพิ่มรายการลงบิล"}
             </DialogDescription>
           </DialogHeader>
 
@@ -452,8 +460,9 @@ export default function ModelMatrixPicker({
                   </TableHeader>
                   <TableBody>
                     {matrix.skus.map((sku) => {
+                      const isService = matrix.is_service || sku.is_service;
                       const stock = sku.stock_balance;
-                      const stockLow = stock <= 0;
+                      const stockLow = !isService && stock <= 0;
                       return (
                         <TableRow key={sku.product_id}>
                           <TableCell className="px-3 font-mono text-xs font-semibold text-slate-800">
@@ -473,10 +482,14 @@ export default function ModelMatrixPicker({
                           <TableCell
                             className={cn(
                               "px-3 text-right text-sm tabular-nums",
-                              stockLow ? "font-semibold text-amber-600" : "text-slate-700",
+                              isService
+                                ? "font-semibold text-violet-700"
+                                : stockLow
+                                  ? "font-semibold text-amber-600"
+                                  : "text-slate-700",
                             )}
                           >
-                            {formatStock(stock)}
+                            {isService ? "บริการ (ไม่ตัดสต็อก)" : formatStock(stock)}
                           </TableCell>
                           <TableCell className="px-3 text-right text-sm tabular-nums text-slate-700">
                             {formatMoney(sku.unit_price)}

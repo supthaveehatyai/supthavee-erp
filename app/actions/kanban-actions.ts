@@ -14,6 +14,7 @@ import {
   type CreateProductionJobResult,
   type GetJobDetailsResult,
   type GetProductionJobsResult,
+  type GetTechnicianOptionsResult,
   type KanbanColumnStatus,
   type ProductionJobCard,
   type ProductionJobDetails,
@@ -21,7 +22,10 @@ import {
   type ProductionJobStatus,
   type ProductionJobType,
   type ProductionJobsByStatus,
+  type TechnicianOption,
   type UpdateJobStatusResult,
+  type UpdateProductionJobAssignmentInput,
+  type UpdateProductionJobAssignmentResult,
 } from "@/types/kanban";
 
 const PRODUCTION_ATTACHMENTS_BUCKET = "production_attachments";
@@ -62,7 +66,10 @@ type ProductionJobRow = {
   created_at: string | null;
   updated_at: string | null;
   document_id: string | null;
+  technician_id: string | null;
+  wage_cost: number | string | null;
   documents: DocumentJoin | DocumentJoin[] | null;
+  technician?: ContactJoin | ContactJoin[] | null;
 };
 
 function unwrapJoin<T extends object>(
@@ -103,6 +110,63 @@ function sanitizeFileName(name: string): string {
     .replace(/_+/g, "_")
     .slice(0, 80);
 }
+
+function toWageCost(value: number | string | null | undefined): number {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.round((n + Number.EPSILON) * 10000) / 10000;
+}
+
+function mapJobCard(row: ProductionJobRow): ProductionJobCard {
+  const doc = unwrapJoin(row.documents);
+  const contact = unwrapJoin(doc?.contacts ?? null);
+  const technician = unwrapJoin(row.technician ?? null);
+
+  return {
+    id: row.id,
+    job_no: row.job_no,
+    job_type: row.job_type,
+    status: row.status,
+    due_date: row.due_date,
+    details: row.details,
+    attachment_paths: Array.isArray(row.attachment_paths)
+      ? row.attachment_paths.filter(Boolean)
+      : [],
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    document_id: row.document_id,
+    document_no: doc?.doc_no?.trim() || null,
+    customer_name: contact?.company_name?.trim() || null,
+    technician_id: row.technician_id ?? null,
+    technician_name: technician?.company_name?.trim() || null,
+    wage_cost: toWageCost(row.wage_cost),
+  };
+}
+
+const JOB_SELECT = `
+        id,
+        job_no,
+        job_type,
+        status,
+        due_date,
+        details,
+        attachment_paths,
+        created_at,
+        updated_at,
+        document_id,
+        technician_id,
+        wage_cost,
+        documents!production_jobs_document_id_fkey (
+          id,
+          doc_no,
+          contacts!documents_contact_id_fkey (
+            company_name
+          )
+        ),
+        technician:contacts!production_jobs_technician_id_fkey (
+          company_name
+        )
+      ` as const;
 
 function collectAttachmentFiles(formData: FormData): File[] {
   const files: File[] = [];
@@ -208,27 +272,7 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
 
     const { data, error } = await supabase
       .from("production_jobs")
-      .select(
-        `
-        id,
-        job_no,
-        job_type,
-        status,
-        due_date,
-        details,
-        attachment_paths,
-        created_at,
-        updated_at,
-        document_id,
-        documents!production_jobs_document_id_fkey (
-          id,
-          doc_no,
-          contacts!documents_contact_id_fkey (
-            company_name
-          )
-        )
-      `,
-      )
+      .select(JOB_SELECT)
       .eq("is_archived", false)
       .order("due_date", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
@@ -242,27 +286,7 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
 
     const flat: ProductionJobCard[] = (
       (data as ProductionJobRow[] | null) ?? []
-    ).map((row) => {
-      const doc = unwrapJoin(row.documents);
-      const contact = unwrapJoin(doc?.contacts ?? null);
-
-      return {
-        id: row.id,
-        job_no: row.job_no,
-        job_type: row.job_type,
-        status: row.status,
-        due_date: row.due_date,
-        details: row.details,
-        attachment_paths: Array.isArray(row.attachment_paths)
-          ? row.attachment_paths.filter(Boolean)
-          : [],
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        document_id: row.document_id,
-        document_no: doc?.doc_no?.trim() || null,
-        customer_name: contact?.company_name?.trim() || null,
-      };
-    });
+    ).map(mapJobCard);
 
     // Active board only — CANCELLED jobs are hidden from columns
     const active = flat.filter((job) => job.status !== "CANCELLED");
@@ -570,27 +594,7 @@ export async function getJobDetails(
 
     const { data: job, error: jobError } = await supabase
       .from("production_jobs")
-      .select(
-        `
-        id,
-        job_no,
-        job_type,
-        status,
-        due_date,
-        details,
-        attachment_paths,
-        created_at,
-        updated_at,
-        document_id,
-        documents!production_jobs_document_id_fkey (
-          id,
-          doc_no,
-          contacts!documents_contact_id_fkey (
-            company_name
-          )
-        )
-      `,
-      )
+      .select(JOB_SELECT)
       .eq("id", id)
       .maybeSingle();
 
@@ -606,8 +610,7 @@ export async function getJobDetails(
     }
 
     const row = job as ProductionJobRow;
-    const doc = unwrapJoin(row.documents);
-    const contact = unwrapJoin(doc?.contacts ?? null);
+    const card = mapJobCard(row);
 
     let lineItems: ProductionJobLineItem[] = [];
 
@@ -690,20 +693,7 @@ export async function getJobDetails(
     }
 
     const details: ProductionJobDetails = {
-      id: row.id,
-      job_no: row.job_no,
-      job_type: row.job_type,
-      status: row.status,
-      due_date: row.due_date,
-      details: row.details,
-      attachment_paths: Array.isArray(row.attachment_paths)
-        ? row.attachment_paths.filter(Boolean)
-        : [],
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-      document_id: row.document_id,
-      document_no: doc?.doc_no?.trim() || null,
-      customer_name: contact?.company_name?.trim() || null,
+      ...card,
       line_items: lineItems,
     };
 
@@ -795,6 +785,148 @@ export async function cancelProductionJob(
       success: false,
       error: err instanceof Error ? err.message : "ยกเลิกงานไม่สำเร็จ",
       data: null,
+    };
+  }
+}
+
+const TECHNICIAN_CONTACT_TYPES = ["Vendor", "Technician"] as const;
+
+/**
+ * รายชื่อช่างรับเหมา / Vendor สำหรับ Dropdown ใน Job Detail
+ */
+export async function getTechnicianOptions(): Promise<GetTechnicianOptionsResult> {
+  try {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("id, company_name, contact_type")
+      .in("contact_type", [...TECHNICIAN_CONTACT_TYPES])
+      .neq("is_active", false)
+      .order("company_name", { ascending: true });
+
+    if (error) {
+      return {
+        success: false,
+        error: error.message ?? "ดึงรายชื่อช่างรับเหมาไม่สำเร็จ",
+        data: [],
+      };
+    }
+
+    const options: TechnicianOption[] = (data ?? []).map((row) => ({
+      id: String(row.id),
+      company_name: String(row.company_name ?? "").trim() || "ไม่ระบุชื่อ",
+      contact_type: String(row.contact_type ?? ""),
+    }));
+
+    return { success: true, data: options };
+  } catch (err) {
+    return {
+      success: false,
+      error:
+        err instanceof Error ? err.message : "ดึงรายชื่อช่างรับเหมาไม่สำเร็จ",
+      data: [],
+    };
+  }
+}
+
+/**
+ * บันทึกช่างรับเหมา + ค่าแรงลง production_jobs
+ */
+export async function updateProductionJobAssignment(
+  input: UpdateProductionJobAssignmentInput,
+): Promise<UpdateProductionJobAssignmentResult> {
+  const jobId = input.job_id?.trim() ?? "";
+  if (!jobId) {
+    return { success: false, error: "ไม่พบรหัสงาน (jobId)" };
+  }
+
+  const technicianId = input.technician_id?.trim() || null;
+  const wageCost = toWageCost(input.wage_cost);
+
+  if (!Number.isFinite(Number(input.wage_cost)) || Number(input.wage_cost) < 0) {
+    return { success: false, error: "ค่าแรงต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0" };
+  }
+
+  try {
+    const supabase = createClient();
+
+    const { data: current, error: currentError } = await supabase
+      .from("production_jobs")
+      .select("id, status")
+      .eq("id", jobId)
+      .maybeSingle();
+
+    if (currentError) {
+      return {
+        success: false,
+        error: currentError.message ?? "ตรวจสอบใบสั่งผลิตไม่สำเร็จ",
+      };
+    }
+    if (!current) {
+      return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ" };
+    }
+    if (current.status === "CANCELLED") {
+      return { success: false, error: "งานถูกยกเลิกแล้ว ไม่สามารถบันทึกค่าแรงได้" };
+    }
+
+    if (technicianId) {
+      const { data: technician, error: techError } = await supabase
+        .from("contacts")
+        .select("id, contact_type")
+        .eq("id", technicianId)
+        .maybeSingle();
+
+      if (techError) {
+        return {
+          success: false,
+          error: techError.message ?? "ตรวจสอบช่างรับเหมาไม่สำเร็จ",
+        };
+      }
+      if (
+        !technician ||
+        !TECHNICIAN_CONTACT_TYPES.includes(
+          technician.contact_type as (typeof TECHNICIAN_CONTACT_TYPES)[number],
+        )
+      ) {
+        return {
+          success: false,
+          error: "ช่างรับเหมาต้องเป็น Vendor หรือ Technician ที่ลงทะเบียนแล้ว",
+        };
+      }
+    }
+
+    const { data: updated, error: updateError } = await supabase
+      .from("production_jobs")
+      .update({
+        technician_id: technicianId,
+        wage_cost: wageCost,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", jobId)
+      .select("id")
+      .maybeSingle();
+
+    if (updateError) {
+      return {
+        success: false,
+        error: updateError.message ?? "บันทึกช่างรับเหมา / ค่าแรงไม่สำเร็จ",
+      };
+    }
+    if (!updated) {
+      return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ" };
+    }
+
+    revalidatePath("/production/kanban");
+    revalidatePath("/profit-analysis");
+    revalidatePath("/dashboard");
+    return { success: true, error: null };
+  } catch (err) {
+    return {
+      success: false,
+      error:
+        err instanceof Error
+          ? err.message
+          : "บันทึกช่างรับเหมา / ค่าแรงไม่สำเร็จ",
     };
   }
 }
