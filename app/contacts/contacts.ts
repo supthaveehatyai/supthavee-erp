@@ -2,7 +2,7 @@
  * Contacts / Vendors domain types (Supabase `contacts` table).
  */
 
-export type ContactType = "Customer" | "Vendor";
+export type ContactType = "Customer" | "Vendor" | "Technician";
 export type CustomerType = "นิติบุคคล" | "บุคคลธรรมดา";
 export type PriceTier = "Retail" | "Wholesale";
 
@@ -159,8 +159,12 @@ export function formatOcrPatternConfig(
 export function normalizeContactRow(row: unknown): Contact {
   const raw = (row ?? {}) as Record<string, unknown>;
   const config = raw.ocr_pattern_config;
-  const contactType =
-    raw.contact_type === "Vendor" ? "Vendor" : "Customer";
+  const contactType: ContactType =
+    raw.contact_type === "Vendor"
+      ? "Vendor"
+      : raw.contact_type === "Technician"
+        ? "Technician"
+        : "Customer";
 
   return {
     id: String(raw.id ?? ""),

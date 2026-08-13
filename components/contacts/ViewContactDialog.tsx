@@ -7,6 +7,7 @@ import {
   type ContactDetails,
   type ContactPersonRow,
 } from "@/app/actions/contacts";
+import { SkillRateCard } from "@/components/contacts/skill-rate-card";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -16,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type ViewContactDialogProps = {
   contactId: string | null;
@@ -85,10 +87,18 @@ export default function ViewContactDialog({
 
   const contact = details?.contact ?? null;
   const persons: ContactPersonRow[] = details?.persons ?? [];
+  const canEditRates =
+    contact?.contact_type === "Vendor" || contact?.contact_type === "Technician";
+
+  function contactTypeLabel(value: string | null | undefined): string {
+    if (value === "Vendor") return "ผู้จำหน่าย";
+    if (value === "Technician") return "ช่างรับเหมา";
+    return "ลูกค้า";
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] max-w-2xl overflow-y-auto">
+      <DialogContent className="max-h-[90dvh] max-w-3xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>รายละเอียดคู่ค้า</DialogTitle>
           <DialogDescription>
@@ -113,7 +123,15 @@ export default function ViewContactDialog({
             {error}
           </div>
         ) : contact ? (
-          <div className="space-y-5">
+          <Tabs defaultValue="profile" className="space-y-1">
+            {canEditRates ? (
+              <TabsList>
+                <TabsTrigger value="profile">ข้อมูลคู่ค้า</TabsTrigger>
+                <TabsTrigger value="rates">ทักษะและค่าแรง</TabsTrigger>
+              </TabsList>
+            ) : null}
+
+            <TabsContent value="profile" className="space-y-5">
             <section className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
               <p className="text-xs font-semibold text-slate-500">ข้อมูลคู่ค้า</p>
               <h3 className="mt-2 text-lg font-bold text-slate-900">
@@ -134,9 +152,7 @@ export default function ViewContactDialog({
                 />
                 <DetailField
                   label="ประเภท"
-                  value={
-                    contact.contact_type === "Vendor" ? "ผู้จำหน่าย" : "ลูกค้า"
-                  }
+                  value={contactTypeLabel(contact.contact_type)}
                 />
                 <DetailField
                   label="ที่อยู่"
@@ -204,7 +220,17 @@ export default function ViewContactDialog({
                 </div>
               )}
             </section>
-          </div>
+            </TabsContent>
+
+            {canEditRates ? (
+              <TabsContent value="rates">
+                <SkillRateCard
+                  technicianId={contact.id}
+                  technicianName={contact.company_name}
+                />
+              </TabsContent>
+            ) : null}
+          </Tabs>
         ) : null}
 
         <DialogFooter>

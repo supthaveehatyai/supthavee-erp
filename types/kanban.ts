@@ -72,10 +72,21 @@ export type ProductionJobLineItem = {
   color: string | null;
   size: string | null;
   description: string | null;
+  model_id: string | null;
+  is_service: boolean;
+};
+
+export type ProductionJobServiceModel = {
+  id: string;
+  model_code: string;
+  name: string;
 };
 
 export type ProductionJobDetails = ProductionJobCard & {
   line_items: ProductionJobLineItem[];
+  /** งานบริการหลักจากเอกสารต้นทาง (product_models.is_service) */
+  service_model_id: string | null;
+  service_model: ProductionJobServiceModel | null;
 };
 
 export type GetJobDetailsResult =
@@ -115,6 +126,8 @@ export type TechnicianOption = {
   id: string;
   company_name: string;
   contact_type: string;
+  /** เรตจาก technician_rates สำหรับ service_model ของงานนี้ */
+  default_wage: number;
 };
 
 export type GetTechnicianOptionsResult =
@@ -124,7 +137,8 @@ export type GetTechnicianOptionsResult =
 export type UpdateProductionJobAssignmentInput = {
   job_id: string;
   technician_id: string | null;
-  wage_cost: number;
+  /** ใช้ได้เฉพาะ Admin — คนอื่นระบบดึงจาก Rate Card */
+  wage_cost?: number;
 };
 
 export type UpdateProductionJobAssignmentResult = {

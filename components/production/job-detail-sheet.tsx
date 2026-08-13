@@ -107,12 +107,14 @@ export type JobDetailSheetProps = {
   job: ProductionJobDetails | null;
   error?: string | null;
   technicians?: TechnicianOption[];
+  isAdmin?: boolean;
 };
 
 export function JobDetailSheet({
   job,
   error,
   technicians = [],
+  isAdmin = false,
 }: JobDetailSheetProps) {
   const router = useRouter();
   const open = Boolean(job) || Boolean(error);
@@ -124,12 +126,40 @@ export function JobDetailSheet({
 
   const busy = isPending || isSaving;
 
+  const technicianOptions = (() => {
+    const list = [...technicians];
+    if (
+      job?.technician_id &&
+      !list.some((tech) => tech.id === job.technician_id)
+    ) {
+      list.unshift({
+        id: job.technician_id,
+        company_name: job.technician_name || "ช่างที่เลือกไว้",
+        contact_type: "Vendor",
+        default_wage: Number.isFinite(job.wage_cost) ? job.wage_cost : 0,
+      });
+    }
+    return list;
+  })();
+
   useEffect(() => {
     setTechnicianId(job?.technician_id ?? "");
     setWageCost(
       job ? String(Number.isFinite(job.wage_cost) ? job.wage_cost : 0) : "0",
     );
   }, [job?.id, job?.technician_id, job?.wage_cost]);
+
+  function applyTechnicianWage(nextTechnicianId: string) {
+    setTechnicianId(nextTechnicianId);
+    if (!nextTechnicianId) {
+      setWageCost("0");
+      return;
+    }
+    const selected = technicianOptions.find((tech) => tech.id === nextTechnicianId);
+    if (selected) {
+      setWageCost(String(selected.default_wage ?? 0));
+    }
+  }
 
   function closeSheet() {
     router.push("/production/kanban");
@@ -142,10 +172,13 @@ export function JobDetailSheet({
   function handleSaveAssignment() {
     if (!job || isPending || isSaving) return;
 
-    const wage = Number.parseFloat(wageCost);
-    if (!Number.isFinite(wage) || wage < 0) {
-      toast.error("ค่าแรงต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0");
-      return;
+    let wage: number | undefined;
+    if (isAdmin) {
+      wage = Number.parseFloat(wageCost);
+      if (!Number.isFinite(wage) || wage < 0) {
+        toast.error("ค่าแรงต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0");
+        return;
+      }
     }
 
     startSaveTransition(async () => {
@@ -248,6 +281,15 @@ export function JobDetailSheet({
                       {job.details || "ไม่มีรายละเอียดเพิ่มเติม"}
                     </span>
                   </div>
+                  {job.service_model ? (
+                    <div className="flex items-center gap-2 text-slate-600">
+                      <Wrench className="size-4 shrink-0 text-violet-500" />
+                      <span>
+                        งานบริการ {job.service_model.model_code} ·{" "}
+                        {job.service_model.name}
+                      </span>
+                    </div>
+                  ) : null}
                   {job.technician_name ? (
                     <div className="flex items-center gap-2 text-slate-600">
                       <Wrench className="size-4 shrink-0 text-slate-400" />
@@ -309,27 +351,47 @@ export function JobDetailSheet({
                   </div>
 
                   <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-2">
+                    {!job.service_model_id ? (
+                      <p className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        เอกสารนี้ไม่มีรายการงานบริการ — เพิ่มรุ่นที่
+                        is_service ลงบิล แล้วตั้ง Rate Card ที่หน้าคู่ค้า
+                      </p>
+                    ) : technicianOptions.length === 0 ? (
+                      <p className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        ยังไม่มีช่างที่มีเรตสำหรับงานนี้ — ไปตั้งทักษะและค่าแรงที่หน้าคู่ค้า
+                      </p>
+                    ) : null}
                     <div className="sm:col-span-2">
                       <Label htmlFor="technician_id">ช่างรับเหมา</Label>
                       <Select
                         id="technician_id"
                         value={technicianId}
-                        disabled={!canEditAssignment || busy}
-                        onChange={(event) => setTechnicianId(event.target.value)}
+                        disabled={
+                          !canEditAssignment ||
+                          busy ||
+                          !job.service_model_id
+                        }
+                        onChange={(event) =>
+                          applyTechnicianWage(event.target.value)
+                        }
                       >
                         <option value="">— ไม่ระบุ —</option>
-                        {technicians.map((tech) => (
+                        {technicianOptions.map((tech) => (
                           <option key={tech.id} value={tech.id}>
                             {tech.company_name}
                             {tech.contact_type === "Technician"
                               ? " (ช่าง)"
-                              : " (Vendor)"}
+                              : " (Vendor)"}{" "}
+                            · {tech.default_wage.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </option>
                         ))}
                       </Select>
                     </div>
                     <div className="sm:col-span-2">
-                      <Label htmlFor="wage_cost">ค่าแรง (Wage Cost)</Label>
+                      <Label htmlFor="wage_cost">
+                        ค่าแรง (Wage Cost)
+                        {isAdmin ? " — Admin แก้ไขได้" : " — จาก Rate Card"}
+                      </Label>
                       <Input
                         id="wage_cost"
                         type="number"
@@ -337,8 +399,11 @@ export function JobDetailSheet({
                         step="0.0001"
                         inputMode="decimal"
                         value={wageCost}
-                        disabled={!canEditAssignment || busy}
-                        onChange={(event) => setWageCost(event.target.value)}
+                        readOnly={!isAdmin}
+                        disabled={!canEditAssignment || busy || !isAdmin}
+                        onChange={(event) => {
+                          if (isAdmin) setWageCost(event.target.value);
+                        }}
                         className="tabular-nums"
                       />
                     </div>

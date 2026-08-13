@@ -11,6 +11,7 @@ import {
   normalizeContactRow,
   type Contact,
 } from "@/app/contacts/contacts";
+import { findDuplicateContactError } from "@/lib/contacts/duplicate-check";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 
 const CONTACTS_PATH = "/contacts";
@@ -139,6 +140,16 @@ export async function updateContact(
     const address = pickNullableString(raw, "address");
 
     const supabase = createSupabaseServerClient();
+
+    const duplicateError = await findDuplicateContactError(supabase, {
+      companyName,
+      taxId,
+      excludeId: id,
+    });
+    if (duplicateError) {
+      return { data: null, error: duplicateError };
+    }
+
     const { data, error } = await supabase
       .from("contacts")
       .update({

@@ -1460,6 +1460,48 @@ export type Database = {
         }
         Relationships: []
       }
+      technician_rates: {
+        Row: {
+          created_at: string
+          default_wage: number
+          id: string
+          service_model_id: string
+          technician_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          default_wage?: number
+          id?: string
+          service_model_id: string
+          technician_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          default_wage?: number
+          id?: string
+          service_model_id?: string
+          technician_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "technician_rates_service_model_id_fkey"
+            columns: ["service_model_id"]
+            isOneToOne: false
+            referencedRelation: "product_models"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "technician_rates_technician_id_fkey"
+            columns: ["technician_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_profiles: {
         Row: {
           created_at: string | null

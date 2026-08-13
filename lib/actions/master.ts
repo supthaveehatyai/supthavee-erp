@@ -13,6 +13,7 @@
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { findDuplicateContactError } from "@/lib/contacts/duplicate-check";
 
 /**
  * Raw service-role client — bypasses RLS.
@@ -592,6 +593,13 @@ export async function createVendor(
 
   try {
     const supabaseAdmin = createSupabaseAdminClient();
+
+    const duplicateError = await findDuplicateContactError(supabaseAdmin, {
+      companyName,
+    });
+    if (duplicateError) {
+      return { data: null, error: duplicateError };
+    }
 
     const { data, error } = await supabaseAdmin
       .from("contacts")

@@ -208,8 +208,12 @@ function validateCsvRows(matrix: string[][]): CsvPreviewRow[] {
     const creditDays = get(cells, "credit_days");
     const errors: string[] = [];
 
-    if (contactType !== "Customer" && contactType !== "Vendor") {
-      errors.push("contact_type ต้องเป็น Customer หรือ Vendor");
+    if (
+      contactType !== "Customer" &&
+      contactType !== "Vendor" &&
+      contactType !== "Technician"
+    ) {
+      errors.push("contact_type ต้องเป็น Customer, Vendor หรือ Technician");
     }
     if (!companyName) {
       errors.push("company_name ห้ามว่าง");
@@ -436,6 +440,9 @@ export default function ContactsClient({
   ).length;
   const vendorCount = contacts.filter(
     (contact) => contact.contact_type === "Vendor",
+  ).length;
+  const technicianCount = contacts.filter(
+    (contact) => contact.contact_type === "Technician",
   ).length;
   const importInvalidCount = importRows.filter((row) => !row.isValid).length;
   const canImport =
@@ -722,6 +729,7 @@ export default function ContactsClient({
                 { key: "All", label: "ทั้งหมด", count: contacts.length },
                 { key: "Customer", label: "ลูกค้า", count: customerCount },
                 { key: "Vendor", label: "ผู้จำหน่าย", count: vendorCount },
+                { key: "Technician", label: "ช่างรับเหมา", count: technicianCount },
               ] as const
             ).map((tab) => {
               const active = typeFilter === tab.key;
@@ -844,12 +852,16 @@ export default function ContactsClient({
                         className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
                           contact.contact_type === "Customer"
                             ? "bg-blue-50 text-blue-700"
-                            : "bg-amber-50 text-amber-700"
+                            : contact.contact_type === "Technician"
+                              ? "bg-violet-50 text-violet-700"
+                              : "bg-amber-50 text-amber-700"
                         }`}
                       >
                         {contact.contact_type === "Customer"
                           ? "ลูกค้า"
-                          : "ผู้จำหน่าย"}
+                          : contact.contact_type === "Technician"
+                            ? "ช่างรับเหมา"
+                            : "ผู้จำหน่าย"}
                       </span>
                     </td>
                     <td className="px-5 py-4 text-xs text-slate-600">
@@ -1017,6 +1029,7 @@ export default function ContactsClient({
                       >
                         <option value="Customer">ลูกค้า</option>
                         <option value="Vendor">ซัพพลายเออร์</option>
+                        <option value="Technician">ช่างรับเหมา</option>
                       </select>
                     </label>
 

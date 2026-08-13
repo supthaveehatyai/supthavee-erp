@@ -5,6 +5,7 @@
  *
  * Zero Client-Side Fetching: Service Role via `createSupabaseServerClient` only.
  * Soft-disable via `is_active` — never hard-delete (preserve payment history).
+ * Never throw to the UI — always return a safe empty list on failure.
  */
 
 import { revalidatePath } from "next/cache";
@@ -17,8 +18,10 @@ import type {
 
 const BANK_ACCOUNTS_PATH = "/finance/bank-accounts";
 
+const EMPTY_LIST: GetBankAccountsResult = { data: [], error: null };
+
 function toBankAccountList(data: unknown): BankAccount[] {
-  if (!Array.isArray(data)) return [];
+  if (!Array.isArray(data) || data.length === 0) return [];
 
   return data
     .filter(
@@ -43,7 +46,7 @@ function toBankAccountList(data: unknown): BankAccount[] {
 
 /**
  * List all company bank books (active + inactive), oldest first.
- * Always returns `data: []` — never null — to keep the page Error-Boundary-safe.
+ * Always returns `data: []` — never null / never throws.
  */
 export async function getBankAccounts(): Promise<GetBankAccountsResult> {
   try {
@@ -56,10 +59,8 @@ export async function getBankAccounts(): Promise<GetBankAccountsResult> {
       .order("created_at", { ascending: true });
 
     if (error) {
-      return {
-        data: [],
-        error: error.message ?? "ไม่สามารถดึงข้อมูลสมุดบัญชีได้",
-      };
+      console.error("[getBankAccounts]", error.message, error);
+      return { data: [], error: error.message ?? "ไม่สามารถดึงข้อมูลสมุดบัญชีได้" };
     }
 
     return {
@@ -67,9 +68,8 @@ export async function getBankAccounts(): Promise<GetBankAccountsResult> {
       error: null,
     };
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "ไม่สามารถดึงข้อมูลสมุดบัญชีได้";
-    return { data: [], error: message };
+    console.error("[getBankAccounts]", err);
+    return EMPTY_LIST;
   }
 }
 
@@ -106,6 +106,7 @@ export async function createBankAccount(
     });
 
     if (error) {
+      console.error("[createBankAccount]", error.message, error);
       return {
         success: false,
         error: error.message ?? "ไม่สามารถสร้างบัญชีได้",
@@ -115,16 +116,25 @@ export async function createBankAccount(
     revalidatePath(BANK_ACCOUNTS_PATH);
     return { success: true, error: null };
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "ไม่สามารถสร้างบัญชีได้";
-    return { success: false, error: message };
+    console.error("[createBankAccount]", err);
+    return { success: false, error: "ไม่สามารถสร้างบัญชีได้" };
+  }
+}
+
+/** Form action — must return void for Next.js <form action>. */
+export async function createBankAccountFormAction(
+  formData: FormData,
+): Promise<void> {
+  try {
+    await createBankAccount(formData);
+  } catch (err) {
+    console.error("[createBankAccountFormAction]", err);
   }
 }
 
 /**
  * Toggle active/inactive — soft disable only (never delete).
- * Compatible with `<form action={toggleBankAccountStatus.bind(null, id, isActive)}>`
- * (Next.js may append FormData as the last argument).
+ * Compatible with `<form action={toggleBankAccountStatusFormAction.bind(null, id, isActive)}>`
  */
 export async function toggleBankAccountStatus(
   id: string,
@@ -144,6 +154,7 @@ export async function toggleBankAccountStatus(
       .eq("id", trimmedId);
 
     if (error) {
+      console.error("[toggleBankAccountStatus]", error.message, error);
       return {
         success: false,
         error: error.message ?? "ไม่สามารถเปลี่ยนสถานะบัญชีได้",
@@ -153,8 +164,20 @@ export async function toggleBankAccountStatus(
     revalidatePath(BANK_ACCOUNTS_PATH);
     return { success: true, error: null };
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "ไม่สามารถเปลี่ยนสถานะบัญชีได้";
-    return { success: false, error: message };
+    console.error("[toggleBankAccountStatus]", err);
+    return { success: false, error: "ไม่สามารถเปลี่ยนสถานะบัญชีได้" };
+  }
+}
+
+/** Form action — must return void for Next.js <form action>. */
+export async function toggleBankAccountStatusFormAction(
+  id: string,
+  currentStatus: boolean,
+  _formData?: FormData,
+): Promise<void> {
+  try {
+    await toggleBankAccountStatus(id, currentStatus, _formData);
+  } catch (err) {
+    console.error("[toggleBankAccountStatusFormAction]", err);
   }
 }

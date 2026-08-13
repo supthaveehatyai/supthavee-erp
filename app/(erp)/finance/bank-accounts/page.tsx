@@ -1,7 +1,10 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import {
   getBankAccounts,
-  createBankAccount,
-  toggleBankAccountStatus,
+  createBankAccountFormAction,
+  toggleBankAccountStatusFormAction,
 } from "@/lib/actions/bank-accounts";
 import type { BankAccount } from "@/types/bank-account";
 import { Button } from "@/components/ui/button";
@@ -25,30 +28,34 @@ import {
 } from "@/components/ui/table";
 import { Building2, Landmark } from "lucide-react";
 
-/** บังคับไม่ให้ Next.js cache ข้อมูลหน้าบัญชี */
-export const dynamic = "force-dynamic";
-
-async function loadBankAccounts(): Promise<{
-  accounts: BankAccount[];
-  error: string | null;
-}> {
-  try {
-    const result = await getBankAccounts();
-    const accounts = Array.isArray(result?.data) ? result.data : [];
-    return { accounts, error: result?.error ?? null };
-  } catch (err) {
-    return {
-      accounts: [],
-      error:
-        err instanceof Error
-          ? err.message
-          : "ไม่สามารถดึงข้อมูลสมุดบัญชีได้",
-    };
-  }
+function EmptyBankAccountsState() {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-6 py-14 text-center">
+      <Landmark className="h-10 w-10 text-slate-300" />
+      <p className="text-sm font-semibold text-slate-700">
+        ยังไม่มีบัญชีธนาคาร
+      </p>
+      <p className="max-w-sm text-sm text-slate-500">
+        ให้กดเพิ่มบัญชีทางซ้าย เพื่อเริ่มรับโอนเงินและตัดชำระหนี้
+      </p>
+    </div>
+  );
 }
 
 export default async function BankAccountsPage() {
-  const { accounts: bankAccounts, error } = await loadBankAccounts();
+  let bankAccounts: BankAccount[] = [];
+  let error: string | null = null;
+
+  try {
+    const result = await getBankAccounts();
+    bankAccounts = Array.isArray(result?.data) ? result.data : [];
+    error = result?.error ?? null;
+  } catch (err) {
+    console.error("[BankAccountsPage]", err);
+    bankAccounts = [];
+    error = null;
+  }
+
   const hasAccounts = Boolean(bankAccounts?.length);
 
   return (
@@ -71,19 +78,13 @@ export default async function BankAccountsPage() {
       ) : null}
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-        {/* คอลัมน์ซ้าย: ฟอร์มเพิ่มบัญชี */}
         <Card className="col-span-1 h-fit">
           <CardHeader>
             <CardTitle>เพิ่มบัญชีธนาคาร</CardTitle>
             <CardDescription>ระบุข้อมูลบัญชีให้ครบถ้วน</CardDescription>
           </CardHeader>
           <CardContent>
-            <form
-              action={async (formData) => {
-                await createBankAccount(formData);
-              }}
-              className="space-y-4"
-            >
+            <form action={createBankAccountFormAction} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="bank_name">
                   ธนาคาร (เช่น KBANK){" "}
@@ -133,22 +134,13 @@ export default async function BankAccountsPage() {
           </CardContent>
         </Card>
 
-        {/* คอลัมน์ขวา: ตารางแสดงบัญชีทั้งหมด */}
         <Card className="col-span-1 md:col-span-2">
           <CardHeader>
             <CardTitle>รายการบัญชีทั้งหมด</CardTitle>
           </CardHeader>
           <CardContent>
             {!hasAccounts ? (
-              <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-6 py-14 text-center">
-                <Landmark className="h-10 w-10 text-slate-300" />
-                <p className="text-sm font-semibold text-slate-700">
-                  ยังไม่มีบัญชีธนาคาร
-                </p>
-                <p className="max-w-sm text-sm text-slate-500">
-                  ให้กดเพิ่มบัญชีทางซ้าย เพื่อเริ่มรับโอนเงินและตัดชำระหนี้
-                </p>
-              </div>
+              <EmptyBankAccountsState />
             ) : (
               <div className="overflow-hidden rounded-md border border-slate-200">
                 <Table>
@@ -164,7 +156,7 @@ export default async function BankAccountsPage() {
                   <TableBody>
                     {bankAccounts?.map((account) => {
                       if (!account?.id) return null;
-                      const isActive = Boolean(account.is_active);
+                      const isActive = Boolean(account?.is_active);
                       return (
                         <TableRow
                           key={account.id}
@@ -195,12 +187,11 @@ export default async function BankAccountsPage() {
                           </TableCell>
                           <TableCell className="text-right">
                             <form
-                              action={async (_formData) => {
-                                await toggleBankAccountStatus(
-                                  account.id,
-                                  isActive,
-                                );
-                              }}
+                              action={toggleBankAccountStatusFormAction.bind(
+                                null,
+                                account.id,
+                                isActive,
+                              )}
                             >
                               <Button
                                 type="submit"

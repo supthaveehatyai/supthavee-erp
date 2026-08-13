@@ -6,6 +6,7 @@
  */
 
 import { revalidatePath } from "next/cache";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server-admin";
 import {
   KANBAN_STATUSES,
@@ -19,6 +20,7 @@ import {
   type ProductionJobCard,
   type ProductionJobDetails,
   type ProductionJobLineItem,
+  type ProductionJobServiceModel,
   type ProductionJobStatus,
   type ProductionJobType,
   type ProductionJobsByStatus,
@@ -630,7 +632,15 @@ export async function getJobDetails(
             name,
             short_name,
             color,
-            size
+            size,
+            model_id,
+            product_models!products_model_id_fkey (
+              id,
+              model_code,
+              name,
+              short_name,
+              is_service
+            )
           )
         `,
         )
@@ -658,6 +668,8 @@ export async function getJobDetails(
               short_name?: string | null;
               color?: string | null;
               size?: string | null;
+              model_id?: string | null;
+              product_models?: ServiceModelJoin | ServiceModelJoin[] | null;
             }
           | {
               id?: string;
@@ -666,12 +678,15 @@ export async function getJobDetails(
               short_name?: string | null;
               color?: string | null;
               size?: string | null;
+              model_id?: string | null;
+              product_models?: ServiceModelJoin | ServiceModelJoin[] | null;
             }[]
           | null;
       };
 
       lineItems = ((items as ItemRow[] | null) ?? []).map((item) => {
         const product = unwrapJoin(item.products);
+        const model = unwrapJoin(product?.product_models ?? null);
         const sku = product?.sku?.trim() || "—";
         const name =
           product?.name?.trim() ||
@@ -688,13 +703,22 @@ export async function getJobDetails(
           color: product?.color?.trim() || null,
           size: product?.size?.trim() || null,
           description: item.description?.trim() || null,
+          model_id: product?.model_id?.trim() || model?.id?.trim() || null,
+          is_service: model?.is_service === true,
         };
       });
     }
 
+    const serviceModel = await resolveServiceModelFromDocument(
+      supabase,
+      row.document_id,
+    );
+
     const details: ProductionJobDetails = {
       ...card,
       line_items: lineItems,
+      service_model_id: serviceModel?.id ?? null,
+      service_model: serviceModel,
     };
 
     return { success: true, data: details };
@@ -791,18 +815,102 @@ export async function cancelProductionJob(
 
 const TECHNICIAN_CONTACT_TYPES = ["Vendor", "Technician"] as const;
 
+type ServiceModelJoin = {
+  id?: string | null;
+  model_code?: string | null;
+  name?: string | null;
+  short_name?: string | null;
+  is_service?: boolean | null;
+};
+
+async function resolveServiceModelFromDocument(
+  supabase: ReturnType<typeof createClient>,
+  documentId: string | null,
+): Promise<ProductionJobServiceModel | null> {
+  if (!documentId) return null;
+
+  const { data, error } = await supabase
+    .from("document_items")
+    .select(
+      `
+      sort_order,
+      products!document_items_product_id_fkey (
+        model_id,
+        product_models!products_model_id_fkey (
+          id,
+          model_code,
+          name,
+          short_name,
+          is_service
+        )
+      )
+    `,
+    )
+    .eq("document_id", documentId)
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    console.error("[resolveServiceModelFromDocument]", error.message);
+    return null;
+  }
+
+  for (const item of data ?? []) {
+    const product = unwrapJoin(
+      item.products as
+        | { product_models?: ServiceModelJoin | ServiceModelJoin[] | null }
+        | { product_models?: ServiceModelJoin | ServiceModelJoin[] | null }[]
+        | null,
+    );
+    const model = unwrapJoin(product?.product_models ?? null);
+    if (model?.is_service === true && model.id) {
+      return {
+        id: String(model.id),
+        model_code: String(model.model_code ?? "").trim() || "—",
+        name:
+          String(model.name ?? "").trim() ||
+          String(model.short_name ?? "").trim() ||
+          String(model.model_code ?? "").trim() ||
+          "งานบริการ",
+      };
+    }
+  }
+
+  return null;
+}
+
+async function isCurrentUserAdmin(): Promise<boolean> {
+  const user = await getCurrentAuthUser();
+  return String(user?.roleCode ?? "").trim().toLowerCase() === "admin";
+}
+
 /**
- * รายชื่อช่างรับเหมา / Vendor สำหรับ Dropdown ใน Job Detail
+ * รายชื่อช่างรับเหมาที่มี Rate Card สำหรับงานบริการนั้น
+ * ถ้าไม่ระบุ serviceModelId → คืน [] (ต้องผูกงานบริการก่อน)
  */
-export async function getTechnicianOptions(): Promise<GetTechnicianOptionsResult> {
+export async function getTechnicianOptions(
+  serviceModelId?: string | null,
+): Promise<GetTechnicianOptionsResult> {
   try {
+    const modelId = serviceModelId?.trim() ?? "";
+    if (!modelId) {
+      return { success: true, data: [] };
+    }
+
     const supabase = createClient();
     const { data, error } = await supabase
-      .from("contacts")
-      .select("id, company_name, contact_type")
-      .in("contact_type", [...TECHNICIAN_CONTACT_TYPES])
-      .neq("is_active", false)
-      .order("company_name", { ascending: true });
+      .from("technician_rates")
+      .select(
+        `
+        default_wage,
+        contacts!technician_rates_technician_id_fkey (
+          id,
+          company_name,
+          contact_type,
+          is_active
+        )
+      `,
+      )
+      .eq("service_model_id", modelId);
 
     if (error) {
       return {
@@ -812,11 +920,43 @@ export async function getTechnicianOptions(): Promise<GetTechnicianOptionsResult
       };
     }
 
-    const options: TechnicianOption[] = (data ?? []).map((row) => ({
-      id: String(row.id),
-      company_name: String(row.company_name ?? "").trim() || "ไม่ระบุชื่อ",
-      contact_type: String(row.contact_type ?? ""),
-    }));
+    type ContactJoin = {
+      id?: string | null;
+      company_name?: string | null;
+      contact_type?: string | null;
+      is_active?: boolean | null;
+    };
+
+    const options: TechnicianOption[] = [];
+    const seen = new Set<string>();
+
+    for (const row of data ?? []) {
+      const contact = unwrapJoin(
+        row.contacts as ContactJoin | ContactJoin[] | null,
+      );
+      const id = String(contact?.id ?? "").trim();
+      if (!id || seen.has(id)) continue;
+      if (contact?.is_active === false) continue;
+      if (
+        !TECHNICIAN_CONTACT_TYPES.includes(
+          String(contact?.contact_type ?? "") as (typeof TECHNICIAN_CONTACT_TYPES)[number],
+        )
+      ) {
+        continue;
+      }
+      seen.add(id);
+      options.push({
+        id,
+        company_name:
+          String(contact?.company_name ?? "").trim() || "ไม่ระบุชื่อ",
+        contact_type: String(contact?.contact_type ?? ""),
+        default_wage: toWageCost(row.default_wage),
+      });
+    }
+
+    options.sort((a, b) =>
+      a.company_name.localeCompare(b.company_name, "th"),
+    );
 
     return { success: true, data: options };
   } catch (err) {
@@ -841,18 +981,14 @@ export async function updateProductionJobAssignment(
   }
 
   const technicianId = input.technician_id?.trim() || null;
-  const wageCost = toWageCost(input.wage_cost);
-
-  if (!Number.isFinite(Number(input.wage_cost)) || Number(input.wage_cost) < 0) {
-    return { success: false, error: "ค่าแรงต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0" };
-  }
 
   try {
     const supabase = createClient();
+    const isAdmin = await isCurrentUserAdmin();
 
     const { data: current, error: currentError } = await supabase
       .from("production_jobs")
-      .select("id, status")
+      .select("id, status, document_id")
       .eq("id", jobId)
       .maybeSingle();
 
@@ -868,6 +1004,8 @@ export async function updateProductionJobAssignment(
     if (current.status === "CANCELLED") {
       return { success: false, error: "งานถูกยกเลิกแล้ว ไม่สามารถบันทึกค่าแรงได้" };
     }
+
+    let wageCost = 0;
 
     if (technicianId) {
       const { data: technician, error: techError } = await supabase
@@ -892,6 +1030,47 @@ export async function updateProductionJobAssignment(
           success: false,
           error: "ช่างรับเหมาต้องเป็น Vendor หรือ Technician ที่ลงทะเบียนแล้ว",
         };
+      }
+
+      const serviceModel = await resolveServiceModelFromDocument(
+        supabase,
+        current.document_id,
+      );
+      if (!serviceModel) {
+        return {
+          success: false,
+          error:
+            "เอกสารต้นทางไม่มีรายการงานบริการ — ไม่สามารถผูกช่างจาก Rate Card ได้",
+        };
+      }
+
+      const { data: rate, error: rateError } = await supabase
+        .from("technician_rates")
+        .select("default_wage")
+        .eq("technician_id", technicianId)
+        .eq("service_model_id", serviceModel.id)
+        .maybeSingle();
+
+      if (rateError) {
+        return {
+          success: false,
+          error: rateError.message ?? "ตรวจสอบ Rate Card ไม่สำเร็จ",
+        };
+      }
+      if (!rate) {
+        return {
+          success: false,
+          error: `ช่างคนนี้ยังไม่มีเรตสำหรับงาน ${serviceModel.model_code}`,
+        };
+      }
+
+      wageCost = toWageCost(rate.default_wage);
+
+      if (isAdmin && input.wage_cost != null) {
+        if (!Number.isFinite(Number(input.wage_cost)) || Number(input.wage_cost) < 0) {
+          return { success: false, error: "ค่าแรงต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0" };
+        }
+        wageCost = toWageCost(input.wage_cost);
       }
     }
 

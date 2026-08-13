@@ -17,6 +17,7 @@ import {
   type OcrPatternConfig,
   type PriceTier,
 } from "@/app/contacts/contacts";
+import { findDuplicateContactError } from "@/lib/contacts/duplicate-check";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 
 const CONTACTS_PATH = "/contacts";
@@ -105,7 +106,11 @@ export async function createContact(
     }
 
     const contactType: ContactType =
-      input.contactType === "Vendor" ? "Vendor" : "Customer";
+      input.contactType === "Vendor"
+        ? "Vendor"
+        : input.contactType === "Technician"
+          ? "Technician"
+          : "Customer";
     const persons = (input.persons ?? [])
       .map((person) => ({
         name: person.name?.trim() ?? "",
@@ -125,6 +130,15 @@ export async function createContact(
     }
 
     const supabaseAdmin = createSupabaseServerClient();
+    const taxId = input.taxId?.trim() || null;
+
+    const duplicateError = await findDuplicateContactError(supabaseAdmin, {
+      companyName,
+      taxId,
+    });
+    if (duplicateError) {
+      return { data: null, error: duplicateError };
+    }
 
     const { data: contact, error: contactError } = await supabaseAdmin
       .from("contacts")
@@ -132,7 +146,7 @@ export async function createContact(
         contact_type: contactType,
         customer_type: input.customerType || "นิติบุคคล",
         company_name: companyName,
-        tax_id: input.taxId?.trim() || null,
+        tax_id: taxId,
         branch_code: input.branchCode?.trim() || "สำนักงานใหญ่",
         address: input.address?.trim() || null,
         phone: input.phone?.trim() || null,
@@ -200,7 +214,11 @@ export async function importContacts(
 
     const payload = rows.map((row) => ({
       contact_type:
-        row.contact_type === "Vendor" ? ("Vendor" as const) : ("Customer" as const),
+        row.contact_type === "Vendor"
+          ? ("Vendor" as const)
+          : row.contact_type === "Technician"
+            ? ("Technician" as const)
+            : ("Customer" as const),
       customer_type: row.customer_type || "บุคคลธรรมดา",
       company_name: row.company_name.trim(),
       tax_id: row.tax_id?.trim() || null,
@@ -223,7 +241,45 @@ export async function importContacts(
       return { success: false, error: "พบแถวที่ไม่มีชื่อบริษัท" };
     }
 
+    const seenNames = new Set<string>();
+    const seenTaxIds = new Set<string>();
+    for (const row of payload) {
+      const nameKey = row.company_name.trim().toLocaleLowerCase("th-TH");
+      if (seenNames.has(nameKey)) {
+        return {
+          success: false,
+          error: `ไฟล์นำเข้ามีชื่อซ้ำ: ${row.company_name}`,
+        };
+      }
+      seenNames.add(nameKey);
+
+      const taxKey = (row.tax_id ?? "").replace(/[\s-]/g, "");
+      if (taxKey) {
+        if (seenTaxIds.has(taxKey)) {
+          return {
+            success: false,
+            error: `ไฟล์นำเข้ามีเลขประจำตัวผู้เสียภาษีซ้ำ: ${row.tax_id}`,
+          };
+        }
+        seenTaxIds.add(taxKey);
+      }
+    }
+
     const supabaseAdmin = createSupabaseServerClient();
+
+    for (const row of payload) {
+      const duplicateError = await findDuplicateContactError(supabaseAdmin, {
+        companyName: row.company_name,
+        taxId: row.tax_id,
+      });
+      if (duplicateError) {
+        return {
+          success: false,
+          error: `${duplicateError} (${row.company_name})`,
+        };
+      }
+    }
+
     const { error } = await supabaseAdmin.from("contacts").insert(payload);
 
     if (error) {
