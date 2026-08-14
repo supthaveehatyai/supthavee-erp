@@ -12,8 +12,8 @@ export type SignOutResult =
   | { success: true }
   | { success: false; error: string };
 
-/** Profile fields loaded during PIN sign-in gate (soft-delete + optional pin check). */
+/** Profile fields loaded during PIN sign-in (email + PIN + soft-delete). */
 export type AuthGateProfile = Pick<
   UserProfile,
-  "id" | "is_active" | "full_name" | "pin_code"
+  "id" | "email" | "is_active" | "full_name" | "pin_code"
 >;

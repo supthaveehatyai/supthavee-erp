@@ -23,7 +23,10 @@ export function LoginForm() {
     setError(null);
 
     startTransition(async () => {
-      const result = await signInWithPin(email, pin);
+      const result = await signInWithPin(
+        email.trim().toLowerCase(),
+        String(pin).trim(),
+      );
       // Successful login redirects — result only returns on failure.
       if (result && !result.success) {
         setError(result.error);
