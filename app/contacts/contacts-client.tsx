@@ -984,7 +984,7 @@ export default function ContactsClient({
                               : "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
                           }`}
                         >
-                          {contact.is_active ? "ปิดใช้งาน" : "เปิดใช้งาน"}
+                          {contact.is_active ? "ระงับการใช้งาน" : "เปิดใช้งาน"}
                         </button>
                       </div>
                     </td>
@@ -1029,13 +1029,13 @@ export default function ContactsClient({
           <AlertDialogHeader>
             <AlertDialogTitle>
               {statusToggleTarget?.is_active
-                ? "ยืนยันการปิดใช้งานคู่ค้า?"
+                ? "ยืนยันการระงับการใช้งานคู่ค้า?"
                 : "ยืนยันการเปิดใช้งานคู่ค้า?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {statusToggleTarget?.is_active ? (
                 <>
-                  จะปิดใช้งาน{" "}
+                  จะระงับการใช้งาน{" "}
                   <span className="font-semibold text-slate-800">
                     {statusToggleTarget.company_name}
                   </span>{" "}
@@ -1071,7 +1071,7 @@ export default function ContactsClient({
               {isTogglingStatus
                 ? "กำลังอัปเดต..."
                 : statusToggleTarget?.is_active
-                  ? "ยืนยันปิดใช้งาน"
+                  ? "ยืนยันระงับการใช้งาน"
                   : "ยืนยันเปิดใช้งาน"}
             </AlertDialogAction>
           </AlertDialogFooter>

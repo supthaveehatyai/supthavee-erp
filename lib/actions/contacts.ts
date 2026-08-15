@@ -204,8 +204,9 @@ export async function createContact(
 }
 
 /**
- * Soft Toggle: สลับสถานะ `is_active` (Active ↔ Inactive)
- * ห้าม Hard Delete — ใช้ปิด/เปิดใช้งานเพื่อรักษา Audit Trail
+ * Soft Delete Toggle: สลับ `contacts.is_active` (Active ↔ Inactive)
+ * ห้าม Hard Delete — ใช้ระงับ/เปิดใช้งานเพื่อรักษา Audit Trail
+ * หลังสำเร็จเรียก `revalidatePath("/contacts")` ให้ UI รีเฟรช
  */
 export async function toggleContactStatus(
   id: string,

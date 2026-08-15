@@ -434,22 +434,21 @@ function isServiceCustomSize(size: { sort_order: number }): boolean {
   return Number(size.sort_order) >= SERVICE_CUSTOM_SIZE_SORT_MIN;
 }
 
-type SizeSelectionGroup = {
-  title: string;
-  sizes: Size[];
-};
-
 /**
  * Group Global Size catalog for Product Matrix Step 2.
- * Apparel sizes stay in Kids / Adult buckets; service sizes (sort_order ≥ 900)
- * get a distinct Service/Custom category and remain fully selectable.
+ * Apparel → Kids / Adult; Service/Custom (sort_order ≥ 900) → separate list.
  */
-function buildGlobalSizeSelectionGroups(
-  catalog: Size[],
-): SizeSelectionGroup[] {
-  const sorted = [...catalog].sort(
-    (left, right) => left.sort_order - right.sort_order,
-  );
+function partitionGlobalSizes(catalog: Size[]): {
+  kids: Size[];
+  adults: Size[];
+  serviceCustom: Size[];
+} {
+  const sorted = [...catalog]
+    .map((size) => ({
+      ...size,
+      sort_order: Number(size.sort_order ?? 0),
+    }))
+    .sort((left, right) => left.sort_order - right.sort_order);
 
   const kids: Size[] = [];
   const adults: Size[] = [];
@@ -467,20 +466,7 @@ function buildGlobalSizeSelectionGroups(
     adults.push(size);
   }
 
-  const groups: SizeSelectionGroup[] = [];
-  if (kids.length > 0) {
-    groups.push({ title: "ไซส์เด็ก (K / J)", sizes: kids });
-  }
-  if (adults.length > 0) {
-    groups.push({ title: "ไซส์ผู้ใหญ่", sizes: adults });
-  }
-  if (serviceCustom.length > 0) {
-    groups.push({
-      title: SERVICE_CUSTOM_SIZE_GROUP_TITLE,
-      sizes: serviceCustom,
-    });
-  }
-  return groups;
+  return { kids, adults, serviceCustom };
 }
 
 function createEmptyForm(vendorId = ""): MatrixForm {
@@ -1265,10 +1251,8 @@ export default function ProductsClient() {
     ];
   }, [editTarget]);
 
-  const globalSizeSelectionGroups = useMemo(
-    () => buildGlobalSizeSelectionGroups(globalSizeCatalog),
-    [globalSizeCatalog],
-  );
+  const { kids: kidsSizes, adults: adultSizes, serviceCustom: serviceCustomSizes } =
+    useMemo(() => partitionGlobalSizes(globalSizeCatalog), [globalSizeCatalog]);
 
   async function openDialog(presetVendorId?: string) {
     setForm(createEmptyForm(presetVendorId ?? ""));
@@ -1405,7 +1389,7 @@ export default function ProductsClient() {
     );
   }
 
-  /** Open the Global Size selection grid (no create / INSERT). */
+  /** Open the Global Size selection grid — always refetch (no stale Turbopack cache). */
   async function openStandardSizePanel() {
     const alreadySelectedLabels = sizes
       .filter((size) => form.sizeIds.includes(size.id))
@@ -1413,7 +1397,7 @@ export default function ProductsClient() {
     setQuickSizeLabels(alreadySelectedLabels);
     setIsStandardSizePanelOpen(true);
 
-    if (globalSizeCatalog.length > 0 || isGlobalSizeLoading) return;
+    if (isGlobalSizeLoading) return;
 
     setIsGlobalSizeLoading(true);
     try {
@@ -3039,43 +3023,32 @@ export default function ProductsClient() {
                                 <div className="rounded-xl bg-white/70 px-4 py-6 text-center text-xs text-slate-400">
                                   กำลังโหลดไซส์มาตรฐาน...
                                 </div>
-                              ) : globalSizeSelectionGroups.length === 0 ? (
+                              ) : kidsSizes.length === 0 &&
+                                adultSizes.length === 0 &&
+                                serviceCustomSizes.length === 0 ? (
                                 <div className="rounded-xl bg-white/70 px-4 py-6 text-center text-xs text-slate-400">
                                   ไม่พบไซส์ในแคตตาล็อก Global Size
                                 </div>
                               ) : (
                                 <div className="space-y-4">
-                                  {globalSizeSelectionGroups.map((group) => (
-                                    <div key={group.title}>
-                                      <p
-                                        className={`mb-2 text-[11px] font-bold tracking-wide ${
-                                          group.title ===
-                                          SERVICE_CUSTOM_SIZE_GROUP_TITLE
-                                            ? "text-violet-700"
-                                            : "text-slate-500"
-                                        }`}
-                                      >
-                                        {group.title}
+                                  {kidsSizes.length > 0 ? (
+                                    <div>
+                                      <p className="mb-2 text-[11px] font-bold tracking-wide text-slate-500">
+                                        ไซส์เด็ก (K / J)
                                       </p>
                                       <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-                                        {group.sizes.map((size) => {
+                                        {kidsSizes.map((size) => {
                                           const checked =
                                             quickSizeLabels.includes(
                                               size.size_label,
                                             );
-                                          const isService =
-                                            isServiceCustomSize(size);
                                           return (
                                             <label
                                               key={size.id}
                                               className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-semibold transition ${
                                                 checked
-                                                  ? isService
-                                                    ? "border-violet-600 bg-violet-600 text-white shadow-sm"
-                                                    : "border-blue-600 bg-blue-600 text-white shadow-sm"
-                                                  : isService
-                                                    ? "border-violet-200 bg-white text-violet-700 hover:border-violet-400 hover:text-violet-800"
-                                                    : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                                                  ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                                                  : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
                                               }`}
                                             >
                                               <input
@@ -3094,7 +3067,89 @@ export default function ProductsClient() {
                                         })}
                                       </div>
                                     </div>
-                                  ))}
+                                  ) : null}
+
+                                  {adultSizes.length > 0 ? (
+                                    <div>
+                                      <p className="mb-2 text-[11px] font-bold tracking-wide text-slate-500">
+                                        ไซส์ผู้ใหญ่
+                                      </p>
+                                      <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+                                        {adultSizes.map((size) => {
+                                          const checked =
+                                            quickSizeLabels.includes(
+                                              size.size_label,
+                                            );
+                                          return (
+                                            <label
+                                              key={size.id}
+                                              className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-semibold transition ${
+                                                checked
+                                                  ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                                                  : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                                              }`}
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                checked={checked}
+                                                onChange={() =>
+                                                  toggleQuickSize(
+                                                    size.size_label,
+                                                  )
+                                                }
+                                                className="sr-only"
+                                              />
+                                              {size.size_label}
+                                            </label>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  ) : null}
+
+                                  {/* 3rd category — Service/Custom (sort_order >= 900) from DB only */}
+                                  <div>
+                                    <p className="mb-2 text-[11px] font-bold tracking-wide text-slate-500">
+                                      {SERVICE_CUSTOM_SIZE_GROUP_TITLE}
+                                    </p>
+                                    {serviceCustomSizes.length === 0 ? (
+                                      <div className="rounded-xl border border-dashed border-slate-200 bg-white/70 px-3 py-4 text-center text-[11px] text-slate-400">
+                                        ยังไม่มีไซส์งานบริการในระบบ (sort_order ≥
+                                        900)
+                                      </div>
+                                    ) : (
+                                      <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+                                        {serviceCustomSizes.map((size) => {
+                                          const checked =
+                                            quickSizeLabels.includes(
+                                              size.size_label,
+                                            );
+                                          return (
+                                            <label
+                                              key={size.id}
+                                              className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-semibold transition ${
+                                                checked
+                                                  ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                                                  : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                                              }`}
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                checked={checked}
+                                                onChange={() =>
+                                                  toggleQuickSize(
+                                                    size.size_label,
+                                                  )
+                                                }
+                                                className="sr-only"
+                                              />
+                                              {size.size_label}
+                                            </label>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
                               )}
 

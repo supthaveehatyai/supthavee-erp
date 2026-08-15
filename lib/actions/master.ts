@@ -12,6 +12,7 @@
  * bypass RLS entirely — no anon-key fallback, ever.
  */
 
+import { unstable_noStore as noStore } from "next/cache";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { findDuplicateContactError } from "@/lib/contacts/duplicate-check";
 
@@ -250,22 +251,40 @@ export async function getSizesByBrand(brandId: string): Promise<GetSizesResult> 
 }
 
 /**
- * Global Size catalog (`mst_sizes.brand_id IS NULL`) — active only, ordered
- * by `sort_order`. Used by Product Matrix Step 2 to SELECT existing sizes
- * into the matrix without INSERTing duplicates.
+ * Global Size catalog for Product Matrix Step 2.
+ * - Apparel: `brand_id IS NULL`
+ * - Service/Custom: `sort_order >= 900` (included even if brand-scoped)
+ * Uses `noStore()` so Turbopack / Next Data Cache never serves stale sizes.
  */
 export async function getGlobalSizes(): Promise<GetSizesResult> {
+  noStore();
   try {
     const supabaseAdmin = createSupabaseAdminClient();
     const { data, error } = await supabaseAdmin
       .from("mst_sizes")
       .select(SIZE_COLUMNS)
-      .is("brand_id", null)
       .eq("is_active", true)
+      .or("brand_id.is.null,sort_order.gte.900")
       .order("sort_order", { ascending: true });
 
     if (error) return { data: [], error: error.message };
-    return { data: (data ?? []) as MasterSize[], error: null };
+
+    const seen = new Set<string>();
+    const rows: MasterSize[] = [];
+    for (const row of data ?? []) {
+      const id = String((row as MasterSize).id ?? "").trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      rows.push({
+        id,
+        brand_id: (row as MasterSize).brand_id ?? null,
+        size_label: String((row as MasterSize).size_label ?? "").trim(),
+        size_code: String((row as MasterSize).size_code ?? "").trim(),
+        sort_order: Number((row as MasterSize).sort_order ?? 0),
+      });
+    }
+
+    return { data: rows, error: null };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "โหลดรายการไซส์มาตรฐาน (Global) ไม่สำเร็จ";
