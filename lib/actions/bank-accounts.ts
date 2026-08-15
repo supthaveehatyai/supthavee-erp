@@ -17,9 +17,10 @@ import type {
 } from "@/types/bank-account";
 
 const BANK_ACCOUNTS_PATH = "/finance/bank-accounts";
+/** Strict table target — never `bank_accounts` / never `account_number`. */
+const MST_BANK_ACCOUNTS_TABLE = "mst_bank_accounts" as const;
 const POSTGRES_UNIQUE_VIOLATION = "23505";
-const DUPLICATE_ACCOUNT_NO_ERROR =
-  "เลขที่บัญชีนี้มีอยู่ในระบบแล้ว กรุณาตรวจสอบอีกครั้ง";
+const DUPLICATE_ACCOUNT_NO_ERROR = "เลขที่บัญชีซ้ำ";
 
 const EMPTY_LIST: GetBankAccountsResult = { data: [], error: null };
 
@@ -67,7 +68,7 @@ export async function getBankAccounts(): Promise<GetBankAccountsResult> {
   try {
     const supabase = createSupabaseServerClient();
     const { data, error } = await supabase
-      .from("mst_bank_accounts")
+      .from(MST_BANK_ACCOUNTS_TABLE)
       .select(
         "id, bank_name, account_no, account_name, branch_name, is_active, created_at, updated_at",
       )
@@ -90,8 +91,10 @@ export async function getBankAccounts(): Promise<GetBankAccountsResult> {
 
 /**
  * Create a new bank account from FormData.
- * Fields: bank_name, account_no, account_name, branch_name (optional)
- * Unique Violation (23505) on account_no → soft error for Toast (never throw).
+ *
+ * Table: `mst_bank_accounts` only
+ * Column: `account_no` (never `account_number`)
+ * Unique Violation (23505) → soft `{ success: false, error }` for Toast — never throw.
  */
 export async function createBankAccount(
   formData: FormData,
@@ -112,19 +115,25 @@ export async function createBankAccount(
       return { success: false, error: "กรุณาระบุชื่อบัญชี" };
     }
 
+    const payload = {
+      bank_name,
+      account_no,
+      account_name,
+      branch_name,
+      is_active: true,
+    };
+
     try {
       const supabase = createSupabaseServerClient();
-      const { error } = await supabase.from("mst_bank_accounts").insert({
-        bank_name,
-        account_no,
-        account_name,
-        branch_name,
-        is_active: true,
-      });
+      const { error } = await supabase
+        .from(MST_BANK_ACCOUNTS_TABLE)
+        .insert(payload);
 
       if (error) {
-        // PostgreSQL Unique Violation on account_no — never throw to the UI
-        if (error.code === POSTGRES_UNIQUE_VIOLATION || isUniqueViolation(error)) {
+        if (error.code === POSTGRES_UNIQUE_VIOLATION) {
+          return { success: false, error: DUPLICATE_ACCOUNT_NO_ERROR };
+        }
+        if (isUniqueViolation(error)) {
           return { success: false, error: DUPLICATE_ACCOUNT_NO_ERROR };
         }
         console.error("[createBankAccount]", error.message, error);
@@ -190,7 +199,7 @@ export async function toggleBankAccountStatus(
 
     const supabase = createSupabaseServerClient();
     const { error } = await supabase
-      .from("mst_bank_accounts")
+      .from(MST_BANK_ACCOUNTS_TABLE)
       .update({ is_active: !currentStatus })
       .eq("id", trimmedId);
 
