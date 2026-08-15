@@ -314,20 +314,22 @@ export async function getAllSizesByBrand(brandId: string): Promise<GetSizesResul
 }
 
 /* -------------------------------------------------------------------------- */
-/* createSize / createSizesBulk                                             */
+/* createSize / updateSize / createSizesBulk                                  */
 /* -------------------------------------------------------------------------- */
 
-/** Same char set as `normalizeSkuPart` (app/products/product-sku.ts) — kept local so this file has zero `app/` deps. */
+const SIZE_CODE_LENGTH = 2;
+const SIZE_CODE_PATTERN = /^[A-Z0-9]{2}$/;
+const SIZE_CODE_ERROR_MESSAGE =
+  "รหัสไซส์ต้องมีความยาว 2 ตัวอักษรพอดี (เช่น XL, S1, 28)";
+
+/** UPPERCASE A–Z/0–9 only, capped to Fixed-2 Check Constraint. */
 function normalizeSizeCode(raw: string): string {
-  return raw
-    .trim()
-    .toUpperCase()
-    .replace(/\s+/g, "")
-    .replace(/[^A-Z0-9ก-๙-]/g, "");
+  return normalizeCode(raw, SIZE_CODE_LENGTH);
 }
 
 export type CreateSizeInput = {
-  brand_id: string;
+  /** `null` = Global Size catalog (`brand_id IS NULL`). */
+  brand_id?: string | null;
   size_label: string;
   size_code: string;
   sort_order: number;
@@ -338,16 +340,17 @@ export type CreateSizeResult = { data: MasterSize | null; error: string | null }
 export async function createSize(
   input: CreateSizeInput,
 ): Promise<CreateSizeResult> {
-  const brandId = input.brand_id?.trim() ?? "";
+  const brandIdRaw = input.brand_id?.trim() ?? "";
+  const brandId = brandIdRaw.length > 0 ? brandIdRaw : null;
   const sizeLabel = input.size_label?.trim() ?? "";
   const sizeCode = normalizeSizeCode(input.size_code ?? "");
   const sortOrder = Number(input.sort_order);
 
-  if (!brandId) {
-    return { data: null, error: "กรุณาเลือกแบรนด์ก่อนเพิ่มไซส์" };
-  }
-  if (!sizeLabel || !sizeCode) {
+  if (!sizeLabel || input.size_code == null || String(input.size_code).trim() === "") {
     return { data: null, error: "กรุณากรอกข้อมูลไซส์ให้ครบทั้ง 3 ช่อง" };
+  }
+  if (!SIZE_CODE_PATTERN.test(sizeCode)) {
+    return { data: null, error: SIZE_CODE_ERROR_MESSAGE };
   }
   if (!Number.isInteger(sortOrder) || sortOrder < 0) {
     return { data: null, error: "ลำดับต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป" };
@@ -371,7 +374,7 @@ export async function createSize(
     if (error || !data) {
       const message =
         error?.code === POSTGRES_UNIQUE_VIOLATION
-          ? `รหัสไซส์ "${sizeCode}" มีอยู่สำหรับแบรนด์นี้แล้ว`
+          ? `รหัสไซส์ "${sizeCode}" มีอยู่ในระบบแล้ว`
           : (error?.message ?? "ไม่สามารถบันทึกไซส์ใหม่ได้");
       return { data: null, error: message };
     }
@@ -379,6 +382,65 @@ export async function createSize(
     return { data: data as MasterSize, error: null };
   } catch (err) {
     const message = err instanceof Error ? err.message : "สร้างไซส์ใหม่ไม่สำเร็จ";
+    return { data: null, error: message };
+  }
+}
+
+export type UpdateSizeInput = {
+  id: string;
+  size_label: string;
+  size_code: string;
+  sort_order: number;
+};
+
+export type UpdateSizeResult = { data: MasterSize | null; error: string | null };
+
+export async function updateSize(
+  input: UpdateSizeInput,
+): Promise<UpdateSizeResult> {
+  const id = input.id?.trim() ?? "";
+  const sizeLabel = input.size_label?.trim() ?? "";
+  const sizeCode = normalizeSizeCode(input.size_code ?? "");
+  const sortOrder = Number(input.sort_order);
+
+  if (!id) {
+    return { data: null, error: "ไม่พบรหัสไซส์" };
+  }
+  if (!sizeLabel || String(input.size_code ?? "").trim() === "") {
+    return { data: null, error: "กรุณากรอกข้อมูลไซส์ให้ครบทั้ง 3 ช่อง" };
+  }
+  if (!SIZE_CODE_PATTERN.test(sizeCode)) {
+    return { data: null, error: SIZE_CODE_ERROR_MESSAGE };
+  }
+  if (!Number.isInteger(sortOrder) || sortOrder < 0) {
+    return { data: null, error: "ลำดับต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป" };
+  }
+
+  try {
+    const supabaseAdmin = createSupabaseAdminClient();
+
+    const { data, error } = await supabaseAdmin
+      .from("mst_sizes")
+      .update({
+        size_label: sizeLabel,
+        size_code: sizeCode,
+        sort_order: sortOrder,
+      })
+      .eq("id", id)
+      .select(SIZE_COLUMNS)
+      .single();
+
+    if (error || !data) {
+      const message =
+        error?.code === POSTGRES_UNIQUE_VIOLATION
+          ? `รหัสไซส์ "${sizeCode}" มีอยู่ในระบบแล้ว`
+          : (error?.message ?? "ไม่สามารถอัปเดตไซส์ได้");
+      return { data: null, error: message };
+    }
+
+    return { data: data as MasterSize, error: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "อัปเดตไซส์ไม่สำเร็จ";
     return { data: null, error: message };
   }
 }
@@ -407,6 +469,13 @@ export async function createSizesBulk(
   }
   if (!input.sizes || input.sizes.length === 0) {
     return { data: [], error: "กรุณาเลือกไซส์อย่างน้อย 1 รายการ" };
+  }
+
+  for (const size of input.sizes) {
+    const code = normalizeSizeCode(size.size_code);
+    if (!SIZE_CODE_PATTERN.test(code)) {
+      return { data: [], error: SIZE_CODE_ERROR_MESSAGE };
+    }
   }
 
   const payload = input.sizes.map((size) => ({

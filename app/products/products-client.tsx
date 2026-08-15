@@ -16,10 +16,12 @@ import {
   getSizesByBrand,
   getVendorMappingsByProductIds,
   getVendors,
+  type MasterSize,
 } from "@/lib/actions/master";
 import SmartColorCombobox, {
   type SmartColor,
 } from "@/components/shared/SmartColorCombobox";
+import SizeFormDialog from "@/components/master/SizeFormDialog";
 import BrandCombobox, { type Brand } from "./brand-combobox";
 import CategoryCombobox, { type Category } from "./category-combobox";
 import { type Vendor } from "./vendor-combobox";
@@ -832,6 +834,9 @@ export default function ProductsClient() {
   const [isStandardSizePanelOpen, setIsStandardSizePanelOpen] = useState(false);
   const [quickSizeLabels, setQuickSizeLabels] = useState<string[]>([]);
   const [isQuickSizeSaving, setIsQuickSizeSaving] = useState(false);
+  /** Master Data create/edit dialog for `mst_sizes` (Fixed-2 size_code). */
+  const [isSizeMasterDialogOpen, setIsSizeMasterDialogOpen] = useState(false);
+  const [editingMasterSize, setEditingMasterSize] = useState<Size | null>(null);
 
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
     () => new Set(),
@@ -1410,6 +1415,50 @@ export default function ProductsClient() {
       );
     } finally {
       setIsGlobalSizeLoading(false);
+    }
+  }
+
+  function openCreateMasterSizeDialog() {
+    setEditingMasterSize(null);
+    setIsSizeMasterDialogOpen(true);
+  }
+
+  function openEditMasterSizeDialog(size: Size) {
+    setEditingMasterSize(size);
+    setIsSizeMasterDialogOpen(true);
+  }
+
+  async function handleMasterSizeSaved(saved: MasterSize) {
+    const next: Size = {
+      id: saved.id,
+      brand_id: saved.brand_id,
+      size_label: saved.size_label,
+      size_code: saved.size_code,
+      sort_order: saved.sort_order,
+    };
+
+    setGlobalSizeCatalog((current) => {
+      const map = new Map(current.map((row) => [row.id, row]));
+      map.set(next.id, next);
+      return [...map.values()].sort(
+        (left, right) => left.sort_order - right.sort_order,
+      );
+    });
+
+    setSizes((current) => {
+      const map = new Map(current.map((row) => [row.id, row]));
+      if (map.has(next.id) || form.sizeIds.includes(next.id)) {
+        map.set(next.id, next);
+      }
+      return [...map.values()].sort(
+        (left, right) => left.sort_order - right.sort_order,
+      );
+    });
+
+    try {
+      setGlobalSizeCatalog(await fetchGlobalSizes());
+    } catch {
+      // Local catalog already patched above.
     }
   }
 
@@ -2926,20 +2975,30 @@ export default function ProductsClient() {
                           ไซส์ (Global Size){" "}
                           <span className="text-red-500">*</span>
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => void openStandardSizePanel()}
-                          disabled={
-                            !form.brandId ||
-                            isMasterLoading ||
-                            isSaving ||
-                            isSizeLoading ||
-                            isGlobalSizeLoading
-                          }
-                          className="inline-flex h-8 items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-[11px] font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          + เพิ่มไซส์
-                        </button>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={openCreateMasterSizeDialog}
+                            disabled={isMasterLoading || isSaving}
+                            className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-600 transition hover:border-blue-300 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            + Master Size
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void openStandardSizePanel()}
+                            disabled={
+                              !form.brandId ||
+                              isMasterLoading ||
+                              isSaving ||
+                              isSizeLoading ||
+                              isGlobalSizeLoading
+                            }
+                            className="inline-flex h-8 items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-[11px] font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            + เพิ่มไซส์
+                          </button>
+                        </div>
                       </div>
                       {!form.brandId ? (
                         <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center text-xs text-slate-400">
@@ -3002,7 +3061,8 @@ export default function ProductsClient() {
                                   </p>
                                   <p className="mt-0.5 text-[11px] text-slate-500">
                                     เลือกจากแคตตาล็อก Global Size
-                                    ที่มีในระบบแล้ว — ไม่สร้างไซส์ใหม่
+                                    ที่มีในระบบแล้ว — สร้าง/แก้ไขรหัสไซส์ใช้ปุ่ม
+                                    &quot;+ Master Size&quot;
                                   </p>
                                 </div>
                                 <button
@@ -3231,9 +3291,16 @@ export default function ProductsClient() {
                                     <span className="font-semibold text-slate-800">
                                       {size.size_label}
                                     </span>
-                                    <span className="ml-2 font-mono text-[10px] text-slate-400">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        openEditMasterSizeDialog(size)
+                                      }
+                                      title="แก้ไขไซส์ใน Master Data"
+                                      className="ml-2 font-mono text-[10px] text-blue-600 underline-offset-2 hover:underline"
+                                    >
                                       {size.size_code}
-                                    </span>
+                                    </button>
                                   </td>
                                   <td className="px-4 py-3">
                                     <PriceInput
@@ -3945,6 +4012,29 @@ export default function ProductsClient() {
           )}
         </div>
       )}
+
+      <SizeFormDialog
+        open={isSizeMasterDialogOpen}
+        onOpenChange={(open) => {
+          setIsSizeMasterDialogOpen(open);
+          if (!open) setEditingMasterSize(null);
+        }}
+        initialSize={
+          editingMasterSize
+            ? {
+                id: editingMasterSize.id,
+                brand_id: editingMasterSize.brand_id,
+                size_label: editingMasterSize.size_label,
+                size_code: editingMasterSize.size_code,
+                sort_order: editingMasterSize.sort_order,
+              }
+            : null
+        }
+        brandId={null}
+        onSuccess={(saved) => {
+          void handleMasterSizeSaved(saved);
+        }}
+      />
 
       {isOverwriteModalOpen && existingDraftModel && pendingDraftPayload && (
         <div

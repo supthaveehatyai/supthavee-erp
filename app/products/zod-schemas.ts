@@ -8,6 +8,13 @@ export const COLOR_CODE_REGEX = /^[A-Z]{3}$/;
 export const COLOR_CODE_ERROR_MESSAGE =
   "รหัสสีต้องเป็นตัวอักษรภาษาอังกฤษ 3 ตัวเท่านั้น (เช่น BLK, RED)";
 
+/** Fixed-2 Character Size Code — matches DB Check Constraint on `mst_sizes.size_code`. */
+export const SIZE_CODE_LENGTH = 2;
+export const SIZE_CODE_REGEX = /^[A-Z0-9]{2}$/;
+
+export const SIZE_CODE_ERROR_MESSAGE =
+  "รหัสไซส์ต้องมีความยาว 2 ตัวอักษรพอดี (เช่น XL, S1, 28)";
+
 export const VENDOR_ID_REQUIRED_MESSAGE =
   "ต้องระบุผู้จำหน่าย (vendor_id) เป็น UUID ที่ถูกต้อง — ห้ามเว้นว่าง";
 
@@ -31,6 +38,26 @@ export const colorSchema = z.object({
 
 export type ColorSchemaInput = z.input<typeof colorSchema>;
 export type ColorSchemaOutput = z.output<typeof colorSchema>;
+
+/**
+ * Master size row — `size_code` locked to exactly 2 uppercase A–Z / 0–9 chars.
+ */
+export const sizeSchema = z.object({
+  id: z.uuid().optional(),
+  brand_id: z.uuid().nullable().optional(),
+  size_label: z.string().trim().min(1, "กรุณาระบุชื่อป้ายไซส์"),
+  size_code: z
+    .string()
+    .regex(SIZE_CODE_REGEX, SIZE_CODE_ERROR_MESSAGE),
+  sort_order: z
+    .number({ error: "ลำดับต้องเป็นตัวเลข" })
+    .int("ลำดับต้องเป็นจำนวนเต็ม")
+    .nonnegative("ลำดับต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป"),
+  is_active: z.boolean().optional().default(true),
+});
+
+export type SizeSchemaInput = z.input<typeof sizeSchema>;
+export type SizeSchemaOutput = z.output<typeof sizeSchema>;
 
 const taxTypeSchema = z.enum(["INC_VAT", "EXC_VAT", "NON_VAT"]);
 
@@ -149,4 +176,39 @@ export function parseColorCode(
     return { ok: false, error: zodFirstError(result.error, COLOR_CODE_ERROR_MESSAGE) };
   }
   return { ok: true, color_code: result.data };
+}
+
+/**
+ * Validate a new / edited size_code against Fixed-2 Check Constraint.
+ */
+export function parseSizeCode(
+  sizeCode: string,
+): { ok: true; size_code: string } | { ok: false; error: string } {
+  const result = sizeSchema.shape.size_code.safeParse(sizeCode);
+  if (!result.success) {
+    return {
+      ok: false,
+      error: zodFirstError(result.error, SIZE_CODE_ERROR_MESSAGE),
+    };
+  }
+  return { ok: true, size_code: result.data };
+}
+
+/**
+ * Validate create/edit size form payload before calling Server Action.
+ */
+export function parseSizeForm(input: {
+  size_label: string;
+  size_code: string;
+  sort_order: number;
+  brand_id?: string | null;
+  id?: string;
+}):
+  | { ok: true; data: SizeSchemaOutput }
+  | { ok: false; error: string } {
+  const result = sizeSchema.safeParse(input);
+  if (!result.success) {
+    return { ok: false, error: zodFirstError(result.error) };
+  }
+  return { ok: true, data: result.data };
 }
