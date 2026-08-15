@@ -203,6 +203,46 @@ export async function createContact(
   }
 }
 
+/**
+ * Soft Toggle: สลับสถานะ `is_active` (Active ↔ Inactive)
+ * ห้าม Hard Delete — ใช้ปิด/เปิดใช้งานเพื่อรักษา Audit Trail
+ */
+export async function toggleContactStatus(
+  id: string,
+  currentStatus: boolean,
+): Promise<CreateContactResult> {
+  try {
+    const contactId = id?.trim() ?? "";
+    if (!contactId) {
+      return { data: null, error: "ไม่พบรหัสคู่ค้า" };
+    }
+
+    const supabaseAdmin = createSupabaseServerClient();
+    const nextStatus = !currentStatus;
+
+    const { data, error } = await supabaseAdmin
+      .from("contacts")
+      .update({ is_active: nextStatus })
+      .eq("id", contactId)
+      .select(contactSelect)
+      .single();
+
+    if (error || !data) {
+      return {
+        data: null,
+        error: error?.message ?? "อัปเดตสถานะคู่ค้าไม่สำเร็จ",
+      };
+    }
+
+    revalidatePath(CONTACTS_PATH);
+    return { data: normalizeContactRow(data), error: null };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "อัปเดตสถานะคู่ค้าไม่สำเร็จ";
+    return { data: null, error: message };
+  }
+}
+
 /** Bulk CSV import into `contacts`. */
 export async function importContacts(
   rows: ImportContactRow[],

@@ -10,6 +10,7 @@ import {
   updateContact,
   type ContactPersonRow,
 } from "@/app/actions/contacts";
+import { SkillRateCard } from "@/components/contacts/skill-rate-card";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -140,6 +141,9 @@ export default function ManageContactDialog({
       cancelled = true;
     };
   }, [open, contact]);
+
+  const canEditRates =
+    contact?.contact_type === "Vendor" || contact?.contact_type === "Technician";
 
   function closeMainDialog() {
     if (isSaving) return;
@@ -301,9 +305,17 @@ export default function ManageContactDialog({
           </DialogHeader>
 
           <Tabs value={tab} onValueChange={setTab} className="mt-2">
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList
+              className={cn(
+                "grid w-full",
+                canEditRates ? "grid-cols-3" : "grid-cols-2",
+              )}
+            >
               <TabsTrigger value="details">ข้อมูลคู่ค้า</TabsTrigger>
               <TabsTrigger value="person">ผู้ประสานงาน</TabsTrigger>
+              {canEditRates ? (
+                <TabsTrigger value="rates">ทักษะและค่าแรง</TabsTrigger>
+              ) : null}
             </TabsList>
 
             <TabsContent value="details" className="mt-4 space-y-4">
@@ -496,6 +508,15 @@ export default function ManageContactDialog({
                 </div>
               </div>
             </TabsContent>
+
+            {canEditRates && contact ? (
+              <TabsContent value="rates" className="mt-4">
+                <SkillRateCard
+                  technicianId={contact.id}
+                  technicianName={contact.company_name}
+                />
+              </TabsContent>
+            ) : null}
           </Tabs>
 
           {formError ? (
@@ -516,15 +537,17 @@ export default function ManageContactDialog({
                 closeMainDialog();
               }}
             >
-              ยกเลิก
+              {tab === "rates" ? "ปิด" : "ยกเลิก"}
             </Button>
-            <Button
-              type="button"
-              disabled={isSaving || !contact}
-              onClick={handleSaveClick}
-            >
-              บันทึก
-            </Button>
+            {tab !== "rates" ? (
+              <Button
+                type="button"
+                disabled={isSaving || !contact}
+                onClick={handleSaveClick}
+              >
+                บันทึก
+              </Button>
+            ) : null}
           </DialogFooter>
         </DialogContent>
       </Dialog>

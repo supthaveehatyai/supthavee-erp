@@ -380,35 +380,6 @@ function hydrateSizePricingFromConfig(
   return { sizeIds, sizePricing };
 }
 
-const STANDARD_SIZES = [
-  { label: "KS", code: "B", sort_order: 20 },
-  { label: "JS", code: "B", sort_order: 20 },
-  { label: "KM", code: "C", sort_order: 30 },
-  { label: "JM", code: "C", sort_order: 30 },
-  { label: "KL", code: "D", sort_order: 40 },
-  { label: "JL", code: "D", sort_order: 40 },
-  { label: "KXL", code: "E", sort_order: 50 },
-  { label: "JXL", code: "E", sort_order: 50 },
-  { label: "3S", code: "G", sort_order: 70 },
-  { label: "2S", code: "H", sort_order: 80 },
-  { label: "XS", code: "H", sort_order: 80 },
-  { label: "S", code: "I", sort_order: 90 },
-  { label: "M", code: "J", sort_order: 100 },
-  { label: "L", code: "K", sort_order: 110 },
-  { label: "XL", code: "L", sort_order: 120 },
-  { label: "2XL", code: "M", sort_order: 130 },
-  { label: "2L", code: "M", sort_order: 130 },
-  { label: "3XL", code: "N", sort_order: 140 },
-  { label: "3L", code: "N", sort_order: 140 },
-  { label: "4XL", code: "O", sort_order: 150 },
-  { label: "4L", code: "O", sort_order: 150 },
-  { label: "5XL", code: "P", sort_order: 160 },
-  { label: "5L", code: "P", sort_order: 160 },
-  { label: "6XL", code: "Q", sort_order: 170 },
-  { label: "6L", code: "Q", sort_order: 170 },
-  { label: "F", code: "V", sort_order: 220 },
-] as const;
-
 const SIZE_SORT_ORDER: Record<string, number> = {
   KS: 2,
   JS: 2,
@@ -438,6 +409,12 @@ const SIZE_SORT_ORDER: Record<string, number> = {
   F: 22,
 };
 
+/** Service / Custom sizes in `mst_sizes` (A3, A4, A5, LOGO, …) */
+const SERVICE_CUSTOM_SIZE_SORT_MIN = 900;
+
+const SERVICE_CUSTOM_SIZE_GROUP_TITLE =
+  "ขนาดงานบริการและงานสั่งทำ (Service/Custom Sizes)";
+
 function getSizeSortWeight(sizeLabel: string | null | undefined): number {
   const key = (sizeLabel ?? "").trim().toUpperCase();
   return SIZE_SORT_ORDER[key] ?? 99;
@@ -449,20 +426,62 @@ function compareSizeLabels(left: string, right: string): number {
   return left.localeCompare(right, "th", { numeric: true, sensitivity: "base" });
 }
 
-type StandardSize = (typeof STANDARD_SIZES)[number];
+function isKidsApparelSizeLabel(label: string): boolean {
+  return /^[KJ]/i.test(label.trim());
+}
 
-const STANDARD_SIZE_GROUPS: { title: string; sizes: StandardSize[] }[] = [
-  {
-    title: "ไซส์เด็ก (K / J)",
-    sizes: STANDARD_SIZES.filter((size) =>
-      /^[KJ]/.test(size.label),
-    ),
-  },
-  {
-    title: "ไซส์ผู้ใหญ่",
-    sizes: STANDARD_SIZES.filter((size) => !/^[KJ]/.test(size.label)),
-  },
-];
+function isServiceCustomSize(size: { sort_order: number }): boolean {
+  return Number(size.sort_order) >= SERVICE_CUSTOM_SIZE_SORT_MIN;
+}
+
+type SizeSelectionGroup = {
+  title: string;
+  sizes: Size[];
+};
+
+/**
+ * Group Global Size catalog for Product Matrix Step 2.
+ * Apparel sizes stay in Kids / Adult buckets; service sizes (sort_order ≥ 900)
+ * get a distinct Service/Custom category and remain fully selectable.
+ */
+function buildGlobalSizeSelectionGroups(
+  catalog: Size[],
+): SizeSelectionGroup[] {
+  const sorted = [...catalog].sort(
+    (left, right) => left.sort_order - right.sort_order,
+  );
+
+  const kids: Size[] = [];
+  const adults: Size[] = [];
+  const serviceCustom: Size[] = [];
+
+  for (const size of sorted) {
+    if (isServiceCustomSize(size)) {
+      serviceCustom.push(size);
+      continue;
+    }
+    if (isKidsApparelSizeLabel(size.size_label)) {
+      kids.push(size);
+      continue;
+    }
+    adults.push(size);
+  }
+
+  const groups: SizeSelectionGroup[] = [];
+  if (kids.length > 0) {
+    groups.push({ title: "ไซส์เด็ก (K / J)", sizes: kids });
+  }
+  if (adults.length > 0) {
+    groups.push({ title: "ไซส์ผู้ใหญ่", sizes: adults });
+  }
+  if (serviceCustom.length > 0) {
+    groups.push({
+      title: SERVICE_CUSTOM_SIZE_GROUP_TITLE,
+      sizes: serviceCustom,
+    });
+  }
+  return groups;
+}
 
 function createEmptyForm(vendorId = ""): MatrixForm {
   return {
@@ -1245,6 +1264,11 @@ export default function ProductsClient() {
       ),
     ];
   }, [editTarget]);
+
+  const globalSizeSelectionGroups = useMemo(
+    () => buildGlobalSizeSelectionGroups(globalSizeCatalog),
+    [globalSizeCatalog],
+  );
 
   async function openDialog(presetVendorId?: string) {
     setForm(createEmptyForm(presetVendorId ?? ""));
@@ -3015,37 +3039,56 @@ export default function ProductsClient() {
                                 <div className="rounded-xl bg-white/70 px-4 py-6 text-center text-xs text-slate-400">
                                   กำลังโหลดไซส์มาตรฐาน...
                                 </div>
+                              ) : globalSizeSelectionGroups.length === 0 ? (
+                                <div className="rounded-xl bg-white/70 px-4 py-6 text-center text-xs text-slate-400">
+                                  ไม่พบไซส์ในแคตตาล็อก Global Size
+                                </div>
                               ) : (
                                 <div className="space-y-4">
-                                  {STANDARD_SIZE_GROUPS.map((group) => (
+                                  {globalSizeSelectionGroups.map((group) => (
                                     <div key={group.title}>
-                                      <p className="mb-2 text-[11px] font-bold tracking-wide text-slate-500">
+                                      <p
+                                        className={`mb-2 text-[11px] font-bold tracking-wide ${
+                                          group.title ===
+                                          SERVICE_CUSTOM_SIZE_GROUP_TITLE
+                                            ? "text-violet-700"
+                                            : "text-slate-500"
+                                        }`}
+                                      >
                                         {group.title}
                                       </p>
                                       <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
                                         {group.sizes.map((size) => {
                                           const checked =
                                             quickSizeLabels.includes(
-                                              size.label,
+                                              size.size_label,
                                             );
+                                          const isService =
+                                            isServiceCustomSize(size);
                                           return (
                                             <label
-                                              key={size.label}
+                                              key={size.id}
                                               className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-semibold transition ${
                                                 checked
-                                                  ? "border-blue-600 bg-blue-600 text-white shadow-sm"
-                                                  : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                                                  ? isService
+                                                    ? "border-violet-600 bg-violet-600 text-white shadow-sm"
+                                                    : "border-blue-600 bg-blue-600 text-white shadow-sm"
+                                                  : isService
+                                                    ? "border-violet-200 bg-white text-violet-700 hover:border-violet-400 hover:text-violet-800"
+                                                    : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
                                               }`}
                                             >
                                               <input
                                                 type="checkbox"
                                                 checked={checked}
                                                 onChange={() =>
-                                                  toggleQuickSize(size.label)
+                                                  toggleQuickSize(
+                                                    size.size_label,
+                                                  )
                                                 }
                                                 className="sr-only"
                                               />
-                                              {size.label}
+                                              {size.size_label}
                                             </label>
                                           );
                                         })}

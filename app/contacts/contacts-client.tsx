@@ -1,6 +1,15 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from "react";
+import { useRouter } from "next/navigation";
 import VendorForm, { validateVendorOcrConfig } from "@/app/contacts/VendorForm";
 import {
   DEFAULT_OCR_PATTERN_JSON,
@@ -15,9 +24,20 @@ import {
   createContact,
   getContacts,
   importContacts,
+  toggleContactStatus,
 } from "@/lib/actions/contacts";
 import ManageContactDialog from "@/components/contacts/ManageContactDialog";
 import ViewContactDialog from "@/components/contacts/ViewContactDialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type TypeFilter = "All" | ContactType;
 type SortDirection = "asc" | "desc";
@@ -361,6 +381,12 @@ export default function ContactsClient({
   const [isManageOpen, setIsManageOpen] = useState(false);
   const [viewContactId, setViewContactId] = useState<string | null>(null);
   const [isViewOpen, setIsViewOpen] = useState(false);
+  const [statusToggleTarget, setStatusToggleTarget] = useState<Contact | null>(
+    null,
+  );
+  const [statusToggleError, setStatusToggleError] = useState("");
+  const [isTogglingStatus, startToggleTransition] = useTransition();
+  const router = useRouter();
 
   useEffect(() => {
     setContacts(initialContacts);
@@ -369,6 +395,29 @@ export default function ContactsClient({
       setIsLoading(false);
     }
   }, [initialContacts, initialError]);
+
+  const handleConfirmToggleStatus = () => {
+    if (!statusToggleTarget || isTogglingStatus) return;
+
+    const target = statusToggleTarget;
+    setStatusToggleError("");
+
+    startToggleTransition(async () => {
+      const result = await toggleContactStatus(target.id, target.is_active);
+      if (result.error || !result.data) {
+        setStatusToggleError(
+          result.error ?? "อัปเดตสถานะคู่ค้าไม่สำเร็จ",
+        );
+        return;
+      }
+
+      setContacts((current) =>
+        current.map((row) => (row.id === result.data!.id ? result.data! : row)),
+      );
+      setStatusToggleTarget(null);
+      router.refresh();
+    });
+  };
 
   const loadContacts = useCallback(async () => {
     setIsLoading(true);
@@ -919,6 +968,24 @@ export default function ContactsClient({
                         >
                           จัดการ
                         </button>
+                        <button
+                          type="button"
+                          disabled={
+                            isTogglingStatus &&
+                            statusToggleTarget?.id === contact.id
+                          }
+                          onClick={() => {
+                            setStatusToggleError("");
+                            setStatusToggleTarget(contact);
+                          }}
+                          className={`inline-flex h-8 items-center rounded-lg border px-3 text-xs font-semibold transition disabled:opacity-60 ${
+                            contact.is_active
+                              ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                              : "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                          }`}
+                        >
+                          {contact.is_active ? "ปิดใช้งาน" : "เปิดใช้งาน"}
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -946,6 +1013,70 @@ export default function ContactsClient({
           if (!next) setManageContact(null);
         }}
       />
+
+      <AlertDialog
+        open={statusToggleTarget !== null}
+        onOpenChange={(next) => {
+          if (isTogglingStatus) return;
+          if (!next) {
+            setStatusToggleTarget(null);
+            setStatusToggleError("");
+          }
+        }}
+        dismissible={!isTogglingStatus}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {statusToggleTarget?.is_active
+                ? "ยืนยันการปิดใช้งานคู่ค้า?"
+                : "ยืนยันการเปิดใช้งานคู่ค้า?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {statusToggleTarget?.is_active ? (
+                <>
+                  จะปิดใช้งาน{" "}
+                  <span className="font-semibold text-slate-800">
+                    {statusToggleTarget.company_name}
+                  </span>{" "}
+                  — ข้อมูลยังอยู่ในระบบ (Soft Delete) แต่จะไม่ถูกเลือกใช้ในฟอร์มเอกสารปกติ
+                </>
+              ) : (
+                <>
+                  จะเปิดใช้งาน{" "}
+                  <span className="font-semibold text-slate-800">
+                    {statusToggleTarget?.company_name}
+                  </span>{" "}
+                  อีกครั้ง — สามารถเลือกใช้ในเอกสารได้ทันที
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {statusToggleError ? (
+            <p className="text-sm font-medium text-red-600">{statusToggleError}</p>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isTogglingStatus}>
+              ยกเลิก
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={
+                statusToggleTarget?.is_active
+                  ? "bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400"
+                  : "bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400"
+              }
+              disabled={isTogglingStatus}
+              onClick={handleConfirmToggleStatus}
+            >
+              {isTogglingStatus
+                ? "กำลังอัปเดต..."
+                : statusToggleTarget?.is_active
+                  ? "ยืนยันปิดใช้งาน"
+                  : "ยืนยันเปิดใช้งาน"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {isDialogOpen && (
         <div

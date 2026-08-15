@@ -17,8 +17,23 @@ import type {
 } from "@/types/bank-account";
 
 const BANK_ACCOUNTS_PATH = "/finance/bank-accounts";
+const POSTGRES_UNIQUE_VIOLATION = "23505";
+const DUPLICATE_ACCOUNT_NO_ERROR =
+  "เลขที่บัญชีนี้มีอยู่ในระบบแล้ว กรุณาตรวจสอบอีกครั้ง";
 
 const EMPTY_LIST: GetBankAccountsResult = { data: [], error: null };
+
+function isUniqueViolation(error: {
+  code?: string;
+  message?: string;
+}): boolean {
+  const code = String(error.code ?? "").trim();
+  const message = String(error.message ?? "");
+  return (
+    code === POSTGRES_UNIQUE_VIOLATION ||
+    /duplicate key|unique constraint/i.test(message)
+  );
+}
 
 function toBankAccountList(data: unknown): BankAccount[] {
   if (!Array.isArray(data) || data.length === 0) return [];
@@ -76,6 +91,7 @@ export async function getBankAccounts(): Promise<GetBankAccountsResult> {
 /**
  * Create a new bank account from FormData.
  * Fields: bank_name, account_no, account_name, branch_name (optional)
+ * Unique Violation (23505) on account_no → soft error for Toast (never throw).
  */
 export async function createBankAccount(
   formData: FormData,
@@ -96,21 +112,46 @@ export async function createBankAccount(
       return { success: false, error: "กรุณาระบุชื่อบัญชี" };
     }
 
-    const supabase = createSupabaseServerClient();
-    const { error } = await supabase.from("mst_bank_accounts").insert({
-      bank_name,
-      account_no,
-      account_name,
-      branch_name,
-      is_active: true,
-    });
+    try {
+      const supabase = createSupabaseServerClient();
+      const { error } = await supabase.from("mst_bank_accounts").insert({
+        bank_name,
+        account_no,
+        account_name,
+        branch_name,
+        is_active: true,
+      });
 
-    if (error) {
-      console.error("[createBankAccount]", error.message, error);
-      return {
-        success: false,
-        error: error.message ?? "ไม่สามารถสร้างบัญชีได้",
-      };
+      if (error) {
+        // PostgreSQL Unique Violation on account_no — never throw to the UI
+        if (error.code === POSTGRES_UNIQUE_VIOLATION || isUniqueViolation(error)) {
+          return { success: false, error: DUPLICATE_ACCOUNT_NO_ERROR };
+        }
+        console.error("[createBankAccount]", error.message, error);
+        return {
+          success: false,
+          error: error.message ?? "ไม่สามารถสร้างบัญชีได้",
+        };
+      }
+    } catch (insertErr) {
+      const maybeCode =
+        insertErr && typeof insertErr === "object" && "code" in insertErr
+          ? String((insertErr as { code?: unknown }).code ?? "")
+          : "";
+      const maybeMessage =
+        insertErr instanceof Error
+          ? insertErr.message
+          : String(insertErr ?? "");
+
+      if (
+        maybeCode === POSTGRES_UNIQUE_VIOLATION ||
+        isUniqueViolation({ code: maybeCode, message: maybeMessage })
+      ) {
+        return { success: false, error: DUPLICATE_ACCOUNT_NO_ERROR };
+      }
+
+      console.error("[createBankAccount] insert", insertErr);
+      return { success: false, error: "ไม่สามารถสร้างบัญชีได้" };
     }
 
     revalidatePath(BANK_ACCOUNTS_PATH);

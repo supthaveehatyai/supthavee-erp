@@ -1,7 +1,7 @@
 "use server";
 
 /**
- * Contact edit / coordinator Server Actions.
+ * Contact edit / coordinator / Technician Rate Card Server Actions.
  * Zero Client-Side Fetching: Service Role via `createSupabaseServerClient`.
  */
 
@@ -13,6 +13,49 @@ import {
 } from "@/app/contacts/contacts";
 import { findDuplicateContactError } from "@/lib/contacts/duplicate-check";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
+import {
+  deleteTechnicianRate as deleteTechnicianRateImpl,
+  getServiceModels as getServiceModelsImpl,
+  getTechnicianRates as getTechnicianRatesImpl,
+  updateTechnicianRate as updateTechnicianRateImpl,
+  upsertTechnicianRate as upsertTechnicianRateImpl,
+} from "@/lib/actions/technician-rates";
+import type {
+  GetServiceModelsResult,
+  GetTechnicianRatesResult,
+  MutateTechnicianRateResult,
+  UpsertTechnicianRateInput,
+} from "@/types/technician-rate";
+
+/** Skill & Rate Card — contact_id scoped CRUD (Zero Client-Side Fetching) */
+export async function getServiceModels(): Promise<GetServiceModelsResult> {
+  return getServiceModelsImpl();
+}
+
+export async function getTechnicianRates(
+  technicianId: string,
+): Promise<GetTechnicianRatesResult> {
+  return getTechnicianRatesImpl(technicianId);
+}
+
+export async function upsertTechnicianRate(
+  input: UpsertTechnicianRateInput,
+): Promise<MutateTechnicianRateResult> {
+  return upsertTechnicianRateImpl(input);
+}
+
+export async function updateTechnicianRate(
+  rateId: string,
+  defaultWage: number,
+): Promise<MutateTechnicianRateResult> {
+  return updateTechnicianRateImpl(rateId, defaultWage);
+}
+
+export async function deleteTechnicianRate(
+  rateId: string,
+): Promise<MutateTechnicianRateResult> {
+  return deleteTechnicianRateImpl(rateId);
+}
 
 const CONTACTS_PATH = "/contacts";
 

@@ -249,6 +249,56 @@ export async function upsertTechnicianRate(
   }
 }
 
+/**
+ * อัปเดตค่าแรงของ Rate Card ตาม id (Update)
+ */
+export async function updateTechnicianRate(
+  rateId: string,
+  defaultWage: number,
+): Promise<MutateTechnicianRateResult> {
+  try {
+    const id = rateId?.trim() ?? "";
+    if (!id) {
+      return { success: false, error: "ไม่พบรหัส Rate Card" };
+    }
+    if (!Number.isFinite(Number(defaultWage)) || Number(defaultWage) < 0) {
+      return { success: false, error: "ค่าแรงต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0" };
+    }
+
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("technician_rates")
+      .update({
+        default_wage: toWage(defaultWage),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+
+    if (error) {
+      console.error("[updateTechnicianRate]", error.message);
+      return {
+        success: false,
+        error: error.message ?? "อัปเดต Rate Card ไม่สำเร็จ",
+      };
+    }
+    if (!data) {
+      return { success: false, error: "ไม่พบ Rate Card ที่ต้องการแก้ไข" };
+    }
+
+    revalidatePath(CONTACTS_PATH);
+    revalidatePath(KANBAN_PATH);
+    return { success: true, error: null };
+  } catch (err) {
+    console.error("[updateTechnicianRate]", err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "อัปเดต Rate Card ไม่สำเร็จ",
+    };
+  }
+}
+
 export async function deleteTechnicianRate(
   rateId: string,
 ): Promise<MutateTechnicianRateResult> {

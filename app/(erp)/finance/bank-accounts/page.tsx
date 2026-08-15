@@ -3,13 +3,11 @@ export const revalidate = 0;
 
 import {
   getBankAccounts,
-  createBankAccountFormAction,
   toggleBankAccountStatusFormAction,
 } from "@/lib/actions/bank-accounts";
 import type { BankAccount } from "@/types/bank-account";
+import { CreateBankAccountForm } from "@/app/(erp)/finance/bank-accounts/create-bank-account-form";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -84,53 +82,7 @@ export default async function BankAccountsPage() {
             <CardDescription>ระบุข้อมูลบัญชีให้ครบถ้วน</CardDescription>
           </CardHeader>
           <CardContent>
-            <form action={createBankAccountFormAction} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="bank_name">
-                  ธนาคาร (เช่น KBANK){" "}
-                  <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="bank_name"
-                  name="bank_name"
-                  placeholder="เช่น กสิกรไทย"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="account_no">
-                  เลขที่บัญชี <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="account_no"
-                  name="account_no"
-                  placeholder="xxx-x-xxxxx-x"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="account_name">
-                  ชื่อบัญชี <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="account_name"
-                  name="account_name"
-                  placeholder="บจก. ทรัพย์ทวี หาดใหญ่"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="branch_name">สาขา (ถ้ามี)</Label>
-                <Input
-                  id="branch_name"
-                  name="branch_name"
-                  placeholder="เช่น สาขาหาดใหญ่"
-                />
-              </div>
-              <Button type="submit" className="mt-4 w-full">
-                บันทึกบัญชี
-              </Button>
-            </form>
+            <CreateBankAccountForm />
           </CardContent>
         </Card>
 
