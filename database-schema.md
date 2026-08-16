@@ -46,7 +46,7 @@
 
 - `service_tracking` (ติดตามสถานะงานบริการ)
 
-- `technician_rates` (เรตค่าแรงช่างรับเหมา)
+- `technician_rates` (เรตค่าแรงช่าง — FK `service_model_id` → `product_models.id`, `technician_id` → `contacts.id`)
 
 ## 4. Documents & Financials (เอกสารและการเงิน)
 
