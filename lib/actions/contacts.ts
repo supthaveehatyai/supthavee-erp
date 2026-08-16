@@ -10,7 +10,9 @@
 import { revalidatePath } from "next/cache";
 import {
   contactSelect,
+  normalizeContactRoles,
   normalizeContactRow,
+  primaryContactType,
   type Contact,
   type ContactType,
   type CustomerType,
@@ -29,7 +31,10 @@ export type ContactPersonPayload = {
 };
 
 export type CreateContactInput = {
-  contactType: ContactType;
+  /** Multi-role selection — at least one of Customer / Vendor / Technician. */
+  contactRoles: ContactType[];
+  /** @deprecated Prefer contactRoles — still accepted for one-role callers. */
+  contactType?: ContactType;
   customerType: CustomerType | string;
   companyName: string;
   taxId?: string | null;
@@ -51,7 +56,10 @@ export type GetContactsResult = {
 };
 
 export type ImportContactRow = {
-  contact_type: ContactType;
+  /** Preferred multi-role field. */
+  contact_roles?: ContactType[];
+  /** Legacy single-role CSV column — used when contact_roles absent. */
+  contact_type?: ContactType;
   customer_type: string;
   company_name: string;
   tax_id?: string | null;
@@ -105,12 +113,14 @@ export async function createContact(
       return { data: null, error: "กรุณากรอกชื่อบริษัทหรือชื่อคู่ค้า" };
     }
 
-    const contactType: ContactType =
-      input.contactType === "Vendor"
-        ? "Vendor"
-        : input.contactType === "Technician"
-          ? "Technician"
-          : "Customer";
+    const contactRoles = normalizeContactRoles(
+      input.contactRoles?.length ? input.contactRoles : undefined,
+      input.contactType,
+    );
+    if (contactRoles.length === 0) {
+      return { data: null, error: "กรุณาเลือกประเภทคู่ค้าอย่างน้อย 1 สถานะ" };
+    }
+    const contactType = primaryContactType(contactRoles);
     const persons = (input.persons ?? [])
       .map((person) => ({
         name: person.name?.trim() ?? "",
@@ -144,6 +154,7 @@ export async function createContact(
       .from("contacts")
       .insert({
         contact_type: contactType,
+        contact_roles: contactRoles,
         customer_type: input.customerType || "นิติบุคคล",
         company_name: companyName,
         tax_id: taxId,
@@ -151,7 +162,7 @@ export async function createContact(
         address: input.address?.trim() || null,
         phone: input.phone?.trim() || null,
         ocr_pattern_config:
-          contactType === "Vendor" ? (input.ocrPatternConfig ?? {}) : {},
+          contactRoles.includes("Vendor") ? (input.ocrPatternConfig ?? {}) : {},
         is_active: true,
       })
       .select(contactSelect)
@@ -253,30 +264,32 @@ export async function importContacts(
       return { success: false, error: "ไม่มีแถวข้อมูลสำหรับนำเข้า" };
     }
 
-    const payload = rows.map((row) => ({
-      contact_type:
-        row.contact_type === "Vendor"
-          ? ("Vendor" as const)
-          : row.contact_type === "Technician"
-            ? ("Technician" as const)
-            : ("Customer" as const),
-      customer_type: row.customer_type || "บุคคลธรรมดา",
-      company_name: row.company_name.trim(),
-      tax_id: row.tax_id?.trim() || null,
-      branch_code: row.branch_code?.trim() || "สำนักงานใหญ่",
-      phone: row.phone?.trim() || null,
-      address: row.address?.trim() || null,
-      default_price_tier:
-        row.default_price_tier === "Wholesale" ||
-        row.default_price_tier === "Retail"
-          ? row.default_price_tier
-          : "Retail",
-      credit_days:
-        typeof row.credit_days === "number" && Number.isFinite(row.credit_days)
-          ? row.credit_days
-          : 0,
-      is_active: true,
-    }));
+    const payload = rows.map((row) => {
+      const contactRoles = normalizeContactRoles(
+        row.contact_roles,
+        row.contact_type,
+      );
+      return {
+        contact_type: primaryContactType(contactRoles),
+        contact_roles: contactRoles,
+        customer_type: row.customer_type || "บุคคลธรรมดา",
+        company_name: row.company_name.trim(),
+        tax_id: row.tax_id?.trim() || null,
+        branch_code: row.branch_code?.trim() || "สำนักงานใหญ่",
+        phone: row.phone?.trim() || null,
+        address: row.address?.trim() || null,
+        default_price_tier:
+          row.default_price_tier === "Wholesale" ||
+          row.default_price_tier === "Retail"
+            ? row.default_price_tier
+            : "Retail",
+        credit_days:
+          typeof row.credit_days === "number" && Number.isFinite(row.credit_days)
+            ? row.credit_days
+            : 0,
+        is_active: true,
+      };
+    });
 
     if (payload.some((row) => !row.company_name)) {
       return { success: false, error: "พบแถวที่ไม่มีชื่อบริษัท" };

@@ -3,6 +3,12 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+  contactHasRole,
+  contactRoleBadgeClass,
+  contactRoleLabel,
+  normalizeContactRoles,
+} from "@/app/contacts/contacts";
+import {
   getContactDetails,
   type ContactDetails,
   type ContactPersonRow,
@@ -87,14 +93,18 @@ export default function ViewContactDialog({
 
   const contact = details?.contact ?? null;
   const persons: ContactPersonRow[] = details?.persons ?? [];
+  const roles = contact
+    ? normalizeContactRoles(contact.contact_roles, contact.contact_type)
+    : [];
   const canEditRates =
-    contact?.contact_type === "Vendor" || contact?.contact_type === "Technician";
-
-  function contactTypeLabel(value: string | null | undefined): string {
-    if (value === "Vendor") return "ผู้จำหน่าย";
-    if (value === "Technician") return "ช่างรับเหมา";
-    return "ลูกค้า";
-  }
+    contactHasRole(
+      { contact_roles: roles, contact_type: contact?.contact_type },
+      "Vendor",
+    ) ||
+    contactHasRole(
+      { contact_roles: roles, contact_type: contact?.contact_type },
+      "Technician",
+    );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -150,10 +160,21 @@ export default function ViewContactDialog({
                   label="เบอร์โทร"
                   value={displayValue(contact.phone)}
                 />
-                <DetailField
-                  label="ประเภท"
-                  value={contactTypeLabel(contact.contact_type)}
-                />
+                <div className="sm:col-span-2">
+                  <p className="text-[11px] font-semibold tracking-wide text-slate-400">
+                    ประเภทคู่ค้า
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {roles.map((role) => (
+                      <span
+                        key={role}
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${contactRoleBadgeClass(role)}`}
+                      >
+                        {contactRoleLabel(role)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
                 <DetailField
                   label="ที่อยู่"
                   value={displayValue(contact.address)}

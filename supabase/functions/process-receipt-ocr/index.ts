@@ -456,7 +456,7 @@ serve(async (req: Request) => {
       .from("contacts")
       .select("company_name, ocr_pattern_config")
       .eq("id", vendorId)
-      .eq("contact_type", "Vendor")
+      .contains("contact_roles", ["Vendor"])
       .single();
 
     if (vendorError || !vendor) {

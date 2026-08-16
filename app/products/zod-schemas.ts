@@ -1,19 +1,23 @@
 import { z } from "zod";
-import { MODEL_CODE_LENGTH } from "@/app/products/product-sku";
+import {
+  COLOR_CODE_LENGTH,
+  MODEL_CODE_LENGTH,
+  SIZE_CODE_LENGTH,
+} from "@/app/products/product-sku";
+
+export { COLOR_CODE_LENGTH, SIZE_CODE_LENGTH };
 
 /** Fixed-3 Character Color Standard (Blueprint v3.6) */
-export const COLOR_CODE_LENGTH = 3;
 export const COLOR_CODE_REGEX = /^[A-Z]{3}$/;
 
 export const COLOR_CODE_ERROR_MESSAGE =
   "รหัสสีต้องเป็นตัวอักษรภาษาอังกฤษ 3 ตัวเท่านั้น (เช่น BLK, RED)";
 
 /** Fixed-2 Character Size Code — matches DB Check Constraint on `mst_sizes.size_code`. */
-export const SIZE_CODE_LENGTH = 2;
 export const SIZE_CODE_REGEX = /^[A-Z0-9]{2}$/;
 
 export const SIZE_CODE_ERROR_MESSAGE =
-  "รหัสไซส์ต้องมีความยาว 2 ตัวอักษรพอดี (เช่น XL, S1, 28)";
+  "รหัสไซส์ต้องมีความยาว 2 ตัวอักษรพอดี (เช่น XL, 0S, 28)";
 
 export const VENDOR_ID_REQUIRED_MESSAGE =
   "ต้องระบุผู้จำหน่าย (vendor_id) เป็น UUID ที่ถูกต้อง — ห้ามเว้นว่าง";

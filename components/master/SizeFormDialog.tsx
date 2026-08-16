@@ -38,7 +38,8 @@ type SizeFormDialogProps = {
 };
 
 /**
- * Normalize size_code: uppercase A–Z / 0–9 only, max 2 chars (DB Check Constraint).
+ * Normalize size_code while typing: uppercase A–Z / 0–9 only, max 2 chars.
+ * Zero-pad (`S` → `0S`) is applied on submit via Server Action / parseSizeForm path.
  */
 export function normalizeSizeCodeInput(value: string): string {
   return value
@@ -94,6 +95,7 @@ export default function SizeFormDialog({
 
   const sizeCodeError = useMemo(() => {
     if (!sizeCode) return "";
+    if (sizeCode.length === 1) return ""; // will zero-pad on submit
     const parsed = parseSizeCode(sizeCode);
     return parsed.ok ? "" : parsed.error;
   }, [sizeCode]);
@@ -103,7 +105,7 @@ export default function SizeFormDialog({
     sizeLabel.trim().length > 0 &&
     sortOrder.trim() !== "" &&
     !sizeCodeError &&
-    sizeCode.length === SIZE_CODE_LENGTH;
+    (sizeCode.length === SIZE_CODE_LENGTH || sizeCode.length === 1);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -111,11 +113,15 @@ export default function SizeFormDialog({
     setFormError("");
 
     const sortOrderNumber = Number(sortOrder);
+    const normalizedCode =
+      sizeCode.length === 1
+        ? sizeCode.padStart(SIZE_CODE_LENGTH, "0")
+        : sizeCode;
     const parsed = parseSizeForm({
       id: initialSize?.id,
       brand_id: initialSize?.brand_id ?? brandId ?? null,
       size_label: sizeLabel,
-      size_code: sizeCode,
+      size_code: normalizedCode,
       sort_order: sortOrderNumber,
     });
 

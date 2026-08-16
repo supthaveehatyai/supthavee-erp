@@ -12,6 +12,10 @@ import {
 import { useRouter } from "next/navigation";
 import VendorForm, { validateVendorOcrConfig } from "@/app/contacts/VendorForm";
 import {
+  CONTACT_ROLE_OPTIONS,
+  contactHasRole,
+  contactRoleBadgeClass,
+  contactRoleLabel,
   DEFAULT_OCR_PATTERN_JSON,
   formatOcrPatternConfig,
   type Contact,
@@ -107,7 +111,7 @@ function createPerson(): ContactPersonInput {
 
 function createEmptyForm(): ContactForm {
   return {
-    contactType: "Customer",
+    contactRoles: ["Customer"],
     customerType: "นิติบุคคล",
     companyName: "",
     taxId: "",
@@ -460,7 +464,7 @@ export default function ContactsClient({
     const keyword = search.trim().toLocaleLowerCase("th");
 
     const filtered = contacts.filter((contact) => {
-      if (typeFilter !== "All" && contact.contact_type !== typeFilter) {
+      if (typeFilter !== "All" && !contactHasRole(contact, typeFilter)) {
         return false;
       }
       if (!keyword) return true;
@@ -471,6 +475,7 @@ export default function ContactsClient({
         contact.tax_id,
         contact.address,
         contact.branch_code,
+        ...(contact.contact_roles ?? []),
       ].some((value) => value?.toLocaleLowerCase("th").includes(keyword));
     });
 
@@ -484,14 +489,14 @@ export default function ContactsClient({
     });
   }, [contacts, search, typeFilter, sortDirection]);
 
-  const customerCount = contacts.filter(
-    (contact) => contact.contact_type === "Customer",
+  const customerCount = contacts.filter((contact) =>
+    contactHasRole(contact, "Customer"),
   ).length;
-  const vendorCount = contacts.filter(
-    (contact) => contact.contact_type === "Vendor",
+  const vendorCount = contacts.filter((contact) =>
+    contactHasRole(contact, "Vendor"),
   ).length;
-  const technicianCount = contacts.filter(
-    (contact) => contact.contact_type === "Technician",
+  const technicianCount = contacts.filter((contact) =>
+    contactHasRole(contact, "Technician"),
   ).length;
   const importInvalidCount = importRows.filter((row) => !row.isValid).length;
   const canImport =
@@ -562,6 +567,7 @@ export default function ContactsClient({
 
     const payload = importRows.map((row) => ({
       contact_type: row.contact_type as ContactType,
+      contact_roles: [row.contact_type as ContactType],
       customer_type: row.customer_type || "บุคคลธรรมดา",
       company_name: row.company_name,
       tax_id: row.tax_id || null,
@@ -596,13 +602,32 @@ export default function ContactsClient({
   ) {
     setForm((current) => {
       const next: ContactForm = { ...current, [key]: value };
-      if (key === "contactType") {
-        const nextType = value as ContactType;
-        if (nextType !== "Vendor") {
+      if (key === "contactRoles") {
+        const roles = value as ContactType[];
+        if (!roles.includes("Vendor")) {
           next.ocrPatternConfigJson = DEFAULT_OCR_PATTERN_JSON;
         } else if (!current.ocrPatternConfigJson.trim()) {
           next.ocrPatternConfigJson = formatOcrPatternConfig({});
         }
+      }
+      return next;
+    });
+  }
+
+  function toggleContactRole(role: ContactType) {
+    setForm((current) => {
+      const hasRole = current.contactRoles.includes(role);
+      const nextRoles = hasRole
+        ? current.contactRoles.filter((item) => item !== role)
+        : [...current.contactRoles, role];
+      // Keep at least one role selected in the UI — validation also enforces this.
+      const contactRoles =
+        nextRoles.length > 0 ? nextRoles : current.contactRoles;
+      const next: ContactForm = { ...current, contactRoles };
+      if (!contactRoles.includes("Vendor")) {
+        next.ocrPatternConfigJson = DEFAULT_OCR_PATTERN_JSON;
+      } else if (!current.ocrPatternConfigJson.trim()) {
+        next.ocrPatternConfigJson = formatOcrPatternConfig({});
       }
       return next;
     });
@@ -658,7 +683,7 @@ export default function ContactsClient({
     }
 
     let ocrPatternConfig = {};
-    if (form.contactType === "Vendor") {
+    if (form.contactRoles.includes("Vendor")) {
       const ocrResult = validateVendorOcrConfig(form.ocrPatternConfigJson);
       if (!ocrResult.ok) {
         setFormError(ocrResult.error);
@@ -667,19 +692,25 @@ export default function ContactsClient({
       ocrPatternConfig = ocrResult.value;
     }
 
+    if (form.contactRoles.length === 0) {
+      setFormError("กรุณาเลือกประเภทคู่ค้าอย่างน้อย 1 สถานะ");
+      return;
+    }
+
     const persons = form.persons.filter((person) => person.name.trim());
     setIsSaving(true);
 
     const result = await createContact({
-      contactType: form.contactType,
+      contactRoles: form.contactRoles,
       customerType: form.customerType,
       companyName,
       taxId: form.taxId.trim() || null,
       branchCode: form.branchCode.trim() || "สำนักงานใหญ่",
       address: form.address.trim() || null,
       phone: form.phone.trim() || null,
-      ocrPatternConfig:
-        form.contactType === "Vendor" ? ocrPatternConfig : {},
+      ocrPatternConfig: form.contactRoles.includes("Vendor")
+        ? ocrPatternConfig
+        : {},
       persons: persons.map((person) => ({
         name: person.name.trim(),
         phone: person.phone.trim() || null,
@@ -897,21 +928,19 @@ export default function ContactsClient({
                       </p>
                     </td>
                     <td className="px-5 py-4">
-                      <span
-                        className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
-                          contact.contact_type === "Customer"
-                            ? "bg-blue-50 text-blue-700"
-                            : contact.contact_type === "Technician"
-                              ? "bg-violet-50 text-violet-700"
-                              : "bg-amber-50 text-amber-700"
-                        }`}
-                      >
-                        {contact.contact_type === "Customer"
-                          ? "ลูกค้า"
-                          : contact.contact_type === "Technician"
-                            ? "ช่างรับเหมา"
-                            : "ผู้จำหน่าย"}
-                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(contact.contact_roles?.length
+                          ? contact.contact_roles
+                          : [contact.contact_type]
+                        ).map((role) => (
+                          <span
+                            key={`${contact.id}-${role}`}
+                            className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${contactRoleBadgeClass(role)}`}
+                          >
+                            {contactRoleLabel(role)}
+                          </span>
+                        ))}
+                      </div>
                     </td>
                     <td className="px-5 py-4 text-xs text-slate-600">
                       {contact.customer_type || "บุคคลธรรมดา"}
@@ -1121,7 +1150,7 @@ export default function ContactsClient({
             >
               <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">
                 <VendorForm
-                  showOcrConfig={form.contactType === "Vendor"}
+                  showOcrConfig={form.contactRoles.includes("Vendor")}
                   ocrPatternConfigJson={form.ocrPatternConfigJson}
                   onOcrPatternConfigJsonChange={(json) =>
                     updateForm("ocrPatternConfigJson", json)
@@ -1144,25 +1173,48 @@ export default function ContactsClient({
                   </div>
 
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="block">
+                    <div className="block sm:col-span-2">
                       <span className="mb-1.5 block text-xs font-semibold text-slate-700">
-                        ประเภทคู่ค้า <span className="text-red-500">*</span>
+                        ประเภทคู่ค้า (เลือกได้หลายสถานะ){" "}
+                        <span className="text-red-500">*</span>
                       </span>
-                      <select
-                        value={form.contactType}
-                        onChange={(event) =>
-                          updateForm(
-                            "contactType",
-                            event.target.value as ContactType,
-                          )
-                        }
-                        className={fieldClass}
-                      >
-                        <option value="Customer">ลูกค้า</option>
-                        <option value="Vendor">ซัพพลายเออร์</option>
-                        <option value="Technician">ช่างรับเหมา</option>
-                      </select>
-                    </label>
+                      <div className="flex flex-wrap gap-2">
+                        {CONTACT_ROLE_OPTIONS.map((option) => {
+                          const checked = form.contactRoles.includes(
+                            option.value,
+                          );
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              aria-pressed={checked}
+                              disabled={isSaving}
+                              onClick={() => toggleContactRole(option.value)}
+                              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                                checked
+                                  ? contactRoleBadgeClass(option.value) +
+                                    " border-transparent shadow-sm"
+                                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                              } disabled:opacity-50`}
+                            >
+                              <span
+                                className={`grid size-3.5 place-items-center rounded border text-[9px] ${
+                                  checked
+                                    ? "border-current bg-white/70"
+                                    : "border-slate-300 bg-white"
+                                }`}
+                              >
+                                {checked ? "✓" : ""}
+                              </span>
+                              {option.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-1.5 text-[11px] text-slate-400">
+                        เช่น เป็นทั้งลูกค้าและผู้จำหน่ายในคนเดียวกันได้
+                      </p>
+                    </div>
 
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-semibold text-slate-700">

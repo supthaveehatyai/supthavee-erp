@@ -174,7 +174,7 @@ export async function getVendors(): Promise<GetVendorsResult> {
     const { data, error } = await supabaseAdmin
       .from("contacts")
       .select("id, company_name")
-      .eq("contact_type", "Vendor")
+      .contains("contact_roles", ["Vendor"])
       .eq("is_active", true)
       .order("company_name");
 
@@ -228,6 +228,21 @@ export type GetSizesResult = { data: MasterSize[]; error: string | null };
 
 const SIZE_COLUMNS = "id, brand_id, size_label, size_code, sort_order";
 
+const SIZE_CODE_LENGTH = 2;
+const SIZE_CODE_PATTERN = /^[A-Z0-9]{2}$/;
+const SIZE_CODE_ERROR_MESSAGE =
+  "รหัสไซส์ต้องมีความยาว 2 ตัวอักษรพอดี (เช่น XL, 0S, 28)";
+
+/**
+ * UPPERCASE A–Z/0–9 only, Fixed-2 Check Constraint.
+ * Single-character input is zero-padded (`S` → `0S`) to match Enterprise Size Normalization.
+ */
+function normalizeSizeCode(raw: string): string {
+  const code = normalizeCode(raw, SIZE_CODE_LENGTH);
+  if (code.length === 1) return code.padStart(SIZE_CODE_LENGTH, "0");
+  return code;
+}
+
 /** Sizes for a brand's own size run (e.g. S/M/L vs 38/40/42) — active only, for the Size selector. */
 export async function getSizesByBrand(brandId: string): Promise<GetSizesResult> {
   const trimmedBrandId = brandId?.trim() ?? "";
@@ -243,7 +258,13 @@ export async function getSizesByBrand(brandId: string): Promise<GetSizesResult> 
       .order("sort_order", { ascending: true });
 
     if (error) return { data: [], error: error.message };
-    return { data: (data ?? []) as MasterSize[], error: null };
+    const rows = ((data ?? []) as MasterSize[])
+      .map((row) => ({
+        ...row,
+        size_code: String(row.size_code ?? "").trim().toUpperCase(),
+      }))
+      .filter((row) => SIZE_CODE_PATTERN.test(row.size_code));
+    return { data: rows, error: null };
   } catch (err) {
     const message = err instanceof Error ? err.message : "โหลดรายการไซส์ไม่สำเร็จ";
     return { data: [], error: message };
@@ -274,12 +295,17 @@ export async function getGlobalSizes(): Promise<GetSizesResult> {
     for (const row of data ?? []) {
       const id = String((row as MasterSize).id ?? "").trim();
       if (!id || seen.has(id)) continue;
+      const sizeCode = String((row as MasterSize).size_code ?? "")
+        .trim()
+        .toUpperCase();
+      // Same guardrail as getColors Fixed-3 — Matrix only sees Fixed-2 size codes.
+      if (!SIZE_CODE_PATTERN.test(sizeCode)) continue;
       seen.add(id);
       rows.push({
         id,
         brand_id: (row as MasterSize).brand_id ?? null,
         size_label: String((row as MasterSize).size_label ?? "").trim(),
-        size_code: String((row as MasterSize).size_code ?? "").trim(),
+        size_code: sizeCode,
         sort_order: Number((row as MasterSize).sort_order ?? 0),
       });
     }
@@ -316,16 +342,6 @@ export async function getAllSizesByBrand(brandId: string): Promise<GetSizesResul
 /* -------------------------------------------------------------------------- */
 /* createSize / updateSize / createSizesBulk                                  */
 /* -------------------------------------------------------------------------- */
-
-const SIZE_CODE_LENGTH = 2;
-const SIZE_CODE_PATTERN = /^[A-Z0-9]{2}$/;
-const SIZE_CODE_ERROR_MESSAGE =
-  "รหัสไซส์ต้องมีความยาว 2 ตัวอักษรพอดี (เช่น XL, S1, 28)";
-
-/** UPPERCASE A–Z/0–9 only, capped to Fixed-2 Check Constraint. */
-function normalizeSizeCode(raw: string): string {
-  return normalizeCode(raw, SIZE_CODE_LENGTH);
-}
 
 export type CreateSizeInput = {
   /** `null` = Global Size catalog (`brand_id IS NULL`). */
@@ -693,6 +709,7 @@ export async function createVendor(
       .from("contacts")
       .insert({
         contact_type: "Vendor",
+        contact_roles: ["Vendor"],
         company_name: companyName,
         phone,
         customer_type: "นิติบุคคล",

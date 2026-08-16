@@ -177,7 +177,7 @@ export async function upsertTechnicianRate(
 
     const { data: contact, error: contactError } = await supabase
       .from("contacts")
-      .select("id, contact_type")
+      .select("id, contact_roles, contact_type")
       .eq("id", technicianId)
       .maybeSingle();
 
@@ -187,12 +187,15 @@ export async function upsertTechnicianRate(
         error: contactError.message ?? "ตรวจสอบคู่ค้าไม่สำเร็จ",
       };
     }
-    if (
-      !contact ||
-      !TECHNICIAN_CONTACT_TYPES.includes(
-        contact.contact_type as (typeof TECHNICIAN_CONTACT_TYPES)[number],
-      )
-    ) {
+    const roles = Array.isArray(contact?.contact_roles)
+      ? contact.contact_roles
+      : contact?.contact_type
+        ? [contact.contact_type]
+        : [];
+    const canEditRates = TECHNICIAN_CONTACT_TYPES.some((role) =>
+      roles.includes(role),
+    );
+    if (!contact || !canEditRates) {
       return {
         success: false,
         error: "ตั้ง Rate Card ได้เฉพาะผู้จำหน่ายหรือช่างรับเหมา",

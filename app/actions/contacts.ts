@@ -8,8 +8,11 @@
 import { revalidatePath } from "next/cache";
 import {
   contactSelect,
+  normalizeContactRoles,
   normalizeContactRow,
+  primaryContactType,
   type Contact,
+  type ContactType,
 } from "@/app/contacts/contacts";
 import { findDuplicateContactError } from "@/lib/contacts/duplicate-check";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
@@ -65,6 +68,8 @@ export type UpdateContactPayload = {
   branchCode?: string | null;
   phone?: string | null;
   address?: string | null;
+  /** Multi-role tags — when provided, replaces contact_roles (+ syncs contact_type). */
+  contactRoles?: ContactType[];
 };
 
 export type AddContactPersonPayload = {
@@ -182,6 +187,16 @@ export async function updateContact(
     const phone = pickNullableString(raw, "phone");
     const address = pickNullableString(raw, "address");
 
+    const rolesRaw =
+      raw.contactRoles ?? raw.contact_roles ?? undefined;
+    const hasRolesUpdate = rolesRaw !== undefined;
+    const contactRoles = hasRolesUpdate
+      ? normalizeContactRoles(rolesRaw)
+      : null;
+    if (hasRolesUpdate && (!contactRoles || contactRoles.length === 0)) {
+      return { data: null, error: "กรุณาเลือกประเภทคู่ค้าอย่างน้อย 1 สถานะ" };
+    }
+
     const supabase = createSupabaseServerClient();
 
     const duplicateError = await findDuplicateContactError(supabase, {
@@ -193,15 +208,21 @@ export async function updateContact(
       return { data: null, error: duplicateError };
     }
 
+    const updatePayload: Record<string, unknown> = {
+      company_name: companyName,
+      tax_id: taxId,
+      branch_code: branchCode || "สำนักงานใหญ่",
+      phone,
+      address,
+    };
+    if (contactRoles) {
+      updatePayload.contact_roles = contactRoles;
+      updatePayload.contact_type = primaryContactType(contactRoles);
+    }
+
     const { data, error } = await supabase
       .from("contacts")
-      .update({
-        company_name: companyName,
-        tax_id: taxId,
-        branch_code: branchCode || "สำนักงานใหญ่",
-        phone,
-        address,
-      })
+      .update(updatePayload)
       .eq("id", id)
       .select(contactSelect)
       .single();

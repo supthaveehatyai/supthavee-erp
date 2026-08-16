@@ -10,17 +10,20 @@
  *
  * SKU formula reuses the exact same Blueprint utilities as the full
  * Product Matrix flow (`app/products/product-sku.ts`) for consistency:
- * `sku = BrandCode + CategoryCode(2) + ModelCode(6) + GenderCode(1) + ColorCode(3) + SizeCode`.
+ * `sku = BrandCode + CategoryCode(2) + ModelCode(6) + GenderCode(1) + ColorCode(3) + SizeCode(2)`.
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   buildProductSku,
+  isValidSizeCodeForSku,
   makeGenderCodeFromName,
+  normalizeSizeCodeForSku,
 } from "@/app/products/product-sku";
 import {
   COLOR_CODE_ERROR_MESSAGE,
   COLOR_CODE_REGEX,
+  SIZE_CODE_ERROR_MESSAGE,
 } from "@/app/products/zod-schemas";
 import type { ReceiptProductSummary } from "@/lib/actions/receipt";
 
@@ -226,12 +229,12 @@ const POSTGRES_UNIQUE_VIOLATION = "23505";
 /**
  * Add a single new color/size variant onto an EXISTING, ACTIVE product model.
  *
- * SKU formula (Blueprint v3.6, same as the full Product Matrix flow):
- * `BrandCode + CategoryCode(2) + ModelCode(6) + GenderCode(1) + ColorCode(3) + SizeCode`
+ * SKU formula (Blueprint Fixed-2 Size):
+ * `BrandCode + CategoryCode(2) + ModelCode(6) + GenderCode(1) + ColorCode(3) + SizeCode(2)`
  * — built via {@link buildProductSku} so both creation paths never drift.
  *
- * `color_code` is validated against the exact same Fixed-3-Character rule as
- * the rest of the app (`COLOR_CODE_REGEX` — 3 uppercase A–Z letters).
+ * `color_code` is validated against Fixed-3 (`COLOR_CODE_REGEX`).
+ * `size_code` from `mst_sizes` is validated/normalized to Fixed-2 (zero-pad if needed).
  * `vendor_id` is re-validated server-side against the model's own
  * `vendor_id` — never trust that the client-selected model actually belongs
  * to the vendor in the active Goods Receipt context.
@@ -323,8 +326,12 @@ export async function quickCreateSKU(
       return { product: null, error: sizeError?.message ?? "ไม่พบไซส์ที่เลือก" };
     }
     const sizeRow = size as { id: string; size_code: string; size_label: string };
+    const sizeCode = normalizeSizeCodeForSku(sizeRow.size_code);
+    if (!isValidSizeCodeForSku(sizeCode)) {
+      return { product: null, error: SIZE_CODE_ERROR_MESSAGE };
+    }
 
-    // 3. Build the SKU — Brand + Category(2) + Model(6) + Gender(1) + Color(3) + Size.
+    // 3. Build the SKU — Brand + Category(2) + Model(6) + Gender(1) + Color(3) + Size(2).
     const genderCode = makeGenderCodeFromName(modelRow.gender ?? "Unisex (U)");
     const sku = buildProductSku({
       brandCode: brand.brand_code,
@@ -332,7 +339,7 @@ export async function quickCreateSKU(
       modelCode: modelRow.model_code,
       genderCode,
       colorCode,
-      sizeCode: sizeRow.size_code,
+      sizeCode,
     });
 
     // 4. Insert into products, linked via model_id — 409/unique_violation handled gracefully below.

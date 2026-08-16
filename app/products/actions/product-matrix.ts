@@ -5,9 +5,11 @@ import { revalidatePath } from "next/cache";
 import {
   isValidModelCode,
   MODEL_CODE_LENGTH,
+  SIZE_CODE_SKU_REGEX,
 } from "@/app/products/product-sku";
 import {
   parseProductModelIdentity,
+  SIZE_CODE_ERROR_MESSAGE,
   updateProductModelSchema,
   zodFirstError,
 } from "@/app/products/zod-schemas";
@@ -467,6 +469,17 @@ export async function generateSkusFromModel(
   const skuList = input.skus.map((row) => row.sku);
   if (new Set(skuList).size !== skuList.length) {
     return { ok: false, error: "พบ SKU ซ้ำกันเองใน Matrix" };
+  }
+
+  // Fixed-2 trailing size segment — SKU must end with exactly 2 A–Z/0–9 chars.
+  const invalidFixed2 = input.skus.find(
+    (row) => !SIZE_CODE_SKU_REGEX.test(String(row.sku).slice(-2)),
+  );
+  if (invalidFixed2) {
+    return {
+      ok: false,
+      error: `${SIZE_CODE_ERROR_MESSAGE} (SKU: ${invalidFixed2.sku})`,
+    };
   }
 
   const supabase = createSupabaseServerClient();

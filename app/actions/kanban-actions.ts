@@ -906,6 +906,7 @@ export async function getTechnicianOptions(
           id,
           company_name,
           contact_type,
+          contact_roles,
           is_active
         )
       `,
@@ -924,6 +925,7 @@ export async function getTechnicianOptions(
       id?: string | null;
       company_name?: string | null;
       contact_type?: string | null;
+      contact_roles?: string[] | null;
       is_active?: boolean | null;
     };
 
@@ -937,11 +939,12 @@ export async function getTechnicianOptions(
       const id = String(contact?.id ?? "").trim();
       if (!id || seen.has(id)) continue;
       if (contact?.is_active === false) continue;
-      if (
-        !TECHNICIAN_CONTACT_TYPES.includes(
-          String(contact?.contact_type ?? "") as (typeof TECHNICIAN_CONTACT_TYPES)[number],
-        )
-      ) {
+      const roles = Array.isArray(contact?.contact_roles)
+        ? contact.contact_roles
+        : contact?.contact_type
+          ? [contact.contact_type]
+          : [];
+      if (!TECHNICIAN_CONTACT_TYPES.some((role) => roles.includes(role))) {
         continue;
       }
       seen.add(id);
@@ -949,7 +952,15 @@ export async function getTechnicianOptions(
         id,
         company_name:
           String(contact?.company_name ?? "").trim() || "ไม่ระบุชื่อ",
-        contact_type: String(contact?.contact_type ?? ""),
+        contact_type: String(
+          roles.find((role) =>
+            TECHNICIAN_CONTACT_TYPES.includes(
+              role as (typeof TECHNICIAN_CONTACT_TYPES)[number],
+            ),
+          ) ??
+            contact?.contact_type ??
+            "",
+        ),
         default_wage: toWageCost(row.default_wage),
       });
     }
@@ -1010,7 +1021,7 @@ export async function updateProductionJobAssignment(
     if (technicianId) {
       const { data: technician, error: techError } = await supabase
         .from("contacts")
-        .select("id, contact_type")
+        .select("id, contact_type, contact_roles")
         .eq("id", technicianId)
         .maybeSingle();
 
@@ -1020,11 +1031,14 @@ export async function updateProductionJobAssignment(
           error: techError.message ?? "ตรวจสอบช่างรับเหมาไม่สำเร็จ",
         };
       }
+      const techRoles = Array.isArray(technician?.contact_roles)
+        ? technician.contact_roles
+        : technician?.contact_type
+          ? [technician.contact_type]
+          : [];
       if (
         !technician ||
-        !TECHNICIAN_CONTACT_TYPES.includes(
-          technician.contact_type as (typeof TECHNICIAN_CONTACT_TYPES)[number],
-        )
+        !TECHNICIAN_CONTACT_TYPES.some((role) => techRoles.includes(role))
       ) {
         return {
           success: false,

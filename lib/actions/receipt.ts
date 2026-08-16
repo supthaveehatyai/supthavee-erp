@@ -1253,7 +1253,7 @@ export async function saveManualGoodsReceipt(
       .from("contacts")
       .select("id")
       .eq("id", vendorId)
-      .eq("contact_type", "Vendor")
+      .contains("contact_roles", ["Vendor"])
       .eq("is_active", true)
       .maybeSingle();
 

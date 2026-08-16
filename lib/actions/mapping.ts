@@ -260,7 +260,7 @@ export async function getActiveVendors(): Promise<GetActiveVendorsResult> {
     const { data, error } = await supabaseAdmin
       .from("contacts")
       .select("id, company_name")
-      .eq("contact_type", "Vendor")
+      .contains("contact_roles", ["Vendor"])
       .eq("is_active", true)
       .order("company_name", { ascending: true });
 

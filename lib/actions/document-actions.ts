@@ -604,7 +604,7 @@ export async function listActiveCustomers(): Promise<GetCustomersResult> {
     const { data, error } = await supabase
       .from("contacts")
       .select("id, company_name")
-      .eq("contact_type", "Customer")
+      .contains("contact_roles", ["Customer"])
       .eq("is_active", true)
       .order("company_name");
 

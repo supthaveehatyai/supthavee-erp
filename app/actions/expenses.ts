@@ -358,7 +358,7 @@ export async function getExpenseVendors(): Promise<GetExpenseVendorsResult> {
     const { data, error } = await supabaseAdmin
       .from("contacts")
       .select("id, company_name")
-      .eq("contact_type", "Vendor")
+      .contains("contact_roles", ["Vendor"])
       .eq("is_active", true)
       .order("company_name", { ascending: true });
 
@@ -1030,7 +1030,7 @@ async function validateExpenseDraftPayload(
     .from("contacts")
     .select("id")
     .eq("id", vendorId)
-    .eq("contact_type", "Vendor")
+    .contains("contact_roles", ["Vendor"])
     .eq("is_active", true)
     .maybeSingle();
 

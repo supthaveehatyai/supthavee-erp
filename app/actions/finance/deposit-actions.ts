@@ -421,10 +421,10 @@ export async function createDepositDocument(
     const grandTotal = summary.grand_total;
     const storedVatRate = vatType === "NONE" ? 0 : summary.vat_rate;
 
-    const expectedContactType = docType === "DEP_IN" ? "Customer" : "Vendor";
+    const expectedRole = docType === "DEP_IN" ? "Customer" : "Vendor";
     const { data: contact, error: contactError } = await supabase
       .from("contacts")
-      .select("id, contact_type, is_active, company_name")
+      .select("id, contact_roles, contact_type, is_active, company_name")
       .eq("id", contactId)
       .maybeSingle();
 
@@ -434,7 +434,12 @@ export async function createDepositDocument(
     if (contact.is_active === false) {
       return { success: false, error: "ผู้ติดต่อนี้ถูกปิดการใช้งานแล้ว" };
     }
-    if (contact.contact_type !== expectedContactType) {
+    const roles = Array.isArray(contact.contact_roles)
+      ? contact.contact_roles
+      : contact.contact_type
+        ? [contact.contact_type]
+        : [];
+    if (!roles.includes(expectedRole)) {
       return {
         success: false,
         error:

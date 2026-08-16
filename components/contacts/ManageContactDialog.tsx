@@ -3,7 +3,14 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import type { Contact } from "@/app/contacts/contacts";
+import type { Contact, ContactType } from "@/app/contacts/contacts";
+import {
+  CONTACT_ROLE_OPTIONS,
+  contactHasRole,
+  contactRoleBadgeClass,
+  contactRoleLabel,
+  normalizeContactRoles,
+} from "@/app/contacts/contacts";
 import {
   addContactPerson,
   listContactPersons,
@@ -39,6 +46,7 @@ type ContactFormState = {
   branchCode: string;
   phone: string;
   address: string;
+  contactRoles: ContactType[];
 };
 
 type PersonFormState = {
@@ -62,6 +70,10 @@ function toContactForm(contact: Contact): ContactFormState {
     branchCode: contact.branch_code ?? "สำนักงานใหญ่",
     phone: contact.phone ?? "",
     address: contact.address ?? "",
+    contactRoles: normalizeContactRoles(
+      contact.contact_roles,
+      contact.contact_type,
+    ),
   };
 }
 
@@ -96,6 +108,7 @@ export default function ManageContactDialog({
         id: "",
         created_at: "",
         contact_type: "Customer",
+        contact_roles: ["Customer"],
         customer_type: null,
         company_name: "",
         tax_id: null,
@@ -143,7 +156,27 @@ export default function ManageContactDialog({
   }, [open, contact]);
 
   const canEditRates =
-    contact?.contact_type === "Vendor" || contact?.contact_type === "Technician";
+    contactHasRole(
+      { contact_roles: contactForm.contactRoles, contact_type: contact?.contact_type },
+      "Vendor",
+    ) ||
+    contactHasRole(
+      { contact_roles: contactForm.contactRoles, contact_type: contact?.contact_type },
+      "Technician",
+    );
+
+  function toggleRole(role: ContactType) {
+    setContactForm((current) => {
+      const hasRole = current.contactRoles.includes(role);
+      const next = hasRole
+        ? current.contactRoles.filter((item) => item !== role)
+        : [...current.contactRoles, role];
+      return {
+        ...current,
+        contactRoles: next.length > 0 ? next : current.contactRoles,
+      };
+    });
+  }
 
   function closeMainDialog() {
     if (isSaving) return;
@@ -181,6 +214,11 @@ export default function ManageContactDialog({
       setTab("details");
       return false;
     }
+    if (contactForm.contactRoles.length === 0) {
+      setFormError("กรุณาเลือกประเภทคู่ค้าอย่างน้อย 1 สถานะ");
+      setTab("details");
+      return false;
+    }
     if (personFormHasAnyValue(personForm) && !personForm.name.trim()) {
       setFormError("กรุณากรอกชื่อผู้ประสานงานให้ครบถ้วน");
       setTab("person");
@@ -207,6 +245,7 @@ export default function ManageContactDialog({
         branchCode: contactForm.branchCode.trim() || "สำนักงานใหญ่",
         phone: contactForm.phone.trim() || null,
         address: contactForm.address.trim() || null,
+        contactRoles: contactForm.contactRoles,
       });
 
       if (updateResult.error || !updateResult.data) {
@@ -320,6 +359,48 @@ export default function ManageContactDialog({
 
             <TabsContent value="details" className="mt-4 space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label>
+                    ประเภทคู่ค้า (เลือกได้หลายสถานะ){" "}
+                    <span className="text-red-500">*</span>
+                  </Label>
+                  <div className="flex flex-wrap gap-2">
+                    {CONTACT_ROLE_OPTIONS.map((option) => {
+                      const checked = contactForm.contactRoles.includes(
+                        option.value,
+                      );
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          aria-pressed={checked}
+                          disabled={isSaving}
+                          onClick={() => toggleRole(option.value)}
+                          className={cn(
+                            "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                            checked
+                              ? `${contactRoleBadgeClass(option.value)} border-transparent shadow-sm`
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300",
+                            "disabled:opacity-50",
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "grid size-3.5 place-items-center rounded border text-[9px]",
+                              checked
+                                ? "border-current bg-white/70"
+                                : "border-slate-300 bg-white",
+                            )}
+                          >
+                            {checked ? "✓" : ""}
+                          </span>
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label htmlFor="manage-company-name">
                     ชื่อบริษัท / ชื่อคู่ค้า{" "}

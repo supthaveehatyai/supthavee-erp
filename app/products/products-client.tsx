@@ -44,6 +44,7 @@ import {
   formatGenderOption,
   type Gender,
   isValidModelCode,
+  isValidSizeCodeForSku,
   MODEL_CODE_LENGTH,
   normalizeSkuPart,
 } from "./product-sku";
@@ -1101,8 +1102,9 @@ export default function ProductsClient() {
     const selectedColors = masterData.colors.filter((color) =>
       form.colorIds.includes(color.id),
     );
-    const selectedSizes = sizes.filter((size) =>
-      form.sizeIds.includes(size.id),
+    const selectedSizes = sizes.filter(
+      (size) =>
+        form.sizeIds.includes(size.id) && isValidSizeCodeForSku(size.size_code),
     );
 
     return selectedColors.flatMap((color) =>
@@ -2584,7 +2586,7 @@ export default function ProductsClient() {
                                       <p className="text-xs font-medium text-slate-700">
                                         ไซส์ {product.size || "—"}
                                       </p>
-                                      <p className="mt-0.5 font-mono text-[11px] font-semibold text-blue-700">
+                                      <p className="mt-0.5 whitespace-nowrap font-mono text-[11px] font-semibold text-blue-700">
                                         {product.sku}
                                       </p>
                                     </td>
@@ -3399,7 +3401,7 @@ export default function ProductsClient() {
                     <StepHeading
                       number={4}
                       title="Preview และ Auto-SKU"
-                      description="SKU = แบรนด์ + หมวดหมู่ + รุ่น(6) + เพศ + สี + ไซส์"
+                      description="SKU = แบรนด์ + หมวดหมู่(2) + รุ่น(6) + เพศ(1) + สี(3) + ไซส์(2)"
                     />
                     <span className="shrink-0 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
                       {previewRows.length.toLocaleString("th-TH")} SKU
@@ -3441,7 +3443,7 @@ export default function ProductsClient() {
                         <tbody className="divide-y divide-slate-100">
                           {previewRows.map((row) => (
                             <tr key={row.key} className="hover:bg-slate-50">
-                              <td className="px-4 py-3 font-mono text-xs font-bold text-blue-700">
+                              <td className="whitespace-nowrap px-4 py-3 font-mono text-xs font-bold text-blue-700">
                                 {row.sku}
                               </td>
                               <td className="px-4 py-3 text-xs font-medium text-slate-700">
@@ -3485,7 +3487,7 @@ export default function ProductsClient() {
 
               <footer className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7">
                 <p className="text-xs text-slate-500">
-                  Phase 2: สร้าง SKU จากสูตร Brand+Category+Model+Gender+Color+Size —
+                  Phase 2: สร้าง SKU จากสูตร Brand+Category(2)+Model(6)+Gender(1)+Color(3)+Size(2) —
                   SKU ที่มีอยู่แล้วจะถูกข้ามอัตโนมัติ (
                   <strong className="text-slate-800">
                     {previewRows.length}
@@ -3884,7 +3886,7 @@ export default function ProductsClient() {
                           : "";
                         return (
                           <tr key={product.id}>
-                            <td className="px-4 py-3 font-mono text-xs font-semibold text-blue-700">
+                            <td className="whitespace-nowrap px-4 py-3 font-mono text-xs font-semibold text-blue-700">
                               {product.sku}
                             </td>
                             <td className="px-4 py-3 text-xs text-slate-700">
