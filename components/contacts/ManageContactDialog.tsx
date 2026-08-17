@@ -13,6 +13,7 @@ import {
 } from "@/app/contacts/contacts";
 import {
   addContactPerson,
+  getContactDetails,
   listContactPersons,
   updateContact,
   type ContactPersonRow,
@@ -137,15 +138,39 @@ export default function ManageContactDialog({
     setShowConfirm(false);
     setIsSaving(false);
 
+    console.info("[ManageContactDialog] load contact", {
+      id: contact.id,
+      raw_contact_roles: contact.contact_roles,
+      form_contact_roles: toContactForm(contact).contactRoles,
+    });
+
     let cancelled = false;
-    void listContactPersons(contact.id).then((result) => {
+    void Promise.all([
+      getContactDetails(contact.id),
+      listContactPersons(contact.id),
+    ]).then(([detailsResult, personsResult]) => {
       if (cancelled) return;
-      if (result.error) {
+
+      if (detailsResult.error) {
+        console.error(
+          "[ManageContactDialog] getContactDetails failed",
+          detailsResult.error,
+        );
+      } else if (detailsResult.data?.contact) {
+        const fresh = detailsResult.data.contact;
+        console.info("[ManageContactDialog] fresh contact_roles", {
+          id: fresh.id,
+          contact_roles: fresh.contact_roles,
+        });
+        setContactForm(toContactForm(fresh));
+      }
+
+      if (personsResult.error) {
         setPersons([]);
-        setPersonsError(result.error);
+        setPersonsError(personsResult.error);
         return;
       }
-      setPersons(result.data ?? []);
+      setPersons(personsResult.data ?? []);
     });
 
     return () => {
@@ -238,7 +263,14 @@ export default function ManageContactDialog({
     setIsSaving(true);
     setFormError("");
 
-    const contact_roles = [...contactForm.contactRoles];
+    const contact_roles = Array.isArray(contactForm.contactRoles)
+      ? contactForm.contactRoles.map((role) => String(role))
+      : [];
+
+    console.info("[ManageContactDialog] submit payload", {
+      id: contact.id,
+      contact_roles,
+    });
 
     try {
       // Payload: contact_roles only (no contact_type). Plain array for RSC serialization.

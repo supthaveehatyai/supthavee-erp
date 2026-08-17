@@ -190,6 +190,13 @@ export async function updateContact(
 
     const supabase = createSupabaseServerClient();
     const taxId = parsed.data.taxId?.trim() || null;
+    const contactRoles = [...parsed.data.contact_roles];
+
+    console.info("[updateContact] payload", {
+      id,
+      contact_roles: contactRoles,
+      taxId,
+    });
 
     const duplicateError = await findDuplicateContactError(supabase, {
       companyName: parsed.data.companyName,
@@ -214,7 +221,7 @@ export async function updateContact(
       branch_code: parsed.data.branchCode?.trim() || "สำนักงานใหญ่",
       phone: parsed.data.phone?.trim() || null,
       address: parsed.data.address?.trim() || null,
-      contact_roles: [...parsed.data.contact_roles],
+      contact_roles: contactRoles,
     };
 
     const { data, error } = await supabase

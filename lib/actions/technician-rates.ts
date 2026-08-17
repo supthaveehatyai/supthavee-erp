@@ -28,11 +28,6 @@ function toWage(value: unknown): number {
   return Math.round((n + Number.EPSILON) * 10000) / 10000;
 }
 
-function unwrapJoin<T>(value: T | T[] | null | undefined): T | null {
-  if (Array.isArray(value)) return value[0] ?? null;
-  return value ?? null;
-}
-
 /**
  * รุ่นงานบริการ (product_models.is_service = true) สำหรับ Rate Card / Kanban
  */
@@ -90,21 +85,13 @@ export async function getTechnicianRates(
     }
 
     const supabase = createClient();
+
+    // Do NOT embed product_models(*) — PostgREST fails with
+    // "Could not find a relationship between technician_rates and product_models"
+    // when the FK is missing from schema cache. Fetch models in a second query.
     const { data, error } = await supabase
       .from("technician_rates")
-      .select(
-        `
-        id,
-        technician_id,
-        service_model_id,
-        default_wage,
-        product_models!technician_rates_service_model_id_fkey (
-          model_code,
-          name,
-          short_name
-        )
-      `,
-      )
+      .select("id, technician_id, service_model_id, default_wage, created_at")
       .eq("technician_id", id)
       .order("created_at", { ascending: true });
 
@@ -117,26 +104,48 @@ export async function getTechnicianRates(
       };
     }
 
-    type RateJoin = {
-      model_code?: string | null;
-      name?: string | null;
-      short_name?: string | null;
-    };
+    const modelIds = [
+      ...new Set(
+        (data ?? [])
+          .map((row) => String(row.service_model_id ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    const modelById = new Map<
+      string,
+      { model_code: string; name: string; short_name: string }
+    >();
+
+    if (modelIds.length > 0) {
+      const { data: models, error: modelsError } = await supabase
+        .from("product_models")
+        .select("id, model_code, name, short_name")
+        .in("id", modelIds);
+
+      if (modelsError) {
+        console.error("[getTechnicianRates] product_models", modelsError.message);
+      } else {
+        for (const model of models ?? []) {
+          modelById.set(String(model.id), {
+            model_code: String(model.model_code ?? "").trim(),
+            name: String(model.name ?? "").trim(),
+            short_name: String(model.short_name ?? "").trim(),
+          });
+        }
+      }
+    }
 
     const rows: TechnicianRateRow[] = (data ?? []).map((row) => {
-      const model = unwrapJoin(
-        row.product_models as RateJoin | RateJoin[] | null,
-      );
+      const modelId = String(row.service_model_id ?? "");
+      const model = modelById.get(modelId);
       return {
         id: String(row.id),
         technician_id: String(row.technician_id),
-        service_model_id: String(row.service_model_id),
-        service_model_code: String(model?.model_code ?? "").trim() || "—",
+        service_model_id: modelId,
+        service_model_code: model?.model_code || "—",
         service_model_name:
-          String(model?.name ?? "").trim() ||
-          String(model?.short_name ?? "").trim() ||
-          String(model?.model_code ?? "").trim() ||
-          "งานบริการ",
+          model?.name || model?.short_name || model?.model_code || "งานบริการ",
         default_wage: toWage(row.default_wage),
       };
     });

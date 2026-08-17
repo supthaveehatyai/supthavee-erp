@@ -72,7 +72,8 @@ export async function findDuplicateContactError(
     return DUPLICATE_CONTACT_NAME_ERROR;
   }
 
-  if (!taxIdNormalized) {
+  // Seed placeholders ("-", scientific notation) are not real tax IDs
+  if (!taxIdNormalized || taxIdNormalized.length < 10 || /e\+/i.test(taxIdRaw)) {
     return null;
   }
 

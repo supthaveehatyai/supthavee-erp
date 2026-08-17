@@ -37,19 +37,34 @@ export function parseContactType(value: unknown): ContactType | null {
   return null;
 }
 
+function coerceRolesRaw(rolesRaw: unknown): unknown[] {
+  if (rolesRaw == null) return [];
+  if (Array.isArray(rolesRaw)) return rolesRaw;
+  if (typeof rolesRaw === "string") {
+    const trimmed = rolesRaw.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      return trimmed
+        .slice(1, -1)
+        .split(",")
+        .map((part) => part.trim().replace(/^"+|"+$/g, ""));
+    }
+    return [trimmed];
+  }
+  if (typeof rolesRaw === "object") {
+    return Object.values(rolesRaw as Record<string, unknown>);
+  }
+  return [];
+}
+
 /**
  * Normalize unknown payload into a unique ContactType[].
- * Empty / invalid → [] (callers decide default or validation error).
+ * Empty / invalid / null (seed rows) → [] (callers decide default).
  */
 export function normalizeContactRoles(rolesRaw: unknown): ContactType[] {
-  if (!Array.isArray(rolesRaw)) {
-    const single = parseContactType(rolesRaw);
-    return single ? [single] : [];
-  }
-
   return [
     ...new Set(
-      rolesRaw
+      coerceRolesRaw(rolesRaw)
         .map((item) => parseContactType(item))
         .filter((item): item is ContactType => item != null),
     ),
