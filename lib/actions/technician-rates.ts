@@ -38,7 +38,6 @@ export async function getServiceModels(): Promise<GetServiceModelsResult> {
       .from("product_models")
       .select("id, model_code, name, short_name, is_service, is_active")
       .eq("is_service", true)
-      .neq("is_active", false)
       .order("model_code", { ascending: true });
 
     if (error) {
@@ -169,7 +168,10 @@ export async function upsertTechnicianRate(
 ): Promise<MutateTechnicianRateResult> {
   try {
     const technicianId = input.technician_id?.trim() ?? "";
-    const serviceModelId = input.service_model_id?.trim() ?? "";
+    const serviceModelId =
+      input.service_model_id?.trim() ||
+      input.product_model_id?.trim() ||
+      "";
     const wage = toWage(input.default_wage);
 
     if (!technicianId) {

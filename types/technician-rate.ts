@@ -28,7 +28,10 @@ export type GetTechnicianRatesResult =
 
 export type UpsertTechnicianRateInput = {
   technician_id: string;
-  service_model_id: string;
+  /** Canonical FK column on technician_rates → product_models.id */
+  service_model_id?: string;
+  /** Alias of service_model_id (product_models.id) */
+  product_model_id?: string;
   default_wage: number;
 };
 

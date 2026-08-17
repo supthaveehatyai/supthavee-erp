@@ -379,6 +379,10 @@ export async function createProductionJob(
     };
   }
 
+  const technicianId = String(
+    formData.get("technicianId") ?? formData.get("technician_id") ?? "",
+  ).trim();
+
   try {
     const supabase = createClient();
 
@@ -436,6 +440,47 @@ export async function createProductionJob(
       };
     }
 
+    let technicianIdToSave: string | null = null;
+    let wageCost = 0;
+    if (technicianId) {
+      const { data: technician, error: techError } = await supabase
+        .from("contacts")
+        .select("id, contact_roles, is_active")
+        .eq("id", technicianId)
+        .contains("contact_roles", ["Technician"])
+        .maybeSingle();
+
+      if (techError) {
+        return {
+          success: false,
+          error: techError.message ?? "ตรวจสอบช่างรับเหมาไม่สำเร็จ",
+          data: null,
+        };
+      }
+      if (!technician || technician.is_active === false) {
+        return {
+          success: false,
+          error: "ช่างรับเหมาต้องมีสถานะ Technician ใน contact_roles",
+          data: null,
+        };
+      }
+      technicianIdToSave = technician.id;
+
+      const serviceModel = await resolveServiceModelFromDocument(
+        supabase,
+        documentId,
+      );
+      if (serviceModel) {
+        const { data: rate } = await supabase
+          .from("technician_rates")
+          .select("default_wage")
+          .eq("technician_id", technicianIdToSave)
+          .eq("service_model_id", serviceModel.id)
+          .maybeSingle();
+        if (rate) wageCost = toWageCost(rate.default_wage);
+      }
+    }
+
     let lastError: string | null = null;
     for (let attempt = 0; attempt < 5; attempt++) {
       const jobNo = await nextProductionJobNo(supabase);
@@ -463,6 +508,8 @@ export async function createProductionJob(
           due_date: dueDate,
           details,
           attachment_paths: attachmentPaths,
+          technician_id: technicianIdToSave,
+          wage_cost: wageCost,
         })
         .select("id, job_no")
         .maybeSingle();

@@ -353,12 +353,13 @@ export function JobDetailSheet({
                   <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-2">
                     {!job.service_model_id ? (
                       <p className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        เอกสารนี้ไม่มีรายการงานบริการ — เพิ่มรุ่นที่
-                        is_service ลงบิล แล้วตั้ง Rate Card ที่หน้าคู่ค้า
+                        เอกสารนี้ไม่มีรายการงานบริการ — ค่าแรงอาจเป็น 0
+                        จนกว่าจะมีรุ่น is_service บนบิล
                       </p>
                     ) : technicianOptions.length === 0 ? (
                       <p className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        ยังไม่มีช่างที่มีเรตสำหรับงานนี้ — ไปตั้งทักษะและค่าแรงที่หน้าคู่ค้า
+                        ยังไม่มีคู่ค้าที่ติดสถานะช่างรับเหมา — ไปหน้าคู่ค้าแล้วติ๊ก
+                        ช่างรับเหมา
                       </p>
                     ) : null}
                     <div className="sm:col-span-2">
@@ -366,11 +367,7 @@ export function JobDetailSheet({
                       <Select
                         id="technician_id"
                         value={technicianId}
-                        disabled={
-                          !canEditAssignment ||
-                          busy ||
-                          !job.service_model_id
-                        }
+                        disabled={!canEditAssignment || busy}
                         onChange={(event) =>
                           applyTechnicianWage(event.target.value)
                         }

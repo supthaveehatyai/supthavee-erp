@@ -149,6 +149,7 @@ export function SkillRateCard({
         const result = await upsertTechnicianRate({
           technician_id: technicianId,
           service_model_id: serviceModelId,
+          product_model_id: serviceModelId,
           default_wage: costNumber,
         });
         if (!result.success) {
@@ -217,10 +218,12 @@ export function SkillRateCard({
 
           <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3 sm:grid-cols-[1fr_8rem_auto]">
             <div>
-              <Label htmlFor="rate_service_name">ชื่องานบริการ (service_name)</Label>
+              <Label htmlFor="rate_service_model">
+                งานบริการ (product_models · is_service)
+              </Label>
               {isEditMode ? (
                 <Input
-                  id="rate_service_name"
+                  id="rate_service_model"
                   readOnly
                   disabled
                   value={(() => {
@@ -233,15 +236,17 @@ export function SkillRateCard({
                 />
               ) : (
                 <Select
-                  id="rate_service_name"
+                  id="rate_service_model"
                   value={serviceModelId}
                   disabled={busy || availableModels.length === 0}
                   onChange={(event) => setServiceModelId(event.target.value)}
                 >
                   <option value="">
-                    {availableModels.length === 0
-                      ? "ไม่มีงานบริการที่ยังไม่ได้ตั้งเรต"
-                      : "— เลือกงานบริการ —"}
+                    {models.length === 0
+                      ? "ยังไม่มีรุ่นงานบริการ (is_service = true)"
+                      : availableModels.length === 0
+                        ? "ตั้งเรตครบทุกงานบริการแล้ว"
+                        : "— เลือกงานบริการ —"}
                   </option>
                   {availableModels.map((model) => (
                     <option key={model.id} value={model.id}>
@@ -299,7 +304,7 @@ export function SkillRateCard({
 
           {rates.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-xs text-slate-400">
-              ยังไม่มีทักษะใน Rate Card — เลือกงานบริการแล้วระบุต้นทุนค่าแรง
+              ยังไม่มีทักษะใน Rate Card — เลือกงานบริการ (is_service) แล้วระบุต้นทุนค่าแรง
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-slate-200">

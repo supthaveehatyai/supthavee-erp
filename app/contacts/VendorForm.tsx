@@ -212,10 +212,12 @@ export default function VendorForm({
   disabled = false,
   children,
 }: VendorFormProps) {
+  const isVendor = showOcrConfig === true;
+
   return (
     <div className="space-y-7">
       {children}
-      {showOcrConfig ? (
+      {isVendor ? (
         <VendorOcrConfigSection
           value={ocrPatternConfigJson}
           onChange={onOcrPatternConfigJsonChange}

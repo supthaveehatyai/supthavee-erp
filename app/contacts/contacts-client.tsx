@@ -1170,7 +1170,10 @@ export default function ContactsClient({
             >
               <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">
                 <VendorForm
-                  showOcrConfig={form.contactRoles.includes("Vendor")}
+                  showOcrConfig={contactHasRole(
+                    { contact_roles: form.contactRoles },
+                    "Vendor",
+                  )}
                   ocrPatternConfigJson={form.ocrPatternConfigJson}
                   onOcrPatternConfigJsonChange={(json) =>
                     updateForm("ocrPatternConfigJson", json)
