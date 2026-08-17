@@ -358,8 +358,11 @@ export function JobDetailSheet({
                       </p>
                     ) : technicianOptions.length === 0 ? (
                       <p className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        ยังไม่มีคู่ค้าที่ติดสถานะช่างรับเหมา — ไปหน้าคู่ค้าแล้วติ๊ก
-                        ช่างรับเหมา
+                        ยังไม่มีช่างรับเหมาที่มี Rate Card สำหรับงานบริการนี้
+                        {job.service_model?.name
+                          ? ` (${job.service_model.name})`
+                          : ""}{" "}
+                        — ตั้ง Skill &amp; Rate Card ที่หน้าคู่ค้า
                       </p>
                     ) : null}
                     <div className="sm:col-span-2">

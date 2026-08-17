@@ -13,6 +13,8 @@ export const COLOR_CODE_LENGTH = 3;
  */
 export const SIZE_CODE_LENGTH = 2;
 export const SIZE_CODE_SKU_REGEX = /^[A-Z0-9]{2}$/;
+/** Brand segment used in SKU when product_models.is_service (no brand). */
+export const SERVICE_SKU_BRAND_CODE = "SVC";
 
 export function normalizeSkuPart(value: string): string {
   return value

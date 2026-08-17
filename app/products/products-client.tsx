@@ -26,11 +26,12 @@ import BrandCombobox, { type Brand } from "./brand-combobox";
 import CategoryCombobox, { type Category } from "./category-combobox";
 import { type Vendor } from "./vendor-combobox";
 import ModelLoadCombobox from "./model-load-combobox";
-import { ProductMatrixVendorField } from "./ProductMatrixForm";
+import { ProductMatrixServiceToggle, ProductMatrixVendorField } from "./ProductMatrixForm";
 import { ProductModelImageUpload } from "@/components/products/ProductModelImageUpload";
 import {
   findProductModelByCode,
   generateSkusFromModel,
+  getProductModelById,
   insertDraftProductModel,
   listLoadableProductModels,
   overwriteDraftProductModel,
@@ -47,6 +48,7 @@ import {
   isValidSizeCodeForSku,
   MODEL_CODE_LENGTH,
   normalizeSkuPart,
+  SERVICE_SKU_BRAND_CODE,
 } from "./product-sku";
 import {
   parseProductModelIdentity,
@@ -138,6 +140,8 @@ type BatchEditForm = {
   modelCode: string;
   /** Public URL จาก product_models.image_url */
   imageUrl: string;
+  /** product_models.is_service */
+  isService: boolean;
   prices: Record<string, SizePrice>;
 };
 
@@ -190,6 +194,8 @@ type MatrixForm = {
   shortName: string;
   /** Public URL จาก Storage product_assets (Visual Verification) */
   imageUrl: string;
+  /** product_models.is_service — งานบริการ ไม่ตัดสต็อก */
+  isService: boolean;
   colorIds: string[];
   sizeIds: string[];
 };
@@ -483,6 +489,7 @@ function createEmptyForm(vendorId = ""): MatrixForm {
     productName: "",
     shortName: "",
     imageUrl: "",
+    isService: false,
     colorIds: [],
     sizeIds: [],
   };
@@ -993,7 +1000,7 @@ export default function ProductsClient() {
     const brandChanged = prevBrandIdForSizesRef.current !== form.brandId;
     prevBrandIdForSizesRef.current = form.brandId;
 
-    if (!form.brandId) {
+    if (!form.brandId && !form.isService) {
       setSizes([]);
       setQuickSizeLabels([]);
       setIsStandardSizePanelOpen(false);
@@ -1011,7 +1018,9 @@ export default function ProductsClient() {
       void (async () => {
         try {
           const [brandData, globalData] = await Promise.all([
-            fetchSizesByBrand(form.brandId),
+            form.brandId
+              ? fetchSizesByBrand(form.brandId)
+              : Promise.resolve([] as Size[]),
             fetchGlobalSizes(),
           ]);
           if (!active) return;
@@ -1064,7 +1073,7 @@ export default function ProductsClient() {
       setIsStandardSizePanelOpen(false);
       setIsSizeLoading(false);
     }
-  }, [form.brandId, pendingSizePricingConfig]);
+  }, [form.brandId, form.isService, pendingSizePricingConfig]);
 
   const selectedBrand = masterData.brands.find(
     (brand) => brand.id === form.brandId,
@@ -1091,7 +1100,7 @@ export default function ProductsClient() {
 
   const previewRows = useMemo<PreviewRow[]>(() => {
     if (
-      !selectedBrand ||
+      (!selectedBrand && !form.isService) ||
       !selectedCategory ||
       !selectedGender ||
       !isValidModelCode(form.modelCode)
@@ -1110,7 +1119,7 @@ export default function ProductsClient() {
     return selectedColors.flatMap((color) =>
       selectedSizes.map((size) => {
         const sku = buildProductSku({
-          brandCode: selectedBrand.brand_code,
+          brandCode: selectedBrand?.brand_code || SERVICE_SKU_BRAND_CODE,
           categoryCode: selectedCategory.category_code,
           modelCode: form.modelCode,
           genderCode: selectedGender.gender_code,
@@ -1137,6 +1146,7 @@ export default function ProductsClient() {
     baseProductName,
     form.colorIds,
     form.modelCode,
+    form.isService,
     form.sizeIds,
     masterData.colors,
     selectedBrand,
@@ -1189,8 +1199,7 @@ export default function ProductsClient() {
   ]);
 
   const isStep1Complete = Boolean(
-    form.vendorId &&
-      form.brandId &&
+    (form.isService || (form.vendorId && form.brandId)) &&
       form.categoryId &&
       form.genderId &&
       isValidModelCode(form.modelCode) &&
@@ -1379,6 +1388,7 @@ export default function ProductsClient() {
       productName: model.name ?? "",
       shortName: model.short_name ?? "",
       imageUrl: (model.image_url ?? "").split("?")[0],
+      isService: model.is_service === true,
       colorIds: [],
       sizeIds: [],
     }));
@@ -1649,6 +1659,7 @@ export default function ProductsClient() {
       shortName,
       gender: selectedGender.gender_name,
       taxType: form.taxType,
+      isService: form.isService,
     });
     if (!identity.ok) {
       setFormError(identity.error);
@@ -1656,8 +1667,8 @@ export default function ProductsClient() {
     }
 
     const payload: SaveDraftModelInput = {
-      vendorId: identity.data.vendor_id,
-      brandId: identity.data.brand_id,
+      vendorId: identity.data.vendor_id ?? "",
+      brandId: identity.data.brand_id ?? "",
       categoryId: identity.data.category_id,
       modelCode: identity.data.model_code,
       name: identity.data.name,
@@ -1666,6 +1677,7 @@ export default function ProductsClient() {
       taxType: identity.data.tax_type,
       sizePricingConfig: serializeSizePricingConfig(sizePricing),
       imageUrl: form.imageUrl.trim() || undefined,
+      isService: identity.data.is_service,
     };
 
     setIsDraftSaving(true);
@@ -1745,8 +1757,12 @@ export default function ProductsClient() {
       );
       return;
     }
-    if (!selectedGender || !selectedBrand || !selectedCategory) {
-      setFormError("กรุณาเลือก Vendor / Brand / Category / Gender ให้ครบ");
+    if (!selectedGender || !selectedCategory) {
+      setFormError("กรุณาเลือก Category / Gender ให้ครบ");
+      return;
+    }
+    if (!form.isService && (!selectedBrand || !form.vendorId)) {
+      setFormError("กรุณาเลือก Vendor / Brand ให้ครบ");
       return;
     }
     if (
@@ -1759,7 +1775,7 @@ export default function ProductsClient() {
     const shortName =
       form.shortName.trim() ||
       selectedCategory.category_name ||
-      `${selectedBrand.brand_name} ${form.modelCode.trim()}`.trim();
+      `${selectedBrand?.brand_name ?? ""} ${form.modelCode.trim()}`.trim();
 
     const identity = parseProductModelIdentity({
       vendorId: form.vendorId,
@@ -1770,6 +1786,7 @@ export default function ProductsClient() {
       shortName,
       gender: selectedGender.gender_name,
       taxType: form.taxType,
+      isService: form.isService,
     });
     if (!identity.ok) {
       setFormError(identity.error);
@@ -1782,10 +1799,10 @@ export default function ProductsClient() {
 
     const result = await generateSkusFromModel({
       modelId: draftModelId,
-      vendorId: identity.data.vendor_id,
+      vendorId: identity.data.vendor_id ?? "",
       model: {
-        vendorId: identity.data.vendor_id,
-        brandId: identity.data.brand_id,
+        vendorId: identity.data.vendor_id ?? "",
+        brandId: identity.data.brand_id ?? "",
         categoryId: identity.data.category_id,
         modelCode: identity.data.model_code,
         name: identity.data.name,
@@ -1794,6 +1811,7 @@ export default function ProductsClient() {
         taxType: safeTaxType,
         sizePricingConfig: serializeSizePricingConfig(sizePricing),
         imageUrl: form.imageUrl.trim() || undefined,
+        isService: identity.data.is_service,
       },
       skus: previewRows.map((row) => ({
         sku: row.sku,
@@ -1978,27 +1996,24 @@ export default function ProductsClient() {
         let vendorId = "";
         let modelCode = "";
         let imageUrl = "";
+        let isService = false;
         const modelId =
           group.modelId ??
           group.products.find((item) => item.model_id)?.model_id ??
           null;
 
         if (modelId) {
-          const { data: modelRow, error: modelError } = await supabase
-            .from("product_models")
-            .select("vendor_id, model_code, image_url")
-            .eq("id", modelId)
-            .maybeSingle();
-
-          if (modelError) {
-            throw modelError;
+          const modelResult = await getProductModelById(modelId);
+          if (!modelResult.ok) {
+            throw new Error(modelResult.error ?? "โหลดรุ่นสินค้าไม่สำเร็จ");
           }
 
-          vendorId = (modelRow?.vendor_id as string | null) ?? "";
-          modelCode = String(modelRow?.model_code ?? "").trim();
-          imageUrl = String(modelRow?.image_url ?? "")
+          vendorId = modelResult.existing?.vendor_id ?? "";
+          modelCode = String(modelResult.existing?.model_code ?? "").trim();
+          imageUrl = String(modelResult.existing?.image_url ?? "")
             .trim()
             .split("?")[0];
+          isService = modelResult.existing?.is_service === true;
         } else {
           const mappedVendor = vendorByProductId[group.products[0]?.id ?? ""];
           vendorId = mappedVendor?.id ?? "";
@@ -2013,6 +2028,7 @@ export default function ProductsClient() {
           vendorId,
           modelCode,
           imageUrl,
+          isService,
           prices,
         });
         setEditError("");
@@ -2064,10 +2080,12 @@ export default function ProductsClient() {
       return;
     }
 
-    const vendorResult = vendorIdSchema.safeParse(editForm.vendorId.trim());
-    if (!vendorResult.success) {
-      setEditError(zodFirstError(vendorResult.error, VENDOR_ID_REQUIRED_MESSAGE));
-      return;
+    if (!editForm.isService) {
+      const vendorResult = vendorIdSchema.safeParse(editForm.vendorId.trim());
+      if (!vendorResult.success) {
+        setEditError(zodFirstError(vendorResult.error, VENDOR_ID_REQUIRED_MESSAGE));
+        return;
+      }
     }
 
     for (const sizeLabel of editSizeLabels) {
@@ -2098,12 +2116,14 @@ export default function ProductsClient() {
     setIsEditSaving(true);
     setEditError("");
 
-    const vendorResult = vendorIdSchema.safeParse(editForm.vendorId.trim());
-    if (!vendorResult.success) {
-      setEditError(zodFirstError(vendorResult.error, VENDOR_ID_REQUIRED_MESSAGE));
-      setIsEditSaving(false);
-      setIsEditConfirmOpen(false);
-      return;
+    if (!editForm.isService) {
+      const vendorResult = vendorIdSchema.safeParse(editForm.vendorId.trim());
+      if (!vendorResult.success) {
+        setEditError(zodFirstError(vendorResult.error, VENDOR_ID_REQUIRED_MESSAGE));
+        setIsEditSaving(false);
+        setIsEditConfirmOpen(false);
+        return;
+      }
     }
 
     let safeTaxType: TaxType = "INC_VAT";
@@ -2153,7 +2173,7 @@ export default function ProductsClient() {
 
     const formData = new FormData();
     formData.set("modelId", modelId);
-    formData.set("vendorId", vendorResult.data);
+    formData.set("vendorId", editForm.isService ? editForm.vendorId.trim() : editForm.vendorId.trim());
     formData.set("name", baseName);
     formData.set("shortName", shortName);
     formData.set("gender", selectedEditGender.gender_name);
@@ -2162,6 +2182,7 @@ export default function ProductsClient() {
       "image_url",
       editForm.imageUrl.trim().split("?")[0] || "",
     );
+    formData.set("is_service", editForm.isService ? "true" : "false");
     formData.set("sizePrices", JSON.stringify(sizePrices));
 
     const result = await updateProductModel(formData);
@@ -2702,6 +2723,15 @@ export default function ProductsClient() {
                     onChange={(url) => updateForm("imageUrl", url)}
                   />
 
+                  <ProductMatrixServiceToggle
+                    className="mb-4"
+                    checked={form.isService}
+                    disabled={isMasterLoading || isSaving || isDraftSaving}
+                    onCheckedChange={(checked) =>
+                      updateForm("isService", checked)
+                    }
+                  />
+
                   <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
                     <div className="mb-1.5 flex flex-wrap items-center gap-2">
                       <span className={labelClass + " mb-0"}>
@@ -2735,6 +2765,8 @@ export default function ProductsClient() {
                   </div>
 
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+                    {!form.isService ? (
+                      <>
                     <ProductMatrixVendorField
                       className="sm:col-span-2"
                       disabled={isMasterLoading}
@@ -2772,6 +2804,12 @@ export default function ProductsClient() {
                         }
                       />
                     </div>
+                      </>
+                    ) : (
+                      <p className="sm:col-span-2 lg:col-span-6 rounded-xl border border-violet-100 bg-violet-50/60 px-3 py-2 text-[11px] text-violet-800">
+                        งานบริการ — ไม่ต้องระบุผู้จำหน่ายและแบรนด์ (ไม่ตัดสต็อก)
+                      </p>
+                    )}
                     <div className="relative block sm:col-span-1 lg:col-span-2">
                       <span className={labelClass}>
                         หมวดหมู่ (Category){" "}
@@ -2990,7 +3028,7 @@ export default function ProductsClient() {
                             type="button"
                             onClick={() => void openStandardSizePanel()}
                             disabled={
-                              !form.brandId ||
+                              (!form.brandId && !form.isService) ||
                               isMasterLoading ||
                               isSaving ||
                               isSizeLoading ||
@@ -3002,7 +3040,7 @@ export default function ProductsClient() {
                           </button>
                         </div>
                       </div>
-                      {!form.brandId ? (
+                      {!form.brandId && !form.isService ? (
                         <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center text-xs text-slate-400">
                           กรุณาเลือกแบรนด์ก่อน
                         </div>
@@ -3667,6 +3705,17 @@ export default function ProductsClient() {
                   }
                 />
 
+                <ProductMatrixServiceToggle
+                  className="mb-4"
+                  checked={editForm.isService}
+                  disabled={isEditSaving}
+                  onCheckedChange={(checked) =>
+                    setEditForm((current) =>
+                      current ? { ...current, isService: checked } : current,
+                    )
+                  }
+                />
+
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="block sm:col-span-2">
                     <span className={labelClass}>
@@ -3749,6 +3798,11 @@ export default function ProductsClient() {
                     </select>
                   </label>
                   <div className="block sm:col-span-2">
+                    {editForm.isService ? (
+                      <p className="rounded-xl border border-violet-100 bg-violet-50/60 px-3 py-2 text-[11px] text-violet-800">
+                        งานบริการ — ไม่ต้องระบุผู้จำหน่าย (ไม่ตัดสต็อก)
+                      </p>
+                    ) : (
                     <ProductMatrixVendorField
                       vendors={masterData.vendors}
                       value={editForm.vendorId}
@@ -3772,6 +3826,7 @@ export default function ProductsClient() {
                       }
                       hint="บังคับ (UUID) — บันทึกลง product_models.vendor_id สำหรับ Bulk Mapping / Goods Receipt"
                     />
+                    )}
                   </div>
                 </div>
               </section>

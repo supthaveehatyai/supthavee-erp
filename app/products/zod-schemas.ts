@@ -65,31 +65,59 @@ export type SizeSchemaOutput = z.output<typeof sizeSchema>;
 
 const taxTypeSchema = z.enum(["INC_VAT", "EXC_VAT", "NON_VAT"]);
 
+const optionalUuid = z.preprocess(
+  (value) => {
+    if (value == null) return null;
+    if (typeof value === "string" && value.trim() === "") return null;
+    return value;
+  },
+  z.uuid().nullable().optional(),
+);
+
 /**
  * Product model identity (Phase 1 Base Model).
- * `vendor_id` is a strictly required UUID — never optional / nullable.
+ * `vendor_id` / `brand_id` required for goods; optional when `is_service`.
  */
-export const productModelSchema = z.object({
-  vendor_id: vendorIdSchema,
-  brand_id: z.uuid({ error: "ต้องระบุแบรนด์ (brand_id) เป็น UUID ที่ถูกต้อง" }),
-  category_id: z.uuid({
-    error: "ต้องระบุหมวดหมู่ (category_id) เป็น UUID ที่ถูกต้อง",
-  }),
-  model_code: z
-    .string()
-    .trim()
-    .toUpperCase()
-    .length(
-      MODEL_CODE_LENGTH,
-      `รหัสรุ่น (model_code) ต้องมีความยาว ${MODEL_CODE_LENGTH} ตัวอักษรพอดี`,
-    ),
-  name: z.string().trim().min(1, "กรุณาระบุชื่อรุ่นสินค้า"),
-  short_name: z.string().trim().max(100).optional(),
-  gender: z.string().trim().min(1, "กรุณาเลือกเพศ"),
-  tax_type: taxTypeSchema.default("INC_VAT"),
-  /** Public URL จาก Storage product_assets (Visual Verification) */
-  image_url: z.string().nullable().optional(),
-});
+export const productModelSchema = z
+  .object({
+    vendor_id: optionalUuid,
+    brand_id: optionalUuid,
+    category_id: z.uuid({
+      error: "ต้องระบุหมวดหมู่ (category_id) เป็น UUID ที่ถูกต้อง",
+    }),
+    model_code: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .length(
+        MODEL_CODE_LENGTH,
+        `รหัสรุ่น (model_code) ต้องมีความยาว ${MODEL_CODE_LENGTH} ตัวอักษรพอดี`,
+      ),
+    name: z.string().trim().min(1, "กรุณาระบุชื่อรุ่นสินค้า"),
+    short_name: z.string().trim().max(100).optional(),
+    gender: z.string().trim().min(1, "กรุณาเลือกเพศ"),
+    tax_type: taxTypeSchema.default("INC_VAT"),
+    /** Public URL จาก Storage product_assets (Visual Verification) */
+    image_url: z.string().nullable().optional(),
+    is_service: z.boolean().default(false),
+  })
+  .superRefine((data, ctx) => {
+    if (data.is_service) return;
+    if (!data.vendor_id) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["vendor_id"],
+        message: VENDOR_ID_REQUIRED_MESSAGE,
+      });
+    }
+    if (!data.brand_id) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["brand_id"],
+        message: "ต้องระบุแบรนด์ (brand_id) เป็น UUID ที่ถูกต้อง",
+      });
+    }
+  });
 
 export type ProductModelSchemaInput = z.input<typeof productModelSchema>;
 export type ProductModelSchemaOutput = z.output<typeof productModelSchema>;
@@ -107,18 +135,30 @@ export const updateProductModelSizePriceSchema = z.object({
  * Payload สำหรับแก้ไขทั้งรุ่น (Product Model + bulk SKU prices).
  * `image_url` เป็น Public URL จาก Storage product_assets
  */
-export const updateProductModelSchema = z.object({
-  modelId: z.uuid({ error: "ต้องระบุ model_id เป็น UUID ที่ถูกต้อง" }),
-  vendorId: vendorIdSchema,
-  name: z.string().trim().min(1, "กรุณาระบุชื่อรุ่นสินค้า"),
-  shortName: z.string().trim().max(100).optional(),
-  gender: z.string().trim().min(1, "กรุณาเลือกเพศ"),
-  taxType: taxTypeSchema,
-  image_url: z.string().nullable().optional(),
-  sizePrices: z
-    .array(updateProductModelSizePriceSchema)
-    .min(1, "ต้องระบุราคาตามไซส์อย่างน้อย 1 รายการ"),
-});
+export const updateProductModelSchema = z
+  .object({
+    modelId: z.uuid({ error: "ต้องระบุ model_id เป็น UUID ที่ถูกต้อง" }),
+    vendorId: optionalUuid,
+    name: z.string().trim().min(1, "กรุณาระบุชื่อรุ่นสินค้า"),
+    shortName: z.string().trim().max(100).optional(),
+    gender: z.string().trim().min(1, "กรุณาเลือกเพศ"),
+    taxType: taxTypeSchema,
+    image_url: z.string().nullable().optional(),
+    isService: z.boolean().default(false),
+    sizePrices: z
+      .array(updateProductModelSizePriceSchema)
+      .min(1, "ต้องระบุราคาตามไซส์อย่างน้อย 1 รายการ"),
+  })
+  .superRefine((data, ctx) => {
+    if (data.isService) return;
+    if (!data.vendorId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["vendorId"],
+        message: VENDOR_ID_REQUIRED_MESSAGE,
+      });
+    }
+  });
 
 export type UpdateProductModelSchemaInput = z.input<
   typeof updateProductModelSchema
@@ -148,6 +188,7 @@ export function parseProductModelIdentity(input: {
   gender: string;
   taxType: "INC_VAT" | "EXC_VAT" | "NON_VAT";
   imageUrl?: string | null;
+  isService?: boolean;
 }):
   | { ok: true; data: ProductModelSchemaOutput }
   | { ok: false; error: string } {
@@ -161,6 +202,7 @@ export function parseProductModelIdentity(input: {
     gender: input.gender,
     tax_type: input.taxType,
     image_url: input.imageUrl ?? null,
+    is_service: Boolean(input.isService),
   });
 
   if (!result.success) {

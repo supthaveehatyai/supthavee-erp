@@ -931,19 +931,55 @@ async function isCurrentUserAdmin(): Promise<boolean> {
 }
 
 /**
- * รายชื่อช่างรับเหมาจาก contacts.contact_roles (ไม่พึ่ง PostgREST embed)
+ * รายชื่อช่างรับเหมาจาก contacts.contact_roles ที่มี 'Technician'
+ * เมื่อระบุ serviceModelId จะแสดงเฉพาะช่างที่มี Rate Card ตรง service_model_id นั้น
  */
 export async function getTechnicianOptions(
   serviceModelId?: string | null,
 ): Promise<GetTechnicianOptionsResult> {
   try {
     const supabase = createClient();
-    const { data, error } = await supabase
+    const modelId = serviceModelId?.trim() ?? "";
+    const wageByTechnician = new Map<string, number>();
+
+    if (modelId) {
+      const { data: rates, error: ratesError } = await supabase
+        .from("technician_rates")
+        .select("technician_id, default_wage")
+        .eq("service_model_id", modelId);
+
+      if (ratesError) {
+        console.error("[getTechnicianOptions] rates", ratesError.message);
+        return {
+          success: false,
+          error: ratesError.message ?? "ดึง Rate Card ช่างรับเหมาไม่สำเร็จ",
+          data: [],
+        };
+      }
+
+      for (const rate of rates ?? []) {
+        const techId = String(rate.technician_id ?? "").trim();
+        if (!techId) continue;
+        wageByTechnician.set(techId, toWageCost(rate.default_wage));
+      }
+
+      if (wageByTechnician.size === 0) {
+        return { success: true, data: [] };
+      }
+    }
+
+    let contactQuery = supabase
       .from("contacts")
       .select("id, company_name, contact_roles, is_active")
       .contains("contact_roles", ["Technician"])
       .neq("is_active", false)
       .order("company_name", { ascending: true });
+
+    if (modelId) {
+      contactQuery = contactQuery.in("id", [...wageByTechnician.keys()]);
+    }
+
+    const { data, error } = await contactQuery;
 
     if (error) {
       console.error("[getTechnicianOptions]", error.message);
@@ -954,31 +990,13 @@ export async function getTechnicianOptions(
       };
     }
 
-    const wageByTechnician = new Map<string, number>();
-    const modelId = serviceModelId?.trim() ?? "";
-    if (modelId) {
-      const { data: rates, error: ratesError } = await supabase
-        .from("technician_rates")
-        .select("technician_id, default_wage")
-        .eq("service_model_id", modelId);
-
-      if (ratesError) {
-        console.error("[getTechnicianOptions] rates", ratesError.message);
-      } else {
-        for (const rate of rates ?? []) {
-          const techId = String(rate.technician_id ?? "").trim();
-          if (!techId) continue;
-          wageByTechnician.set(techId, toWageCost(rate.default_wage));
-        }
-      }
-    }
-
     const options: TechnicianOption[] = [];
     const seen = new Set<string>();
 
     for (const row of data ?? []) {
       const id = String(row.id ?? "").trim();
       if (!id || seen.has(id)) continue;
+      if (modelId && !wageByTechnician.has(id)) continue;
       seen.add(id);
       const roles = Array.isArray(row.contact_roles) ? row.contact_roles : [];
       const primaryRole =
@@ -1048,8 +1066,9 @@ export async function updateProductionJobAssignment(
     if (technicianId) {
       const { data: technician, error: techError } = await supabase
         .from("contacts")
-        .select("id, contact_roles")
+        .select("id, contact_roles, is_active")
         .eq("id", technicianId)
+        .contains("contact_roles", ["Technician"])
         .maybeSingle();
 
       if (techError) {
@@ -1058,16 +1077,10 @@ export async function updateProductionJobAssignment(
           error: techError.message ?? "ตรวจสอบช่างรับเหมาไม่สำเร็จ",
         };
       }
-      const techRoles = Array.isArray(technician?.contact_roles)
-        ? technician.contact_roles
-        : [];
-      if (
-        !technician ||
-        !TECHNICIAN_CONTACT_TYPES.some((role) => techRoles.includes(role))
-      ) {
+      if (!technician || technician.is_active === false) {
         return {
           success: false,
-          error: "ช่างรับเหมาต้องเป็น Vendor หรือ Technician ที่ลงทะเบียนแล้ว",
+          error: "ช่างรับเหมาต้องมีสถานะ Technician ใน contact_roles",
         };
       }
 
@@ -1090,7 +1103,13 @@ export async function updateProductionJobAssignment(
             error: rateError.message ?? "ตรวจสอบ Rate Card ไม่สำเร็จ",
           };
         }
-        wageCost = rate ? toWageCost(rate.default_wage) : 0;
+        if (!rate) {
+          return {
+            success: false,
+            error: "ช่างรับเหมานี้ไม่มี Rate Card สำหรับงานบริการในใบสั่งผลิตนี้",
+          };
+        }
+        wageCost = toWageCost(rate.default_wage);
       }
 
       if (isAdmin && input.wage_cost != null) {

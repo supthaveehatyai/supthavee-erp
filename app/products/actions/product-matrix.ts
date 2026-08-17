@@ -34,6 +34,8 @@ export type SaveDraftModelInput = {
   sizePricingConfig?: string;
   /** Public URL จาก Storage bucket product_assets */
   imageUrl?: string;
+  /** product_models.is_service — งานบริการ ไม่ตัดสต็อก */
+  isService?: boolean;
 };
 
 export type ExistingProductModel = {
@@ -49,6 +51,7 @@ export type ExistingProductModel = {
   category_id: string | null;
   size_pricing_config: unknown;
   image_url: string | null;
+  is_service: boolean;
 };
 
 export type UploadProductModelImageResult = {
@@ -84,7 +87,7 @@ export type GenerateSkusInput = {
   /** Existing draft/parent model id from Phase 1 (optional — created if missing). */
   modelId?: string | null;
   model: SaveDraftModelInput;
-  vendorId: string;
+  vendorId?: string;
   skus: GenerateSkuRow[];
 };
 
@@ -129,6 +132,7 @@ function validateStep1(input: SaveDraftModelInput): string | null {
     gender: input.gender,
     taxType: input.taxType,
     imageUrl: input.imageUrl ?? null,
+    isService: input.isService,
   });
   if (!identity.ok) return identity.error;
   if (!isValidModelCode(identity.data.model_code)) {
@@ -141,10 +145,11 @@ function buildDraftPayload(input: SaveDraftModelInput) {
   const modelCode = input.modelCode.trim().toUpperCase();
   const shortName =
     input.shortName?.trim() || `${input.name.trim()}`.slice(0, 100);
+  const isService = Boolean(input.isService);
 
   return {
-    vendor_id: input.vendorId,
-    brand_id: input.brandId,
+    vendor_id: isService ? input.vendorId?.trim() || null : input.vendorId,
+    brand_id: isService ? input.brandId?.trim() || null : input.brandId,
     category_id: input.categoryId,
     model_code: modelCode,
     name: input.name.trim(),
@@ -154,11 +159,12 @@ function buildDraftPayload(input: SaveDraftModelInput) {
     status: "DRAFT" as const,
     size_pricing_config: parseSizePricingConfig(input.sizePricingConfig),
     image_url: input.imageUrl?.trim().split("?")[0] || null,
+    is_service: isService,
   };
 }
 
 const EXISTING_MODEL_SELECT =
-  "id, model_code, name, short_name, gender, tax_type, status, vendor_id, brand_id, category_id, size_pricing_config, image_url";
+  "id, model_code, name, short_name, gender, tax_type, status, vendor_id, brand_id, category_id, size_pricing_config, image_url, is_service";
 
 const PRODUCT_ASSETS_BUCKET = "product_assets";
 const MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -284,6 +290,42 @@ export async function findProductModelByCode(
   };
 }
 
+export async function getProductModelById(
+  modelId: string,
+): Promise<{
+  ok: boolean;
+  existing: ExistingProductModel | null;
+  error?: string;
+}> {
+  const id = modelId?.trim() ?? "";
+  if (!id) {
+    return { ok: false, existing: null, error: "ไม่พบรหัสรุ่นสินค้า" };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("product_models")
+    .select(EXISTING_MODEL_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    return {
+      ok: false,
+      existing: null,
+      error:
+        error.code === "42P01"
+          ? "ยังไม่มีตาราง product_models — รัน sql/product_models.sql ก่อน"
+          : error.message,
+    };
+  }
+
+  return {
+    ok: true,
+    existing: (data as ExistingProductModel | null) ?? null,
+  };
+}
+
 /**
  * Load models for Matrix combobox — DRAFT and ACTIVE only.
  */
@@ -345,6 +387,7 @@ export async function listLoadableProductModels(): Promise<{
       category_id: record.category_id,
       size_pricing_config: record.size_pricing_config,
       image_url: record.image_url ?? null,
+      is_service: record.is_service === true,
       brand_code: brand?.brand_code ?? null,
       brand_name: brand?.brand_name ?? null,
       category_code: category?.category_code ?? null,
@@ -452,14 +495,17 @@ export async function generateSkusFromModel(
     return { ok: false, error: validationError };
   }
 
-  if (!input.vendorId) {
-    return { ok: false, error: "กรุณาเลือกผู้จำหน่าย" };
-  }
-  if (input.vendorId !== input.model.vendorId) {
-    return {
-      ok: false,
-      error: "vendor_id ของฟอร์มกับโมเดลไม่ตรงกัน — ต้องระบุ Vendor บังคับ",
-    };
+  const isService = Boolean(input.model.isService);
+  if (!isService) {
+    if (!input.vendorId) {
+      return { ok: false, error: "กรุณาเลือกผู้จำหน่าย" };
+    }
+    if (input.vendorId !== input.model.vendorId) {
+      return {
+        ok: false,
+        error: "vendor_id ของฟอร์มกับโมเดลไม่ตรงกัน — ต้องระบุ Vendor บังคับ",
+      };
+    }
   }
 
   if (!input.skus.length) {
@@ -787,6 +833,9 @@ export async function updateProductModel(
         formDataText(formData, "tax_type") ||
         "INC_VAT",
       image_url: imageUrl,
+      isService:
+        formDataText(formData, "is_service") === "true" ||
+        formDataText(formData, "isService") === "true",
       sizePrices: sizePricesOrError,
     });
 
@@ -816,12 +865,13 @@ export async function updateProductModel(
     const { error: modelUpdateError } = await supabaseAdmin
       .from("product_models")
       .update({
-        vendor_id: input.vendorId,
+        vendor_id: input.isService ? input.vendorId || null : input.vendorId,
         name: baseName,
         short_name: shortName,
         gender: input.gender,
         tax_type: taxType,
         image_url: input.image_url?.trim() || null,
+        is_service: input.isService,
       })
       .eq("id", input.modelId);
 
