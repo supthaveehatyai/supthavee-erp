@@ -1,19 +1,29 @@
 import { z } from "zod";
 
-/** Allowed Multi-Role values for contacts.contact_roles */
-export const CONTACT_ROLE_ENUM = z.enum([
-  "Customer",
-  "Vendor",
-  "Technician",
-]);
+const ALLOWED_CONTACT_ROLES = ["Customer", "Vendor", "Technician"] as const;
 
 /**
- * Multi-role array — replaces legacy contact_type.
- * At least one role required.
+ * Multi-role array — replaces legacy contact_type entirely.
+ * Accept string[] first (UI / DB), then keep only known roles.
  */
 export const contactRolesSchema = z
-  .array(CONTACT_ROLE_ENUM)
-  .min(1, "กรุณาเลือกอย่างน้อย 1 สถานะ");
+  .array(z.string())
+  .min(1, "กรุณาเลือกอย่างน้อย 1 สถานะ")
+  .transform((roles) => {
+    const unique = [
+      ...new Set(
+        roles
+          .map((role) => role.trim())
+          .filter((role): role is (typeof ALLOWED_CONTACT_ROLES)[number] =>
+            (ALLOWED_CONTACT_ROLES as readonly string[]).includes(role),
+          ),
+      ),
+    ];
+    return unique;
+  })
+  .refine((roles) => roles.length >= 1, {
+    message: "กรุณาเลือกอย่างน้อย 1 สถานะ",
+  });
 
 /** Create / update contact identity payload (no contact_type). */
 export const contactMutationSchema = z.object({
@@ -34,9 +44,8 @@ export type ContactMutationInput = z.infer<typeof contactMutationSchema>;
 export function parseContactRolesInput(
   rolesRaw: unknown,
 ):
-  | { ok: true; contact_roles: z.infer<typeof contactRolesSchema> }
+  | { ok: true; contact_roles: string[] }
   | { ok: false; error: string } {
-  // Accept camelCase from UI or snake_case from DB-shaped payloads
   const result = contactRolesSchema.safeParse(rolesRaw);
   if (!result.success) {
     return {

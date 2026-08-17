@@ -173,7 +173,8 @@ export async function updateContact(
     const raw = payload as Record<string, unknown>;
     const parsed = parseContactMutation({
       companyName: raw.companyName ?? raw.company_name,
-      contactRoles: raw.contactRoles ?? raw.contact_roles,
+      contactRoles: raw.contactRoles,
+      contact_roles: raw.contact_roles,
       taxId: raw.taxId ?? raw.tax_id,
       branchCode: raw.branchCode ?? raw.branch_code,
       phone: raw.phone,
@@ -199,13 +200,21 @@ export async function updateContact(
       return { data: null, error: duplicateError };
     }
 
-    const updatePayload = {
+    // Hard rule: write contact_roles array only — never contact_type
+    const updatePayload: {
+      company_name: string;
+      tax_id: string | null;
+      branch_code: string;
+      phone: string | null;
+      address: string | null;
+      contact_roles: string[];
+    } = {
       company_name: parsed.data.companyName,
       tax_id: taxId,
       branch_code: parsed.data.branchCode?.trim() || "สำนักงานใหญ่",
       phone: parsed.data.phone?.trim() || null,
       address: parsed.data.address?.trim() || null,
-      contact_roles: parsed.data.contact_roles,
+      contact_roles: [...parsed.data.contact_roles],
     };
 
     const { data, error } = await supabase
@@ -223,7 +232,7 @@ export async function updateContact(
       };
     }
 
-    revalidatePath(CONTACTS_PATH);
+    revalidatePath("/contacts");
     return { data: normalizeContactRow(data), error: null };
   } catch (err) {
     console.error("[updateContact] exception", err);

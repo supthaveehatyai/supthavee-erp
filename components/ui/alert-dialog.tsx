@@ -3,9 +3,15 @@
 /**
  * Lightweight AlertDialog (shadcn/ui-compatible API) — no extra Radix dependency.
  * Mirrors Dialog styling used across the ERP.
+ *
+ * Must portal to `document.body` with z-index ABOVE Radix Dialog
+ * (`DialogOverlay`/`DialogContent` use z-[10000]/z-[10001]). Otherwise a
+ * confirm dialog opened from inside ManageContactDialog (etc.) sits behind
+ * the parent dialog and looks like a silent no-op on Save.
  */
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 
 type AlertDialogContextValue = {
@@ -99,13 +105,19 @@ function AlertDialogContent({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open, setOpen]);
 
-  if (!open) return null;
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
 
+  if (!open || !mounted) return null;
+
+  // Portal + z-[11000]: sit above Radix Dialog (z-10000/10001).
   // `pointer-events-auto` is required when nested above a Radix Dialog:
-  // Radix sets `pointer-events: none` on `body`, so siblings outside
-  // Dialog.Content would otherwise swallow / ignore all clicks.
-  return (
-    <div className="fixed inset-0 z-[10000] flex pointer-events-auto items-center justify-center p-4">
+  // Radix sets `pointer-events: none` on `body`, so without this the
+  // confirm layer would ignore all clicks.
+  return createPortal(
+    <div className="fixed inset-0 z-[11000] flex pointer-events-auto items-center justify-center p-4">
       <div
         role="presentation"
         className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]"
@@ -127,7 +139,8 @@ function AlertDialogContent({
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

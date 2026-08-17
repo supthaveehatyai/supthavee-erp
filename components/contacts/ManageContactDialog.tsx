@@ -64,13 +64,15 @@ const emptyPersonForm = (): PersonFormState => ({
 });
 
 function toContactForm(contact: Contact): ContactFormState {
+  const roles = normalizeContactRoles(contact.contact_roles);
   return {
     companyName: contact.company_name ?? "",
     taxId: contact.tax_id ?? "",
     branchCode: contact.branch_code ?? "สำนักงานใหญ่",
     phone: contact.phone ?? "",
     address: contact.address ?? "",
-    contactRoles: normalizeContactRoles(contact.contact_roles),
+    // Never leave undefined — empty DB/legacy rows default to Customer
+    contactRoles: roles.length > 0 ? roles : (["Customer"] as ContactType[]),
   };
 }
 
@@ -239,13 +241,13 @@ export default function ManageContactDialog({
     const contact_roles = [...contactForm.contactRoles];
 
     try {
+      // Payload: contact_roles only (no contact_type). Plain array for RSC serialization.
       const updateResult = await updateContact(contact.id, {
         companyName: contactForm.companyName.trim(),
         taxId: contactForm.taxId.trim() || null,
         branchCode: contactForm.branchCode.trim() || "สำนักงานใหญ่",
         phone: contactForm.phone.trim() || null,
         address: contactForm.address.trim() || null,
-        contactRoles: contact_roles,
         contact_roles,
       });
 
@@ -294,7 +296,9 @@ export default function ManageContactDialog({
     } catch (error) {
       console.error("Submit Error:", error);
       const message =
-        error instanceof Error ? error.message : "บันทึกข้อมูลไม่สำเร็จ";
+        error instanceof Error && error.message
+          ? error.message
+          : "บันทึกข้อมูลไม่สำเร็จ";
       setFormError(message);
       setShowConfirm(false);
       toast.error(message);
