@@ -39,23 +39,21 @@ export function parseContactType(value: unknown): ContactType | null {
 
 /**
  * Normalize unknown payload into a unique ContactType[].
- * Accepts string[] from DB / form state. Defaults to ["Customer"] if empty.
+ * Empty / invalid → [] (callers decide default or validation error).
  */
 export function normalizeContactRoles(rolesRaw: unknown): ContactType[] {
   if (!Array.isArray(rolesRaw)) {
     const single = parseContactType(rolesRaw);
-    return single ? [single] : ["Customer"];
+    return single ? [single] : [];
   }
 
-  const roles = [
+  return [
     ...new Set(
       rolesRaw
         .map((item) => parseContactType(item))
         .filter((item): item is ContactType => item != null),
     ),
   ];
-
-  return roles.length > 0 ? roles : ["Customer"];
 }
 
 export function contactHasRole(
@@ -202,7 +200,7 @@ export function normalizeContactRow(row: unknown): Contact {
   return {
     id: String(raw.id ?? ""),
     created_at: String(raw.created_at ?? ""),
-    contact_roles: contactRoles,
+    contact_roles: contactRoles.length > 0 ? contactRoles : ["Customer"],
     customer_type: (raw.customer_type as string | null) ?? null,
     company_name: String(raw.company_name ?? ""),
     tax_id: (raw.tax_id as string | null) ?? null,

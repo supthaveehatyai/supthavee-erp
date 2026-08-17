@@ -196,21 +196,29 @@ export default function ManageContactDialog({
   function validateBeforeConfirm(): boolean {
     setFormError("");
     if (!contact) {
-      setFormError("ไม่พบข้อมูลคู่ค้า");
+      const message = "ไม่พบข้อมูลคู่ค้า";
+      setFormError(message);
+      toast.error(message);
       return false;
     }
     if (!contactForm.companyName.trim()) {
-      setFormError("กรุณากรอกชื่อบริษัทหรือชื่อคู่ค้า");
+      const message = "กรุณากรอกชื่อบริษัทหรือชื่อคู่ค้า";
+      setFormError(message);
+      toast.error(message);
       setTab("details");
       return false;
     }
     if (contactForm.contactRoles.length === 0) {
-      setFormError("กรุณาเลือกประเภทคู่ค้าอย่างน้อย 1 สถานะ");
+      const message = "กรุณาเลือกอย่างน้อย 1 สถานะ";
+      setFormError(message);
+      toast.error(message);
       setTab("details");
       return false;
     }
     if (personFormHasAnyValue(personForm) && !personForm.name.trim()) {
-      setFormError("กรุณากรอกชื่อผู้ประสานงานให้ครบถ้วน");
+      const message = "กรุณากรอกชื่อผู้ประสานงานให้ครบถ้วน";
+      setFormError(message);
+      toast.error(message);
       setTab("person");
       return false;
     }
@@ -228,6 +236,8 @@ export default function ManageContactDialog({
     setIsSaving(true);
     setFormError("");
 
+    const contact_roles = [...contactForm.contactRoles];
+
     try {
       const updateResult = await updateContact(contact.id, {
         companyName: contactForm.companyName.trim(),
@@ -235,11 +245,15 @@ export default function ManageContactDialog({
         branchCode: contactForm.branchCode.trim() || "สำนักงานใหญ่",
         phone: contactForm.phone.trim() || null,
         address: contactForm.address.trim() || null,
-        contactRoles: [...contactForm.contactRoles],
+        contactRoles: contact_roles,
+        contact_roles,
       });
 
       if (updateResult.error || !updateResult.data) {
         const message = updateResult.error ?? "อัปเดตข้อมูลคู่ค้าไม่สำเร็จ";
+        console.error("Submit Error:", updateResult.error, {
+          contact_roles,
+        });
         setFormError(message);
         setShowConfirm(false);
         toast.error(message);
@@ -256,6 +270,7 @@ export default function ManageContactDialog({
         });
 
         if (personResult.error) {
+          console.error("Submit Error:", personResult.error);
           setFormError(
             `อัปเดตคู่ค้าสำเร็จ แต่เพิ่มผู้ประสานงานไม่สำเร็จ: ${personResult.error}`,
           );
@@ -277,6 +292,7 @@ export default function ManageContactDialog({
       onOpenChange(false);
       router.refresh();
     } catch (error) {
+      console.error("Submit Error:", error);
       const message =
         error instanceof Error ? error.message : "บันทึกข้อมูลไม่สำเร็จ";
       setFormError(message);

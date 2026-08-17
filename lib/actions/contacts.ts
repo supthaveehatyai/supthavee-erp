@@ -10,7 +10,6 @@
 import { revalidatePath } from "next/cache";
 import {
   contactSelect,
-  normalizeContactRoles,
   normalizeContactRow,
   type Contact,
   type ContactType,
@@ -20,6 +19,7 @@ import {
 } from "@/app/contacts/contacts";
 import { findDuplicateContactError } from "@/lib/contacts/duplicate-check";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
+import { parseContactMutation, parseContactRolesInput } from "@/lib/validations/contacts";
 
 const CONTACTS_PATH = "/contacts";
 
@@ -108,15 +108,24 @@ export async function createContact(
   input: CreateContactInput,
 ): Promise<CreateContactResult> {
   try {
-    const companyName = input.companyName?.trim() ?? "";
-    if (!companyName) {
-      return { data: null, error: "กรุณากรอกชื่อบริษัทหรือชื่อคู่ค้า" };
+    const parsed = parseContactMutation({
+      companyName: input.companyName,
+      contactRoles: input.contactRoles,
+      customerType: input.customerType,
+      taxId: input.taxId,
+      branchCode: input.branchCode,
+      phone: input.phone,
+      address: input.address,
+    });
+    if (!parsed.ok) {
+      console.error("[createContact] validation failed", parsed.error, {
+        contactRoles: input.contactRoles,
+      });
+      return { data: null, error: parsed.error };
     }
 
-    const contactRoles = normalizeContactRoles(input.contactRoles);
-    if (contactRoles.length === 0) {
-      return { data: null, error: "กรุณาเลือกประเภทคู่ค้าอย่างน้อย 1 สถานะ" };
-    }
+    const contactRoles = parsed.data.contact_roles;
+    const companyName = parsed.data.companyName;
     const persons = (input.persons ?? [])
       .map((person) => ({
         name: person.name?.trim() ?? "",
@@ -136,7 +145,7 @@ export async function createContact(
     }
 
     const supabaseAdmin = createSupabaseServerClient();
-    const taxId = input.taxId?.trim() || null;
+    const taxId = parsed.data.taxId?.trim() || null;
 
     const duplicateError = await findDuplicateContactError(supabaseAdmin, {
       companyName,
@@ -146,24 +155,27 @@ export async function createContact(
       return { data: null, error: duplicateError };
     }
 
+    const insertPayload = {
+      contact_roles: contactRoles,
+      customer_type: parsed.data.customerType || "นิติบุคคล",
+      company_name: companyName,
+      tax_id: taxId,
+      branch_code: parsed.data.branchCode?.trim() || "สำนักงานใหญ่",
+      address: parsed.data.address?.trim() || null,
+      phone: parsed.data.phone?.trim() || null,
+      ocr_pattern_config:
+        contactRoles.includes("Vendor") ? (input.ocrPatternConfig ?? {}) : {},
+      is_active: true,
+    };
+
     const { data: contact, error: contactError } = await supabaseAdmin
       .from("contacts")
-      .insert({
-        contact_roles: contactRoles,
-        customer_type: input.customerType || "นิติบุคคล",
-        company_name: companyName,
-        tax_id: taxId,
-        branch_code: input.branchCode?.trim() || "สำนักงานใหญ่",
-        address: input.address?.trim() || null,
-        phone: input.phone?.trim() || null,
-        ocr_pattern_config:
-          contactRoles.includes("Vendor") ? (input.ocrPatternConfig ?? {}) : {},
-        is_active: true,
-      })
+      .insert(insertPayload)
       .select(contactSelect)
       .single();
 
     if (contactError || !contact) {
+      console.error("[createContact] insert failed", contactError, insertPayload);
       return {
         data: null,
         error: contactError?.message ?? "ไม่สามารถสร้างข้อมูลคู่ค้าได้",
@@ -203,6 +215,7 @@ export async function createContact(
     revalidatePath(CONTACTS_PATH);
     return { data: created, error: null };
   } catch (err) {
+    console.error("[createContact] exception", err);
     const message =
       err instanceof Error ? err.message : "สร้างข้อมูลคู่ค้าไม่สำเร็จ";
     return { data: null, error: message };
@@ -260,11 +273,14 @@ export async function importContacts(
     }
 
     const payload = rows.map((row) => {
-      const contactRoles = normalizeContactRoles(
+      const rolesParsed = parseContactRolesInput(
         row.contact_roles?.length ? row.contact_roles : row.contact_type,
       );
+      const contactRoles = rolesParsed.ok
+        ? rolesParsed.contact_roles
+        : (["Customer"] as const);
       return {
-        contact_roles: contactRoles,
+        contact_roles: [...contactRoles],
         customer_type: row.customer_type || "บุคคลธรรมดา",
         company_name: row.company_name.trim(),
         tax_id: row.tax_id?.trim() || null,

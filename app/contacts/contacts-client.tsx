@@ -33,6 +33,7 @@ import {
 } from "@/lib/actions/contacts";
 import ManageContactDialog from "@/components/contacts/ManageContactDialog";
 import ViewContactDialog from "@/components/contacts/ViewContactDialog";
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -668,7 +669,9 @@ export default function ContactsClient({
 
     const companyName = form.companyName.trim();
     if (!companyName) {
-      setFormError("กรุณากรอกชื่อบริษัทหรือชื่อคู่ค้า");
+      const message = "กรุณากรอกชื่อบริษัทหรือชื่อคู่ค้า";
+      setFormError(message);
+      toast.error(message);
       return;
     }
 
@@ -678,7 +681,9 @@ export default function ContactsClient({
         (person.phone.trim() || person.departmentOrRole.trim()),
     );
     if (incompletePerson) {
-      setFormError("กรุณากรอกชื่อของผู้ประสานงานให้ครบถ้วน");
+      const message = "กรุณากรอกชื่อของผู้ประสานงานให้ครบถ้วน";
+      setFormError(message);
+      toast.error(message);
       return;
     }
 
@@ -687,47 +692,63 @@ export default function ContactsClient({
       const ocrResult = validateVendorOcrConfig(form.ocrPatternConfigJson);
       if (!ocrResult.ok) {
         setFormError(ocrResult.error);
+        toast.error(ocrResult.error);
         return;
       }
       ocrPatternConfig = ocrResult.value;
     }
 
     if (form.contactRoles.length === 0) {
-      setFormError("กรุณาเลือกประเภทคู่ค้าอย่างน้อย 1 สถานะ");
+      const message = "กรุณาเลือกอย่างน้อย 1 สถานะ";
+      setFormError(message);
+      toast.error(message);
       return;
     }
 
     const persons = form.persons.filter((person) => person.name.trim());
+    const contact_roles = [...form.contactRoles];
     setIsSaving(true);
 
-    const result = await createContact({
-      contactRoles: [...form.contactRoles],
-      customerType: form.customerType,
-      companyName,
-      taxId: form.taxId.trim() || null,
-      branchCode: form.branchCode.trim() || "สำนักงานใหญ่",
-      address: form.address.trim() || null,
-      phone: form.phone.trim() || null,
-      ocrPatternConfig: form.contactRoles.includes("Vendor")
-        ? ocrPatternConfig
-        : {},
-      persons: persons.map((person) => ({
-        name: person.name.trim(),
-        phone: person.phone.trim() || null,
-        departmentOrRole: person.departmentOrRole.trim() || null,
-      })),
-    });
+    try {
+      const result = await createContact({
+        contactRoles: contact_roles,
+        customerType: form.customerType,
+        companyName,
+        taxId: form.taxId.trim() || null,
+        branchCode: form.branchCode.trim() || "สำนักงานใหญ่",
+        address: form.address.trim() || null,
+        phone: form.phone.trim() || null,
+        ocrPatternConfig: form.contactRoles.includes("Vendor")
+          ? ocrPatternConfig
+          : {},
+        persons: persons.map((person) => ({
+          name: person.name.trim(),
+          phone: person.phone.trim() || null,
+          departmentOrRole: person.departmentOrRole.trim() || null,
+        })),
+      });
 
-    if (result.error || !result.data) {
-      setFormError(result.error ?? "ไม่สามารถสร้างข้อมูลคู่ค้าได้");
+      if (result.error || !result.data) {
+        const message = result.error ?? "ไม่สามารถสร้างข้อมูลคู่ค้าได้";
+        console.error("Submit Error:", result.error, { contact_roles });
+        setFormError(message);
+        toast.error(message);
+        return;
+      }
+
+      toast.success("สร้างข้อมูลคู่ค้าสำเร็จ");
+      setContacts((current) => [result.data!, ...current]);
+      setIsDialogOpen(false);
+      setForm(createEmptyForm());
+    } catch (error) {
+      console.error("Submit Error:", error);
+      const message =
+        error instanceof Error ? error.message : "สร้างข้อมูลคู่ค้าไม่สำเร็จ";
+      setFormError(message);
+      toast.error(message);
+    } finally {
       setIsSaving(false);
-      return;
     }
-
-    setContacts((current) => [result.data!, ...current]);
-    setIsSaving(false);
-    setIsDialogOpen(false);
-    setForm(createEmptyForm());
   }
 
   return (

@@ -8,13 +8,13 @@
 import { revalidatePath } from "next/cache";
 import {
   contactSelect,
-  normalizeContactRoles,
   normalizeContactRow,
   type Contact,
   type ContactType,
 } from "@/app/contacts/contacts";
 import { findDuplicateContactError } from "@/lib/contacts/duplicate-check";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
+import { parseContactMutation } from "@/lib/validations/contacts";
 import {
   deleteTechnicianRate as deleteTechnicianRateImpl,
   getServiceModels as getServiceModelsImpl,
@@ -68,7 +68,8 @@ export type UpdateContactPayload = {
   phone?: string | null;
   address?: string | null;
   /** Multi-role tags — required on edit; written to contact_roles only. */
-  contactRoles: ContactType[];
+  contactRoles?: ContactType[];
+  contact_roles?: ContactType[];
 };
 
 export type AddContactPersonPayload = {
@@ -158,7 +159,7 @@ export async function getContactDetails(
   }
 }
 
-/** Update main contact fields on `contacts`. */
+/** Update main contact fields on `contacts` — contact_roles only (no contact_type). */
 export async function updateContact(
   contactId: string,
   payload: UpdateContactPayload | Record<string, unknown>,
@@ -170,32 +171,27 @@ export async function updateContact(
     }
 
     const raw = payload as Record<string, unknown>;
-    const companyName =
-      typeof raw.companyName === "string"
-        ? raw.companyName.trim()
-        : typeof raw.company_name === "string"
-          ? raw.company_name.trim()
-          : "";
-
-    if (!companyName) {
-      return { data: null, error: "กรุณากรอกชื่อบริษัทหรือชื่อคู่ค้า" };
-    }
-
-    const taxId = pickNullableString(raw, "taxId", "tax_id");
-    const branchCode = pickNullableString(raw, "branchCode", "branch_code");
-    const phone = pickNullableString(raw, "phone");
-    const address = pickNullableString(raw, "address");
-
-    const rolesRaw = raw.contactRoles ?? raw.contact_roles ?? undefined;
-    const contactRoles = normalizeContactRoles(rolesRaw);
-    if (!Array.isArray(rolesRaw) || contactRoles.length === 0) {
-      return { data: null, error: "กรุณาเลือกประเภทคู่ค้าอย่างน้อย 1 สถานะ" };
+    const parsed = parseContactMutation({
+      companyName: raw.companyName ?? raw.company_name,
+      contactRoles: raw.contactRoles ?? raw.contact_roles,
+      taxId: raw.taxId ?? raw.tax_id,
+      branchCode: raw.branchCode ?? raw.branch_code,
+      phone: raw.phone,
+      address: raw.address,
+    });
+    if (!parsed.ok) {
+      console.error("[updateContact] validation failed", parsed.error, {
+        contactRoles: raw.contactRoles,
+        contact_roles: raw.contact_roles,
+      });
+      return { data: null, error: parsed.error };
     }
 
     const supabase = createSupabaseServerClient();
+    const taxId = parsed.data.taxId?.trim() || null;
 
     const duplicateError = await findDuplicateContactError(supabase, {
-      companyName,
+      companyName: parsed.data.companyName,
       taxId,
       excludeId: id,
     });
@@ -203,21 +199,24 @@ export async function updateContact(
       return { data: null, error: duplicateError };
     }
 
+    const updatePayload = {
+      company_name: parsed.data.companyName,
+      tax_id: taxId,
+      branch_code: parsed.data.branchCode?.trim() || "สำนักงานใหญ่",
+      phone: parsed.data.phone?.trim() || null,
+      address: parsed.data.address?.trim() || null,
+      contact_roles: parsed.data.contact_roles,
+    };
+
     const { data, error } = await supabase
       .from("contacts")
-      .update({
-        company_name: companyName,
-        tax_id: taxId,
-        branch_code: branchCode || "สำนักงานใหญ่",
-        phone,
-        address,
-        contact_roles: contactRoles,
-      })
+      .update(updatePayload)
       .eq("id", id)
       .select(contactSelect)
       .single();
 
     if (error || !data) {
+      console.error("[updateContact] update failed", error, updatePayload);
       return {
         data: null,
         error: error?.message ?? "อัปเดตข้อมูลคู่ค้าไม่สำเร็จ",
@@ -227,6 +226,7 @@ export async function updateContact(
     revalidatePath(CONTACTS_PATH);
     return { data: normalizeContactRow(data), error: null };
   } catch (err) {
+    console.error("[updateContact] exception", err);
     const message =
       err instanceof Error ? err.message : "อัปเดตข้อมูลคู่ค้าไม่สำเร็จ";
     return { data: null, error: message };
