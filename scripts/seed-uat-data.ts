@@ -12,7 +12,7 @@
  *   SUPABASE_SERVICE_ROLE_KEY
  *
  * Schema notes:
- *   - contacts ใช้ contact_type = 'Customer' | 'Vendor' (ไม่มี is_customer/is_vendor)
+ *   - contacts ใช้ contact_roles = ['Customer'] | ['Vendor'] (Multi-Role array)
  *   - inventory_ledger ไม่มี document_ref → เก็บ 'UAT-INIT-001' ใน notes
  */
 
@@ -257,7 +257,7 @@ async function seedContacts(supabase: SupabaseClient): Promise<{
   console.log("\n👥 [2/4] Seeding contacts…");
 
   const customerPayload = UAT_CUSTOMERS.map((c) => ({
-    contact_type: "Customer" as const,
+    contact_roles: ["Customer"] as const,
     company_name: c.company_name,
     tax_id: c.tax_id,
     phone: c.phone,
@@ -271,7 +271,7 @@ async function seedContacts(supabase: SupabaseClient): Promise<{
   }));
 
   const vendorPayload = UAT_VENDORS.map((v) => ({
-    contact_type: "Vendor" as const,
+    contact_roles: ["Vendor"] as const,
     company_name: v.company_name,
     tax_id: v.tax_id,
     phone: v.phone,

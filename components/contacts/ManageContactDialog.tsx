@@ -70,10 +70,7 @@ function toContactForm(contact: Contact): ContactFormState {
     branchCode: contact.branch_code ?? "สำนักงานใหญ่",
     phone: contact.phone ?? "",
     address: contact.address ?? "",
-    contactRoles: normalizeContactRoles(
-      contact.contact_roles,
-      contact.contact_type,
-    ),
+    contactRoles: normalizeContactRoles(contact.contact_roles),
   };
 }
 
@@ -107,7 +104,6 @@ export default function ManageContactDialog({
       contact ?? {
         id: "",
         created_at: "",
-        contact_type: "Customer",
         contact_roles: ["Customer"],
         customer_type: null,
         company_name: "",
@@ -156,14 +152,8 @@ export default function ManageContactDialog({
   }, [open, contact]);
 
   const canEditRates =
-    contactHasRole(
-      { contact_roles: contactForm.contactRoles, contact_type: contact?.contact_type },
-      "Vendor",
-    ) ||
-    contactHasRole(
-      { contact_roles: contactForm.contactRoles, contact_type: contact?.contact_type },
-      "Technician",
-    );
+    contactHasRole({ contact_roles: contactForm.contactRoles }, "Vendor") ||
+    contactHasRole({ contact_roles: contactForm.contactRoles }, "Technician");
 
   function toggleRole(role: ContactType) {
     setContactForm((current) => {
@@ -245,7 +235,7 @@ export default function ManageContactDialog({
         branchCode: contactForm.branchCode.trim() || "สำนักงานใหญ่",
         phone: contactForm.phone.trim() || null,
         address: contactForm.address.trim() || null,
-        contactRoles: contactForm.contactRoles,
+        contactRoles: [...contactForm.contactRoles],
       });
 
       if (updateResult.error || !updateResult.data) {

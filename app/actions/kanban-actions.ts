@@ -905,7 +905,6 @@ export async function getTechnicianOptions(
         contacts!technician_rates_technician_id_fkey (
           id,
           company_name,
-          contact_type,
           contact_roles,
           is_active
         )
@@ -924,7 +923,6 @@ export async function getTechnicianOptions(
     type ContactJoin = {
       id?: string | null;
       company_name?: string | null;
-      contact_type?: string | null;
       contact_roles?: string[] | null;
       is_active?: boolean | null;
     };
@@ -941,26 +939,22 @@ export async function getTechnicianOptions(
       if (contact?.is_active === false) continue;
       const roles = Array.isArray(contact?.contact_roles)
         ? contact.contact_roles
-        : contact?.contact_type
-          ? [contact.contact_type]
-          : [];
+        : [];
       if (!TECHNICIAN_CONTACT_TYPES.some((role) => roles.includes(role))) {
         continue;
       }
       seen.add(id);
+      const primaryRole =
+        roles.find((role) =>
+          TECHNICIAN_CONTACT_TYPES.includes(
+            role as (typeof TECHNICIAN_CONTACT_TYPES)[number],
+          ),
+        ) ?? roles[0] ?? "";
       options.push({
         id,
         company_name:
           String(contact?.company_name ?? "").trim() || "ไม่ระบุชื่อ",
-        contact_type: String(
-          roles.find((role) =>
-            TECHNICIAN_CONTACT_TYPES.includes(
-              role as (typeof TECHNICIAN_CONTACT_TYPES)[number],
-            ),
-          ) ??
-            contact?.contact_type ??
-            "",
-        ),
+        contact_type: String(primaryRole),
         default_wage: toWageCost(row.default_wage),
       });
     }
@@ -1021,7 +1015,7 @@ export async function updateProductionJobAssignment(
     if (technicianId) {
       const { data: technician, error: techError } = await supabase
         .from("contacts")
-        .select("id, contact_type, contact_roles")
+        .select("id, contact_roles")
         .eq("id", technicianId)
         .maybeSingle();
 
@@ -1033,9 +1027,7 @@ export async function updateProductionJobAssignment(
       }
       const techRoles = Array.isArray(technician?.contact_roles)
         ? technician.contact_roles
-        : technician?.contact_type
-          ? [technician.contact_type]
-          : [];
+        : [];
       if (
         !technician ||
         !TECHNICIAN_CONTACT_TYPES.some((role) => techRoles.includes(role))

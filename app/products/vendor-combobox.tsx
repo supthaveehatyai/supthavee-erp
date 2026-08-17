@@ -183,7 +183,7 @@ export default function VendorCombobox({
                 เพิ่มผู้จำหน่ายใหม่
               </h3>
               <p className="mt-0.5 text-[11px] text-slate-400">
-                บันทึกลง contacts (contact_type = Vendor)
+                บันทึกลง contacts (contact_roles รวม Vendor)
               </p>
             </div>
             <button

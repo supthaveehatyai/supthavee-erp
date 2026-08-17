@@ -10,7 +10,6 @@ import {
   contactSelect,
   normalizeContactRoles,
   normalizeContactRow,
-  primaryContactType,
   type Contact,
   type ContactType,
 } from "@/app/contacts/contacts";
@@ -68,8 +67,8 @@ export type UpdateContactPayload = {
   branchCode?: string | null;
   phone?: string | null;
   address?: string | null;
-  /** Multi-role tags — when provided, replaces contact_roles (+ syncs contact_type). */
-  contactRoles?: ContactType[];
+  /** Multi-role tags — required on edit; written to contact_roles only. */
+  contactRoles: ContactType[];
 };
 
 export type AddContactPersonPayload = {
@@ -187,13 +186,9 @@ export async function updateContact(
     const phone = pickNullableString(raw, "phone");
     const address = pickNullableString(raw, "address");
 
-    const rolesRaw =
-      raw.contactRoles ?? raw.contact_roles ?? undefined;
-    const hasRolesUpdate = rolesRaw !== undefined;
-    const contactRoles = hasRolesUpdate
-      ? normalizeContactRoles(rolesRaw)
-      : null;
-    if (hasRolesUpdate && (!contactRoles || contactRoles.length === 0)) {
+    const rolesRaw = raw.contactRoles ?? raw.contact_roles ?? undefined;
+    const contactRoles = normalizeContactRoles(rolesRaw);
+    if (!Array.isArray(rolesRaw) || contactRoles.length === 0) {
       return { data: null, error: "กรุณาเลือกประเภทคู่ค้าอย่างน้อย 1 สถานะ" };
     }
 
@@ -208,21 +203,16 @@ export async function updateContact(
       return { data: null, error: duplicateError };
     }
 
-    const updatePayload: Record<string, unknown> = {
-      company_name: companyName,
-      tax_id: taxId,
-      branch_code: branchCode || "สำนักงานใหญ่",
-      phone,
-      address,
-    };
-    if (contactRoles) {
-      updatePayload.contact_roles = contactRoles;
-      updatePayload.contact_type = primaryContactType(contactRoles);
-    }
-
     const { data, error } = await supabase
       .from("contacts")
-      .update(updatePayload)
+      .update({
+        company_name: companyName,
+        tax_id: taxId,
+        branch_code: branchCode || "สำนักงานใหญ่",
+        phone,
+        address,
+        contact_roles: contactRoles,
+      })
       .eq("id", id)
       .select(contactSelect)
       .single();

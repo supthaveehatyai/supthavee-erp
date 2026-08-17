@@ -177,7 +177,7 @@ export async function upsertTechnicianRate(
 
     const { data: contact, error: contactError } = await supabase
       .from("contacts")
-      .select("id, contact_roles, contact_type")
+      .select("id, contact_roles")
       .eq("id", technicianId)
       .maybeSingle();
 
@@ -189,9 +189,7 @@ export async function upsertTechnicianRate(
     }
     const roles = Array.isArray(contact?.contact_roles)
       ? contact.contact_roles
-      : contact?.contact_type
-        ? [contact.contact_type]
-        : [];
+      : [];
     const canEditRates = TECHNICIAN_CONTACT_TYPES.some((role) =>
       roles.includes(role),
     );

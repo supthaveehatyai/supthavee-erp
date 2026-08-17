@@ -33,7 +33,7 @@ type EdgeFunctionResponse = {
 export type UploadBillOcrInput = {
   /** Uploaded bill image or PDF */
   file: File;
-  /** contacts.id where contact_type = Vendor */
+  /** contacts.id where contact_roles contains Vendor */
   vendorId: string;
 };
 

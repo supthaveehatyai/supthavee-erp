@@ -93,18 +93,10 @@ export default function ViewContactDialog({
 
   const contact = details?.contact ?? null;
   const persons: ContactPersonRow[] = details?.persons ?? [];
-  const roles = contact
-    ? normalizeContactRoles(contact.contact_roles, contact.contact_type)
-    : [];
+  const roles = contact ? normalizeContactRoles(contact.contact_roles) : [];
   const canEditRates =
-    contactHasRole(
-      { contact_roles: roles, contact_type: contact?.contact_type },
-      "Vendor",
-    ) ||
-    contactHasRole(
-      { contact_roles: roles, contact_type: contact?.contact_type },
-      "Technician",
-    );
+    contactHasRole({ contact_roles: roles }, "Vendor") ||
+    contactHasRole({ contact_roles: roles }, "Technician");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

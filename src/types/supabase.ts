@@ -194,7 +194,6 @@ export type Database = {
           branch_code: string | null
           company_name: string
           contact_roles: string[]
-          contact_type: string
           created_at: string | null
           credit_days: number | null
           customer_type: string | null
@@ -214,7 +213,6 @@ export type Database = {
           branch_code?: string | null
           company_name: string
           contact_roles?: string[]
-          contact_type: string
           created_at?: string | null
           credit_days?: number | null
           customer_type?: string | null
@@ -234,7 +232,6 @@ export type Database = {
           branch_code?: string | null
           company_name?: string
           contact_roles?: string[]
-          contact_type?: string
           created_at?: string | null
           credit_days?: number | null
           customer_type?: string | null

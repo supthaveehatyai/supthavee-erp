@@ -12,7 +12,6 @@ import {
   contactSelect,
   normalizeContactRoles,
   normalizeContactRow,
-  primaryContactType,
   type Contact,
   type ContactType,
   type CustomerType,
@@ -33,8 +32,6 @@ export type ContactPersonPayload = {
 export type CreateContactInput = {
   /** Multi-role selection — at least one of Customer / Vendor / Technician. */
   contactRoles: ContactType[];
-  /** @deprecated Prefer contactRoles — still accepted for one-role callers. */
-  contactType?: ContactType;
   customerType: CustomerType | string;
   companyName: string;
   taxId?: string | null;
@@ -57,9 +54,12 @@ export type GetContactsResult = {
 
 export type ImportContactRow = {
   /** Preferred multi-role field. */
-  contact_roles?: ContactType[];
-  /** Legacy single-role CSV column — used when contact_roles absent. */
-  contact_type?: ContactType;
+  contact_roles?: ContactType[] | string[];
+  /**
+   * CSV legacy column name kept for import templates only —
+   * mapped into contact_roles; never written to DB as contact_type.
+   */
+  contact_type?: ContactType | string;
   customer_type: string;
   company_name: string;
   tax_id?: string | null;
@@ -113,14 +113,10 @@ export async function createContact(
       return { data: null, error: "กรุณากรอกชื่อบริษัทหรือชื่อคู่ค้า" };
     }
 
-    const contactRoles = normalizeContactRoles(
-      input.contactRoles?.length ? input.contactRoles : undefined,
-      input.contactType,
-    );
+    const contactRoles = normalizeContactRoles(input.contactRoles);
     if (contactRoles.length === 0) {
       return { data: null, error: "กรุณาเลือกประเภทคู่ค้าอย่างน้อย 1 สถานะ" };
     }
-    const contactType = primaryContactType(contactRoles);
     const persons = (input.persons ?? [])
       .map((person) => ({
         name: person.name?.trim() ?? "",
@@ -153,7 +149,6 @@ export async function createContact(
     const { data: contact, error: contactError } = await supabaseAdmin
       .from("contacts")
       .insert({
-        contact_type: contactType,
         contact_roles: contactRoles,
         customer_type: input.customerType || "นิติบุคคล",
         company_name: companyName,
@@ -266,11 +261,9 @@ export async function importContacts(
 
     const payload = rows.map((row) => {
       const contactRoles = normalizeContactRoles(
-        row.contact_roles,
-        row.contact_type,
+        row.contact_roles?.length ? row.contact_roles : row.contact_type,
       );
       return {
-        contact_type: primaryContactType(contactRoles),
         contact_roles: contactRoles,
         customer_type: row.customer_type || "บุคคลธรรมดา",
         company_name: row.company_name.trim(),

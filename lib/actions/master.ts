@@ -708,7 +708,6 @@ export async function createVendor(
     const { data, error } = await supabaseAdmin
       .from("contacts")
       .insert({
-        contact_type: "Vendor",
         contact_roles: ["Vendor"],
         company_name: companyName,
         phone,

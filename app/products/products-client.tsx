@@ -132,7 +132,7 @@ type BatchEditForm = {
   shortName: string;
   genderId: string;
   taxType: TaxType;
-  /** contacts.id where contact_type = Vendor → product_models.vendor_id */
+  /** contacts.id where contact_roles contains Vendor → product_models.vendor_id */
   vendorId: string;
   /** รหัสรุ่น (model_code) สำหรับตั้งชื่อไฟล์อัปโหลด */
   modelCode: string;

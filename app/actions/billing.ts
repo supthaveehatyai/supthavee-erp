@@ -72,7 +72,7 @@ export type BillingNoteContact = {
   address: string | null;
   phone: string | null;
   branch_code: string | null;
-  contact_type: string | null;
+  contact_roles: string[] | null;
 };
 
 export type BillingNoteInvoiceLine = {
@@ -145,7 +145,7 @@ type ContactJoin = {
   address?: string | null;
   phone?: string | null;
   branch_code?: string | null;
-  contact_type?: string | null;
+  contact_roles?: string[] | null;
 };
 
 type LedgerInvoiceRow = {
@@ -358,7 +358,7 @@ export async function getBillingNoteById(
           address,
           phone,
           branch_code,
-          contact_type
+          contact_roles
         )
       `,
       )
@@ -454,7 +454,9 @@ export async function getBillingNoteById(
               address: contact.address ?? null,
               phone: contact.phone ?? null,
               branch_code: contact.branch_code ?? null,
-              contact_type: contact.contact_type ?? null,
+              contact_roles: Array.isArray(contact.contact_roles)
+                ? contact.contact_roles
+                : null,
             }
           : null,
         invoices,

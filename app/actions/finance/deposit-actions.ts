@@ -424,7 +424,7 @@ export async function createDepositDocument(
     const expectedRole = docType === "DEP_IN" ? "Customer" : "Vendor";
     const { data: contact, error: contactError } = await supabase
       .from("contacts")
-      .select("id, contact_roles, contact_type, is_active, company_name")
+      .select("id, contact_roles, is_active, company_name")
       .eq("id", contactId)
       .maybeSingle();
 
@@ -436,9 +436,7 @@ export async function createDepositDocument(
     }
     const roles = Array.isArray(contact.contact_roles)
       ? contact.contact_roles
-      : contact.contact_type
-        ? [contact.contact_type]
-        : [];
+      : [];
     if (!roles.includes(expectedRole)) {
       return {
         success: false,

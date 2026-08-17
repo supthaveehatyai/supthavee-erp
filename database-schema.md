@@ -22,7 +22,7 @@
 
 ## 2. Core Entities (องค์กร, ผู้ใช้, ตั้งค่า)
 
-- `contacts` (คู่ค้า Multi-Role: `contact_roles` VARCHAR[] — Customer / Vendor / Technician)
+- `contacts` (คู่ค้า Multi-Role: `contact_roles` VARCHAR[] เท่านั้น — ไม่ใช้ `contact_type`)
 
 - `contact_persons` (ผู้ติดต่อภายใต้คู่ค้า)
 

@@ -18,6 +18,7 @@ import {
   contactRoleLabel,
   DEFAULT_OCR_PATTERN_JSON,
   formatOcrPatternConfig,
+  normalizeContactRoles,
   type Contact,
   type ContactFormValues,
   type ContactPersonInput,
@@ -566,8 +567,7 @@ export default function ContactsClient({
     setImportError("");
 
     const payload = importRows.map((row) => ({
-      contact_type: row.contact_type as ContactType,
-      contact_roles: [row.contact_type as ContactType],
+      contact_roles: normalizeContactRoles(row.contact_type),
       customer_type: row.customer_type || "บุคคลธรรมดา",
       company_name: row.company_name,
       tax_id: row.tax_id || null,
@@ -701,7 +701,7 @@ export default function ContactsClient({
     setIsSaving(true);
 
     const result = await createContact({
-      contactRoles: form.contactRoles,
+      contactRoles: [...form.contactRoles],
       customerType: form.customerType,
       companyName,
       taxId: form.taxId.trim() || null,
@@ -929,17 +929,16 @@ export default function ContactsClient({
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex flex-wrap gap-1.5">
-                        {(contact.contact_roles?.length
-                          ? contact.contact_roles
-                          : [contact.contact_type]
-                        ).map((role) => (
-                          <span
-                            key={`${contact.id}-${role}`}
-                            className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${contactRoleBadgeClass(role)}`}
-                          >
-                            {contactRoleLabel(role)}
-                          </span>
-                        ))}
+                        {normalizeContactRoles(contact.contact_roles).map(
+                          (role) => (
+                            <span
+                              key={`${contact.id}-${role}`}
+                              className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${contactRoleBadgeClass(role)}`}
+                            >
+                              {contactRoleLabel(role)}
+                            </span>
+                          ),
+                        )}
                       </div>
                     </td>
                     <td className="px-5 py-4 text-xs text-slate-600">
