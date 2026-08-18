@@ -5,6 +5,7 @@
  * Zero Client-Side Fetching: Service Role via `createSupabaseServerClient`.
  */
 
+import { AP_PAYABLE_DOC_TYPES } from "@/lib/constants/document";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import type {
   AccountPayableGroup,
@@ -16,7 +17,6 @@ import type {
 
 const OPEN_PAYMENT_STATUSES = ["UNPAID", "PARTIAL", "Pending"] as const;
 const AR_DOC_TYPES = ["INV_DO", "TAX_INV"] as const;
-const AP_DOC_TYPES = ["AP_TAX", "AP_INV"] as const;
 
 type ContactJoin = {
   id?: string;
@@ -189,8 +189,8 @@ export async function getAccountReceivables(): Promise<GetAccountReceivablesResu
 }
 
 /**
- * Open AP invoices grouped by vendor.
- * Sources Phase 4 `documents` (AP_TAX / AP_INV) — same ledger as purchases list.
+ * Open AP invoices grouped by vendor / technician.
+ * Sources Phase 4 `documents` (AP_TAX / AP_INV / TB) — same ledger as PAY knock-off.
  */
 export async function getAccountPayables(): Promise<GetAccountPayablesResult> {
   try {
@@ -217,7 +217,7 @@ export async function getAccountPayables(): Promise<GetAccountPayablesResult> {
         )
       `,
       )
-      .in("doc_type", [...AP_DOC_TYPES])
+      .in("doc_type", [...AP_PAYABLE_DOC_TYPES])
       .in("payment_status", [...OPEN_PAYMENT_STATUSES])
       .in("status", ["ISSUED", "COMPLETED"])
       .or("is_voided.is.null,is_voided.eq.false")

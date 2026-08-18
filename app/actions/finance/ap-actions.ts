@@ -5,6 +5,7 @@
  * Zero Client-Side Fetching: Service Role (`supabaseAdmin`) only.
  *
  * Ledger source: Phase 4/5 `documents` (internal doc_no).
+ * Payables: AP_TAX / AP_INV (บิลซัพพลายเออร์) + TB (สรุปวางบิลช่าง).
  * Vendor invoice ref lives in `notes` — no dedicated reference_no column yet.
  */
 
@@ -26,10 +27,10 @@ import type {
   SubmitAPPaymentResult,
   VendorPaymentContext,
 } from "@/types/ap-payment";
+import { AP_PAYABLE_DOC_TYPES } from "@/lib/constants/document";
 import { getAvailableDepositsForContact } from "@/lib/actions/finance/available-deposits";
 
 const OPEN_PAYMENT_STATUSES = ["UNPAID", "PARTIAL", "Pending"] as const;
-const AP_DOC_TYPES = ["AP_TAX", "AP_INV"] as const;
 const MONEY_EPS = 0.02;
 const DOCUMENT_ATTACHMENTS_BUCKET = "document_attachments";
 const ALLOWED_SLIP_MIME_TYPES = new Set([
@@ -134,7 +135,8 @@ export async function getOutstandingSummary(): Promise<ApVendorOption[]> {
 }
 
 /**
- * Vendors with outstanding AP > 0 (from `documents`).
+ * Vendors / technicians with outstanding AP > 0 (from `documents`).
+ * Includes AP_TAX, AP_INV, and TB (Technician Bill).
  */
 export async function getVendors(): Promise<ApVendorOption[]> {
   try {
@@ -159,7 +161,7 @@ export async function getVendors(): Promise<ApVendorOption[]> {
         )
       `,
       )
-      .in("doc_type", [...AP_DOC_TYPES])
+      .in("doc_type", [...AP_PAYABLE_DOC_TYPES])
       .in("payment_status", [...OPEN_PAYMENT_STATUSES])
       .in("status", ["ISSUED", "COMPLETED"])
       .or("is_voided.is.null,is_voided.eq.false");
@@ -226,6 +228,7 @@ export async function getVendors(): Promise<ApVendorOption[]> {
 
 /**
  * Outstanding AP invoices + available DEP_OUT for one vendor (`vendor_id` from URL).
+ * Includes AP_TAX, AP_INV, and TB (Technician Bill) for PAY knock-off.
  * Internal `document_no` = documents.doc_no.
  * Vendor ref parsed from `notes` (documents has no reference_no column yet).
  * Sorted by document_date ASC for FIFO.
@@ -257,7 +260,7 @@ export async function getOutstandingAP(
       `,
       )
       .eq("contact_id", trimmed)
-      .in("doc_type", [...AP_DOC_TYPES])
+      .in("doc_type", [...AP_PAYABLE_DOC_TYPES])
       .in("payment_status", [...OPEN_PAYMENT_STATUSES])
       .in("status", ["ISSUED", "COMPLETED"])
       .or("is_voided.is.null,is_voided.eq.false")
@@ -544,8 +547,8 @@ export async function submitAPPayment(
         };
       }
       if (
-        !AP_DOC_TYPES.includes(
-          invoice.doc_type as (typeof AP_DOC_TYPES)[number],
+        !AP_PAYABLE_DOC_TYPES.includes(
+          invoice.doc_type as (typeof AP_PAYABLE_DOC_TYPES)[number],
         )
       ) {
         return {

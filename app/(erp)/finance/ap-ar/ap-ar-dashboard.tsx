@@ -239,7 +239,7 @@ export function ApArDashboard({
           <CardHeader>
             <CardTitle>รายการเจ้าหนี้แยกตามผู้จำหน่าย</CardTitle>
             <CardDescription>
-              เฉพาะ AP_TAX / AP_INV ที่ยัง UNPAID หรือ PARTIAL
+              เฉพาะ AP_TAX / AP_INV / TB ที่ยัง UNPAID หรือ PARTIAL
             </CardDescription>
           </CardHeader>
           <CardContent>

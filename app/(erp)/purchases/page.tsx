@@ -61,6 +61,7 @@ function docTypeLabel(docType: DocumentType): string {
     AP_TAX: "ใบส่งของ/ใบกำกับ (ตั้งหนี้)",
     AP_INV: "บิลธรรมดา (ตั้งหนี้ Non-VAT)",
     AP_CASH: "บิลเงินสด/ใบกำกับ (จ่ายทันที)",
+    TB: "สรุปวางบิลช่าง (Technician Bill)",
     DEP_OUT: "มัดจำจ่าย",
     PAY: "ใบจ่ายชำระ",
     AP_REFUND: "ใบสำคัญรับเงินคืน (Refund Receipt)",

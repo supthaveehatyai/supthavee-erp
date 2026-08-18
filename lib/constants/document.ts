@@ -103,6 +103,7 @@ export const PURCHASE_DOC_TYPES = [
   "PAY",
   "AP_REFUND",
   "AP_WRITEOFF",
+  "TB",
 ] as const;
 
 /** AR settlement docs (Sales / DEP_IN). */
@@ -156,6 +157,7 @@ export const CREDIT_DOC_TYPES = [
   "TAX_INV",
   "AP_TAX",
   "AP_INV",
+  "TB",
 ] as const;
 
 /** Cash / settled-on-issue documents. */
@@ -163,6 +165,13 @@ export const CASH_DOC_TYPES = ["CS_TAX", "ABB", "AP_CASH"] as const;
 
 /** Sales AR invoice types (customer receivables). */
 export const AR_INVOICE_DOC_TYPES = ["INV_DO", "TAX_INV"] as const;
+
+/**
+ * AP payables eligible for PAY knock-off.
+ * AP_TAX / AP_INV = บิลตั้งหนี้ซัพพลายเออร์ · TB = สรุปวางบิลช่าง (Technician Bill).
+ * BR อยู่ที่ `doc_headers` (ใบรับวางบิล) ไม่ใช่เอกสารตั้งหนี้ใน `documents`.
+ */
+export const AP_PAYABLE_DOC_TYPES = ["AP_TAX", "AP_INV", "TB"] as const;
 
 export type FinancePaymentStatus = "UNPAID" | "PARTIAL" | "PAID";
 

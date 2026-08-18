@@ -100,6 +100,13 @@ function formatDocLabel(documentNo: string, referenceNo: string | null): string 
   return documentNo;
 }
 
+function docTypeBadgeLabel(docType: string): string {
+  if (docType === "TB") return "TB · สรุปวางบิลช่าง";
+  if (docType === "AP_TAX") return "AP_TAX";
+  if (docType === "AP_INV") return "AP_INV";
+  return docType || "—";
+}
+
 export function APPaymentClient({
   vendors,
   invoices: initialInvoices,
@@ -449,15 +456,17 @@ export function APPaymentClient({
           จ่ายชำระหนี้ซัพพลายเออร์ (AP Payment)
         </h1>
         <p className="text-slate-500">
-          เลือกผู้จำหน่ายที่มียอดค้าง เพื่อตัดยอดแบบ Knock-off (FIFO)
+          เลือกผู้จำหน่ายหรือช่างรับเหมาที่มียอดค้าง เพื่อตัดยอดแบบ Knock-off
+          (FIFO) — รองรับ AP_TAX / AP_INV / TB
         </p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>1. เลือกผู้จำหน่าย (Smart Combobox)</CardTitle>
+          <CardTitle>1. เลือกเจ้าหนี้ (Smart Combobox)</CardTitle>
           <CardDescription>
-            แสดงเฉพาะเจ้าหนี้ที่ยอดค้าง &gt; 0 · ผูกสถานะกับ URL (`?vendor_id=`)
+            แสดงเฉพาะเจ้าหนี้ที่ยอดค้าง &gt; 0 (ซัพพลายเออร์ + ช่างรับเหมา) ·
+            ผูกสถานะกับ URL (`?vendor_id=`)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -468,9 +477,9 @@ export function APPaymentClient({
               value={selectedVendorId}
               onChange={handleVendorChange}
               accent="orange"
-              placeholder="ค้นหาเจ้าหนี้ที่มียอดค้างชำระ..."
-              searchPlaceholder="พิมพ์ชื่อผู้จำหน่าย..."
-              emptyMessage="ไม่มีเจ้าหนี้ค้างชำระในขณะนี้"
+              placeholder="ค้นหาเจ้าหนี้หรือช่างที่มียอดค้างชำระ..."
+              searchPlaceholder="พิมพ์ชื่อผู้จำหน่าย / ช่าง..."
+              emptyMessage="ไม่มีเจ้าหนี้หรือช่างค้างชำระในขณะนี้"
             />
           </div>
         </CardContent>
@@ -494,7 +503,7 @@ export function APPaymentClient({
           <CardContent className="pt-6">
             {vendors.length === 0 ? (
               <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 py-10 text-center text-slate-500">
-                ไม่มีข้อมูลเจ้าหนี้ค้างชำระในระบบ
+                ไม่มีข้อมูลเจ้าหนี้หรือช่างค้างชำระในระบบ
               </div>
             ) : (
               <div className="overflow-hidden rounded-md border border-slate-200">
@@ -617,7 +626,7 @@ export function APPaymentClient({
                 ไม่พบบิลค้างชำระ
                 {selectedBillingNoteId
                   ? " ในใบรับวางบิลที่เลือก"
-                  : " สำหรับผู้จำหน่ายรายนี้"}
+                  : " สำหรับเจ้าหนี้รายนี้"}
               </div>
             ) : (
               <form action={handleSubmit} className="space-y-4">
@@ -711,7 +720,9 @@ export function APPaymentClient({
                               </a>
                             </TableCell>
                             <TableCell>
-                              <Badge variant="slate">{inv.doc_type}</Badge>
+                              <Badge variant="slate">
+                                {docTypeBadgeLabel(inv.doc_type)}
+                              </Badge>
                             </TableCell>
                             <TableCell className="text-right font-semibold text-red-600">
                               {formatMoney(inv.remaining_balance)}

@@ -97,7 +97,7 @@ function buildKpiCards(kpis: ExecutiveKpis): KpiCard[] {
       value: kpis.pendingAp.formatted,
       hint: kpis.pendingAp.error
         ? "โหลดเจ้าหนี้ไม่สำเร็จ"
-        : "Σ (grand_total − paid) · AP_INV / AP_TAX · ISSUED / PARTIAL",
+        : "Σ (grand_total − paid) · AP_INV / AP_TAX / TB · ISSUED / PARTIAL",
       icon: <Landmark className="h-5 w-5" />,
       accent: "bg-amber-50 text-amber-800 border-amber-100",
       error: kpis.pendingAp.error,

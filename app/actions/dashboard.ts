@@ -7,6 +7,7 @@
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { AP_PAYABLE_DOC_TYPES } from "@/lib/constants/document";
 import type { Database } from "@/src/types/supabase";
 import type {
   KpiMoneyResult,
@@ -33,7 +34,6 @@ type ExpenseNetRow = {
 
 const YTD_SALES_DOC_TYPES = ["INV_DO", "TAX_INV", "ABB"] as const;
 const AR_PENDING_DOC_TYPES = ["INV_DO", "TAX_INV"] as const;
-const AP_PENDING_DOC_TYPES = ["AP_INV", "AP_TAX"] as const;
 
 /**
  * Outstanding filter intent: status IN ('ISSUED', 'PARTIAL').
@@ -137,7 +137,7 @@ export async function getPendingAR(): Promise<KpiMoneyResult> {
 }
 
 /**
- * Pending AP — AP_INV / AP_TAX where status≈ISSUED or payment_status=PARTIAL.
+ * Pending AP — AP_INV / AP_TAX / TB where status≈ISSUED or payment_status=PARTIAL.
  * Outstanding = Σ (grand_total − COALESCE(paid_amount, 0)).
  */
 export async function getPendingAP(): Promise<KpiMoneyResult> {
@@ -147,7 +147,7 @@ export async function getPendingAP(): Promise<KpiMoneyResult> {
     const { data, error } = await supabaseAdmin
       .from("documents")
       .select("id, grand_total, paid_amount, status, payment_status")
-      .in("doc_type", [...AP_PENDING_DOC_TYPES])
+      .in("doc_type", [...AP_PAYABLE_DOC_TYPES])
       .or(OUTSTANDING_STATUS_OR)
       .not("status", "in", '("DRAFT","VOID","CANCELLED")')
       .not("is_voided", "eq", true);
