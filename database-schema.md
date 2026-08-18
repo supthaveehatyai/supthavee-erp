@@ -42,17 +42,18 @@
 
 - `inventory_ledger` (สมุดบัญชีคลังสินค้า - ควบคุมการเข้าออกสต็อก)
 
-- `production_jobs` (ใบสั่งผลิต / งาน MTO)
+- `production_jobs` (ใบสั่งผลิต / งาน MTO — *อัปเดต: ยกเลิกการเก็บ technician_id และ wage_cost ที่ตารางนี้ ย้ายไประดับ Line Item แทน*)
 
 - `service_tracking` (ติดตามสถานะงานบริการ)
 
 - `technician_rates` (เรตค่าแรงช่าง — FK `service_model_id` → `product_models.id`, `technician_id` → `contacts.id`)
 
+
 ## 4. Documents & Financials (เอกสารและการเงิน)
 
 - `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — `doc_type` รวม `TB` สรุปวางบิลช่าง)
 
-- `document_items` (รายการสินค้าในเอกสาร — งานบริการเก็บ `technician_id`, `wage_cost`, `technician_bill_id`)
+- `document_items` (รายการสินค้าในเอกสาร — งานบริการเก็บ `technician_id`, `wage_cost`, `technician_bill_id` เพื่อรองรับ Line Item Assignment)
 
 - `document_allocations` (การจัดสรรเอกสาร เช่น ตัดมัดจำ)
 

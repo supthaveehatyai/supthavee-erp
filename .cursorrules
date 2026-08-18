@@ -27,6 +27,7 @@ Tech Stack หลัก: Supabase (PostgreSQL, Auth, Edge Functions, RLS), Next.
 - **Zero Client-Side Fetching:** ห้ามใช้ `supabase.from()` หรือ query ข้อมูลผ่าน Client Component เด็ดขาด การอ่าน/เขียนข้อมูลต้องทำผ่าน **Server Actions** เท่านั้น
 - **Bypass RLS on Server:** ใน Server Actions ให้ใช้ `supabaseAdmin` (Service Role Key) ในการจัดการข้อมูลที่ต้องการสิทธิ์ระดับสูง
 - **Type Separation:** ห้ามเขียน `export type` หรือ `interface` รวมในไฟล์ที่มี `'use server'` ให้แยกไฟล์ Type ออกไปที่โฟลเดอร์ `types/` เพื่อป้องกัน Turbopack Build Error
+- **Explicit Foreign Key References:** เมื่อมีการ Query ข้อมูลข้ามตาราง (Join) ผ่าน Supabase SDK หากตารางนั้นมี Foreign Key ชี้ไปตารางเป้าหมายมากกว่า 1 คอลัมน์ (Ambiguous Relationship) **บังคับให้ใช้ Explicit Join เสมอ** (เช่น `.select('*, document_items!document_id(*)')`) เพื่อป้องกัน Error 500
 
 ## 2. Business & Accounting Logic (ERP Standard)
 - **Late Numbering:** เอกสารใหม่ต้องใช้รหัสชั่วคราว (`DRAFT-YYYYMMDDHHmmss`) และดึงเลขรันนิ่งจริงผ่าน RPC (`generate_document_no`) เฉพาะตอนกด "ยืนยัน (ISSUED)" เท่านั้น

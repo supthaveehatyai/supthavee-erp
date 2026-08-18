@@ -41,6 +41,8 @@
 *   **Net Price Support:** อนุญาตให้เลือกลักษณะส่วนลดเป็น "ราคาเน็ต" เพื่อปลดล็อกช่องให้ผู้ใช้สามารถกรอกราคาต้นทุนเป็นเงินบาทได้โดยตรง[cite: 3, 4]
 *   **Size Sort Order & Code Structure (Fixed-2):** ตาราง `mst_sizes` ใช้ระบบรหัสตรงตามหน้าแคตตาล็อกโรงงานและตั้งน้ำหนักการจัดเรียง (`sort_order`) แบบระบุโซนช่วงห่างทีละ 10 (Gap of 10) **และบังคับให้ `size_code` มีความยาว 2 ตัวอักษรเท่านั้น (Fixed-2 Characters) เช่น '0S', 'XL', 'JS', 'A4' เพื่อความเสถียรของความยาว SKU**[cite: 13]
 *   **สูตรการสร้าง SKU:** `Brand Code` + `Category Code (2 หลัก)` + `Model Code (ล็อก 6 หลัก)` + `Gender Code (1 หลัก)` + `Color Code (3 หลัก)` + `Size Code (2 หลัก)`[cite: 13]
+*   **Line Item Subcontracting:** รองรับการแบ่งงานบริการภายในใบสั่งผลิต (Job) เดียวกัน ให้ช่างหลายคนรับผิดชอบแยกกันเป็นรายบรรทัด (Line Item Assignment) โดยดึงเรตค่าแรงจากตาราง `technician_rates` มาเป็น Default Wage และอนุญาตให้ปรับปรุงเป็น Actual Cost ได้หน้างาน
+*   **Unified Billing Hub (Technician Billing):** ระบบสรุปวางบิลช่าง (TB) ถูกรวบรวมไว้ในหน้าจอเดียวกับระบบวางบิลลูกหนี้ (BN) และเจ้าหนี้ (BR) เพื่อให้กระบวนการตั้งเจ้าหนี้ค่าแรง (Accounts Payable) สอดคล้องตามหลักการบัญชี Accrual Basis
 
 ### Module B: Document Flow & Profit Analysis (ระบบเอกสารและการวิเคราะห์กำไร)
 *   *(คงเนื้อหาเดิมตาม Blueprint ข้อ B - E อ้างอิงจาก[cite: 3, 4])*
