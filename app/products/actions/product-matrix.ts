@@ -121,6 +121,12 @@ function parseSizePricingConfig(raw?: string): unknown {
   }
 }
 
+/** UUID FK: never send "" / undefined to Postgres. */
+function toNullableUuid(value: string | null | undefined): string | null {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function validateStep1(input: SaveDraftModelInput): string | null {
   const identity = parseProductModelIdentity({
     vendorId: input.vendorId,
@@ -148,8 +154,8 @@ function buildDraftPayload(input: SaveDraftModelInput) {
   const isService = Boolean(input.isService);
 
   return {
-    vendor_id: isService ? input.vendorId?.trim() || null : input.vendorId,
-    brand_id: isService ? input.brandId?.trim() || null : input.brandId,
+    vendor_id: isService ? null : toNullableUuid(input.vendorId),
+    brand_id: isService ? null : toNullableUuid(input.brandId),
     category_id: input.categoryId,
     model_code: modelCode,
     name: input.name.trim(),
@@ -629,25 +635,31 @@ export async function generateSkusFromModel(
     insertedCount = insertedProducts?.length ?? 0;
 
     if (insertedProducts && insertedProducts.length > 0) {
-      const mappings = insertedProducts.map((product) => ({
-        vendor_id: input.vendorId,
-        vendor_sku: product.sku,
-        vendor_product_name: product.name,
-        vendor_uom: "ตัว",
-        internal_product_id: product.id,
-        conversion_factor: 1,
-      }));
+      const mappingVendorId = isService
+        ? null
+        : toNullableUuid(input.vendorId ?? input.model.vendorId);
 
-      const { error: mappingError } = await supabase
-        .from("vendor_product_mapping")
-        .insert(mappings);
+      if (mappingVendorId) {
+        const mappings = insertedProducts.map((product) => ({
+          vendor_id: mappingVendorId,
+          vendor_sku: product.sku,
+          vendor_product_name: product.name,
+          vendor_uom: "ตัว",
+          internal_product_id: product.id,
+          conversion_factor: 1,
+        }));
 
-      if (mappingError && mappingError.code !== "23505") {
-        return {
-          ok: false,
-          modelId,
-          error: `ผูกผู้จำหน่ายไม่สำเร็จ: ${mappingError.message}`,
-        };
+        const { error: mappingError } = await supabase
+          .from("vendor_product_mapping")
+          .insert(mappings);
+
+        if (mappingError && mappingError.code !== "23505") {
+          return {
+            ok: false,
+            modelId,
+            error: `ผูกผู้จำหน่ายไม่สำเร็จ: ${mappingError.message}`,
+          };
+        }
       }
     }
   }
@@ -865,7 +877,7 @@ export async function updateProductModel(
     const { error: modelUpdateError } = await supabaseAdmin
       .from("product_models")
       .update({
-        vendor_id: input.isService ? input.vendorId || null : input.vendorId,
+        vendor_id: input.isService ? null : toNullableUuid(input.vendorId),
         name: baseName,
         short_name: shortName,
         gender: input.gender,

@@ -65,6 +65,7 @@ export type SizeSchemaOutput = z.output<typeof sizeSchema>;
 
 const taxTypeSchema = z.enum(["INC_VAT", "EXC_VAT", "NON_VAT"]);
 
+/** Empty string / undefined → null so Postgres UUID columns never receive "". */
 const optionalUuid = z.preprocess(
   (value) => {
     if (value == null) return null;
@@ -76,7 +77,7 @@ const optionalUuid = z.preprocess(
 
 /**
  * Product model identity (Phase 1 Base Model).
- * `vendor_id` / `brand_id` required for goods; optional when `is_service`.
+ * `vendor_id` / `brand_id` required for goods; null when `is_service`.
  */
 export const productModelSchema = z
   .object({
@@ -117,6 +118,16 @@ export const productModelSchema = z
         message: "ต้องระบุแบรนด์ (brand_id) เป็น UUID ที่ถูกต้อง",
       });
     }
+  })
+  .transform((data) => {
+    if (data.is_service) {
+      return { ...data, vendor_id: null, brand_id: null };
+    }
+    return {
+      ...data,
+      vendor_id: data.vendor_id ?? null,
+      brand_id: data.brand_id ?? null,
+    };
   });
 
 export type ProductModelSchemaInput = z.input<typeof productModelSchema>;
@@ -158,7 +169,11 @@ export const updateProductModelSchema = z
         message: VENDOR_ID_REQUIRED_MESSAGE,
       });
     }
-  });
+  })
+  .transform((data) => ({
+    ...data,
+    vendorId: data.isService ? null : (data.vendorId ?? null),
+  }));
 
 export type UpdateProductModelSchemaInput = z.input<
   typeof updateProductModelSchema
