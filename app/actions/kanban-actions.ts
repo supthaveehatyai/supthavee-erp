@@ -380,10 +380,6 @@ export async function createProductionJob(
     };
   }
 
-  const technicianId = String(
-    formData.get("technicianId") ?? formData.get("technician_id") ?? "",
-  ).trim();
-
   try {
     const supabase = createClient();
 
@@ -441,47 +437,6 @@ export async function createProductionJob(
       };
     }
 
-    let technicianIdToSave: string | null = null;
-    let wageCost = 0;
-    if (technicianId) {
-      const { data: technician, error: techError } = await supabase
-        .from("contacts")
-        .select("id, contact_roles, is_active")
-        .eq("id", technicianId)
-        .contains("contact_roles", ["Technician"])
-        .maybeSingle();
-
-      if (techError) {
-        return {
-          success: false,
-          error: techError.message ?? "ตรวจสอบช่างรับเหมาไม่สำเร็จ",
-          data: null,
-        };
-      }
-      if (!technician || technician.is_active === false) {
-        return {
-          success: false,
-          error: "ช่างรับเหมาต้องมีสถานะ Technician ใน contact_roles",
-          data: null,
-        };
-      }
-      technicianIdToSave = technician.id;
-
-      const serviceModel = await resolveServiceModelFromDocument(
-        supabase,
-        documentId,
-      );
-      if (serviceModel) {
-        const { data: rate } = await supabase
-          .from("technician_rates")
-          .select("default_wage")
-          .eq("technician_id", technicianIdToSave)
-          .eq("service_model_id", serviceModel.id)
-          .maybeSingle();
-        if (rate) wageCost = toWageCost(rate.default_wage);
-      }
-    }
-
     let lastError: string | null = null;
     for (let attempt = 0; attempt < 5; attempt++) {
       const jobNo = await nextProductionJobNo(supabase);
@@ -509,8 +464,8 @@ export async function createProductionJob(
           due_date: dueDate,
           details,
           attachment_paths: attachmentPaths,
-          technician_id: technicianIdToSave,
-          wage_cost: wageCost,
+          technician_id: null,
+          wage_cost: 0,
         })
         .select("id, job_no")
         .maybeSingle();
@@ -796,6 +751,32 @@ export async function getJobDetails(
           technician_bill_id: item.technician_bill_id?.trim() || null,
         };
       });
+
+      const modelIds = [
+        ...new Set(
+          lineItems
+            .map((item) => item.model_id)
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ];
+      if (modelIds.length > 0) {
+        const { data: models } = await supabase
+          .from("product_models")
+          .select("id, is_service")
+          .in("id", modelIds);
+        const serviceByModel = new Map(
+          (models ?? []).map((row) => [
+            String(row.id),
+            row.is_service === true,
+          ]),
+        );
+        lineItems = lineItems.map((item) => ({
+          ...item,
+          is_service: item.model_id
+            ? (serviceByModel.get(item.model_id) ?? item.is_service)
+            : item.is_service,
+        }));
+      }
     }
 
     const serviceModel = await resolveServiceModelFromDocument(
@@ -1172,7 +1153,9 @@ export async function updateProductionJobAssignment(
     const itemIds = [
       ...new Set(
         lines
-          .map((line) => line.item_id?.trim())
+          .map((line) =>
+            (line.document_item_id ?? line.item_id)?.trim(),
+          )
           .filter((id): id is string => Boolean(id)),
       ),
     ];
@@ -1240,7 +1223,7 @@ export async function updateProductionJobAssignment(
 
     const nowIso = new Date().toISOString();
     for (const line of lines) {
-      const itemId = line.item_id?.trim() ?? "";
+      const itemId = (line.document_item_id ?? line.item_id)?.trim() ?? "";
       if (!itemId) continue;
       if (billed.has(itemId)) {
         return {

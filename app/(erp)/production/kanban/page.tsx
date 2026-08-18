@@ -25,8 +25,24 @@ export default async function ProductionKanbanPage({ searchParams }: PageProps) 
 
   const result = await getKanbanBoardData();
 
-  const jobDetailsResult = jobId ? await getJobDetails(jobId) : null;
-  const techniciansResult = await getTechnicianOptions();
+  const jobDetailsResult = jobId
+    ? await getJobDetails(jobId).catch((err: unknown) => ({
+        success: false as const,
+        error:
+          err instanceof Error ? err.message : "ดึงรายละเอียดงานไม่สำเร็จ",
+        data: null,
+      }))
+    : null;
+
+  const techniciansResult = await getTechnicianOptions().catch(
+    (err: unknown) => ({
+      success: false as const,
+      error:
+        err instanceof Error ? err.message : "ดึงรายชื่อช่างรับเหมาไม่สำเร็จ",
+      data: [] as Awaited<ReturnType<typeof getTechnicianOptions>>["data"],
+      rates: [] as Awaited<ReturnType<typeof getTechnicianOptions>>["rates"],
+    }),
+  );
 
   if (!result.success) {
     return (

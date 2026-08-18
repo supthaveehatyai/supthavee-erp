@@ -117,10 +117,34 @@ export default async function PurchaseDocumentDetailPage({
   params,
 }: PageProps) {
   const { doc_no: rawDocNo } = await params;
-  const docNo = decodeURIComponent(rawDocNo);
+  const docNo = decodeURIComponent(rawDocNo ?? "").trim();
+  if (!docNo) {
+    notFound();
+  }
 
-  const result = await getDocumentByNo(docNo);
-  if (result.error || !result.data) {
+  let result: Awaited<ReturnType<typeof getDocumentByNo>>;
+  try {
+    result = await getDocumentByNo(docNo);
+  } catch (err) {
+    return (
+      <div className="mx-auto max-w-3xl p-6">
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {err instanceof Error ? err.message : "โหลดเอกสารซื้อไม่สำเร็จ"}
+        </div>
+      </div>
+    );
+  }
+
+  if (!result.data) {
+    if (result.error && !/ไม่พบเอกสาร/.test(result.error)) {
+      return (
+        <div className="mx-auto max-w-3xl p-6">
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {result.error}
+          </div>
+        </div>
+      );
+    }
     notFound();
   }
 

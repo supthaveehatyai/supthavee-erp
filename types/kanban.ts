@@ -145,7 +145,10 @@ export type GetTechnicianOptionsResult =
   | { success: false; error: string; data: TechnicianOption[]; rates: TechnicianRateOption[] };
 
 export type ProductionJobLineAssignment = {
-  item_id: string;
+  /** document_items.id */
+  item_id?: string;
+  /** alias ของ item_id */
+  document_item_id?: string;
   technician_id: string | null;
   wage_cost: number;
 };

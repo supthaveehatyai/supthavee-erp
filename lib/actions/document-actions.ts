@@ -1220,10 +1220,9 @@ export async function getDocumentByNo(
     }
 
     const supabase = createSupabaseServerClient();
-    const { data, error } = await supabase
-      .from("documents")
-      .select(
-        `
+    const uuidPattern =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const selectSql = `
         id,
         doc_no,
         doc_type,
@@ -1282,19 +1281,32 @@ export async function getDocumentByNo(
           discount_amount,
           line_total,
           sort_order,
-          products:product_id (
+          products!document_items_product_id_fkey (
             id,
             sku,
             name,
-            product_models (
+            product_models!products_model_id_fkey (
               image_url
             )
           )
         )
-      `,
-      )
+      `;
+
+    let { data, error } = await supabase
+      .from("documents")
+      .select(selectSql)
       .eq("doc_no", trimmed)
       .maybeSingle();
+
+    if (!data && !error && uuidPattern.test(trimmed)) {
+      const byId = await supabase
+        .from("documents")
+        .select(selectSql)
+        .eq("id", trimmed)
+        .maybeSingle();
+      data = byId.data;
+      error = byId.error;
+    }
 
     if (error) {
       return { data: null, error: error.message };

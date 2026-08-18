@@ -12,13 +12,11 @@ import { ImagePlus, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   createProductionJob,
-  getTechnicianOptions,
 } from "@/app/actions/kanban-actions";
 import { compressImages } from "@/lib/utils/image-compression";
 import {
   PRODUCTION_JOB_TYPES,
   type ProductionJobType,
-  type TechnicianOption,
 } from "@/types/kanban";
 import { Button } from "@/components/ui/button";
 import {
@@ -104,7 +102,6 @@ export function CreateJobModal({
   const [previews, setPreviews] = useState<PreviewItem[]>([]);
   const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
   const [isCompressing, setIsCompressing] = useState(false);
-  const [technicians, setTechnicians] = useState<TechnicianOption[]>([]);
   const previewUrlsRef = useRef<string[]>([]);
 
   function revokePreviews() {
@@ -122,21 +119,6 @@ export function CreateJobModal({
     setPreviews([]);
     setAttachmentFiles([]);
     setIsCompressing(false);
-
-    let cancelled = false;
-    void getTechnicianOptions().then((result) => {
-      if (cancelled) return;
-      if (!result.success) {
-        toast.error(result.error);
-        setTechnicians([]);
-        return;
-      }
-      setTechnicians(result.data ?? []);
-    });
-
-    return () => {
-      cancelled = true;
-    };
   }, [open]);
 
   useEffect(() => {
@@ -247,24 +229,8 @@ export function CreateJobModal({
               required
               className="h-10"
             />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="mto-technician">ช่างรับเหมา</Label>
-            <Select id="mto-technician" name="technicianId" defaultValue="">
-              <option value="">
-                {technicians.length === 0
-                  ? "— ยังไม่มีคู่ค้าสถานะช่างรับเหมา —"
-                  : "— ไม่ระบุ —"}
-              </option>
-              {technicians.map((tech) => (
-                <option key={tech.id} value={tech.id}>
-                  {tech.company_name}
-                </option>
-              ))}
-            </Select>
             <p className="text-[11px] text-slate-400">
-              ดึงจาก contacts ที่ contact_roles มี Technician
+              ระบุช่างและค่าแรงทีละบรรทัดงานบริการในหน้า Production Kanban
             </p>
           </div>
 

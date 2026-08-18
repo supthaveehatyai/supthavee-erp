@@ -5,6 +5,7 @@
  * Data is fetched on the Server and passed in (Zero Client-Side Fetching).
  */
 
+import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -232,6 +233,7 @@ export function JobDetailSheet({
 
     const lines: Array<{
       item_id: string;
+      document_item_id: string;
       technician_id: string | null;
       wage_cost: number;
     }> = [];
@@ -245,6 +247,7 @@ export function JobDetailSheet({
       }
       lines.push({
         item_id: item.id,
+        document_item_id: item.id,
         technician_id: draft?.technicianId?.trim() || null,
         wage_cost: wage,
       });
@@ -292,8 +295,8 @@ export function JobDetailSheet({
   const canCancel =
     job && job.status !== "DELIVERED" && job.status !== "CANCELLED";
   const canEditAssignment = job && job.status !== "CANCELLED";
-  const goodsItems = job?.line_items.filter((item) => !item.is_service) ?? [];
-  const serviceItems = job?.line_items.filter((item) => item.is_service) ?? [];
+  const goodsItems = (job?.line_items ?? []).filter((item) => !item.is_service);
+  const serviceItems = (job?.line_items ?? []).filter((item) => item.is_service);
 
   return (
     <>
@@ -339,7 +342,16 @@ export function JobDetailSheet({
                   <div className="flex items-center gap-2 text-slate-600">
                     <FileText className="size-4 shrink-0 text-slate-400" />
                     <span className="font-mono font-semibold text-slate-800">
-                      {job.document_no || "ไม่ผูกเอกสาร"}
+                      {job.document_no ? (
+                        <Link
+                          href={`/sales/${encodeURIComponent(job.document_no)}`}
+                          className="underline decoration-slate-300 underline-offset-2 hover:text-blue-700"
+                        >
+                          {job.document_no}
+                        </Link>
+                      ) : (
+                        "ไม่ผูกเอกสาร"
+                      )}
                     </span>
                   </div>
                   <div className="flex items-center gap-2 text-slate-600">

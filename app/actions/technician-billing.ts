@@ -123,52 +123,6 @@ export async function getUnbilledTechnicianJobs(
       return emptyResult("วันที่สิ้นสุดต้องเป็นรูปแบบ YYYY-MM-DD", techniciansResult.data);
     }
 
-    const { data: jobs, error: jobsError } = await supabase
-      .from("production_jobs")
-      .select("id, job_no, status, updated_at, document_id")
-      .in("status", [...BILLABLE_JOB_STATUSES])
-      .not("document_id", "is", null)
-      .order("updated_at", { ascending: false });
-
-    if (jobsError) {
-      return emptyResult(
-        jobsError.message ?? "ดึงใบสั่งผลิตไม่สำเร็จ",
-        techniciansResult.data,
-      );
-    }
-
-    type JobRow = {
-      id: string;
-      job_no: string;
-      status: string;
-      updated_at: string | null;
-      document_id: string | null;
-    };
-
-    const billableJobs = ((jobs ?? []) as JobRow[]).filter((row) => {
-      const deliveredOn = deliveredOnFromJob(row.updated_at);
-      if (from && (!deliveredOn || deliveredOn < from)) return false;
-      if (to && (!deliveredOn || deliveredOn > to)) return false;
-      return Boolean(row.document_id);
-    });
-
-    const jobByDocument = new Map<string, JobRow>();
-    for (const job of billableJobs) {
-      const docId = String(job.document_id ?? "").trim();
-      if (!docId || jobByDocument.has(docId)) continue;
-      jobByDocument.set(docId, job);
-    }
-
-    const documentIds = [...jobByDocument.keys()];
-    if (documentIds.length === 0) {
-      return {
-        success: true,
-        rows: [],
-        totalWage: 0,
-        technicians: techniciansResult.data,
-      };
-    }
-
     let itemQuery = supabase
       .from("document_items")
       .select(
@@ -197,7 +151,6 @@ export async function getUnbilledTechnicianJobs(
         )
       `,
       )
-      .in("document_id", documentIds)
       .not("technician_id", "is", null)
       .is("technician_bill_id", null)
       .gt("wage_cost", 0)
@@ -240,6 +193,56 @@ export async function getUnbilledTechnicianJobs(
       documents: DocumentJoin | DocumentJoin[] | null;
     };
 
+    const itemRows = (items ?? []) as ItemRow[];
+    const documentIds = [
+      ...new Set(
+        itemRows
+          .map((row) => String(row.document_id ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    if (documentIds.length === 0) {
+      return {
+        success: true,
+        rows: [],
+        totalWage: 0,
+        technicians: techniciansResult.data,
+      };
+    }
+
+    const { data: jobs, error: jobsError } = await supabase
+      .from("production_jobs")
+      .select("id, job_no, status, updated_at, document_id")
+      .in("document_id", documentIds)
+      .in("status", [...BILLABLE_JOB_STATUSES])
+      .order("updated_at", { ascending: false });
+
+    if (jobsError) {
+      return emptyResult(
+        jobsError.message ?? "ดึงใบสั่งผลิตไม่สำเร็จ",
+        techniciansResult.data,
+      );
+    }
+
+    type JobRow = {
+      id: string;
+      job_no: string;
+      status: string;
+      updated_at: string | null;
+      document_id: string | null;
+    };
+
+    const jobByDocument = new Map<string, JobRow>();
+    for (const job of (jobs ?? []) as JobRow[]) {
+      const docId = String(job.document_id ?? "").trim();
+      if (!docId || jobByDocument.has(docId)) continue;
+      const deliveredOn = deliveredOnFromJob(job.updated_at);
+      if (from && (!deliveredOn || deliveredOn < from)) continue;
+      if (to && (!deliveredOn || deliveredOn > to)) continue;
+      jobByDocument.set(docId, job);
+    }
+
     const technicianNameById = new Map(
       techniciansResult.data.map((tech) => [tech.id, tech.company_name]),
     );
@@ -247,7 +250,7 @@ export async function getUnbilledTechnicianJobs(
     const rows: TechnicianBillingJobRow[] = [];
     let totalWage = 0;
 
-    for (const item of (items ?? []) as ItemRow[]) {
+    for (const item of itemRows) {
       const id = String(item.id ?? "").trim();
       const techId = String(item.technician_id ?? "").trim();
       const documentId = String(item.document_id ?? "").trim();
