@@ -1269,7 +1269,7 @@ export async function getDocumentByNo(
           email,
           department_or_role
         ),
-        document_items (
+        document_items!document_items_document_id_fkey (
           id,
           product_id,
           description,
@@ -2298,7 +2298,7 @@ export async function convertDocument(
         net_before_vat,
         vat_amount,
         notes,
-        document_items (
+        document_items!document_items_document_id_fkey (
           product_id,
           description,
           qty,
@@ -2751,7 +2751,7 @@ export async function cloneDocumentToNewDraft(
         net_before_vat,
         vat_amount,
         notes,
-        document_items (
+        document_items!document_items_document_id_fkey (
           product_id,
           description,
           qty,
@@ -2944,7 +2944,7 @@ export async function duplicateDocument(
         total_amount,
         net_before_vat,
         vat_amount,
-        document_items (
+        document_items!document_items_document_id_fkey (
           product_id,
           description,
           qty,
