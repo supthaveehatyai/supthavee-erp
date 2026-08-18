@@ -37,6 +37,7 @@ const A4_TYPES = new Set([
   "AP_WRITEOFF",
   "EXPENSE",
   "WHT",
+  "TB",
 ]);
 
 export const PRINT_PAPER_SIZE_OPTIONS: ReadonlyArray<{

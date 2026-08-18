@@ -29,6 +29,8 @@ export const DOCUMENT_TYPES = [
   // Legacy settlement (readable until fully migrated)
   "REFUND",
   "WRITE_OFF",
+  // Technician Billing (documents.doc_type)
+  "TB",
   // Legacy (readable until fully migrated)
   "DEP",
   "INT_REC",
@@ -67,6 +69,7 @@ export const DOCUMENT_TYPE_PREFIX = {
   // Legacy
   REFUND: "RFD",
   WRITE_OFF: "WRO",
+  TB: "TB",
   DEP: "DEP",
   INT_REC: "INT",
 } as const;

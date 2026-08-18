@@ -42,7 +42,7 @@
 
 - `inventory_ledger` (สมุดบัญชีคลังสินค้า - ควบคุมการเข้าออกสต็อก)
 
-- `production_jobs` (ใบสั่งผลิต / งาน MTO — `technician_id` → `contacts.id`, `wage_cost` ค่าแรงจริง)
+- `production_jobs` (ใบสั่งผลิต / งาน MTO — `technician_id` → `contacts.id`, `wage_cost` ค่าแรงจริง, `technician_bill_id` → `documents.id` เมื่อวางบิลช่างแล้ว)
 
 - `service_tracking` (ติดตามสถานะงานบริการ)
 
@@ -50,7 +50,7 @@
 
 ## 4. Documents & Financials (เอกสารและการเงิน)
 
-- `documents` / `doc_headers` / `doc_details` (เอกสารหลัก)
+- `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — `doc_type` รวม `TB` สรุปวางบิลช่าง)
 
 - `document_items` (รายการสินค้าในเอกสาร)
 

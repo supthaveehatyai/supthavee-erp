@@ -13,6 +13,9 @@ import type {
   BillingNoteDocType,
   BillingNoteListItem,
 } from "@/app/actions/billing";
+import type { BillingNotesTab } from "@/types/technician-billing";
+import { TechnicianBillingPanel } from "@/components/finance/TechnicianBillingPanel";
+import type { TechnicianBillingPanelProps } from "@/components/finance/TechnicianBillingPanel";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
@@ -35,10 +38,11 @@ import { cn } from "@/lib/utils";
 const SEARCH_DEBOUNCE_MS = 300;
 
 export type BillingNoteListProps = {
-  type: BillingNoteDocType;
+  type: BillingNotesTab;
   search: string;
   rows: BillingNoteListItem[];
   error: string | null;
+  technicianBilling?: TechnicianBillingPanelProps;
 };
 
 function formatMoney(value: number): string {
@@ -59,10 +63,10 @@ function formatDate(value: string | null | undefined): string {
   });
 }
 
-function buildListHref(type: BillingNoteDocType, search?: string): string {
+function buildListHref(type: BillingNotesTab, search?: string): string {
   const params = new URLSearchParams();
   params.set("type", type);
-  if (search?.trim()) params.set("search", search.trim());
+  if (type !== "TB" && search?.trim()) params.set("search", search.trim());
   return `/finance/billing-notes?${params.toString()}`;
 }
 
@@ -106,6 +110,7 @@ export function BillingNoteList({
   search: urlSearch,
   rows,
   error,
+  technicianBilling,
 }: BillingNoteListProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -114,6 +119,8 @@ export function BillingNoteList({
   latestRef.current = { search, urlSearch, type };
 
   const isBN = type === "BN";
+  const isBR = type === "BR";
+  const isTB = type === "TB";
   const contactColumnLabel = isBN ? "ชื่อลูกค้า" : "ชื่อคู่ค้า";
 
   useEffect(() => {
@@ -123,6 +130,7 @@ export function BillingNoteList({
   useEffect(() => {
     const handle = window.setTimeout(() => {
       const latest = latestRef.current;
+      if (latest.type === "TB") return;
       if (latest.search.trim() === latest.urlSearch.trim()) return;
       startTransition(() => {
         router.replace(buildListHref(latest.type, latest.search), {
@@ -143,29 +151,30 @@ export function BillingNoteList({
             ระบบวางบิล (Billing Note)
           </h1>
           <p className="text-slate-500">
-            วางบิลลูกหนี้ (BN) และรับวางบิลเจ้าหนี้ (BR) — สถานะแท็บ/ค้นหาผ่าน
-            URL Search Params
+            วางบิลลูกหนี้ (BN) · รับวางบิลเจ้าหนี้ (BR) · สรุปวางบิลช่าง (TB)
           </p>
         </div>
-        <Link
-          href={createHref(type)}
-          className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-        >
-          <Plus className="size-4" />
-          สร้างใบวางบิล
-        </Link>
+        {isTB ? null : (
+          <Link
+            href={createHref(isBN ? "BN" : "BR")}
+            className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+          >
+            <Plus className="size-4" />
+            สร้างใบวางบิล
+          </Link>
+        )}
       </div>
 
       <div
         role="tablist"
-        className="inline-flex h-10 w-full max-w-xl items-center justify-center rounded-xl bg-slate-100 p-1 text-slate-600"
+        className="inline-flex h-10 w-full max-w-3xl items-center justify-center rounded-xl bg-slate-100 p-1 text-slate-600"
       >
         <Link
           role="tab"
           aria-selected={isBN}
           href={buildListHref("BN", urlSearch)}
           className={cn(
-            "inline-flex flex-1 items-center justify-center whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-semibold transition",
+            "inline-flex flex-1 items-center justify-center whitespace-nowrap rounded-lg px-2 py-1.5 text-sm font-semibold transition sm:px-3",
             isBN
               ? "bg-white text-slate-900 shadow-sm"
               : "text-slate-600 hover:text-slate-900",
@@ -175,20 +184,40 @@ export function BillingNoteList({
         </Link>
         <Link
           role="tab"
-          aria-selected={!isBN}
+          aria-selected={isBR}
           href={buildListHref("BR", urlSearch)}
           className={cn(
-            "inline-flex flex-1 items-center justify-center whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-semibold transition",
-            !isBN
+            "inline-flex flex-1 items-center justify-center whitespace-nowrap rounded-lg px-2 py-1.5 text-sm font-semibold transition sm:px-3",
+            isBR
               ? "bg-white text-slate-900 shadow-sm"
               : "text-slate-600 hover:text-slate-900",
           )}
         >
           รับวางบิลเจ้าหนี้ (BR)
         </Link>
+        <Link
+          role="tab"
+          aria-selected={isTB}
+          href={buildListHref("TB")}
+          className={cn(
+            "inline-flex flex-1 items-center justify-center whitespace-nowrap rounded-lg px-2 py-1.5 text-sm font-semibold transition sm:px-3",
+            isTB
+              ? "bg-white text-slate-900 shadow-sm"
+              : "text-slate-600 hover:text-slate-900",
+          )}
+        >
+          สรุปวางบิลช่าง (TB)
+        </Link>
       </div>
 
-      <Card>
+      {isTB && technicianBilling ? (
+        <TechnicianBillingPanel {...technicianBilling} />
+      ) : isTB ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          ไม่สามารถโหลดรายการสรุปวางบิลช่างได้
+        </div>
+      ) : (
+        <Card>
         <CardHeader className="gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <CardTitle>
@@ -291,6 +320,7 @@ export function BillingNoteList({
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

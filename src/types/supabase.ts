@@ -1291,6 +1291,7 @@ export type Database = {
           job_type: Database["public"]["Enums"]["production_job_type"]
           status: Database["public"]["Enums"]["production_job_status"]
           technician_id: string | null
+          technician_bill_id: string | null
           updated_at: string | null
           wage_cost: number | null
         }
@@ -1306,6 +1307,7 @@ export type Database = {
           job_type?: Database["public"]["Enums"]["production_job_type"]
           status?: Database["public"]["Enums"]["production_job_status"]
           technician_id?: string | null
+          technician_bill_id?: string | null
           updated_at?: string | null
           wage_cost?: number | null
         }
@@ -1321,6 +1323,7 @@ export type Database = {
           job_type?: Database["public"]["Enums"]["production_job_type"]
           status?: Database["public"]["Enums"]["production_job_status"]
           technician_id?: string | null
+          technician_bill_id?: string | null
           updated_at?: string | null
           wage_cost?: number | null
         }
@@ -1344,6 +1347,13 @@ export type Database = {
             columns: ["technician_id"]
             isOneToOne: false
             referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "production_jobs_technician_bill_id_fkey"
+            columns: ["technician_bill_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
             referencedColumns: ["id"]
           },
         ]
@@ -1766,6 +1776,7 @@ export type Database = {
         | "AP_REFUND"
         | "AR_WRITEOFF"
         | "AP_WRITEOFF"
+        | "TB"
       payment_method_enum:
         | "CASH"
         | "BANK_TRANSFER"
@@ -1945,6 +1956,7 @@ export const Constants = {
         "AP_REFUND",
         "AR_WRITEOFF",
         "AP_WRITEOFF",
+        "TB",
       ],
       payment_method_enum: [
         "CASH",
