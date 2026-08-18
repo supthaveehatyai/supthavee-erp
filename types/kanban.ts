@@ -74,6 +74,10 @@ export type ProductionJobLineItem = {
   description: string | null;
   model_id: string | null;
   is_service: boolean;
+  technician_id: string | null;
+  technician_name: string | null;
+  wage_cost: number;
+  technician_bill_id: string | null;
 };
 
 export type ProductionJobServiceModel = {
@@ -126,19 +130,29 @@ export type TechnicianOption = {
   id: string;
   company_name: string;
   contact_type: string;
-  /** เรตจาก technician_rates สำหรับ service_model ของงานนี้ */
+  /** เรตจาก technician_rates — ใช้เมื่อ filter ตามรุ่นเดียว */
+  default_wage: number;
+};
+
+export type TechnicianRateOption = {
+  technician_id: string;
+  service_model_id: string;
   default_wage: number;
 };
 
 export type GetTechnicianOptionsResult =
-  | { success: true; data: TechnicianOption[] }
-  | { success: false; error: string; data: TechnicianOption[] };
+  | { success: true; data: TechnicianOption[]; rates: TechnicianRateOption[] }
+  | { success: false; error: string; data: TechnicianOption[]; rates: TechnicianRateOption[] };
+
+export type ProductionJobLineAssignment = {
+  item_id: string;
+  technician_id: string | null;
+  wage_cost: number;
+};
 
 export type UpdateProductionJobAssignmentInput = {
   job_id: string;
-  technician_id: string | null;
-  /** Manual override — ถ้าไม่ส่ง ระบบดึงจาก technician_rates */
-  wage_cost?: number;
+  lines: ProductionJobLineAssignment[];
 };
 
 export type UpdateProductionJobAssignmentResult = {

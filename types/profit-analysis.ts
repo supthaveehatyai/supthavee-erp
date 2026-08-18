@@ -9,7 +9,7 @@ export type ProfitMonthKpi = {
   revenue: number;
   /** ต้นทุนเสื้อเปล่า — Σ (unit_cost_price × qty) */
   productCogs: number;
-  /** ค่าแรงงานบริการ — Σ production_jobs.wage_cost */
+  /** ค่าแรงงานบริการ — Σ document_items.wage_cost */
   wageCogs: number;
   /** productCogs + wageCogs */
   cogs: number;

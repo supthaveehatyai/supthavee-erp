@@ -25,6 +25,7 @@ import {
   type ProductionJobType,
   type ProductionJobsByStatus,
   type TechnicianOption,
+  type TechnicianRateOption,
   type UpdateJobStatusResult,
   type UpdateProductionJobAssignmentInput,
   type UpdateProductionJobAssignmentResult,
@@ -673,6 +674,9 @@ export async function getJobDetails(
           description,
           uom_used,
           sort_order,
+          technician_id,
+          wage_cost,
+          technician_bill_id,
           products!document_items_product_id_fkey (
             id,
             sku,
@@ -688,6 +692,9 @@ export async function getJobDetails(
               short_name,
               is_service
             )
+          ),
+          technician:contacts!document_items_technician_id_fkey (
+            company_name
           )
         `,
         )
@@ -707,6 +714,10 @@ export async function getJobDetails(
         qty: number;
         description: string | null;
         uom_used: string | null;
+        technician_id: string | null;
+        wage_cost: number | string | null;
+        technician_bill_id: string | null;
+        technician: ContactJoin | ContactJoin[] | null;
         products:
           | {
               id?: string;
@@ -734,6 +745,7 @@ export async function getJobDetails(
       lineItems = ((items as ItemRow[] | null) ?? []).map((item) => {
         const product = unwrapJoin(item.products);
         const model = unwrapJoin(product?.product_models ?? null);
+        const technician = unwrapJoin(item.technician ?? null);
         const sku = product?.sku?.trim() || "—";
         const name =
           product?.name?.trim() ||
@@ -752,6 +764,10 @@ export async function getJobDetails(
           description: item.description?.trim() || null,
           model_id: product?.model_id?.trim() || model?.id?.trim() || null,
           is_service: model?.is_service === true,
+          technician_id: item.technician_id?.trim() || null,
+          technician_name: technician?.company_name?.trim() || null,
+          wage_cost: toWageCost(item.wage_cost),
+          technician_bill_id: item.technician_bill_id?.trim() || null,
         };
       });
     }
@@ -926,25 +942,24 @@ async function resolveServiceModelFromDocument(
 }
 
 /**
- * เช็ก Rate Card ของช่างสำหรับงานบริการในใบสั่งผลิต (JOB)
- * ใช้ตอนเลือก Dropdown — auto-fill wage_cost
+ * เช็ก Rate Card ของช่างสำหรับรุ่นงานบริการ (product_models.id)
+ * ใช้ตอนเลือก Dropdown รายบรรทัด — auto-fill wage_cost
  */
-export async function lookupTechnicianWageForJob(
-  jobId: string,
+export async function lookupTechnicianWageForService(
   technicianId: string,
+  serviceModelId: string | null | undefined,
 ): Promise<LookupTechnicianWageResult> {
-  const id = jobId?.trim() ?? "";
   const techId = technicianId?.trim() ?? "";
-  if (!id) {
+  const modelId = serviceModelId?.trim() ?? "";
+  if (!techId) {
     return {
-      success: false,
-      error: "ไม่พบรหัสงาน (jobId)",
+      success: true,
       default_wage: 0,
       has_rate: false,
-      service_model_id: null,
+      service_model_id: modelId || null,
     };
   }
-  if (!techId) {
+  if (!modelId) {
     return {
       success: true,
       default_wage: 0,
@@ -955,50 +970,11 @@ export async function lookupTechnicianWageForJob(
 
   try {
     const supabase = createClient();
-
-    const { data: job, error: jobError } = await supabase
-      .from("production_jobs")
-      .select("id, document_id")
-      .eq("id", id)
-      .maybeSingle();
-
-    if (jobError) {
-      return {
-        success: false,
-        error: jobError.message ?? "ตรวจสอบใบสั่งผลิตไม่สำเร็จ",
-        default_wage: 0,
-        has_rate: false,
-        service_model_id: null,
-      };
-    }
-    if (!job) {
-      return {
-        success: false,
-        error: "ไม่พบใบสั่งผลิตในระบบ",
-        default_wage: 0,
-        has_rate: false,
-        service_model_id: null,
-      };
-    }
-
-    const serviceModel = await resolveServiceModelFromDocument(
-      supabase,
-      job.document_id,
-    );
-    if (!serviceModel) {
-      return {
-        success: true,
-        default_wage: 0,
-        has_rate: false,
-        service_model_id: null,
-      };
-    }
-
     const { data: rate, error: rateError } = await supabase
       .from("technician_rates")
       .select("default_wage")
       .eq("technician_id", techId)
-      .eq("service_model_id", serviceModel.id)
+      .eq("service_model_id", modelId)
       .maybeSingle();
 
     if (rateError) {
@@ -1007,7 +983,7 @@ export async function lookupTechnicianWageForJob(
         error: rateError.message ?? "ตรวจสอบ Rate Card ไม่สำเร็จ",
         default_wage: 0,
         has_rate: false,
-        service_model_id: serviceModel.id,
+        service_model_id: modelId,
       };
     }
 
@@ -1016,7 +992,7 @@ export async function lookupTechnicianWageForJob(
         success: true,
         default_wage: 0,
         has_rate: false,
-        service_model_id: serviceModel.id,
+        service_model_id: modelId,
       };
     }
 
@@ -1024,7 +1000,7 @@ export async function lookupTechnicianWageForJob(
       success: true,
       default_wage: toWageCost(rate.default_wage),
       has_rate: true,
-      service_model_id: serviceModel.id,
+      service_model_id: modelId,
     };
   } catch (err) {
     return {
@@ -1033,61 +1009,53 @@ export async function lookupTechnicianWageForJob(
         err instanceof Error ? err.message : "ตรวจสอบ Rate Card ไม่สำเร็จ",
       default_wage: 0,
       has_rate: false,
-      service_model_id: null,
+      service_model_id: modelId || null,
     };
   }
 }
 
 /**
- * รายชื่อช่างรับเหมาจาก contacts.contact_roles ที่มี 'Technician'
- * เมื่อระบุ serviceModelId จะแสดงเฉพาะช่างที่มี Rate Card ตรง service_model_id นั้น
+ * รายชื่อช่างรับเหมาทั้งหมด + Rate Card ทุกงานบริการ
+ * UI กรองตาม model_id ของแต่ละบรรทัด
  */
 export async function getTechnicianOptions(
-  serviceModelId?: string | null,
+  _serviceModelId?: string | null,
 ): Promise<GetTechnicianOptionsResult> {
   try {
     const supabase = createClient();
-    const modelId = serviceModelId?.trim() ?? "";
-    const wageByTechnician = new Map<string, number>();
 
-    if (modelId) {
-      const { data: rates, error: ratesError } = await supabase
-        .from("technician_rates")
-        .select("technician_id, default_wage")
-        .eq("service_model_id", modelId);
+    const { data: rateRows, error: ratesError } = await supabase
+      .from("technician_rates")
+      .select("technician_id, service_model_id, default_wage");
 
-      if (ratesError) {
-        console.error("[getTechnicianOptions] rates", ratesError.message);
-        return {
-          success: false,
-          error: ratesError.message ?? "ดึง Rate Card ช่างรับเหมาไม่สำเร็จ",
-          data: [],
-        };
-      }
-
-      for (const rate of rates ?? []) {
-        const techId = String(rate.technician_id ?? "").trim();
-        if (!techId) continue;
-        wageByTechnician.set(techId, toWageCost(rate.default_wage));
-      }
-
-      if (wageByTechnician.size === 0) {
-        return { success: true, data: [] };
-      }
+    if (ratesError) {
+      console.error("[getTechnicianOptions] rates", ratesError.message);
+      return {
+        success: false,
+        error: ratesError.message ?? "ดึง Rate Card ช่างรับเหมาไม่สำเร็จ",
+        data: [],
+        rates: [],
+      };
     }
 
-    let contactQuery = supabase
+    const rates: TechnicianRateOption[] = [];
+    for (const rate of rateRows ?? []) {
+      const techId = String(rate.technician_id ?? "").trim();
+      const modelId = String(rate.service_model_id ?? "").trim();
+      if (!techId || !modelId) continue;
+      rates.push({
+        technician_id: techId,
+        service_model_id: modelId,
+        default_wage: toWageCost(rate.default_wage),
+      });
+    }
+
+    const { data, error } = await supabase
       .from("contacts")
       .select("id, company_name, contact_roles, is_active")
       .contains("contact_roles", ["Technician"])
       .neq("is_active", false)
       .order("company_name", { ascending: true });
-
-    if (modelId) {
-      contactQuery = contactQuery.in("id", [...wageByTechnician.keys()]);
-    }
-
-    const { data, error } = await contactQuery;
 
     if (error) {
       console.error("[getTechnicianOptions]", error.message);
@@ -1095,6 +1063,7 @@ export async function getTechnicianOptions(
         success: false,
         error: error.message ?? "ดึงรายชื่อช่างรับเหมาไม่สำเร็จ",
         data: [],
+        rates: [],
       };
     }
 
@@ -1104,7 +1073,6 @@ export async function getTechnicianOptions(
     for (const row of data ?? []) {
       const id = String(row.id ?? "").trim();
       if (!id || seen.has(id)) continue;
-      if (modelId && !wageByTechnician.has(id)) continue;
       seen.add(id);
       const roles = Array.isArray(row.contact_roles) ? row.contact_roles : [];
       const primaryRole =
@@ -1117,11 +1085,11 @@ export async function getTechnicianOptions(
         id,
         company_name: String(row.company_name ?? "").trim() || "ไม่ระบุชื่อ",
         contact_type: String(primaryRole),
-        default_wage: wageByTechnician.get(id) ?? 0,
+        default_wage: 0,
       });
     }
 
-    return { success: true, data: options };
+    return { success: true, data: options, rates };
   } catch (err) {
     console.error("[getTechnicianOptions]", err);
     return {
@@ -1129,12 +1097,13 @@ export async function getTechnicianOptions(
       error:
         err instanceof Error ? err.message : "ดึงรายชื่อช่างรับเหมาไม่สำเร็จ",
       data: [],
+      rates: [],
     };
   }
 }
 
 /**
- * บันทึกช่างรับเหมา + ค่าแรงลง production_jobs
+ * บันทึกช่างรับเหมา + ค่าแรงลง document_items เป็นรายบรรทัด
  */
 export async function updateProductionJobAssignment(
   input: UpdateProductionJobAssignmentInput,
@@ -1144,7 +1113,10 @@ export async function updateProductionJobAssignment(
     return { success: false, error: "ไม่พบรหัสงาน (jobId)" };
   }
 
-  const technicianId = input.technician_id?.trim() || null;
+  const lines = Array.isArray(input.lines) ? input.lines : [];
+  if (lines.length === 0) {
+    return { success: false, error: "ไม่มีรายการงานบริการที่จะบันทึก" };
+  }
 
   try {
     const supabase = createClient();
@@ -1167,16 +1139,57 @@ export async function updateProductionJobAssignment(
     if (current.status === "CANCELLED") {
       return { success: false, error: "งานถูกยกเลิกแล้ว ไม่สามารถบันทึกค่าแรงได้" };
     }
+    if (!current.document_id) {
+      return { success: false, error: "ใบสั่งผลิตนี้ไม่ได้ผูกเอกสารขาย" };
+    }
 
-    let wageCost = 0;
+    const itemIds = [
+      ...new Set(
+        lines
+          .map((line) => line.item_id?.trim())
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
 
-    if (technicianId) {
-      const { data: technician, error: techError } = await supabase
+    const { data: existingItems, error: itemsError } = await supabase
+      .from("document_items")
+      .select("id, technician_bill_id, document_id")
+      .eq("document_id", current.document_id)
+      .in("id", itemIds);
+
+    if (itemsError) {
+      return {
+        success: false,
+        error: itemsError.message ?? "ตรวจสอบรายการสินค้าไม่สำเร็จ",
+      };
+    }
+    if ((existingItems ?? []).length !== itemIds.length) {
+      return {
+        success: false,
+        error: "พบรายการที่ไม่ได้อยู่ในเอกสารต้นทางของใบสั่งผลิตนี้",
+      };
+    }
+
+    const billed = new Set(
+      (existingItems ?? [])
+        .filter((row) => row.technician_bill_id)
+        .map((row) => String(row.id)),
+    );
+
+    const technicianIds = [
+      ...new Set(
+        lines
+          .map((line) => line.technician_id?.trim())
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+
+    if (technicianIds.length > 0) {
+      const { data: technicians, error: techError } = await supabase
         .from("contacts")
         .select("id, contact_roles, is_active")
-        .eq("id", technicianId)
-        .contains("contact_roles", ["Technician"])
-        .maybeSingle();
+        .in("id", technicianIds)
+        .contains("contact_roles", ["Technician"]);
 
       if (techError) {
         return {
@@ -1184,71 +1197,59 @@ export async function updateProductionJobAssignment(
           error: techError.message ?? "ตรวจสอบช่างรับเหมาไม่สำเร็จ",
         };
       }
-      if (!technician || technician.is_active === false) {
+      const validTechs = new Set(
+        (technicians ?? [])
+          .filter((row) => row.is_active !== false)
+          .map((row) => String(row.id)),
+      );
+      for (const techId of technicianIds) {
+        if (!validTechs.has(techId)) {
+          return {
+            success: false,
+            error: "ช่างรับเหมาต้องมีสถานะ Technician ใน contact_roles",
+          };
+        }
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    for (const line of lines) {
+      const itemId = line.item_id?.trim() ?? "";
+      if (!itemId) continue;
+      if (billed.has(itemId)) {
         return {
           success: false,
-          error: "ช่างรับเหมาต้องมีสถานะ Technician ใน contact_roles",
+          error: "มีรายการที่ถูกสรุปวางบิลช่างแล้ว ไม่สามารถแก้ไขได้",
         };
       }
-
-      const serviceModel = await resolveServiceModelFromDocument(
-        supabase,
-        current.document_id,
-      );
-
-      if (serviceModel) {
-        const { data: rate, error: rateError } = await supabase
-          .from("technician_rates")
-          .select("default_wage")
-          .eq("technician_id", technicianId)
-          .eq("service_model_id", serviceModel.id)
-          .maybeSingle();
-
-        if (rateError) {
-          return {
-            success: false,
-            error: rateError.message ?? "ตรวจสอบ Rate Card ไม่สำเร็จ",
-          };
-        }
-        if (!rate) {
-          return {
-            success: false,
-            error: "ช่างรับเหมานี้ไม่มี Rate Card สำหรับงานบริการในใบสั่งผลิตนี้",
-          };
-        }
-        wageCost = toWageCost(rate.default_wage);
+      if (!Number.isFinite(Number(line.wage_cost)) || Number(line.wage_cost) < 0) {
+        return { success: false, error: "ค่าแรงต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0" };
       }
 
-      if (input.wage_cost != null) {
-        if (!Number.isFinite(Number(input.wage_cost)) || Number(input.wage_cost) < 0) {
-          return { success: false, error: "ค่าแรงต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0" };
-        }
-        wageCost = toWageCost(input.wage_cost);
+      const { error: updateError } = await supabase
+        .from("document_items")
+        .update({
+          technician_id: line.technician_id?.trim() || null,
+          wage_cost: toWageCost(line.wage_cost),
+        })
+        .eq("id", itemId)
+        .eq("document_id", current.document_id);
+
+      if (updateError) {
+        return {
+          success: false,
+          error: updateError.message ?? "บันทึกช่างรับเหมา / ค่าแรงไม่สำเร็จ",
+        };
       }
     }
 
-    const { data: updated, error: updateError } = await supabase
+    await supabase
       .from("production_jobs")
-      .update({
-        technician_id: technicianId,
-        wage_cost: wageCost,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", jobId)
-      .select("id")
-      .maybeSingle();
-
-    if (updateError) {
-      return {
-        success: false,
-        error: updateError.message ?? "บันทึกช่างรับเหมา / ค่าแรงไม่สำเร็จ",
-      };
-    }
-    if (!updated) {
-      return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ" };
-    }
+      .update({ updated_at: nowIso })
+      .eq("id", jobId);
 
     revalidatePath("/production/kanban");
+    revalidatePath("/finance/billing-notes");
     revalidatePath("/profit-analysis");
     revalidatePath("/dashboard");
     return { success: true, error: null };

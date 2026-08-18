@@ -42,7 +42,7 @@
 
 - `inventory_ledger` (สมุดบัญชีคลังสินค้า - ควบคุมการเข้าออกสต็อก)
 
-- `production_jobs` (ใบสั่งผลิต / งาน MTO — `technician_id` → `contacts.id`, `wage_cost` ค่าแรงจริง, `technician_bill_id` → `documents.id` เมื่อวางบิลช่างแล้ว)
+- `production_jobs` (ใบสั่งผลิต / งาน MTO)
 
 - `service_tracking` (ติดตามสถานะงานบริการ)
 
@@ -52,7 +52,7 @@
 
 - `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — `doc_type` รวม `TB` สรุปวางบิลช่าง)
 
-- `document_items` (รายการสินค้าในเอกสาร)
+- `document_items` (รายการสินค้าในเอกสาร — งานบริการเก็บ `technician_id`, `wage_cost`, `technician_bill_id`)
 
 - `document_allocations` (การจัดสรรเอกสาร เช่น ตัดมัดจำ)
 
@@ -74,4 +74,4 @@
 
 - `vw_monthly_profit_summary` (`product_cogs`, `wage_cogs`, `cogs` = เสื้อเปล่า + ค่าแรง)
 
-- `vw_sales_profit_analysis` (กำไรต่อบิล — `product_cogs` + `wage_cogs` = `total_cogs`)
+- `vw_sales_profit_analysis` (กำไรต่อบิล — `product_cogs` + `document_items.wage_cost` = `total_cogs`)

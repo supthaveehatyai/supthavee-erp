@@ -26,10 +26,7 @@ export default async function ProductionKanbanPage({ searchParams }: PageProps) 
   const result = await getKanbanBoardData();
 
   const jobDetailsResult = jobId ? await getJobDetails(jobId) : null;
-  const serviceModelId = jobDetailsResult?.success
-    ? jobDetailsResult.data.service_model_id
-    : null;
-  const techniciansResult = await getTechnicianOptions(serviceModelId);
+  const techniciansResult = await getTechnicianOptions();
 
   if (!result.success) {
     return (
@@ -63,6 +60,7 @@ export default async function ProductionKanbanPage({ searchParams }: PageProps) 
       <JobDetailSheet
         job={jobDetailsResult?.success ? jobDetailsResult.data : null}
         technicians={techniciansResult.data}
+        rates={techniciansResult.rates}
         error={
           jobDetailsResult && !jobDetailsResult.success
             ? jobDetailsResult.error

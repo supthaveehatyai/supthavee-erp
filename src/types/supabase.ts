@@ -485,9 +485,12 @@ export type Database = {
           product_id: string | null
           qty: number
           sort_order: number
+          technician_bill_id: string | null
+          technician_id: string | null
           unit_cost_price: number
           unit_price: number
           uom_used: string | null
+          wage_cost: number
         }
         Insert: {
           created_at?: string
@@ -500,9 +503,12 @@ export type Database = {
           product_id?: string | null
           qty?: number
           sort_order?: number
+          technician_bill_id?: string | null
+          technician_id?: string | null
           unit_cost_price?: number
           unit_price?: number
           uom_used?: string | null
+          wage_cost?: number
         }
         Update: {
           created_at?: string
@@ -515,9 +521,12 @@ export type Database = {
           product_id?: string | null
           qty?: number
           sort_order?: number
+          technician_bill_id?: string | null
+          technician_id?: string | null
           unit_cost_price?: number
           unit_price?: number
           uom_used?: string | null
+          wage_cost?: number
         }
         Relationships: [
           {
@@ -539,6 +548,20 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_items_technician_bill_id_fkey"
+            columns: ["technician_bill_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_items_technician_id_fkey"
+            columns: ["technician_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
             referencedColumns: ["id"]
           },
         ]

@@ -11,6 +11,7 @@ export type TechnicianBillingContact = {
 };
 
 export type TechnicianBillingJobRow = {
+  /** document_items.id */
   id: string;
   job_no: string;
   status: string;
@@ -19,7 +20,9 @@ export type TechnicianBillingJobRow = {
   technician_id: string;
   technician_name: string;
   invoice_doc_no: string | null;
+  sku: string;
   service_name: string;
+  qty: number;
   wage_cost: number;
 };
 
@@ -46,7 +49,7 @@ export type GetUnbilledTechnicianJobsResult =
 
 export type CreateTechnicianBillInput = {
   technicianId: string;
-  jobIds: string[];
+  itemIds: string[];
 };
 
 export type CreateTechnicianBillResult =

@@ -22,18 +22,19 @@ import {
 import { toast } from "sonner";
 import {
   cancelProductionJob,
-  lookupTechnicianWageForJob,
+  lookupTechnicianWageForService,
   updateProductionJobAssignment,
 } from "@/app/actions/kanban-actions";
 import {
   JOB_STATUS_LABEL,
   type ProductionJobDetails,
+  type ProductionJobLineItem,
   type ProductionJobStatus,
   type ProductionJobType,
   type TechnicianOption,
+  type TechnicianRateOption,
 } from "@/types/kanban";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import {
   AlertDialog,
@@ -108,82 +109,114 @@ export type JobDetailSheetProps = {
   job: ProductionJobDetails | null;
   error?: string | null;
   technicians?: TechnicianOption[];
+  rates?: TechnicianRateOption[];
+};
+
+type LineDraft = {
+  technicianId: string;
+  wageCost: string;
 };
 
 export function JobDetailSheet({
   job,
   error,
   technicians = [],
+  rates = [],
 }: JobDetailSheetProps) {
   const router = useRouter();
   const open = Boolean(job) || Boolean(error);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [isSaving, startSaveTransition] = useTransition();
-  const [isLookingUpWage, startWageLookup] = useTransition();
-  const [technicianId, setTechnicianId] = useState("");
-  const [wageCost, setWageCost] = useState("0");
-  const lookupSeqRef = useRef(0);
+  const [lookingUpItemId, setLookingUpItemId] = useState<string | null>(null);
+  const [lineDrafts, setLineDrafts] = useState<Record<string, LineDraft>>({});
+  const lookupSeqRef = useRef<Record<string, number>>({});
 
   const formBusy = isPending || isSaving;
-  const busy = formBusy || isLookingUpWage;
+  const busy = formBusy || Boolean(lookingUpItemId);
 
-  const technicianOptions = (() => {
-    const list = [...technicians];
-    if (
-      job?.technician_id &&
-      !list.some((tech) => tech.id === job.technician_id)
-    ) {
+  const technicianOptions = technicians;
+
+  useEffect(() => {
+    const next: Record<string, LineDraft> = {};
+    for (const item of job?.line_items ?? []) {
+      next[item.id] = {
+        technicianId: item.technician_id ?? "",
+        wageCost: String(Number.isFinite(item.wage_cost) ? item.wage_cost : 0),
+      };
+    }
+    setLineDrafts(next);
+    lookupSeqRef.current = {};
+    setLookingUpItemId(null);
+  }, [job?.id, job?.line_items]);
+
+  function techniciansForLine(item: ProductionJobLineItem): TechnicianOption[] {
+    const modelId = item.model_id?.trim() ?? "";
+    const allowed = new Set(
+      rates
+        .filter((rate) => rate.service_model_id === modelId)
+        .map((rate) => rate.technician_id),
+    );
+    const list = technicianOptions.filter((tech) => allowed.has(tech.id));
+    const assignedId = lineDrafts[item.id]?.technicianId || item.technician_id;
+    if (assignedId && !list.some((tech) => tech.id === assignedId)) {
       list.unshift({
-        id: job.technician_id,
-        company_name: job.technician_name || "ช่างที่เลือกไว้",
-        contact_type: "Vendor",
-        default_wage: Number.isFinite(job.wage_cost) ? job.wage_cost : 0,
+        id: assignedId,
+        company_name: item.technician_name || "ช่างที่เลือกไว้",
+        contact_type: "Technician",
+        default_wage: item.wage_cost,
       });
     }
     return list;
-  })();
+  }
 
-  useEffect(() => {
-    setTechnicianId(job?.technician_id ?? "");
-    setWageCost(
-      job ? String(Number.isFinite(job.wage_cost) ? job.wage_cost : 0) : "0",
+  function applyLineTechnician(item: ProductionJobLineItem, nextTechnicianId: string) {
+    const rate = rates.find(
+      (row) =>
+        row.technician_id === nextTechnicianId &&
+        row.service_model_id === (item.model_id ?? ""),
     );
-  }, [job?.id, job?.technician_id, job?.wage_cost]);
+    setLineDrafts((prev) => ({
+      ...prev,
+      [item.id]: {
+        technicianId: nextTechnicianId,
+        wageCost: nextTechnicianId ? String(rate?.default_wage ?? 0) : "0",
+      },
+    }));
 
-  function applyTechnicianWage(nextTechnicianId: string) {
-    setTechnicianId(nextTechnicianId);
     if (!nextTechnicianId) {
-      lookupSeqRef.current += 1;
-      setWageCost("0");
+      lookupSeqRef.current[item.id] = (lookupSeqRef.current[item.id] ?? 0) + 1;
       return;
     }
 
-    const selected = technicianOptions.find((tech) => tech.id === nextTechnicianId);
-    if (selected) {
-      setWageCost(String(selected.default_wage ?? 0));
-    }
-
-    if (!job) return;
-
-    const seq = ++lookupSeqRef.current;
-    startWageLookup(async () => {
-      const result = await lookupTechnicianWageForJob(job.id, nextTechnicianId);
-      if (seq !== lookupSeqRef.current) return;
-
-      if (!result.success) {
-        toast.error(result.error ?? "ตรวจสอบ Rate Card ไม่สำเร็จ");
-        return;
-      }
-
-      if (result.has_rate) {
-        setWageCost(String(result.default_wage));
-        return;
-      }
-
-      setWageCost("0");
-      toast.warning("ช่างคนนี้ไม่มี Rate Card สำหรับงานบริการนี้");
-    });
+    const seq = (lookupSeqRef.current[item.id] ?? 0) + 1;
+    lookupSeqRef.current[item.id] = seq;
+    setLookingUpItemId(item.id);
+    void lookupTechnicianWageForService(nextTechnicianId, item.model_id).then(
+      (result) => {
+        if (lookupSeqRef.current[item.id] !== seq) return;
+        setLookingUpItemId(null);
+        if (!result.success) {
+          toast.error(result.error ?? "ตรวจสอบ Rate Card ไม่สำเร็จ");
+          return;
+        }
+        if (result.has_rate) {
+          setLineDrafts((prev) => ({
+            ...prev,
+            [item.id]: {
+              technicianId: nextTechnicianId,
+              wageCost: String(result.default_wage),
+            },
+          }));
+          return;
+        }
+        setLineDrafts((prev) => ({
+          ...prev,
+          [item.id]: { technicianId: nextTechnicianId, wageCost: "0" },
+        }));
+        toast.warning("ช่างคนนี้ไม่มี Rate Card สำหรับงานบริการนี้");
+      },
+    );
   }
 
   function closeSheet() {
@@ -197,17 +230,41 @@ export function JobDetailSheet({
   function handleSaveAssignment() {
     if (!job || isPending || isSaving) return;
 
-    const wage = Number.parseFloat(wageCost);
-    if (!Number.isFinite(wage) || wage < 0) {
-      toast.error("ค่าแรงต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0");
+    const serviceLines = job.line_items.filter((item) => item.is_service);
+    if (serviceLines.length === 0) {
+      toast.error("เอกสารนี้ไม่มีรายการงานบริการ");
+      return;
+    }
+
+    const lines: Array<{
+      item_id: string;
+      technician_id: string | null;
+      wage_cost: number;
+    }> = [];
+    for (const item of serviceLines) {
+      if (item.technician_bill_id) continue;
+      const draft = lineDrafts[item.id];
+      const wage = Number.parseFloat(draft?.wageCost ?? "0");
+      if (!Number.isFinite(wage) || wage < 0) {
+        toast.error(`ค่าแรงของ ${item.sku} ต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0`);
+        return;
+      }
+      lines.push({
+        item_id: item.id,
+        technician_id: draft?.technicianId?.trim() || null,
+        wage_cost: wage,
+      });
+    }
+
+    if (lines.length === 0) {
+      toast.error("ทุกรายการงานบริการถูกวางบิลแล้ว");
       return;
     }
 
     startSaveTransition(async () => {
       const result = await updateProductionJobAssignment({
         job_id: job.id,
-        technician_id: technicianId.trim() || null,
-        wage_cost: wage,
+        lines,
       });
 
       if (!result.success) {
@@ -215,7 +272,7 @@ export function JobDetailSheet({
         return;
       }
 
-      toast.success("บันทึกช่างรับเหมาและค่าแรงแล้ว");
+      toast.success("บันทึกช่างรับเหมาและค่าแรงรายบรรทัดแล้ว");
       router.refresh();
     });
   }
@@ -247,7 +304,7 @@ export function JobDetailSheet({
       <Sheet open={open} onOpenChange={handleOpenChange}>
         <SheetContent
           side="right"
-          className="w-full overflow-y-auto p-0 sm:max-w-xl"
+          className="w-full overflow-y-auto p-0 sm:max-w-3xl"
         >
           {error && !job ? (
             <div className="flex h-full flex-col gap-4 p-6">
@@ -307,19 +364,7 @@ export function JobDetailSheet({
                     <div className="flex items-center gap-2 text-slate-600">
                       <Wrench className="size-4 shrink-0 text-violet-500" />
                       <span>
-                        งานบริการ {job.service_model.model_code} ·{" "}
-                        {job.service_model.name}
-                      </span>
-                    </div>
-                  ) : null}
-                  {job.technician_name ? (
-                    <div className="flex items-center gap-2 text-slate-600">
-                      <Wrench className="size-4 shrink-0 text-slate-400" />
-                      <span>
-                        ช่าง {job.technician_name}
-                        {job.wage_cost > 0
-                          ? ` · ค่าแรง ${job.wage_cost.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
-                          : ""}
+                        งานบริการในบิล (ระบุช่างแยกบรรทัดด้านล่าง)
                       </span>
                     </div>
                   ) : null}
@@ -366,93 +411,6 @@ export function JobDetailSheet({
 
                 <section className="space-y-3">
                   <div className="flex items-center gap-2">
-                    <Wrench className="size-4 text-amber-600" />
-                    <h3 className="text-sm font-bold text-slate-800">
-                      ช่างรับเหมา / ค่าแรง
-                    </h3>
-                  </div>
-
-                  <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-2">
-                    {!job.service_model_id ? (
-                      <p className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        เอกสารนี้ไม่มีรายการงานบริการ — ค่าแรงอาจเป็น 0
-                        จนกว่าจะมีรุ่น is_service บนบิล
-                      </p>
-                    ) : technicianOptions.length === 0 ? (
-                      <p className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        ยังไม่มีช่างรับเหมาที่มี Rate Card สำหรับงานบริการนี้
-                        {job.service_model?.name
-                          ? ` (${job.service_model.name})`
-                          : ""}{" "}
-                        — ตั้ง Skill &amp; Rate Card ที่หน้าคู่ค้า
-                      </p>
-                    ) : null}
-                    <div className="sm:col-span-2">
-                      <Label htmlFor="technician_id">ช่างรับเหมา</Label>
-                      <Select
-                        id="technician_id"
-                        value={technicianId}
-                        disabled={!canEditAssignment || formBusy}
-                        onChange={(event) =>
-                          applyTechnicianWage(event.target.value)
-                        }
-                      >
-                        <option value="">— ไม่ระบุ —</option>
-                        {technicianOptions.map((tech) => (
-                          <option key={tech.id} value={tech.id}>
-                            {tech.company_name}
-                            {tech.contact_type === "Technician"
-                              ? " (ช่าง)"
-                              : " (Vendor)"}{" "}
-                            · {tech.default_wage.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                    <div className="sm:col-span-2">
-                      <Label htmlFor="wage_cost">
-                        ค่าแรง (Wage Cost) — ดึงจาก Rate Card อัตโนมัติ แก้ไขได้
-                      </Label>
-                      <Input
-                        id="wage_cost"
-                        type="number"
-                        min={0}
-                        step="0.0001"
-                        inputMode="decimal"
-                        value={wageCost}
-                        disabled={!canEditAssignment || busy}
-                        onChange={(event) => setWageCost(event.target.value)}
-                        className="tabular-nums"
-                      />
-                      {isLookingUpWage ? (
-                        <p className="mt-1 flex items-center gap-1 text-[11px] text-slate-400">
-                          <Loader2 className="size-3 animate-spin" />
-                          กำลังดึงเรตค่าแรงจาก Rate Card...
-                        </p>
-                      ) : null}
-                    </div>
-                    {canEditAssignment ? (
-                      <div className="sm:col-span-2">
-                        <Button
-                          type="button"
-                          className="h-10 w-full gap-2"
-                          disabled={busy}
-                          onClick={handleSaveAssignment}
-                        >
-                          {isSaving ? (
-                            <Loader2 className="size-4 animate-spin" />
-                          ) : (
-                            <Save className="size-4" />
-                          )}
-                          บันทึกช่าง / ค่าแรง
-                        </Button>
-                      </div>
-                    ) : null}
-                  </div>
-                </section>
-
-                <section className="space-y-3">
-                  <div className="flex items-center gap-2">
                     <Package className="size-4 text-blue-500" />
                     <h3 className="text-sm font-bold text-slate-800">
                       รายการสินค้าที่ต้องผลิต
@@ -473,38 +431,153 @@ export function JobDetailSheet({
                             <TableHead className="text-right text-xs">
                               จำนวน
                             </TableHead>
+                            <TableHead className="min-w-[10rem] text-xs">
+                              ช่างรับเหมา
+                            </TableHead>
+                            <TableHead className="min-w-[7rem] text-right text-xs">
+                              ค่าแรง
+                            </TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {job.line_items.map((item) => (
-                            <TableRow key={item.id}>
-                              <TableCell className="font-mono text-xs font-semibold text-slate-800">
-                                {item.sku}
-                              </TableCell>
-                              <TableCell className="text-xs text-slate-700">
-                                <p className="font-medium">{item.name}</p>
-                                {(item.color || item.size) && (
-                                  <p className="mt-0.5 text-[10px] text-slate-400">
-                                    {[item.color, item.size]
-                                      .filter(Boolean)
-                                      .join(" · ")}
-                                  </p>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right text-xs font-semibold tabular-nums text-slate-800">
-                                {formatQty(item.qty)}
-                                {item.uom ? (
-                                  <span className="ml-1 font-normal text-slate-400">
-                                    {item.uom}
-                                  </span>
-                                ) : null}
-                              </TableCell>
-                            </TableRow>
-                          ))}
+                          {job.line_items.map((item) => {
+                            const draft = lineDrafts[item.id];
+                            const billed = Boolean(item.technician_bill_id);
+                            const lineTechs = techniciansForLine(item);
+                            return (
+                              <TableRow key={item.id}>
+                                <TableCell className="align-top font-mono text-xs font-semibold text-slate-800">
+                                  {item.sku}
+                                  {item.is_service ? (
+                                    <span className="mt-1 block text-[10px] font-semibold text-violet-600">
+                                      งานบริการ
+                                    </span>
+                                  ) : null}
+                                </TableCell>
+                                <TableCell className="align-top text-xs text-slate-700">
+                                  <p className="font-medium">{item.name}</p>
+                                  {(item.color || item.size) && (
+                                    <p className="mt-0.5 text-[10px] text-slate-400">
+                                      {[item.color, item.size]
+                                        .filter(Boolean)
+                                        .join(" · ")}
+                                    </p>
+                                  )}
+                                </TableCell>
+                                <TableCell className="align-top text-right text-xs font-semibold tabular-nums text-slate-800">
+                                  {formatQty(item.qty)}
+                                  {item.uom ? (
+                                    <span className="ml-1 font-normal text-slate-400">
+                                      {item.uom}
+                                    </span>
+                                  ) : null}
+                                </TableCell>
+                                <TableCell className="align-top">
+                                  {item.is_service ? (
+                                    <Select
+                                      value={draft?.technicianId ?? ""}
+                                      disabled={
+                                        !canEditAssignment ||
+                                        formBusy ||
+                                        billed
+                                      }
+                                      onChange={(event) =>
+                                        applyLineTechnician(
+                                          item,
+                                          event.target.value,
+                                        )
+                                      }
+                                      className="h-9 text-xs"
+                                    >
+                                      <option value="">— ไม่ระบุ —</option>
+                                      {lineTechs.map((tech) => (
+                                        <option key={tech.id} value={tech.id}>
+                                          {tech.company_name}
+                                        </option>
+                                      ))}
+                                    </Select>
+                                  ) : (
+                                    <span className="text-xs text-slate-400">
+                                      —
+                                    </span>
+                                  )}
+                                  {item.is_service &&
+                                  lineTechs.length === 0 &&
+                                  !item.technician_id ? (
+                                    <p className="mt-1 text-[10px] text-amber-700">
+                                      ยังไม่มี Rate Card สำหรับรุ่นนี้
+                                    </p>
+                                  ) : null}
+                                  {billed ? (
+                                    <p className="mt-1 text-[10px] text-emerald-700">
+                                      วางบิลช่างแล้ว
+                                    </p>
+                                  ) : null}
+                                </TableCell>
+                                <TableCell className="align-top">
+                                  {item.is_service ? (
+                                    <div>
+                                      <Input
+                                        type="number"
+                                        min={0}
+                                        step="0.0001"
+                                        inputMode="decimal"
+                                        value={draft?.wageCost ?? "0"}
+                                        disabled={
+                                          !canEditAssignment ||
+                                          busy ||
+                                          billed
+                                        }
+                                        onChange={(event) =>
+                                          setLineDrafts((prev) => ({
+                                            ...prev,
+                                            [item.id]: {
+                                              technicianId:
+                                                prev[item.id]?.technicianId ??
+                                                "",
+                                              wageCost: event.target.value,
+                                            },
+                                          }))
+                                        }
+                                        className="h-9 text-right text-xs tabular-nums"
+                                      />
+                                      {lookingUpItemId === item.id ? (
+                                        <p className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-400">
+                                          <Loader2 className="size-3 animate-spin" />
+                                          ดึงเรต...
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  ) : (
+                                    <span className="block text-right text-xs text-slate-400">
+                                      —
+                                    </span>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
                         </TableBody>
                       </Table>
                     </div>
                   )}
+
+                  {canEditAssignment &&
+                  job.line_items.some((item) => item.is_service) ? (
+                    <Button
+                      type="button"
+                      className="h-10 w-full gap-2"
+                      disabled={busy}
+                      onClick={handleSaveAssignment}
+                    >
+                      {isSaving ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Save className="size-4" />
+                      )}
+                      บันทึกช่าง / ค่าแรงรายบรรทัด
+                    </Button>
+                  ) : null}
                 </section>
               </div>
 

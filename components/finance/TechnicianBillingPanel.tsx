@@ -157,7 +157,7 @@ export function TechnicianBillingPanel({
     startCreate(async () => {
       const result = await createTechnicianBill({
         technicianId: urlTechnicianId,
-        jobIds: rows.map((row) => row.id),
+        itemIds: rows.map((row) => row.id),
       });
       if (!result.success) {
         toast.error(result.error);
@@ -165,7 +165,7 @@ export function TechnicianBillingPanel({
         return;
       }
       toast.success(
-        `สร้าง ${result.docNo} แล้ว · ${result.jobCount} ใบงาน · ฿${formatMoney(result.totalWage)}`,
+        `สร้าง ${result.docNo} แล้ว · ${result.jobCount} บรรทัด · ฿${formatMoney(result.totalWage)}`,
       );
       setConfirmOpen(false);
       router.replace(buildTbHref({ technicianId: urlTechnicianId, from: urlFrom, to: urlTo }));
@@ -181,8 +181,8 @@ export function TechnicianBillingPanel({
             <div>
               <CardTitle>งานค้างสรุปวางบิลช่าง</CardTitle>
               <CardDescription>
-                ดึง JOB ที่สถานะ พร้อมส่งมอบ / ส่งมอบแล้ว · มีช่าง · มีค่าแรง ·
-                ยังไม่ถูกผูกเอกสาร TB
+                ดึงบรรทัดงานบริการจาก document_items ที่ JOB เสร็จ/ส่งมอบแล้ว ·
+                มีช่าง · มีค่าแรง · ยังไม่ถูกผูกเอกสาร TB
               </CardDescription>
             </div>
             <Button
@@ -262,9 +262,12 @@ export function TechnicianBillingPanel({
                   <TableRow className="bg-slate-50">
                     <TableHead className="whitespace-nowrap">เลขที่ Job</TableHead>
                     <TableHead className="whitespace-nowrap">เลขที่บิลอ้างอิง</TableHead>
-                    <TableHead>ชื่องานบริการ</TableHead>
+                    <TableHead>SKU / งานบริการ</TableHead>
                     <TableHead className="hidden whitespace-nowrap md:table-cell">
                       ช่างรับเหมา
+                    </TableHead>
+                    <TableHead className="hidden whitespace-nowrap text-right lg:table-cell">
+                      จำนวนจุด
                     </TableHead>
                     <TableHead className="hidden whitespace-nowrap lg:table-cell">
                       วันที่ส่งงาน
@@ -286,11 +289,19 @@ export function TechnicianBillingPanel({
                       <TableCell className="whitespace-nowrap font-mono text-sm text-slate-700">
                         {row.invoice_doc_no || "—"}
                       </TableCell>
-                      <TableCell className="max-w-[16rem] truncate text-slate-700">
-                        {row.service_name}
+                      <TableCell className="max-w-[16rem] text-slate-700">
+                        <span className="block font-mono text-xs font-semibold">
+                          {row.sku}
+                        </span>
+                        <span className="block truncate text-sm">
+                          {row.service_name}
+                        </span>
                       </TableCell>
                       <TableCell className="hidden max-w-[12rem] truncate text-slate-700 md:table-cell">
                         {row.technician_name}
+                      </TableCell>
+                      <TableCell className="hidden whitespace-nowrap text-right tabular-nums text-slate-600 lg:table-cell">
+                        {row.qty.toLocaleString("th-TH")}
                       </TableCell>
                       <TableCell className="hidden whitespace-nowrap text-slate-600 lg:table-cell">
                         {formatDate(row.delivered_on)}
@@ -302,7 +313,7 @@ export function TechnicianBillingPanel({
                   ))}
                   <TableRow className="bg-slate-50">
                     <TableCell
-                      colSpan={5}
+                      colSpan={6}
                       className="text-right text-sm font-semibold text-slate-700"
                     >
                       ยอดรวมค่าแรงทั้งหมด ({rows.length} รายการ)
@@ -326,8 +337,8 @@ export function TechnicianBillingPanel({
           <AlertDialogHeader>
             <AlertDialogTitle>ยืนยันสร้างใบสรุปค่าแรง</AlertDialogTitle>
             <AlertDialogDescription>
-              จะรวบยอด {rows.length} ใบงาน ตามตัวกรองปัจจุบัน เป็นเอกสาร TB
-              (สรุปวางบิลช่าง) ยอด ฿{formatMoney(totalWage)} — งานเหล่านี้จะถูก
+              จะรวบยอด {rows.length} บรรทัดงานบริการ ตามตัวกรองปัจจุบัน เป็นเอกสาร TB
+              (สรุปวางบิลช่าง) ยอด ฿{formatMoney(totalWage)} — รายการเหล่านี้จะถูก
               ทำเครื่องหมายว่าวางบิลแล้ว
             </AlertDialogDescription>
           </AlertDialogHeader>

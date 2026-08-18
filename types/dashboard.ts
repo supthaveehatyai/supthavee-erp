@@ -15,7 +15,7 @@ export type ProfitabilityKpiResult = {
   totalExpenses: number;
   /** Σ product cost snapshot · YTD */
   productCogs: number;
-  /** Σ production_jobs.wage_cost · YTD */
+  /** Σ document_items.wage_cost · YTD */
   wageCogs: number;
   /** productCogs + wageCogs */
   totalCogs: number;
