@@ -158,5 +158,5 @@ export type LookupTechnicianWageResult =
       error: string;
       default_wage: number;
       has_rate: false;
-      service_model_id: null;
+      service_model_id: string | null;
     };

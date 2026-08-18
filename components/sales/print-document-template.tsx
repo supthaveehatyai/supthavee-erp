@@ -25,6 +25,7 @@ const DOC_TYPE_LABELS: Record<DocumentType, string> = {
   AR_WRITEOFF: "ใบสำคัญปรับปรุงบัญชี - รับรู้รายได้ (Write-off Income)",
   AP_REFUND: "ใบสำคัญรับเงินคืน (Refund Receipt)",
   AP_WRITEOFF: "ใบสำคัญปรับปรุงบัญชี - ตัดเป็นค่าใช้จ่าย (Write-off Expense)",
+  TB: "สรุปวางบิลช่าง (Technician Billing)",
   REFUND: "ใบสำคัญคืนเงิน (Refund — legacy)",
   WRITE_OFF: "ใบสำคัญตัดเศษ (Write-off — legacy)",
   DEP: "ใบมัดจำ (Deposit — legacy)",
