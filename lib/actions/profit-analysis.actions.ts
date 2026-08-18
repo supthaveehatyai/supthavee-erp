@@ -51,6 +51,8 @@ function emptyKpi(month: string): ProfitMonthKpi {
   return {
     profitMonth: month,
     revenue: 0,
+    productCogs: 0,
+    wageCogs: 0,
     cogs: 0,
     grossProfit: 0,
     opex: 0,
@@ -71,7 +73,7 @@ export async function getMonthlyProfitKpi(
     const { data, error } = await supabaseAdmin
       .from("vw_monthly_profit_summary")
       .select(
-        "profit_month, revenue, cogs, gross_profit, opex, net_profit",
+        "profit_month, revenue, product_cogs, wage_cogs, cogs, gross_profit, opex, net_profit",
       )
       .eq("profit_month", profitMonth)
       .maybeSingle();
@@ -89,6 +91,8 @@ export async function getMonthlyProfitKpi(
       data: {
         profitMonth,
         revenue: roundMoney(toMoney(data.revenue)),
+        productCogs: roundMoney(toMoney(data.product_cogs)),
+        wageCogs: roundMoney(toMoney(data.wage_cogs)),
         cogs: roundMoney(toMoney(data.cogs)),
         grossProfit: roundMoney(toMoney(data.gross_profit)),
         opex: roundMoney(toMoney(data.opex)),
@@ -119,7 +123,7 @@ export async function getSalesProfitRows(
     const { data, error } = await supabaseAdmin
       .from("vw_sales_profit_analysis")
       .select(
-        "document_id, document_number, document_date, doc_type, contact_name, net_revenue, total_cogs",
+        "document_id, document_number, document_date, doc_type, contact_name, net_revenue, product_cogs, wage_cogs, total_cogs",
       )
       .gte("document_date", from)
       .lt("document_date", toExclusive)
@@ -133,6 +137,8 @@ export async function getSalesProfitRows(
 
     const rows: SalesProfitRow[] = (data ?? []).map((row) => {
       const revenue = roundMoney(toMoney(row.net_revenue));
+      const productCogs = roundMoney(toMoney(row.product_cogs));
+      const wageCogs = roundMoney(toMoney(row.wage_cogs));
       const cogs = roundMoney(toMoney(row.total_cogs));
       const grossProfit = roundMoney(revenue - cogs);
       const gpMarginPercent =
@@ -145,6 +151,8 @@ export async function getSalesProfitRows(
         docType: String(row.doc_type ?? ""),
         contactName: String(row.contact_name ?? "—"),
         revenue,
+        productCogs,
+        wageCogs,
         cogs,
         grossProfit,
         gpMarginPercent,

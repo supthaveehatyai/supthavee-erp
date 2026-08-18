@@ -72,8 +72,8 @@ export default async function ProfitAnalysisPage({ searchParams }: PageProps) {
             วิเคราะห์กำไร (Profit Analysis)
           </h1>
           <p className="text-slate-500">
-            KPI รายเดือน + กำไรแยกตามบิลขาย · Phase 12 · Zero Client-Side
-            Fetching
+            KPI รายเดือน + กำไรแยกตามบิลขาย · Actual Cost = เสื้อเปล่า + ค่าแรง
+            งานบริการ
           </p>
         </div>
 

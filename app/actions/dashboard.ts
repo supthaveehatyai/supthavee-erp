@@ -243,87 +243,64 @@ export async function getYTDExpenses(): Promise<KpiMoneyResult> {
   }
 }
 
-const YTD_WAGE_DOC_TYPES = ["INV_DO", "TAX_INV", "ABB", "CS_TAX"] as const;
-
 /**
- * YTD ค่าแรงช่าง (COGS) — Σ production_jobs.wage_cost
- * ของงานที่ไม่ถูกยกเลิก และผูกเอกสารขาย ISSUED ในปีปฏิทินปัจจุบัน
- */
-async function getYTDWageCost(): Promise<KpiMoneyResult> {
-  try {
-    const supabaseAdmin = createSupabaseAdminClient();
-    const { from, to } = currentYearBounds();
-
-    const { data, error } = await supabaseAdmin
-      .from("production_jobs")
-      .select(
-        "wage_cost, documents!production_jobs_document_id_fkey ( doc_date, status, doc_type )",
-      )
-      .neq("status", "CANCELLED");
-
-    if (error) {
-      console.error("[getYTDWageCost]", error.message);
-      return { amount: 0, error: error.message };
-    }
-
-    type WageDocJoin = {
-      doc_date?: string | null;
-      status?: string | null;
-      doc_type?: string | null;
-    };
-
-    type WageRow = {
-      wage_cost: number | string | null;
-      documents: WageDocJoin | WageDocJoin[] | null;
-    };
-
-    let total = 0;
-    for (const row of (data ?? []) as WageRow[]) {
-      const doc = Array.isArray(row.documents)
-        ? (row.documents[0] ?? null)
-        : row.documents;
-      if (!doc) continue;
-      if (doc.status !== "ISSUED") continue;
-      if (!YTD_WAGE_DOC_TYPES.includes(doc.doc_type as (typeof YTD_WAGE_DOC_TYPES)[number])) {
-        continue;
-      }
-      const docDate = String(doc.doc_date ?? "").slice(0, 10);
-      if (docDate < from || docDate > to) continue;
-      total = roundMoney(total + toMoney(row.wage_cost));
-    }
-
-    return { amount: total, error: null };
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Failed to calculate YTD wage cost";
-    console.error("[getYTDWageCost]", message);
-    return { amount: 0, error: message };
-  }
-}
-
-/**
- * True Net Profit — YTD Sales − wage_cost (COGS) − OPEX.
+ * True Net Profit — YTD Net Revenue − (product COGS + wage_cost) − OPEX
+ * จาก vw_monthly_profit_summary (Actual Cost Engine)
  */
 export async function getTrueNetProfit(): Promise<ProfitabilityKpiResult> {
-  try {
-    const [sales, expenses, wages] = await Promise.all([
-      getYTDSales(),
-      getYTDExpenses(),
-      getYTDWageCost(),
-    ]);
+  const empty: ProfitabilityKpiResult = {
+    totalExpenses: 0,
+    productCogs: 0,
+    wageCogs: 0,
+    totalCogs: 0,
+    grossProfit: 0,
+    netProfit: 0,
+    error: null,
+  };
 
-    const errors = [sales.error, expenses.error, wages.error].filter(
-      (msg): msg is string => Boolean(msg),
-    );
-    const grossProfit = roundMoney(sales.amount - wages.amount);
-    const totalExpenses = roundMoney(expenses.amount);
-    const netProfit = roundMoney(grossProfit - totalExpenses);
+  try {
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { year } = currentYearBounds();
+    const fromMonth = `${year}-01`;
+    const toMonth = `${year}-12`;
+
+    const { data, error } = await supabaseAdmin
+      .from("vw_monthly_profit_summary")
+      .select(
+        "profit_month, product_cogs, wage_cogs, cogs, gross_profit, opex, net_profit",
+      )
+      .gte("profit_month", fromMonth)
+      .lte("profit_month", toMonth);
+
+    if (error) {
+      console.error("[getTrueNetProfit]", error.message);
+      return { ...empty, error: error.message };
+    }
+
+    let productCogs = 0;
+    let wageCogs = 0;
+    let totalCogs = 0;
+    let opex = 0;
+    let grossProfit = 0;
+    let netProfit = 0;
+
+    for (const row of data ?? []) {
+      productCogs = roundMoney(productCogs + toMoney(row.product_cogs));
+      wageCogs = roundMoney(wageCogs + toMoney(row.wage_cogs));
+      totalCogs = roundMoney(totalCogs + toMoney(row.cogs));
+      opex = roundMoney(opex + toMoney(row.opex));
+      grossProfit = roundMoney(grossProfit + toMoney(row.gross_profit));
+      netProfit = roundMoney(netProfit + toMoney(row.net_profit));
+    }
 
     return {
-      totalExpenses,
+      totalExpenses: opex,
+      productCogs,
+      wageCogs,
+      totalCogs,
       grossProfit,
       netProfit,
-      error: errors.length > 0 ? errors.join(" · ") : null,
+      error: null,
     };
   } catch (err) {
     const message =
@@ -331,11 +308,6 @@ export async function getTrueNetProfit(): Promise<ProfitabilityKpiResult> {
         ? err.message
         : "Failed to calculate true net profit";
     console.error("[getTrueNetProfit]", message);
-    return {
-      totalExpenses: 0,
-      grossProfit: 0,
-      netProfit: 0,
-      error: message,
-    };
+    return { ...empty, error: message };
   }
 }

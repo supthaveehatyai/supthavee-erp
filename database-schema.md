@@ -42,7 +42,7 @@
 
 - `inventory_ledger` (สมุดบัญชีคลังสินค้า - ควบคุมการเข้าออกสต็อก)
 
-- `production_jobs` (ใบสั่งผลิต / งาน MTO)
+- `production_jobs` (ใบสั่งผลิต / งาน MTO — `technician_id` → `contacts.id`, `wage_cost` ค่าแรงจริง)
 
 - `service_tracking` (ติดตามสถานะงานบริการ)
 
@@ -72,6 +72,6 @@
 
 ## 6. Database Views (มุมมองข้อมูลสำหรับ Report)
 
-- `vw_monthly_profit_summary`
+- `vw_monthly_profit_summary` (`product_cogs`, `wage_cogs`, `cogs` = เสื้อเปล่า + ค่าแรง)
 
-- `vw_sales_profit_analysis`
+- `vw_sales_profit_analysis` (กำไรต่อบิล — `product_cogs` + `wage_cogs` = `total_cogs`)

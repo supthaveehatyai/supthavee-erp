@@ -1695,8 +1695,10 @@ export type Database = {
           gross_profit: number | null
           net_profit: number | null
           opex: number | null
+          product_cogs: number | null
           profit_month: string | null
           revenue: number | null
+          wage_cogs: number | null
         }
         Relationships: []
       }
@@ -1709,7 +1711,9 @@ export type Database = {
           document_number: string | null
           grand_total: number | null
           net_revenue: number | null
+          product_cogs: number | null
           total_cogs: number | null
+          wage_cogs: number | null
         }
         Relationships: []
       }

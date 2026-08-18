@@ -137,7 +137,7 @@ export type GetTechnicianOptionsResult =
 export type UpdateProductionJobAssignmentInput = {
   job_id: string;
   technician_id: string | null;
-  /** ใช้ได้เฉพาะ Admin — คนอื่นระบบดึงจาก Rate Card */
+  /** Manual override — ถ้าไม่ส่ง ระบบดึงจาก technician_rates */
   wage_cost?: number;
 };
 
@@ -145,3 +145,18 @@ export type UpdateProductionJobAssignmentResult = {
   success: boolean;
   error: string | null;
 };
+
+export type LookupTechnicianWageResult =
+  | {
+      success: true;
+      default_wage: number;
+      has_rate: boolean;
+      service_model_id: string | null;
+    }
+  | {
+      success: false;
+      error: string;
+      default_wage: number;
+      has_rate: false;
+      service_model_id: null;
+    };

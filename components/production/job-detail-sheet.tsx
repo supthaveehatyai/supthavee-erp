@@ -5,7 +5,7 @@
  * Data is fetched on the Server and passed in (Zero Client-Side Fetching).
  */
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Ban,
@@ -22,6 +22,7 @@ import {
 import { toast } from "sonner";
 import {
   cancelProductionJob,
+  lookupTechnicianWageForJob,
   updateProductionJobAssignment,
 } from "@/app/actions/kanban-actions";
 import {
@@ -107,24 +108,25 @@ export type JobDetailSheetProps = {
   job: ProductionJobDetails | null;
   error?: string | null;
   technicians?: TechnicianOption[];
-  isAdmin?: boolean;
 };
 
 export function JobDetailSheet({
   job,
   error,
   technicians = [],
-  isAdmin = false,
 }: JobDetailSheetProps) {
   const router = useRouter();
   const open = Boolean(job) || Boolean(error);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [isSaving, startSaveTransition] = useTransition();
+  const [isLookingUpWage, startWageLookup] = useTransition();
   const [technicianId, setTechnicianId] = useState("");
   const [wageCost, setWageCost] = useState("0");
+  const lookupSeqRef = useRef(0);
 
-  const busy = isPending || isSaving;
+  const formBusy = isPending || isSaving;
+  const busy = formBusy || isLookingUpWage;
 
   const technicianOptions = (() => {
     const list = [...technicians];
@@ -152,13 +154,36 @@ export function JobDetailSheet({
   function applyTechnicianWage(nextTechnicianId: string) {
     setTechnicianId(nextTechnicianId);
     if (!nextTechnicianId) {
+      lookupSeqRef.current += 1;
       setWageCost("0");
       return;
     }
+
     const selected = technicianOptions.find((tech) => tech.id === nextTechnicianId);
     if (selected) {
       setWageCost(String(selected.default_wage ?? 0));
     }
+
+    if (!job) return;
+
+    const seq = ++lookupSeqRef.current;
+    startWageLookup(async () => {
+      const result = await lookupTechnicianWageForJob(job.id, nextTechnicianId);
+      if (seq !== lookupSeqRef.current) return;
+
+      if (!result.success) {
+        toast.error(result.error ?? "ตรวจสอบ Rate Card ไม่สำเร็จ");
+        return;
+      }
+
+      if (result.has_rate) {
+        setWageCost(String(result.default_wage));
+        return;
+      }
+
+      setWageCost("0");
+      toast.warning("ช่างคนนี้ไม่มี Rate Card สำหรับงานบริการนี้");
+    });
   }
 
   function closeSheet() {
@@ -172,13 +197,10 @@ export function JobDetailSheet({
   function handleSaveAssignment() {
     if (!job || isPending || isSaving) return;
 
-    let wage: number | undefined;
-    if (isAdmin) {
-      wage = Number.parseFloat(wageCost);
-      if (!Number.isFinite(wage) || wage < 0) {
-        toast.error("ค่าแรงต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0");
-        return;
-      }
+    const wage = Number.parseFloat(wageCost);
+    if (!Number.isFinite(wage) || wage < 0) {
+      toast.error("ค่าแรงต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0");
+      return;
     }
 
     startSaveTransition(async () => {
@@ -370,7 +392,7 @@ export function JobDetailSheet({
                       <Select
                         id="technician_id"
                         value={technicianId}
-                        disabled={!canEditAssignment || busy}
+                        disabled={!canEditAssignment || formBusy}
                         onChange={(event) =>
                           applyTechnicianWage(event.target.value)
                         }
@@ -389,8 +411,7 @@ export function JobDetailSheet({
                     </div>
                     <div className="sm:col-span-2">
                       <Label htmlFor="wage_cost">
-                        ค่าแรง (Wage Cost)
-                        {isAdmin ? " — Admin แก้ไขได้" : " — จาก Rate Card"}
+                        ค่าแรง (Wage Cost) — ดึงจาก Rate Card อัตโนมัติ แก้ไขได้
                       </Label>
                       <Input
                         id="wage_cost"
@@ -399,13 +420,16 @@ export function JobDetailSheet({
                         step="0.0001"
                         inputMode="decimal"
                         value={wageCost}
-                        readOnly={!isAdmin}
-                        disabled={!canEditAssignment || busy || !isAdmin}
-                        onChange={(event) => {
-                          if (isAdmin) setWageCost(event.target.value);
-                        }}
+                        disabled={!canEditAssignment || busy}
+                        onChange={(event) => setWageCost(event.target.value)}
                         className="tabular-nums"
                       />
+                      {isLookingUpWage ? (
+                        <p className="mt-1 flex items-center gap-1 text-[11px] text-slate-400">
+                          <Loader2 className="size-3 animate-spin" />
+                          กำลังดึงเรตค่าแรงจาก Rate Card...
+                        </p>
+                      ) : null}
                     </div>
                     {canEditAssignment ? (
                       <div className="sm:col-span-2">

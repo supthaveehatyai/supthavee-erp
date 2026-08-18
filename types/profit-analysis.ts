@@ -7,6 +7,11 @@ export type ProfitMonthKpi = {
   /** YYYY-MM */
   profitMonth: string;
   revenue: number;
+  /** ต้นทุนเสื้อเปล่า — Σ (unit_cost_price × qty) */
+  productCogs: number;
+  /** ค่าแรงงานบริการ — Σ production_jobs.wage_cost */
+  wageCogs: number;
+  /** productCogs + wageCogs */
   cogs: number;
   grossProfit: number;
   opex: number;
@@ -20,6 +25,9 @@ export type SalesProfitRow = {
   docType: string;
   contactName: string;
   revenue: number;
+  productCogs: number;
+  wageCogs: number;
+  /** productCogs + wageCogs */
   cogs: number;
   grossProfit: number;
   /** Gross Profit / Revenue × 100 — null when revenue is 0 */

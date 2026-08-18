@@ -122,7 +122,7 @@ function buildKpiCards(kpis: ExecutiveKpis): KpiCard[] {
       value: kpis.netProfit.formatted,
       hint: kpis.netProfit.error
         ? "คำนวณกำไรสุทธิไม่สำเร็จ"
-        : "True Net Profit = YTD Sales − Wage Cost (COGS) − OPEX",
+        : "True Net Profit = Net Revenue − ต้นทุนเสื้อเปล่า − ค่าแรงงานบริการ − OPEX",
       icon: <TrendingUp className="h-5 w-5" />,
       accent: "bg-slate-50 text-slate-700 border-slate-200",
       valueClassName: netProfitValueClass(
@@ -203,8 +203,8 @@ function BusinessOverviewTab({ kpis }: { kpis: ExecutiveKpis }) {
           <CardDescription>
             YTD Sales / AR / AP / OPEX ดึงจาก Server Actions แบบ Real-time — ค่า{" "}
             <span className="font-medium text-slate-600">฿0.00</span>{" "}
-            หมายถึงยังไม่มีเอกสารตรงเงื่อนไข · Net Profit = Sales − OPEX
-            (ก่อนหัก COGS จาก Cost Snapshot)
+            หมายถึงยังไม่มีเอกสารตรงเงื่อนไข · Net Profit = Revenue − Actual
+            COGS (เสื้อเปล่า + ค่าแรง) − OPEX
           </CardDescription>
         </CardHeader>
       </Card>

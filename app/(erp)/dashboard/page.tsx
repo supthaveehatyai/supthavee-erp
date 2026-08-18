@@ -3,13 +3,14 @@ import { LayoutDashboard } from "lucide-react";
 import {
   getPendingAP,
   getPendingAR,
+  getTrueNetProfit,
   getYTDExpenses,
   getYTDSales,
 } from "@/app/actions/dashboard";
 import { ManualBackupButton } from "@/components/dashboard/manual-backup-button";
 import { getRecentAuditLogs } from "@/lib/actions/audit-actions";
 import type { GetRecentAuditLogsResult } from "@/types/audit";
-import type { KpiMoneyResult } from "@/types/dashboard";
+import type { KpiMoneyResult, ProfitabilityKpiResult } from "@/types/dashboard";
 import { ExecutiveDashboard } from "./executive-dashboard";
 
 export const dynamic = "force-dynamic";
@@ -31,8 +32,31 @@ function formatThaiBaht(value: number): string {
   }).format(Number.isFinite(value) ? value : 0);
 }
 
-function roundMoney(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+function unwrapProfit(
+  settled: PromiseSettledResult<ProfitabilityKpiResult>,
+  fallbackError: string,
+): ProfitabilityKpiResult {
+  if (settled.status === "fulfilled") {
+    return settled.value;
+  }
+
+  const reason = settled.reason;
+  const message =
+    reason instanceof Error
+      ? reason.message
+      : typeof reason === "string"
+        ? reason
+        : fallbackError;
+
+  return {
+    totalExpenses: 0,
+    productCogs: 0,
+    wageCogs: 0,
+    totalCogs: 0,
+    grossProfit: 0,
+    netProfit: 0,
+    error: message,
+  };
 }
 
 function unwrapKpi(
@@ -97,12 +121,13 @@ function toDisplayKpi(result: KpiMoneyResult): DisplayKpi {
 
 export default async function ExecutiveDashboardPage() {
   // allSettled — no unhandled rejections even if a Server Action throws
-  const [ytdSettled, arSettled, apSettled, opexSettled, auditSettled] =
+  const [ytdSettled, arSettled, apSettled, opexSettled, profitSettled, auditSettled] =
     await Promise.allSettled([
       getYTDSales(),
       getPendingAR(),
       getPendingAP(),
       getYTDExpenses(),
+      getTrueNetProfit(),
       getRecentAuditLogs(),
     ]);
 
@@ -119,20 +144,13 @@ export default async function ExecutiveDashboardPage() {
     unwrapKpi(opexSettled, "Failed to load YTD expenses"),
   );
   const auditResult = unwrapAudit(auditSettled);
+  const profit = unwrapProfit(profitSettled, "Failed to calculate true net profit");
 
-  // True Net Profit = Gross (YTD Sales, pre-COGS) − OPEX
-  const netProfitAmount = roundMoney(ytdSales.amount - totalExpenses.amount);
-  const netProfitError =
-    ytdSales.error || totalExpenses.error
-      ? [ytdSales.error, totalExpenses.error]
-          .filter((msg): msg is string => Boolean(msg))
-          .join(" · ")
-      : null;
-  const netProfit: DisplayKpi = netProfitError
-    ? { amount: 0, formatted: "—", error: netProfitError }
+  const netProfit: DisplayKpi = profit.error
+    ? { amount: 0, formatted: "—", error: profit.error }
     : {
-        amount: netProfitAmount,
-        formatted: formatThaiBaht(netProfitAmount),
+        amount: profit.netProfit,
+        formatted: formatThaiBaht(profit.netProfit),
         error: null,
       };
 
@@ -145,8 +163,7 @@ export default async function ExecutiveDashboardPage() {
             Executive Dashboard
           </h1>
           <p className="text-slate-500">
-            ภาพรวมธุรกิจ · True Net Profit (Sales − OPEX) · Audit Trail · Manual
-            Backup — Phase 9 (Zero Client-Side Fetching)
+            ภาพรวมธุรกิจ · True Net Profit = รายได้ − ต้นทุนเสื้อ − ค่าแรง − OPEX
           </p>
         </div>
         <ManualBackupButton />

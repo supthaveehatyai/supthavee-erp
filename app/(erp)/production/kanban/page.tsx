@@ -5,7 +5,6 @@ import {
   getKanbanBoardData,
   getTechnicianOptions,
 } from "@/app/actions/kanban-actions";
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { JobDetailSheet } from "@/components/production/job-detail-sheet";
 import { KanbanBoard } from "@/components/production/kanban-board";
 
@@ -24,18 +23,13 @@ export default async function ProductionKanbanPage({ searchParams }: PageProps) 
   const params = await searchParams;
   const jobId = params.jobId?.trim() ?? "";
 
-  const [result, currentUser] = await Promise.all([
-    getKanbanBoardData(),
-    getCurrentAuthUser(),
-  ]);
+  const result = await getKanbanBoardData();
 
   const jobDetailsResult = jobId ? await getJobDetails(jobId) : null;
   const serviceModelId = jobDetailsResult?.success
     ? jobDetailsResult.data.service_model_id
     : null;
   const techniciansResult = await getTechnicianOptions(serviceModelId);
-  const isAdmin =
-    String(currentUser?.roleCode ?? "").trim().toLowerCase() === "admin";
 
   if (!result.success) {
     return (
@@ -69,7 +63,6 @@ export default async function ProductionKanbanPage({ searchParams }: PageProps) 
       <JobDetailSheet
         job={jobDetailsResult?.success ? jobDetailsResult.data : null}
         technicians={techniciansResult.data}
-        isAdmin={isAdmin}
         error={
           jobDetailsResult && !jobDetailsResult.success
             ? jobDetailsResult.error

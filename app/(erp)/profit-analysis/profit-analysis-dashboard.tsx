@@ -94,9 +94,9 @@ function buildKpiCards(
     },
     {
       key: "cogs",
-      label: "COGS",
+      label: "Actual COGS",
       value: formatted.cogs,
-      hint: "ต้นทุนขาย · Σ (unit_cost_price × qty)",
+      hint: `เสื้อเปล่า ${formatThaiBaht(kpi.productCogs)} + ค่าแรง ${formatThaiBaht(kpi.wageCogs)}`,
       icon: <Package className="h-5 w-5" />,
       accent: "bg-amber-50 text-amber-800 border-amber-100",
     },
@@ -104,7 +104,7 @@ function buildKpiCards(
       key: "gross",
       label: "Gross Profit",
       value: formatted.grossProfit,
-      hint: "กำไรขั้นต้น = Revenue − COGS",
+      hint: "กำไรขั้นต้น = Revenue − Actual COGS",
       icon: <TrendingUp className="h-5 w-5" />,
       accent: "bg-emerald-50 text-emerald-700 border-emerald-100",
       valueClassName: moneyToneClass(kpi.grossProfit),
@@ -180,7 +180,7 @@ export function ProfitAnalysisDashboard({
               </CardTitle>
               <CardDescription className="mt-1">
                 เดือน {monthLabel} · ISSUED · INV_DO / TAX_INV / ABB / CS_TAX ·
-                จาก View vw_sales_profit_analysis
+                Actual COGS = ต้นทุนเสื้อเปล่า + ค่าแรงจาก production_jobs
               </CardDescription>
             </div>
             <Badge variant="slate">{rows.length} รายการ</Badge>
@@ -200,7 +200,13 @@ export function ProfitAnalysisDashboard({
                     <TableHead>Date</TableHead>
                     <TableHead className="hidden md:table-cell">ลูกค้า</TableHead>
                     <TableHead className="text-right">Revenue</TableHead>
-                    <TableHead className="text-right">COGS</TableHead>
+                    <TableHead className="hidden text-right lg:table-cell">
+                      ต้นทุนสินค้า
+                    </TableHead>
+                    <TableHead className="hidden text-right lg:table-cell">
+                      ค่าแรง
+                    </TableHead>
+                    <TableHead className="text-right">Actual COGS</TableHead>
                     <TableHead className="text-right">Gross Profit</TableHead>
                     <TableHead className="text-right">GP Margin %</TableHead>
                   </TableRow>
@@ -233,6 +239,12 @@ export function ProfitAnalysisDashboard({
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-slate-700">
                         {formatThaiBaht(row.revenue)}
+                      </TableCell>
+                      <TableCell className="hidden text-right tabular-nums text-slate-600 lg:table-cell">
+                        {formatThaiBaht(row.productCogs)}
+                      </TableCell>
+                      <TableCell className="hidden text-right tabular-nums text-slate-600 lg:table-cell">
+                        {formatThaiBaht(row.wageCogs)}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-slate-700">
                         {formatThaiBaht(row.cogs)}

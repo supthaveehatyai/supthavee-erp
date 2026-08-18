@@ -6,7 +6,6 @@
  */
 
 import { revalidatePath } from "next/cache";
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server-admin";
 import {
   KANBAN_STATUSES,
@@ -17,6 +16,7 @@ import {
   type GetProductionJobsResult,
   type GetTechnicianOptionsResult,
   type KanbanColumnStatus,
+  type LookupTechnicianWageResult,
   type ProductionJobCard,
   type ProductionJobDetails,
   type ProductionJobLineItem,
@@ -925,9 +925,117 @@ async function resolveServiceModelFromDocument(
   return null;
 }
 
-async function isCurrentUserAdmin(): Promise<boolean> {
-  const user = await getCurrentAuthUser();
-  return String(user?.roleCode ?? "").trim().toLowerCase() === "admin";
+/**
+ * เช็ก Rate Card ของช่างสำหรับงานบริการในใบสั่งผลิต (JOB)
+ * ใช้ตอนเลือก Dropdown — auto-fill wage_cost
+ */
+export async function lookupTechnicianWageForJob(
+  jobId: string,
+  technicianId: string,
+): Promise<LookupTechnicianWageResult> {
+  const id = jobId?.trim() ?? "";
+  const techId = technicianId?.trim() ?? "";
+  if (!id) {
+    return {
+      success: false,
+      error: "ไม่พบรหัสงาน (jobId)",
+      default_wage: 0,
+      has_rate: false,
+      service_model_id: null,
+    };
+  }
+  if (!techId) {
+    return {
+      success: true,
+      default_wage: 0,
+      has_rate: false,
+      service_model_id: null,
+    };
+  }
+
+  try {
+    const supabase = createClient();
+
+    const { data: job, error: jobError } = await supabase
+      .from("production_jobs")
+      .select("id, document_id")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (jobError) {
+      return {
+        success: false,
+        error: jobError.message ?? "ตรวจสอบใบสั่งผลิตไม่สำเร็จ",
+        default_wage: 0,
+        has_rate: false,
+        service_model_id: null,
+      };
+    }
+    if (!job) {
+      return {
+        success: false,
+        error: "ไม่พบใบสั่งผลิตในระบบ",
+        default_wage: 0,
+        has_rate: false,
+        service_model_id: null,
+      };
+    }
+
+    const serviceModel = await resolveServiceModelFromDocument(
+      supabase,
+      job.document_id,
+    );
+    if (!serviceModel) {
+      return {
+        success: true,
+        default_wage: 0,
+        has_rate: false,
+        service_model_id: null,
+      };
+    }
+
+    const { data: rate, error: rateError } = await supabase
+      .from("technician_rates")
+      .select("default_wage")
+      .eq("technician_id", techId)
+      .eq("service_model_id", serviceModel.id)
+      .maybeSingle();
+
+    if (rateError) {
+      return {
+        success: false,
+        error: rateError.message ?? "ตรวจสอบ Rate Card ไม่สำเร็จ",
+        default_wage: 0,
+        has_rate: false,
+        service_model_id: serviceModel.id,
+      };
+    }
+
+    if (!rate) {
+      return {
+        success: true,
+        default_wage: 0,
+        has_rate: false,
+        service_model_id: serviceModel.id,
+      };
+    }
+
+    return {
+      success: true,
+      default_wage: toWageCost(rate.default_wage),
+      has_rate: true,
+      service_model_id: serviceModel.id,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error:
+        err instanceof Error ? err.message : "ตรวจสอบ Rate Card ไม่สำเร็จ",
+      default_wage: 0,
+      has_rate: false,
+      service_model_id: null,
+    };
+  }
 }
 
 /**
@@ -1040,7 +1148,6 @@ export async function updateProductionJobAssignment(
 
   try {
     const supabase = createClient();
-    const isAdmin = await isCurrentUserAdmin();
 
     const { data: current, error: currentError } = await supabase
       .from("production_jobs")
@@ -1112,7 +1219,7 @@ export async function updateProductionJobAssignment(
         wageCost = toWageCost(rate.default_wage);
       }
 
-      if (isAdmin && input.wage_cost != null) {
+      if (input.wage_cost != null) {
         if (!Number.isFinite(Number(input.wage_cost)) || Number(input.wage_cost) < 0) {
           return { success: false, error: "ค่าแรงต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0" };
         }

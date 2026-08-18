@@ -9,12 +9,18 @@ export type KpiMoneyResult = {
   error: string | null;
 };
 
-/** True Net Profit KPI — Sales − wage COGS − OPEX. */
+/** True Net Profit KPI — Net Revenue − (product COGS + wage_cost) − OPEX. */
 export type ProfitabilityKpiResult = {
-  /** Σ expenses.net_amount · ISSUED · YTD */
+  /** Σ expenses.net_payable · ISSUED · YTD (จาก vw_monthly_profit_summary) */
   totalExpenses: number;
+  /** Σ product cost snapshot · YTD */
+  productCogs: number;
+  /** Σ production_jobs.wage_cost · YTD */
+  wageCogs: number;
+  /** productCogs + wageCogs */
+  totalCogs: number;
   /**
-   * YTD Sales − production_jobs.wage_cost (COGS เพิ่มจากค่าแรงช่าง)
+   * YTD Net Revenue − Actual COGS (เสื้อเปล่า + ค่าแรงงานบริการ)
    */
   grossProfit: number;
   /** grossProfit − totalExpenses */
