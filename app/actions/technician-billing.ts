@@ -46,7 +46,6 @@ function deliveredOnFromJob(updatedAt: string | null | undefined): string | null
   return raw.slice(0, 10);
 }
 
-type ContactJoin = { id?: string | null; company_name?: string | null };
 type DocumentJoin = { id?: string | null; doc_no?: string | null };
 type ServiceModelJoin = {
   id?: string | null;
@@ -192,10 +191,6 @@ export async function getUnbilledTechnicianJobs(
             is_service
           )
         ),
-        technician:contacts!document_items_technician_id_fkey (
-          id,
-          company_name
-        ),
         documents!document_items_document_id_fkey (
           id,
           doc_no
@@ -242,9 +237,12 @@ export async function getUnbilledTechnicianJobs(
             product_models?: ServiceModelJoin | ServiceModelJoin[] | null;
           }[]
         | null;
-      technician: ContactJoin | ContactJoin[] | null;
       documents: DocumentJoin | DocumentJoin[] | null;
     };
+
+    const technicianNameById = new Map(
+      techniciansResult.data.map((tech) => [tech.id, tech.company_name]),
+    );
 
     const rows: TechnicianBillingJobRow[] = [];
     let totalWage = 0;
@@ -260,7 +258,6 @@ export async function getUnbilledTechnicianJobs(
       totalWage = roundMoney(totalWage + wage);
       const product = unwrapJoin(item.products);
       const model = unwrapJoin(product?.product_models ?? null);
-      const technician = unwrapJoin(item.technician);
       const doc = unwrapJoin(item.documents);
       const serviceName =
         String(model?.name ?? "").trim() ||
@@ -275,7 +272,8 @@ export async function getUnbilledTechnicianJobs(
         status: String(job.status ?? ""),
         delivered_on: deliveredOnFromJob(job.updated_at),
         technician_id: techId,
-        technician_name: technician?.company_name?.trim() || "ไม่ระบุชื่อช่าง",
+        technician_name:
+          technicianNameById.get(techId) || "ไม่ระบุชื่อช่าง",
         invoice_doc_no: doc?.doc_no?.trim() || null,
         sku: String(product?.sku ?? "").trim() || "—",
         service_name: serviceName,

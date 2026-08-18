@@ -151,13 +151,7 @@ export function JobDetailSheet({
   }, [job?.id, job?.line_items]);
 
   function techniciansForLine(item: ProductionJobLineItem): TechnicianOption[] {
-    const modelId = item.model_id?.trim() ?? "";
-    const allowed = new Set(
-      rates
-        .filter((rate) => rate.service_model_id === modelId)
-        .map((rate) => rate.technician_id),
-    );
-    const list = technicianOptions.filter((tech) => allowed.has(tech.id));
+    const list = [...technicianOptions];
     const assignedId = lineDrafts[item.id]?.technicianId || item.technician_id;
     if (assignedId && !list.some((tech) => tech.id === assignedId)) {
       list.unshift({
@@ -298,6 +292,8 @@ export function JobDetailSheet({
   const canCancel =
     job && job.status !== "DELIVERED" && job.status !== "CANCELLED";
   const canEditAssignment = job && job.status !== "CANCELLED";
+  const goodsItems = job?.line_items.filter((item) => !item.is_service) ?? [];
+  const serviceItems = job?.line_items.filter((item) => item.is_service) ?? [];
 
   return (
     <>
@@ -413,13 +409,16 @@ export function JobDetailSheet({
                   <div className="flex items-center gap-2">
                     <Package className="size-4 text-blue-500" />
                     <h3 className="text-sm font-bold text-slate-800">
-                      รายการสินค้าที่ต้องผลิต
+                      สินค้าทั่วไป (Trading Goods)
                     </h3>
+                    <span className="text-xs text-slate-400">
+                      ({goodsItems.length})
+                    </span>
                   </div>
 
-                  {job.line_items.length === 0 ? (
+                  {goodsItems.length === 0 ? (
                     <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-xs text-slate-400">
-                      ไม่พบรายการสินค้าในเอกสารต้นทาง
+                      ไม่มีสินค้าทั่วไปในเอกสารต้นทาง
                     </p>
                   ) : (
                     <div className="overflow-hidden rounded-xl border border-slate-200">
@@ -431,8 +430,67 @@ export function JobDetailSheet({
                             <TableHead className="text-right text-xs">
                               จำนวน
                             </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {goodsItems.map((item) => (
+                            <TableRow key={item.id}>
+                              <TableCell className="font-mono text-xs font-semibold text-slate-800">
+                                {item.sku}
+                              </TableCell>
+                              <TableCell className="text-xs text-slate-700">
+                                <p className="font-medium">{item.name}</p>
+                                {(item.color || item.size) && (
+                                  <p className="mt-0.5 text-[10px] text-slate-400">
+                                    {[item.color, item.size]
+                                      .filter(Boolean)
+                                      .join(" · ")}
+                                  </p>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right text-xs font-semibold tabular-nums text-slate-800">
+                                {formatQty(item.qty)}
+                                {item.uom ? (
+                                  <span className="ml-1 font-normal text-slate-400">
+                                    {item.uom}
+                                  </span>
+                                ) : null}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </section>
+
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Wrench className="size-4 text-violet-500" />
+                    <h3 className="text-sm font-bold text-slate-800">
+                      งานบริการ (Service Products)
+                    </h3>
+                    <span className="text-xs text-slate-400">
+                      ({serviceItems.length})
+                    </span>
+                  </div>
+
+                  {serviceItems.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-violet-200 bg-violet-50/60 px-3 py-6 text-center text-xs text-slate-400">
+                      ไม่มีงานบริการในเอกสารต้นทาง
+                    </p>
+                  ) : (
+                    <div className="overflow-hidden rounded-xl border border-violet-200">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-violet-50 hover:bg-violet-50">
+                            <TableHead className="text-xs">SKU / งานบริการ</TableHead>
+                            <TableHead className="text-xs">รายละเอียด</TableHead>
+                            <TableHead className="text-right text-xs">
+                              จำนวนจุด
+                            </TableHead>
                             <TableHead className="min-w-[10rem] text-xs">
-                              ช่างรับเหมา
+                              ชื่อช่าง
                             </TableHead>
                             <TableHead className="min-w-[7rem] text-right text-xs">
                               ค่าแรง
@@ -440,19 +498,24 @@ export function JobDetailSheet({
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {job.line_items.map((item) => {
+                          {serviceItems.map((item) => {
                             const draft = lineDrafts[item.id];
                             const billed = Boolean(item.technician_bill_id);
                             const lineTechs = techniciansForLine(item);
+                            const selectedTechId =
+                              draft?.technicianId || item.technician_id;
+                            const hasRate = rates.some(
+                              (rate) =>
+                                rate.service_model_id === (item.model_id ?? "") &&
+                                rate.technician_id === selectedTechId,
+                            );
                             return (
                               <TableRow key={item.id}>
                                 <TableCell className="align-top font-mono text-xs font-semibold text-slate-800">
                                   {item.sku}
-                                  {item.is_service ? (
-                                    <span className="mt-1 block text-[10px] font-semibold text-violet-600">
-                                      งานบริการ
-                                    </span>
-                                  ) : null}
+                                  <span className="mt-1 block text-[10px] font-semibold text-violet-600">
+                                    งานบริการ
+                                  </span>
                                 </TableCell>
                                 <TableCell className="align-top text-xs text-slate-700">
                                   <p className="font-medium">{item.name}</p>
@@ -473,39 +536,34 @@ export function JobDetailSheet({
                                   ) : null}
                                 </TableCell>
                                 <TableCell className="align-top">
-                                  {item.is_service ? (
-                                    <Select
-                                      value={draft?.technicianId ?? ""}
-                                      disabled={
-                                        !canEditAssignment ||
-                                        formBusy ||
-                                        billed
-                                      }
-                                      onChange={(event) =>
-                                        applyLineTechnician(
-                                          item,
-                                          event.target.value,
-                                        )
-                                      }
-                                      className="h-9 text-xs"
-                                    >
-                                      <option value="">— ไม่ระบุ —</option>
-                                      {lineTechs.map((tech) => (
-                                        <option key={tech.id} value={tech.id}>
-                                          {tech.company_name}
-                                        </option>
-                                      ))}
-                                    </Select>
-                                  ) : (
-                                    <span className="text-xs text-slate-400">
-                                      —
-                                    </span>
-                                  )}
-                                  {item.is_service &&
-                                  lineTechs.length === 0 &&
-                                  !item.technician_id ? (
+                                  <Select
+                                    value={draft?.technicianId ?? ""}
+                                    disabled={
+                                      !canEditAssignment || formBusy || billed
+                                    }
+                                    onChange={(event) =>
+                                      applyLineTechnician(
+                                        item,
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="h-9 text-xs"
+                                  >
+                                    <option value="">— ไม่ระบุ —</option>
+                                    {lineTechs.map((tech) => (
+                                      <option key={tech.id} value={tech.id}>
+                                        {tech.company_name}
+                                      </option>
+                                    ))}
+                                  </Select>
+                                  {lineTechs.length === 0 ? (
                                     <p className="mt-1 text-[10px] text-amber-700">
-                                      ยังไม่มี Rate Card สำหรับรุ่นนี้
+                                      ยังไม่มีรายชื่อช่าง (role Technician)
+                                    </p>
+                                  ) : null}
+                                  {selectedTechId && !hasRate ? (
+                                    <p className="mt-1 text-[10px] text-amber-700">
+                                      ไม่มี Rate Card สำหรับงานนี้
                                     </p>
                                   ) : null}
                                   {billed ? (
@@ -515,44 +573,33 @@ export function JobDetailSheet({
                                   ) : null}
                                 </TableCell>
                                 <TableCell className="align-top">
-                                  {item.is_service ? (
-                                    <div>
-                                      <Input
-                                        type="number"
-                                        min={0}
-                                        step="0.0001"
-                                        inputMode="decimal"
-                                        value={draft?.wageCost ?? "0"}
-                                        disabled={
-                                          !canEditAssignment ||
-                                          busy ||
-                                          billed
-                                        }
-                                        onChange={(event) =>
-                                          setLineDrafts((prev) => ({
-                                            ...prev,
-                                            [item.id]: {
-                                              technicianId:
-                                                prev[item.id]?.technicianId ??
-                                                "",
-                                              wageCost: event.target.value,
-                                            },
-                                          }))
-                                        }
-                                        className="h-9 text-right text-xs tabular-nums"
-                                      />
-                                      {lookingUpItemId === item.id ? (
-                                        <p className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-400">
-                                          <Loader2 className="size-3 animate-spin" />
-                                          ดึงเรต...
-                                        </p>
-                                      ) : null}
-                                    </div>
-                                  ) : (
-                                    <span className="block text-right text-xs text-slate-400">
-                                      —
-                                    </span>
-                                  )}
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    step="0.0001"
+                                    inputMode="decimal"
+                                    value={draft?.wageCost ?? "0"}
+                                    disabled={
+                                      !canEditAssignment || busy || billed
+                                    }
+                                    onChange={(event) =>
+                                      setLineDrafts((prev) => ({
+                                        ...prev,
+                                        [item.id]: {
+                                          technicianId:
+                                            prev[item.id]?.technicianId ?? "",
+                                          wageCost: event.target.value,
+                                        },
+                                      }))
+                                    }
+                                    className="h-9 text-right text-xs tabular-nums"
+                                  />
+                                  {lookingUpItemId === item.id ? (
+                                    <p className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-400">
+                                      <Loader2 className="size-3 animate-spin" />
+                                      ดึงเรต...
+                                    </p>
+                                  ) : null}
                                 </TableCell>
                               </TableRow>
                             );
@@ -562,8 +609,7 @@ export function JobDetailSheet({
                     </div>
                   )}
 
-                  {canEditAssignment &&
-                  job.line_items.some((item) => item.is_service) ? (
+                  {canEditAssignment && serviceItems.length > 0 ? (
                     <Button
                       type="button"
                       className="h-10 w-full gap-2"

@@ -165,3 +165,6 @@ COMMENT ON VIEW public.vw_monthly_profit_summary IS
 
 GRANT SELECT ON public.vw_sales_profit_analysis TO service_role;
 GRANT SELECT ON public.vw_monthly_profit_summary TO service_role;
+
+-- Reload PostgREST schema cache so embed document_items → contacts works
+NOTIFY pgrst, 'reload schema';

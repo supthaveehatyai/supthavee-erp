@@ -665,6 +665,8 @@ export async function getJobDetails(
     let lineItems: ProductionJobLineItem[] = [];
 
     if (row.document_id) {
+      // ไม่ embed contacts ผ่าน PostgREST — ดึง technician_id แล้ว lookup ชื่อแยก
+      // เพื่อไม่พังถ้า Schema Cache ยังไม่เห็น FK document_items → contacts
       const { data: items, error: itemsError } = await supabase
         .from("document_items")
         .select(
@@ -692,9 +694,6 @@ export async function getJobDetails(
               short_name,
               is_service
             )
-          ),
-          technician:contacts!document_items_technician_id_fkey (
-            company_name
           )
         `,
         )
@@ -717,7 +716,6 @@ export async function getJobDetails(
         technician_id: string | null;
         wage_cost: number | string | null;
         technician_bill_id: string | null;
-        technician: ContactJoin | ContactJoin[] | null;
         products:
           | {
               id?: string;
@@ -742,10 +740,36 @@ export async function getJobDetails(
           | null;
       };
 
-      lineItems = ((items as ItemRow[] | null) ?? []).map((item) => {
+      const itemRows = (items as ItemRow[] | null) ?? [];
+      const technicianIds = [
+        ...new Set(
+          itemRows
+            .map((item) => item.technician_id?.trim())
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ];
+
+      const technicianNameById = new Map<string, string>();
+      if (technicianIds.length > 0) {
+        const { data: technicians } = await supabase
+          .from("contacts")
+          .select("id, company_name")
+          .in("id", technicianIds);
+
+        for (const tech of technicians ?? []) {
+          const techId = String(tech.id ?? "").trim();
+          if (!techId) continue;
+          technicianNameById.set(
+            techId,
+            String(tech.company_name ?? "").trim() || "ไม่ระบุชื่อช่าง",
+          );
+        }
+      }
+
+      lineItems = itemRows.map((item) => {
         const product = unwrapJoin(item.products);
         const model = unwrapJoin(product?.product_models ?? null);
-        const technician = unwrapJoin(item.technician ?? null);
+        const technicianId = item.technician_id?.trim() || null;
         const sku = product?.sku?.trim() || "—";
         const name =
           product?.name?.trim() ||
@@ -764,8 +788,10 @@ export async function getJobDetails(
           description: item.description?.trim() || null,
           model_id: product?.model_id?.trim() || model?.id?.trim() || null,
           is_service: model?.is_service === true,
-          technician_id: item.technician_id?.trim() || null,
-          technician_name: technician?.company_name?.trim() || null,
+          technician_id: technicianId,
+          technician_name: technicianId
+            ? technicianNameById.get(technicianId) ?? null
+            : null,
           wage_cost: toWageCost(item.wage_cost),
           technician_bill_id: item.technician_bill_id?.trim() || null,
         };
