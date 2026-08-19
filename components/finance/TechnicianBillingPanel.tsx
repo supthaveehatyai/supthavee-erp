@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, Receipt } from "lucide-react";
 import { toast } from "sonner";
@@ -280,8 +281,13 @@ export function TechnicianBillingPanel({
                 <TableBody>
                   {rows.map((row) => (
                     <TableRow key={row.id}>
-                      <TableCell className="whitespace-nowrap font-mono text-sm font-semibold text-slate-900">
-                        {row.job_no}
+                      <TableCell className="whitespace-nowrap font-mono text-sm">
+                        <Link
+                          href={`/production/kanban?jobId=${row.job_id}`}
+                          className="font-semibold text-blue-700 underline-offset-2 hover:underline"
+                        >
+                          {row.job_no}
+                        </Link>
                         <span className="mt-0.5 block text-[11px] font-normal text-slate-400">
                           {JOB_STATUS_LABEL[row.status] ?? row.status}
                         </span>

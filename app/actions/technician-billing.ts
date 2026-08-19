@@ -271,6 +271,7 @@ export async function getUnbilledTechnicianJobs(
 
       rows.push({
         id,
+        job_id: String(job.id ?? ""),
         job_no: String(job.job_no ?? "—"),
         status: String(job.status ?? ""),
         delivered_on: deliveredOnFromJob(job.updated_at),
@@ -284,6 +285,8 @@ export async function getUnbilledTechnicianJobs(
         wage_cost: wage,
       });
     }
+
+    rows.sort((a, b) => a.job_no.localeCompare(b.job_no));
 
     return {
       success: true,

@@ -56,7 +56,7 @@ import QuickEditContactButton from "@/components/contacts/QuickEditContactButton
 import ContactPersonCombobox from "./contact-person-combobox";
 import CustomerCombobox from "./customer-combobox";
 
-const INITIAL_DOC_TYPE: DocumentType = "TAX_INV";
+const INITIAL_DOC_TYPE: DocumentType = "QT";
 const INITIAL_VAT_TYPE: VatCalculationType = "EXCLUSIVE";
 const DEFAULT_VAT_RATE = 7;
 

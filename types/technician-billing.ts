@@ -13,6 +13,8 @@ export type TechnicianBillingContact = {
 export type TechnicianBillingJobRow = {
   /** document_items.id */
   id: string;
+  /** production_jobs.id — for linking to job detail */
+  job_id: string;
   job_no: string;
   status: string;
   /** วันที่ส่งงาน (updated_at ของงานที่เสร็จ/ส่งมอบ) */
