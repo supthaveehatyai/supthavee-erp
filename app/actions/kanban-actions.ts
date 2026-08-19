@@ -34,6 +34,7 @@ import {
 const PRODUCTION_ATTACHMENTS_BUCKET = "production_attachments";
 /** Sales doc types ที่ส่งเข้าสายผลิต (MTO) ได้ */
 const MTO_ELIGIBLE_DOC_TYPES = new Set([
+  "SO",
   "TAX_INV",
   "ABB",
   "CS_TAX",
@@ -321,7 +322,7 @@ export async function getKanbanBoardData(): Promise<GetProductionJobsResult> {
 }
 
 /**
- * สร้างใบสั่งผลิตจากเอกสารขาย (TAX_INV / ABB / CS_TAX / INV_DO) พร้อมแนบรูป Mockup
+ * สร้างใบสั่งผลิตจากเอกสารขาย (SO / TAX_INV / ABB / CS_TAX / INV_DO) พร้อมแนบรูป Mockup
  *
  * Fields: documentId | document_id, jobType | job_type,
  * description | details, targetDate | due_date, attachments (File[])
@@ -402,7 +403,7 @@ export async function createProductionJob(
     if (!MTO_ELIGIBLE_DOC_TYPES.has(doc.doc_type)) {
       return {
         success: false,
-        error: `ส่งงานผลิตได้เฉพาะ TAX_INV / ABB / CS_TAX / INV_DO (ปัจจุบัน: ${doc.doc_type})`,
+        error: `ส่งงานผลิตได้เฉพาะ SO / TAX_INV / ABB / CS_TAX / INV_DO (ปัจจุบัน: ${doc.doc_type})`,
         data: null,
       };
     }

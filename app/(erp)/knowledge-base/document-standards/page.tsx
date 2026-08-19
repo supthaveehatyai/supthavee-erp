@@ -60,11 +60,11 @@ const SALES_DOCS: DocRow[] = [
     code: "SO",
     nameTh: "ใบสั่งขาย",
     nameEn: "Sales Order",
-    role: "ยืนยันคำสั่งซื้อลูกค้า",
-    stock: "ไม่ตัดสต็อก",
+    role: "ยืนยันคำสั่งซื้อ, จองสต็อก (Soft Allocation), และส่งงานสั่งทำ (MTO)",
+    stock: "จองสต็อก (ATP)",
     payment: "—",
     paper: "A4",
-    legalNote: "เอกสารภายใน / สั่งผลิต (MTO)",
+    legalNote: "เอกสารภายใน / ต้นทางสำหรับส่งผลิตและออกบิล",
   },
   {
     code: "INV_DO",
@@ -264,18 +264,18 @@ const PURCHASE_DOCS: DocRow[] = [
 const SALES_FLOWS: FlowStep[] = [
   {
     title: "ขายเชื่อ (Credit) — มาตรฐาน",
-    path: "QT → TAX_INV / INV_DO → (BN) → REC",
-    note: "แปลง QT เป็นบิลขาย → วางบิล BN (ถ้าต้องการ) → รับชำระด้วย REC แล้วตัดยอดลูกหนี้",
+    path: "QT → SO → (ส่งผลิต MTO) → TAX_INV / INV_DO → (BN) → REC",
+    note: "แปลง QT เป็น SO เพื่อยืนยันคำสั่งซื้อและจองสต็อก → ส่งผลิต (ถ้ามี) → ออกบิลขาย → วางบิล BN → รับชำระด้วย REC",
   },
   {
     title: "ขายเงินสด (Cash)",
-    path: "QT → CS_TAX / ABB",
-    note: "ออกบิลเงินสดแล้วสถานะชำระเป็น PAID ทันที ไม่ต้องสร้าง REC ซ้ำ",
+    path: "QT → SO → CS_TAX / ABB",
+    note: "ออกบิลเงินสดจาก SO แล้วสถานะชำระเป็น PAID ทันที ไม่ต้องสร้าง REC ซ้ำ",
   },
   {
     title: "รับมัดจำแล้วตัดชำระ",
-    path: "DEP_IN → TAX_INV / INV_DO → REC (+ หักมัดจำ)",
-    note: "รับมัดจำก่อนส่งของ แล้วใช้ยอดคงเหลือหักตอน REC",
+    path: "DEP_IN → SO → TAX_INV / INV_DO → REC (+ หักมัดจำ)",
+    note: "รับมัดจำก่อน → สร้าง SO จองสต็อก → ออกบิลขาย → ใช้ยอดมัดจำหักตอน REC",
   },
   {
     title: "คืนมัดจำ / ตัดเศษ",
@@ -566,6 +566,7 @@ export default async function DocumentStandardsPage() {
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {[
               ["เสนอราคา", "QT"],
+              ["ใบสั่งขาย / จองสต็อก / ส่งผลิต", "SO"],
               ["ส่งของ / แจ้งหนี้", "INV_DO"],
               ["ใบกำกับภาษีขาย", "TAX_INV"],
               ["วางบิลลูกค้า", "BN"],
