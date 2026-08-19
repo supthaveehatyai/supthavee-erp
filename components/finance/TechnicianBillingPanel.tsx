@@ -6,8 +6,7 @@
  */
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, Receipt } from "lucide-react";
 import { toast } from "sonner";
 import { createTechnicianBill } from "@/app/actions/technician-billing";
@@ -150,8 +149,15 @@ export function TechnicianBillingPanel({
     return () => window.clearTimeout(handle);
   }, [technicianId, from, to, router]);
 
+  const searchParams = useSearchParams();
   const canCreate = Boolean(urlTechnicianId) && rows.length > 0 && !isCreating;
   const busy = isPending || isCreating;
+
+  function handleViewJob(jobId: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("view_job_id", jobId);
+    router.push(`/finance/billing-notes?${params.toString()}`, { scroll: false });
+  }
 
   function handleCreate() {
     if (!canCreate) return;
@@ -282,12 +288,13 @@ export function TechnicianBillingPanel({
                   {rows.map((row) => (
                     <TableRow key={row.id}>
                       <TableCell className="whitespace-nowrap font-mono text-sm">
-                        <Link
-                          href={`/production/kanban?jobId=${row.job_id}`}
+                        <button
+                          type="button"
+                          onClick={() => handleViewJob(row.job_id)}
                           className="font-semibold text-blue-700 underline-offset-2 hover:underline"
                         >
                           {row.job_no}
-                        </Link>
+                        </button>
                         <span className="mt-0.5 block text-[11px] font-normal text-slate-400">
                           {JOB_STATUS_LABEL[row.status] ?? row.status}
                         </span>

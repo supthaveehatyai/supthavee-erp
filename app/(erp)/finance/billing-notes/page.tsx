@@ -3,8 +3,13 @@ import {
   getBillingNotes,
   type BillingNoteDocType,
 } from "@/app/actions/billing";
+import {
+  getJobDetails,
+  getTechnicianOptions,
+} from "@/app/actions/kanban-actions";
 import { getUnbilledTechnicianJobs } from "@/app/actions/technician-billing";
 import { BillingNoteList } from "@/components/finance/BillingNoteList";
+import { JobDetailSheet } from "@/components/production/job-detail-sheet";
 import type { BillingNotesTab } from "@/types/technician-billing";
 
 export const metadata: Metadata = {
@@ -22,6 +27,7 @@ type PageProps = {
     technicianId?: string;
     from?: string;
     to?: string;
+    view_job_id?: string;
   }>;
 };
 
@@ -35,6 +41,18 @@ export default async function BillingNotesPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const type = resolveTab(params.type);
   const search = params.search?.trim() || undefined;
+  const viewJobId = params.view_job_id?.trim() ?? "";
+
+  const jobDetailPromise = viewJobId
+    ? Promise.all([
+        getJobDetails(viewJobId).catch((err: unknown) => ({
+          success: false as const,
+          error: err instanceof Error ? err.message : "ดึงรายละเอียดงานไม่สำเร็จ",
+          data: null,
+        })),
+        getTechnicianOptions().catch(() => ({ data: [], rates: [] })),
+      ])
+    : null;
 
   if (type === "TB") {
     const technicianId = params.technicianId?.trim() ?? "";
@@ -45,6 +63,17 @@ export default async function BillingNotesPage({ searchParams }: PageProps) {
       from,
       to,
     });
+
+    const jobResults = await jobDetailPromise;
+    const jobDetailsResult = jobResults?.[0] ?? null;
+    const techniciansResult = jobResults?.[1] ?? { data: [], rates: [] };
+
+    const closeParams = new URLSearchParams();
+    closeParams.set("type", "TB");
+    if (technicianId) closeParams.set("technicianId", technicianId);
+    if (from) closeParams.set("from", from);
+    if (to) closeParams.set("to", to);
+    const closeHref = `/finance/billing-notes?${closeParams.toString()}`;
 
     return (
       <div className="flex flex-col gap-6 p-6">
@@ -63,6 +92,15 @@ export default async function BillingNotesPage({ searchParams }: PageProps) {
             error: tb.success ? null : tb.error,
           }}
         />
+        {viewJobId && (
+          <JobDetailSheet
+            job={jobDetailsResult?.success ? jobDetailsResult.data : null}
+            error={jobDetailsResult && !jobDetailsResult.success ? jobDetailsResult.error : null}
+            technicians={techniciansResult.data}
+            rates={techniciansResult.rates}
+            closeHref={closeHref}
+          />
+        )}
       </div>
     );
   }

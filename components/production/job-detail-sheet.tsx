@@ -111,6 +111,8 @@ export type JobDetailSheetProps = {
   error?: string | null;
   technicians?: TechnicianOption[];
   rates?: TechnicianRateOption[];
+  /** URL to navigate when closing the sheet (defaults to /production/kanban) */
+  closeHref?: string;
 };
 
 type LineDraft = {
@@ -123,6 +125,7 @@ export function JobDetailSheet({
   error,
   technicians = [],
   rates = [],
+  closeHref,
 }: JobDetailSheetProps) {
   const router = useRouter();
   const open = Boolean(job) || Boolean(error);
@@ -215,7 +218,11 @@ export function JobDetailSheet({
   }
 
   function closeSheet() {
-    router.push("/production/kanban");
+    if (closeHref) {
+      router.push(closeHref);
+    } else {
+      router.push("/production/kanban");
+    }
   }
 
   function handleOpenChange(next: boolean) {
@@ -287,7 +294,7 @@ export function JobDetailSheet({
 
       toast.success(`ยกเลิกงาน ${result.data.job_no} แล้ว`);
       setConfirmOpen(false);
-      router.push("/production/kanban");
+      closeSheet();
       router.refresh();
     });
   }

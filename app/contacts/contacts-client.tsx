@@ -862,17 +862,13 @@ export default function ContactsClient({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1080px] text-left">
+          <table className="w-full min-w-[720px] text-left">
             <thead className="border-b border-slate-200 bg-slate-50/80">
               <tr>
                 {[
                   "ชื่อองค์กร / คู่ค้า",
                   "ประเภทคู่ค้า",
-                  "ประเภทลูกค้า",
                   "เบอร์โทร",
-                  "เลขผู้เสียภาษี",
-                  "ระดับราคา",
-                  "เครดิต (วัน)",
                   "สถานะ",
                   "จัดการ",
                 ].map((heading) => (
@@ -889,7 +885,7 @@ export default function ContactsClient({
               {isLoading ? (
                 Array.from({ length: 5 }).map((_, row) => (
                   <tr key={row} className="animate-pulse">
-                    {Array.from({ length: 9 }).map((__, cell) => (
+                    {Array.from({ length: 5 }).map((__, cell) => (
                       <td key={cell} className="px-5 py-4">
                         <div className="h-3.5 rounded bg-slate-100" />
                       </td>
@@ -898,7 +894,7 @@ export default function ContactsClient({
                 ))
               ) : loadError ? (
                 <tr>
-                  <td colSpan={9} className="px-5 py-16 text-center">
+                  <td colSpan={5} className="px-5 py-16 text-center">
                     <p className="text-sm font-medium text-red-600">
                       ไม่สามารถโหลดข้อมูลคู่ค้าได้
                     </p>
@@ -914,7 +910,7 @@ export default function ContactsClient({
                 </tr>
               ) : filteredContacts.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-5 py-16 text-center">
+                  <td colSpan={5} className="px-5 py-16 text-center">
                     <div className="mx-auto grid size-11 place-items-center rounded-full bg-slate-100 text-slate-400">
                       <Icon
                         name={
@@ -963,19 +959,7 @@ export default function ContactsClient({
                       </div>
                     </td>
                     <td className="px-5 py-4 text-xs text-slate-600">
-                      {contact.customer_type || "บุคคลธรรมดา"}
-                    </td>
-                    <td className="px-5 py-4 text-xs text-slate-600">
                       {contact.phone || "—"}
-                    </td>
-                    <td className="px-5 py-4 text-xs text-slate-600">
-                      {contact.tax_id || "—"}
-                    </td>
-                    <td className="px-5 py-4 text-xs text-slate-600">
-                      {contact.default_price_tier || "Retail"}
-                    </td>
-                    <td className="px-5 py-4 text-xs tabular-nums text-slate-600">
-                      {contact.credit_days ?? 0}
                     </td>
                     <td className="px-5 py-4">
                       <span
