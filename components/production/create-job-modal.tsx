@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
-import { ImagePlus, X } from "lucide-react";
+import { Check, ImagePlus, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   createProductionJob,
@@ -18,6 +18,7 @@ import {
   PRODUCTION_JOB_TYPES,
   type ProductionJobType,
 } from "@/types/kanban";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -29,15 +30,15 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
-const JOB_TYPE_LABEL: Record<ProductionJobType, string> = {
-  SCREEN: "สกรีน (SCREEN)",
-  EMBROIDERY: "ปัก (EMBROIDERY)",
-  SEWING: "เย็บ (SEWING)",
-  OTHER: "อื่นๆ (OTHER)",
-};
+const JOB_TYPE_OPTIONS: { value: ProductionJobType; label: string }[] = [
+  { value: "SCREEN", label: "สกรีน" },
+  { value: "EMBROIDERY", label: "ปัก" },
+  { value: "SEWING", label: "เย็บ" },
+  { value: "OTHER", label: "อื่นๆ" },
+];
+
 
 const ACCEPT_IMAGES = "image/jpeg,image/png,image/webp";
 
@@ -104,6 +105,11 @@ export function CreateJobModal({
   const [isCompressing, setIsCompressing] = useState(false);
   const previewUrlsRef = useRef<string[]>([]);
 
+  const [selectedTypes, setSelectedTypes] = useState<Set<ProductionJobType>>(
+    new Set(["SCREEN"]),
+  );
+  const [otherText, setOtherText] = useState("");
+
   function revokePreviews() {
     for (const url of previewUrlsRef.current) URL.revokeObjectURL(url);
     previewUrlsRef.current = [];
@@ -119,6 +125,8 @@ export function CreateJobModal({
     setPreviews([]);
     setAttachmentFiles([]);
     setIsCompressing(false);
+    setSelectedTypes(new Set(["SCREEN"]));
+    setOtherText("");
   }, [open]);
 
   useEffect(() => {
@@ -126,6 +134,32 @@ export function CreateJobModal({
       for (const url of previewUrlsRef.current) URL.revokeObjectURL(url);
     };
   }, []);
+
+  function toggleType(type: ProductionJobType) {
+    setSelectedTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  }
+
+  function buildJobTypeString(): string {
+    const parts: string[] = [];
+    for (const opt of JOB_TYPE_OPTIONS) {
+      if (!selectedTypes.has(opt.value)) continue;
+      if (opt.value === "OTHER") {
+        const trimmed = otherText.trim();
+        parts.push(trimmed ? `อื่นๆ: ${trimmed}` : "อื่นๆ");
+      } else {
+        parts.push(opt.label);
+      }
+    }
+    return parts.join(" + ");
+  }
 
   function handleFilesChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -141,7 +175,27 @@ export function CreateJobModal({
   }
 
   async function formAction(formData: FormData) {
-    // Rebuild attachments — compress to WebP before Storage upload (production_attachments)
+    if (selectedTypes.size === 0) {
+      toast.error("กรุณาเลือกประเภทงานอย่างน้อย 1 รายการ");
+      return;
+    }
+
+    // Primary enum for DB `job_type` column — first selected
+    const primaryType = JOB_TYPE_OPTIONS.find((o) =>
+      selectedTypes.has(o.value),
+    )!.value;
+    formData.set("jobType", primaryType);
+
+    // Combined label goes into details prefix when multi-select
+    const combinedLabel = buildJobTypeString();
+    if (selectedTypes.size > 1) {
+      const existingDesc = String(formData.get("description") ?? "").trim();
+      formData.set(
+        "description",
+        `[${combinedLabel}]\n${existingDesc}`,
+      );
+    }
+
     formData.delete("attachments");
     if (attachmentFiles.length > 0) {
       setIsCompressing(true);
@@ -204,20 +258,61 @@ export function CreateJobModal({
         <form key={formKey} action={formAction} className="space-y-4">
           <input type="hidden" name="documentId" value={resolvedDocumentId} />
 
-          <div className="space-y-1.5">
-            <Label htmlFor="mto-job-type">ประเภทงาน</Label>
-            <Select
-              id="mto-job-type"
-              name="jobType"
-              defaultValue="SCREEN"
-              required
-            >
-              {PRODUCTION_JOB_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {JOB_TYPE_LABEL[type]}
-                </option>
-              ))}
-            </Select>
+          {/* ── Job Type Multi-Select ── */}
+          <div className="space-y-2">
+            <Label>
+              ประเภทงาน{" "}
+              <span className="font-normal text-slate-400">
+                (เลือกได้หลายรายการ)
+              </span>
+            </Label>
+            <div className="flex flex-wrap gap-2">
+              {JOB_TYPE_OPTIONS.map((opt) => {
+                const active = selectedTypes.has(opt.value);
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => toggleType(opt.value)}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition",
+                      active
+                        ? "border-violet-300 bg-violet-50 text-violet-800 ring-1 ring-violet-200"
+                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "grid size-4 shrink-0 place-items-center rounded border transition",
+                        active
+                          ? "border-violet-500 bg-violet-500"
+                          : "border-slate-300 bg-white",
+                      )}
+                    >
+                      {active ? (
+                        <Check className="size-3 text-white" />
+                      ) : null}
+                    </div>
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+            {selectedTypes.size === 0 ? (
+              <p className="text-xs text-red-500">
+                กรุณาเลือกประเภทงานอย่างน้อย 1 รายการ
+              </p>
+            ) : null}
+
+            {selectedTypes.has("OTHER") ? (
+              <Input
+                type="text"
+                placeholder="ระบุประเภทงาน เช่น พิมพ์ลาย, ซับลิเมชัน..."
+                value={otherText}
+                onChange={(e) => setOtherText(e.target.value)}
+                className="mt-2 h-9"
+              />
+            ) : null}
           </div>
 
           <div className="space-y-1.5">
