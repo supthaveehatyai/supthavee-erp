@@ -9,6 +9,8 @@
     "lint": "eslint",
     "env:check": "node -e \"const e=process.env.NODE_ENV||'development'; console.log('NODE_ENV='+e); console.log('URL='+(process.env.NEXT_PUBLIC_SUPABASE_URL||'(missing)'));\"",
     "generate-seed": "node scripts/generate-seed.mjs",
+    "generate-cloud-seed": "node scripts/generate-cloud-seed.mjs",
+    "seed-to-cloud": "node scripts/run-seed-to-cloud.mjs",
     "seed:uat": "npx tsx scripts/seed-uat-data.ts",
     "backup:db": "node scripts/backup/backup-db.mjs",
     "backup:storage": "node scripts/backup/backup-storage.mjs"
