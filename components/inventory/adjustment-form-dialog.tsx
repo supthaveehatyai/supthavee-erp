@@ -224,8 +224,13 @@ export function AdjustmentFormDialog({
                   <TableRow>
                     <TableHead>สินค้า</TableHead>
                     <TableHead className="text-right">สต็อกปัจจุบัน</TableHead>
+                    {isAdj ? (
+                      <TableHead className="w-28 text-right text-blue-700">
+                        นับได้จริง
+                      </TableHead>
+                    ) : null}
                     <TableHead className="w-28">
-                      {isOb ? "ยอดยกมา" : "ปรับ (+/−)"}
+                      {isOb ? "ยอดยกมา" : "ส่วนต่าง"}
                     </TableHead>
                     {isOb ? (
                       <TableHead className="w-32">ต้นทุน/หน่วย</TableHead>
@@ -251,26 +256,48 @@ export function AdjustmentFormDialog({
                         <TableCell className="text-right tabular-nums">
                           {line.stock_balance.toLocaleString("th-TH")}
                         </TableCell>
+                        {isAdj ? (() => {
+                          const varianceNum = Number.parseFloat(line.qty);
+                          const countedQty = Number.isFinite(varianceNum)
+                            ? line.stock_balance + varianceNum
+                            : null;
+                          return (
+                            <TableCell className="text-right tabular-nums text-blue-700 font-medium">
+                              {countedQty !== null ? countedQty.toLocaleString("th-TH") : "—"}
+                            </TableCell>
+                          );
+                        })() : null}
                         <TableCell>
-                          <Input
-                            type="number"
-                            step="any"
-                            min={isOb ? 0 : undefined}
-                            value={line.qty}
-                            disabled={isPending}
-                            onChange={(e) =>
-                              updateLine(
-                                line.product_id,
-                                "qty",
-                                e.target.value,
-                              )
-                            }
-                            className={cn(
-                              "h-9 text-right tabular-nums",
-                              isNegative &&
-                                "border-red-200 text-red-600 focus-visible:ring-red-300",
-                            )}
-                          />
+                          {isAdj ? (
+                            <div
+                              className={cn(
+                                "h-9 flex items-center justify-end px-3 rounded-md border bg-slate-50 tabular-nums text-sm font-semibold",
+                                isNegative
+                                  ? "border-red-200 text-red-600"
+                                  : qtyNum > 0
+                                    ? "border-emerald-200 text-emerald-600"
+                                    : "border-slate-200 text-slate-400",
+                              )}
+                            >
+                              {isNegative ? `${qtyNum}` : qtyNum > 0 ? `+${qtyNum}` : "0"}
+                            </div>
+                          ) : (
+                            <Input
+                              type="number"
+                              step="any"
+                              min={0}
+                              value={line.qty}
+                              disabled={isPending}
+                              onChange={(e) =>
+                                updateLine(
+                                  line.product_id,
+                                  "qty",
+                                  e.target.value,
+                                )
+                              }
+                              className="h-9 text-right tabular-nums"
+                            />
+                          )}
                         </TableCell>
                         {isOb ? (
                           <TableCell>

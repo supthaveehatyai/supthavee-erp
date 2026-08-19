@@ -202,23 +202,36 @@ export function AdjustmentMatrixPicker({
     const lines: AdjustmentFormLine[] = [];
     for (const sku of matrix.skus) {
       const rawQty = qtyByProductId[sku.product_id] ?? "";
-      const qty = Number.parseFloat(rawQty);
-      if (!Number.isFinite(qty) || qty === 0) continue;
-      if (isOpeningBalance && qty <= 0) continue;
+      const inputQty = Number.parseFloat(rawQty);
+      if (!Number.isFinite(inputQty)) continue;
 
-      const rawCost = costByProductId[sku.product_id] ?? "";
-      const cost = rawCost.trim()
-        ? Number.parseFloat(rawCost)
-        : sku.cost_price;
-
-      lines.push({
-        product_id: sku.product_id,
-        sku: sku.sku,
-        display_name: skuLabel(sku, matrix.model_name),
-        stock_balance: sku.stock_balance,
-        qty: String(qty),
-        unit_cost_price: Number.isFinite(cost) ? String(cost) : "",
-      });
+      if (isOpeningBalance) {
+        if (inputQty <= 0) continue;
+        const rawCost = costByProductId[sku.product_id] ?? "";
+        const cost = rawCost.trim()
+          ? Number.parseFloat(rawCost)
+          : sku.cost_price;
+        lines.push({
+          product_id: sku.product_id,
+          sku: sku.sku,
+          display_name: skuLabel(sku, matrix.model_name),
+          stock_balance: sku.stock_balance,
+          qty: String(inputQty),
+          unit_cost_price: Number.isFinite(cost) ? String(cost) : "",
+        });
+      } else {
+        const variance =
+          Math.trunc(inputQty) - Math.trunc(sku.stock_balance);
+        if (variance === 0) continue;
+        lines.push({
+          product_id: sku.product_id,
+          sku: sku.sku,
+          display_name: skuLabel(sku, matrix.model_name),
+          stock_balance: sku.stock_balance,
+          qty: String(variance),
+          unit_cost_price: "",
+        });
+      }
     }
 
     if (lines.length === 0) return;
@@ -228,10 +241,11 @@ export function AdjustmentMatrixPicker({
 
   const selectedCount = matrix
     ? matrix.skus.filter((sku) => {
-        const qty = Number.parseFloat(qtyByProductId[sku.product_id] ?? "");
-        return (
-          Number.isFinite(qty) && qty !== 0 && (isOpeningBalance ? qty > 0 : true)
-        );
+        const input = Number.parseFloat(qtyByProductId[sku.product_id] ?? "");
+        if (!Number.isFinite(input)) return false;
+        if (isOpeningBalance) return input > 0;
+        const variance = Math.trunc(input) - Math.trunc(sku.stock_balance);
+        return variance !== 0;
       }).length
     : 0;
 
@@ -329,7 +343,7 @@ export function AdjustmentMatrixPicker({
               <p className="text-xs text-slate-500">
                 {isOpeningBalance
                   ? "ยอดยกมา (STK_OB) — กรอกจำนวนบวกและต้นทุนต่อหน่วย"
-                  : "ปรับปรุงสต็อก (STK_ADJ) — จำนวนบวก = เข้า / ลบ = ออก"}
+                  : "ปรับปรุงสต็อก (STK_ADJ) — กรอก \"นับได้จริง\" ระบบคำนวณส่วนต่างอัตโนมัติ"}
               </p>
             </div>
             <Button
@@ -367,8 +381,13 @@ export function AdjustmentMatrixPicker({
                           สต็อกคงเหลือ
                         </TableHead>
                         <TableHead className="w-28 px-3 text-xs">
-                          {isOpeningBalance ? "ยอดยกมา (+)" : "ปรับ (+/−)"}
+                          {isOpeningBalance ? "ยอดยกมา (+)" : "นับได้จริง"}
                         </TableHead>
+                        {!isOpeningBalance ? (
+                          <TableHead className="w-28 px-3 text-right text-xs text-blue-700">
+                            ส่วนต่าง (Variance)
+                          </TableHead>
+                        ) : null}
                         {isOpeningBalance ? (
                           <TableHead className="w-32 px-3 text-xs">
                             ต้นทุน/หน่วย
@@ -405,8 +424,8 @@ export function AdjustmentMatrixPicker({
                                 type="number"
                                 step="any"
                                 inputMode="decimal"
-                                placeholder={isOpeningBalance ? "0" : "+/−"}
-                                min={isOpeningBalance ? 0 : undefined}
+                                placeholder={isOpeningBalance ? "0" : "นับได้"}
+                                min={0}
                                 value={qtyByProductId[sku.product_id] ?? ""}
                                 onChange={(e) =>
                                   setQtyByProductId((c) => ({
@@ -417,6 +436,37 @@ export function AdjustmentMatrixPicker({
                                 className="h-9 text-right tabular-nums"
                               />
                             </TableCell>
+                            {!isOpeningBalance ? (() => {
+                              const counted = Number.parseFloat(
+                                qtyByProductId[sku.product_id] ?? "",
+                              );
+                              const hasInput = Number.isFinite(counted);
+                              const variance = hasInput
+                                ? Math.trunc(counted) - Math.trunc(sku.stock_balance)
+                                : null;
+                              return (
+                                <TableCell
+                                  className={cn(
+                                    "px-3 text-right tabular-nums text-sm font-semibold",
+                                    variance === null
+                                      ? "text-slate-300"
+                                      : variance > 0
+                                        ? "text-emerald-600"
+                                        : variance < 0
+                                          ? "text-red-600"
+                                          : "text-slate-400",
+                                  )}
+                                >
+                                  {variance === null
+                                    ? "—"
+                                    : variance > 0
+                                      ? `+${variance}`
+                                      : variance === 0
+                                        ? "0"
+                                        : `${variance}`}
+                                </TableCell>
+                              );
+                            })() : null}
                             {isOpeningBalance ? (
                               <TableCell className="px-3">
                                 <Input

@@ -58,7 +58,7 @@ export function AdjustmentDetailSheet({ detail, error }: Props) {
         if (!v) router.push("/inventory/adjustments");
       }}
     >
-      <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+      <SheetContent className="w-full overflow-y-auto sm:max-w-3xl">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-blue-600" />
@@ -131,18 +131,18 @@ export function AdjustmentDetailSheet({ detail, error }: Props) {
                 <Package className="h-4 w-4" />
                 รายการสินค้า ({detail.items.length})
               </h3>
-              <div className="overflow-hidden rounded-xl border border-slate-200">
-                <Table>
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <Table className="min-w-[640px]">
                   <TableHeader>
                     <TableRow className="bg-slate-50">
-                      <TableHead className="w-10 text-center">#</TableHead>
-                      <TableHead>SKU</TableHead>
-                      <TableHead>สินค้า</TableHead>
-                      <TableHead>สี</TableHead>
-                      <TableHead>ไซส์</TableHead>
-                      <TableHead className="text-right">จำนวน</TableHead>
-                      <TableHead className="text-right">ต้นทุน/หน่วย</TableHead>
-                      <TableHead className="text-right">รวม</TableHead>
+                      <TableHead className="w-10 px-3 text-center">#</TableHead>
+                      <TableHead className="px-3">SKU</TableHead>
+                      <TableHead className="px-3">สินค้า</TableHead>
+                      <TableHead className="px-3">สี</TableHead>
+                      <TableHead className="px-3">ไซส์</TableHead>
+                      <TableHead className="px-3 text-right">จำนวน</TableHead>
+                      <TableHead className="px-3 text-right">ต้นทุน/หน่วย</TableHead>
+                      <TableHead className="px-3 text-right">รวม</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -150,33 +150,33 @@ export function AdjustmentDetailSheet({ detail, error }: Props) {
                       const isNeg = item.qty < 0;
                       return (
                         <TableRow key={item.id}>
-                          <TableCell className="text-center text-xs text-slate-400">
+                          <TableCell className="px-3 text-center text-xs text-slate-400">
                             {idx + 1}
                           </TableCell>
-                          <TableCell className="font-mono text-xs">
+                          <TableCell className="px-3 font-mono text-xs">
                             {item.sku || "—"}
                           </TableCell>
-                          <TableCell className="text-sm">
+                          <TableCell className="px-3 text-sm">
                             {item.product_name}
                           </TableCell>
-                          <TableCell className="text-sm">
+                          <TableCell className="px-3 text-sm">
                             {item.color || "—"}
                           </TableCell>
-                          <TableCell className="text-sm">
+                          <TableCell className="px-3 text-sm">
                             {item.size || "—"}
                           </TableCell>
                           <TableCell
-                            className={`text-right tabular-nums font-semibold ${isNeg ? "text-red-600" : "text-emerald-700"}`}
+                            className={`px-3 text-right tabular-nums font-semibold ${isNeg ? "text-red-600" : "text-emerald-700"}`}
                           >
                             {isNeg ? `−${Math.abs(item.qty)}` : `+${item.qty}`}
                           </TableCell>
-                          <TableCell className="text-right tabular-nums text-sm">
+                          <TableCell className="px-3 text-right tabular-nums text-sm">
                             {item.unit_cost_price.toLocaleString("th-TH", {
                               minimumFractionDigits: 2,
                               maximumFractionDigits: 4,
                             })}
                           </TableCell>
-                          <TableCell className="text-right tabular-nums text-sm">
+                          <TableCell className="px-3 text-right tabular-nums text-sm">
                             {item.line_total.toLocaleString("th-TH", {
                               minimumFractionDigits: 2,
                             })}
