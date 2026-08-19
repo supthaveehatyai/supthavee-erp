@@ -43,6 +43,36 @@ export type GetInventoryAdjustmentsResult = {
   error: string | null;
 };
 
+/** Detail view — document header + line items with product info. */
+export type AdjustmentDetailItem = {
+  id: string;
+  product_id: string;
+  sku: string;
+  product_name: string;
+  color: string | null;
+  size: string | null;
+  qty: number;
+  unit_cost_price: number;
+  line_total: number;
+  sort_order: number;
+};
+
+export type AdjustmentDetail = {
+  id: string;
+  doc_no: string;
+  doc_type: InventoryDocType;
+  status: string;
+  doc_date: string;
+  remark: string | null;
+  created_at: string;
+  items: AdjustmentDetailItem[];
+};
+
+export type GetAdjustmentDetailResult = {
+  data: AdjustmentDetail | null;
+  error: string | null;
+};
+
 /** Draft line in the adjustment form (from Matrix picker). */
 export type AdjustmentFormLine = {
   product_id: string;

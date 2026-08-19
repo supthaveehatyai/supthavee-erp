@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { PackagePlus, Scale } from "lucide-react";
-import type { InventoryAdjustmentListItem } from "@/types/inventory-adjustment";
+import type {
+  AdjustmentDetail,
+  InventoryAdjustmentListItem,
+} from "@/types/inventory-adjustment";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -20,12 +23,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AdjustmentFormDialog } from "@/components/inventory/adjustment-form-dialog";
+import { AdjustmentDetailSheet } from "@/components/inventory/adjustment-detail-sheet";
 import type { InventoryDocType } from "@/lib/constants/document";
 
 export type AdjustmentsWorkspaceProps = {
   rows: InventoryAdjustmentListItem[];
   error: string | null;
   createMode: InventoryDocType | null;
+  viewDetail: AdjustmentDetail | null;
+  viewDetailError: string | null;
 };
 
 function formatDate(value: string): string {
@@ -56,6 +62,8 @@ export function AdjustmentsWorkspace({
   rows,
   error,
   createMode,
+  viewDetail,
+  viewDetailError,
 }: AdjustmentsWorkspaceProps) {
   return (
     <>
@@ -129,8 +137,13 @@ export function AdjustmentsWorkspace({
                   <TableBody>
                     {rows.map((row) => (
                       <TableRow key={row.id}>
-                        <TableCell className="font-mono text-sm font-semibold text-slate-900">
-                          {row.doc_no}
+                        <TableCell className="font-mono text-sm font-semibold">
+                          <Link
+                            href={`/inventory/adjustments?view_id=${row.id}`}
+                            className="text-blue-700 underline-offset-2 hover:underline"
+                          >
+                            {row.doc_no}
+                          </Link>
                         </TableCell>
                         <TableCell>{docTypeBadge(row.doc_type)}</TableCell>
                         <TableCell>{formatDate(row.doc_date)}</TableCell>
@@ -166,6 +179,11 @@ export function AdjustmentsWorkspace({
       <AdjustmentFormDialog
         open={createMode === "STK_OB" || createMode === "STK_ADJ"}
         docType={createMode}
+      />
+
+      <AdjustmentDetailSheet
+        detail={viewDetail}
+        error={viewDetailError}
       />
     </>
   );

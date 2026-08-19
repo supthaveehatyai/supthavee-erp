@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
-import { getInventoryAdjustments } from "@/lib/actions/inventory-adjustment";
+import {
+  getInventoryAdjustments,
+  getAdjustmentDetail,
+} from "@/lib/actions/inventory-adjustment";
 import { INVENTORY_DOC_TYPES } from "@/lib/constants/document";
 import type { InventoryDocType } from "@/lib/constants/document";
 import { AdjustmentsWorkspace } from "@/app/(erp)/inventory/adjustments/adjustments-workspace";
@@ -12,7 +15,7 @@ export const metadata: Metadata = {
 };
 
 type PageProps = {
-  searchParams: Promise<{ create?: string }>;
+  searchParams: Promise<{ create?: string; view_id?: string }>;
 };
 
 function resolveCreateMode(raw: string | undefined): InventoryDocType | null {
@@ -28,14 +31,21 @@ export default async function InventoryAdjustmentsPage({
 }: PageProps) {
   const params = await searchParams;
   const createMode = resolveCreateMode(params.create);
-  const { data, error } = await getInventoryAdjustments();
+  const viewId = params.view_id?.trim() ?? null;
+
+  const [listResult, detailResult] = await Promise.all([
+    getInventoryAdjustments(),
+    viewId ? getAdjustmentDetail(viewId) : Promise.resolve({ data: null, error: null }),
+  ]);
 
   return (
     <AdjustmentsWorkspace
-      key={createMode ?? "list"}
-      rows={data}
-      error={error}
+      key={createMode ?? viewId ?? "list"}
+      rows={listResult.data}
+      error={listResult.error}
       createMode={createMode}
+      viewDetail={detailResult.data}
+      viewDetailError={detailResult.error}
     />
   );
 }

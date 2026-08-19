@@ -9,6 +9,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server-admin";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
+import { logAuditTrail } from "@/lib/supabase/auditService";
 import { getSystemSettings } from "@/lib/actions/settings";
 import {
   INVENTORY_DOC_TYPES,
@@ -23,6 +24,9 @@ import {
 import type {
   AdjustInventoryInput,
   AdjustInventoryResult,
+  AdjustmentDetail,
+  AdjustmentDetailItem,
+  GetAdjustmentDetailResult,
   GetInventoryAdjustmentsResult,
   InventoryAdjustmentLineInput,
   InventoryAdjustmentListItem,
@@ -485,6 +489,19 @@ export async function adjustInventory(
       }
     }
 
+    // ── Audit Log (fire-and-forget — never block the critical path) ──
+    void logAuditTrail("documents", documentId, "INSERT", null, {
+      doc_no: docNo,
+      doc_type: docType,
+      status: issuedStatus,
+      doc_date: docDate,
+      remark: remark || null,
+      line_count: stockLines.length,
+      audit_event: "ISSUE",
+    }).catch((auditErr) => {
+      console.error("[adjustInventory] audit log failed:", auditErr);
+    });
+
     revalidatePath("/inventory/adjustments");
     revalidatePath("/inventory/ledger");
 
@@ -506,5 +523,129 @@ export async function adjustInventory(
     const message =
       err instanceof Error ? err.message : "บันทึกปรับปรุงสต็อกไม่สำเร็จ";
     return { success: false, error: message };
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* getAdjustmentDetail                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Read-only detail for a single STK_OB / STK_ADJ document.
+ * Joins document_items → products for SKU / color / size display.
+ */
+export async function getAdjustmentDetail(
+  documentId: string,
+): Promise<GetAdjustmentDetailResult> {
+  const trimmed = documentId?.trim() ?? "";
+  if (!trimmed) {
+    return { data: null, error: "ไม่มี document_id" };
+  }
+
+  try {
+    const supabase = createClient();
+
+    const { data: doc, error: docError } = await supabase
+      .from("documents")
+      .select(
+        `
+        id,
+        doc_no,
+        doc_type,
+        status,
+        doc_date,
+        notes,
+        created_at,
+        document_items!document_items_document_id_fkey (
+          id,
+          product_id,
+          description,
+          qty,
+          unit_cost_price,
+          line_total,
+          sort_order,
+          products!document_items_product_id_fkey (
+            id,
+            sku,
+            name,
+            color,
+            size
+          )
+        )
+      `,
+      )
+      .eq("id", trimmed)
+      .in("doc_type", [...INVENTORY_DOC_TYPES])
+      .maybeSingle();
+
+    if (docError) {
+      return { data: null, error: docError.message };
+    }
+    if (!doc) {
+      return { data: null, error: "ไม่พบเอกสารปรับปรุงสต็อก" };
+    }
+
+    type RawProduct = {
+      id?: string;
+      sku?: string;
+      name?: string;
+      color?: string | null;
+      size?: string | null;
+    };
+
+    type RawItem = {
+      id: string;
+      product_id: string;
+      description: string | null;
+      qty: number | string;
+      unit_cost_price: number | string | null;
+      line_total: number | string | null;
+      sort_order: number | string | null;
+      products: RawProduct | RawProduct[] | null;
+    };
+
+    const rawItems: RawItem[] = Array.isArray(doc.document_items)
+      ? (doc.document_items as RawItem[])
+      : doc.document_items
+        ? [doc.document_items as RawItem]
+        : [];
+
+    const items: AdjustmentDetailItem[] = rawItems
+      .map((item) => {
+        const product = Array.isArray(item.products)
+          ? item.products[0]
+          : item.products;
+        return {
+          id: item.id,
+          product_id: item.product_id,
+          sku: String(product?.sku ?? ""),
+          product_name:
+            String(product?.name ?? item.description ?? "").trim() || "—",
+          color: product?.color ?? null,
+          size: product?.size ?? null,
+          qty: Math.trunc(Number(item.qty ?? 0)),
+          unit_cost_price: roundCost(Number(item.unit_cost_price ?? 0)),
+          line_total: roundMoney(Number(item.line_total ?? 0)),
+          sort_order: Number(item.sort_order ?? 0),
+        };
+      })
+      .sort((a, b) => a.sort_order - b.sort_order);
+
+    const detail: AdjustmentDetail = {
+      id: doc.id,
+      doc_no: doc.doc_no,
+      doc_type: doc.doc_type as AdjustmentDetail["doc_type"],
+      status: doc.status,
+      doc_date: doc.doc_date,
+      remark: doc.notes ?? null,
+      created_at: doc.created_at,
+      items,
+    };
+
+    return { data: detail, error: null };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "ดึงรายละเอียดเอกสารไม่สำเร็จ";
+    return { data: null, error: message };
   }
 }
