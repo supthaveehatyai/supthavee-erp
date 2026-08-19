@@ -153,13 +153,27 @@ export const STOCK_OUT_DOC_TYPES = [
   "CS_TAX",
 ] as const;
 
-/** Target types allowed by `convertDocument` (QT → sales bill). */
-export const CONVERT_TARGET_DOC_TYPES = [
+/**
+ * Target types allowed by `convertDocument`.
+ * QT → SO (ยืนยันคำสั่งซื้อ จองสต็อก MTO)
+ * SO → INV_DO / TAX_INV / CS_TAX / ABB (ออกบิลจริง)
+ */
+export const QT_CONVERT_TARGETS = ["SO"] as const;
+export const SO_CONVERT_TARGETS = [
   "INV_DO",
   "TAX_INV",
   "CS_TAX",
   "ABB",
 ] as const;
+
+/** Union of all convertible target doc types. */
+export const CONVERT_TARGET_DOC_TYPES = [
+  ...QT_CONVERT_TARGETS,
+  ...SO_CONVERT_TARGETS,
+] as const;
+
+/** Source doc types that support conversion. */
+export const CONVERTIBLE_SOURCE_DOC_TYPES = ["QT", "SO"] as const;
 
 /** Credit invoices — open AR/AP until paid (Knock-off). */
 export const CREDIT_DOC_TYPES = [

@@ -72,6 +72,85 @@ function signedLedgerQty(transType: string | null | undefined, qty: number): num
   return qty;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Soft Allocation — Committed Stock from SO (ISSUED)                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Committed Stock = Σ qty from `document_items` where the parent `documents`
+ * row has `doc_type = 'SO'` AND `status = 'ISSUED'` AND the SO has NOT yet
+ * been converted to a billing doc (no active child via `ref_document_id`).
+ *
+ * Available Stock (ATP) = Physical Stock − Committed Stock
+ */
+export async function getCommittedStockByProducts(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: SupabaseClient<any>,
+  productIds: string[],
+): Promise<Map<string, number>> {
+  const committed = new Map<string, number>();
+  const ids = [...new Set(productIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return committed;
+
+  for (const id of ids) committed.set(id, 0);
+
+  // 1. Find all SO ISSUED documents that still need fulfillment
+  //    (no active child billing doc — i.e. not yet converted to INV_DO/TAX_INV etc.)
+  const { data: soDocIds, error: soError } = await supabase
+    .from("documents")
+    .select("id")
+    .eq("doc_type", "SO")
+    .eq("status", "ISSUED")
+    .or("is_voided.is.null,is_voided.eq.false");
+
+  if (soError || !soDocIds || soDocIds.length === 0) {
+    return committed;
+  }
+
+  const allSoIds = soDocIds.map((d: { id: string }) => d.id);
+
+  // 2. Exclude SOs that already have an active child document (fulfilled)
+  const { data: fulfilledRows } = await supabase
+    .from("documents")
+    .select("ref_document_id")
+    .in("ref_document_id", allSoIds)
+    .not("status", "in", '("CANCELLED","VOID")');
+
+  const fulfilledSoIds = new Set(
+    (fulfilledRows ?? []).map((r: { ref_document_id: string }) =>
+      String(r.ref_document_id),
+    ),
+  );
+  const openSoIds = allSoIds.filter(
+    (id: string) => !fulfilledSoIds.has(id),
+  );
+
+  if (openSoIds.length === 0) return committed;
+
+  // 3. Sum qty from document_items for open SOs, filtered to requested product_ids
+  const chunkSize = 200;
+  for (let i = 0; i < openSoIds.length; i += chunkSize) {
+    const chunk = openSoIds.slice(i, i + chunkSize);
+    const { data: items, error: itemsError } = await supabase
+      .from("document_items")
+      .select("product_id, qty")
+      .in("document_id", chunk)
+      .in("product_id", ids);
+
+    if (itemsError) continue;
+
+    for (const item of items ?? []) {
+      const pid = String(item.product_id);
+      const qty = Math.abs(toQty(item.qty));
+      if (qty > 0) {
+        committed.set(pid, (committed.get(pid) ?? 0) + qty);
+      }
+    }
+  }
+
+  return committed;
+}
+
 /**
  * Aggregate OUT demand and compare against on-hand (Σ ledger).
  * When `allowNegativeInventory` is true → always ok (bypass).
@@ -130,9 +209,17 @@ export async function assertStockOutAvailability(
     }
   }
 
+  // ── Soft Allocation: deduct SO committed qty from available ──
+  const committedByProduct = await getCommittedStockByProducts(
+    supabase,
+    productIds,
+  );
+
   const shortfalls: string[] = [];
   for (const [productId, demand] of demandByProduct) {
-    const available = balanceByProduct.get(productId) ?? 0;
+    const physical = balanceByProduct.get(productId) ?? 0;
+    const committed = committedByProduct.get(productId) ?? 0;
+    const available = physical - committed;
     if (demand > available) {
       shortfalls.push(productId);
     }
@@ -158,14 +245,16 @@ export async function assertStockOutAvailability(
   const details = shortfalls
     .map((id) => {
       const demand = demandByProduct.get(id) ?? 0;
-      const available = balanceByProduct.get(id) ?? 0;
+      const physical = balanceByProduct.get(id) ?? 0;
+      const committed = committedByProduct.get(id) ?? 0;
+      const atp = physical - committed;
       const sku = skuById.get(id) ?? id.slice(0, 8);
-      return `${sku} (ต้องการ ${demand} มี ${available})`;
+      return `${sku} (ต้องการ ${demand} พร้อมขาย ${atp} | คลัง ${physical} จอง SO ${committed})`;
     })
     .join(", ");
 
   return {
     ok: false,
-    error: `สต็อกไม่เพียงพอ — ${details}`,
+    error: `สต็อกไม่เพียงพอ (ATP) — ${details}`,
   };
 }

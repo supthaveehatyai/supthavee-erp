@@ -53,6 +53,10 @@
 
 ## 4. Documents & Financials (เอกสารและการเงิน)
 
+- **Document Conversion Lineage:** `QT` → `SO` → `INV_DO / TAX_INV / CS_TAX / ABB` → `REC` (ห้ามข้าม SO)
+- **SO (ใบสั่งขาย):** ใช้ยืนยันคำสั่งซื้อ, จองสต็อก (Soft Allocation / ATP), และส่งงานผลิต (MTO)
+- **Soft Allocation (ATP):** `Available Stock = Physical Stock (Σ inventory_ledger) − Committed Stock (Σ SO ISSUED qty ที่ยังไม่ออกบิล)`
+
 - `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — `doc_type` รวม `TB` สรุปวางบิลช่าง)
 
 - `document_items` (รายการสินค้าในเอกสาร — งานบริการเก็บ `technician_id`, `wage_cost`, `technician_bill_id` เพื่อรองรับ Line Item Assignment)

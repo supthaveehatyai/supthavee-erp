@@ -38,6 +38,10 @@ export type ModelMatrixSkuRow = {
    * อนุญาตค่าติดลบตามจริงเมื่อเปิด Allow Negative Inventory
    */
   stock_balance: number;
+  /** Qty committed by SO (ISSUED, not yet billed). */
+  committed_qty: number;
+  /** Available to Promise = stock_balance − committed_qty */
+  available_stock: number;
   /** สืบทอดจาก product_models.is_service — ไม่ตัดสต็อก */
   is_service: boolean;
 };

@@ -1,7 +1,9 @@
 "use client";
 
 /**
- * Convert COMPLETED QT → INV_DO / TAX_INV draft.
+ * Convert document dropdown — context-aware per source doc_type:
+ *   QT (COMPLETED) → SO
+ *   SO (ISSUED)    → INV_DO / TAX_INV / CS_TAX / ABB
  * Calls `convertDocument` Server Action only — no client Supabase.
  */
 
@@ -11,6 +13,7 @@ import { ChevronDown, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { convertDocument } from "@/lib/actions/document-actions";
 import type { ConvertTargetDocType } from "@/types/document";
+import type { DocumentType } from "@/types/document";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -21,21 +24,39 @@ import {
 export type ConvertDocumentDropdownProps = {
   sourceDocId: string;
   sourceDocNo: string;
+  sourceDocType: DocumentType;
 };
 
-const OPTIONS: { type: ConvertTargetDocType; label: string }[] = [
+type Option = { type: ConvertTargetDocType; label: string };
+
+const QT_OPTIONS: Option[] = [
+  { type: "SO", label: "สร้างใบสั่งขาย (SO)" },
+];
+
+const SO_OPTIONS: Option[] = [
   { type: "INV_DO", label: "สร้างใบส่งของ (INV_DO)" },
   { type: "TAX_INV", label: "สร้างใบกำกับภาษี (TAX_INV)" },
   { type: "CS_TAX", label: "สร้างใบกำกับเงินสด (CS_TAX)" },
+  { type: "ABB", label: "สร้างใบสำคัญเงินสด (ABB)" },
 ];
+
+function getOptions(docType: DocumentType): Option[] {
+  if (docType === "QT") return QT_OPTIONS;
+  if (docType === "SO") return SO_OPTIONS;
+  return [];
+}
 
 export default function ConvertDocumentDropdown({
   sourceDocId,
   sourceDocNo,
+  sourceDocType,
 }: ConvertDocumentDropdownProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const options = getOptions(sourceDocType);
+
+  if (options.length === 0) return null;
 
   function handleConvert(targetDocType: ConvertTargetDocType) {
     setOpen(false);
@@ -70,13 +91,13 @@ export default function ConvertDocumentDropdown({
           ) : (
             <RefreshCw className="size-4" />
           )}
-          {isPending ? "กำลังแปลงเอกสาร..." : "🔄 สร้างเอกสารต่อยอด"}
+          {isPending ? "กำลังแปลงเอกสาร..." : "สร้างเอกสารต่อยอด"}
           <ChevronDown className="size-4 opacity-70" />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-1">
         <div role="menu" className="flex flex-col">
-          {OPTIONS.map((option) => (
+          {options.map((option) => (
             <button
               key={option.type}
               type="button"

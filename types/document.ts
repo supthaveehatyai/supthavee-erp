@@ -415,7 +415,7 @@ export type GetPurchaseDocumentsResult = {
   error: string | null;
 };
 
-export type ConvertTargetDocType = "INV_DO" | "TAX_INV" | "CS_TAX" | "ABB";
+export type ConvertTargetDocType = "SO" | "INV_DO" | "TAX_INV" | "CS_TAX" | "ABB";
 
 export type ConvertDocumentResult = {
   data: {

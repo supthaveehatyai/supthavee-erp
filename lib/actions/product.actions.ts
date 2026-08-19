@@ -6,6 +6,7 @@
  */
 
 import { createClient } from "@/lib/supabase/server-admin";
+import { getCommittedStockByProducts } from "@/lib/inventory/stock-availability";
 import type {
   GetModelMatrixForSaleResult,
   ModelMatrixForSale,
@@ -307,11 +308,18 @@ export async function getModelMatrixForSale(
       if (codeKey) sizeMetaByKey.set(codeKey, meta);
     }
 
+    // ── Soft Allocation: committed qty from SO (ISSUED) ──
+    const committedByProduct = isService
+      ? new Map<string, number>()
+      : await getCommittedStockByProducts(supabase, productIds);
+
     const skus: ModelMatrixSkuRow[] = products.map((product) => {
       const colorCode = product.color?.trim().toUpperCase() ?? "";
       const sizeRaw = product.size?.trim() ?? "";
       const sizeKey = sizeRaw.toUpperCase();
       const sizeMeta = sizeMetaByKey.get(sizeKey);
+      const physical = balanceByProduct.get(product.id) ?? 0;
+      const committed = committedByProduct.get(product.id) ?? 0;
 
       return {
         product_id: product.id,
@@ -325,7 +333,9 @@ export async function getModelMatrixForSale(
         unit_price: toMoney(product.retail_price),
         cost_price: toMoney(product.cost_price),
         base_uom: product.base_uom,
-        stock_balance: balanceByProduct.get(product.id) ?? 0,
+        stock_balance: physical,
+        committed_qty: committed,
+        available_stock: physical - committed,
         is_service: isService,
       };
     });

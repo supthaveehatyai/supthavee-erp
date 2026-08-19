@@ -448,7 +448,7 @@ export default function ModelMatrixPicker({
                         ไซส์
                       </TableHead>
                       <TableHead className="px-3 text-right text-xs font-semibold text-slate-500">
-                        สต็อกคงเหลือ
+                        พร้อมขาย (ATP)
                       </TableHead>
                       <TableHead className="px-3 text-right text-xs font-semibold text-slate-500">
                         ราคา/หน่วย
@@ -461,8 +461,8 @@ export default function ModelMatrixPicker({
                   <TableBody>
                     {matrix.skus.map((sku) => {
                       const isService = matrix.is_service || sku.is_service;
-                      const stock = sku.stock_balance;
-                      const stockLow = !isService && stock <= 0;
+                      const atp = sku.available_stock;
+                      const stockLow = !isService && atp <= 0;
                       return (
                         <TableRow key={sku.product_id}>
                           <TableCell className="px-3 font-mono text-xs font-semibold text-slate-800">
@@ -489,7 +489,13 @@ export default function ModelMatrixPicker({
                                   : "text-slate-700",
                             )}
                           >
-                            {isService ? "บริการ (ไม่ตัดสต็อก)" : formatStock(stock)}
+                            {isService ? (
+                              "บริการ (ไม่ตัดสต็อก)"
+                            ) : (
+                              <span title={`คงเหลือ ${formatStock(sku.stock_balance)} / จอง SO ${formatStock(sku.committed_qty)}`}>
+                                {formatStock(atp)}
+                              </span>
+                            )}
                           </TableCell>
                           <TableCell className="px-3 text-right text-sm tabular-nums text-slate-700">
                             {formatMoney(sku.unit_price)}

@@ -45,7 +45,16 @@
 *   **Unified Billing Hub (Technician Billing):** ระบบสรุปวางบิลช่าง (TB) ถูกรวบรวมไว้ในหน้าจอเดียวกับระบบวางบิลลูกหนี้ (BN) และเจ้าหนี้ (BR) เพื่อให้กระบวนการตั้งเจ้าหนี้ค่าแรง (Accounts Payable) สอดคล้องตามหลักการบัญชี Accrual Basis
 
 ### Module B: Document Flow & Profit Analysis (ระบบเอกสารและการวิเคราะห์กำไร)
-*   *(คงเนื้อหาเดิมตาม Blueprint ข้อ B - E อ้างอิงจาก[cite: 3, 4])*
+*   **Document Conversion Lineage (SAP-aligned):**
+    *   `QT (ใบเสนอราคา)` → `SO (ใบสั่งขาย)` → `INV_DO / TAX_INV / CS_TAX / ABB` → `REC (ใบเสร็จรับเงิน)`
+    *   QT ห้ามแปลงเป็นบิลขายตรง — ต้องผ่าน SO เพื่อยืนยันคำสั่งซื้อและจองสต็อกก่อน
+    *   SO ใช้ยืนยันคำสั่งซื้อ, จองสต็อก (Soft Allocation / ATP), และส่งงานผลิต (MTO — Send to Production)
+    *   One-Active-Child Lock: เอกสารต้นทางจะมีเอกสารต่อยอดที่ active ได้เพียง 1 ฉบับ
+*   **Soft Allocation / Available to Promise (ATP):**
+    *   `Available Stock = Physical Stock (Σ inventory_ledger) − Committed Stock (Σ SO ISSUED items ที่ยังไม่ออกบิล)`
+    *   Smart Matrix Selection แสดงยอด "พร้อมขาย (ATP)" แทน Physical Stock
+    *   Guardrail: หาก ATP ไม่เพียงพอ ห้ามบันทึกเอกสาร (bypass ได้ถ้า `allow_negative_inventory = true`)
+*   *(คงเนื้อหาเดิมตาม Blueprint ข้อ C - E อ้างอิงจาก[cite: 3, 4])*
 
 ### Module F: Inventory UI & Production Workflow (ระบบคลังสินค้าและสายการผลิต)
 *   **Stock Card UI:** สมุดบัญชีคลังสินค้า จัดกลุ่มตาม Brand -> Model -> Color -> Size ค้นหาผ่าน URL-Driven เรียงลำดับตามน้ำหนักไซส์ (`sort_order`) แสดงยอดยกมา รับเข้า จ่ายออก ผ่าน Slide-over Sheet[cite: 3, 4]

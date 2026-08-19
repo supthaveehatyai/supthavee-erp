@@ -216,14 +216,15 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   const primaryChild = activeChildren[0] ?? null;
   const isAlreadyConverted = activeChildren.length > 0;
   const canConvert =
-    doc.doc_type === "QT" &&
-    doc.status === "COMPLETED" &&
+    ((doc.doc_type === "QT" && doc.status === "COMPLETED") ||
+      (doc.doc_type === "SO" && doc.status === "ISSUED")) &&
     !isAlreadyConverted;
   const canVoid =
     doc.status === "ISSUED" && Number(doc.paid_amount ?? 0) === 0;
-  /** MTO — TAX_INV / ABB / CS_TAX / INV_DO ที่ ISSUED เท่านั้น (ห้าม DRAFT) */
+  /** MTO — SO / TAX_INV / ABB / CS_TAX / INV_DO ที่ ISSUED เท่านั้น (ห้าม DRAFT) */
   const canSendToProduction =
-    (doc.doc_type === "TAX_INV" ||
+    (doc.doc_type === "SO" ||
+      doc.doc_type === "TAX_INV" ||
       doc.doc_type === "ABB" ||
       doc.doc_type === "CS_TAX" ||
       doc.doc_type === "INV_DO") &&
@@ -294,6 +295,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
             <ConvertDocumentDropdown
               sourceDocId={doc.id}
               sourceDocNo={doc.doc_no}
+              sourceDocType={doc.doc_type}
             />
           )}
           {canIssue && (

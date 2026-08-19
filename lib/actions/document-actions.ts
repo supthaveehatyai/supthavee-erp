@@ -11,6 +11,9 @@
 
 import {
   CONVERT_TARGET_DOC_TYPES,
+  CONVERTIBLE_SOURCE_DOC_TYPES,
+  QT_CONVERT_TARGETS,
+  SO_CONVERT_TARGETS,
   DOCUMENT_TYPE_PREFIX,
   DOCUMENT_TYPES,
   PURCHASE_DOC_TYPES,
@@ -2249,8 +2252,10 @@ function sanitizeSearch(value: string): string {
 }
 
 /**
- * Convert a COMPLETED Quotation (QT) into a new DRAFT sales document
- * (INV_DO / TAX_INV / ABB), copying header commercial fields + line items.
+ * Convert a source document into a new DRAFT target document, copying
+ * header commercial fields + line items. Supported lineage:
+ *   QT (COMPLETED) → SO
+ *   SO (ISSUED)    → INV_DO / TAX_INV / CS_TAX / ABB
  * Service Role only — Zero Client-Side Fetching.
  */
 export async function convertDocument(
@@ -2265,7 +2270,7 @@ export async function convertDocument(
     if (!isConvertTargetDocType(targetDocType)) {
       return {
         data: null,
-        error: "ประเภทเอกสารปลายทางไม่ถูกต้อง (รองรับ INV_DO, TAX_INV, ABB)",
+        error: "ประเภทเอกสารปลายทางไม่ถูกต้อง (รองรับ SO, INV_DO, TAX_INV, CS_TAX, ABB)",
       };
     }
 
@@ -2321,17 +2326,49 @@ export async function convertDocument(
     if (!source) {
       return { data: null, error: "ไม่พบเอกสารต้นทาง" };
     }
-    if (source.doc_type !== "QT") {
+
+    // ── Validate source doc_type + target combination ──
+    const srcType = source.doc_type;
+    if (
+      !(CONVERTIBLE_SOURCE_DOC_TYPES as readonly string[]).includes(srcType)
+    ) {
       return {
         data: null,
-        error: "แปลงเอกสารได้เฉพาะใบเสนอราคา (QT) เท่านั้น",
+        error: "แปลงเอกสารได้เฉพาะ QT หรือ SO เท่านั้น",
       };
     }
-    if (source.status !== "COMPLETED") {
-      return {
-        data: null,
-        error: "แปลงเอกสารได้เมื่อสถานะเป็น COMPLETED เท่านั้น",
-      };
+
+    if (srcType === "QT") {
+      if (
+        !(QT_CONVERT_TARGETS as readonly string[]).includes(targetDocType)
+      ) {
+        return {
+          data: null,
+          error: "ใบเสนอราคา (QT) แปลงได้เป็นใบสั่งขาย (SO) เท่านั้น",
+        };
+      }
+      if (source.status !== "COMPLETED") {
+        return {
+          data: null,
+          error: "แปลง QT → SO ได้เมื่อสถานะเป็น COMPLETED เท่านั้น",
+        };
+      }
+    } else if (srcType === "SO") {
+      if (
+        !(SO_CONVERT_TARGETS as readonly string[]).includes(targetDocType)
+      ) {
+        return {
+          data: null,
+          error:
+            "ใบสั่งขาย (SO) แปลงได้เป็น INV_DO, TAX_INV, CS_TAX หรือ ABB เท่านั้น",
+        };
+      }
+      if (source.status !== "ISSUED") {
+        return {
+          data: null,
+          error: "แปลง SO → บิลขายได้เมื่อสถานะเป็น ISSUED เท่านั้น",
+        };
+      }
     }
     if (!source.contact_id) {
       return { data: null, error: "เอกสารต้นทางไม่มีข้อมูลลูกค้า" };
@@ -2353,11 +2390,12 @@ export async function convertDocument(
     });
     if (activeChild) {
       const childNo = String(activeChild.doc_no ?? "");
+      const srcLabel = srcType === "QT" ? "ใบเสนอราคา" : "ใบสั่งขาย";
       return {
         data: null,
         error: childNo
-          ? `ใบเสนอราคานี้ถูกนำไปสร้างเป็นเอกสาร ${childNo} แล้ว — ไม่สามารถสร้างต่อยอดซ้ำได้`
-          : "ใบเสนอราคานี้ถูกนำไปสร้างเอกสารต่อยอดแล้ว — ไม่สามารถสร้างซ้ำได้",
+          ? `${srcLabel}นี้ถูกนำไปสร้างเป็นเอกสาร ${childNo} แล้ว — ไม่สามารถสร้างต่อยอดซ้ำได้`
+          : `${srcLabel}นี้ถูกนำไปสร้างเอกสารต่อยอดแล้ว — ไม่สามารถสร้างซ้ำได้`,
       };
     }
 
