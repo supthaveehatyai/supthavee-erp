@@ -42,6 +42,8 @@
 
 - `inventory_ledger` (สมุดบัญชีคลังสินค้า - ควบคุมการเข้าออกสต็อก)
 
+- `documents` — ประเภท `STK_OB` (ยอดยกมา · Prefix **SOB-YYMM-XXXX**) และ `STK_ADJ` (ปรับปรุงสต็อก · Prefix **SAD-YYMM-XXXX**) บันทึกผ่าน `inventory_ledger` เท่านั้น (`contact_id` nullable)
+
 - `production_jobs` (ใบสั่งผลิต / งาน MTO — *อัปเดต: ยกเลิกการเก็บ technician_id และ wage_cost ที่ตารางนี้ ย้ายไประดับ Line Item แทน*)
 
 - `service_tracking` (ติดตามสถานะงานบริการ)

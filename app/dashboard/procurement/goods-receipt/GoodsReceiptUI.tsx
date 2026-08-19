@@ -30,7 +30,7 @@
  *    directly, per the ERP blueprint.
  */
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -42,7 +42,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { getActiveVendors, type VendorOption } from "@/lib/actions/mapping";
+import type { VendorOption } from "@/lib/actions/mapping";
 import {
   createOnTheFlyReceiptMapping,
   getInternalProductsForMatching,
@@ -169,12 +169,20 @@ function StatusBadge({ status }: { status: ReceiptLineRow["status"] }) {
   );
 }
 
-export default function GoodsReceiptUI() {
-  /* Header — vendor */
-  const [vendors, setVendors] = useState<VendorOption[]>([]);
+export type GoodsReceiptUIProps = {
+  /** Loaded on the server via getActiveVendors() — contacts.contact_roles @> ['Vendor'] */
+  initialVendors: VendorOption[];
+  initialVendorsError: string | null;
+};
+
+export default function GoodsReceiptUI({
+  initialVendors,
+  initialVendorsError,
+}: GoodsReceiptUIProps) {
+  /* Header — vendor (prefetched server-side; no client-side contacts query) */
+  const vendors = initialVendors;
+  const vendorsError = initialVendorsError;
   const [vendorId, setVendorId] = useState("");
-  const [vendorsError, setVendorsError] = useState<string | null>(null);
-  const [isLoadingVendors, startVendorsTransition] = useTransition();
 
   /* Products for the on-the-fly Smart Combobox (Server Action, not client fetch) */
   const [products, setProducts] = useState<ReceiptProductSummary[]>([]);
@@ -229,17 +237,10 @@ export default function GoodsReceiptUI() {
   );
 
   useEffect(() => {
-    startVendorsTransition(async () => {
-      const result = await getActiveVendors();
-      if (result.error) {
-        setVendorsError(result.error);
-        toast.error(result.error);
-        return;
-      }
-      setVendorsError(null);
-      setVendors(result.data);
-    });
-  }, []);
+    if (initialVendorsError) {
+      toast.error(initialVendorsError);
+    }
+  }, [initialVendorsError]);
 
   /** Re-fetches the internal product cache — also used after Quick Create so the new SKU is selectable everywhere. */
   const refreshInternalProducts = useCallback(async () => {
@@ -756,8 +757,8 @@ export default function GoodsReceiptUI() {
                 options={vendors}
                 value={vendorId}
                 onChange={handleVendorChange}
-                disabled={isLoadingVendors || isOcrRunning}
-                isLoading={isLoadingVendors}
+                disabled={isOcrRunning}
+                isLoading={false}
               />
               {vendorsError && (
                 <p className="mt-1 text-xs text-red-600">{vendorsError}</p>

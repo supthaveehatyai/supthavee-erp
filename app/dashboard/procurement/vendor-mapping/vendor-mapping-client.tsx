@@ -14,8 +14,8 @@ import {
   deleteVendorMapping,
   fetchMappingsByVendor,
   fetchModelsByVendor,
-  fetchVendors,
 } from "./api";
+import { getActiveVendors } from "@/lib/actions/mapping";
 import { MappingTable } from "./mapping-table";
 import { ModelTreePanel } from "./model-tree-panel";
 import type {
@@ -54,14 +54,14 @@ export default function VendorMappingClient() {
   const loadVendors = useCallback(async () => {
     setIsBootLoading(true);
     setBootError("");
-    const { data, error } = await fetchVendors();
-    if (error) {
+    const result = await getActiveVendors();
+    if (result.error) {
       setVendors([]);
-      setBootError(error);
+      setBootError(result.error);
       setIsBootLoading(false);
       return;
     }
-    setVendors(data);
+    setVendors(result.data);
     setIsBootLoading(false);
   }, []);
 

@@ -19,8 +19,8 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { VendorSelect } from "@/app/dashboard/procurement/vendor-mapping/vendor-select";
-import type { VendorOption } from "@/app/dashboard/procurement/vendor-mapping/types";
-import { fetchVendors } from "../api";
+import { getActiveVendors } from "@/lib/actions/mapping";
+import type { VendorOption } from "@/lib/actions/mapping";
 import { uploadBillAndProcessOcr } from "../lib/upload-bill-ocr";
 import type { OcrVerificationItem, OcrVerificationRow } from "../types";
 import { InvoiceDropzone } from "./InvoiceDropzone";
@@ -82,13 +82,13 @@ export default function SmartGoodsReceipt({
     let active = true;
     void (async () => {
       setIsBootLoading(true);
-      const { data, error } = await fetchVendors();
+      const result = await getActiveVendors();
       if (!active) return;
-      if (error) {
-        toast.error(`โหลดผู้จำหน่ายไม่สำเร็จ: ${error}`);
+      if (result.error) {
+        toast.error(`โหลดผู้จำหน่ายไม่สำเร็จ: ${result.error}`);
         setVendors([]);
       } else {
-        setVendors(data);
+        setVendors(result.data);
       }
       setIsBootLoading(false);
     })();

@@ -83,4 +83,6 @@ export interface CreateOnTheFlyMappingInput {
 export interface VendorOption {
   id: string;
   company_name: string;
+  /** Multi-role tags from contacts.contact_roles (never contact_type). */
+  contact_roles?: string[];
 }

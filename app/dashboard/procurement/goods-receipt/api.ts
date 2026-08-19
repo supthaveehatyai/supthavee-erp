@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import { getVendors } from "@/lib/actions/master";
+import { getActiveVendors } from "@/lib/actions/mapping";
 import { normalizeVendorSku } from "./lib/normalize-vendor-sku";
 import type {
   CreateOnTheFlyMappingInput,
@@ -54,16 +54,15 @@ function toMappingMatch(row: MappingQueryRow): VendorMappingMatch {
 }
 
 /**
- * Vendors (`contacts`) go through the `getVendors` Server Action —
- * Service Role Key bypasses RLS. Never fetched client-side (anon key hits
- * "permission denied" on this table).
+ * @deprecated Import `getActiveVendors` from `@/lib/actions/mapping` directly.
+ * Wrapper kept for legacy imports — must not be called from Client Components
+ * without going through a `"use server"` module (Next.js Server Action boundary).
  */
 export async function fetchVendors(): Promise<{
   data: VendorOption[];
   error: string | null;
 }> {
-  const { data, error } = await getVendors();
-  return { data, error };
+  return getActiveVendors();
 }
 
 export async function fetchActiveProducts(): Promise<{

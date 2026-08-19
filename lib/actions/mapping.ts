@@ -241,6 +241,8 @@ function emptyVendorMappingResult(
 export type VendorOption = {
   id: string;
   company_name: string;
+  /** Present when loaded from contacts — multi-role array (Customer / Vendor / Technician). */
+  contact_roles?: string[];
 };
 
 export type GetActiveVendorsResult = {
@@ -250,6 +252,7 @@ export type GetActiveVendorsResult = {
 
 /**
  * Fetch active Vendor contacts via service-role admin client (bypasses RLS).
+ * Filter: `contacts.contact_roles @> ARRAY['Vendor']` (legacy contact_type removed).
  * Never uses anon / SSR clients.
  */
 export async function getActiveVendors(): Promise<GetActiveVendorsResult> {

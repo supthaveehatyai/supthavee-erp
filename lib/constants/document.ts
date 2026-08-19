@@ -31,6 +31,9 @@ export const DOCUMENT_TYPES = [
   "WRITE_OFF",
   // Technician Billing (documents.doc_type)
   "TB",
+  // Inventory — Ledger-driven (Phase 14)
+  "STK_OB",
+  "STK_ADJ",
   // Legacy (readable until fully migrated)
   "DEP",
   "INT_REC",
@@ -70,9 +73,16 @@ export const DOCUMENT_TYPE_PREFIX = {
   REFUND: "RFD",
   WRITE_OFF: "WRO",
   TB: "TB",
+  STK_OB: "SOB",
+  STK_ADJ: "SAD",
   DEP: "DEP",
   INT_REC: "INT",
 } as const;
+
+/** Inventory adjustment documents — post to inventory_ledger only. */
+export const INVENTORY_DOC_TYPES = ["STK_OB", "STK_ADJ"] as const;
+
+export type InventoryDocType = (typeof INVENTORY_DOC_TYPES)[number];
 
 /**
  * Sales Document List — strict allow-list.
@@ -190,6 +200,7 @@ export function resolveInitialPaymentStatus(
   }
   // QT / SO / PO / DEP_* / REC / CN / PAY — no open trade receivable by default
   if (docType === "REC" || docType === "PAY") return "PAID";
+  if ((INVENTORY_DOC_TYPES as readonly string[]).includes(docType)) return "PAID";
   return "UNPAID";
 }
 
@@ -201,5 +212,9 @@ export function resolveInitialPaymentStatus(
 export function resolveIssuedDocumentStatus(
   docType: string,
 ): "ISSUED" | "COMPLETED" {
-  return docType === "QT" ? "COMPLETED" : "ISSUED";
+  if (docType === "QT") return "COMPLETED";
+  if ((INVENTORY_DOC_TYPES as readonly string[]).includes(docType)) {
+    return "COMPLETED";
+  }
+  return "ISSUED";
 }

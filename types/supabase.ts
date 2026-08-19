@@ -146,7 +146,7 @@ export type Database = {
       }
       contact_persons: {
         Row: {
-          contact_id: string | null
+          contact_id: string
           created_at: string | null
           department_or_role: string | null
           email: string | null
@@ -570,7 +570,7 @@ export type Database = {
         Row: {
           attached_file_url: string | null
           attachment_url: string | null
-          contact_id: string
+          contact_id: string | null
           contact_person_id: string | null
           created_at: string
           deposit_deducted: number
@@ -612,7 +612,7 @@ export type Database = {
         Insert: {
           attached_file_url?: string | null
           attachment_url?: string | null
-          contact_id: string
+          contact_id?: string | null
           contact_person_id?: string | null
           created_at?: string
           deposit_deducted?: number
@@ -1800,6 +1800,8 @@ export type Database = {
         | "AR_WRITEOFF"
         | "AP_WRITEOFF"
         | "TB"
+        | "STK_OB"
+        | "STK_ADJ"
       payment_method_enum:
         | "CASH"
         | "BANK_TRANSFER"
@@ -1980,6 +1982,8 @@ export const Constants = {
         "AR_WRITEOFF",
         "AP_WRITEOFF",
         "TB",
+        "STK_OB",
+        "STK_ADJ",
       ],
       payment_method_enum: [
         "CASH",

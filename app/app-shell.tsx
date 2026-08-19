@@ -67,6 +67,7 @@ const navigationGroups: NavigationGroup[] = [
     icon: "warehouse",
     items: [
       { label: "บัตรสต็อก (Stock Card)", href: "/inventory/ledger" },
+      { label: "ปรับปรุงคลังสินค้า", href: "/inventory/adjustments" },
       { label: "Production Kanban", href: "/production/kanban" },
     ],
   },
