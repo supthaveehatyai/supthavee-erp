@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Trash2 } from "lucide-react";
 import { adjustInventory } from "@/lib/actions/inventory-adjustment";
+import { cn } from "@/lib/utils";
 import type { InventoryDocType } from "@/lib/constants/document";
 import type { AdjustmentFormLine } from "@/types/inventory-adjustment";
 import { AdjustmentMatrixPicker } from "@/components/inventory/adjustment-matrix-picker";
@@ -88,7 +89,9 @@ export function AdjustmentFormDialog({
   }
 
   function removeLine(productId: string) {
-    setLines((current) => current.filter((line) => line.product_id !== productId));
+    setLines((current) =>
+      current.filter((line) => line.product_id !== productId),
+    );
   }
 
   function updateLine(
@@ -168,6 +171,7 @@ export function AdjustmentFormDialog({
         </DialogHeader>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
+          {/* ── Document Header ── */}
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="adj_doc_date">วันที่เอกสาร</Label>
@@ -200,6 +204,7 @@ export function AdjustmentFormDialog({
             </div>
           </div>
 
+          {/* ── Smart Matrix Selection (inline, not Popover) ── */}
           {docType ? (
             <AdjustmentMatrixPicker
               docType={docType}
@@ -208,6 +213,7 @@ export function AdjustmentFormDialog({
             />
           ) : null}
 
+          {/* ── Selected Line Items Review ── */}
           {lines.length > 0 ? (
             <div className="overflow-hidden rounded-xl border border-slate-200">
               <div className="border-b border-slate-100 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-800">
@@ -221,68 +227,85 @@ export function AdjustmentFormDialog({
                     <TableHead className="w-28">
                       {isOb ? "ยอดยกมา" : "ปรับ (+/−)"}
                     </TableHead>
-                    <TableHead className="w-32">ต้นทุน/หน่วย</TableHead>
+                    {isOb ? (
+                      <TableHead className="w-32">ต้นทุน/หน่วย</TableHead>
+                    ) : null}
                     <TableHead className="w-12" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {lines.map((line) => (
-                    <TableRow key={line.product_id}>
-                      <TableCell>
-                        <p className="font-mono text-xs text-slate-500">
-                          {line.sku}
-                        </p>
-                        <p className="text-sm text-slate-800">
-                          {line.display_name}
-                        </p>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {line.stock_balance.toLocaleString("th-TH")}
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          step="any"
-                          min={isOb ? 0 : undefined}
-                          value={line.qty}
-                          disabled={isPending}
-                          onChange={(e) =>
-                            updateLine(line.product_id, "qty", e.target.value)
-                          }
-                          className="h-9 text-right tabular-nums"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          step="0.0001"
-                          min={0}
-                          value={line.unit_cost_price}
-                          disabled={isPending}
-                          onChange={(e) =>
-                            updateLine(
-                              line.product_id,
-                              "unit_cost_price",
-                              e.target.value,
-                            )
-                          }
-                          className="h-9 text-right tabular-nums"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          disabled={isPending}
-                          onClick={() => removeLine(line.product_id)}
-                          aria-label="ลบรายการ"
-                        >
-                          <Trash2 className="size-4 text-red-500" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {lines.map((line) => {
+                    const qtyNum = Number.parseFloat(line.qty);
+                    const isNegative =
+                      Number.isFinite(qtyNum) && qtyNum < 0;
+                    return (
+                      <TableRow key={line.product_id}>
+                        <TableCell>
+                          <p className="font-mono text-xs text-slate-500">
+                            {line.sku}
+                          </p>
+                          <p className="text-sm text-slate-800">
+                            {line.display_name}
+                          </p>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {line.stock_balance.toLocaleString("th-TH")}
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            step="any"
+                            min={isOb ? 0 : undefined}
+                            value={line.qty}
+                            disabled={isPending}
+                            onChange={(e) =>
+                              updateLine(
+                                line.product_id,
+                                "qty",
+                                e.target.value,
+                              )
+                            }
+                            className={cn(
+                              "h-9 text-right tabular-nums",
+                              isNegative &&
+                                "border-red-200 text-red-600 focus-visible:ring-red-300",
+                            )}
+                          />
+                        </TableCell>
+                        {isOb ? (
+                          <TableCell>
+                            <Input
+                              type="number"
+                              step="0.0001"
+                              min={0}
+                              value={line.unit_cost_price}
+                              disabled={isPending}
+                              onChange={(e) =>
+                                updateLine(
+                                  line.product_id,
+                                  "unit_cost_price",
+                                  e.target.value,
+                                )
+                              }
+                              className="h-9 text-right tabular-nums"
+                            />
+                          </TableCell>
+                        ) : null}
+                        <TableCell>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            disabled={isPending}
+                            onClick={() => removeLine(line.product_id)}
+                            aria-label="ลบรายการ"
+                          >
+                            <Trash2 className="size-4 text-red-500" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

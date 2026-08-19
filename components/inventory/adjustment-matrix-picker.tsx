@@ -2,15 +2,21 @@
 
 /**
  * Smart Matrix Selection — ปรับปรุงสต็อก (STK_OB / STK_ADJ)
+ *
+ * Renders an inline search box + expandable matrix table — no Popover/Portal
+ * so it works correctly when hosted inside a Dialog (z-index stacking).
+ *
  * Zero Client-Side Fetching: searchProductModels + getModelMatrixForSale
  */
 
-import { useEffect, useId, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
-  ChevronsUpDown,
+  ChevronDown,
+  ChevronUp,
   Loader2,
   PackageSearch,
   Plus,
+  X,
 } from "lucide-react";
 import {
   getModelMatrixForSale,
@@ -26,28 +32,7 @@ import type { InventoryDocType } from "@/lib/constants/document";
 import { cn } from "@/lib/utils";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import { Button } from "@/components/ui/button";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import {
   Table,
   TableBody,
@@ -90,30 +75,33 @@ export function AdjustmentMatrixPicker({
   disabled = false,
   onAddLines,
 }: AdjustmentMatrixPickerProps) {
-  const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const isOpeningBalance = docType === "STK_OB";
 
-  const [open, setOpen] = useState(false);
+  /* ── Search ── */
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [results, setResults] = useState<ProductModelSearchItem[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isSearchPending, startSearchTransition] = useTransition();
+  const [searchFocused, setSearchFocused] = useState(false);
+  const showDropdown = searchFocused && debouncedQuery.length > 0;
 
-  const [matrixOpen, setMatrixOpen] = useState(false);
+  /* ── Matrix ── */
+  const [matrixExpanded, setMatrixExpanded] = useState(false);
   const [selectedModel, setSelectedModel] =
     useState<ProductModelSearchItem | null>(null);
   const [matrix, setMatrix] = useState<ModelMatrixForSale | null>(null);
   const [matrixError, setMatrixError] = useState<string | null>(null);
-  const [qtyByProductId, setQtyByProductId] = useState<Record<string, string>>(
-    {},
-  );
+  const [qtyByProductId, setQtyByProductId] = useState<
+    Record<string, string>
+  >({});
   const [costByProductId, setCostByProductId] = useState<
     Record<string, string>
   >({});
   const [isMatrixPending, startMatrixTransition] = useTransition();
 
+  /* ── Debounce ── */
   useEffect(() => {
     const handle = window.setTimeout(() => {
       setDebouncedQuery(query.trim());
@@ -121,14 +109,8 @@ export function AdjustmentMatrixPicker({
     return () => window.clearTimeout(handle);
   }, [query]);
 
+  /* ── Search execution ── */
   useEffect(() => {
-    if (!open) return;
-    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 10);
-    return () => window.clearTimeout(focusTimer);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
     if (debouncedQuery.length < 1) {
       setResults([]);
       setSearchError(null);
@@ -146,9 +128,7 @@ export function AdjustmentMatrixPicker({
           return;
         }
         setSearchError(null);
-        setResults(
-          result.data.filter((model) => !model.is_service),
-        );
+        setResults(result.data.filter((model) => !model.is_service));
       } catch (err) {
         if (!active) return;
         setSearchError(
@@ -161,25 +141,20 @@ export function AdjustmentMatrixPicker({
     return () => {
       active = false;
     };
-  }, [debouncedQuery, open]);
-
-  function closeSearch() {
-    setOpen(false);
-    setQuery("");
-    setDebouncedQuery("");
-    setResults([]);
-    setSearchError(null);
-  }
+  }, [debouncedQuery]);
 
   function openMatrixForModel(model: ProductModelSearchItem) {
     if (model.is_service) return;
-    closeSearch();
+    setQuery("");
+    setDebouncedQuery("");
+    setResults([]);
+    setSearchFocused(false);
     setSelectedModel(model);
     setMatrix(null);
     setMatrixError(null);
     setQtyByProductId({});
     setCostByProductId({});
-    setMatrixOpen(true);
+    setMatrixExpanded(true);
 
     startMatrixTransition(async () => {
       try {
@@ -212,6 +187,15 @@ export function AdjustmentMatrixPicker({
     });
   }
 
+  function closeMatrix() {
+    setMatrixExpanded(false);
+    setSelectedModel(null);
+    setMatrix(null);
+    setQtyByProductId({});
+    setCostByProductId({});
+    setMatrixError(null);
+  }
+
   function handleAddLines() {
     if (!matrix) return;
 
@@ -220,9 +204,7 @@ export function AdjustmentMatrixPicker({
       const rawQty = qtyByProductId[sku.product_id] ?? "";
       const qty = Number.parseFloat(rawQty);
       if (!Number.isFinite(qty) || qty === 0) continue;
-
       if (isOpeningBalance && qty <= 0) continue;
-      if (!isOpeningBalance && qty === 0) continue;
 
       const rawCost = costByProductId[sku.product_id] ?? "";
       const cost = rawCost.trim()
@@ -241,98 +223,70 @@ export function AdjustmentMatrixPicker({
 
     if (lines.length === 0) return;
     onAddLines(lines);
-    setMatrixOpen(false);
-    setSelectedModel(null);
-    setMatrix(null);
-    setQtyByProductId({});
-    setCostByProductId({});
-    setMatrixError(null);
+    closeMatrix();
   }
 
   const selectedCount = matrix
     ? matrix.skus.filter((sku) => {
         const qty = Number.parseFloat(qtyByProductId[sku.product_id] ?? "");
-        return Number.isFinite(qty) && qty !== 0 && (isOpeningBalance ? qty > 0 : true);
+        return (
+          Number.isFinite(qty) && qty !== 0 && (isOpeningBalance ? qty > 0 : true)
+        );
       }).length
     : 0;
 
   return (
-    <>
-      <Popover
-        open={open}
-        onOpenChange={(next) => {
-          if (disabled) return;
-          if (next) setOpen(true);
-          else closeSearch();
-        }}
-        modal={false}
-      >
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            role="combobox"
-            aria-expanded={open}
-            aria-controls={listboxId}
+    <div className="space-y-3">
+      {/* ── Inline Search ── */}
+      <div className="relative">
+        <div className="relative">
+          <PackageSearch className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-blue-600" />
+          <Input
+            ref={inputRef}
+            type="text"
+            placeholder="ค้นหารุ่นสินค้า (Smart Matrix Selection)..."
+            value={query}
             disabled={disabled}
-            className="h-11 w-full justify-between font-normal"
-          >
-            <span className="flex min-w-0 items-center gap-2 text-slate-600">
-              <PackageSearch className="size-4 shrink-0 text-blue-600" />
-              <span className="truncate">
-                ค้นหารุ่นสินค้า (Smart Matrix Selection)...
-              </span>
-            </span>
-            {isSearchPending ? (
-              <Loader2 className="size-4 shrink-0 animate-spin text-slate-400" />
+            onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => {
+              // delay so click on result registers first
+              window.setTimeout(() => setSearchFocused(false), 200);
+            }}
+            className="h-11 pl-10 pr-10"
+          />
+          {isSearchPending && debouncedQuery.length > 0 ? (
+            <Loader2 className="absolute right-3 top-1/2 size-4 -translate-y-1/2 animate-spin text-slate-400" />
+          ) : null}
+        </div>
+
+        {/* ── Search Results Dropdown (absolute, inside the same stacking context) ── */}
+        {showDropdown ? (
+          <div className="absolute left-0 top-full z-50 mt-1 max-h-72 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
+            {searchError ? (
+              <div className="px-4 py-6 text-center text-xs text-red-600">
+                {searchError}
+              </div>
+            ) : isSearchPending ? (
+              <div className="flex items-center justify-center gap-2 px-4 py-6 text-xs text-slate-400">
+                <Loader2 className="size-3.5 animate-spin" />
+                กำลังค้นหา...
+              </div>
+            ) : results.length === 0 ? (
+              <div className="px-4 py-6 text-center text-sm text-slate-500">
+                ไม่พบรุ่นสินค้า (Trading Goods)
+              </div>
             ) : (
-              <ChevronsUpDown className="size-4 shrink-0 text-slate-400" />
-            )}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
-          align="start"
-          sideOffset={6}
-          className="z-[9999] w-[var(--radix-popover-trigger-width)] p-0 sm:w-[28rem]"
-          onOpenAutoFocus={(event) => {
-            event.preventDefault();
-            inputRef.current?.focus();
-          }}
-        >
-          <Command shouldFilter={false} id={listboxId}>
-            <CommandInput
-              ref={inputRef}
-              placeholder="พิมพ์รหัสรุ่น หรือชื่อรุ่นสินค้า..."
-              value={query}
-              onValueChange={setQuery}
-              disabled={disabled}
-            />
-            <CommandList>
-              {searchError ? (
-                <div className="px-3 py-4 text-center text-xs text-red-600">
-                  {searchError}
-                </div>
-              ) : null}
-              {!searchError && isSearchPending && debouncedQuery.length > 0 ? (
-                <div className="flex items-center justify-center gap-2 px-3 py-6 text-xs text-slate-400">
-                  <Loader2 className="size-3.5 animate-spin" />
-                  กำลังค้นหา...
-                </div>
-              ) : null}
-              {!searchError &&
-              !isSearchPending &&
-              debouncedQuery.length > 0 &&
-              results.length === 0 ? (
-                <CommandEmpty>ไม่พบรุ่นสินค้า (Trading Goods)</CommandEmpty>
-              ) : null}
-              {!searchError && results.length > 0 ? (
-                <CommandGroup heading={`รุ่นสินค้า (${results.length})`}>
-                  {results.map((model) => (
-                    <CommandItem
-                      key={model.id}
-                      value={`${model.model_code} ${model.name}`}
-                      onSelect={() => openMatrixForModel(model)}
-                      className="cursor-pointer items-center gap-2 py-2"
+              <ul className="divide-y divide-slate-100">
+                {results.map((model) => (
+                  <li key={model.id}>
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-blue-50"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        openMatrixForModel(model);
+                      }}
                     >
                       <LineItemProductThumb
                         imageUrl={model.image_url}
@@ -346,181 +300,186 @@ export function AdjustmentMatrixPicker({
                           {model.name}
                         </p>
                       </div>
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              ) : null}
-            </CommandList>
-          </Command>
-        </PopoverContent>
-      </Popover>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
+      </div>
 
-      <Dialog
-        open={matrixOpen}
-        onOpenChange={(next) => {
-          if (!next) {
-            setMatrixOpen(false);
-            setSelectedModel(null);
-            setMatrix(null);
-            setQtyByProductId({});
-            setCostByProductId({});
-            setMatrixError(null);
-          }
-        }}
-      >
-        <DialogContent className="flex max-h-[90vh] max-w-4xl flex-col gap-0 overflow-hidden p-0">
-          <DialogHeader className="shrink-0 border-b border-slate-100 px-6 pt-6 pb-4">
-            <DialogTitle className="flex items-center gap-3">
-              <LineItemProductThumb
-                imageUrl={
-                  matrix?.image_url ?? selectedModel?.image_url ?? null
-                }
-                alt={selectedModel?.model_code ?? "รุ่น"}
-                size="md"
-              />
-              <span className="min-w-0">
-                <span className="block font-mono text-xs font-semibold text-slate-500">
-                  {selectedModel?.model_code ?? "—"}
-                </span>
-                <span className="block truncate">
-                  {selectedModel?.name ?? "เลือกสี / ไซส์ / จำนวน / ต้นทุน"}
-                </span>
-              </span>
-            </DialogTitle>
-            <DialogDescription>
-              {isOpeningBalance
-                ? "ยอดยกมา (STK_OB) — กรอกจำนวนบวกและต้นทุนต่อหน่วย"
-                : "ปรับปรุงสต็อก (STK_ADJ) — จำนวนบวก = เข้า / ลบ = ออก"}
-            </DialogDescription>
-          </DialogHeader>
+      {/* ── Inline Matrix Panel ── */}
+      {matrixExpanded && selectedModel ? (
+        <div className="overflow-hidden rounded-xl border border-blue-200 bg-blue-50/30">
+          {/* Matrix header */}
+          <div className="flex items-center gap-3 border-b border-blue-100 px-4 py-3">
+            <LineItemProductThumb
+              imageUrl={matrix?.image_url ?? selectedModel.image_url}
+              alt={selectedModel.model_code}
+              size="md"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="font-mono text-xs font-semibold text-slate-500">
+                {selectedModel.model_code}
+              </p>
+              <p className="truncate text-sm font-semibold text-slate-900">
+                {selectedModel.name}
+              </p>
+              <p className="text-xs text-slate-500">
+                {isOpeningBalance
+                  ? "ยอดยกมา (STK_OB) — กรอกจำนวนบวกและต้นทุนต่อหน่วย"
+                  : "ปรับปรุงสต็อก (STK_ADJ) — จำนวนบวก = เข้า / ลบ = ออก"}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={closeMatrix}
+              aria-label="ปิด Matrix"
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+          {/* Matrix body */}
+          <div className="p-4">
             {isMatrixPending ? (
-              <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-400">
+              <div className="flex items-center justify-center gap-2 py-12 text-sm text-slate-400">
                 <Loader2 className="size-4 animate-spin" />
                 กำลังโหลด Matrix SKU...
               </div>
-            ) : null}
-
-            {!isMatrixPending && matrixError ? (
+            ) : matrixError ? (
               <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-6 text-center text-sm text-red-600">
                 {matrixError}
               </div>
-            ) : null}
-
-            {!isMatrixPending && !matrixError && matrix && matrix.skus.length > 0 ? (
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-slate-50/80">
-                      <TableHead className="px-3 text-xs">SKU</TableHead>
-                      <TableHead className="px-3 text-xs">สี</TableHead>
-                      <TableHead className="px-3 text-xs">ไซส์</TableHead>
-                      <TableHead className="px-3 text-right text-xs">
-                        สต็อกคงเหลือ
-                      </TableHead>
-                      <TableHead className="w-28 px-3 text-xs">
-                        {isOpeningBalance ? "ยอดยกมา (+)" : "ปรับ (+/−)"}
-                      </TableHead>
-                      <TableHead className="w-32 px-3 text-xs">
-                        ต้นทุน/หน่วย
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {matrix.skus.map((sku) => {
-                      const stockLow = sku.stock_balance <= 0;
-                      return (
-                        <TableRow key={sku.product_id}>
-                          <TableCell className="px-3 font-mono text-xs">
-                            {sku.sku}
-                          </TableCell>
-                          <TableCell className="px-3 text-sm">
-                            {sku.color_name || "—"}
-                          </TableCell>
-                          <TableCell className="px-3 text-sm">
-                            {sku.size_label || "—"}
-                          </TableCell>
-                          <TableCell
-                            className={cn(
-                              "px-3 text-right text-sm tabular-nums",
-                              stockLow
-                                ? "font-semibold text-amber-600"
-                                : "text-slate-700",
-                            )}
-                          >
-                            {formatStock(sku.stock_balance)}
-                          </TableCell>
-                          <TableCell className="px-3">
-                            <Input
-                              type="number"
-                              step="any"
-                              inputMode="decimal"
-                              placeholder={isOpeningBalance ? "0" : "+/−"}
-                              min={isOpeningBalance ? 0 : undefined}
-                              value={qtyByProductId[sku.product_id] ?? ""}
-                              onChange={(e) =>
-                                setQtyByProductId((c) => ({
-                                  ...c,
-                                  [sku.product_id]: e.target.value,
-                                }))
-                              }
-                              className="h-9 text-right tabular-nums"
-                            />
-                          </TableCell>
-                          <TableCell className="px-3">
-                            <Input
-                              type="number"
-                              step="0.0001"
-                              min={0}
-                              inputMode="decimal"
-                              placeholder={formatMoney(sku.cost_price)}
-                              value={costByProductId[sku.product_id] ?? ""}
-                              onChange={(e) =>
-                                setCostByProductId((c) => ({
-                                  ...c,
-                                  [sku.product_id]: e.target.value,
-                                }))
-                              }
-                              className="h-9 text-right tabular-nums"
-                            />
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+            ) : matrix && matrix.skus.length > 0 ? (
+              <>
+                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50/80">
+                        <TableHead className="px-3 text-xs">SKU</TableHead>
+                        <TableHead className="px-3 text-xs">สี</TableHead>
+                        <TableHead className="px-3 text-xs">ไซส์</TableHead>
+                        <TableHead className="px-3 text-right text-xs">
+                          สต็อกคงเหลือ
+                        </TableHead>
+                        <TableHead className="w-28 px-3 text-xs">
+                          {isOpeningBalance ? "ยอดยกมา (+)" : "ปรับ (+/−)"}
+                        </TableHead>
+                        {isOpeningBalance ? (
+                          <TableHead className="w-32 px-3 text-xs">
+                            ต้นทุน/หน่วย
+                          </TableHead>
+                        ) : null}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {matrix.skus.map((sku) => {
+                        const stockLow = sku.stock_balance <= 0;
+                        return (
+                          <TableRow key={sku.product_id}>
+                            <TableCell className="px-3 font-mono text-xs">
+                              {sku.sku}
+                            </TableCell>
+                            <TableCell className="px-3 text-sm">
+                              {sku.color_name || "—"}
+                            </TableCell>
+                            <TableCell className="px-3 text-sm">
+                              {sku.size_label || "—"}
+                            </TableCell>
+                            <TableCell
+                              className={cn(
+                                "px-3 text-right text-sm tabular-nums",
+                                stockLow
+                                  ? "font-semibold text-amber-600"
+                                  : "text-slate-700",
+                              )}
+                            >
+                              {formatStock(sku.stock_balance)}
+                            </TableCell>
+                            <TableCell className="px-3">
+                              <Input
+                                type="number"
+                                step="any"
+                                inputMode="decimal"
+                                placeholder={isOpeningBalance ? "0" : "+/−"}
+                                min={isOpeningBalance ? 0 : undefined}
+                                value={qtyByProductId[sku.product_id] ?? ""}
+                                onChange={(e) =>
+                                  setQtyByProductId((c) => ({
+                                    ...c,
+                                    [sku.product_id]: e.target.value,
+                                  }))
+                                }
+                                className="h-9 text-right tabular-nums"
+                              />
+                            </TableCell>
+                            {isOpeningBalance ? (
+                              <TableCell className="px-3">
+                                <Input
+                                  type="number"
+                                  step="0.0001"
+                                  min={0}
+                                  inputMode="decimal"
+                                  placeholder={formatMoney(sku.cost_price)}
+                                  value={
+                                    costByProductId[sku.product_id] ?? ""
+                                  }
+                                  onChange={(e) =>
+                                    setCostByProductId((c) => ({
+                                      ...c,
+                                      [sku.product_id]: e.target.value,
+                                    }))
+                                  }
+                                  className="h-9 text-right tabular-nums"
+                                />
+                              </TableCell>
+                            ) : null}
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div className="mt-3 flex items-center justify-between">
+                  <p className="text-xs text-slate-500">
+                    {selectedCount > 0
+                      ? `เลือกแล้ว ${selectedCount} บรรทัด`
+                      : "กรอกจำนวนที่ไม่เป็น 0 อย่างน้อย 1 บรรทัด"}
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={closeMatrix}
+                    >
+                      ยกเลิก
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={selectedCount === 0 || isMatrixPending}
+                      className="gap-1.5"
+                      onClick={handleAddLines}
+                    >
+                      <Plus className="size-3.5" />
+                      เพิ่มรายการ
+                    </Button>
+                  </div>
+                </div>
+              </>
+            ) : matrix && matrix.skus.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
+                ไม่พบ SKU ภายใต้รุ่นนี้
               </div>
             ) : null}
           </div>
-
-          <DialogFooter className="shrink-0 border-t border-slate-100 px-6 py-4 sm:justify-between">
-            <p className="text-xs text-slate-500">
-              {selectedCount > 0
-                ? `เลือกแล้ว ${selectedCount} บรรทัด`
-                : "กรอกจำนวนที่ไม่เป็น 0 อย่างน้อย 1 บรรทัด"}
-            </p>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setMatrixOpen(false)}
-              >
-                ยกเลิก
-              </Button>
-              <Button
-                type="button"
-                disabled={selectedCount === 0 || isMatrixPending}
-                className="gap-2"
-                onClick={handleAddLines}
-              >
-                <Plus className="size-4" />
-                เพิ่มรายการ
-              </Button>
-            </div>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+        </div>
+      ) : null}
+    </div>
   );
 }
