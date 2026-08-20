@@ -762,14 +762,10 @@ export function ExpenseCreateWorkspace({
 
       const result = await processExpenseOCR(formData);
 
-      if (result.error || !result.data) {
-        const msg = result.error ?? "อ่านบิลด้วย AI ไม่สำเร็จ";
-        console.error("[Expense OCR] processExpenseOCR failed:", {
-          error: result.error,
-          data: result.data,
-        });
-        setError(msg);
-        toast.error(msg);
+      if (!result.success) {
+        console.error("[Expense OCR] processExpenseOCR failed:", result.error);
+        setError(result.error);
+        toast.error(result.error);
         return;
       }
 
@@ -787,7 +783,7 @@ export function ExpenseCreateWorkspace({
       const msg =
         err instanceof Error
           ? err.message
-          : "เกิดข้อผิดพลาดขณะประมวลผล OCR";
+          : "เกิดข้อผิดพลาดขณะประมวลผล OCR — กรุณาลองใหม่อีกครั้ง";
       setError(msg);
       toast.error(msg);
     } finally {

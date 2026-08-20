@@ -193,7 +193,6 @@ export type ExpenseOcrExtraction = {
   items: ExpenseOcrItem[];
 };
 
-export type ProcessExpenseOcrResult = {
-  data: ExpenseOcrExtraction | null;
-  error: string | null;
-};
+export type ProcessExpenseOcrResult =
+  | { success: true; data: ExpenseOcrExtraction }
+  | { success: false; error: string };
