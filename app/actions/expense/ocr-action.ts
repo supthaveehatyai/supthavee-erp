@@ -1,10 +1,11 @@
 "use server";
 
-/** Vercel Serverless — allow Gemini OCR up to 60s (default 10s on Hobby). */
-export const maxDuration = 60;
-
 /**
  * Phase 8 — Expense AI OCR Server Action.
+ *
+ * NOTE: Do NOT export route segment config (e.g. `maxDuration`) from this file.
+ * Next.js requires `"use server"` modules to export async functions only.
+ * Set `export const maxDuration = 60` on `app/(erp)/expenses/create/page.tsx`.
  *
  * Zero Client-Side Fetching: the Client never calls Gemini or
  * `supabase.functions.invoke`. This action converts the uploaded File to
@@ -21,18 +22,6 @@ import type {
   ExpenseOcrVatType,
   ProcessExpenseOcrResult,
 } from "@/types/expense";
-
-const EMPTY_EXTRACTION: ExpenseOcrExtraction = {
-  vendor_name: null,
-  tax_id: null,
-  document_number: null,
-  document_date: null,
-  vat_type: "NONE",
-  sub_total: 0,
-  vat_amount: 0,
-  grand_total: 0,
-  items: [],
-};
 
 const ALLOWED_MIME = new Set([
   "image/jpeg",
