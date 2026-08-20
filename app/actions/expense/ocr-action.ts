@@ -10,13 +10,13 @@
  * Zero Client-Side Fetching: the Client never calls Gemini or
  * `supabase.functions.invoke`. This action converts the uploaded File to
  * Base64 server-side, then invokes Edge Function `ocr-expense` with the
- * Service Role key (`supabaseAdmin`).
+ * signed-in user's JWT (`sub` claim) so gateway `verify_jwt` succeeds.
  *
  * Never throws — all failures return `{ success: false, error }` so Next.js
  * Production does not censor the message as an unhandled Server Action error.
  */
 
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createSupabaseSSRClient } from "@/lib/supabase/ssr-server";
 import type {
   ExpenseOcrExtraction,
   ExpenseOcrVatType,
@@ -43,35 +43,53 @@ function ok(data: ExpenseOcrExtraction): ProcessExpenseOcrResult {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Admin client                                                               */
+/* Auth JWT (SSR session — required by verify_jwt)                            */
 /* -------------------------------------------------------------------------- */
 
-function tryCreateSupabaseAdminClient():
-  | { client: SupabaseClient }
-  | { error: string } {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    return {
-      error:
-        "Missing SUPABASE_SERVICE_ROLE_KEY (หรือ NEXT_PUBLIC_SUPABASE_URL) — ตั้งค่าใน .env แล้ว redeploy",
-    };
-  }
-
-  return {
-    client: createClient(supabaseUrl, serviceRoleKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false,
-      },
-    }),
-  };
+function isGenericInvokeError(message: string): boolean {
+  return /non-2xx status code|missing sub claim/i.test(message);
 }
 
-function isGenericInvokeError(message: string): boolean {
-  return /non-2xx status code/i.test(message);
+/**
+ * User JWT from Auth cookies — required by Edge Functions with `verify_jwt`.
+ * Service Role / anon keys have no `sub` claim and are rejected by the gateway.
+ * Never throws.
+ */
+async function resolveUserAccessToken(): Promise<
+  { token: string } | { error: string }
+> {
+  try {
+    const supabase = await createSupabaseSSRClient();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user?.id) {
+      return { error: "กรุณาเข้าสู่ระบบก่อนใช้ Expense OCR" };
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    const token = session?.access_token?.trim();
+    if (!token) {
+      return {
+        error: "ไม่พบ Access Token — กรุณาเข้าสู่ระบบใหม่แล้วลองอีกครั้ง",
+      };
+    }
+
+    return { token };
+  } catch (err) {
+    console.error("[ocr-expense] resolveUserAccessToken failed:", err);
+    return {
+      error:
+        err instanceof Error
+          ? err.message
+          : "ไม่สามารถอ่าน Session ผู้ใช้ได้",
+    };
+  }
 }
 
 /**
@@ -441,15 +459,21 @@ function safeParseFetchBody(rawText: string): unknown | null {
 async function fetchOcrExpenseDirect(
   imageBase64: string,
   mimeType: string,
+  accessToken: string,
 ): Promise<ProcessExpenseOcrResult> {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (!supabaseUrl) {
       return fail("Missing NEXT_PUBLIC_SUPABASE_URL environment variable");
     }
-    if (!serviceRoleKey) {
-      return fail("Missing SUPABASE_SERVICE_ROLE_KEY environment variable");
+
+    const bearer =
+      accessToken.trim() || anonKey?.trim() || "";
+    if (!bearer) {
+      return fail(
+        "ไม่พบ Access Token หรือ NEXT_PUBLIC_SUPABASE_ANON_KEY",
+      );
     }
 
     const payload = { image_base64: imageBase64, mime_type: mimeType };
@@ -459,8 +483,8 @@ async function fetchOcrExpenseDirect(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${serviceRoleKey}`,
-        apikey: serviceRoleKey,
+        Authorization: `Bearer ${bearer}`,
+        apikey: anonKey ?? bearer,
       },
       body: JSON.stringify(payload),
     });
@@ -510,9 +534,9 @@ async function invokeOcrExpenseEdge(
   mimeType: string,
 ): Promise<ProcessExpenseOcrResult> {
   try {
-    const adminResult = tryCreateSupabaseAdminClient();
-    if ("error" in adminResult) {
-      return fail(adminResult.error);
+    const auth = await resolveUserAccessToken();
+    if ("error" in auth) {
+      return fail(auth.error);
     }
 
     const payload = {
@@ -520,10 +544,13 @@ async function invokeOcrExpenseEdge(
       mime_type: mimeType,
     };
 
-    const { data, error } = await adminResult.client.functions.invoke(
-      "ocr-expense",
-      { body: payload },
-    );
+    const supabaseSsr = await createSupabaseSSRClient();
+    const { data, error } = await supabaseSsr.functions.invoke("ocr-expense", {
+      body: payload,
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+      },
+    });
 
     if (error) {
       const message = await extractEdgeFunctionErrorMessage(error);
@@ -533,7 +560,7 @@ async function invokeOcrExpenseEdge(
         console.warn(
           "[processExpenseOCR] generic non-2xx — trying direct fetch fallback",
         );
-        return await fetchOcrExpenseDirect(imageBase64, mimeType);
+        return await fetchOcrExpenseDirect(imageBase64, mimeType, auth.token);
       }
 
       if (/\b(503|429)\b/.test(message)) {
@@ -554,7 +581,11 @@ async function invokeOcrExpenseEdge(
       "[processExpenseOCR] functions.invoke threw — trying fetch fallback",
       invokeErr,
     );
-    return await fetchOcrExpenseDirect(imageBase64, mimeType);
+    const auth = await resolveUserAccessToken();
+    if ("error" in auth) {
+      return fail(auth.error);
+    }
+    return await fetchOcrExpenseDirect(imageBase64, mimeType, auth.token);
   }
 }
 
