@@ -60,6 +60,7 @@ const navigationGroups: NavigationGroup[] = [
       { label: "รายงานหัก ณ ที่จ่าย (WHT)", href: "/tax/wht-report" },
       { label: "สมุดบัญชีธนาคาร", href: "/finance/bank-accounts" },
       { label: "เจ้าหนี้ / ลูกหนี้", href: "/finance/ap-ar" },
+      { label: "ปิดงบรายเดือน (Period Lock)", href: "/accounting-periods" },
     ],
   },
   {
