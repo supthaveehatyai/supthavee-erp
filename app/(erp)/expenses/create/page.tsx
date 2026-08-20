@@ -14,6 +14,9 @@ import {
 
 export const dynamic = "force-dynamic";
 
+/** Vercel Serverless — OCR Server Action may run up to 60s on this route. */
+export const maxDuration = 60;
+
 export const metadata: Metadata = {
   title: "เพิ่มค่าใช้จ่าย | Create Expense",
   description: "บันทึกค่าใช้จ่ายแบบ Manual หรือเตรียมสแกนบิลด้วย AI",

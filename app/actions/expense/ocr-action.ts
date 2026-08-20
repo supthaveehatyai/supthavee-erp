@@ -1,5 +1,8 @@
 "use server";
 
+/** Vercel Serverless — allow Gemini OCR up to 60s (default 10s on Hobby). */
+export const maxDuration = 60;
+
 /**
  * Phase 8 — Expense AI OCR Server Action.
  *

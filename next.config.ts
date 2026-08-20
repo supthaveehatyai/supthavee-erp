@@ -3,7 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   experimental: {
     serverActions: {
-      bodySizeLimit: "8mb", // ขยายลิมิตให้รองรับรูปบิล Base64 ขนาดใหญ่สำหรับการทำ AI OCR
+      // Expense OCR FormData (compressed image) — avoid 413 on Vercel
+      bodySizeLimit: "5mb",
     },
   },
 };

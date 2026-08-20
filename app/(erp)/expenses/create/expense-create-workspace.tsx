@@ -58,7 +58,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VAT_OPTIONS, type VatOptionValue } from "@/lib/constants/accounting";
 import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import { cn } from "@/lib/utils";
-import { compressImage } from "@/lib/utils/image-compression";
+import { compressImage, compressImageForOcr } from "@/lib/utils/image-compression";
 import { ExpenseCategoryCombobox } from "./expense-category-combobox";
 
 export type ExpenseCreateTab = "ocr" | "manual";
@@ -339,6 +339,27 @@ function buildOcrRemark(
   if (!prev) return ocrBlock;
   if (prev.includes(ocrBlock)) return prev;
   return `${prev}\n\n${ocrBlock}`;
+}
+
+function formatOcrTransportError(err: unknown): string {
+  const raw =
+    err instanceof Error
+      ? err.message
+      : typeof err === "string"
+        ? err
+        : "เกิดข้อผิดพลาดขณะประมวลผล OCR — กรุณาลองใหม่อีกครั้ง";
+
+  if (/unexpected response was received from the server/i.test(raw)) {
+    return "ไม่สามารถส่งรูปไปประมวลผลได้ — ไฟล์อาจใหญ่เกินไป หรือ AI ใช้เวลานานเกินกำหนด กรุณาลองสแกนใหม่";
+  }
+  if (/\b413\b|payload too large|body exceeded/i.test(raw)) {
+    return "ไฟล์รูปใหญ่เกินไป — ระบบบีบอัดอัตโนมัติแล้ว กรุณาลองใหม่หรือใช้รูปที่เล็กลง";
+  }
+  if (/\b504\b|timed out|timeout|deadline exceeded/i.test(raw)) {
+    return "AI OCR ใช้เวลานานเกินกำหนด — กรุณาลองใหม่อีกครั้ง";
+  }
+
+  return raw;
 }
 
 export function ExpenseCreateWorkspace({
@@ -753,12 +774,27 @@ export function ExpenseCreateWorkspace({
     setIsOcrProcessing(true);
     setError(null);
     setOcrFileName(file.name);
-    // Keep the same file as Manual attachment (upload on Save Draft)
-    void setAttachmentFile(file);
 
     try {
+      let uploadFile: File;
+      try {
+        uploadFile = await compressImageForOcr(file);
+      } catch (compressErr) {
+        console.error("[Expense OCR] compressImageForOcr failed:", compressErr);
+        const msg =
+          compressErr instanceof Error
+            ? `บีบอัดรูปไม่สำเร็จ: ${compressErr.message}`
+            : "บีบอัดรูปไม่สำเร็จ — กรุณาลองใช้รูปที่เล็กลง";
+        setError(msg);
+        toast.error(msg);
+        return;
+      }
+
+      // Keep compressed file as Manual attachment (upload on Save Draft)
+      void setAttachmentFile(uploadFile);
+
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file", uploadFile);
 
       const result = await processExpenseOCR(formData);
 
@@ -780,10 +816,7 @@ export function ExpenseCreateWorkspace({
       toast.success("อ่านบิลสำเร็จ — ตรวจสอบข้อมูลก่อนบันทึก Draft");
     } catch (err) {
       console.error("[Expense OCR] processExpenseOCR threw:", err);
-      const msg =
-        err instanceof Error
-          ? err.message
-          : "เกิดข้อผิดพลาดขณะประมวลผล OCR — กรุณาลองใหม่อีกครั้ง";
+      const msg = formatOcrTransportError(err);
       setError(msg);
       toast.error(msg);
     } finally {

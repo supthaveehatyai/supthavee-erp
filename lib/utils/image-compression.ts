@@ -34,6 +34,30 @@ function isCompressibleImage(file: File): boolean {
   return true;
 }
 
+const OCR_OPTIONS: Parameters<typeof imageCompression>[1] = {
+  maxSizeMB: 0.5,
+  maxWidthOrHeight: 1600,
+  useWebWorker: true,
+  fileType: "image/webp",
+};
+
+/**
+ * Compress receipt images before Expense OCR Server Action upload.
+ * Targets ≤ 0.5 MB / 1600px edge to stay under Vercel payload limits.
+ */
+export async function compressImageForOcr(file: File): Promise<File> {
+  if (!file || !(file instanceof File) || file.size <= 0) {
+    return file;
+  }
+
+  if (!isCompressibleImage(file)) {
+    return file;
+  }
+
+  const compressed = await imageCompression(file, OCR_OPTIONS);
+  return toWebpFile(compressed, file.name);
+}
+
 /**
  * Compress a raster image to WebP (≤ 0.5MB, max edge 1200px).
  * Non-images (e.g. PDF) and SVG are returned unchanged.
