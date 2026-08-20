@@ -349,6 +349,8 @@ export async function getExpenses(
 
 /**
  * Active Vendor contacts for expense payee dropdown.
+ * Filter: `contacts.contact_roles @> ARRAY['Vendor']`
+ * (legacy `contact_type` column was dropped — never query it).
  * Mirrors procurement `getActiveVendors` — kept in this module for Expense UI.
  */
 export async function getExpenseVendors(): Promise<GetExpenseVendorsResult> {

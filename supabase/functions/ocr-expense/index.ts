@@ -2,8 +2,9 @@
 //
 // AI Vision OCR for Expense (OPEX) receipts — Gemini extracts header +
 // soft line items (description / amount / category_hint). No SKU mapping,
-// no inventory. Invoked from Next.js Server Actions via service-role or
-// authenticated user JWT.
+// no inventory, and no `contacts` query (`contact_type` / `contact_roles`
+// are handled in Next.js Server Actions only).
+// Invoked from Next.js Server Actions via service-role or authenticated user JWT.
 //
 // Deploy: supabase functions deploy ocr-expense
 // Secret:  supabase secrets set GEMINI_API_KEY=...
@@ -489,7 +490,11 @@ serve(async (req: Request) => {
         ? (error as HttpError).status!
         : 500;
 
-    console.error("[ocr-expense] Error:", message);
-    return jsonResponse({ error: message }, status);
+    console.error("[ocr-expense] Error:", message, { status });
+    // HTTP 200 + `{ error }` so supabase-js `functions.invoke` does not
+    // collapse the real message into a generic "non-2xx status code".
+    // Auth still runs in requireAuthorization(); this only affects the
+    // JSON envelope the Server Action unwraps.
+    return jsonResponse({ error: message, status }, 200);
   }
 });

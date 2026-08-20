@@ -764,6 +764,10 @@ export function ExpenseCreateWorkspace({
 
       if (result.error || !result.data) {
         const msg = result.error ?? "อ่านบิลด้วย AI ไม่สำเร็จ";
+        console.error("[Expense OCR] processExpenseOCR failed:", {
+          error: result.error,
+          data: result.data,
+        });
         setError(msg);
         toast.error(msg);
         return;
@@ -777,6 +781,7 @@ export function ExpenseCreateWorkspace({
         router.replace(tabHref("manual"), { scroll: false });
       }
     } catch (err) {
+      console.error("[Expense OCR] processExpenseOCR threw:", err);
       const msg =
         err instanceof Error
           ? err.message

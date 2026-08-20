@@ -62,9 +62,14 @@ function createSupabaseAdminClient(): SupabaseClient {
   });
 }
 
+function isGenericInvokeError(message: string): boolean {
+  return /non-2xx status code/i.test(message);
+}
+
 /**
  * `functions.invoke()` collapses non-2xx into a generic FunctionsHttpError.
- * The Edge Function always returns `{ error: string }` — unwrap it.
+ * The Edge Function always returns `{ error: string }` — unwrap it from
+ * `error.context` (raw Response / Response-like), then log the real body.
  */
 async function extractEdgeFunctionErrorMessage(error: unknown): Promise<string> {
   const fallback =
@@ -72,14 +77,85 @@ async function extractEdgeFunctionErrorMessage(error: unknown): Promise<string> 
       ? error.message
       : "เรียก Edge Function ocr-expense ไม่สำเร็จ";
 
-  const context = (error as { context?: unknown })?.context;
-  if (context instanceof Response) {
-    try {
-      const body = (await context.clone().json()) as { error?: string } | null;
-      if (body?.error) return body.error;
-    } catch {
-      // keep fallback
+  console.error("[ocr-expense] functions.invoke raw error:", error);
+
+  const context = (error as { context?: unknown; details?: unknown })?.context;
+  const details = (error as { details?: unknown })?.details;
+
+  async function readContextBody(ctx: unknown): Promise<string | null> {
+    if (ctx == null) return null;
+
+    if (typeof ctx === "string" && ctx.trim()) return ctx;
+
+    if (typeof ctx !== "object") return null;
+
+    const record = ctx as {
+      clone?: () => unknown;
+      json?: () => Promise<unknown>;
+      text?: () => Promise<string>;
+      status?: number;
+      error?: unknown;
+      message?: unknown;
+    };
+
+    console.error("[ocr-expense] invoke error.context status:", record.status ?? null);
+
+    const readable = typeof record.clone === "function" ? record.clone() : ctx;
+    const bodySource = readable as {
+      json?: () => Promise<unknown>;
+      text?: () => Promise<string>;
+    };
+
+    if (typeof bodySource.text === "function") {
+      try {
+        const text = await bodySource.text();
+        if (text?.trim()) {
+          console.error("[ocr-expense] invoke error body:", text);
+          try {
+            const parsed = JSON.parse(text) as { error?: unknown; message?: unknown };
+            if (typeof parsed?.error === "string" && parsed.error.trim()) {
+              return parsed.error;
+            }
+            if (typeof parsed?.message === "string" && parsed.message.trim()) {
+              return parsed.message;
+            }
+          } catch {
+            return text.slice(0, 500);
+          }
+          return text.slice(0, 500);
+        }
+      } catch (readErr) {
+        console.error("[ocr-expense] failed to read invoke error.text()", readErr);
+      }
     }
+
+    if (typeof bodySource.json === "function") {
+      try {
+        const body = (await bodySource.json()) as { error?: unknown; message?: unknown };
+        console.error("[ocr-expense] invoke error JSON:", body);
+        if (typeof body?.error === "string" && body.error.trim()) return body.error;
+        if (typeof body?.message === "string" && body.message.trim()) {
+          return body.message;
+        }
+      } catch (jsonErr) {
+        console.error("[ocr-expense] failed to parse invoke error.json()", jsonErr);
+      }
+    }
+
+    if (typeof record.error === "string" && record.error.trim()) return record.error;
+    if (typeof record.message === "string" && record.message.trim()) {
+      return record.message;
+    }
+
+    return null;
+  }
+
+  const fromContext = await readContextBody(context);
+  if (fromContext) return fromContext;
+
+  if (typeof details === "string" && details.trim()) {
+    console.error("[ocr-expense] invoke error.details:", details);
+    return details;
   }
 
   return fallback;
@@ -179,6 +255,60 @@ async function invokeOcrExpenseEdge(
     mime_type: mimeType,
   };
 
+  async function fetchOcrExpenseDirect(): Promise<{
+    data: ExpenseOcrExtraction | null;
+    error: string | null;
+  }> {
+    const url = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/ocr-expense`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${serviceRoleKey}`,
+        apikey: serviceRoleKey,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const rawText = await response.text();
+    if (!response.ok) {
+      console.error(
+        "[ocr-expense] direct fetch status:",
+        response.status,
+        "body:",
+        rawText.slice(0, 1000),
+      );
+    }
+
+    const body = (() => {
+      try {
+        return JSON.parse(rawText) as { data?: unknown; error?: string };
+      } catch {
+        return null;
+      }
+    })();
+
+    if (!response.ok) {
+      const status = response.status;
+      const detail =
+        body?.error ??
+        (rawText.trim() ? rawText.slice(0, 500) : `ocr-expense failed (HTTP ${status})`);
+      if (status === 503 || status === 429) {
+        return {
+          data: null,
+          error: `AI OCR ชั่วคราวไม่พร้อม (HTTP ${status}) — ลองใหม่ในอีกสักครู่`,
+        };
+      }
+      return { data: null, error: detail };
+    }
+
+    if (body?.error) {
+      return { data: null, error: body.error };
+    }
+
+    return { data: normalizeExtraction(body?.data ?? body), error: null };
+  }
+
   try {
     const supabaseAdmin = createSupabaseAdminClient();
     const { data, error } = await supabaseAdmin.functions.invoke("ocr-expense", {
@@ -187,7 +317,19 @@ async function invokeOcrExpenseEdge(
 
     if (error) {
       const message = await extractEdgeFunctionErrorMessage(error);
-      // Transient capacity — surface clearly for UI retry
+      console.error("[ocr-expense] functions.invoke error message:", message);
+
+      if (isGenericInvokeError(message)) {
+        console.warn(
+          "[processExpenseOCR] generic non-2xx — trying direct fetch fallback",
+        );
+        try {
+          return await fetchOcrExpenseDirect();
+        } catch (fetchErr) {
+          console.error("[ocr-expense] direct fetch fallback failed:", fetchErr);
+        }
+      }
+
       if (/\b(503|429)\b/.test(message)) {
         return {
           data: null,
@@ -209,6 +351,7 @@ async function invokeOcrExpenseEdge(
       typeof envelope.error === "string" &&
       envelope.error
     ) {
+      console.error("[ocr-expense] Edge Function returned error envelope:", envelope.error);
       return { data: null, error: envelope.error };
     }
 
@@ -222,53 +365,19 @@ async function invokeOcrExpenseEdge(
 
     return { data: normalizeExtraction(extractionRaw), error: null };
   } catch (invokeErr) {
-    // Fallback: direct fetch to Functions URL (useful for local Edge)
-    console.warn(
-      "[processExpenseOCR] functions.invoke failed — trying fetch fallback",
+    console.error(
+      "[processExpenseOCR] functions.invoke threw — trying fetch fallback",
       invokeErr,
     );
 
     try {
-      const url = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/ocr-expense`;
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${serviceRoleKey}`,
-          apikey: serviceRoleKey,
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const body = (await response.json().catch(() => null)) as {
-        data?: unknown;
-        error?: string;
-      } | null;
-
-      if (!response.ok) {
-        const status = response.status;
-        if (status === 503 || status === 429) {
-          return {
-            data: null,
-            error: `AI OCR ชั่วคราวไม่พร้อม (HTTP ${status}) — ลองใหม่ในอีกสักครู่`,
-          };
-        }
-        return {
-          data: null,
-          error: body?.error ?? `ocr-expense failed (HTTP ${status})`,
-        };
-      }
-
-      if (body?.error) {
-        return { data: null, error: body.error };
-      }
-
-      return { data: normalizeExtraction(body?.data ?? body), error: null };
+      return await fetchOcrExpenseDirect();
     } catch (fetchErr) {
       const message =
         fetchErr instanceof Error
           ? fetchErr.message
           : "ไม่สามารถเชื่อมต่อ Edge Function ocr-expense";
+      console.error("[ocr-expense] direct fetch failed:", fetchErr);
       return { data: null, error: message };
     }
   }
