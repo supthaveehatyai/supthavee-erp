@@ -56,3 +56,10 @@ Tech Stack หลัก: Supabase (PostgreSQL, Auth, Edge Functions, RLS), Next.
   - `NONE` → 'ไม่มีภาษี (None)'
   - `INCLUSIVE` → 'รวมภาษีมูลค่าเพิ่ม (Inclusive)'
   - `EXCLUSIVE` → 'แยกภาษีมูลค่าเพิ่ม (Exclusive)'
+... (เนื้อหาข้อ 1 - 4 คงเดิมทุกประการ) ...
+
+## 5. Cloud Integration & Edge Functions (Vercel & Supabase)
+- **Vercel Limits:** Server Actions ที่ทำงานหนัก (เช่น OCR) ต้องมีบรรทัด `export const maxDuration = 60;` ไว้บนสุดเสมอ และต้องตั้งค่าเพิ่ม `bodySizeLimit` ใน `next.config.mjs` หากต้องรับไฟล์ Base64
+- **Edge Function Auth:** การใช้ `fetch` เพื่อเรียก Supabase Edge Functions ต้องแนบ `Authorization: Bearer ${session.access_token}` จาก Server Session เสมอ เพื่อให้ผ่านระบบ Security (sub claim)
+- **Safe JSON Parsing:** ต้องทำการล้าง Markdown Formatting (เช่น ```json) ออกจาก Payload ที่ได้รับจาก AI เสมอก่อนรัน `JSON.parse`
+- **Error Handling on Production:** Server Actions ห้าม `throw new Error(...)` แบบดิบๆ เพราะ Next.js จะเซนเซอร์ข้อความบน Production ให้ดักจับด้วย `try-catch` แล้ว `return { success: false, error: '...' }` เสมอ
