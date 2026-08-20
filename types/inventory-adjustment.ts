@@ -22,7 +22,14 @@ export type AdjustInventoryInput = {
 };
 
 export type AdjustInventoryResult =
-  | { success: true; document_id: string; doc_no: string; error?: null }
+  | {
+      success: true;
+      document_id: string;
+      doc_no: string;
+      pending_approval?: boolean;
+      successMessage?: string;
+      error?: null;
+    }
   | { success: false; error: string; document_id?: null; doc_no?: null };
 
 export type InventoryAdjustmentListItem = {

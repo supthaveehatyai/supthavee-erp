@@ -40,6 +40,12 @@ import {
   generateDraftDocumentNo,
   isTemporaryDraftDocNo,
 } from "@/lib/utils/draft-document-no";
+import {
+  approvalStatusFields,
+  buildIssueSuccessMessage,
+  isPendingApprovalStatus,
+} from "@/lib/approval/approval-rules";
+import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
 import type {
   CompleteDocumentInput,
   CompleteDocumentResult,
@@ -1073,6 +1079,7 @@ export async function completeDocument(
           ? grandTotal
           : 0,
       updated_at: nowIso,
+      ...approvalStatusFields(docType),
     };
     if (needsOfficialNumber) {
       headerUpdate.doc_date = issueDate;
@@ -1160,6 +1167,11 @@ export async function completeDocument(
       },
     });
 
+    const pendingApproval = isPendingApprovalStatus(
+      approvalStatusFields(docType).approval_status,
+    );
+    revalidateApprovalCenterIfPending(pendingApproval);
+
     return {
       data: {
         document_id: documentId,
@@ -1168,6 +1180,10 @@ export async function completeDocument(
         item_count: lineRows.length,
         ledger_count: ledgerCount,
         grand_total: grandTotal,
+        pending_approval: pendingApproval,
+        successMessage: buildIssueSuccessMessage(officialDocNo, pendingApproval, {
+          ledgerCount,
+        }),
       },
       error: null,
     };
@@ -1858,6 +1874,10 @@ export async function issueDocument(
       paymentStatus === "PAID" ? grandTotal : Number(document.paid_amount ?? 0);
     const nowIso = new Date().toISOString();
     const issueDate = nowIso.slice(0, 10);
+    const documentApproval = approvalStatusFields(docType);
+    const pendingApproval = isPendingApprovalStatus(
+      documentApproval.approval_status,
+    );
 
     let officialDocNo = String(document.doc_no ?? "");
     const updatePayload: {
@@ -1865,6 +1885,9 @@ export async function issueDocument(
       payment_status: string;
       paid_amount: number;
       updated_at: string;
+      approval_status: typeof documentApproval.approval_status;
+      approved_by: null;
+      approved_at: null;
       doc_no?: string;
       doc_date?: string;
     } = {
@@ -1872,6 +1895,9 @@ export async function issueDocument(
       payment_status: paymentStatus,
       paid_amount: paidAmount,
       updated_at: nowIso,
+      approval_status: documentApproval.approval_status,
+      approved_by: documentApproval.approved_by,
+      approved_at: documentApproval.approved_at,
     };
 
     const stockOutLinesRaw = isStockOutDocType(docType)
@@ -2002,12 +2028,18 @@ export async function issueDocument(
       },
     });
 
+    revalidateApprovalCenterIfPending(pendingApproval);
+
     return {
       data: {
         document_id: id,
         document_no: officialDocNo,
         status: issuedStatus,
         ledger_count: ledgerCount,
+        pending_approval: pendingApproval,
+        successMessage: buildIssueSuccessMessage(officialDocNo, pendingApproval, {
+          ledgerCount,
+        }),
       },
       error: null,
     };

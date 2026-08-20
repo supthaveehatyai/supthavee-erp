@@ -60,6 +60,10 @@ export type MutateExpenseResult = {
   error: string | null;
   /** Human-readable detail when `error` is a machine code. */
   message?: string | null;
+  /** True when expense entered Maker-Checker queue (grand_total > threshold). */
+  pending_approval?: boolean;
+  /** Toast override for IssueDocumentButton wrappers. */
+  successMessage?: string;
 };
 
 export type ExpenseVendorOption = {

@@ -21,6 +21,11 @@ import {
   generateDraftDocumentNo,
   isTemporaryDraftDocNo,
 } from "@/lib/utils/draft-document-no";
+import {
+  expenseApprovalStatusFields,
+  PENDING_APPROVAL_TOAST_MESSAGE,
+} from "@/lib/approval/approval-rules";
+import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
 import type {
   CreateDraftExpenseInput,
   CreateDraftExpenseResult,
@@ -1388,11 +1393,17 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
     }
 
     const nowIso = new Date().toISOString();
+    const expenseApproval = expenseApprovalStatusFields(before.grand_total);
+    const pendingApproval = expenseApproval.approval_status === "PENDING";
+
     const { data: updated, error: updateError } = await supabaseAdmin
       .from("expenses")
       .update({
         document_no: officialNo,
         status: "ISSUED",
+        approval_status: expenseApproval.approval_status,
+        approved_by: expenseApproval.approved_by,
+        approved_at: expenseApproval.approved_at,
         updated_at: nowIso,
       })
       .eq("id", expenseId)
@@ -1424,11 +1435,21 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
         ...mapped,
         status: "ISSUED",
         document_no: officialNo,
+        approval_status: expenseApproval.approval_status,
       },
     });
 
     revalidateExpenseCaches(expenseId);
-    return { data: mapped, error: null };
+    revalidateApprovalCenterIfPending(pendingApproval);
+
+    return {
+      data: mapped,
+      error: null,
+      pending_approval: pendingApproval,
+      successMessage: pendingApproval
+        ? PENDING_APPROVAL_TOAST_MESSAGE
+        : undefined,
+    };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "ออกเอกสารค่าใช้จ่ายไม่สำเร็จ";

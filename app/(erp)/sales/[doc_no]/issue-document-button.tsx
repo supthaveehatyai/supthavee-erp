@@ -34,10 +34,11 @@ export default function SalesIssueDocumentButton({
             id: result.data.document_id,
             document_no: result.data.document_no,
             successMessage:
+              result.data.successMessage ??
               `ออกเอกสาร ${result.data.document_no} สำเร็จ` +
-              (result.data.ledger_count > 0
-                ? ` — ตัดสต็อก ${result.data.ledger_count} รายการ`
-                : ""),
+                (result.data.ledger_count > 0
+                  ? ` — ตัดสต็อก ${result.data.ledger_count} รายการ`
+                  : ""),
           },
           error: null,
         };

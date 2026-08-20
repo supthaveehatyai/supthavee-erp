@@ -17,6 +17,7 @@ import {
   manageDepositBalance,
   type DepositBalanceActionType,
 } from "@/app/actions/finance/deposit-actions";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -129,6 +130,10 @@ export function DepositBalanceActions({
         setError(result.error ?? "ทำรายการไม่สำเร็จ");
         return;
       }
+      toast.success(
+        result.successMessage ??
+          `ทำรายการสำเร็จ — ${result.action_doc_no ?? docNo}`,
+      );
       setOpen(false);
       router.refresh();
     });

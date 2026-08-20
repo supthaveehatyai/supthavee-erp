@@ -146,7 +146,9 @@ export function AdjustmentFormDialog({
         return;
       }
 
-      toast.success(`บันทึกสำเร็จ — ${result.doc_no}`);
+      toast.success(
+        result.successMessage ?? `บันทึกสำเร็จ — ${result.doc_no}`,
+      );
       closeDialog();
       router.refresh();
     });

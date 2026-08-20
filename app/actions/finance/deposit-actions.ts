@@ -24,6 +24,12 @@ import {
 } from "@/lib/utils/document-summary";
 import { todayIsoDate } from "@/lib/utils/outstanding-summary";
 import { roundMoney } from "@/lib/utils/payment-fifo";
+import {
+  approvalStatusFields,
+  buildIssueSuccessMessage,
+  isPendingApprovalStatus,
+} from "@/lib/approval/approval-rules";
+import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
 import type { DocumentType } from "@/types/document";
 
 const DEFAULT_DEPOSIT_VAT_RATE = 7;
@@ -69,6 +75,8 @@ export type ManageDepositBalanceResult = {
   error: string | null;
   /** Running number of the stub REFUND / WRITE_OFF document. */
   action_doc_no?: string | null;
+  pending_approval?: boolean;
+  successMessage?: string;
 };
 
 const MONEY_EPS = 0.02;
@@ -795,6 +803,10 @@ export async function manageDepositBalance(
     }
     const stubDocNo = numberResult.data;
     const nowIso = new Date().toISOString();
+    const documentApproval = approvalStatusFields(stubDocType);
+    const pendingApproval = isPendingApprovalStatus(
+      documentApproval.approval_status,
+    );
     const actionLabel =
       actionType === "REFUND" ? "คืนเงินมัดจำ" : "ตัดเศษบัญชีมัดจำ";
     const notesParts = [
@@ -837,6 +849,9 @@ export async function manageDepositBalance(
         attached_file_url: slipUrl,
         original_file_name: originalFileName,
         notes: notesParts.join(" | "),
+        approval_status: documentApproval.approval_status,
+        approved_by: documentApproval.approved_by,
+        approved_at: documentApproval.approved_at,
         updated_at: nowIso,
       })
       .select("id, doc_no")
@@ -951,10 +966,16 @@ export async function manageDepositBalance(
       revalidatePath(`/purchases/${deposit.doc_no}`);
     }
 
+    revalidateApprovalCenterIfPending(pendingApproval);
+
     return {
       success: true,
       error: null,
       action_doc_no: stubDocNo,
+      pending_approval: pendingApproval,
+      successMessage: pendingApproval
+        ? buildIssueSuccessMessage(stubDocNo, true)
+        : undefined,
     };
   } catch (err) {
     if (stubHeaderId) {

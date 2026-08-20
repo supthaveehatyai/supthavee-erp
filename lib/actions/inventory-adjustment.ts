@@ -21,6 +21,12 @@ import {
   excludeServiceLines,
   loadServiceProductIdSet,
 } from "@/lib/inventory/stock-availability";
+import {
+  approvalStatusFields,
+  buildIssueSuccessMessage,
+  isPendingApprovalStatus,
+} from "@/lib/approval/approval-rules";
+import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
 import type {
   AdjustInventoryInput,
   AdjustInventoryResult,
@@ -332,6 +338,10 @@ export async function adjustInventory(
     const nowIso = new Date().toISOString();
     const issuedStatus = resolveIssuedDocumentStatus(docType);
     const paymentStatus = resolveInitialPaymentStatus(docType);
+    const documentApproval = approvalStatusFields(docType);
+    const pendingApproval = isPendingApprovalStatus(
+      documentApproval.approval_status,
+    );
 
     const { data: document, error: docError } = await supabase
       .from("documents")
@@ -357,6 +367,9 @@ export async function adjustInventory(
         payment_status: paymentStatus,
         notes: remark || null,
         is_voided: false,
+        approval_status: documentApproval.approval_status,
+        approved_by: documentApproval.approved_by,
+        approved_at: documentApproval.approved_at,
         updated_at: nowIso,
       })
       .select("id, doc_no")
@@ -504,11 +517,16 @@ export async function adjustInventory(
 
     revalidatePath("/inventory/adjustments");
     revalidatePath("/inventory/ledger");
+    revalidateApprovalCenterIfPending(pendingApproval);
 
     return {
       success: true,
       document_id: documentId,
       doc_no: docNo,
+      pending_approval: pendingApproval,
+      successMessage: pendingApproval
+        ? buildIssueSuccessMessage(docNo, true)
+        : undefined,
       error: null,
     };
   } catch (err) {

@@ -225,6 +225,8 @@ export type CompleteDocumentResult = {
     item_count: number;
     ledger_count: number;
     grand_total: number;
+    pending_approval?: boolean;
+    successMessage?: string;
   } | null;
   error: string | null;
 };
@@ -338,6 +340,8 @@ export type IssueDocumentResult = {
     document_no: string;
     status: DocumentStatus;
     ledger_count: number;
+    pending_approval?: boolean;
+    successMessage?: string;
   } | null;
   error: string | null;
 };

@@ -88,7 +88,20 @@ export function ExpenseDetailActions({
         <IssueDocumentButton
           documentId={expenseId}
           docNo={documentNo}
-          issueAction={issueExpense}
+          issueAction={async (id) => {
+            const result = await issueExpense(id);
+            if (result.error || !result.data) {
+              return { data: null, error: result.error };
+            }
+            return {
+              data: {
+                id: result.data.id,
+                document_no: result.data.document_no,
+                successMessage: result.successMessage,
+              },
+              error: null,
+            };
+          }}
           confirmTitle="ยืนยันและออกเอกสาร"
           confirmDescription={
             <>
