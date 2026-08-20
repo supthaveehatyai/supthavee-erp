@@ -61,6 +61,7 @@ const navigationGroups: NavigationGroup[] = [
       { label: "สมุดบัญชีธนาคาร", href: "/finance/bank-accounts" },
       { label: "เจ้าหนี้ / ลูกหนี้", href: "/finance/ap-ar" },
       { label: "ปิดงบรายเดือน (Period Lock)", href: "/accounting-periods" },
+      { label: "ศูนย์อนุมัติ (Approval Center)", href: "/approvals" },
     ],
   },
   {
