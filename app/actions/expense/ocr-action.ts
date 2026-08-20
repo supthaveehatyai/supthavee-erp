@@ -259,13 +259,22 @@ async function invokeOcrExpenseEdge(
     data: ExpenseOcrExtraction | null;
     error: string | null;
   }> {
-    const url = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/ocr-expense`;
+    const resolvedUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const resolvedKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!resolvedUrl) {
+      throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL environment variable");
+    }
+    if (!resolvedKey) {
+      throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY environment variable");
+    }
+
+    const url = `${resolvedUrl.replace(/\/$/, "")}/functions/v1/ocr-expense`;
     const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${serviceRoleKey}`,
-        apikey: serviceRoleKey,
+        Authorization: `Bearer ${resolvedKey}`,
+        apikey: resolvedKey,
       },
       body: JSON.stringify(payload),
     });
