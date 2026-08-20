@@ -202,33 +202,111 @@ function normalizeIsoDate(value: unknown): string | null {
   return ok ? trimmed : null;
 }
 
+function sanitizeJsonText(rawText: string): string {
+  const cleaned = rawText
+    .replace(/```json\s*/gi, "")
+    .replace(/```/g, "")
+    .trim();
+  const objectMatch = /\{[\s\S]*\}/.exec(cleaned);
+  return objectMatch ? objectMatch[0] : cleaned;
+}
+
+function parseSanitizedJson(rawText: string): unknown {
+  const cleanJson = sanitizeJsonText(rawText);
+  console.log("[ocr-expense] Cleaned JSON:", cleanJson.slice(0, 2000));
+  return JSON.parse(cleanJson);
+}
+
+function unwrapExtractionPayload(raw: unknown): unknown {
+  if (typeof raw === "string") {
+    try {
+      return parseSanitizedJson(raw);
+    } catch (err) {
+      console.error("[ocr-expense] parse sanitized JSON failed:", err);
+      return raw;
+    }
+  }
+
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+
+  const root = raw as Record<string, unknown>;
+  if (root.data != null) {
+    return unwrapExtractionPayload(root.data);
+  }
+
+  return raw;
+}
+
+function isEmptyExtraction(data: ExpenseOcrExtraction): boolean {
+  const hasVendor = Boolean(data.vendor_name?.trim());
+  const hasDoc = Boolean(data.document_number?.trim());
+  const hasDate = Boolean(data.document_date);
+  const hasMoney = data.grand_total > 0 || data.sub_total > 0;
+  const hasItems = data.items.some(
+    (item) => item.description.trim().length > 0 || item.amount > 0,
+  );
+  return !hasVendor && !hasDoc && !hasDate && !hasMoney && !hasItems;
+}
+
 function normalizeExtraction(raw: unknown): ExpenseOcrExtraction {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+  const payload = unwrapExtractionPayload(raw);
+
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    console.warn("[ocr-expense] normalizeExtraction: invalid payload", raw);
     return { ...EMPTY_EXTRACTION };
   }
 
-  const root = raw as Record<string, unknown>;
+  const root = payload as Record<string, unknown>;
   const rawItems = Array.isArray(root.items) ? root.items : [];
 
-  return {
-    vendor_name: normalizeNullableString(root.vendor_name),
-    tax_id: normalizeNullableString(root.tax_id),
-    document_number: normalizeNullableString(root.document_number),
-    document_date: normalizeIsoDate(root.document_date),
-    vat_type: normalizeVatType(root.vat_type),
-    sub_total: normalizeAmount(root.sub_total),
-    vat_amount: normalizeAmount(root.vat_amount),
-    grand_total: normalizeAmount(root.grand_total),
+  const normalized: ExpenseOcrExtraction = {
+    vendor_name: normalizeNullableString(
+      root.vendor_name ?? root.vendorName ?? root.payee_name,
+    ),
+    tax_id: normalizeNullableString(root.tax_id ?? root.taxId),
+    document_number: normalizeNullableString(
+      root.document_number ??
+        root.documentNumber ??
+        root.invoice_number ??
+        root.doc_no,
+    ),
+    document_date: normalizeIsoDate(
+      root.document_date ?? root.documentDate ?? root.invoice_date ?? root.date,
+    ),
+    vat_type: normalizeVatType(root.vat_type ?? root.vatType),
+    sub_total: normalizeAmount(
+      root.sub_total ?? root.subtotal ?? root.net_amount ?? root.netAmount,
+    ),
+    vat_amount: normalizeAmount(
+      root.vat_amount ?? root.vatAmount ?? root.vat ?? root.tax_amount,
+    ),
+    grand_total: normalizeAmount(
+      root.grand_total ??
+        root.grandTotal ??
+        root.total ??
+        root.total_amount,
+    ),
     items: rawItems.map((row) => {
       const item = (row ?? {}) as Record<string, unknown>;
       return {
         description: normalizeNullableString(item.description) ?? "",
-        amount: normalizeAmount(item.amount),
+        amount: normalizeAmount(item.amount ?? item.line_total),
         category_hint:
-          normalizeNullableString(item.category_hint)?.toUpperCase() ?? "OTHER",
+          normalizeNullableString(item.category_hint ?? item.categoryHint)
+            ?.toUpperCase() ?? "OTHER",
       };
     }),
   };
+
+  console.log("[ocr-expense] normalized extraction:", {
+    vendor_name: normalized.vendor_name,
+    document_number: normalized.document_number,
+    document_date: normalized.document_date,
+    grand_total: normalized.grand_total,
+    item_count: normalized.items.length,
+  });
+
+  return normalized;
 }
 
 /**
@@ -315,7 +393,17 @@ async function invokeOcrExpenseEdge(
       return { data: null, error: body.error };
     }
 
-    return { data: normalizeExtraction(body?.data ?? body), error: null };
+    const normalized = normalizeExtraction(body?.data ?? body);
+    if (isEmptyExtraction(normalized)) {
+      console.error("[ocr-expense] empty extraction from direct fetch:", body);
+      return {
+        data: null,
+        error:
+          "OCR อ่านบิลไม่สำเร็จ — ไม่พบข้อมูลที่ใช้ได้ (vendor / ยอดเงิน / รายการว่าง)",
+      };
+    }
+
+    return { data: normalized, error: null };
   }
 
   try {
@@ -372,7 +460,17 @@ async function invokeOcrExpenseEdge(
         ? envelope.data
         : envelope;
 
-    return { data: normalizeExtraction(extractionRaw), error: null };
+    const normalized = normalizeExtraction(extractionRaw);
+    if (isEmptyExtraction(normalized)) {
+      console.error("[ocr-expense] empty extraction after normalize:", extractionRaw);
+      return {
+        data: null,
+        error:
+          "OCR อ่านบิลไม่สำเร็จ — ไม่พบข้อมูลที่ใช้ได้ (vendor / ยอดเงิน / รายการว่าง)",
+      };
+    }
+
+    return { data: normalized, error: null };
   } catch (invokeErr) {
     console.error(
       "[processExpenseOCR] functions.invoke threw — trying fetch fallback",

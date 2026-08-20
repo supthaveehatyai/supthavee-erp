@@ -447,6 +447,7 @@ export function ExpenseCreateWorkspace({
     handleSubmit,
     setValue,
     getValues,
+    reset,
     formState: { errors },
   } = form;
 
@@ -697,41 +698,40 @@ export function ExpenseCreateWorkspace({
         : String(extraction.sub_total || extraction.grand_total);
 
     const docDate = extraction.document_date || getValues("expense_date");
+    const current = getValues();
+    const nextItems = extraction.items.map((item) => ({
+      description: item.description,
+      amount: item.amount,
+      category_hint: item.category_hint || "OTHER",
+    }));
 
-    setValue("vendor_name", extraction.vendor_name ?? "", {
-      shouldValidate: true,
-    });
-    setValue("document_number", extraction.document_number ?? "", {
-      shouldValidate: true,
-    });
-    setValue("document_date", docDate, { shouldValidate: true });
-    setValue("expense_date", docDate, { shouldValidate: true });
-    setValue("vat_type", vatType, { shouldValidate: true });
-    setValue("sub_total", extraction.sub_total, { shouldValidate: true });
-    setValue("vat_amount", extraction.vat_amount, { shouldValidate: true });
-    setValue("grand_total", extraction.grand_total, { shouldValidate: true });
-    setValue("base_amount", baseAmount, { shouldValidate: true });
-
-    if (matchedVendorId) {
-      setValue("vendor_id", matchedVendorId, { shouldValidate: true });
-    }
-    if (matchedCategoryId) {
-      setValue("category_id", matchedCategoryId, { shouldValidate: true });
-    }
-
-    replace(
-      extraction.items.map((item) => ({
-        description: item.description,
-        amount: item.amount,
-        category_hint: item.category_hint || "OTHER",
-      })),
+    reset(
+      {
+        ...current,
+        vendor_name: extraction.vendor_name ?? "",
+        vendor_id: matchedVendorId || current.vendor_id,
+        document_number: extraction.document_number ?? "",
+        document_date: docDate,
+        expense_date: docDate,
+        category_id: matchedCategoryId || current.category_id,
+        vat_type: vatType,
+        sub_total: extraction.sub_total,
+        vat_amount: extraction.vat_amount,
+        grand_total: extraction.grand_total,
+        base_amount: baseAmount,
+        items: nextItems.length > 0 ? nextItems : current.items,
+        remark: buildOcrRemark(extraction, current.remark),
+      },
+      { keepDefaultValues: false },
     );
 
-    setValue(
-      "remark",
-      buildOcrRemark(extraction, getValues("remark")),
-      { shouldValidate: true },
-    );
+    console.log("[Expense OCR] applied to form:", {
+      vendor_name: extraction.vendor_name,
+      document_number: extraction.document_number,
+      document_date: docDate,
+      grand_total: extraction.grand_total,
+      item_count: nextItems.length,
+    });
   }
 
   async function runExpenseOcr(file: File | null | undefined) {
@@ -773,13 +773,15 @@ export function ExpenseCreateWorkspace({
         return;
       }
 
-      applyOcrResult(result.data);
-      toast.success("อ่านบิลสำเร็จ — ตรวจสอบข้อมูลก่อนบันทึก Draft");
-
       if (!isEdit) {
         setTab("manual");
-        router.replace(tabHref("manual"), { scroll: false });
+        // Sync URL without Next.js navigation — router.replace remounts the
+        // workspace and wipes RHF state set by applyOcrResult.
+        window.history.replaceState(null, "", tabHref("manual"));
       }
+
+      applyOcrResult(result.data);
+      toast.success("อ่านบิลสำเร็จ — ตรวจสอบข้อมูลก่อนบันทึก Draft");
     } catch (err) {
       console.error("[Expense OCR] processExpenseOCR threw:", err);
       const msg =

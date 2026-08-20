@@ -343,6 +343,7 @@ function normalizeCategoryHint(value: unknown): string {
 
 function parseExpenseOcrJson(rawText: string): ExpenseOcrExtraction {
   const jsonSlice = extractJsonObjectText(rawText);
+  console.log("[ocr-expense] Cleaned JSON:", jsonSlice.slice(0, 2000));
 
   let parsed: unknown;
   try {
