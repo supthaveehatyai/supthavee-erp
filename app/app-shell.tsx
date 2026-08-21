@@ -62,6 +62,7 @@ const navigationGroups: NavigationGroup[] = [
       { label: "เจ้าหนี้ / ลูกหนี้", href: "/finance/ap-ar" },
       { label: "ปิดงบรายเดือน (Period Lock)", href: "/accounting-periods" },
       { label: "ศูนย์อนุมัติ (Approval Center)", href: "/approvals" },
+      { label: "สินทรัพย์ถาวร (Fixed Assets)", href: "/fixed-assets" },
     ],
   },
   {

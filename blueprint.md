@@ -1,6 +1,6 @@
 # System Blueprint: Supthavee ERP SuperApp
 
-**Version:** 14 (Phase 14 Post-Go-Live Enterprise Enhancements)
+**Version:** 14.1 (Phase 14 Post-Go-Live Enterprise Enhancements)
 **Company:** บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด
 **Document Purpose:** System Requirements, Business Logic, and Database Schema for AI Assistants (Claude, Cursor, Gemini)[cite: 6]
 
@@ -65,7 +65,7 @@
 
 ### Module D: Finance, Accounting & Billing (ระบบการเงินและบัญชี)
 *   **Document Taxonomy (Sales vs Purchases):** รหัสเอกสารแยกขาดจากกันชัดเจน
-    *   **Sales (AR):** 'QT', 'INV_DO', 'TAX_INV', 'CS_TAX', 'ABB', 'DEP_IN', 'REC', 'CN', 'AR_REFUND' (SRF), 'AR_WRITEOFF' (SWO), 'BN' (Billing Note)
+    *   **Sales (AR):** 'QT', "SO", 'INV_DO', 'TAX_INV', 'CS_TAX', 'ABB', 'DEP_IN', 'REC', 'CN', 'AR_REFUND' (SRF), 'AR_WRITEOFF' (SWO), 'BN' (Billing Note)
     *   **Purchases (AP):** 'PO', 'AP_TAX', 'AP_INV', 'AP_CASH', 'DEP_OUT', 'PAY', 'AP_REFUND' (PRF), 'AP_WRITEOFF' (PWO), 'BR' (Bill Receipt)
 *   **AR/AP Dashboard:** หน้าจอสรุปยอดลูกหนี้และเจ้าหนี้ แบ่งแท็บแยกอิสระ โดยดึงจากฟิลด์ `grand_total` (รวม VAT)
 *   **Billing Note (ระบบวางบิล):** สร้างเอกสาร BN/BR แบบ Grouping ผ่าน `billing_note_items` โดยไม่มีผลต่อบัญชีแยกประเภท (GL) พร้อมหน้าตารางสรุปลูกหนี้ค้างชำระ
@@ -73,6 +73,9 @@
 *   **Document Attachment & WHT:** รองรับการแนบไฟล์สลิปโอนเงิน (Slip) และหนังสือรับรองการหักภาษี ณ ที่จ่าย (WHT) ลง Supabase Storage
 *   **Receipt Status Tracking:** ระบบติดตามและอัปเดตสถานะเอกสารตัวจริง ("รอออกเอกสาร/รอเอกสาร" -> "ออกเอกสารแล้ว/ได้รับแล้ว") พร้อม Database Migration `original_receipt_received`
 *   **Deposit Management:** ระบบรับและจ่ายเงินมัดจำ (DEP_IN / DEP_OUT) ทำงานร่วมกับระบบ Allocation สามารถนำยอดคงเหลือไปเป็นส่วนลดในใบเสร็จ (REC/PAY) ได้ รองรับการคืนเงิน (Refund) และตัดเศษบัญชี (Write-off) พร้อมสืบทอดภาษีมูลค่าเพิ่ม (VAT Inheritance)
+*   **Approval Workflow (Maker-Checker):** เอกสารที่มีผลกระทบสูง (เช่น Expense > 5,000) จะถูกตั้งค่าเป็น `PENDING` สถานะหลักต้องถูกล็อกเป็น `DRAFT` เสมอ และต้องได้รับการอนุมัติจาก `Approval Center` ก่อนจึงจะรันเลข `ISSUED` ได้ หากปฏิเสธจะคงสถานะ `DRAFT` พร้อมบังคับใส่เหตุผลลง `approval_logs`
+*   **Period Closing (Period Lock):** ป้องกันการแก้ไขหรือเพิ่มเอกสารในงวดบัญชีที่ถูกปิดไปแล้ว ควบคุมผ่านตาราง `accounting_periods`
+*   **Fixed Asset Register:** ทะเบียนสินทรัพย์ถาวรผ่าน `fixed_assets` + `mst_asset_categories` (ราคาทุน, อายุใช้งาน, Soft Dispose) — เตรียมฐานสำหรับ Straight-line Depreciation
 
 ### Module E: Dashboard & Audit (ระบบรายงานและความปลอดภัย) 
 *   **Executive Dashboard:** หน้าจอสรุปยอดขาย (YTD) และยอดหนี้คงค้าง (AR/AP) แบบ Real-time
@@ -114,10 +117,10 @@
 *   **Phase 12 (Knowledge Management & UAT):** จัดทำคู่มือมาตรฐานระบบ, ระบบตั้งค่า Interactive Knowledge Base, ระบบ PIN Login, ทะลุกำแพง Auth Guard, เปิดสวิตช์ Negative Stock, UAT Testing[cite: 6]
 
 ### Module K: Post Go-Live Enterprise Enhancements (ส่วนต่อขยาย Phase 14) - [Roadmap]
-*   **Physical Inventory:** ระบบเอกสารยอดยกมา (STK_OB) และระบบปรับปรุงสต็อก (STK_ADJ)[cite: 6]
-*   **Data Archiving (Tiered Storage):** สคริปต์สำรองข้อมูลภาพเย็น (Cold Data) อายุเกิน 1-5 ปี ถ่ายโอนสู่ NAS และลบพ้น Cloud[cite: 6]
-*   **Approval Workflow & Period Closing:** ระบบอนุมัติบิล Maker-Checker และการล็อกบัญชีรายเดือน[cite: 6]
-*   **Fixed Asset Management:** ทะเบียนสินทรัพย์ถาวรและคิดค่าเสื่อมราคา[cite: 6]
+*   **Physical Inventory:** ระบบเอกสารยอดยกมา (STK_OB) และระบบปรับปรุงสต็อก (STK_ADJ) [✅ Completed]
+*   **Approval Workflow & Period Closing:** ระบบอนุมัติบิล Maker-Checker และการล็อกบัญชีรายเดือน [✅ Completed]
+*   **Fixed Asset Management:** ทะเบียนสินทรัพย์ถาวร (`fixed_assets` + `mst_asset_categories`) รองรับราคาทุน/อายุใช้งาน และเตรียม Straight-line Depreciation [✅ Register Completed · Depreciation Roadmap]
+*   **Data Archiving (Tiered Storage):** สคริปต์สำรองข้อมูลภาพเย็น (Cold Data) อายุเกิน 1-5 ปี ถ่ายโอนสู่ NAS และลบพ้น Cloud [Roadmap]
 
 ## 5. Database Schema (PostgreSQL for Supabase)
 
@@ -131,6 +134,7 @@
 - `mst_categories` (หมวดหมู่สินค้า)[cite: 11]
 - `mst_colors` (สีมาตรฐาน - ล็อก 3 ตัวอักษรพิมพ์ใหญ่)[cite: 11]
 - `mst_expense_categories` (หมวดหมู่ค่าใช้จ่าย)[cite: 11]
+- `mst_asset_categories` (หมวดหมู่สินทรัพย์ถาวร — useful_life_years / STRAIGHT_LINE)[cite: 11]
 - `mst_genders` (เพศ/ทรงเสื้อ)[cite: 11]
 - `mst_sizes` (ไซส์มาตรฐาน Global Size รวมถึงไซส์บริการ)[cite: 11]
 
@@ -160,6 +164,7 @@
 - `document_allocations` (การจัดสรรเอกสาร เช่น ตัดมัดจำ)[cite: 11]
 - `billing_note_items` (รายการใบวางบิล)[cite: 11]
 - `expenses` (บิลค่าใช้จ่าย / OPEX)[cite: 11]
+- `fixed_assets` (ทะเบียนสินทรัพย์ถาวร — acquisition_cost / useful_life_years / status)[cite: 11]
 - `payment_transactions` (ธุรกรรมการรับ/จ่าย)[cite: 11]
 - `payment_allocations` (การตัดยอดหนี้ Knock-off)[cite: 11]
 - `payment_slips` (สลิปโอนเงิน)[cite: 11]
