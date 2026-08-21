@@ -10,10 +10,8 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { submitAPPayment } from "@/app/actions/finance/ap-actions";
-import {
-  getInvoicesByBillingNote,
-  type OpenBillingNoteOption,
-} from "@/app/actions/billing";
+import { getInvoicesByBillingNote } from "@/app/actions/billing";
+import type { OpenBillingNoteOption } from "@/types/billing";
 import type {
   ApVendorOption,
   AvailableDeposit,

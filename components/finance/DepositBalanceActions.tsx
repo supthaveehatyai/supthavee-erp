@@ -13,10 +13,8 @@ import {
   FileUp,
   Loader2,
 } from "lucide-react";
-import {
-  manageDepositBalance,
-  type DepositBalanceActionType,
-} from "@/app/actions/finance/deposit-actions";
+import { manageDepositBalance } from "@/app/actions/finance/deposit-actions";
+import type { DepositBalanceActionType } from "@/types/deposit";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

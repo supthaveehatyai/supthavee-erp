@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { HandCoins } from "lucide-react";
 import { DepositCreateForm } from "./deposit-create-form";
-import type { DepositTab } from "@/app/actions/finance/deposit-actions";
+import type { DepositTab } from "@/types/deposit";
 import { listActiveCustomers } from "@/lib/actions/document-actions";
 import { getActiveVendors } from "@/lib/actions/mapping";
 import { todayIsoDate } from "@/lib/utils/outstanding-summary";

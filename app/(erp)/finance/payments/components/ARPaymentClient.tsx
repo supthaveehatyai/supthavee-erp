@@ -14,7 +14,7 @@ import type {
   DebtorOption,
   UnpaidInvoice,
 } from "@/types/payment";
-import type { OpenBillingNoteOption } from "@/app/actions/billing";
+import type { OpenBillingNoteOption } from "@/types/billing";
 import { OutstandingPartyCombobox } from "@/components/finance/OutstandingPartyCombobox";
 import { PaymentKnockoffForm } from "@/components/finance/PaymentKnockoffForm";
 import { Badge } from "@/components/ui/badge";

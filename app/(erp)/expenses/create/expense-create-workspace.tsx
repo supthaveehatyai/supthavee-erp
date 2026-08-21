@@ -14,6 +14,7 @@ import {
   ArrowLeft,
   ImagePlus,
   Loader2,
+  Plus,
   Save,
   Sparkles,
   PenLine,
@@ -84,6 +85,8 @@ export type ExpenseFormInitialValues = {
   payment_slip_url?: string | null;
   /** Vendor bill number → expenses.vendor_doc_no */
   vendor_doc_no?: string | null;
+  is_installment?: boolean;
+  installments?: ExpenseInstallmentFormRow[];
 };
 
 export type ExpenseCreateWorkspaceProps = {
@@ -108,6 +111,13 @@ type ExpenseFormItem = {
   description: string;
   amount: number;
   category_hint: string;
+};
+
+type ExpenseInstallmentFormRow = {
+  installment_period: number;
+  due_date: string;
+  principal_amount: number;
+  interest_amount: number;
 };
 
 /** RHF form shape — includes OCR-mapped fields + save payload fields. */
@@ -144,6 +154,8 @@ export type ExpenseFormValues = {
   payment_slip_file: File | null;
   /** Existing / uploaded public URL stored in expenses.payment_slip_url */
   payment_slip_url: string;
+  is_installment: boolean;
+  installments: ExpenseInstallmentFormRow[];
 };
 
 const PAYMENT_OPTIONS: { value: PaymentMethod; label: string }[] = [
@@ -458,6 +470,11 @@ export function ExpenseCreateWorkspace({
       receipt_url: initialValues?.receipt_url ?? "",
       payment_slip_file: null,
       payment_slip_url: initialValues?.payment_slip_url ?? "",
+      is_installment: Boolean(initialValues?.is_installment),
+      installments:
+        initialValues?.installments && initialValues.installments.length > 0
+          ? initialValues.installments
+          : [],
     },
     mode: "onChange",
   });
@@ -475,6 +492,16 @@ export function ExpenseCreateWorkspace({
   const { fields, replace } = useFieldArray({
     control,
     name: "items",
+  });
+
+  const {
+    fields: installmentFields,
+    append: appendInstallment,
+    remove: removeInstallment,
+    replace: replaceInstallments,
+  } = useFieldArray({
+    control,
+    name: "installments",
   });
 
   const watchedExpenseDate = useWatch({ control, name: "expense_date" });
@@ -504,6 +531,14 @@ export function ExpenseCreateWorkspace({
   const watchedPaymentSlipUrl = useWatch({
     control,
     name: "payment_slip_url",
+  });
+  const watchedIsInstallment = useWatch({
+    control,
+    name: "is_installment",
+  });
+  const watchedInstallments = useWatch({
+    control,
+    name: "installments",
   });
 
   // Client-side WHT math — Sub Total × rate; Net Payable = Grand Total − WHT
@@ -872,6 +907,34 @@ export function ExpenseCreateWorkspace({
       unlock();
       return;
     }
+    if (values.is_installment) {
+      if (!values.installments || values.installments.length === 0) {
+        const msg = "กรุณาเพิ่มงวดผ่อนชำระอย่างน้อย 1 งวด";
+        setError(msg);
+        toast.error(msg);
+        unlock();
+        return;
+      }
+      for (const row of values.installments) {
+        if (!row.due_date) {
+          const msg = `งวดที่ ${row.installment_period}: กรุณาระบุวันครบกำหนด`;
+          setError(msg);
+          toast.error(msg);
+          unlock();
+          return;
+        }
+        if (
+          !Number.isFinite(Number(row.principal_amount)) ||
+          Number(row.principal_amount) < 0
+        ) {
+          const msg = `งวดที่ ${row.installment_period}: เงินต้นไม่ถูกต้อง`;
+          setError(msg);
+          toast.error(msg);
+          unlock();
+          return;
+        }
+      }
+    }
 
     try {
       // Prefer ref (authoritative) — RHF File fields are unreliable on submit.
@@ -928,6 +991,21 @@ export function ExpenseCreateWorkspace({
           "payment_slip_file",
           paymentSlipFile,
           paymentSlipFile.name,
+        );
+      }
+
+      formData.append("is_installment", values.is_installment ? "1" : "0");
+      if (values.is_installment) {
+        formData.append(
+          "installments_json",
+          JSON.stringify(
+            values.installments.map((row, index) => ({
+              installment_period: Number(row.installment_period) || index + 1,
+              due_date: row.due_date,
+              principal_amount: Number(row.principal_amount) || 0,
+              interest_amount: Number(row.interest_amount) || 0,
+            })),
+          ),
         );
       }
 
@@ -1530,6 +1608,183 @@ export function ExpenseCreateWorkspace({
                     </Select>
                   </div>
                 ) : null}
+
+                <div className="md:col-span-2 space-y-3 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <input
+                      type="checkbox"
+                      className="mt-1 size-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      checked={Boolean(watchedIsInstallment)}
+                      disabled={formBusy}
+                      onChange={(event) => {
+                        const checked = event.target.checked;
+                        setValue("is_installment", checked, {
+                          shouldValidate: true,
+                        });
+                        if (checked && installmentFields.length === 0) {
+                          appendInstallment({
+                            installment_period: 1,
+                            due_date: watchedExpenseDate || defaultDate,
+                            principal_amount: Number(watchedGrandTotal ?? 0) || 0,
+                            interest_amount: 0,
+                          });
+                        }
+                        if (!checked) {
+                          replaceInstallments([]);
+                        }
+                      }}
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-slate-900">
+                        เป็นการผ่อนชำระ (Installment Plan)
+                      </span>
+                      <span className="mt-0.5 block text-xs text-slate-500">
+                        เมื่อเลือก จะบันทึกงวดลงตาราง{" "}
+                        <code className="text-[10px]">expense_installments</code>
+                      </span>
+                    </span>
+                  </label>
+
+                  {watchedIsInstallment ? (
+                    <div className="space-y-3">
+                      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                        <table className="min-w-full text-sm">
+                          <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            <tr>
+                              <th className="px-3 py-2">งวดที่</th>
+                              <th className="px-3 py-2">วันครบกำหนด</th>
+                              <th className="px-3 py-2 text-right">เงินต้น</th>
+                              <th className="px-3 py-2 text-right">ดอกเบี้ย</th>
+                              <th className="px-3 py-2 text-right">รวมงวด</th>
+                              <th className="px-3 py-2" />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {installmentFields.map((field, index) => {
+                              const principal = Number(
+                                watchedInstallments?.[index]?.principal_amount ??
+                                  0,
+                              );
+                              const interest = Number(
+                                watchedInstallments?.[index]?.interest_amount ??
+                                  0,
+                              );
+                              return (
+                                <tr
+                                  key={field.id}
+                                  className="border-t border-slate-100"
+                                >
+                                  <td className="px-3 py-2">
+                                    <Input
+                                      type="number"
+                                      min={1}
+                                      step={1}
+                                      disabled={formBusy}
+                                      className="h-9 w-20"
+                                      {...register(
+                                        `installments.${index}.installment_period`,
+                                        { valueAsNumber: true },
+                                      )}
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <Input
+                                      type="date"
+                                      disabled={formBusy}
+                                      className="h-9"
+                                      {...register(
+                                        `installments.${index}.due_date`,
+                                      )}
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      step="0.01"
+                                      disabled={formBusy}
+                                      className="h-9 text-right"
+                                      {...register(
+                                        `installments.${index}.principal_amount`,
+                                        { valueAsNumber: true },
+                                      )}
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      step="0.01"
+                                      disabled={formBusy}
+                                      className="h-9 text-right"
+                                      {...register(
+                                        `installments.${index}.interest_amount`,
+                                        { valueAsNumber: true },
+                                      )}
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-700">
+                                    {formatThaiBaht(
+                                      roundMoney(principal + interest),
+                                    )}
+                                  </td>
+                                  <td className="px-3 py-2 text-right">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="text-red-600"
+                                      disabled={
+                                        formBusy || installmentFields.length <= 1
+                                      }
+                                      onClick={() => removeInstallment(index)}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs text-slate-500">
+                          ดอกเบี้ยรวม:{" "}
+                          <span className="font-semibold text-slate-800">
+                            {formatThaiBaht(
+                              roundMoney(
+                                (watchedInstallments ?? []).reduce(
+                                  (sum, row) =>
+                                    sum + Number(row.interest_amount ?? 0),
+                                  0,
+                                ),
+                              ),
+                            )}
+                          </span>
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={formBusy}
+                          onClick={() =>
+                            appendInstallment({
+                              installment_period:
+                                installmentFields.length + 1,
+                              due_date: watchedExpenseDate || defaultDate,
+                              principal_amount: 0,
+                              interest_amount: 0,
+                            })
+                          }
+                        >
+                          <Plus className="h-4 w-4" />
+                          เพิ่มงวด
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
 
                 <div className="md:col-span-2 space-y-3 rounded-xl border border-slate-200 bg-slate-50/50 p-4">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">

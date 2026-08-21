@@ -1,7 +1,7 @@
 import { PrintLayout } from "@/components/shared/print/PrintLayout";
 import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
 import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
-import type { BillingNoteDetailData } from "@/app/actions/billing";
+import type { BillingNoteDetailData } from "@/types/billing";
 import { cn } from "@/lib/utils";
 
 export type BillingNotePrintTemplateProps = {

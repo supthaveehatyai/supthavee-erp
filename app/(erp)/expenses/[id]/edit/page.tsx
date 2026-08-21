@@ -124,6 +124,13 @@ export default async function EditExpensePage({ params }: PageProps) {
           receipt_url: expense.receipt_url,
           payment_slip_url: expense.payment_slip_url,
           vendor_doc_no: expense.vendor_doc_no,
+          is_installment: expense.is_installment,
+          installments: expense.installments.map((row) => ({
+            installment_period: row.installment_period,
+            due_date: row.due_date,
+            principal_amount: row.principal_amount,
+            interest_amount: row.interest_amount,
+          })),
         }}
       />
     </div>

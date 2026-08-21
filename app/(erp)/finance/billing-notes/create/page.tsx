@@ -3,10 +3,12 @@ import { FileSpreadsheet } from "lucide-react";
 import {
   getOutstandingContactsSummary,
   getUnbilledInvoices,
-  type BillingCategory,
-  type OutstandingContactSummary,
-  type UnbilledInvoice,
 } from "@/app/actions/billing";
+import type {
+  BillingCategory,
+  OutstandingContactSummary,
+  UnbilledInvoice,
+} from "@/types/billing";
 import { CreateBillingNoteForm } from "@/components/finance/CreateBillingNoteForm";
 import { listActiveCustomers } from "@/lib/actions/document-actions";
 import { getActiveVendors } from "@/lib/actions/mapping";

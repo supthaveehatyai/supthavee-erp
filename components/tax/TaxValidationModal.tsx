@@ -8,11 +8,8 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import {
-  updateVendorTaxInfo,
-  type TaxEntityType,
-  type WHTContactTax,
-} from "@/app/actions/tax-actions";
+import { updateVendorTaxInfo } from "@/app/actions/tax-actions";
+import type { TaxEntityType, WHTContactTax } from "@/types/tax";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,

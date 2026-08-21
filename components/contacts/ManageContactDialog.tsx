@@ -16,8 +16,8 @@ import {
   getContactDetails,
   listContactPersons,
   updateContact,
-  type ContactPersonRow,
 } from "@/app/actions/contacts";
+import type { ContactPersonRow } from "@/types/contact";
 import { SkillRateCard } from "@/components/contacts/skill-rate-card";
 import {
   AlertDialog,

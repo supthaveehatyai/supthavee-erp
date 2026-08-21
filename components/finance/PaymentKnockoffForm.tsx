@@ -9,10 +9,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import {
-  getInvoicesByBillingNote,
-  type OpenBillingNoteOption,
-} from "@/app/actions/billing";
+import { getInvoicesByBillingNote } from "@/app/actions/billing";
+import type { OpenBillingNoteOption } from "@/types/billing";
 import { processPaymentKnockoff } from "@/lib/actions/finance/payment";
 import { allocateFifo, roundMoney } from "@/lib/utils/payment-fifo";
 import {

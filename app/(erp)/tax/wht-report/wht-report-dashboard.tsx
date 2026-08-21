@@ -14,7 +14,7 @@ import {
   FileSpreadsheet,
   Percent,
 } from "lucide-react";
-import type { WHTReportExpenseRow } from "@/app/actions/tax-actions";
+import type { WHTReportExpenseRow } from "@/types/tax";
 import { TaxValidationModal } from "@/components/tax/TaxValidationModal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

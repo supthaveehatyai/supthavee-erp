@@ -11,7 +11,7 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2, FileUp, Loader2 } from "lucide-react";
 import { createDepositDocument } from "@/app/actions/finance/deposit-actions";
-import type { DepositTab } from "@/app/actions/finance/deposit-actions";
+import type { DepositTab } from "@/types/deposit";
 import CustomerCombobox from "@/app/(erp)/sales/create/customer-combobox";
 import VendorCombobox from "@/components/procurement/VendorCombobox";
 import type { VendorOption } from "@/lib/actions/mapping";

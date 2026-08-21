@@ -8,11 +8,8 @@ import {
   contactRoleLabel,
   normalizeContactRoles,
 } from "@/app/contacts/contacts";
-import {
-  getContactDetails,
-  type ContactDetails,
-  type ContactPersonRow,
-} from "@/app/actions/contacts";
+import { getContactDetails } from "@/app/actions/contacts";
+import type { ContactDetails, ContactPersonRow } from "@/types/contact";
 import { SkillRateCard } from "@/components/contacts/skill-rate-card";
 import { Button } from "@/components/ui/button";
 import {

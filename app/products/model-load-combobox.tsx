@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { LoadableProductModel } from "@/app/products/actions/product-matrix";
+import type { LoadableProductModel } from "@/types/product-matrix";
 import {
   Command,
   CommandGroup,

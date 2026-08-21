@@ -8,14 +8,9 @@
 import { revalidatePath } from "next/cache";
 import { insertAuditLog } from "@/lib/supabase/auditService";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
+import type { DeleteDraftDocumentResult } from "@/types/document";
 
 const SALES_PATH = "/sales";
-
-export type DeleteDraftDocumentResult = {
-  success: boolean;
-  docNo: string | null;
-  error: string | null;
-};
 
 /**
  * Physically delete a DRAFT document.

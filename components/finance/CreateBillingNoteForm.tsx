@@ -11,12 +11,12 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
-import {
-  createBillingNote,
-  type BillingCategory,
-  type OutstandingContactSummary,
-  type UnbilledInvoice,
-} from "@/app/actions/billing";
+import { createBillingNote } from "@/app/actions/billing";
+import type {
+  BillingCategory,
+  OutstandingContactSummary,
+  UnbilledInvoice,
+} from "@/types/billing";
 import CustomerCombobox from "@/app/(erp)/sales/create/customer-combobox";
 import VendorCombobox from "@/components/procurement/VendorCombobox";
 import { Button } from "@/components/ui/button";

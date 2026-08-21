@@ -7,7 +7,7 @@
 
 import Link from "next/link";
 import { ArrowLeft, Printer } from "lucide-react";
-import type { BillingNoteDetailData } from "@/app/actions/billing";
+import type { BillingNoteDetailData } from "@/types/billing";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 

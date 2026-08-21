@@ -41,14 +41,34 @@ export type ExpenseRecord = {
   approval_status: "PENDING" | "APPROVED" | "REJECTED" | string;
   remark: string | null;
   recorded_by: string | null;
+  /** Phase 14 — installment plan */
+  is_installment: boolean;
+  total_interest_amount: number;
   created_at: string;
   updated_at: string;
+};
+
+/** One installment row for create/update FormData (JSON). */
+export type ExpenseInstallmentInput = {
+  installment_period: number;
+  due_date: string;
+  principal_amount: number;
+  interest_amount: number;
+};
+
+export type ExpenseInstallmentRow = ExpenseInstallmentInput & {
+  id: string;
+  expense_id: string;
+  total_installment: number;
+  is_paid: boolean;
+  paid_date: string | null;
 };
 
 export type ExpenseDetail = ExpenseRecord & {
   category_name: string;
   vendor_name: string;
   bank_account_label: string | null;
+  installments: ExpenseInstallmentRow[];
 };
 
 export type GetExpenseByIdResult = {
@@ -94,6 +114,10 @@ export type CreateDraftExpenseInput = {
   /** Public URL from payment slip upload → expenses.payment_slip_url */
   payment_slip_url?: string | null;
   recorded_by?: string | null;
+  /** Installment plan flag → expenses.is_installment */
+  is_installment?: boolean;
+  /** Rows for expense_installments (required when is_installment) */
+  installments?: ExpenseInstallmentInput[];
 };
 
 /** Same mutable fields as create — used by `updateDraftExpense`. */
@@ -117,6 +141,8 @@ export type UpdateDraftExpenseInput = {
   receipt_url?: string | null;
   /** Public URL from payment slip upload → expenses.payment_slip_url */
   payment_slip_url?: string | null;
+  is_installment?: boolean;
+  installments?: ExpenseInstallmentInput[];
 };
 
 export type UploadExpenseReceiptResult = {

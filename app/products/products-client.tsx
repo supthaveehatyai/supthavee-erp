@@ -36,10 +36,12 @@ import {
   listLoadableProductModels,
   overwriteDraftProductModel,
   updateProductModel,
-  type ExistingProductModel,
-  type LoadableProductModel,
-  type SaveDraftModelInput,
 } from "./actions/product-matrix";
+import type {
+  ExistingProductModel,
+  LoadableProductModel,
+  SaveDraftModelInput,
+} from "@/types/product-matrix";
 import {
   buildProductSku,
   formatGenderOption,

@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
-import {
-  getBillingNotes,
-  type BillingNoteDocType,
-} from "@/app/actions/billing";
+import { getBillingNotes } from "@/app/actions/billing";
+import type { BillingNoteDocType } from "@/types/billing";
 import {
   getJobDetails,
   getTechnicianOptions,

@@ -10,7 +10,6 @@ import {
   contactSelect,
   normalizeContactRow,
   type Contact,
-  type ContactType,
 } from "@/app/contacts/contacts";
 import { findDuplicateContactError } from "@/lib/contacts/duplicate-check";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
@@ -22,6 +21,13 @@ import {
   updateTechnicianRate as updateTechnicianRateImpl,
   upsertTechnicianRate as upsertTechnicianRateImpl,
 } from "@/lib/actions/technician-rates";
+import type {
+  AddContactPersonPayload,
+  ActionResult,
+  ContactDetails,
+  ContactPersonRow,
+  UpdateContactPayload,
+} from "@/types/contact";
 import type {
   GetServiceModelsResult,
   GetTechnicianRatesResult,
@@ -60,44 +66,6 @@ export async function deleteTechnicianRate(
 }
 
 const CONTACTS_PATH = "/contacts";
-
-export type UpdateContactPayload = {
-  companyName?: string;
-  taxId?: string | null;
-  branchCode?: string | null;
-  phone?: string | null;
-  address?: string | null;
-  /** Multi-role tags — required on edit; written to contact_roles only. */
-  contactRoles?: ContactType[];
-  contact_roles?: ContactType[];
-};
-
-export type AddContactPersonPayload = {
-  name?: string;
-  phone?: string | null;
-  email?: string | null;
-  role?: string | null;
-};
-
-export type ContactPersonRow = {
-  id: string;
-  contact_id: string;
-  name: string;
-  phone: string | null;
-  email: string | null;
-  department_or_role: string | null;
-  is_primary: boolean;
-};
-
-export type ActionResult<T> = {
-  data: T | null;
-  error: string | null;
-};
-
-export type ContactDetails = {
-  contact: Contact;
-  persons: ContactPersonRow[];
-};
 
 /** Fetch one contact + all related contact_persons (read-only view). */
 export async function getContactDetails(

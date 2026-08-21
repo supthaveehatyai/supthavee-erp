@@ -34,6 +34,8 @@ import type {
   ExpenseBankAccountOption,
   ExpenseCategory,
   ExpenseDetail,
+  ExpenseInstallmentInput,
+  ExpenseInstallmentRow,
   ExpenseListItem,
   ExpenseRecord,
   ExpenseVendorOption,
@@ -64,7 +66,7 @@ function revalidateExpenseCaches(expenseId?: string | null) {
 }
 
 const EXPENSE_ROW_SELECT =
-  "id, document_no, expense_date, category_id, vendor_id, vendor_doc_no, bank_account_id, net_amount, vat_amount, grand_total, wht_type, wht_rate, wht_amount, net_payable, payment_method, receipt_url, payment_slip_url, status, approval_status, remark, recorded_by, created_at, updated_at";
+  "id, document_no, expense_date, category_id, vendor_id, vendor_doc_no, bank_account_id, net_amount, vat_amount, grand_total, wht_type, wht_rate, wht_amount, net_payable, payment_method, receipt_url, payment_slip_url, status, approval_status, remark, recorded_by, is_installment, total_interest_amount, created_at, updated_at";
 
 function mapDuplicateExpenseError(error: {
   code?: string;
@@ -220,9 +222,163 @@ function mapExpenseRow(row: Record<string, unknown>): ExpenseRecord {
     remark: row.remark == null ? null : String(row.remark),
     recorded_by:
       row.recorded_by == null ? null : String(row.recorded_by),
+    is_installment: Boolean(row.is_installment),
+    total_interest_amount: Number(row.total_interest_amount ?? 0),
     created_at: String(row.created_at ?? ""),
     updated_at: String(row.updated_at ?? ""),
   };
+}
+
+function mapInstallmentRow(row: Record<string, unknown>): ExpenseInstallmentRow {
+  const principal = Number(row.principal_amount ?? 0);
+  const interest = Number(row.interest_amount ?? 0);
+  return {
+    id: String(row.id),
+    expense_id: String(row.expense_id ?? ""),
+    installment_period: Number(row.installment_period ?? 0),
+    due_date: String(row.due_date ?? ""),
+    principal_amount: principal,
+    interest_amount: interest,
+    total_installment: Number(
+      row.total_installment ?? toMoney(principal + interest),
+    ),
+    is_paid: Boolean(row.is_paid),
+    paid_date: row.paid_date == null ? null : String(row.paid_date),
+  };
+}
+
+function parseInstallmentsFromFormData(
+  formData: FormData,
+): {
+  isInstallment: boolean;
+  installments: ExpenseInstallmentInput[];
+  error: string | null;
+} {
+  const isInstallment =
+    String(formData.get("is_installment") ?? "") === "1" ||
+    String(formData.get("is_installment") ?? "").toLowerCase() === "true";
+
+  if (!isInstallment) {
+    return { isInstallment: false, installments: [], error: null };
+  }
+
+  const raw = String(formData.get("installments_json") ?? "").trim();
+  if (!raw) {
+    return {
+      isInstallment: true,
+      installments: [],
+      error: "กรุณาระบุงวดผ่อนชำระอย่างน้อย 1 งวด",
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {
+      isInstallment: true,
+      installments: [],
+      error: "รูปแบบงวดผ่อนชำระไม่ถูกต้อง",
+    };
+  }
+
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    return {
+      isInstallment: true,
+      installments: [],
+      error: "กรุณาระบุงวดผ่อนชำระอย่างน้อย 1 งวด",
+    };
+  }
+
+  const installments: ExpenseInstallmentInput[] = [];
+  for (let i = 0; i < parsed.length; i += 1) {
+    const row = parsed[i] as Record<string, unknown>;
+    const period = Number(row.installment_period ?? i + 1);
+    const dueDate = String(row.due_date ?? "").trim();
+    const principal = toMoney(Number(row.principal_amount ?? 0));
+    const interest = toMoney(Number(row.interest_amount ?? 0));
+
+    if (!Number.isInteger(period) || period <= 0) {
+      return {
+        isInstallment: true,
+        installments: [],
+        error: `งวดที่ ${i + 1}: เลขงวดไม่ถูกต้อง`,
+      };
+    }
+    if (!isIsoDate(dueDate)) {
+      return {
+        isInstallment: true,
+        installments: [],
+        error: `งวดที่ ${period}: วันครบกำหนดไม่ถูกต้อง`,
+      };
+    }
+    if (!Number.isFinite(principal) || principal < 0) {
+      return {
+        isInstallment: true,
+        installments: [],
+        error: `งวดที่ ${period}: เงินต้นไม่ถูกต้อง`,
+      };
+    }
+    if (!Number.isFinite(interest) || interest < 0) {
+      return {
+        isInstallment: true,
+        installments: [],
+        error: `งวดที่ ${period}: ดอกเบี้ยไม่ถูกต้อง`,
+      };
+    }
+
+    installments.push({
+      installment_period: period,
+      due_date: dueDate,
+      principal_amount: principal,
+      interest_amount: interest,
+    });
+  }
+
+  return { isInstallment: true, installments, error: null };
+}
+
+async function replaceExpenseInstallments(
+  supabaseAdmin: SupabaseClient,
+  expenseId: string,
+  installments: ExpenseInstallmentInput[],
+): Promise<{ error: string | null }> {
+  const { error: deleteError } = await supabaseAdmin
+    .from("expense_installments")
+    .delete()
+    .eq("expense_id", expenseId);
+
+  if (deleteError) {
+    console.error("[replaceExpenseInstallments][delete]", deleteError.message);
+    return { error: deleteError.message };
+  }
+
+  if (installments.length === 0) {
+    return { error: null };
+  }
+
+  const rows = installments.map((row) => ({
+    expense_id: expenseId,
+    installment_period: row.installment_period,
+    due_date: row.due_date,
+    principal_amount: row.principal_amount,
+    interest_amount: row.interest_amount,
+    total_installment: toMoney(
+      row.principal_amount + row.interest_amount,
+    ),
+    is_paid: false,
+  }));
+
+  const { error: insertError } = await supabaseAdmin
+    .from("expense_installments")
+    .insert(rows);
+
+  if (insertError) {
+    console.error("[replaceExpenseInstallments][insert]", insertError.message);
+    return { error: insertError.message };
+  }
+
+  return { error: null };
 }
 
 type NamedJoin = { category_name?: string | null; company_name?: string | null };
@@ -794,6 +950,11 @@ export async function createDraftExpense(
 ): Promise<CreateDraftExpenseResult> {
   try {
     const parsed = parseExpenseDraftFormData(formData);
+    const plan = parseInstallmentsFromFormData(formData);
+    if (plan.error) {
+      return { data: null, error: plan.error };
+    }
+
     const receipt = await resolveReceiptUrlFromForm(parsed);
     if (receipt.error) {
       return { data: null, error: receipt.error };
@@ -865,6 +1026,15 @@ export async function createDraftExpense(
       status: "DRAFT" as const,
       remark: v.remark,
       recorded_by: data.recorded_by ?? null,
+      is_installment: plan.isInstallment,
+      total_interest_amount: plan.isInstallment
+        ? toMoney(
+            plan.installments.reduce(
+              (sum, row) => sum + row.interest_amount,
+              0,
+            ),
+          )
+        : 0,
     };
 
     const { data: inserted, error: insertError } = await supabaseAdmin
@@ -888,6 +1058,21 @@ export async function createDraftExpense(
     }
 
     const mapped = mapExpenseRow(inserted as Record<string, unknown>);
+
+    if (plan.isInstallment) {
+      const sync = await replaceExpenseInstallments(
+        supabaseAdmin,
+        mapped.id,
+        plan.installments,
+      );
+      if (sync.error) {
+        return {
+          data: null,
+          error: `บันทึกบิลแล้ว แต่บันทึกงวดผ่อนไม่สำเร็จ: ${sync.error}`,
+        };
+      }
+    }
+
     revalidateExpenseCaches(mapped.id);
     return {
       data: mapped,
@@ -1131,6 +1316,11 @@ export async function updateDraftExpense(
     }
 
     const parsed = parseExpenseDraftFormData(formData);
+    const plan = parseInstallmentsFromFormData(formData);
+    if (plan.error) {
+      return { data: null, error: plan.error };
+    }
+
     const receipt = await resolveReceiptUrlFromForm(parsed);
     if (receipt.error) {
       return { data: null, error: receipt.error };
@@ -1221,6 +1411,15 @@ export async function updateDraftExpense(
       receipt_url: receiptUrl,
       // Strict write: use Storage-resolved URL (not a stale form field).
       payment_slip_url: paymentSlipUrl,
+      is_installment: plan.isInstallment,
+      total_interest_amount: plan.isInstallment
+        ? toMoney(
+            plan.installments.reduce(
+              (sum, row) => sum + row.interest_amount,
+              0,
+            ),
+          )
+        : 0,
       updated_at: nowIso,
     };
 
@@ -1245,6 +1444,18 @@ export async function updateDraftExpense(
       return {
         data: null,
         error: "อัปเดต Draft ไม่สำเร็จ (อาจถูก Issue/Void ไปแล้ว)",
+      };
+    }
+
+    const sync = await replaceExpenseInstallments(
+      supabaseAdmin,
+      expenseId,
+      plan.isInstallment ? plan.installments : [],
+    );
+    if (sync.error) {
+      return {
+        data: null,
+        error: `อัปเดตบิลแล้ว แต่บันทึกงวดผ่อนไม่สำเร็จ: ${sync.error}`,
       };
     }
 
@@ -1320,12 +1531,29 @@ export async function getExpenseById(
         }`
       : null;
 
+    const { data: installmentRows, error: installmentError } =
+      await supabaseAdmin
+        .from("expense_installments")
+        .select(
+          "id, expense_id, installment_period, due_date, principal_amount, interest_amount, total_installment, is_paid, paid_date",
+        )
+        .eq("expense_id", expenseId)
+        .order("installment_period", { ascending: true });
+
+    if (installmentError) {
+      console.error("[getExpenseById][installments]", installmentError.message);
+      return { data: null, error: installmentError.message };
+    }
+
     return {
       data: {
         ...base,
         category_name: category?.category_name?.trim() || "—",
         vendor_name: vendor?.company_name?.trim() || "—",
         bank_account_label: bankLabel,
+        installments: (installmentRows ?? []).map((row) =>
+          mapInstallmentRow(row as Record<string, unknown>),
+        ),
       },
       error: null,
     };

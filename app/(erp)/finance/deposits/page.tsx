@@ -1,11 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { HandCoins, Plus, Wallet } from "lucide-react";
-import {
-  getDepositDocuments,
-  type DepositDocument,
-  type DepositTab,
-} from "@/app/actions/finance/deposit-actions";
+import { getDepositDocuments } from "@/app/actions/finance/deposit-actions";
+import type { DepositDocument, DepositTab } from "@/types/deposit";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,

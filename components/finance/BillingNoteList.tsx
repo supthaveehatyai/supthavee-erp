@@ -12,7 +12,7 @@ import { FileSpreadsheet, Plus, Search } from "lucide-react";
 import type {
   BillingNoteDocType,
   BillingNoteListItem,
-} from "@/app/actions/billing";
+} from "@/types/billing";
 import type { BillingNotesTab } from "@/types/technician-billing";
 import { TechnicianBillingPanel } from "@/components/finance/TechnicianBillingPanel";
 import type { TechnicianBillingPanelProps } from "@/components/finance/TechnicianBillingPanel";

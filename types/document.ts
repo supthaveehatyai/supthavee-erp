@@ -437,3 +437,9 @@ export type UploadDocumentImageResult = {
   } | null;
   error: string | null;
 };
+
+export type DeleteDraftDocumentResult = {
+  success: boolean;
+  docNo: string | null;
+  error: string | null;
+};
