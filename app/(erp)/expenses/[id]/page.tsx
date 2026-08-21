@@ -142,6 +142,8 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
             expenseId={expense.id}
             documentNo={expense.document_no}
             status={expense.status}
+            grandTotal={Number(expense.grand_total ?? 0)}
+            approvalStatus={String(expense.approval_status ?? "APPROVED")}
           />
           <Link
             href="/expenses"

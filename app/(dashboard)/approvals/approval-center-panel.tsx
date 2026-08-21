@@ -2,14 +2,15 @@
 
 /**
  * Approval Center — Maker-Checker UI (Server Actions only).
+ * Expense rows open slide-over via `?view_expense=` (URL-driven).
  */
 
 import { useState, useTransition } from "react";
-import Link from "next/link";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   CheckCircle2,
   ClipboardCheck,
+  Eye,
   Loader2,
   XCircle,
 } from "lucide-react";
@@ -21,6 +22,7 @@ import type {
   PendingApprovalItem,
   PendingApprovalsPayload,
 } from "@/types/approval";
+import { buildViewExpenseHref } from "./expense-approval-review-sheet";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -86,12 +88,21 @@ function PendingApprovalTable({
   emptyLabel: string;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
   const [rejectTarget, setRejectTarget] = useState<PendingApprovalItem | null>(
     null,
   );
   const [rejectComment, setRejectComment] = useState("");
   const [commentError, setCommentError] = useState<string | null>(null);
+
+  function openExpenseReview(item: PendingApprovalItem) {
+    if (targetType !== "EXPENSE") return;
+    router.replace(
+      buildViewExpenseHref(pathname, searchParams.toString(), item.id),
+    );
+  }
 
   function runApproval(
     item: PendingApprovalItem,
@@ -121,6 +132,14 @@ function PendingApprovalTable({
         setRejectTarget(null);
         setRejectComment("");
         setCommentError(null);
+
+        // Close slide-over after decision
+        if (targetType === "EXPENSE" && searchParams.get("view_expense")) {
+          const params = new URLSearchParams(searchParams.toString());
+          params.delete("view_expense");
+          const qs = params.toString();
+          router.replace(qs ? `${pathname}?${qs}` : pathname);
+        }
         router.refresh();
       } catch (err) {
         toast.error(
@@ -164,15 +183,36 @@ function PendingApprovalTable({
           </TableHeader>
           <TableBody>
             {items.map((item) => (
-              <TableRow key={item.id}>
+              <TableRow
+                key={item.id}
+                className={
+                  targetType === "EXPENSE"
+                    ? "cursor-pointer hover:bg-slate-50"
+                    : undefined
+                }
+                onClick={() => {
+                  if (targetType === "EXPENSE") openExpenseReview(item);
+                }}
+              >
                 <TableCell>
                   <div className="space-y-1">
-                    <Link
-                      href={item.detail_href}
-                      className="font-medium text-blue-700 underline-offset-2 hover:underline"
-                    >
-                      {item.document_no}
-                    </Link>
+                    {targetType === "EXPENSE" ? (
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1.5 font-medium text-blue-700 underline-offset-2 hover:underline"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openExpenseReview(item);
+                        }}
+                      >
+                        <Eye className="size-3.5" />
+                        {item.document_no}
+                      </button>
+                    ) : (
+                      <p className="font-medium text-slate-900">
+                        {item.document_no}
+                      </p>
+                    )}
                     {item.doc_type ? (
                       <Badge variant="slate" className="font-mono text-[10px]">
                         {item.doc_type}
@@ -189,7 +229,7 @@ function PendingApprovalTable({
                 <TableCell className="text-right font-medium tabular-nums text-slate-900">
                   {formatMoney(item.grand_total)}
                 </TableCell>
-                <TableCell>
+                <TableCell onClick={(event) => event.stopPropagation()}>
                   <div className="flex flex-wrap items-center justify-center gap-2">
                     <Button
                       type="button"
@@ -297,6 +337,9 @@ export function ApprovalCenterPanel({
   function handleTabChange(next: string) {
     const params = new URLSearchParams(searchParams.toString());
     params.set("tab", next);
+    if (next !== "expenses") {
+      params.delete("view_expense");
+    }
     router.replace(`${pathname}?${params.toString()}`);
   }
 
@@ -361,7 +404,7 @@ export function ApprovalCenterPanel({
             <CardHeader className="pb-3">
               <CardTitle className="text-base">ค่าใช้จ่าย (Expenses)</CardTitle>
               <CardDescription>
-                รายการจากตาราง expenses ที่ approval_status = PENDING
+                คลิกแถวเพื่อเปิด Slide-over รีวิวรายละเอียดก่อนอนุมัติ
               </CardDescription>
             </CardHeader>
             <CardContent>

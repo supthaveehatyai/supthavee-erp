@@ -560,6 +560,7 @@ export async function processApproval(
             approval_status: "REJECTED",
             approved_by: actorId,
             approved_at: nowIso,
+            status: "DRAFT",
             updated_at: nowIso,
           })
           .eq("id", trimmedId)
@@ -611,6 +612,10 @@ export async function processApproval(
       };
     }
 
+    const auditComment =
+      trimmedComment ||
+      (action === "APPROVED" ? "อนุมัติเอกสาร" : "ปฏิเสธเอกสาร");
+
     await insertAuditLog({
       tableName: type === "DOCUMENT" ? "documents" : "expenses",
       recordId: trimmedId,
@@ -629,11 +634,14 @@ export async function processApproval(
               : previousStatus === "DRAFT"
                 ? "ISSUED"
                 : previousStatus
-            : previousStatus,
+            : type === "EXPENSE"
+              ? "DRAFT"
+              : previousStatus,
         approved_by: actorId,
         approved_at: nowIso,
         approval_decision: action,
-        approval_comment: trimmedComment || null,
+        comment: auditComment,
+        approval_comment: auditComment,
         document_no: documentNo,
       },
     });

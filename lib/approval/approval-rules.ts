@@ -35,12 +35,17 @@ export function resolveDocumentApprovalStatus(
   return requiresDocumentApproval(docType) ? "PENDING" : "APPROVED";
 }
 
+export function requiresExpenseApproval(
+  grandTotal: number | string | null | undefined,
+): boolean {
+  const total = Number(grandTotal ?? 0);
+  return Number.isFinite(total) && total > EXPENSE_APPROVAL_THRESHOLD;
+}
+
 export function resolveExpenseApprovalStatus(
   grandTotal: number | string | null | undefined,
 ): ApprovalStatus {
-  const total = Number(grandTotal ?? 0);
-  if (!Number.isFinite(total)) return "APPROVED";
-  return total > EXPENSE_APPROVAL_THRESHOLD ? "PENDING" : "APPROVED";
+  return requiresExpenseApproval(grandTotal) ? "PENDING" : "APPROVED";
 }
 
 export function isPendingApprovalStatus(status: ApprovalStatus): boolean {

@@ -22,8 +22,9 @@ import {
   isTemporaryDraftDocNo,
 } from "@/lib/utils/draft-document-no";
 import {
-  expenseApprovalStatusFields,
+  EXPENSE_APPROVAL_THRESHOLD,
   PENDING_APPROVAL_TOAST_MESSAGE,
+  requiresExpenseApproval,
 } from "@/lib/approval/approval-rules";
 import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
 import type {
@@ -63,7 +64,7 @@ function revalidateExpenseCaches(expenseId?: string | null) {
 }
 
 const EXPENSE_ROW_SELECT =
-  "id, document_no, expense_date, category_id, vendor_id, vendor_doc_no, bank_account_id, net_amount, vat_amount, grand_total, wht_type, wht_rate, wht_amount, net_payable, payment_method, receipt_url, payment_slip_url, status, remark, recorded_by, created_at, updated_at";
+  "id, document_no, expense_date, category_id, vendor_id, vendor_doc_no, bank_account_id, net_amount, vat_amount, grand_total, wht_type, wht_rate, wht_amount, net_payable, payment_method, receipt_url, payment_slip_url, status, approval_status, remark, recorded_by, created_at, updated_at";
 
 function mapDuplicateExpenseError(error: {
   code?: string;
@@ -215,6 +216,7 @@ function mapExpenseRow(row: Record<string, unknown>): ExpenseRecord {
     payment_slip_url:
       row.payment_slip_url == null ? null : String(row.payment_slip_url),
     status: String(row.status ?? "DRAFT"),
+    approval_status: String(row.approval_status ?? "APPROVED"),
     remark: row.remark == null ? null : String(row.remark),
     recorded_by:
       row.recorded_by == null ? null : String(row.recorded_by),
@@ -1336,8 +1338,112 @@ export async function getExpenseById(
 }
 
 /**
+ * Maker — ส่ง Expense เข้าคิวอนุมัติ (grand_total > threshold).
+ * คง status = DRAFT · ตั้ง approval_status = PENDING เท่านั้น (ไม่ ISSUED / ไม่รันเลข)
+ */
+export async function sendExpenseForApproval(
+  id: string,
+): Promise<MutateExpenseResult> {
+  try {
+    const expenseId = id?.trim() ?? "";
+    if (!expenseId) {
+      return { data: null, error: "ไม่พบรหัสเอกสารค่าใช้จ่าย" };
+    }
+
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data: before, error: beforeError } = await supabaseAdmin
+      .from("expenses")
+      .select(
+        "id, document_no, expense_date, grand_total, status, approval_status, remark",
+      )
+      .eq("id", expenseId)
+      .maybeSingle();
+
+    if (beforeError) {
+      return { data: null, error: beforeError.message };
+    }
+    if (!before) {
+      return { data: null, error: "ไม่พบเอกสารค่าใช้จ่าย" };
+    }
+    if (String(before.status) !== "DRAFT") {
+      return {
+        data: null,
+        error: `ส่งขออนุมัติได้เฉพาะสถานะ DRAFT (ปัจจุบัน: ${before.status})`,
+      };
+    }
+    if (!requiresExpenseApproval(before.grand_total)) {
+      return {
+        data: null,
+        error: `ยอดไม่เกิน ${EXPENSE_APPROVAL_THRESHOLD.toLocaleString("th-TH")} บาท — ใช้ออกเอกสาร (Issue) ได้โดยตรง`,
+      };
+    }
+
+    const currentApproval = String(before.approval_status ?? "APPROVED");
+    if (currentApproval === "PENDING") {
+      return {
+        data: null,
+        error: "เอกสารนี้อยู่ในคิวรออนุมัติแล้ว",
+      };
+    }
+
+    const nowIso = new Date().toISOString();
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from("expenses")
+      .update({
+        approval_status: "PENDING",
+        approved_by: null,
+        approved_at: null,
+        updated_at: nowIso,
+      })
+      .eq("id", expenseId)
+      .eq("status", "DRAFT")
+      .select(EXPENSE_ROW_SELECT)
+      .maybeSingle();
+
+    if (updateError) {
+      return { data: null, error: updateError.message };
+    }
+    if (!updated) {
+      return {
+        data: null,
+        error: "ส่งขออนุมัติไม่สำเร็จ (อาจถูกแก้ไขไปแล้ว)",
+      };
+    }
+
+    const mapped = mapExpenseRow(updated as Record<string, unknown>);
+    fireExpenseAuditLog({
+      recordId: expenseId,
+      auditEvent: "UPDATE",
+      oldData: before as Record<string, unknown>,
+      newData: {
+        ...mapped,
+        status: "DRAFT",
+        approval_status: "PENDING",
+        audit_event_detail: "SEND_FOR_APPROVAL",
+      },
+    });
+
+    revalidateExpenseCaches(expenseId);
+    revalidateApprovalCenterIfPending(true);
+
+    return {
+      data: mapped,
+      error: null,
+      pending_approval: true,
+      successMessage: PENDING_APPROVAL_TOAST_MESSAGE,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "ส่งขออนุมัติไม่สำเร็จ";
+    console.error("[sendExpenseForApproval]", message);
+    return { data: null, error: message };
+  }
+}
+
+/**
  * Confirm DRAFT → ISSUED and assign EXP-YYMM-XXXX via generate_expense_no.
  * YYMM bucket uses CURRENT_DATE at ISSUE time (not expense_date) — see RPC.
+ * Guardrail: grand_total > threshold ต้องใช้ sendExpenseForApproval แทน
  */
 export async function issueExpense(id: string): Promise<MutateExpenseResult> {
   try {
@@ -1350,7 +1456,7 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
     const { data: before, error: beforeError } = await supabaseAdmin
       .from("expenses")
       .select(
-        "id, document_no, expense_date, category_id, vendor_id, bank_account_id, net_amount, vat_amount, grand_total, payment_method, status, remark",
+        "id, document_no, expense_date, category_id, vendor_id, bank_account_id, net_amount, vat_amount, grand_total, payment_method, status, approval_status, remark",
       )
       .eq("id", expenseId)
       .maybeSingle();
@@ -1368,63 +1474,26 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
       };
     }
 
-    const expenseApproval = expenseApprovalStatusFields(before.grand_total);
-    const pendingApproval = expenseApproval.approval_status === "PENDING";
-    const nowIso = new Date().toISOString();
-
-    // Maker-Checker: grand_total > threshold → keep DRAFT + PENDING (Checker issues)
-    if (pendingApproval) {
-      const { data: updated, error: updateError } = await supabaseAdmin
-        .from("expenses")
-        .update({
-          approval_status: "PENDING",
-          approved_by: null,
-          approved_at: null,
-          updated_at: nowIso,
-        })
-        .eq("id", expenseId)
-        .eq("status", "DRAFT")
-        .select(EXPENSE_ROW_SELECT)
-        .maybeSingle();
-
-      if (updateError) {
-        return (
-          mapDuplicateExpenseError(updateError) ?? {
-            data: null,
-            error: updateError.message,
-          }
-        );
-      }
-      if (!updated) {
-        return {
-          data: null,
-          error: "ส่งเข้ารออนุมัติไม่สำเร็จ (อาจถูกแก้ไขไปแล้ว)",
-        };
-      }
-
-      const mapped = mapExpenseRow(updated as Record<string, unknown>);
-      fireExpenseAuditLog({
-        recordId: expenseId,
-        auditEvent: "UPDATE",
-        oldData: before as Record<string, unknown>,
-        newData: {
-          ...mapped,
-          status: "DRAFT",
-          approval_status: "PENDING",
-        },
-      });
-
-      revalidateExpenseCaches(expenseId);
-      revalidateApprovalCenterIfPending(true);
-
+    if (requiresExpenseApproval(before.grand_total)) {
       return {
-        data: mapped,
-        error: null,
-        pending_approval: true,
-        successMessage: PENDING_APPROVAL_TOAST_MESSAGE,
+        data: null,
+        error:
+          "ยอดเกินเกณฑ์อนุมัติ — กรุณาใช้ปุ่ม ส่งขออนุมัติ แทนการออกเอกสารโดยตรง",
       };
     }
 
+    const approvalStatus = String(before.approval_status ?? "APPROVED");
+    if (approvalStatus === "PENDING" || approvalStatus === "REJECTED") {
+      return {
+        data: null,
+        error:
+          approvalStatus === "PENDING"
+            ? "เอกสารรออนุมัติอยู่ — ยังออกเอกสารไม่ได้"
+            : "เอกสารถูกปฏิเสธ — กรุณาส่งขออนุมัติใหม่ก่อนออกเอกสาร",
+      };
+    }
+
+    const nowIso = new Date().toISOString();
     let officialNo = String(before.document_no ?? "");
     const expenseDate = String(before.expense_date ?? "").slice(0, 10);
 
@@ -1454,9 +1523,9 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
       .update({
         document_no: officialNo,
         status: "ISSUED",
-        approval_status: expenseApproval.approval_status,
-        approved_by: expenseApproval.approved_by,
-        approved_at: expenseApproval.approved_at,
+        approval_status: "APPROVED",
+        approved_by: null,
+        approved_at: null,
         updated_at: nowIso,
       })
       .eq("id", expenseId)
@@ -1488,7 +1557,7 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
         ...mapped,
         status: "ISSUED",
         document_no: officialNo,
-        approval_status: expenseApproval.approval_status,
+        approval_status: "APPROVED",
       },
     });
 
