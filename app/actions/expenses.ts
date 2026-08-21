@@ -357,15 +357,13 @@ async function replaceExpenseInstallments(
     return { error: null };
   }
 
+  // `total_installment` is a GENERATED column — never send it in INSERT.
   const rows = installments.map((row) => ({
     expense_id: expenseId,
     installment_period: row.installment_period,
     due_date: row.due_date,
     principal_amount: row.principal_amount,
     interest_amount: row.interest_amount,
-    total_installment: toMoney(
-      row.principal_amount + row.interest_amount,
-    ),
     is_paid: false,
   }));
 
