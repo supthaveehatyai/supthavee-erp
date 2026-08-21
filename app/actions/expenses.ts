@@ -1368,8 +1368,65 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
       };
     }
 
-    const expenseDate = String(before.expense_date ?? "").slice(0, 10);
+    const expenseApproval = expenseApprovalStatusFields(before.grand_total);
+    const pendingApproval = expenseApproval.approval_status === "PENDING";
+    const nowIso = new Date().toISOString();
+
+    // Maker-Checker: grand_total > threshold → keep DRAFT + PENDING (Checker issues)
+    if (pendingApproval) {
+      const { data: updated, error: updateError } = await supabaseAdmin
+        .from("expenses")
+        .update({
+          approval_status: "PENDING",
+          approved_by: null,
+          approved_at: null,
+          updated_at: nowIso,
+        })
+        .eq("id", expenseId)
+        .eq("status", "DRAFT")
+        .select(EXPENSE_ROW_SELECT)
+        .maybeSingle();
+
+      if (updateError) {
+        return (
+          mapDuplicateExpenseError(updateError) ?? {
+            data: null,
+            error: updateError.message,
+          }
+        );
+      }
+      if (!updated) {
+        return {
+          data: null,
+          error: "ส่งเข้ารออนุมัติไม่สำเร็จ (อาจถูกแก้ไขไปแล้ว)",
+        };
+      }
+
+      const mapped = mapExpenseRow(updated as Record<string, unknown>);
+      fireExpenseAuditLog({
+        recordId: expenseId,
+        auditEvent: "UPDATE",
+        oldData: before as Record<string, unknown>,
+        newData: {
+          ...mapped,
+          status: "DRAFT",
+          approval_status: "PENDING",
+        },
+      });
+
+      revalidateExpenseCaches(expenseId);
+      revalidateApprovalCenterIfPending(true);
+
+      return {
+        data: mapped,
+        error: null,
+        pending_approval: true,
+        successMessage: PENDING_APPROVAL_TOAST_MESSAGE,
+      };
+    }
+
     let officialNo = String(before.document_no ?? "");
+    const expenseDate = String(before.expense_date ?? "").slice(0, 10);
 
     if (isTemporaryDraftDocNo(officialNo)) {
       const { data: generated, error: rpcError } = await supabaseAdmin.rpc(
@@ -1391,10 +1448,6 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
       }
       officialNo = generated;
     }
-
-    const nowIso = new Date().toISOString();
-    const expenseApproval = expenseApprovalStatusFields(before.grand_total);
-    const pendingApproval = expenseApproval.approval_status === "PENDING";
 
     const { data: updated, error: updateError } = await supabaseAdmin
       .from("expenses")
@@ -1440,15 +1493,11 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
     });
 
     revalidateExpenseCaches(expenseId);
-    revalidateApprovalCenterIfPending(pendingApproval);
 
     return {
       data: mapped,
       error: null,
-      pending_approval: pendingApproval,
-      successMessage: pendingApproval
-        ? PENDING_APPROVAL_TOAST_MESSAGE
-        : undefined,
+      pending_approval: false,
     };
   } catch (err) {
     const message =

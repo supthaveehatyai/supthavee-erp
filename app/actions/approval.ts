@@ -4,13 +4,24 @@
  * Phase 14 — Maker-Checker Approval Server Actions.
  * Zero Client-Side Fetching: Service Role (`supabaseAdmin`) only.
  * Types live in `@/types/approval`.
+ *
+ * Cloud `approval_logs` columns (source of truth from generated types):
+ * document_id | expense_id | action | actor_id | comments | created_at
  */
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth/require-admin";
-import { logAuditTrail } from "@/lib/supabase/auditService";
+import { insertAuditLog } from "@/lib/supabase/auditService";
 import { createClient } from "@/lib/supabase/server-admin";
+import { generateDocumentNumber } from "@/lib/actions/document-actions";
+import {
+  PURCHASE_DOC_TYPES,
+  INVENTORY_DOC_TYPES,
+  resolveIssuedDocumentStatus,
+} from "@/lib/constants/document";
+import { isTemporaryDraftDocNo } from "@/lib/utils/draft-document-no";
 import type { Database } from "@/src/types/supabase";
+import type { DocumentType } from "@/types/document";
 import type {
   ApprovalDecision,
   ApprovalTargetType,
@@ -30,39 +41,12 @@ const EMPTY_PAYLOAD: PendingApprovalsPayload = {
 };
 
 type ApprovalLogInsert = {
-  target_type: ApprovalTargetType;
-  target_id: string;
-  decision: ApprovalDecision;
-  comment: string | null;
-  previous_status: ApprovalStatus | null;
-  new_status: ApprovalStatus;
-  acted_by: string | null;
-  acted_at: string;
+  document_id?: string | null;
+  expense_id?: string | null;
+  action: ApprovalDecision;
+  actor_id: string;
+  comments: string | null;
 };
-
-async function insertApprovalLog(
-  payload: ApprovalLogInsert,
-): Promise<{ error: string | null }> {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) {
-    return { error: "Missing Supabase service role configuration" };
-  }
-
-  const { createClient: createUntypedClient } = await import(
-    "@supabase/supabase-js"
-  );
-  const client = createUntypedClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-    },
-  });
-
-  const { error } = await client.from("approval_logs").insert(payload);
-  return { error: error?.message ?? null };
-}
 
 function emptyResult(error: string): GetPendingApprovalsResult {
   return { success: false, data: EMPTY_PAYLOAD, error };
@@ -71,6 +55,40 @@ function emptyResult(error: string): GetPendingApprovalsResult {
 function toMoney(value: number | string | null | undefined): number {
   const n = Number(value ?? 0);
   return Number.isFinite(n) ? n : 0;
+}
+
+function resolveDocumentDetailHref(
+  docNo: string,
+  docType: string | null,
+): string {
+  const encoded = encodeURIComponent(docNo);
+  if (
+    docType &&
+    (INVENTORY_DOC_TYPES as readonly string[]).includes(docType)
+  ) {
+    return "/inventory/adjustments";
+  }
+  if (
+    docType &&
+    (PURCHASE_DOC_TYPES as readonly string[]).includes(docType)
+  ) {
+    return `/purchases/${encoded}`;
+  }
+  return `/sales/${encoded}`;
+}
+
+async function insertApprovalLog(
+  payload: ApprovalLogInsert,
+): Promise<{ error: string | null }> {
+  try {
+    const supabaseAdmin = createClient();
+    const { error } = await supabaseAdmin.from("approval_logs").insert(payload);
+    return { error: error?.message ?? null };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "บันทึก approval_logs ไม่สำเร็จ",
+    };
+  }
 }
 
 async function resolveUserDisplay(
@@ -139,6 +157,7 @@ function mapDocumentRow(
     grand_total: toMoney(row.grand_total),
     created_by_name: profile?.name ?? null,
     created_by_email: profile?.email ?? null,
+    detail_href: resolveDocumentDetailHref(row.doc_no, row.doc_type),
   };
 }
 
@@ -164,12 +183,16 @@ function mapExpenseRow(
     grand_total: toMoney(row.grand_total),
     created_by_name: profile?.name ?? null,
     created_by_email: profile?.email ?? null,
+    detail_href: `/expenses/${row.id}`,
   };
 }
 
-function revalidateApprovalCaches() {
+function revalidateApprovalCaches(paths: string[] = []) {
   revalidatePath(APPROVALS_PATH);
   revalidatePath(APPROVALS_PATH, "layout");
+  for (const path of paths) {
+    revalidatePath(path);
+  }
 }
 
 /**
@@ -230,9 +253,7 @@ export async function getPendingApprovals(): Promise<GetPendingApprovalsResult> 
     const documents = documentRows.map((row) =>
       mapDocumentRow(row, creatorByDocId.get(row.id) ?? null, profileMap),
     );
-    const expenses = expenseRows.map((row) =>
-      mapExpenseRow(row, profileMap),
-    );
+    const expenses = expenseRows.map((row) => mapExpenseRow(row, profileMap));
 
     return {
       success: true,
@@ -245,8 +266,55 @@ export async function getPendingApprovals(): Promise<GetPendingApprovalsResult> 
   }
 }
 
+async function postInventoryAdjustmentLedger(
+  documentId: string,
+  docNo: string,
+  docType: string,
+  remark: string | null,
+): Promise<{ error: string | null }> {
+  const supabaseAdmin = createClient();
+  const { data: items, error: itemsError } = await supabaseAdmin
+    .from("document_items")
+    .select("product_id, qty, unit_cost_price")
+    .eq("document_id", documentId);
+
+  if (itemsError) {
+    return { error: itemsError.message };
+  }
+
+  const lines = (items ?? []).filter((row) => Boolean(row.product_id));
+  if (lines.length === 0) {
+    return { error: null };
+  }
+
+  const ledgerPayload = lines.map((line) => {
+    const qty = Number(line.qty ?? 0);
+    const absQty = Math.abs(Math.trunc(qty));
+    const unitCost = Number(line.unit_cost_price ?? 0);
+    const isOb = docType === "STK_OB";
+    const transType = isOb || qty > 0 ? "IN" : "OUT";
+    return {
+      product_id: line.product_id as string,
+      doc_header_id: null as string | null,
+      trans_type: transType,
+      qty: absQty,
+      notes: isOb
+        ? `${docType} ${docNo} | document_id=${documentId} | unit_cost=${unitCost.toFixed(4)}${remark ? ` | ${remark}` : ""}`
+        : `${docType} ${docNo} | document_id=${documentId} | adj=${qty > 0 ? "+" : "-"}${absQty}${remark ? ` | ${remark}` : ""}`,
+    };
+  });
+
+  const { error: ledgerError } = await supabaseAdmin
+    .from("inventory_ledger")
+    .insert(ledgerPayload);
+
+  return { error: ledgerError?.message ?? null };
+}
+
 /**
- * อนุมัติหรือปฏิเสธรายการ — บันทึก approval_logs
+ * อนุมัติหรือปฏิเสธรายการ — บันทึก approval_logs + audit_logs
+ * APPROVED → approval_status APPROVED + status ISSUED/COMPLETED + Late Numbering
+ * REJECTED → approval_status REJECTED (คง DRAFT)
  */
 export async function processApproval(
   targetId: string,
@@ -281,17 +349,24 @@ export async function processApproval(
 
     const supabaseAdmin = createClient();
     const nowIso = new Date().toISOString();
-    const newStatus: ApprovalStatus =
+    const newApprovalStatus: ApprovalStatus =
       action === "APPROVED" ? "APPROVED" : "REJECTED";
     const actorId = gate.admin.userId;
+    if (!actorId) {
+      return { success: false, error: "ไม่พบผู้ใช้งานที่กำลังอนุมัติ" };
+    }
 
-    let previousStatus: ApprovalStatus | null = null;
+    let previousApproval: ApprovalStatus | null = null;
+    let previousStatus: string | null = null;
     let documentNo = trimmedId;
+    let revalidateExtra: string[] = [];
 
     if (type === "DOCUMENT") {
       const { data: existing, error: lookupError } = await supabaseAdmin
         .from("documents")
-        .select("id, doc_no, approval_status")
+        .select(
+          "id, doc_no, doc_type, doc_date, status, approval_status, notes, paid_amount, grand_total, payment_status",
+        )
         .eq("id", trimmedId)
         .maybeSingle();
 
@@ -308,25 +383,111 @@ export async function processApproval(
         };
       }
 
-      previousStatus = existing.approval_status;
+      previousApproval = existing.approval_status;
+      previousStatus = existing.status;
       documentNo = existing.doc_no;
+      const docType = existing.doc_type as DocumentType;
 
-      const { error: updateError } = await supabaseAdmin
-        .from("documents")
-        .update({
-          approval_status: newStatus,
+      if (action === "APPROVED") {
+        let officialDocNo = String(existing.doc_no ?? "");
+        const issueDate = nowIso.slice(0, 10);
+        const issuedStatus = resolveIssuedDocumentStatus(docType);
+
+        if (isTemporaryDraftDocNo(officialDocNo)) {
+          const numberResult = await generateDocumentNumber(
+            docType,
+            existing.doc_date ?? issueDate,
+          );
+          if (numberResult.error || !numberResult.data) {
+            return {
+              success: false,
+              error:
+                numberResult.error ??
+                "สร้างเลขที่เอกสารทางการไม่สำเร็จ — ยังไม่อนุมัติ",
+            };
+          }
+          officialDocNo = numberResult.data;
+        }
+
+        const updatePayload = {
+          approval_status: "APPROVED" as const,
           approved_by: actorId,
           approved_at: nowIso,
-        })
-        .eq("id", trimmedId);
+          status: issuedStatus,
+          updated_at: nowIso,
+          doc_no: officialDocNo,
+          ...(isTemporaryDraftDocNo(String(existing.doc_no ?? ""))
+            ? { doc_date: existing.doc_date ?? issueDate }
+            : {}),
+        };
 
-      if (updateError) {
-        return { success: false, error: updateError.message };
+        const { error: updateError } = await supabaseAdmin
+          .from("documents")
+          .update(updatePayload)
+          .eq("id", trimmedId)
+          .eq("approval_status", "PENDING");
+
+        if (updateError) {
+          return { success: false, error: updateError.message };
+        }
+
+        documentNo = officialDocNo;
+
+        if (
+          (INVENTORY_DOC_TYPES as readonly string[]).includes(docType) &&
+          String(existing.status) === "DRAFT"
+        ) {
+          const ledgerResult = await postInventoryAdjustmentLedger(
+            trimmedId,
+            officialDocNo,
+            docType,
+            existing.notes ?? null,
+          );
+          if (ledgerResult.error) {
+            await supabaseAdmin
+              .from("documents")
+              .update({
+                approval_status: "PENDING",
+                approved_by: null,
+                approved_at: null,
+                status: "DRAFT",
+                doc_no: existing.doc_no,
+                updated_at: nowIso,
+              })
+              .eq("id", trimmedId);
+            return {
+              success: false,
+              error: `ตัดสต็อกไม่สำเร็จ: ${ledgerResult.error}`,
+            };
+          }
+          revalidateExtra.push("/inventory/adjustments", "/inventory/ledger");
+        }
+
+        revalidateExtra.push(
+          resolveDocumentDetailHref(officialDocNo, docType),
+        );
+      } else {
+        const { error: updateError } = await supabaseAdmin
+          .from("documents")
+          .update({
+            approval_status: "REJECTED",
+            approved_by: actorId,
+            approved_at: nowIso,
+            updated_at: nowIso,
+          })
+          .eq("id", trimmedId)
+          .eq("approval_status", "PENDING");
+
+        if (updateError) {
+          return { success: false, error: updateError.message };
+        }
       }
     } else if (type === "EXPENSE") {
       const { data: existing, error: lookupError } = await supabaseAdmin
         .from("expenses")
-        .select("id, document_no, approval_status")
+        .select(
+          "id, document_no, expense_date, approval_status, status, grand_total",
+        )
         .eq("id", trimmedId)
         .maybeSingle();
 
@@ -343,53 +504,105 @@ export async function processApproval(
         };
       }
 
-      previousStatus = existing.approval_status;
+      previousApproval = existing.approval_status;
+      previousStatus = String(existing.status);
       documentNo = existing.document_no;
 
-      const { error: updateError } = await supabaseAdmin
-        .from("expenses")
-        .update({
-          approval_status: newStatus,
-          approved_by: actorId,
-          approved_at: nowIso,
-        })
-        .eq("id", trimmedId);
+      if (action === "APPROVED") {
+        let officialNo = String(existing.document_no ?? "");
+        const expenseDate = String(existing.expense_date ?? "").slice(0, 10);
 
-      if (updateError) {
-        return { success: false, error: updateError.message };
+        if (isTemporaryDraftDocNo(officialNo)) {
+          const { data: generated, error: rpcError } = await supabaseAdmin.rpc(
+            "generate_expense_no",
+            { p_expense_date: expenseDate },
+          );
+          if (rpcError) {
+            return {
+              success: false,
+              error:
+                rpcError.message ||
+                "สร้างเลขที่เอกสาร EXP ไม่สำเร็จ — ตรวจว่า migration generate_expense_no รันแล้ว",
+            };
+          }
+          if (!generated || typeof generated !== "string") {
+            return {
+              success: false,
+              error: "RPC generate_expense_no ไม่คืนเลขที่เอกสาร",
+            };
+          }
+          officialNo = generated;
+        }
+
+        const { error: updateError } = await supabaseAdmin
+          .from("expenses")
+          .update({
+            document_no: officialNo,
+            status: "ISSUED",
+            approval_status: "APPROVED",
+            approved_by: actorId,
+            approved_at: nowIso,
+            updated_at: nowIso,
+          })
+          .eq("id", trimmedId)
+          .eq("approval_status", "PENDING");
+
+        if (updateError) {
+          return { success: false, error: updateError.message };
+        }
+
+        documentNo = officialNo;
+        revalidateExtra.push(`/expenses/${trimmedId}`, "/expenses");
+      } else {
+        const { error: updateError } = await supabaseAdmin
+          .from("expenses")
+          .update({
+            approval_status: "REJECTED",
+            approved_by: actorId,
+            approved_at: nowIso,
+            updated_at: nowIso,
+          })
+          .eq("id", trimmedId)
+          .eq("approval_status", "PENDING");
+
+        if (updateError) {
+          return { success: false, error: updateError.message };
+        }
+        revalidateExtra.push(`/expenses/${trimmedId}`, "/expenses");
       }
     } else {
       return { success: false, error: "ประเภทเป้าหมายไม่ถูกต้อง" };
     }
 
-    const logInsert = {
-      target_type: type,
-      target_id: trimmedId,
-      decision: action,
-      comment: trimmedComment || null,
-      previous_status: previousStatus,
-      new_status: newStatus,
-      acted_by: actorId,
-      acted_at: nowIso,
+    const logInsert: ApprovalLogInsert = {
+      document_id: type === "DOCUMENT" ? trimmedId : null,
+      expense_id: type === "EXPENSE" ? trimmedId : null,
+      action,
+      actor_id: actorId,
+      comments: trimmedComment || null,
     };
 
     const { error: logError } = await insertApprovalLog(logInsert);
 
     if (logError) {
-      const rollbackPayload = {
-        approval_status: "PENDING" as ApprovalStatus,
-        approved_by: null,
-        approved_at: null,
-      };
+      // Best-effort rollback of approval fields only (avoid typed status mismatch)
       if (type === "DOCUMENT") {
         await supabaseAdmin
           .from("documents")
-          .update(rollbackPayload)
+          .update({
+            approval_status: "PENDING",
+            approved_by: null,
+            approved_at: null,
+          })
           .eq("id", trimmedId);
       } else {
         await supabaseAdmin
           .from("expenses")
-          .update(rollbackPayload)
+          .update({
+            approval_status: "PENDING",
+            approved_by: null,
+            approved_at: null,
+          })
           .eq("id", trimmedId);
       }
       return {
@@ -398,21 +611,34 @@ export async function processApproval(
       };
     }
 
-    await logAuditTrail(
-      type === "DOCUMENT" ? "documents" : "expenses",
-      trimmedId,
-      "UPDATE",
-      { approval_status: previousStatus },
-      {
-        approval_status: newStatus,
+    await insertAuditLog({
+      tableName: type === "DOCUMENT" ? "documents" : "expenses",
+      recordId: trimmedId,
+      action: "UPDATE",
+      oldData: {
+        approval_status: previousApproval,
+        status: previousStatus,
+        document_no: documentNo,
+      },
+      newData: {
+        approval_status: newApprovalStatus,
+        status:
+          action === "APPROVED"
+            ? type === "EXPENSE"
+              ? "ISSUED"
+              : previousStatus === "DRAFT"
+                ? "ISSUED"
+                : previousStatus
+            : previousStatus,
         approved_by: actorId,
         approved_at: nowIso,
         approval_decision: action,
         approval_comment: trimmedComment || null,
+        document_no: documentNo,
       },
-    );
+    });
 
-    revalidateApprovalCaches();
+    revalidateApprovalCaches(revalidateExtra);
 
     return { success: true };
   } catch (err) {

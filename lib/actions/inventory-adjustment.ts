@@ -16,17 +16,18 @@ import {
   resolveInitialPaymentStatus,
   resolveIssuedDocumentStatus,
 } from "@/lib/constants/document";
-import {
-  assertStockOutAvailability,
-  excludeServiceLines,
-  loadServiceProductIdSet,
-} from "@/lib/inventory/stock-availability";
+import { generateDraftDocumentNo } from "@/lib/utils/draft-document-no";
 import {
   approvalStatusFields,
   buildIssueSuccessMessage,
   isPendingApprovalStatus,
 } from "@/lib/approval/approval-rules";
 import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
+import {
+  assertStockOutAvailability,
+  excludeServiceLines,
+  loadServiceProductIdSet,
+} from "@/lib/inventory/stock-availability";
 import type {
   AdjustInventoryInput,
   AdjustInventoryResult,
@@ -324,10 +325,14 @@ export async function adjustInventory(
       }
     }
 
-    const numberResult = await generateDocumentNumber(
-      docType as DocumentType,
-      docDate,
+    const documentApproval = approvalStatusFields(docType);
+    const pendingApproval = isPendingApprovalStatus(
+      documentApproval.approval_status,
     );
+
+    const numberResult = pendingApproval
+      ? { data: generateDraftDocumentNo(), error: null as string | null }
+      : await generateDocumentNumber(docType as DocumentType, docDate);
     if (!numberResult.data) {
       return {
         success: false,
@@ -338,17 +343,14 @@ export async function adjustInventory(
     const nowIso = new Date().toISOString();
     const issuedStatus = resolveIssuedDocumentStatus(docType);
     const paymentStatus = resolveInitialPaymentStatus(docType);
-    const documentApproval = approvalStatusFields(docType);
-    const pendingApproval = isPendingApprovalStatus(
-      documentApproval.approval_status,
-    );
+    const headerStatus = pendingApproval ? "DRAFT" : issuedStatus;
 
     const { data: document, error: docError } = await supabase
       .from("documents")
       .insert({
         doc_no: docNo,
         doc_type: docType,
-        status: issuedStatus,
+        status: headerStatus,
         doc_date: docDate,
         contact_id: null,
         sub_total: 0,
@@ -418,6 +420,34 @@ export async function adjustInventory(
       return {
         success: false,
         error: itemsError.message ?? "บันทึกรายการสินค้าไม่สำเร็จ",
+      };
+    }
+
+    // Maker-Checker (STK_ADJ): defer ledger + cost updates until Checker approves
+    if (pendingApproval) {
+      void logAuditTrail("documents", documentId, "INSERT", null, {
+        doc_no: docNo,
+        doc_type: docType,
+        status: "DRAFT",
+        approval_status: "PENDING",
+        doc_date: docDate,
+        remark: remark || null,
+        line_count: stockLines.length,
+        audit_event: "SUBMIT_APPROVAL",
+      }).catch((auditErr) => {
+        console.error("[adjustInventory] audit log failed:", auditErr);
+      });
+
+      revalidatePath("/inventory/adjustments");
+      revalidateApprovalCenterIfPending(true);
+
+      return {
+        success: true,
+        document_id: documentId,
+        doc_no: docNo,
+        pending_approval: true,
+        successMessage: buildIssueSuccessMessage(docNo, true),
+        error: null,
       };
     }
 

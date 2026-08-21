@@ -1867,6 +1867,66 @@ export async function issueDocument(
     }
 
     const docType = document.doc_type as DocumentType;
+    const documentApproval = approvalStatusFields(docType);
+    const pendingApproval = isPendingApprovalStatus(
+      documentApproval.approval_status,
+    );
+
+    // Maker-Checker: sensitive doc types stay DRAFT + PENDING until Checker approves
+    if (pendingApproval) {
+      const nowIso = new Date().toISOString();
+      const { error: pendingError } = await supabase
+        .from("documents")
+        .update({
+          approval_status: "PENDING",
+          approved_by: null,
+          approved_at: null,
+          updated_at: nowIso,
+        })
+        .eq("id", id)
+        .eq("status", "DRAFT");
+
+      if (pendingError) {
+        return { data: null, error: pendingError.message };
+      }
+
+      fireDocumentAuditLog({
+        recordId: id,
+        auditEvent: "UPDATE",
+        oldData: {
+          id: document.id,
+          doc_no: document.doc_no,
+          doc_type: document.doc_type,
+          status: document.status,
+          approval_status: null,
+        },
+        newData: {
+          id,
+          doc_no: document.doc_no,
+          doc_type: docType,
+          status: "DRAFT",
+          approval_status: "PENDING",
+        },
+      });
+
+      revalidateApprovalCenterIfPending(true);
+
+      return {
+        data: {
+          document_id: id,
+          document_no: String(document.doc_no),
+          status: "DRAFT",
+          ledger_count: 0,
+          pending_approval: true,
+          successMessage: buildIssueSuccessMessage(
+            String(document.doc_no),
+            true,
+          ),
+        },
+        error: null,
+      };
+    }
+
     const issuedStatus = resolveIssuedDocumentStatus(docType);
     const paymentStatus = resolveInitialPaymentStatus(docType);
     const grandTotal = Number(document.grand_total ?? 0);
@@ -1874,10 +1934,6 @@ export async function issueDocument(
       paymentStatus === "PAID" ? grandTotal : Number(document.paid_amount ?? 0);
     const nowIso = new Date().toISOString();
     const issueDate = nowIso.slice(0, 10);
-    const documentApproval = approvalStatusFields(docType);
-    const pendingApproval = isPendingApprovalStatus(
-      documentApproval.approval_status,
-    );
 
     let officialDocNo = String(document.doc_no ?? "");
     const updatePayload: {

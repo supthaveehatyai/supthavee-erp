@@ -5,6 +5,7 @@
  */
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   CheckCircle2,
@@ -166,9 +167,12 @@ function PendingApprovalTable({
               <TableRow key={item.id}>
                 <TableCell>
                   <div className="space-y-1">
-                    <p className="font-medium text-slate-900">
+                    <Link
+                      href={item.detail_href}
+                      className="font-medium text-blue-700 underline-offset-2 hover:underline"
+                    >
                       {item.document_no}
-                    </p>
+                    </Link>
                     {item.doc_type ? (
                       <Badge variant="slate" className="font-mono text-[10px]">
                         {item.doc_type}
@@ -243,11 +247,14 @@ function PendingApprovalTable({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="reject-comment">เหตุผล (Comments)</Label>
+            <Label htmlFor="reject-comment">
+              เหตุผล (Comments) <span className="text-red-600">*</span>
+            </Label>
             <Textarea
               id="reject-comment"
               value={rejectComment}
               disabled={isPending}
+              required
               placeholder="ระบุเหตุผลที่ปฏิเสธ..."
               rows={4}
               onChange={(event) => {
@@ -262,7 +269,7 @@ function PendingApprovalTable({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isPending}>ยกเลิก</AlertDialogCancel>
             <AlertDialogAction
-              disabled={isPending}
+              disabled={isPending || !rejectComment.trim()}
               className="bg-red-600 hover:bg-red-700"
               onClick={(event) => {
                 event.preventDefault();

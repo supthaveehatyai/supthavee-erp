@@ -40,7 +40,7 @@
 - `document_allocations` (การจัดสรรเอกสาร เช่น ตัดมัดจำ)
 - `billing_note_items` (รายการใบวางบิล)
 - `expenses` (บิลค่าใช้จ่าย / OPEX — มี `approval_status`, `approved_by`, `approved_at`)
-- `approval_logs` (Phase 14 Maker-Checker — ประวัติการอนุมัติ/ปฏิเสธ: `target_type` DOCUMENT|EXPENSE, `target_id`, `decision` APPROVED|REJECTED, `comment`, `previous_status`, `new_status`, `acted_by`, `acted_at` — RLS: service_role only)
+- `approval_logs` (Phase 14 Maker-Checker — ประวัติอนุมัติ/ปฏิเสธ: `document_id`, `expense_id`, `action`, `actor_id`, `comments`, `created_at` — RLS: service_role only)
 - `accounting_periods` (งวดบัญชีรายเดือน — Period Closing: `period_year`, `period_month`, `is_closed`, `closed_at`, `closed_by`)
 - `payment_transactions` (ธุรกรรมการรับ/จ่าย)
 - `payment_allocations` (การตัดยอดหนี้ Knock-off)

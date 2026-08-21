@@ -18,6 +18,8 @@ export type PendingApprovalItem = {
   grand_total: number;
   created_by_name: string | null;
   created_by_email: string | null;
+  /** Server-resolved detail page for Maker-Checker review. */
+  detail_href: string;
 };
 
 export type PendingApprovalsPayload = {
