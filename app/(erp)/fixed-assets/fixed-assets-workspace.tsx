@@ -13,8 +13,8 @@ import type {
   FixedAssetListItem,
   FixedAssetStatus,
   LinkableExpenseOption,
-} from "@/types/fixed-asset";
-import { FIXED_ASSET_STATUS_LABELS } from "@/types/fixed-asset";
+} from "@/types/fixed-assets";
+import { FIXED_ASSET_STATUS_LABELS } from "@/types/fixed-assets";
 import {
   AlertDialog,
   AlertDialogAction,

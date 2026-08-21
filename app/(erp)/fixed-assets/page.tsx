@@ -6,11 +6,14 @@ import {
   getFixedAssets,
   getLinkableExpenses,
 } from "@/app/actions/fixed-assets";
-import type { FixedAssetStatus } from "@/types/fixed-asset";
-import { FIXED_ASSET_STATUSES } from "@/types/fixed-asset";
+import type { FixedAssetStatus } from "@/types/fixed-assets";
+import { FIXED_ASSET_STATUSES } from "@/types/fixed-assets";
 import { FixedAssetsWorkspace } from "@/app/(erp)/fixed-assets/fixed-assets-workspace";
 
 export const dynamic = "force-dynamic";
+
+/** Allow heavy attachment uploads via Server Actions on this segment. */
+export const maxDuration = 60;
 
 export const metadata: Metadata = {
   title: "สินทรัพย์ถาวร | Fixed Assets",

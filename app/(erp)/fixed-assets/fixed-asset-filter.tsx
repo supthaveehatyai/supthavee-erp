@@ -14,7 +14,7 @@ import {
   FIXED_ASSET_STATUS_LABELS,
   FIXED_ASSET_STATUSES,
   type FixedAssetStatus,
-} from "@/types/fixed-asset";
+} from "@/types/fixed-assets";
 
 const SEARCH_DEBOUNCE_MS = 300;
 

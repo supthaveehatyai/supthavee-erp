@@ -3,7 +3,11 @@
 /**
  * Phase 14 — Fixed Asset Management Server Actions.
  * Zero Client-Side Fetching: Service Role (`supabaseAdmin`) only.
- * Types: DTOs in `@/types/fixed-asset` · DB Rows in `@/src/types/supabase`.
+ * Types live in `@/types/fixed-assets` — never export types from this file.
+ *
+ * NOTE: Do NOT export route segment config (e.g. `maxDuration`) from this file.
+ * `"use server"` modules may only export async functions (Turbopack / Vercel).
+ * Set `export const maxDuration = 60` on `app/(erp)/fixed-assets/page.tsx`.
  */
 
 import { revalidatePath } from "next/cache";
@@ -24,10 +28,8 @@ import type {
   MutateFixedAssetResult,
   UpdateFixedAssetInput,
   UploadFixedAssetAttachmentResult,
-} from "@/types/fixed-asset";
-import { FIXED_ASSET_STATUSES } from "@/types/fixed-asset";
-
-export const maxDuration = 60;
+} from "@/types/fixed-assets";
+import { FIXED_ASSET_STATUSES } from "@/types/fixed-assets";
 
 const FIXED_ASSETS_PATH = "/fixed-assets";
 const POSTGRES_UNIQUE_VIOLATION = "23505";

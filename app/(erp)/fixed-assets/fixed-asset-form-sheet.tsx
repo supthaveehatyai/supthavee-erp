@@ -20,11 +20,11 @@ import type {
   FixedAssetListItem,
   FixedAssetStatus,
   LinkableExpenseOption,
-} from "@/types/fixed-asset";
+} from "@/types/fixed-assets";
 import {
   FIXED_ASSET_STATUS_LABELS,
   FIXED_ASSET_STATUSES,
-} from "@/types/fixed-asset";
+} from "@/types/fixed-assets";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

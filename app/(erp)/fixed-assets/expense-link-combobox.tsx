@@ -7,7 +7,7 @@
 
 import { useMemo, useState } from "react";
 import { Check, ChevronsUpDown, X } from "lucide-react";
-import type { LinkableExpenseOption } from "@/types/fixed-asset";
+import type { LinkableExpenseOption } from "@/types/fixed-assets";
 import { cn } from "@/lib/utils";
 import {
   Command,
