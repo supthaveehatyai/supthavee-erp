@@ -20,6 +20,15 @@ export type AssetCategory = {
   updated_at: string;
 };
 
+/** Expense options for Link Expense combobox (ISSUED only). */
+export type LinkableExpenseOption = {
+  id: string;
+  document_no: string;
+  expense_date: string;
+  grand_total: number;
+  status: string;
+};
+
 export type FixedAssetListItem = {
   id: string;
   asset_code: string;
@@ -38,6 +47,10 @@ export type FixedAssetListItem = {
   accumulated_depreciation: number;
   net_book_value: number;
   status: FixedAssetStatus;
+  expense_id: string | null;
+  expense_document_no: string | null;
+  warranty_expiry_date: string | null;
+  attachment_urls: string[];
   created_at: string;
   updated_at: string;
 };
@@ -57,6 +70,11 @@ export type GetFixedAssetsResult = {
   error: string | null;
 };
 
+export type GetLinkableExpensesResult = {
+  data: LinkableExpenseOption[];
+  error: string | null;
+};
+
 export type CreateFixedAssetInput = {
   asset_code: string;
   asset_name: string;
@@ -66,6 +84,9 @@ export type CreateFixedAssetInput = {
   acquisition_cost: number;
   salvage_value?: number | null;
   useful_life_years?: number | null;
+  expense_id?: string | null;
+  warranty_expiry_date?: string | null;
+  attachment_urls?: string[] | null;
 };
 
 export type UpdateFixedAssetInput = {
@@ -79,6 +100,9 @@ export type UpdateFixedAssetInput = {
   salvage_value?: number | null;
   useful_life_years?: number | null;
   status: FixedAssetStatus;
+  expense_id?: string | null;
+  warranty_expiry_date?: string | null;
+  attachment_urls?: string[] | null;
 };
 
 export type MutateFixedAssetResult = {
@@ -90,6 +114,12 @@ export type MutateFixedAssetResult = {
 export type DisposeFixedAssetResult = {
   success: boolean;
   error: string | null;
+};
+
+export type UploadFixedAssetAttachmentResult = {
+  success: boolean;
+  error: string | null;
+  url?: string | null;
 };
 
 export const FIXED_ASSET_STATUS_LABELS: Record<FixedAssetStatus, string> = {

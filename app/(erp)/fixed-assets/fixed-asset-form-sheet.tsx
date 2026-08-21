@@ -13,10 +13,13 @@ import {
   createFixedAsset,
   updateFixedAsset,
 } from "@/app/actions/fixed-assets";
+import { ExpenseLinkCombobox } from "@/app/(erp)/fixed-assets/expense-link-combobox";
+import { FixedAssetAttachmentUploader } from "@/app/(erp)/fixed-assets/fixed-asset-attachment-uploader";
 import type {
   AssetCategory,
   FixedAssetListItem,
   FixedAssetStatus,
+  LinkableExpenseOption,
 } from "@/types/fixed-asset";
 import {
   FIXED_ASSET_STATUS_LABELS,
@@ -38,6 +41,7 @@ export type FixedAssetFormSheetProps = {
   open: boolean;
   mode: "create" | "edit";
   categories: AssetCategory[];
+  expenses: LinkableExpenseOption[];
   initialAsset: FixedAssetListItem | null;
 };
 
@@ -50,6 +54,9 @@ type FormState = {
   acquisition_cost: string;
   salvage_value: string;
   useful_life_years: string;
+  expense_id: string;
+  warranty_expiry_date: string;
+  attachment_urls: string[];
   status: FixedAssetStatus;
 };
 
@@ -65,6 +72,9 @@ function emptyForm(categories: AssetCategory[]): FormState {
     useful_life_years: categories[0]
       ? String(categories[0].useful_life_years)
       : "",
+    expense_id: "",
+    warranty_expiry_date: "",
+    attachment_urls: [],
     status: "ACTIVE",
   };
 }
@@ -83,6 +93,9 @@ function fromAsset(
     salvage_value: String(asset.salvage_value ?? 0),
     useful_life_years:
       asset.useful_life_years == null ? "" : String(asset.useful_life_years),
+    expense_id: asset.expense_id ?? "",
+    warranty_expiry_date: asset.warranty_expiry_date ?? "",
+    attachment_urls: asset.attachment_urls ?? [],
     status: asset.status,
   };
 }
@@ -102,6 +115,7 @@ export function FixedAssetFormSheet({
   open,
   mode,
   categories,
+  expenses,
   initialAsset,
 }: FixedAssetFormSheetProps) {
   const router = useRouter();
@@ -136,6 +150,16 @@ export function FixedAssetFormSheet({
     }));
   }
 
+  function handleExpenseSelect(expense: LinkableExpenseOption | null) {
+    setForm((prev) => ({
+      ...prev,
+      expense_id: expense?.id ?? "",
+      acquisition_cost: expense
+        ? String(expense.grand_total)
+        : prev.acquisition_cost,
+    }));
+  }
+
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isSubmitting) return;
@@ -160,6 +184,9 @@ export function FixedAssetFormSheet({
           salvage_value,
           useful_life_years,
           status: form.status,
+          expense_id: form.expense_id || null,
+          warranty_expiry_date: form.warranty_expiry_date || null,
+          attachment_urls: form.attachment_urls,
         });
         if (!result.success) {
           toast.error(result.error ?? "ไม่สามารถแก้ไขสินทรัพย์ได้");
@@ -180,6 +207,9 @@ export function FixedAssetFormSheet({
         acquisition_cost,
         salvage_value,
         useful_life_years,
+        expense_id: form.expense_id || null,
+        warranty_expiry_date: form.warranty_expiry_date || null,
+        attachment_urls: form.attachment_urls,
       });
       if (!result.success) {
         toast.error(result.error ?? "ไม่สามารถลงทะเบียนสินทรัพย์ได้");
@@ -204,7 +234,8 @@ export function FixedAssetFormSheet({
             {mode === "edit" ? "แก้ไขสินทรัพย์ถาวร" : "ลงทะเบียนสินทรัพย์ใหม่"}
           </SheetTitle>
           <SheetDescription>
-            บันทึกผ่าน Server Action เท่านั้น — ราคาทุนใช้เป็นฐานคิดค่าเสื่อม (Straight-line)
+            หมวดหมู่จาก Master Data · ผูกบิลค่าใช้จ่าย · แนบใบรับประกันผ่าน Server
+            Action
           </SheetDescription>
         </SheetHeader>
 
@@ -261,7 +292,9 @@ export function FixedAssetFormSheet({
                 disabled={isSubmitting || categories.length === 0}
               >
                 <option value="" disabled>
-                  เลือกหมวดหมู่
+                  {categories.length === 0
+                    ? "ยังไม่มีหมวดหมู่ในระบบ"
+                    : "เลือกหมวดหมู่"}
                 </option>
                 {categories.map((category) => (
                   <option key={category.id} value={category.id}>
@@ -269,6 +302,19 @@ export function FixedAssetFormSheet({
                   </option>
                 ))}
               </Select>
+            </div>
+
+            <div className="space-y-2 sm:col-span-2">
+              <Label>อ้างอิงบิลค่าใช้จ่าย (Link Expense)</Label>
+              <ExpenseLinkCombobox
+                expenses={expenses}
+                value={form.expense_id}
+                disabled={isSubmitting}
+                onSelect={handleExpenseSelect}
+              />
+              <p className="text-xs text-slate-500">
+                เมื่อเลือกบิล ISSUED ระบบจะเติมราคาทุนจากยอด Grand Total อัตโนมัติ
+              </p>
             </div>
 
             <div className="space-y-2 sm:col-span-2">
@@ -302,6 +348,22 @@ export function FixedAssetFormSheet({
                   }))
                 }
                 required
+                disabled={isSubmitting}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="warranty_expiry_date">วันหมดประกัน (Warranty)</Label>
+              <Input
+                id="warranty_expiry_date"
+                type="date"
+                value={form.warranty_expiry_date}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    warranty_expiry_date: event.target.value,
+                  }))
+                }
                 disabled={isSubmitting}
               />
             </div>
@@ -387,6 +449,17 @@ export function FixedAssetFormSheet({
                 </Select>
               </div>
             ) : null}
+
+            <div className="space-y-2 sm:col-span-2">
+              <Label>ไฟล์แนบ (ใบรับประกัน / เอกสาร)</Label>
+              <FixedAssetAttachmentUploader
+                urls={form.attachment_urls}
+                disabled={isSubmitting}
+                onChange={(urls) =>
+                  setForm((prev) => ({ ...prev, attachment_urls: urls }))
+                }
+              />
+            </div>
           </div>
 
           <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
@@ -398,7 +471,10 @@ export function FixedAssetFormSheet({
             >
               ยกเลิก
             </Button>
-            <Button type="submit" disabled={isSubmitting || categories.length === 0}>
+            <Button
+              type="submit"
+              disabled={isSubmitting || categories.length === 0}
+            >
               {isSubmitting ? (
                 <>
                   <Loader2 className="mr-2 size-4 animate-spin" />

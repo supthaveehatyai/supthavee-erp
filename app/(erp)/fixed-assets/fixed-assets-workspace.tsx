@@ -12,6 +12,7 @@ import type {
   AssetCategory,
   FixedAssetListItem,
   FixedAssetStatus,
+  LinkableExpenseOption,
 } from "@/types/fixed-asset";
 import { FIXED_ASSET_STATUS_LABELS } from "@/types/fixed-asset";
 import {
@@ -47,6 +48,8 @@ export type FixedAssetsWorkspaceProps = {
   error: string | null;
   categories: AssetCategory[];
   categoriesError: string | null;
+  expenses: LinkableExpenseOption[];
+  expensesError: string | null;
   query: string;
   status: FixedAssetStatus | "ALL";
   createOpen: boolean;
@@ -94,6 +97,8 @@ export function FixedAssetsWorkspace({
   error,
   categories,
   categoriesError,
+  expenses,
+  expensesError,
   query,
   status,
   createOpen,
@@ -168,6 +173,12 @@ export function FixedAssetsWorkspace({
         {categoriesError ? (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             {categoriesError}
+          </div>
+        ) : null}
+
+        {expensesError ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {expensesError}
           </div>
         ) : null}
 
@@ -277,6 +288,7 @@ export function FixedAssetsWorkspace({
         open={sheetOpen}
         mode={sheetMode}
         categories={categories}
+        expenses={expenses}
         initialAsset={editAsset}
       />
 

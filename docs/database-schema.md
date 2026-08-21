@@ -43,7 +43,7 @@
 - `expenses` (บิลค่าใช้จ่าย / OPEX — มี `approval_status`, `approved_by`, `approved_at`)
 - `approval_logs` (Phase 14 Maker-Checker — ประวัติอนุมัติ/ปฏิเสธ: `document_id`, `expense_id`, `action`, `actor_id`, `comments`, `created_at` — RLS: service_role only)
 - `accounting_periods` (งวดบัญชีรายเดือน — Period Closing: `period_year`, `period_month`, `is_closed`, `closed_at`, `closed_by`)
-- `fixed_assets` (ทะเบียนสินทรัพย์ถาวร — `asset_code`, `asset_name`, `category_id`, `location`, `acquisition_date`, `acquisition_cost`, `salvage_value`, `useful_life_months`, `accumulated_depreciation`, `net_book_value`, `status`)
+- `fixed_assets` (ทะเบียนสินทรัพย์ถาวร — `asset_code`, `asset_name`, `category_id`, `location`, `acquisition_date`, `acquisition_cost`, `salvage_value`, `useful_life_months`, `accumulated_depreciation`, `net_book_value`, `status`, `expense_id`, `warranty_expiry_date`, `attachment_urls`)
 - `payment_transactions` (ธุรกรรมการรับ/จ่าย)
 - `payment_allocations` (การตัดยอดหนี้ Knock-off)
 - `payment_slips` (สลิปโอนเงิน)

@@ -19,13 +19,27 @@ import type {
   FixedAssetStatus,
   GetAssetCategoriesResult,
   GetFixedAssetsResult,
+  GetLinkableExpensesResult,
+  LinkableExpenseOption,
   MutateFixedAssetResult,
   UpdateFixedAssetInput,
+  UploadFixedAssetAttachmentResult,
 } from "@/types/fixed-asset";
 import { FIXED_ASSET_STATUSES } from "@/types/fixed-asset";
 
+export const maxDuration = 60;
+
 const FIXED_ASSETS_PATH = "/fixed-assets";
 const POSTGRES_UNIQUE_VIOLATION = "23505";
+const DOCUMENT_ATTACHMENTS_BUCKET = "document_attachments";
+const ALLOWED_ATTACHMENT_MIME = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+]);
 
 type AssetCategoryRow =
   Database["public"]["Tables"]["mst_asset_categories"]["Row"];
@@ -40,13 +54,14 @@ type FixedAssetWithCategory = FixedAssetRow & {
     AssetCategoryRow,
     "category_code" | "category_name"
   > | null;
+  expenses: { document_no: string } | null;
 };
 
 const CATEGORY_SELECT =
   "id, category_code, category_name, useful_life_years, depreciation_rate, is_active, created_at, updated_at" as const;
 
 const ASSET_SELECT =
-  "id, asset_code, asset_name, category_id, location, acquisition_date, acquisition_cost, salvage_value, useful_life_months, status, accumulated_depreciation, net_book_value, created_at, updated_at, mst_asset_categories!category_id(category_code, category_name)" as const;
+  "id, asset_code, asset_name, category_id, location, acquisition_date, acquisition_cost, salvage_value, useful_life_months, status, accumulated_depreciation, net_book_value, expense_id, warranty_expiry_date, attachment_urls, created_at, updated_at, mst_asset_categories!category_id(category_code, category_name), expenses!expense_id(document_no)" as const;
 
 function revalidateFixedAssetCaches() {
   revalidatePath(FIXED_ASSETS_PATH);
@@ -94,6 +109,9 @@ function mapAssetRow(row: FixedAssetWithCategory): FixedAssetListItem {
     : "ACTIVE";
 
   const usefulLifeMonths = Number(row.useful_life_months ?? 0);
+  const urls = Array.isArray(row.attachment_urls)
+    ? row.attachment_urls.filter((url): url is string => Boolean(url?.trim()))
+    : [];
 
   return {
     id: row.id,
@@ -112,9 +130,21 @@ function mapAssetRow(row: FixedAssetWithCategory): FixedAssetListItem {
     accumulated_depreciation: Number(row.accumulated_depreciation ?? 0),
     net_book_value: Number(row.net_book_value ?? 0),
     status,
+    expense_id: row.expense_id,
+    expense_document_no: row.expenses?.document_no?.trim() || null,
+    warranty_expiry_date: row.warranty_expiry_date,
+    attachment_urls: urls,
     created_at: row.created_at ?? "",
     updated_at: row.updated_at ?? "",
   };
+}
+
+function normalizeAttachmentUrls(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((url) => String(url ?? "").trim())
+    .filter(Boolean)
+    .slice(0, 20);
 }
 
 function validateAssetPayload(input: {
@@ -125,12 +155,19 @@ function validateAssetPayload(input: {
   acquisition_cost: number;
   salvage_value: number;
   useful_life_years: number | null;
+  warranty_expiry_date: string | null;
 }): string | null {
   if (!input.asset_code) return "กรุณาระบุรหัสสินทรัพย์";
   if (!input.asset_name) return "กรุณาระบุชื่อทรัพย์สิน";
   if (!input.category_id) return "กรุณาเลือกหมวดหมู่";
   if (!isIsoDate(input.purchase_date)) {
     return "วันที่ซื้อไม่ถูกต้อง (รูปแบบ YYYY-MM-DD)";
+  }
+  if (
+    input.warranty_expiry_date &&
+    !isIsoDate(input.warranty_expiry_date)
+  ) {
+    return "วันหมดประกันไม่ถูกต้อง (รูปแบบ YYYY-MM-DD)";
   }
   if (!Number.isFinite(input.acquisition_cost) || input.acquisition_cost < 0) {
     return "ราคาทุนต้องเป็นตัวเลขที่ไม่ติดลบ";
@@ -153,7 +190,8 @@ function validateAssetPayload(input: {
 }
 
 /**
- * Read active (+ optionally inactive) asset categories from Master Data.
+ * ดึงหมวดหมู่สินทรัพย์ทั้งหมดจาก `mst_asset_categories` เรียงตาม `category_name`.
+ * ค่าเริ่มต้น: เฉพาะ is_active = true
  */
 export async function getAssetCategories(options?: {
   activeOnly?: boolean;
@@ -185,6 +223,125 @@ export async function getAssetCategories(options?: {
   } catch (err) {
     console.error("[getAssetCategories]", err);
     return { data: [], error: "ไม่สามารถดึงหมวดหมู่สินทรัพย์ได้" };
+  }
+}
+
+/**
+ * รายการบิลค่าใช้จ่ายสำหรับ Link Expense (สถานะ ISSUED) — แสดงเลขที่ + ยอดเงิน.
+ */
+export async function getLinkableExpenses(
+  limit = 200,
+): Promise<GetLinkableExpensesResult> {
+  try {
+    const safeLimit = Math.min(Math.max(Number(limit) || 200, 1), 500);
+    const supabaseAdmin = createClient();
+    const { data, error } = await supabaseAdmin
+      .from("expenses")
+      .select("id, document_no, expense_date, grand_total, status")
+      .eq("status", "ISSUED")
+      .order("expense_date", { ascending: false })
+      .order("document_no", { ascending: false })
+      .limit(safeLimit);
+
+    if (error) {
+      console.error("[getLinkableExpenses]", error.message, error);
+      return {
+        data: [],
+        error: error.message ?? "ไม่สามารถดึงรายการบิลค่าใช้จ่ายได้",
+      };
+    }
+
+    const rows: LinkableExpenseOption[] = (data ?? []).map((row) => ({
+      id: String(row.id),
+      document_no: String(row.document_no ?? ""),
+      expense_date: String(row.expense_date ?? ""),
+      grand_total: Number(row.grand_total ?? 0),
+      status: String(row.status ?? "ISSUED"),
+    }));
+
+    return { data: rows.filter((row) => Boolean(row.id)), error: null };
+  } catch (err) {
+    console.error("[getLinkableExpenses]", err);
+    return { data: [], error: "ไม่สามารถดึงรายการบิลค่าใช้จ่ายได้" };
+  }
+}
+
+/**
+ * อัปโหลดไฟล์แนบสินทรัพย์เข้า Storage bucket `document_attachments`.
+ * FormData key: `file` — คืน public URL ให้เก็บลง `attachment_urls`.
+ */
+export async function uploadFixedAssetAttachment(
+  formData: FormData,
+): Promise<UploadFixedAssetAttachmentResult> {
+  try {
+    const fileEntry = formData.get("file");
+    if (!(fileEntry instanceof File) || fileEntry.size <= 0) {
+      return { success: false, error: "กรุณาเลือกไฟล์ที่จะอัปโหลด" };
+    }
+
+    const mimeType = (fileEntry.type || "").toLowerCase();
+    if (mimeType && !ALLOWED_ATTACHMENT_MIME.has(mimeType)) {
+      return {
+        success: false,
+        error: `ประเภทไฟล์ไม่รองรับ (${mimeType || "unknown"}) — ใช้ JPG/PNG/WEBP/GIF/PDF`,
+      };
+    }
+
+    const maxBytes = 10 * 1024 * 1024;
+    if (fileEntry.size > maxBytes) {
+      return { success: false, error: "ไฟล์ใหญ่เกิน 10MB" };
+    }
+
+    const now = new Date();
+    const yyyy = String(now.getUTCFullYear());
+    const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+    const safeName = fileEntry.name
+      .replace(/[^\w.\-ก-๙]+/g, "_")
+      .replace(/_+/g, "_")
+      .slice(0, 120);
+    const extFromName = safeName.includes(".")
+      ? safeName.slice(safeName.lastIndexOf("."))
+      : mimeType === "application/pdf"
+        ? ".pdf"
+        : mimeType === "image/png"
+          ? ".png"
+          : mimeType === "image/webp"
+            ? ".webp"
+            : mimeType === "image/gif"
+              ? ".gif"
+              : ".jpg";
+    const objectPath = `fixed-assets/${yyyy}/${mm}/${crypto.randomUUID()}${extFromName}`;
+    const buffer = Buffer.from(await fileEntry.arrayBuffer());
+
+    const supabaseAdmin = createClient();
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from(DOCUMENT_ATTACHMENTS_BUCKET)
+      .upload(objectPath, buffer, {
+        contentType: mimeType || "application/octet-stream",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      console.error("[uploadFixedAssetAttachment]", uploadError.message);
+      return {
+        success: false,
+        error: uploadError.message ?? "อัปโหลดไฟล์ขึ้น Storage ไม่สำเร็จ",
+      };
+    }
+
+    const { data: publicData } = supabaseAdmin.storage
+      .from(DOCUMENT_ATTACHMENTS_BUCKET)
+      .getPublicUrl(objectPath);
+
+    const url = publicData?.publicUrl?.trim();
+    if (!url) {
+      return { success: false, error: "อัปโหลดสำเร็จ แต่สร้าง URL ไม่ได้" };
+    }
+
+    return { success: true, error: null, url };
+  } catch (err) {
+    console.error("[uploadFixedAssetAttachment]", err);
+    return { success: false, error: "อัปโหลดไฟล์แนบไม่สำเร็จ" };
   }
 }
 
@@ -255,6 +412,10 @@ export async function createFixedAsset(
       usefulLifeRaw == null || String(usefulLifeRaw).trim() === ""
         ? null
         : Number(usefulLifeRaw);
+    const expense_id = String(input.expense_id ?? "").trim() || null;
+    const warrantyRaw = String(input.warranty_expiry_date ?? "").trim();
+    const warranty_expiry_date = warrantyRaw || null;
+    const attachment_urls = normalizeAttachmentUrls(input.attachment_urls);
 
     const validationError = validateAssetPayload({
       asset_code,
@@ -267,6 +428,7 @@ export async function createFixedAsset(
         useful_life_years == null || Number.isNaN(useful_life_years)
           ? null
           : useful_life_years,
+      warranty_expiry_date,
     });
     if (validationError) {
       return { success: false, error: validationError };
@@ -301,6 +463,9 @@ export async function createFixedAsset(
       accumulated_depreciation: 0,
       net_book_value: acquisition_cost,
       status: "ACTIVE",
+      expense_id,
+      warranty_expiry_date,
+      attachment_urls,
     };
 
     const { data, error } = await supabaseAdmin
@@ -368,6 +533,10 @@ export async function updateFixedAsset(
     if (!isFixedAssetStatus(statusRaw)) {
       return { success: false, error: "สถานะสินทรัพย์ไม่ถูกต้อง" };
     }
+    const expense_id = String(input.expense_id ?? "").trim() || null;
+    const warrantyRaw = String(input.warranty_expiry_date ?? "").trim();
+    const warranty_expiry_date = warrantyRaw || null;
+    const attachment_urls = normalizeAttachmentUrls(input.attachment_urls);
 
     const validationError = validateAssetPayload({
       asset_code,
@@ -380,6 +549,7 @@ export async function updateFixedAsset(
         useful_life_years == null || Number.isNaN(useful_life_years)
           ? null
           : useful_life_years,
+      warranty_expiry_date,
     });
     if (validationError) {
       return { success: false, error: validationError };
@@ -421,6 +591,9 @@ export async function updateFixedAsset(
       useful_life_months: yearsToMonths(resolvedYears),
       net_book_value: roundMoney(Math.max(0, acquisition_cost - accumulated)),
       status: statusRaw,
+      expense_id,
+      warranty_expiry_date,
+      attachment_urls,
     };
 
     const { error } = await supabaseAdmin

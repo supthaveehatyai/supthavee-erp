@@ -4,6 +4,7 @@ import {
   getAssetCategories,
   getFixedAssetById,
   getFixedAssets,
+  getLinkableExpenses,
 } from "@/app/actions/fixed-assets";
 import type { FixedAssetStatus } from "@/types/fixed-asset";
 import { FIXED_ASSET_STATUSES } from "@/types/fixed-asset";
@@ -43,13 +44,15 @@ export default async function FixedAssetsPage({ searchParams }: PageProps) {
   const createOpen = params.create === "1" || params.create === "true";
   const editId = params.edit_id?.trim() || null;
 
-  const [assetsResult, categoriesResult, editResult] = await Promise.all([
-    getFixedAssets({ query, status }),
-    getAssetCategories({ activeOnly: true }),
-    editId
-      ? getFixedAssetById(editId)
-      : Promise.resolve({ data: null, error: null }),
-  ]);
+  const [assetsResult, categoriesResult, expensesResult, editResult] =
+    await Promise.all([
+      getFixedAssets({ query, status }),
+      getAssetCategories({ activeOnly: true }),
+      getLinkableExpenses(),
+      editId
+        ? getFixedAssetById(editId)
+        : Promise.resolve({ data: null, error: null }),
+    ]);
 
   const editAsset = editResult.data;
 
@@ -64,6 +67,8 @@ export default async function FixedAssetsPage({ searchParams }: PageProps) {
         error={assetsResult.error}
         categories={categoriesResult.data}
         categoriesError={categoriesResult.error}
+        expenses={expensesResult.data}
+        expensesError={expensesResult.error}
         query={query}
         status={status}
         createOpen={createOpen}
