@@ -3,16 +3,13 @@
 /**
  * Phase 14 — Fixed Asset Management Server Actions.
  * Zero Client-Side Fetching: Service Role (`supabaseAdmin`) only.
- * Types live in `@/types/fixed-asset`.
- *
- * NOTE: After applying Cloud SQL, regenerate Database types:
- *   npx supabase gen types typescript --project-id <PROJECT_ID> > src/types/supabase.ts
+ * Types: DTOs in `@/types/fixed-asset` · DB Rows in `@/src/types/supabase`.
  */
 
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { logAuditTrail } from "@/lib/supabase/auditService";
-import { createSupabaseSSRClient } from "@/lib/supabase/ssr-server";
+import { createClient } from "@/lib/supabase/server-admin";
+import type { Database } from "@/src/types/supabase";
 import type {
   AssetCategory,
   CreateFixedAssetInput,
@@ -28,34 +25,28 @@ import type {
 import { FIXED_ASSET_STATUSES } from "@/types/fixed-asset";
 
 const FIXED_ASSETS_PATH = "/fixed-assets";
-const MST_ASSET_CATEGORIES_TABLE = "mst_asset_categories" as const;
-const FIXED_ASSETS_TABLE = "fixed_assets" as const;
 const POSTGRES_UNIQUE_VIOLATION = "23505";
 
+type AssetCategoryRow =
+  Database["public"]["Tables"]["mst_asset_categories"]["Row"];
+type FixedAssetRow = Database["public"]["Tables"]["fixed_assets"]["Row"];
+type FixedAssetInsert =
+  Database["public"]["Tables"]["fixed_assets"]["Insert"];
+type FixedAssetUpdate =
+  Database["public"]["Tables"]["fixed_assets"]["Update"];
+
+type FixedAssetWithCategory = FixedAssetRow & {
+  mst_asset_categories: Pick<
+    AssetCategoryRow,
+    "category_code" | "category_name"
+  > | null;
+};
+
 const CATEGORY_SELECT =
-  "id, category_code, category_name, useful_life_years, depreciation_method, description, is_active, created_at, updated_at" as const;
+  "id, category_code, category_name, useful_life_years, depreciation_rate, is_active, created_at, updated_at" as const;
 
 const ASSET_SELECT =
-  "id, asset_code, asset_name, category_id, location, purchase_date, acquisition_cost, salvage_value, useful_life_years, status, remark, recorded_by, created_at, updated_at, mst_asset_categories!category_id(category_code, category_name)" as const;
-
-function createSupabaseAdminClient(): SupabaseClient {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error(
-      "Missing SUPABASE_SERVICE_ROLE_KEY (หรือ NEXT_PUBLIC_SUPABASE_URL) — ตั้งค่าใน .env แล้วรีสตาร์ท next dev",
-    );
-  }
-
-  return createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-    },
-  });
-}
+  "id, asset_code, asset_name, category_id, location, acquisition_date, acquisition_cost, salvage_value, useful_life_months, status, accumulated_depreciation, net_book_value, created_at, updated_at, mst_asset_categories!category_id(category_code, category_name)" as const;
 
 function revalidateFixedAssetCaches() {
   revalidatePath(FIXED_ASSETS_PATH);
@@ -74,66 +65,55 @@ function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-function mapCategoryRow(row: Record<string, unknown>): AssetCategory {
+function yearsToMonths(years: number): number {
+  return Math.max(1, Math.round(years * 12));
+}
+
+function monthsToYears(months: number): number {
+  return Math.max(1, Math.round(months / 12));
+}
+
+function mapCategoryRow(row: AssetCategoryRow): AssetCategory {
   return {
-    id: String(row.id ?? "").trim(),
-    category_code: String(row.category_code ?? "").trim(),
-    category_name: String(row.category_name ?? "").trim(),
+    id: row.id,
+    category_code: row.category_code,
+    category_name: row.category_name,
     useful_life_years: Number(row.useful_life_years ?? 0),
-    depreciation_method: String(row.depreciation_method ?? "STRAIGHT_LINE"),
-    description:
-      row.description == null || String(row.description).trim() === ""
-        ? null
-        : String(row.description).trim(),
-    is_active: Boolean(row.is_active),
-    created_at: String(row.created_at ?? ""),
-    updated_at: String(row.updated_at ?? ""),
+    depreciation_rate:
+      row.depreciation_rate == null ? null : Number(row.depreciation_rate),
+    is_active: Boolean(row.is_active ?? true),
+    created_at: row.created_at ?? "",
+    updated_at: row.updated_at ?? "",
   };
 }
 
-function mapAssetRow(row: Record<string, unknown>): FixedAssetListItem {
-  const categoryJoin = row.mst_asset_categories;
-  let categoryCode: string | null = null;
-  let categoryName: string | null = null;
-
-  if (categoryJoin && typeof categoryJoin === "object" && !Array.isArray(categoryJoin)) {
-    const cat = categoryJoin as Record<string, unknown>;
-    categoryCode =
-      cat.category_code == null ? null : String(cat.category_code).trim();
-    categoryName =
-      cat.category_name == null ? null : String(cat.category_name).trim();
-  }
-
+function mapAssetRow(row: FixedAssetWithCategory): FixedAssetListItem {
   const statusRaw = String(row.status ?? "ACTIVE").trim().toUpperCase();
   const status: FixedAssetStatus = isFixedAssetStatus(statusRaw)
     ? statusRaw
     : "ACTIVE";
 
+  const usefulLifeMonths = Number(row.useful_life_months ?? 0);
+
   return {
-    id: String(row.id ?? "").trim(),
-    asset_code: String(row.asset_code ?? "").trim(),
-    asset_name: String(row.asset_name ?? "").trim(),
-    category_id: String(row.category_id ?? "").trim(),
-    category_code: categoryCode,
-    category_name: categoryName,
-    location:
-      row.location == null || String(row.location).trim() === ""
-        ? null
-        : String(row.location).trim(),
-    purchase_date: String(row.purchase_date ?? "").trim(),
+    id: row.id,
+    asset_code: row.asset_code,
+    asset_name: row.asset_name,
+    category_id: row.category_id ?? "",
+    category_code: row.mst_asset_categories?.category_code ?? null,
+    category_name: row.mst_asset_categories?.category_name ?? null,
+    location: row.location,
+    purchase_date: row.acquisition_date,
     acquisition_cost: Number(row.acquisition_cost ?? 0),
     salvage_value: Number(row.salvage_value ?? 0),
     useful_life_years:
-      row.useful_life_years == null ? null : Number(row.useful_life_years),
+      usefulLifeMonths > 0 ? monthsToYears(usefulLifeMonths) : null,
+    useful_life_months: usefulLifeMonths,
+    accumulated_depreciation: Number(row.accumulated_depreciation ?? 0),
+    net_book_value: Number(row.net_book_value ?? 0),
     status,
-    remark:
-      row.remark == null || String(row.remark).trim() === ""
-        ? null
-        : String(row.remark).trim(),
-    recorded_by:
-      row.recorded_by == null ? null : String(row.recorded_by).trim(),
-    created_at: String(row.created_at ?? ""),
-    updated_at: String(row.updated_at ?? ""),
+    created_at: row.created_at ?? "",
+    updated_at: row.updated_at ?? "",
   };
 }
 
@@ -172,18 +152,6 @@ function validateAssetPayload(input: {
   return null;
 }
 
-async function resolveActorUserId(): Promise<string | null> {
-  try {
-    const ssr = await createSupabaseSSRClient();
-    const {
-      data: { user },
-    } = await ssr.auth.getUser();
-    return user?.id ?? null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Read active (+ optionally inactive) asset categories from Master Data.
  */
@@ -191,9 +159,9 @@ export async function getAssetCategories(options?: {
   activeOnly?: boolean;
 }): Promise<GetAssetCategoriesResult> {
   try {
-    const supabaseAdmin = createSupabaseAdminClient();
+    const supabaseAdmin = createClient();
     let query = supabaseAdmin
-      .from(MST_ASSET_CATEGORIES_TABLE)
+      .from("mst_asset_categories")
       .select(CATEGORY_SELECT)
       .order("category_name", { ascending: true });
 
@@ -210,15 +178,8 @@ export async function getAssetCategories(options?: {
       };
     }
 
-    const rows = Array.isArray(data) ? data : [];
     return {
-      data: rows
-        .filter(
-          (row): row is Record<string, unknown> =>
-            row != null && typeof row === "object",
-        )
-        .map(mapCategoryRow)
-        .filter((row) => Boolean(row.id)),
+      data: (data ?? []).map(mapCategoryRow).filter((row) => Boolean(row.id)),
       error: null,
     };
   } catch (err) {
@@ -234,11 +195,11 @@ export async function getFixedAssets(
   filters?: FixedAssetFilters,
 ): Promise<GetFixedAssetsResult> {
   try {
-    const supabaseAdmin = createSupabaseAdminClient();
+    const supabaseAdmin = createClient();
     let query = supabaseAdmin
-      .from(FIXED_ASSETS_TABLE)
+      .from("fixed_assets")
       .select(ASSET_SELECT)
-      .order("purchase_date", { ascending: false })
+      .order("acquisition_date", { ascending: false })
       .order("asset_code", { ascending: true });
 
     const statusRaw = (filters?.status ?? "").trim().toUpperCase();
@@ -263,14 +224,9 @@ export async function getFixedAssets(
       };
     }
 
-    const rows = Array.isArray(data) ? data : [];
     return {
-      data: rows
-        .filter(
-          (row): row is Record<string, unknown> =>
-            row != null && typeof row === "object",
-        )
-        .map(mapAssetRow)
+      data: (data ?? [])
+        .map((row) => mapAssetRow(row as FixedAssetWithCategory))
         .filter((row) => Boolean(row.id)),
       error: null,
     };
@@ -299,7 +255,6 @@ export async function createFixedAsset(
       usefulLifeRaw == null || String(usefulLifeRaw).trim() === ""
         ? null
         : Number(usefulLifeRaw);
-    const remark = String(input.remark ?? "").trim() || null;
 
     const validationError = validateAssetPayload({
       asset_code,
@@ -317,13 +272,12 @@ export async function createFixedAsset(
       return { success: false, error: validationError };
     }
 
-    const supabaseAdmin = createSupabaseAdminClient();
+    const supabaseAdmin = createClient();
 
-    // Inherit useful life from category when omitted
-    let resolvedLife = useful_life_years;
-    if (resolvedLife == null) {
+    let resolvedYears = useful_life_years;
+    if (resolvedYears == null) {
       const { data: category } = await supabaseAdmin
-        .from(MST_ASSET_CATEGORIES_TABLE)
+        .from("mst_asset_categories")
         .select("useful_life_years")
         .eq("id", category_id)
         .eq("is_active", true)
@@ -331,28 +285,26 @@ export async function createFixedAsset(
       if (!category) {
         return { success: false, error: "ไม่พบหมวดหมู่สินทรัพย์ที่เลือก" };
       }
-      resolvedLife = Number(
-        (category as { useful_life_years?: number }).useful_life_years ?? 5,
-      );
+      resolvedYears = Number(category.useful_life_years ?? 5);
     }
 
-    const recorded_by = await resolveActorUserId();
-    const payload = {
+    const useful_life_months = yearsToMonths(resolvedYears);
+    const payload: FixedAssetInsert = {
       asset_code,
       asset_name,
       category_id,
       location,
-      purchase_date,
+      acquisition_date: purchase_date,
       acquisition_cost,
       salvage_value,
-      useful_life_years: resolvedLife,
-      status: "ACTIVE" as const,
-      remark,
-      recorded_by,
+      useful_life_months,
+      accumulated_depreciation: 0,
+      net_book_value: acquisition_cost,
+      status: "ACTIVE",
     };
 
     const { data, error } = await supabaseAdmin
-      .from(FIXED_ASSETS_TABLE)
+      .from("fixed_assets")
       .insert(payload)
       .select("id")
       .single();
@@ -373,11 +325,11 @@ export async function createFixedAsset(
 
     const id = data?.id ? String(data.id) : null;
     if (id) {
-      void logAuditTrail(FIXED_ASSETS_TABLE, id, "INSERT", null, payload).catch(
-        (auditErr) => {
-          console.error("[createFixedAsset][audit]", auditErr);
-        },
-      );
+      void logAuditTrail("fixed_assets", id, "INSERT", null, {
+        ...payload,
+      }).catch((auditErr) => {
+        console.error("[createFixedAsset][audit]", auditErr);
+      });
     }
 
     revalidateFixedAssetCaches();
@@ -412,7 +364,6 @@ export async function updateFixedAsset(
       usefulLifeRaw == null || String(usefulLifeRaw).trim() === ""
         ? null
         : Number(usefulLifeRaw);
-    const remark = String(input.remark ?? "").trim() || null;
     const statusRaw = String(input.status ?? "ACTIVE").trim().toUpperCase();
     if (!isFixedAssetStatus(statusRaw)) {
       return { success: false, error: "สถานะสินทรัพย์ไม่ถูกต้อง" };
@@ -434,9 +385,9 @@ export async function updateFixedAsset(
       return { success: false, error: validationError };
     }
 
-    const supabaseAdmin = createSupabaseAdminClient();
+    const supabaseAdmin = createClient();
     const { data: existing, error: existingError } = await supabaseAdmin
-      .from(FIXED_ASSETS_TABLE)
+      .from("fixed_assets")
       .select(ASSET_SELECT)
       .eq("id", id)
       .maybeSingle();
@@ -452,21 +403,28 @@ export async function updateFixedAsset(
       return { success: false, error: "ไม่พบสินทรัพย์ที่ต้องการแก้ไข" };
     }
 
-    const payload = {
+    const existingRow = existing as FixedAssetWithCategory;
+    const accumulated = Number(existingRow.accumulated_depreciation ?? 0);
+    const resolvedYears =
+      useful_life_years == null || Number.isNaN(useful_life_years)
+        ? monthsToYears(Number(existingRow.useful_life_months ?? 12))
+        : useful_life_years;
+
+    const payload: FixedAssetUpdate = {
       asset_code,
       asset_name,
       category_id,
       location,
-      purchase_date,
+      acquisition_date: purchase_date,
       acquisition_cost,
       salvage_value,
-      useful_life_years,
+      useful_life_months: yearsToMonths(resolvedYears),
+      net_book_value: roundMoney(Math.max(0, acquisition_cost - accumulated)),
       status: statusRaw,
-      remark,
     };
 
     const { error } = await supabaseAdmin
-      .from(FIXED_ASSETS_TABLE)
+      .from("fixed_assets")
       .update(payload)
       .eq("id", id);
 
@@ -485,11 +443,11 @@ export async function updateFixedAsset(
     }
 
     void logAuditTrail(
-      FIXED_ASSETS_TABLE,
+      "fixed_assets",
       id,
       "UPDATE",
-      existing as Record<string, unknown>,
-      payload,
+      existingRow as unknown as Record<string, unknown>,
+      payload as Record<string, unknown>,
     ).catch((auditErr) => {
       console.error("[updateFixedAsset][audit]", auditErr);
     });
@@ -514,9 +472,9 @@ export async function getFixedAssetById(
       return { data: null, error: "ไม่พบรหัสสินทรัพย์" };
     }
 
-    const supabaseAdmin = createSupabaseAdminClient();
+    const supabaseAdmin = createClient();
     const { data, error } = await supabaseAdmin
-      .from(FIXED_ASSETS_TABLE)
+      .from("fixed_assets")
       .select(ASSET_SELECT)
       .eq("id", id)
       .maybeSingle();
@@ -528,12 +486,12 @@ export async function getFixedAssetById(
         error: error.message ?? "ไม่สามารถโหลดสินทรัพย์ได้",
       };
     }
-    if (!data || typeof data !== "object") {
+    if (!data) {
       return { data: null, error: "ไม่พบสินทรัพย์" };
     }
 
     return {
-      data: mapAssetRow(data as Record<string, unknown>),
+      data: mapAssetRow(data as FixedAssetWithCategory),
       error: null,
     };
   } catch (err) {
@@ -554,9 +512,9 @@ export async function disposeFixedAsset(
       return { success: false, error: "ไม่พบรหัสสินทรัพย์" };
     }
 
-    const supabaseAdmin = createSupabaseAdminClient();
+    const supabaseAdmin = createClient();
     const { data: existing, error: existingError } = await supabaseAdmin
-      .from(FIXED_ASSETS_TABLE)
+      .from("fixed_assets")
       .select("id, asset_code, asset_name, status")
       .eq("id", id)
       .maybeSingle();
@@ -572,15 +530,13 @@ export async function disposeFixedAsset(
       return { success: false, error: "ไม่พบสินทรัพย์ที่ต้องการจำหน่าย" };
     }
 
-    const currentStatus = String(
-      (existing as { status?: string }).status ?? "",
-    ).toUpperCase();
+    const currentStatus = String(existing.status ?? "").toUpperCase();
     if (currentStatus === "DISPOSED") {
       return { success: false, error: "สินทรัพย์นี้ถูกจำหน่ายแล้ว" };
     }
 
     const { error } = await supabaseAdmin
-      .from(FIXED_ASSETS_TABLE)
+      .from("fixed_assets")
       .update({ status: "DISPOSED" })
       .eq("id", id);
 
@@ -593,10 +549,10 @@ export async function disposeFixedAsset(
     }
 
     void logAuditTrail(
-      FIXED_ASSETS_TABLE,
+      "fixed_assets",
       id,
       "UPDATE",
-      existing as Record<string, unknown>,
+      existing as unknown as Record<string, unknown>,
       { status: "DISPOSED", audit_event: "DISPOSE" },
     ).catch((auditErr) => {
       console.error("[disposeFixedAsset][audit]", auditErr);

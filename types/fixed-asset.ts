@@ -1,6 +1,7 @@
 /**
  * Phase 14 — Fixed Asset Management types.
  * Kept outside `"use server"` modules (Turbopack / type separation).
+ * DB columns follow `@/src/types/supabase` (Cloud source of truth).
  */
 
 export type FixedAssetStatus =
@@ -13,8 +14,7 @@ export type AssetCategory = {
   category_code: string;
   category_name: string;
   useful_life_years: number;
-  depreciation_method: string;
-  description: string | null;
+  depreciation_rate: number | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -28,13 +28,16 @@ export type FixedAssetListItem = {
   category_code: string | null;
   category_name: string | null;
   location: string | null;
+  /** UI alias of DB `acquisition_date` */
   purchase_date: string;
   acquisition_cost: number;
   salvage_value: number;
+  /** UI convenience — derived from `useful_life_months` */
   useful_life_years: number | null;
+  useful_life_months: number;
+  accumulated_depreciation: number;
+  net_book_value: number;
   status: FixedAssetStatus;
-  remark: string | null;
-  recorded_by: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -63,7 +66,6 @@ export type CreateFixedAssetInput = {
   acquisition_cost: number;
   salvage_value?: number | null;
   useful_life_years?: number | null;
-  remark?: string | null;
 };
 
 export type UpdateFixedAssetInput = {
@@ -76,7 +78,6 @@ export type UpdateFixedAssetInput = {
   acquisition_cost: number;
   salvage_value?: number | null;
   useful_life_years?: number | null;
-  remark?: string | null;
   status: FixedAssetStatus;
 };
 

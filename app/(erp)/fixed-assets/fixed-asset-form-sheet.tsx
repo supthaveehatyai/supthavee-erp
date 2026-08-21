@@ -50,7 +50,6 @@ type FormState = {
   acquisition_cost: string;
   salvage_value: string;
   useful_life_years: string;
-  remark: string;
   status: FixedAssetStatus;
 };
 
@@ -66,7 +65,6 @@ function emptyForm(categories: AssetCategory[]): FormState {
     useful_life_years: categories[0]
       ? String(categories[0].useful_life_years)
       : "",
-    remark: "",
     status: "ACTIVE",
   };
 }
@@ -85,7 +83,6 @@ function fromAsset(
     salvage_value: String(asset.salvage_value ?? 0),
     useful_life_years:
       asset.useful_life_years == null ? "" : String(asset.useful_life_years),
-    remark: asset.remark ?? "",
     status: asset.status,
   };
 }
@@ -162,7 +159,6 @@ export function FixedAssetFormSheet({
           acquisition_cost,
           salvage_value,
           useful_life_years,
-          remark: form.remark,
           status: form.status,
         });
         if (!result.success) {
@@ -184,7 +180,6 @@ export function FixedAssetFormSheet({
         acquisition_cost,
         salvage_value,
         useful_life_years,
-        remark: form.remark,
       });
       if (!result.success) {
         toast.error(result.error ?? "ไม่สามารถลงทะเบียนสินทรัพย์ได้");
@@ -392,21 +387,6 @@ export function FixedAssetFormSheet({
                 </Select>
               </div>
             ) : null}
-
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="remark">หมายเหตุ</Label>
-              <Input
-                id="remark"
-                value={form.remark}
-                onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    remark: event.target.value,
-                  }))
-                }
-                disabled={isSubmitting}
-              />
-            </div>
           </div>
 
           <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
