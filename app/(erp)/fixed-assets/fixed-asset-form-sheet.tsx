@@ -112,14 +112,27 @@ function closeSheetUrl(
 }
 
 /** Normalize expense grand_total for `<input type="number">` (2 dp, no NaN). */
-function formatAcquisitionCostInput(value: number): string {
-  if (!Number.isFinite(value) || value < 0) return "";
-  return String(Number(value.toFixed(2)));
+function parseLinkableGrandTotal(value: number | string): number {
+  if (typeof value === "string") {
+    const parsed = parseFloat(value.replace(/,/g, "").trim());
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return Number.isFinite(value) ? value : 0;
 }
 
-/** Map expense_date (YYYY-MM-DD) → purchase_date field on the form. */
-function expenseDateToPurchaseDate(expenseDate: string): string {
-  const trimmed = expenseDate.trim();
+function formatAcquisitionCostInput(value: number | string): string {
+  const cost = parseLinkableGrandTotal(value);
+  if (cost <= 0) return "";
+  return String(Number(cost.toFixed(2)));
+}
+
+/** Map expense_date → purchase_date (`acquisition_date` on save). */
+function expenseDateToPurchaseDate(expenseDate: string | Date): string {
+  if (expenseDate instanceof Date) {
+    if (Number.isNaN(expenseDate.getTime())) return "";
+    return expenseDate.toISOString().slice(0, 10);
+  }
+  const trimmed = String(expenseDate ?? "").trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
   const parsed = new Date(`${trimmed}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return "";
@@ -179,13 +192,18 @@ export function FixedAssetFormSheet({
       return;
     }
 
+    const cost = parseLinkableGrandTotal(selectedExpense.grand_total);
+    const purchaseDate = selectedExpense.expense_date
+      ? expenseDateToPurchaseDate(
+          new Date(`${String(selectedExpense.expense_date).trim()}T00:00:00`),
+        )
+      : "";
+
     setForm((prev) => ({
       ...prev,
       expense_id: selectedExpense.id,
-      acquisition_cost: formatAcquisitionCostInput(selectedExpense.grand_total),
-      purchase_date:
-        expenseDateToPurchaseDate(selectedExpense.expense_date) ||
-        prev.purchase_date,
+      acquisition_cost: formatAcquisitionCostInput(cost),
+      purchase_date: purchaseDate || prev.purchase_date,
     }));
   }
 
@@ -368,6 +386,7 @@ export function FixedAssetFormSheet({
               </Label>
               <Input
                 id="purchase_date"
+                key={`purchase-date-${form.expense_id || "none"}`}
                 type="date"
                 value={form.purchase_date}
                 onChange={(event) =>
@@ -403,6 +422,7 @@ export function FixedAssetFormSheet({
               </Label>
               <Input
                 id="acquisition_cost"
+                key={`acquisition-cost-${form.expense_id || "none"}`}
                 type="number"
                 min={0}
                 step="0.01"

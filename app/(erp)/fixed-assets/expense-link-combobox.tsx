@@ -31,11 +31,19 @@ export type ExpenseLinkComboboxProps = {
   onSelect: (selectedExpenseId: string | null) => void;
 };
 
-function formatThaiBaht(value: number): string {
+function parseDisplayAmount(value: number | string): number {
+  if (typeof value === "string") {
+    const parsed = parseFloat(value.replace(/,/g, "").trim());
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return Number.isFinite(value) ? value : 0;
+}
+
+function formatThaiBaht(value: number | string): string {
   return new Intl.NumberFormat("th-TH", {
     style: "currency",
     currency: "THB",
-  }).format(Number.isFinite(value) ? value : 0);
+  }).format(parseDisplayAmount(value));
 }
 
 function formatDocDate(value: string): string {

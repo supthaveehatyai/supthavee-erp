@@ -25,7 +25,8 @@ export type LinkableExpenseOption = {
   id: string;
   document_no: string;
   expense_date: string;
-  grand_total: number;
+  /** Supabase DECIMAL may arrive as string — parse on auto-fill. */
+  grand_total: number | string;
   status: string;
 };
 
