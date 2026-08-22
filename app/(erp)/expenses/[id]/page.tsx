@@ -185,6 +185,13 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
             <Field label="Status">
               <StatusBadge status={expense.status} />
             </Field>
+            <Field label="ผ่อนชำระ">
+              {expense.is_installment ? (
+                <Badge variant="blue">Installment Plan</Badge>
+              ) : (
+                "—"
+              )}
+            </Field>
           </CardContent>
         </Card>
 
@@ -219,6 +226,107 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
           </CardContent>
         </Card>
       </div>
+
+      {expense.is_installment ? (
+        <Card className="print:hidden">
+          <CardHeader>
+            <CardTitle className="text-base">
+              ตารางการผ่อนชำระ (Installment Plan)
+            </CardTitle>
+            <CardDescription>
+              งวดผ่อนจากตาราง expense_installments · Read-only
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {expense.installments.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                ไม่พบรายการงวดผ่อนชำระ
+              </p>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2.5">งวดที่</th>
+                      <th className="px-3 py-2.5">วันครบกำหนด</th>
+                      <th className="px-3 py-2.5 text-right">เงินต้น</th>
+                      <th className="px-3 py-2.5 text-right">ดอกเบี้ย</th>
+                      <th className="px-3 py-2.5 text-right">ยอดรวม</th>
+                      <th className="px-3 py-2.5 text-center">สถานะการจ่าย</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expense.installments.map((row) => (
+                      <tr
+                        key={row.id}
+                        className="border-t border-slate-100"
+                      >
+                        <td className="px-3 py-2.5 font-semibold tabular-nums text-slate-900">
+                          {row.installment_period}
+                        </td>
+                        <td className="px-3 py-2.5 text-slate-700">
+                          {formatDate(row.due_date)}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">
+                          {formatThaiBaht(row.principal_amount)}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">
+                          {formatThaiBaht(row.interest_amount)}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums font-medium text-slate-900">
+                          {formatThaiBaht(row.total_installment)}
+                        </td>
+                        <td className="px-3 py-2.5 text-center">
+                          {row.is_paid ? (
+                            <Badge variant="emerald">จ่ายแล้ว</Badge>
+                          ) : (
+                            <Badge variant="slate">ยังไม่จ่าย</Badge>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-slate-200 bg-slate-50/80">
+                      <td
+                        colSpan={2}
+                        className="px-3 py-2.5 text-xs font-semibold text-slate-600"
+                      >
+                        รวม
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                        {formatThaiBaht(
+                          expense.installments.reduce(
+                            (sum, row) => sum + Number(row.principal_amount),
+                            0,
+                          ),
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                        {formatThaiBaht(
+                          expense.installments.reduce(
+                            (sum, row) => sum + Number(row.interest_amount),
+                            0,
+                          ),
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-bold text-slate-900">
+                        {formatThaiBaht(
+                          expense.installments.reduce(
+                            (sum, row) => sum + Number(row.total_installment),
+                            0,
+                          ),
+                        )}
+                      </td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 print:hidden md:grid-cols-2">
         <Card>

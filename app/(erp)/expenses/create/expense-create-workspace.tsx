@@ -188,6 +188,28 @@ function parseAmount(raw: string): number {
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
+/** Split Net Payable into N principals; remainder (decimal leakage) → last row. */
+function splitPrincipalAcrossInstallments(
+  netPayable: number,
+  count: number,
+): number[] {
+  if (count <= 0) return [];
+  const total = roundMoney(Math.max(0, netPayable));
+  if (count === 1) return [total];
+
+  const baseCents = Math.floor(Math.round(total * 100) / count);
+  const amounts = Array.from({ length: count }, () =>
+    roundMoney(baseCents / 100),
+  );
+  const allocated = roundMoney(amounts.slice(0, -1).reduce((s, v) => s + v, 0));
+  amounts[count - 1] = roundMoney(total - allocated);
+  return amounts;
+}
+
+function moneyEquals(a: number, b: number, eps = 0.005): boolean {
+  return Math.abs(roundMoney(a) - roundMoney(b)) <= eps;
+}
+
 /** Infer VAT type from stored net/vat/grand (expenses table has no vat_type column). */
 export function inferExpenseVatType(
   netAmount: number,
@@ -552,6 +574,83 @@ export function ExpenseCreateWorkspace({
     setValue("net_payable", netPayable, { shouldValidate: true });
   }, [watchedSubTotal, watchedWhtRate, watchedGrandTotal, setValue]);
 
+  /**
+   * Auto-split principal จาก Net Payable ÷ จำนวนงวด
+   * (หักดอกเบี้ยรวมก่อน เพื่อให้เงินต้น+ดอกเบี้ย = Net Payable เสมอ)
+   * เศษสตางค์ปัดไปงวดสุดท้าย
+   */
+  useEffect(() => {
+    if (!watchedIsInstallment) return;
+    const count = installmentFields.length;
+    if (count <= 0) return;
+
+    const netPayable = roundMoney(Number(watchedNetPayable ?? 0));
+    const current = getValues("installments") ?? [];
+    const interestSum = roundMoney(
+      current.reduce((sum, row) => sum + Number(row.interest_amount ?? 0), 0),
+    );
+    // เมื่อดอกเบี้ย = 0 → เท่ากับ Net Payable / n ตามสเปก
+    const principalPool = roundMoney(Math.max(0, netPayable - interestSum));
+    const principals = splitPrincipalAcrossInstallments(principalPool, count);
+
+    let needsUpdate = false;
+    for (let i = 0; i < count; i += 1) {
+      const existing = roundMoney(Number(current[i]?.principal_amount ?? 0));
+      if (!moneyEquals(existing, principals[i] ?? 0)) {
+        needsUpdate = true;
+        break;
+      }
+    }
+    if (!needsUpdate) return;
+
+    for (let i = 0; i < count; i += 1) {
+      setValue(`installments.${i}.principal_amount`, principals[i] ?? 0, {
+        shouldValidate: true,
+        shouldDirty: true,
+      });
+    }
+  }, [
+    watchedIsInstallment,
+    watchedNetPayable,
+    installmentFields.length,
+    watchedInstallments,
+    getValues,
+    setValue,
+  ]);
+
+  const installmentPrincipalTotal = roundMoney(
+    (watchedInstallments ?? []).reduce(
+      (sum, row) => sum + Number(row.principal_amount ?? 0),
+      0,
+    ),
+  );
+  const installmentInterestTotal = roundMoney(
+    (watchedInstallments ?? []).reduce(
+      (sum, row) => sum + Number(row.interest_amount ?? 0),
+      0,
+    ),
+  );
+  const installmentCombinedTotal = roundMoney(
+    installmentPrincipalTotal + installmentInterestTotal,
+  );
+  const netPayableAmount = roundMoney(Number(watchedNetPayable ?? 0));
+  const principalMatchesNetPayable = moneyEquals(
+    installmentPrincipalTotal,
+    netPayableAmount,
+  );
+  /**
+   * Submit guard (ERP): ผลรวมเงินต้น + ดอกเบี้ย ต้องเท่ากับ Net Payable.
+   * เมื่อระบบแยกเงินต้นจาก Net Payable อัตโนมัติ ดอกเบี้ยรวมต้องเป็น 0
+   * หรือผู้ใช้ต้องปรับยอดให้สมดุลก่อนบันทึก.
+   */
+  const installmentTotalsMatchNetPayable = moneyEquals(
+    installmentCombinedTotal,
+    netPayableAmount,
+  );
+  const installmentSubmitBlocked =
+    Boolean(watchedIsInstallment) &&
+    (installmentFields.length === 0 || !installmentTotalsMatchNetPayable);
+
   const [attachmentPreviewUrl, setAttachmentPreviewUrl] = useState<
     string | null
   >(initialValues?.receipt_url ?? null);
@@ -910,6 +1009,28 @@ export function ExpenseCreateWorkspace({
     if (values.is_installment) {
       if (!values.installments || values.installments.length === 0) {
         const msg = "กรุณาเพิ่มงวดผ่อนชำระอย่างน้อย 1 งวด";
+        setError(msg);
+        toast.error(msg);
+        unlock();
+        return;
+      }
+      const principalSum = roundMoney(
+        values.installments.reduce(
+          (sum, row) => sum + Number(row.principal_amount ?? 0),
+          0,
+        ),
+      );
+      const interestSum = roundMoney(
+        values.installments.reduce(
+          (sum, row) => sum + Number(row.interest_amount ?? 0),
+          0,
+        ),
+      );
+      const combined = roundMoney(principalSum + interestSum);
+      const netPayable = roundMoney(Number(values.net_payable ?? 0));
+      if (!moneyEquals(combined, netPayable)) {
+        const msg =
+          "ผลรวมเงินต้น + ดอกเบี้ย ต้องเท่ากับยอด Net Payable ก่อนบันทึก";
         setError(msg);
         toast.error(msg);
         unlock();
@@ -1625,7 +1746,8 @@ export function ExpenseCreateWorkspace({
                           appendInstallment({
                             installment_period: 1,
                             due_date: watchedExpenseDate || defaultDate,
-                            principal_amount: Number(watchedGrandTotal ?? 0) || 0,
+                            principal_amount:
+                              roundMoney(Number(watchedNetPayable ?? 0)) || 0,
                             interest_amount: 0,
                           });
                         }
@@ -1749,20 +1871,43 @@ export function ExpenseCreateWorkspace({
                         </table>
                       </div>
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs text-slate-500">
-                          ดอกเบี้ยรวม:{" "}
-                          <span className="font-semibold text-slate-800">
-                            {formatThaiBaht(
-                              roundMoney(
-                                (watchedInstallments ?? []).reduce(
-                                  (sum, row) =>
-                                    sum + Number(row.interest_amount ?? 0),
-                                  0,
-                                ),
-                              ),
+                        <div className="space-y-1 text-xs">
+                          <p
+                            className={cn(
+                              "font-semibold",
+                              principalMatchesNetPayable
+                                ? "text-emerald-700"
+                                : "text-red-600",
                             )}
-                          </span>
-                        </p>
+                          >
+                            เงินต้นรวม {formatThaiBaht(installmentPrincipalTotal)}{" "}
+                            {principalMatchesNetPayable ? "=" : "≠"} Net Payable{" "}
+                            {formatThaiBaht(netPayableAmount)}
+                          </p>
+                          <p
+                            className={cn(
+                              "font-medium",
+                              installmentTotalsMatchNetPayable
+                                ? "text-emerald-700"
+                                : "text-red-600",
+                            )}
+                          >
+                            เงินต้น + ดอกเบี้ย{" "}
+                            {formatThaiBaht(installmentCombinedTotal)}{" "}
+                            {installmentTotalsMatchNetPayable ? "=" : "≠"} Net
+                            Payable {formatThaiBaht(netPayableAmount)}
+                            <span className="ml-1 font-normal text-slate-500">
+                              (ดอกเบี้ย{" "}
+                              {formatThaiBaht(installmentInterestTotal)})
+                            </span>
+                          </p>
+                          {!installmentTotalsMatchNetPayable ? (
+                            <p className="text-red-600">
+                              ปรับยอดเงินต้น/ดอกเบี้ยให้ผลรวมเท่ากับ Net Payable
+                              ก่อนบันทึก
+                            </p>
+                          ) : null}
+                        </div>
                         <Button
                           type="button"
                           variant="outline"
@@ -2000,10 +2145,11 @@ export function ExpenseCreateWorkspace({
                 disabled={
                   formBusy ||
                   categories.length === 0 ||
-                  vendors.length === 0
+                  vendors.length === 0 ||
+                  installmentSubmitBlocked
                 }
                 aria-busy={isSubmitting}
-                aria-disabled={formBusy}
+                aria-disabled={formBusy || installmentSubmitBlocked}
               >
                 {isSubmitting ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
