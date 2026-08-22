@@ -20,7 +20,7 @@ export type AssetCategory = {
   updated_at: string;
 };
 
-/** Expense options for Link Expense combobox (ISSUED only). */
+/** Expense options for Link Expense combobox (ISSUED or PAID). */
 export type LinkableExpenseOption = {
   id: string;
   document_no: string;

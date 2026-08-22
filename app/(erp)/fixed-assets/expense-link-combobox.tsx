@@ -104,7 +104,7 @@ export function ExpenseLinkCombobox({
               onValueChange={setSearch}
             />
             <CommandList>
-              <CommandEmpty>ไม่พบบิลค่าใช้จ่าย ISSUED</CommandEmpty>
+              <CommandEmpty>ไม่พบบิลค่าใช้จ่าย ISSUED / PAID</CommandEmpty>
               <CommandGroup>
                 {filtered.map((row) => (
                   <CommandItem

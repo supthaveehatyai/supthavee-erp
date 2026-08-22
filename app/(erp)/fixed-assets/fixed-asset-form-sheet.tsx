@@ -151,12 +151,18 @@ export function FixedAssetFormSheet({
   }
 
   function handleExpenseSelect(expense: LinkableExpenseOption | null) {
+    if (!expense) {
+      setForm((prev) => ({ ...prev, expense_id: "" }));
+      return;
+    }
+
+    const selected =
+      expenses.find((row) => row.id === expense.id) ?? expense;
+
     setForm((prev) => ({
       ...prev,
-      expense_id: expense?.id ?? "",
-      acquisition_cost: expense
-        ? String(expense.grand_total)
-        : prev.acquisition_cost,
+      expense_id: selected.id,
+      acquisition_cost: String(selected.grand_total),
     }));
   }
 
@@ -313,7 +319,7 @@ export function FixedAssetFormSheet({
                 onSelect={handleExpenseSelect}
               />
               <p className="text-xs text-slate-500">
-                เมื่อเลือกบิล ISSUED ระบบจะเติมราคาทุนจากยอด Grand Total อัตโนมัติ
+                เมื่อเลือกบิล ISSUED / PAID ระบบจะเติมราคาทุนจากยอด Grand Total อัตโนมัติ
               </p>
             </div>
 

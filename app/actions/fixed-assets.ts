@@ -229,7 +229,7 @@ export async function getAssetCategories(options?: {
 }
 
 /**
- * รายการบิลค่าใช้จ่ายสำหรับ Link Expense (สถานะ ISSUED) — แสดงเลขที่ + ยอดเงิน.
+ * รายการบิลค่าใช้จ่ายสำหรับ Link Expense (ISSUED / PAID) — แสดงเลขที่ + ยอดเงิน.
  */
 export async function getLinkableExpenses(
   limit = 200,
@@ -240,7 +240,7 @@ export async function getLinkableExpenses(
     const { data, error } = await supabaseAdmin
       .from("expenses")
       .select("id, document_no, expense_date, grand_total, status")
-      .eq("status", "ISSUED")
+      .in("status", ["ISSUED", "PAID"])
       .order("expense_date", { ascending: false })
       .order("document_no", { ascending: false })
       .limit(safeLimit);
