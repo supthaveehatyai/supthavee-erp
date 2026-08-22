@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Receipt } from "lucide-react";
 import { getBankAccounts, getExpenseById } from "@/app/actions/expenses";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -14,12 +15,12 @@ import {
 } from "@/components/ui/card";
 import PrintExpenseTemplate from "@/components/expenses/PrintExpenseTemplate";
 import { ExpensePrintButton } from "@/components/expenses/expense-print-button";
+import {
+  buildFixedAssetCapitalizeHref,
+  isAssetClearingCategory,
+} from "@/lib/utils/expense-capitalize";
 import { ExpenseAttachmentPreview } from "./expense-attachment-preview";
 import { ExpenseDetailActions } from "./expense-detail-actions";
-import {
-  ExpenseCapitalizeButton,
-  isAssetClearingCategory,
-} from "./expense-capitalize-button";
 import { ExpenseInstallmentPayCell } from "./pay-installment-dialog";
 
 export const dynamic = "force-dynamic";
@@ -122,7 +123,8 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
   }
 
   const statusNormalized = expense.status.trim().toUpperCase();
-  const showCapitalizeButton =
+  const installments = expense.installments ?? [];
+  const canCapitalize =
     (statusNormalized === "ISSUED" || statusNormalized === "PAID") &&
     isAssetClearingCategory(expense.category_name);
 
@@ -145,12 +147,21 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
 
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
           <ExpensePrintButton />
-          {showCapitalizeButton ? (
-            <ExpenseCapitalizeButton
-              expenseId={expense.id}
-              grandTotal={Number(expense.grand_total ?? 0)}
-              expenseDate={expense.expense_date}
-            />
+          {canCapitalize ? (
+            <Link
+              href={buildFixedAssetCapitalizeHref({
+                expenseId: expense.id,
+                grandTotal: Number(expense.grand_total ?? 0),
+                expenseDate: expense.expense_date,
+              })}
+            >
+              <Button
+                variant="default"
+                className="bg-indigo-600 text-white hover:bg-indigo-700"
+              >
+                ⚡ ขึ้นทะเบียนเป็นสินทรัพย์ถาวร
+              </Button>
+            </Link>
           ) : null}
           {Number(expense.wht_amount) > 0 ? (
             <Link
@@ -262,7 +273,7 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {expense.installments.length === 0 ? (
+            {installments.length === 0 ? (
               <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
                 ไม่พบรายการงวดผ่อนชำระ
               </p>
@@ -280,7 +291,7 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {expense.installments.map((row) => (
+                    {installments.map((row) => (
                       <tr
                         key={row.id}
                         className="border-t border-slate-100"
@@ -322,7 +333,7 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
                         {formatThaiBaht(
-                          expense.installments.reduce(
+                          installments.reduce(
                             (sum, row) => sum + Number(row.principal_amount),
                             0,
                           ),
@@ -330,7 +341,7 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
                         {formatThaiBaht(
-                          expense.installments.reduce(
+                          installments.reduce(
                             (sum, row) => sum + Number(row.interest_amount),
                             0,
                           ),
@@ -338,7 +349,7 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums font-bold text-slate-900">
                         {formatThaiBaht(
-                          expense.installments.reduce(
+                          installments.reduce(
                             (sum, row) => sum + Number(row.total_installment),
                             0,
                           ),
