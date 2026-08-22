@@ -24,6 +24,10 @@ function isDepositAllocation(docType: string): boolean {
   return docType === "DEP_IN" || docType === "DEP_OUT";
 }
 
+function isExpenseAllocation(row: DocumentAllocationRow): boolean {
+  return row.target_doc_type === "EXPENSE" || Boolean(row.expense_id);
+}
+
 /** Signed display amount: invoices positive, deposits negative. */
 function signedAllocatedAmount(row: DocumentAllocationRow): number {
   const amount = Number(row.allocated_amount ?? 0);
@@ -94,7 +98,11 @@ export function AllocatedDocumentsTable({
         <TableBody>
           {rows.map((row) => {
             const isDeposit = isDepositAllocation(row.target_doc_type);
+            const isExpense = isExpenseAllocation(row);
             const signed = signedAllocatedAmount(row);
+            const expenseHref = row.expense_id
+              ? `/expenses/${encodeURIComponent(row.expense_id)}`
+              : `/expenses`;
             // Deposits link to their own detail path
             const hrefBase =
               row.target_doc_type === "DEP_OUT" ||
@@ -103,6 +111,9 @@ export function AllocatedDocumentsTable({
               row.target_doc_type === "PAY"
                 ? "/purchases"
                 : detailBasePath;
+            const href = isExpense
+              ? expenseHref
+              : `${hrefBase}/${encodeURIComponent(row.target_doc_no)}`;
 
             return (
               <TableRow
@@ -111,7 +122,7 @@ export function AllocatedDocumentsTable({
               >
                 <TableCell>
                   <Link
-                    href={`${hrefBase}/${encodeURIComponent(row.target_doc_no)}`}
+                    href={href}
                     className={
                       isDeposit
                         ? "font-mono text-sm font-semibold text-emerald-800 underline-offset-2 hover:underline"
@@ -124,7 +135,7 @@ export function AllocatedDocumentsTable({
                   </Link>
                   {row.target_doc_type ? (
                     <span className="ml-1.5 text-xs text-slate-400">
-                      ({row.target_doc_type})
+                      ({isExpense ? "EXP" : row.target_doc_type})
                     </span>
                   ) : null}
                 </TableCell>
@@ -148,7 +159,7 @@ export function AllocatedDocumentsTable({
                   ) : null}
                 </TableCell>
                 <TableCell className="text-center">
-                  {isDeposit ? (
+                  {isDeposit || isExpense ? (
                     <span className="text-xs text-slate-400">—</span>
                   ) : (
                     <OriginalReceiptStatusToggle

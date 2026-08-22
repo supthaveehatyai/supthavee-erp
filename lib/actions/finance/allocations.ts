@@ -9,7 +9,9 @@
  */
 
 import { revalidatePath } from "next/cache";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
+import { parseExpenseKnockoffReason } from "@/lib/utils/expense-knockoff";
 import { roundMoney } from "@/lib/utils/payment-fifo";
 import type {
   DepositAllocationHistoryRow,
@@ -18,6 +20,25 @@ import type {
   GetDocumentAllocationsResult,
   UpdateReceiptStatusResult,
 } from "@/types/document-allocation";
+
+function createSupabaseAdminClient(): SupabaseClient {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error(
+      "Missing SUPABASE_SERVICE_ROLE_KEY (หรือ NEXT_PUBLIC_SUPABASE_URL) — ตั้งค่าใน .env.development แล้วรีสตาร์ท next dev",
+    );
+  }
+
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
 
 type InvoiceJoin = {
   id?: string;
@@ -34,8 +55,191 @@ type AllocationQueryRow = {
   wht_amount: number | string | null;
   invoice_doc_id: string;
   original_receipt_received?: boolean | null;
+  adjustment_reason?: string | null;
+  expense_id?: string | null;
   invoice: InvoiceJoin | InvoiceJoin[] | null;
 };
+
+type ExpenseJoin = {
+  id?: string;
+  document_no?: string | null;
+  vendor_doc_no?: string | null;
+};
+
+function unwrapExpense(
+  value: ExpenseJoin | ExpenseJoin[] | null | undefined,
+): ExpenseJoin | null {
+  if (value == null) return null;
+  return Array.isArray(value) ? (value[0] ?? null) : value;
+}
+
+function mapExpenseAllocationRow(input: {
+  id: string;
+  expenseId: string;
+  documentNo: string;
+  vendorDocNo: string | null;
+  allocatedAmount: number;
+  originalReceiptReceived?: boolean;
+}): DocumentAllocationRow {
+  return {
+    id: input.id,
+    invoice_doc_id: input.expenseId,
+    target_doc_no: input.documentNo || "ไม่ระบุ",
+    target_doc_type: "EXPENSE",
+    reference_no: input.vendorDocNo,
+    allocated_amount: roundMoney(input.allocatedAmount),
+    wht_amount: 0,
+    original_receipt_received: input.originalReceiptReceived === true,
+    expense_id: input.expenseId,
+  };
+}
+
+async function loadExpensesByIds(
+  supabaseAdmin: SupabaseClient,
+  ids: string[],
+): Promise<Map<string, { document_no: string; vendor_doc_no: string | null }>> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  const map = new Map<
+    string,
+    { document_no: string; vendor_doc_no: string | null }
+  >();
+  if (unique.length === 0) return map;
+
+  const { data, error } = await supabaseAdmin
+    .from("expenses")
+    .select("id, document_no, vendor_doc_no")
+    .in("id", unique);
+
+  if (error) {
+    console.error("[loadExpensesByIds]", error.message);
+    return map;
+  }
+
+  for (const row of data ?? []) {
+    map.set(String(row.id), {
+      document_no: String(row.document_no ?? "").trim(),
+      vendor_doc_no:
+        row.vendor_doc_no == null
+          ? null
+          : String(row.vendor_doc_no).trim() || null,
+    });
+  }
+  return map;
+}
+
+/**
+ * Knock-off rows for a PAY that settled expense installments.
+ * Sources (admin / bypass RLS on expenses):
+ * 1) payment_allocations.document_id
+ * 2) expense_installments via payment_transactions.document_id
+ */
+async function loadExpenseAllocationsForPayDocument(
+  supabaseAdmin: SupabaseClient,
+  payDocumentId: string,
+): Promise<DocumentAllocationRow[]> {
+  const rows: DocumentAllocationRow[] = [];
+  const seenExpenseKeys = new Set<string>();
+
+  const { data: payAllocs, error: payAllocError } = await supabaseAdmin
+    .from("payment_allocations")
+    .select("id, allocated_amount, expense_id, payment_transaction_id")
+    .eq("document_id", payDocumentId);
+
+  if (payAllocError && !/document_id|expense_id/i.test(payAllocError.message)) {
+    console.error(
+      "[loadExpenseAllocationsForPayDocument][payment_allocations]",
+      payAllocError.message,
+    );
+  }
+
+  const payAllocExpenseIds = (payAllocs ?? [])
+    .map((row) => String(row.expense_id ?? "").trim())
+    .filter(Boolean);
+  const expensesFromAlloc = await loadExpensesByIds(
+    supabaseAdmin,
+    payAllocExpenseIds,
+  );
+
+  for (const row of payAllocs ?? []) {
+    const expenseId = String(row.expense_id ?? "").trim();
+    if (!expenseId) continue;
+    const expense = expensesFromAlloc.get(expenseId);
+    if (!expense) continue;
+    const key = `${expenseId}:${roundMoney(toMoney(row.allocated_amount))}`;
+    seenExpenseKeys.add(key);
+    rows.push(
+      mapExpenseAllocationRow({
+        id: String(row.id),
+        expenseId,
+        documentNo: expense.document_no,
+        vendorDocNo: expense.vendor_doc_no,
+        allocatedAmount: toMoney(row.allocated_amount),
+      }),
+    );
+  }
+
+  const { data: txs, error: txError } = await supabaseAdmin
+    .from("payment_transactions")
+    .select("id, amount")
+    .eq("document_id", payDocumentId)
+    .or("is_voided.eq.false,is_voided.is.null");
+
+  if (txError) {
+    console.error(
+      "[loadExpenseAllocationsForPayDocument][tx]",
+      txError.message,
+    );
+    return rows;
+  }
+
+  const txIds = (txs ?? []).map((row) => String(row.id)).filter(Boolean);
+  if (txIds.length === 0) return rows;
+
+  const { data: installments, error: instError } = await supabaseAdmin
+    .from("expense_installments")
+    .select(
+      "id, payment_transaction_id, total_installment, expense_id, expenses!expense_id ( id, document_no, vendor_doc_no )",
+    )
+    .in("payment_transaction_id", txIds);
+
+  if (instError) {
+    console.error(
+      "[loadExpenseAllocationsForPayDocument][installments]",
+      instError.message,
+    );
+    return rows;
+  }
+
+  for (const row of installments ?? []) {
+    const expense = unwrapExpense(
+      row.expenses as ExpenseJoin | ExpenseJoin[] | null,
+    );
+    const expenseId = String(expense?.id ?? row.expense_id ?? "").trim();
+    if (!expenseId) continue;
+    const amount = toMoney(
+      row.total_installment ??
+        (txs ?? []).find((tx) => String(tx.id) === String(row.payment_transaction_id))
+          ?.amount,
+    );
+    const key = `${expenseId}:${roundMoney(amount)}`;
+    if (seenExpenseKeys.has(key)) continue;
+    seenExpenseKeys.add(key);
+    rows.push(
+      mapExpenseAllocationRow({
+        id: String(row.id),
+        expenseId,
+        documentNo: String(expense?.document_no ?? "").trim(),
+        vendorDocNo:
+          expense?.vendor_doc_no == null
+            ? null
+            : String(expense.vendor_doc_no).trim() || null,
+        allocatedAmount: amount,
+      }),
+    );
+  }
+
+  return rows;
+}
 
 function unwrapInvoice(
   value: InvoiceJoin | InvoiceJoin[] | null,
@@ -68,12 +272,31 @@ export async function getDocumentAllocationsByReceiptId(
 
   try {
     const supabase = createSupabaseServerClient();
+    const supabaseAdmin = createSupabaseAdminClient();
+    const selectWithExpense = `
+        id,
+        allocated_amount,
+        wht_amount,
+        invoice_doc_id,
+        original_receipt_received,
+        adjustment_reason,
+        expense_id,
+        invoice:invoice_doc_id (
+          id,
+          doc_no,
+          doc_type,
+          notes,
+          contact_id,
+          doc_date
+        )
+      `;
     const selectWithStatus = `
         id,
         allocated_amount,
         wht_amount,
         invoice_doc_id,
         original_receipt_received,
+        adjustment_reason,
         invoice:invoice_doc_id (
           id,
           doc_no,
@@ -101,9 +324,19 @@ export async function getDocumentAllocationsByReceiptId(
 
     let { data, error } = await supabase
       .from("document_allocations")
-      .select(selectWithStatus)
+      .select(selectWithExpense)
       .eq("receipt_doc_id", trimmed)
       .order("created_at", { ascending: true });
+
+    if (error && /expense_id/i.test(error.message ?? "")) {
+      const withoutExpenseCol = await supabase
+        .from("document_allocations")
+        .select(selectWithStatus)
+        .eq("receipt_doc_id", trimmed)
+        .order("created_at", { ascending: true });
+      data = withoutExpenseCol.data;
+      error = withoutExpenseCol.error;
+    }
 
     // Fallback before migration `original_receipt_received` is applied
     if (
@@ -150,7 +383,51 @@ export async function getDocumentAllocationsByReceiptId(
       }
     }
 
-    const mapped: DocumentAllocationRow[] = rows.map((row) => {
+    const knockoffExpenseIds = [
+      ...new Set(
+        rows
+          .map((row) => {
+            const fromCol = String(row.expense_id ?? "").trim();
+            if (fromCol) return fromCol;
+            return parseExpenseKnockoffReason(row.adjustment_reason)?.expense_id ?? "";
+          })
+          .filter(Boolean),
+      ),
+    ];
+    const expensesById = await loadExpensesByIds(
+      supabaseAdmin,
+      knockoffExpenseIds,
+    );
+
+    const mapped: DocumentAllocationRow[] = [];
+    for (const row of rows) {
+      const knockoff =
+        parseExpenseKnockoffReason(row.adjustment_reason) ??
+        (row.expense_id
+          ? {
+              expense_id: String(row.expense_id),
+              document_no: "",
+              vendor_doc_no: null as string | null,
+            }
+          : null);
+
+      if (knockoff) {
+        const expense = expensesById.get(knockoff.expense_id);
+        mapped.push(
+          mapExpenseAllocationRow({
+            id: row.id,
+            expenseId: knockoff.expense_id,
+            documentNo:
+              expense?.document_no || knockoff.document_no,
+            vendorDocNo:
+              expense?.vendor_doc_no ?? knockoff.vendor_doc_no,
+            allocatedAmount: toMoney(row.allocated_amount),
+            originalReceiptReceived: row.original_receipt_received === true,
+          }),
+        );
+        continue;
+      }
+
       const invoice = unwrapInvoice(row.invoice);
       const targetDocNo = invoice?.doc_no?.trim() || "ไม่ระบุ";
       const fromNotes = extractVendorReference(invoice?.notes);
@@ -165,7 +442,7 @@ export async function getDocumentAllocationsByReceiptId(
         referenceNo = candidates[0] ?? [...headerSet][0] ?? null;
       }
 
-      return {
+      mapped.push({
         id: row.id,
         invoice_doc_id: row.invoice_doc_id,
         target_doc_no: targetDocNo,
@@ -174,10 +451,43 @@ export async function getDocumentAllocationsByReceiptId(
         allocated_amount: roundMoney(toMoney(row.allocated_amount)),
         wht_amount: roundMoney(toMoney(row.wht_amount)),
         original_receipt_received: row.original_receipt_received === true,
-      };
-    });
+      });
+    }
 
-    return { data: mapped, error: null };
+    const expenseFromPay = await loadExpenseAllocationsForPayDocument(
+      supabaseAdmin,
+      trimmed,
+    );
+    const existingExpenseKeys = new Set(
+      mapped
+        .filter((row) => row.target_doc_type === "EXPENSE" || row.expense_id)
+        .map(
+          (row) =>
+            `${row.expense_id ?? row.invoice_doc_id}:${roundMoney(row.allocated_amount)}`,
+        ),
+    );
+    for (const extra of expenseFromPay) {
+      const key = `${extra.expense_id ?? extra.invoice_doc_id}:${roundMoney(extra.allocated_amount)}`;
+      if (existingExpenseKeys.has(key)) continue;
+      existingExpenseKeys.add(key);
+      mapped.push(extra);
+    }
+
+    const hasExpenseRows = mapped.some(
+      (row) => row.target_doc_type === "EXPENSE" || Boolean(row.expense_id),
+    );
+    const dataOut = hasExpenseRows
+      ? mapped.filter(
+          (row) =>
+            !(
+              row.target_doc_type === "PAY" &&
+              row.invoice_doc_id === trimmed &&
+              !row.expense_id
+            ),
+        )
+      : mapped;
+
+    return { data: dataOut, error: null };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "โหลดรายการตัดยอดไม่สำเร็จ";

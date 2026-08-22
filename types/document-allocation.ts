@@ -7,7 +7,7 @@ export type DocumentAllocationRow = {
   invoice_doc_id: string;
   /** Internal running number of the allocated invoice (e.g. APT-2606-0001). */
   target_doc_no: string;
-  /** Target document type (INV_DO, DEP_IN, AP_TAX, …). */
+  /** Target document type (INV_DO, DEP_IN, AP_TAX, EXPENSE, …). */
   target_doc_type: string;
   /** Vendor / external reference when available. */
   reference_no: string | null;
@@ -15,6 +15,8 @@ export type DocumentAllocationRow = {
   wht_amount: number;
   /** From document_allocations.original_receipt_received */
   original_receipt_received: boolean;
+  /** Set when this knock-off line is an OPEX expense (not a documents row). */
+  expense_id?: string | null;
 };
 
 export type GetDocumentAllocationsResult = {

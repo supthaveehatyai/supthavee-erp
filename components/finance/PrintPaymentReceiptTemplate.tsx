@@ -139,7 +139,9 @@ export default async function PrintPaymentReceiptTemplate({
                         : row.target_doc_no}
                       {row.target_doc_type ? (
                         <span className="ml-1 text-[10px] text-neutral-400">
-                          ({row.target_doc_type})
+                          ({row.target_doc_type === "EXPENSE"
+                            ? "EXP"
+                            : row.target_doc_type})
                         </span>
                       ) : null}
                     </td>

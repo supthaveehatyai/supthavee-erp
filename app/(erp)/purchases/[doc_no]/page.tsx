@@ -445,7 +445,7 @@ export default async function PurchaseDocumentDetailPage({
               รายการเอกสารที่ตัดชำระ (Allocated Documents)
             </CardTitle>
             <CardDescription>
-              {allocationsResult.data.length} รายการจาก document_allocations
+              {allocationsResult.data.length} รายการที่ตัดชำระ (AP / ค่าใช้จ่าย)
             </CardDescription>
           </CardHeader>
           <CardContent className="px-0 sm:px-6">

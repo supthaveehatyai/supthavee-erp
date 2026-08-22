@@ -47,6 +47,9 @@ function StatusBadge({ status }: { status: string }) {
   if (normalized === "ISSUED") {
     return <Badge variant="emerald">ISSUED</Badge>;
   }
+  if (normalized === "PAID") {
+    return <Badge variant="blue">PAID</Badge>;
+  }
   if (normalized === "VOID") {
     return (
       <Badge variant="amber" className="bg-red-100 text-red-700">

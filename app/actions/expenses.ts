@@ -52,6 +52,7 @@ import type {
   UploadExpenseReceiptResult,
 } from "@/types/expense";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
+import { encodeExpenseKnockoffReason } from "@/lib/utils/expense-knockoff";
 
 /**
  * Purge Next.js Router Cache for Expense routes after mutations.
@@ -2055,7 +2056,7 @@ export async function payExpenseInstallment(
 
     const { data: expense, error: expenseError } = await supabaseAdmin
       .from("expenses")
-      .select("id, document_no, status, vendor_id")
+      .select("id, document_no, status, vendor_id, vendor_doc_no")
       .eq("id", expenseId)
       .maybeSingle();
 
@@ -2163,6 +2164,107 @@ export async function payExpenseInstallment(
     }
 
     const txId = String(tx.id);
+    const vendorDocNo =
+      expense.vendor_doc_no == null
+        ? null
+        : String(expense.vendor_doc_no).trim() || null;
+    const expenseDocNo = String(expense.document_no ?? "").trim();
+    const knockoffReason = encodeExpenseKnockoffReason({
+      expense_id: expenseId,
+      document_no: expenseDocNo,
+      vendor_doc_no: vendorDocNo,
+    });
+
+    async function rollbackPayout(allocationIds: {
+      documentAllocationId?: string | null;
+      paymentAllocationId?: string | null;
+    }) {
+      if (allocationIds.paymentAllocationId) {
+        await supabaseAdmin
+          .from("payment_allocations")
+          .delete()
+          .eq("id", allocationIds.paymentAllocationId);
+      }
+      if (allocationIds.documentAllocationId) {
+        await supabaseAdmin
+          .from("document_allocations")
+          .delete()
+          .eq("id", allocationIds.documentAllocationId);
+      }
+      await supabaseAdmin.from("payment_transactions").delete().eq("id", txId);
+      await supabaseAdmin.from("documents").delete().eq("id", payDocId);
+    }
+
+    const allocWithExpenseId = {
+      receipt_doc_id: payDocId,
+      invoice_doc_id: payDocId,
+      allocated_amount: amount,
+      wht_amount: 0,
+      adjustment_amount: 0,
+      adjustment_reason: knockoffReason,
+      original_receipt_received: false,
+      expense_id: expenseId,
+    };
+
+    let { data: docAlloc, error: docAllocError } = await supabaseAdmin
+      .from("document_allocations")
+      .insert(allocWithExpenseId)
+      .select("id")
+      .single();
+
+    if (
+      docAllocError &&
+      /expense_id/i.test(docAllocError.message ?? "")
+    ) {
+      const retry = await supabaseAdmin
+        .from("document_allocations")
+        .insert({
+          receipt_doc_id: payDocId,
+          invoice_doc_id: payDocId,
+          allocated_amount: amount,
+          wht_amount: 0,
+          adjustment_amount: 0,
+          adjustment_reason: knockoffReason,
+          original_receipt_received: false,
+        })
+        .select("id")
+        .single();
+      docAlloc = retry.data;
+      docAllocError = retry.error;
+    }
+
+    if (docAllocError || !docAlloc) {
+      await rollbackPayout({});
+      return {
+        success: false,
+        error:
+          docAllocError?.message ??
+          "บันทึกการตัดยอด (document_allocations) ไม่สำเร็จ",
+      };
+    }
+
+    const documentAllocationId = String(docAlloc.id);
+    let paymentAllocationId: string | null = null;
+
+    const { data: payAlloc, error: payAllocError } = await supabaseAdmin
+      .from("payment_allocations")
+      .insert({
+        document_id: payDocId,
+        expense_id: expenseId,
+        payment_transaction_id: txId,
+        allocated_amount: amount,
+      })
+      .select("id")
+      .single();
+
+    if (payAllocError) {
+      console.error(
+        "[payExpenseInstallment][payment_allocations]",
+        payAllocError.message,
+      );
+    } else if (payAlloc) {
+      paymentAllocationId = String(payAlloc.id);
+    }
 
     const { data: updated, error: updateError } = await supabaseAdmin
       .from("expense_installments")
@@ -2177,8 +2279,10 @@ export async function payExpenseInstallment(
       .maybeSingle();
 
     if (updateError || !updated) {
-      await supabaseAdmin.from("payment_transactions").delete().eq("id", txId);
-      await supabaseAdmin.from("documents").delete().eq("id", payDocId);
+      await rollbackPayout({
+        documentAllocationId,
+        paymentAllocationId,
+      });
       return {
         success: false,
         error:
@@ -2187,9 +2291,40 @@ export async function payExpenseInstallment(
       };
     }
 
+    const { count: unpaidCount, error: unpaidError } = await supabaseAdmin
+      .from("expense_installments")
+      .select("id", { count: "exact", head: true })
+      .eq("expense_id", expenseId)
+      .eq("is_paid", false);
+
+    if (unpaidError) {
+      console.error(
+        "[payExpenseInstallment][unpaid-count]",
+        unpaidError.message,
+      );
+    } else if ((unpaidCount ?? 0) === 0) {
+      const { error: paidStatusError } = await supabaseAdmin
+        .from("expenses")
+        .update({
+          status: "PAID",
+          updated_at: nowIso,
+        })
+        .eq("id", expenseId)
+        .eq("status", "ISSUED");
+
+      if (paidStatusError) {
+        console.error(
+          "[payExpenseInstallment][auto-paid]",
+          paidStatusError.message,
+        );
+      }
+    }
+
     revalidateExpenseCaches(expenseId);
     revalidatePath("/finance");
     revalidatePath("/finance/ap-payment");
+    revalidatePath("/purchases");
+    revalidatePath(`/purchases/${numberResult.data}`);
 
     return { success: true, error: null };
   } catch (err) {
