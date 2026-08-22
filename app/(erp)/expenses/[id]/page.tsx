@@ -48,7 +48,7 @@ function StatusBadge({ status }: { status: string }) {
     return <Badge variant="emerald">ISSUED</Badge>;
   }
   if (normalized === "PAID") {
-    return <Badge variant="blue">PAID</Badge>;
+    return <Badge variant="emerald">ชำระครบแล้ว (PAID)</Badge>;
   }
   if (normalized === "VOID") {
     return (
