@@ -56,9 +56,34 @@ type AllocationQueryRow = {
   invoice_doc_id: string;
   original_receipt_received?: boolean | null;
   adjustment_reason?: string | null;
-  expense_id?: string | null;
+  /** OPEX knock-off target — null for classic AP/AR allocations */
+  expense_id: string | null;
   invoice: InvoiceJoin | InvoiceJoin[] | null;
 };
+
+/**
+ * Normalize Supabase select results so fallback queries (without expense_id)
+ * stay assignable to AllocationQueryRow without Vercel type errors.
+ */
+function asAllocationQueryRows(
+  rows: unknown[] | null | undefined,
+): AllocationQueryRow[] {
+  return ((rows ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    id: String(row.id ?? ""),
+    allocated_amount: (row.allocated_amount as number | string | null) ?? null,
+    wht_amount: (row.wht_amount as number | string | null) ?? null,
+    invoice_doc_id: String(row.invoice_doc_id ?? ""),
+    original_receipt_received:
+      (row.original_receipt_received as boolean | null | undefined) ?? null,
+    adjustment_reason:
+      (row.adjustment_reason as string | null | undefined) ?? null,
+    expense_id:
+      row.expense_id == null || row.expense_id === ""
+        ? null
+        : String(row.expense_id),
+    invoice: (row.invoice as InvoiceJoin | InvoiceJoin[] | null) ?? null,
+  }));
+}
 
 type ExpenseJoin = {
   id?: string;
@@ -322,11 +347,18 @@ export async function getDocumentAllocationsByReceiptId(
         )
       `;
 
-    let { data, error } = await supabase
-      .from("document_allocations")
-      .select(selectWithExpense)
-      .eq("receipt_doc_id", trimmed)
-      .order("created_at", { ascending: true });
+    let data: AllocationQueryRow[] = [];
+    let error: { message?: string } | null = null;
+
+    {
+      const primary = await supabase
+        .from("document_allocations")
+        .select(selectWithExpense)
+        .eq("receipt_doc_id", trimmed)
+        .order("created_at", { ascending: true });
+      data = asAllocationQueryRows(primary.data as unknown[] | null);
+      error = primary.error;
+    }
 
     if (error && /expense_id/i.test(error.message ?? "")) {
       const withoutExpenseCol = await supabase
@@ -334,7 +366,9 @@ export async function getDocumentAllocationsByReceiptId(
         .select(selectWithStatus)
         .eq("receipt_doc_id", trimmed)
         .order("created_at", { ascending: true });
-      data = withoutExpenseCol.data;
+      data = asAllocationQueryRows(
+        withoutExpenseCol.data as unknown[] | null,
+      );
       error = withoutExpenseCol.error;
     }
 
@@ -348,15 +382,15 @@ export async function getDocumentAllocationsByReceiptId(
         .select(selectLegacy)
         .eq("receipt_doc_id", trimmed)
         .order("created_at", { ascending: true });
-      data = legacy.data;
+      data = asAllocationQueryRows(legacy.data as unknown[] | null);
       error = legacy.error;
     }
 
     if (error) {
-      return { data: [], error: error.message };
+      return { data: [], error: error.message ?? "โหลดรายการตัดยอดไม่สำเร็จ" };
     }
 
-    const rows = (data ?? []) as AllocationQueryRow[];
+    const rows = data;
     const contactIds = [
       ...new Set(
         rows
@@ -451,6 +485,7 @@ export async function getDocumentAllocationsByReceiptId(
         allocated_amount: roundMoney(toMoney(row.allocated_amount)),
         wht_amount: roundMoney(toMoney(row.wht_amount)),
         original_receipt_received: row.original_receipt_received === true,
+        expense_id: row.expense_id ?? null,
       });
     }
 
