@@ -186,15 +186,9 @@ export function FixedAssetFormSheet({
 
     const normalizedId = String(selectedExpenseId).trim();
     const selectedExpense = expenses.find(
-      (row) => String(row.id).trim() === normalizedId,
+      (row) =>
+        String(row.id).trim().toLowerCase() === normalizedId.toLowerCase(),
     );
-
-    console.log("[FixedAssetForm] expense select", {
-      selectedExpenseId: normalizedId,
-      found: Boolean(selectedExpense),
-      grand_total: selectedExpense?.grand_total,
-      expense_date: selectedExpense?.expense_date,
-    });
 
     if (!selectedExpense) {
       setForm((prev) => ({ ...prev, expense_id: normalizedId }));

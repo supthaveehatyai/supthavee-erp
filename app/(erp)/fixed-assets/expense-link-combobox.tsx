@@ -2,7 +2,7 @@
 
 /**
  * Presentational Combobox — Link Expense (data from Server Component).
- * Selecting an expense auto-fills acquisition cost via onSelect.
+ * CommandItem `value` MUST be expense.id (matches form field value).
  */
 
 import { useMemo, useState } from "react";
@@ -57,6 +57,21 @@ function formatDocDate(value: string): string {
   }).format(date);
 }
 
+function expenseIdsMatch(a: string, b: string): boolean {
+  return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+}
+
+function findExpenseById(
+  expenses: LinkableExpenseOption[],
+  id: string,
+): LinkableExpenseOption | undefined {
+  const normalized = String(id).trim().toLowerCase();
+  if (!normalized) return undefined;
+  return expenses.find((row) =>
+    expenseIdsMatch(String(row.id), normalized),
+  );
+}
+
 function matchesSearch(row: LinkableExpenseOption, query: string): boolean {
   const keyword = query.trim().toLocaleLowerCase("th");
   if (!keyword) return true;
@@ -75,14 +90,22 @@ export function ExpenseLinkCombobox({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
-  const selected =
-    expenses.find((row) => String(row.id).trim() === String(value).trim()) ??
-    null;
+  const selected = findExpenseById(expenses, value) ?? null;
 
   const filtered = useMemo(
     () => expenses.filter((row) => matchesSearch(row, search)),
     [expenses, search],
   );
+
+  const triggerLabel =
+    selected?.document_no?.trim() || "เลือกบิลค่าใช้จ่าย (ถ้ามี)";
+
+  function handleItemSelect(currentValue: string) {
+    const matched = findExpenseById(expenses, currentValue);
+    onSelect(matched ? String(matched.id) : currentValue.trim());
+    setOpen(false);
+    setSearch("");
+  }
 
   return (
     <div className="flex gap-2">
@@ -98,15 +121,14 @@ export function ExpenseLinkCombobox({
               !selected && "text-slate-400",
             )}
           >
-            <span className="truncate">
-              {selected
-                ? `${selected.document_no} · ${formatThaiBaht(selected.grand_total)}`
-                : "เลือกบิลค่าใช้จ่าย (ถ้ามี)"}
-            </span>
+            <span className="truncate font-mono">{triggerLabel}</span>
             <ChevronsUpDown className="ml-2 size-4 shrink-0 text-slate-400" />
           </button>
         </PopoverTrigger>
-        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+        <PopoverContent
+          className="w-[var(--radix-popover-trigger-width)] p-0"
+          align="start"
+        >
           <Command shouldFilter={false}>
             <CommandInput
               placeholder="ค้นหาเลขที่เอกสาร..."
@@ -119,17 +141,16 @@ export function ExpenseLinkCombobox({
                 {filtered.map((row) => (
                   <CommandItem
                     key={row.id}
-                    value={`${row.document_no} ${row.id}`}
-                    onSelect={() => {
-                      onSelect(String(row.id));
-                      setOpen(false);
-                      setSearch("");
-                    }}
+                    value={String(row.id)}
+                    keywords={[row.document_no]}
+                    onSelect={handleItemSelect}
                   >
                     <Check
                       className={cn(
                         "mr-2 size-4",
-                        value === String(row.id) ? "opacity-100" : "opacity-0",
+                        selected && expenseIdsMatch(selected.id, row.id)
+                          ? "opacity-100"
+                          : "opacity-0",
                       )}
                     />
                     <div className="flex min-w-0 flex-col">
@@ -155,7 +176,10 @@ export function ExpenseLinkCombobox({
           size="icon"
           disabled={disabled}
           aria-label="ล้างการอ้างอิงบิล"
-          onClick={() => onSelect(null)}
+          onClick={() => {
+            onSelect(null);
+            setSearch("");
+          }}
         >
           <X className="size-4" />
         </Button>
