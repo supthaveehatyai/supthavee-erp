@@ -1,4 +1,3 @@
-Markdown
 # CRITICAL SYSTEM GUARDRAILS (AI MUST FOLLOW)
 1. ALWAYS read `docs/database-schema.md` before generating any Supabase queries or Server Actions. 
 2. STRICTLY use the table names and column names defined in the schema and existing database. DO NOT invent new tables or guess column names (e.g., use `mst_bank_accounts` with `account_no`, NEVER `bank_accounts`).
@@ -28,42 +27,29 @@ Tech Stack หลัก: Supabase (PostgreSQL, Auth, Edge Functions, RLS), Next.
 - **Zero Client-Side Fetching:** ห้ามใช้ `supabase.from()` หรือ query ข้อมูลผ่าน Client Component เด็ดขาด การอ่าน/เขียนข้อมูลต้องทำผ่าน **Server Actions** เท่านั้น
 - **Bypass RLS on Server:** ใน Server Actions ให้ใช้ `supabaseAdmin` (Service Role Key) ในการจัดการข้อมูลที่ต้องการสิทธิ์ระดับสูง
 - **Type Separation:** ห้ามเขียน `export type` หรือ `interface` รวมในไฟล์ที่มี `'use server'` ให้แยกไฟล์ Type ออกไปที่โฟลเดอร์ `types/` เพื่อป้องกัน Turbopack Build Error
-- **Explicit Foreign Key References:** เมื่อมีการ Query ข้อมูลข้ามตาราง (Join) ผ่าน Supabase SDK หากตารางนั้นมี Foreign Key ชี้ไปตารางเป้าหมายมากกว่า 1 คอลัมน์ (Ambiguous Relationship) **บังคับให้ใช้ Explicit Join เสมอ** (เช่น `.select('*, document_items!document_id(*)')`) เพื่อป้องกัน Error 500
-- **Cloud-First Alignment:** การทำ Database Migration ใหม่ ให้แนะนำ SQL เพื่อไปรันบน Supabase Cloud โดยตรง และใช้คำสั่ง `npx supabase gen types typescript --project-id ...` เสมอ เพื่อลดปัญหา Schema Drift
+- **Explicit Foreign Key References:** เมื่อมีการ Query ข้อมูลข้ามตาราง (Join) ผ่าน Supabase SDK หากตารางนั้นมี Foreign Key ชี้ไปตารางเป้าหมายมากกว่า 1 คอลัมน์ บังคับให้ใช้ Explicit Join เสมอ 
+- **Cloud-First Alignment:** การทำ Database Migration ใหม่ ให้รันบน Supabase Cloud โดยตรง และใช้คำสั่ง `npx supabase gen types typescript --project-id ...` 
 
 ## 2. Business & Accounting Logic (ERP Standard)
-- **Late Numbering:** เอกสารใหม่ต้องใช้รหัสชั่วคราว (`DRAFT-YYYYMMDDHHmmss`) และดึงเลขรันนิ่งจริงผ่าน RPC (`generate_document_no`) เฉพาะตอนกด "ยืนยัน (ISSUED)" เท่านั้น
-- **Approval Workflow (Maker-Checker):** เอกสารที่ต้องขออนุมัติ (PENDING) สถานะหลักต้องคงไว้ที่ DRAFT เสมอ เมื่อได้รับการ APPROVED จึงจะเปลี่ยนสถานะเป็น ISSUED และรันเลขจริง หากถูก REJECTED ให้คงสถานะ DRAFT ต่อไป
-- **Document Lifecycle & Reversal:**
-  - สถานะ DRAFT ให้ใช้คำสั่ง "Delete"
-  - สถานะ ISSUED ให้ใช้คำสั่ง "Void" (ห้ามลบ)
-  - เมื่อ Void ต้องทำการคืนสต็อกอัตโนมัติ (Inventory Reversal) ลง `inventory_ledger`
-- **Cost Accuracy (Decimal Leakage):** การคำนวณส่วนลดท้ายบิลและ Prorate ต้นทุน (Net Cost Apportionment) ต้องรักษาความละเอียด 4 ทศนิยม
-- **Post-Submit Redirection:** หลัง Server Action สำเร็จจากหน้าสร้างเอกสาร ต้อง `router.push` ออกจากฟอร์มทันทีเพื่อกัน Duplicate Submit
-
+- **Late Numbering:** เอกสารใหม่ต้องใช้รหัสชั่วคราว (`DRAFT-YYYYMMDDHHmmss`) และดึงเลขรันนิ่งจริงผ่าน RPC เฉพาะตอนกด "ยืนยัน (ISSUED)"
+- **Approval Workflow:** เอกสารรออนุมัติต้องคงสถานะ DRAFT เสมอ เมื่อ APPROVED จึงเปลี่ยนเป็น ISSUED หากถูก REJECTED ให้คงสถานะ DRAFT 
+- **Document Lifecycle:** DRAFT = ลบ (Delete), ISSUED = ยกเลิก (Void / ห้ามลบ) พร้อมทำ Inventory Reversal
+- **AP Auto-Clearing (Cash Purchase):** บิลค่าใช้จ่ายที่ไม่ได้ผ่อนชำระ ให้เปลี่ยนสถานะเป็น `PAID` อัตโนมัติเมื่ออนุมัติสำเร็จ ตามมาตรฐานบัญชี
+- **Direct Capitalization:** การขึ้นทะเบียนสินทรัพย์ให้ใช้วิธีส่ง URL Parameters (`?linked_expense_id=...`) จากหน้า Expense ไปยัง Fixed Asset Form แทนการใช้ Dropdown เพื่อป้องกัน UI Crash
 
 ## 3. Data Integrity & Taxonomy
-- **Color Code:** `mst_colors` ต้องล็อกรหัสสีเป็นอักษรภาษาอังกฤษพิมพ์ใหญ่ 3 ตัวอักษรเสมอ (เช่น WHT, BLK, NVY)
+- **Color Code:** `mst_colors` ต้องล็อกเป็นอักษรภาษาอังกฤษพิมพ์ใหญ่ 3 ตัวอักษร
 - **Size Sort Order:** `mst_sizes` การจัดเรียงต้องเป็นมาตราส่วน Gap of 10
-- **Inventory Update:** ห้ามแก้ไขจำนวนสต็อกที่ตาราง `products` โดยตรง ต้องบันทึกเข้า-ออกผ่าน `inventory_ledger` เสมอ
+- **Inventory Update:** ห้ามแก้ไขสต็อกที่ตาราง `products` โดยตรง ต้องผ่าน `inventory_ledger` เสมอ
 
 ## 4. UI / UX Pattern
-- **Component Library:** ใช้ `shadcn/ui`, `Tailwind CSS`, และ `Lucide Icons` เป็นหลัก
-- **URL-Driven State:** ใช้ URL Search Parameters (`?query=...`) แทน `useState` สำหรับการ Filter Data Table และ State ของ Sheet/Modal
-- **Destructive Actions:** การลบ หรือยกเลิกเอกสาร ต้องใช้ `AlertDialog` (Shared Component) ยืนยันเสมอ ห้ามใช้ `window.confirm()` แบบ Native
-- **Submit Guard:** ปุ่ม Submit ต้องมีสถานะ `isSubmitting` (disable) ระหว่างรอ Server Action ทำงาน เพื่อป้องกัน Duplicate Insert
-- **Forms:** Stick to the established 2-column grid layout for document headers
-- **Print Layout:** Support A4 printing via CSS `@media print`, automatically hiding Navbars and Sidebars
-- **Shared Print Components (TFRS):** ทุกหน้าที่มีการสั่งพิมพ์เอกสาร ต้องใช้ Component `PrintLayout`, `DocumentPrintHeader`, `DocumentPrintSummary`, `DocumentPrintFooter` เสมอ (`components/shared/print/*`) — ห้าม hard-code ชื่อ/ที่อยู่/โลโก้บริษัท ให้ดึงจาก `getSystemSettings()` ผ่าน Header — paperSize ตาม `lib/constants/print-paper-size.ts` (A4: QT/TAX_INV/AP_TAX/EXPENSE/WHT · A5-Landscape: INV_DO/REC/PAY/DEP_IN/DEP_OUT/BN)
-- **Document Action Labels:** ดึงข้อความปุ่มจาก `lib/constants/document-actions.ts` (`DOCUMENT_ACTIONS.*`) เป็น Single Source of Truth
-- **VAT UI Labels:**
-  - `NONE` → 'ไม่มีภาษี (None)'
-  - `INCLUSIVE` → 'รวมภาษีมูลค่าเพิ่ม (Inclusive)'
-  - `EXCLUSIVE` → 'แยกภาษีมูลค่าเพิ่ม (Exclusive)'
-... (เนื้อหาข้อ 1 - 4 คงเดิมทุกประการ) ...
+- **URL-Driven State:** ใช้ URL Search Parameters (`?query=...`) แทน `useState` สำหรับการ Filter
+- **Submit Guard:** ปุ่ม Submit ต้องมีสถานะ `isSubmitting` ระหว่างรอ Server Action ทำงาน
+- **Shared Print Components (TFRS):** ทุกหน้าพิมพ์ต้องใช้ `PrintLayout`, `DocumentPrintHeader`, `DocumentPrintSummary` ห้าม Hard-code ข้อมูลบริษัท
 
-## 5. Cloud Integration & Edge Functions (Vercel & Supabase)
-- **Vercel Limits:** Server Actions ที่ทำงานหนัก (เช่น OCR) ต้องมีบรรทัด `export const maxDuration = 60;` ไว้บนสุดเสมอ และต้องตั้งค่าเพิ่ม `bodySizeLimit` ใน `next.config.mjs` หากต้องรับไฟล์ Base64
-- **Edge Function Auth:** การใช้ `fetch` เพื่อเรียก Supabase Edge Functions ต้องแนบ `Authorization: Bearer ${session.access_token}` จาก Server Session เสมอ เพื่อให้ผ่านระบบ Security (sub claim)
-- **Safe JSON Parsing:** ต้องทำการล้าง Markdown Formatting (เช่น ```json) ออกจาก Payload ที่ได้รับจาก AI เสมอก่อนรัน `JSON.parse`
-- **Error Handling on Production:** Server Actions ห้าม `throw new Error(...)` แบบดิบๆ เพราะ Next.js จะเซนเซอร์ข้อความบน Production ให้ดักจับด้วย `try-catch` แล้ว `return { success: false, error: '...' }` เสมอ
+## 5. Cloud Integration & Edge Functions
+- **Vercel Limits:** Server Actions ที่ทำงานหนัก ต้องมี `export const maxDuration = 60;`
+- **Error Handling on Production:** ให้ดักจับด้วย `try-catch` แล้ว `return { success: false, error: '...' }` เสมอ
+
+## 6. Server / Client Boundary (CRITICAL)
+- **No Event Handlers in Server Components:** ห้ามใส่ `onClick` หรือ Client Hooks (เช่น `useState`, `useRouter`) ลงในไฟล์ที่เป็น Server Component (`page.tsx` ที่ไม่มี `'use client'`) เด็ดขาด หากต้องการทำ Navigation ให้ใช้ `<Link href="...">` ของ Next.js เสมอ

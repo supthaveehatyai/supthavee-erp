@@ -1,8 +1,8 @@
 # System Blueprint: Supthavee ERP SuperApp
 
-**Version:** 14.1 (Phase 14 Post-Go-Live Enterprise Enhancements)
+**Version:** 14.2 (Phase 14 Post-Go-Live Enterprise Enhancements)
 **Company:** บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด
-**Document Purpose:** System Requirements, Business Logic, and Database Schema for AI Assistants (Claude, Cursor, Gemini)[cite: 6]
+**Document Purpose:** System Requirements, Business Logic, and Database Schema for AI Assistants (Claude, Cursor, Gemini)
 
 ## 1. System Overview (ภาพรวมระบบ)
 ระบบ ERP แบบ Web Application สถาปัตยกรรม Full-Code ที่ออกแบบมาเพื่อบริหารจัดการธุรกิจค้าปลีก-ค้าส่ง (เสื้อผ้า, ชุดกีฬา, ถ้วยรางวัล) และงานบริการสั่งทำ (งานปัก, สกรีน) ครอบคลุมการจัดการบิลซื้อ/ขาย, การแยกบัญชี VAT/Non-VAT, ระบบรับเข้าอัจฉริยะ (OCR), การจัดการสต็อกหลายหน่วยนับ, การสร้างรหัสสินค้าแบบชาญฉลาด (Product Matrix & Auto-SKU), การวิเคราะห์กำไรต่อบิล, การจัดการเจ้าหนี้-ลูกหนี้ (AP/AR), การจัดการค่าใช้จ่าย (OPEX/Net Profit) และระบบสำรองข้อมูล (Backup/Restore)[cite: 6]
@@ -99,6 +99,9 @@
 *   **Duplicate Invoice Protection:** ตรวจสอบบิลซ้ำซ้อนแบบ On-the-fly และ Database Unique Index (อ้างอิง `vendor_id` + `expense_date` + `vendor_doc_no`)[cite: 6]
 *   **Withholding Tax (WHT) Foundation:** โครงสร้างคำนวณหัก ณ ที่จ่าย หาค่า `net_payable` อัตโนมัติ พร้อมรองรับแนบสลิปโอนเงิน (Payment Slip)[cite: 6]
 *   **True Net Profit Engine:** Dashboard ดึง OPEX ไปหักลบ Gross Profit เพื่อแสดงกำไรสุทธิแบบ Real-time[cite: 6]
+*   **AP Installment Engine (TFRS 16):** ระบบคำนวณแบ่งจ่ายค่างวดอัตโนมัติ (Auto-Split) พร้อมระบบปัดเศษสตางค์ลงงวดสุดท้าย แยกเงินต้น (`principal`) และดอกเบี้ยจ่าย (`interest`) ออกจากกันอย่างเด็ดขาดตามมาตรฐานบัญชี
+*   **AP Auto-Clearing (Cash Purchase):** สำหรับบิลที่ไม่ผ่อนชำระ เมื่อได้รับการอนุมัติ (Approved) ระบบจะทำการตั้งหนี้และล้างหนี้โดยเปลี่ยนสถานะเอกสารเป็น `PAID` ทันทีอัตโนมัติ
+*   **Installment Knock-off:** การบันทึกจ่ายค่างวด จะทำการ `INSERT` ลงตาราง `payment_transactions` และเชื่อมสะพานผ่าน `payment_allocations` เพื่อตัดหนี้รายงวด (ระบบจะอัปเดตบิลหลักเป็น `PAID` อัตโนมัติเมื่อผ่อนครบ)
 
 ### Module H: Tax & WHT Management (ระบบจัดการภาษีหัก ณ ที่จ่าย) - [✅ Completed]
 *   **WHT Report:** หน้าต่างรายงานสรุปยอดภาษีหัก ณ ที่จ่ายประจำเดือน แยกตามประเภท (1%, 2%, 3%, 5%)[cite: 6]
@@ -116,11 +119,13 @@
 *   **Phase 11 (Operational Refinement):** การแสดงรูปสินค้า Thumbnail ในรายการเปิดบิล (Visual Verification), การปรับปรุง Document Templates (ดึงข้อมูลบริษัทอัตโนมัติและอิง TFRS)[cite: 6]
 *   **Phase 12 (Knowledge Management & UAT):** จัดทำคู่มือมาตรฐานระบบ, ระบบตั้งค่า Interactive Knowledge Base, ระบบ PIN Login, ทะลุกำแพง Auth Guard, เปิดสวิตช์ Negative Stock, UAT Testing[cite: 6]
 
-### Module K: Post Go-Live Enterprise Enhancements (ส่วนต่อขยาย Phase 14) - [Roadmap]
+### Module K: Post Go-Live Enterprise Enhancements (ส่วนต่อขยาย Phase 14) 
 *   **Physical Inventory:** ระบบเอกสารยอดยกมา (STK_OB) และระบบปรับปรุงสต็อก (STK_ADJ) [✅ Completed]
 *   **Approval Workflow & Period Closing:** ระบบอนุมัติบิล Maker-Checker และการล็อกบัญชีรายเดือน [✅ Completed]
-*   **Fixed Asset Management:** ทะเบียนสินทรัพย์ถาวร (`fixed_assets` + `mst_asset_categories`) รองรับราคาทุน/อายุใช้งาน และเตรียม Straight-line Depreciation [✅ Register Completed · Depreciation Roadmap]
-*   **Data Archiving (Tiered Storage):** สคริปต์สำรองข้อมูลภาพเย็น (Cold Data) อายุเกิน 1-5 ปี ถ่ายโอนสู่ NAS และลบพ้น Cloud [Roadmap]
+*   **Fixed Asset Management (Direct Capitalization):** ทะเบียนสินทรัพย์ถาวร รองรับการดึงข้อมูลราคาทุนจาก AP Invoice โดยตรงผ่าน URL Search Params (`?linked_expense_id=...`) เข้าสู่ตาราง `fixed_assets` เพื่อป้องกันการกรอกราคาทุนไม่ตรงกับบิล (Historical Cost Principle) [✅ Register Completed]
+*   **Fixed Asset Depreciation:** คำนวณค่าเสื่อมราคาแบบเส้นตรง (Straight-line) และโพสต์รายการบัญชีรายเดือน [⏳ Roadmap]
+*   **Data Archiving (Tiered Storage):** สคริปต์สำรองข้อมูลภาพเย็น (Cold Data) อายุเกิน 1-5 ปี ถ่ายโอนสู่ NAS [⏳ Roadmap]
+*   **ABAC (Attribute-Based Access Control):** ยกระดับระบบสิทธิ์การเข้าถึงข้อมูลแบบละเอียดรายบุคคล [⏳ Roadmap]
 
 ## 5. Database Schema (PostgreSQL for Supabase)
 
