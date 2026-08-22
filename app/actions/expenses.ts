@@ -52,6 +52,7 @@ import type {
   UploadExpenseReceiptResult,
 } from "@/types/expense";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
+import { settleExpenseCashPurchase } from "@/lib/actions/finance/expense-cash-settlement";
 import { encodeExpenseKnockoffReason } from "@/lib/utils/expense-knockoff";
 
 /**
@@ -1728,7 +1729,7 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
     const { data: before, error: beforeError } = await supabaseAdmin
       .from("expenses")
       .select(
-        "id, document_no, expense_date, category_id, vendor_id, bank_account_id, net_amount, vat_amount, grand_total, payment_method, status, approval_status, remark",
+        "id, document_no, expense_date, category_id, vendor_id, vendor_doc_no, bank_account_id, net_amount, vat_amount, grand_total, payment_method, payment_slip_url, is_installment, status, approval_status, remark",
       )
       .eq("id", expenseId)
       .maybeSingle();
@@ -1820,20 +1821,51 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
       };
     }
 
-    const mapped = mapExpenseRow(updated as Record<string, unknown>);
+    let mapped = mapExpenseRow(updated as Record<string, unknown>);
+
+    const settlement = await settleExpenseCashPurchase(
+      supabaseAdmin,
+      expenseId,
+    );
+    if (!settlement.success) {
+      return {
+        data: mapped,
+        error:
+          settlement.error ??
+          "ออกเอกสารแล้ว แต่บันทึกการจ่ายซื้อสดไม่สำเร็จ",
+      };
+    }
+
+    if (settlement.success && !settlement.skipped) {
+      const { data: paidExpense, error: paidFetchError } = await supabaseAdmin
+        .from("expenses")
+        .select(EXPENSE_ROW_SELECT)
+        .eq("id", expenseId)
+        .maybeSingle();
+
+      if (paidFetchError) {
+        console.error("[issueExpense][paid-fetch]", paidFetchError.message);
+      } else if (paidExpense) {
+        mapped = mapExpenseRow(paidExpense as Record<string, unknown>);
+      }
+    }
+
     fireExpenseAuditLog({
       recordId: expenseId,
       auditEvent: "ISSUE",
       oldData: before as Record<string, unknown>,
       newData: {
         ...mapped,
-        status: "ISSUED",
+        status: mapped.status,
         document_no: officialNo,
         approval_status: "APPROVED",
       },
     });
 
     revalidateExpenseCaches(expenseId);
+    revalidatePath("/finance");
+    revalidatePath("/finance/ap-payment");
+    revalidatePath("/purchases");
 
     return {
       data: mapped,

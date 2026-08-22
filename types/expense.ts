@@ -80,6 +80,13 @@ export type PayExpenseInstallmentResult = {
   error: string | null;
 };
 
+export type ExpenseCashSettlementResult = {
+  success: boolean;
+  error: string | null;
+  /** True when installment bill or already PAID — no settlement ran. */
+  skipped?: boolean;
+};
+
 export type ExpenseDetail = ExpenseRecord & {
   category_name: string;
   vendor_name: string;

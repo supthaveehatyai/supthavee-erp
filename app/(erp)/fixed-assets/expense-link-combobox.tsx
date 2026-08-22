@@ -75,7 +75,9 @@ export function ExpenseLinkCombobox({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
-  const selected = expenses.find((row) => row.id === value) ?? null;
+  const selected =
+    expenses.find((row) => String(row.id).trim() === String(value).trim()) ??
+    null;
 
   const filtered = useMemo(
     () => expenses.filter((row) => matchesSearch(row, search)),
@@ -119,7 +121,7 @@ export function ExpenseLinkCombobox({
                     key={row.id}
                     value={`${row.document_no} ${row.id}`}
                     onSelect={() => {
-                      onSelect(row.id);
+                      onSelect(String(row.id));
                       setOpen(false);
                       setSearch("");
                     }}
@@ -127,7 +129,7 @@ export function ExpenseLinkCombobox({
                     <Check
                       className={cn(
                         "mr-2 size-4",
-                        value === row.id ? "opacity-100" : "opacity-0",
+                        value === String(row.id) ? "opacity-100" : "opacity-0",
                       )}
                     />
                     <div className="flex min-w-0 flex-col">

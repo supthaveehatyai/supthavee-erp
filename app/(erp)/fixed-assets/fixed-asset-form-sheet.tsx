@@ -184,11 +184,20 @@ export function FixedAssetFormSheet({
       return;
     }
 
+    const normalizedId = String(selectedExpenseId).trim();
     const selectedExpense = expenses.find(
-      (row) => row.id === selectedExpenseId,
+      (row) => String(row.id).trim() === normalizedId,
     );
+
+    console.log("[FixedAssetForm] expense select", {
+      selectedExpenseId: normalizedId,
+      found: Boolean(selectedExpense),
+      grand_total: selectedExpense?.grand_total,
+      expense_date: selectedExpense?.expense_date,
+    });
+
     if (!selectedExpense) {
-      setForm((prev) => ({ ...prev, expense_id: selectedExpenseId }));
+      setForm((prev) => ({ ...prev, expense_id: normalizedId }));
       return;
     }
 
@@ -201,7 +210,7 @@ export function FixedAssetFormSheet({
 
     setForm((prev) => ({
       ...prev,
-      expense_id: selectedExpense.id,
+      expense_id: String(selectedExpense.id),
       acquisition_cost: formatAcquisitionCostInput(cost),
       purchase_date: purchaseDate || prev.purchase_date,
     }));

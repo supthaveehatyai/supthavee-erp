@@ -20,6 +20,7 @@ import {
   resolveIssuedDocumentStatus,
 } from "@/lib/constants/document";
 import { isTemporaryDraftDocNo } from "@/lib/utils/draft-document-no";
+import { settleExpenseCashPurchase } from "@/lib/actions/finance/expense-cash-settlement";
 import type { Database } from "@/src/types/supabase";
 import type { DocumentType } from "@/types/document";
 import type {
@@ -551,8 +552,24 @@ export async function processApproval(
           return { success: false, error: updateError.message };
         }
 
+        const settlement = await settleExpenseCashPurchase(
+          supabaseAdmin,
+          trimmedId,
+        );
+        if (!settlement.success) {
+          return {
+            success: false,
+            error:
+              settlement.error ??
+              "อนุมัติแล้ว แต่บันทึกการจ่ายซื้อสดไม่สำเร็จ",
+          };
+        }
+
         documentNo = officialNo;
         revalidateExtra.push(`/expenses/${trimmedId}`, "/expenses");
+        if (!settlement.skipped) {
+          revalidateExtra.push("/finance", "/finance/ap-payment", "/purchases");
+        }
       } else {
         const { error: updateError } = await supabaseAdmin
           .from("expenses")
