@@ -45,10 +45,13 @@ import type {
   GetExpensesResult,
   GetExpenseVendorsResult,
   MutateExpenseResult,
+  PayExpenseInstallmentPayload,
+  PayExpenseInstallmentResult,
   UpdateDraftExpenseInput,
   UpdateDraftExpenseResult,
   UploadExpenseReceiptResult,
 } from "@/types/expense";
+import { generateDocumentNumber } from "@/lib/actions/document-actions";
 
 /**
  * Purge Next.js Router Cache for Expense routes after mutations.
@@ -244,6 +247,11 @@ function mapInstallmentRow(row: Record<string, unknown>): ExpenseInstallmentRow 
     ),
     is_paid: Boolean(row.is_paid),
     paid_date: row.paid_date == null ? null : String(row.paid_date),
+    payment_transaction_id:
+      row.payment_transaction_id == null
+        ? null
+        : String(row.payment_transaction_id),
+    slip_url: row.slip_url == null ? null : String(row.slip_url),
   };
 }
 
@@ -1533,7 +1541,7 @@ export async function getExpenseById(
       await supabaseAdmin
         .from("expense_installments")
         .select(
-          "id, expense_id, installment_period, due_date, principal_amount, interest_amount, total_installment, is_paid, paid_date",
+          "id, expense_id, installment_period, due_date, principal_amount, interest_amount, total_installment, is_paid, paid_date, payment_transaction_id",
         )
         .eq("expense_id", expenseId)
         .order("installment_period", { ascending: true });
@@ -1543,15 +1551,52 @@ export async function getExpenseById(
       return { data: null, error: installmentError.message };
     }
 
+    const txIds = Array.from(
+      new Set(
+        (installmentRows ?? [])
+          .map((row) =>
+            row.payment_transaction_id == null
+              ? ""
+              : String(row.payment_transaction_id),
+          )
+          .filter((id) => id.length > 0),
+      ),
+    );
+
+    const slipByTxId = new Map<string, string | null>();
+    if (txIds.length > 0) {
+      const { data: txRows, error: txError } = await supabaseAdmin
+        .from("payment_transactions")
+        .select("id, attachment_url")
+        .in("id", txIds);
+
+      if (txError) {
+        console.error("[getExpenseById][payment_tx]", txError.message);
+        return { data: null, error: txError.message };
+      }
+
+      for (const tx of txRows ?? []) {
+        slipByTxId.set(
+          String(tx.id),
+          tx.attachment_url == null ? null : String(tx.attachment_url),
+        );
+      }
+    }
+
     return {
       data: {
         ...base,
         category_name: category?.category_name?.trim() || "—",
         vendor_name: vendor?.company_name?.trim() || "—",
         bank_account_label: bankLabel,
-        installments: (installmentRows ?? []).map((row) =>
-          mapInstallmentRow(row as Record<string, unknown>),
-        ),
+        installments: (installmentRows ?? []).map((row) => {
+          const mapped = mapInstallmentRow(row as Record<string, unknown>);
+          const txId = mapped.payment_transaction_id;
+          return {
+            ...mapped,
+            slip_url: txId ? (slipByTxId.get(txId) ?? null) : null,
+          };
+        }),
       },
       error: null,
     };
@@ -1935,5 +1980,222 @@ export async function voidExpense(id: string): Promise<MutateExpenseResult> {
       err instanceof Error ? err.message : "ยกเลิกเอกสารค่าใช้จ่ายไม่สำเร็จ";
     console.error("[voidExpense]", message);
     return { data: null, error: message };
+  }
+}
+
+/**
+ * Record payout for one expense installment (simulated transaction).
+ *
+ * Cloud schema has no PAYOUT / COMPLETED columns on `payment_transactions`.
+ * Mapping:
+ * - payout type → PAY document + `reference_no = PAYOUT`
+ * - slip_url → `attachment_url`
+ * - amount → `expense_installments.total_installment`
+ */
+export async function payExpenseInstallment(
+  installmentId: string,
+  payload: PayExpenseInstallmentPayload,
+): Promise<PayExpenseInstallmentResult> {
+  try {
+    const id = installmentId?.trim() ?? "";
+    if (!id) {
+      return { success: false, error: "ไม่พบรหัสงวดผ่อนชำระ" };
+    }
+
+    const paidDate = String(payload?.paid_date ?? "").trim();
+    const bankAccountId = String(payload?.bank_account_id ?? "").trim();
+    let slipUrl = String(payload?.slip_url ?? "").trim() || null;
+
+    if (!slipUrl && isReceiptUploadFile(payload?.slip_file)) {
+      const uploaded = await uploadExpenseFileToStorage(
+        payload.slip_file,
+        "payment_slip",
+      );
+      if (uploaded.error || !uploaded.data) {
+        return {
+          success: false,
+          error: uploaded.error ?? "อัปโหลดสลิปโอนเงินไม่สำเร็จ",
+        };
+      }
+      slipUrl = uploaded.data.url;
+    }
+
+    if (!isIsoDate(paidDate)) {
+      return { success: false, error: "วันที่จ่ายไม่ถูกต้อง" };
+    }
+    if (!bankAccountId) {
+      return { success: false, error: "กรุณาเลือกสมุดบัญชีธนาคาร" };
+    }
+
+    const supabaseAdmin = createSupabaseAdminClient();
+
+    const { data: installment, error: installmentError } = await supabaseAdmin
+      .from("expense_installments")
+      .select(
+        "id, expense_id, installment_period, total_installment, is_paid, payment_transaction_id",
+      )
+      .eq("id", id)
+      .maybeSingle();
+
+    if (installmentError) {
+      return { success: false, error: installmentError.message };
+    }
+    if (!installment) {
+      return { success: false, error: "ไม่พบงวดผ่อนชำระ" };
+    }
+    if (Boolean(installment.is_paid) || installment.payment_transaction_id) {
+      return { success: false, error: "งวดนี้ชำระแล้ว" };
+    }
+
+    const expenseId = String(installment.expense_id);
+    const amount = toMoney(Number(installment.total_installment ?? 0));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { success: false, error: "ยอดรวมงวดไม่ถูกต้อง" };
+    }
+
+    const { data: expense, error: expenseError } = await supabaseAdmin
+      .from("expenses")
+      .select("id, document_no, status, vendor_id")
+      .eq("id", expenseId)
+      .maybeSingle();
+
+    if (expenseError) {
+      return { success: false, error: expenseError.message };
+    }
+    if (!expense) {
+      return { success: false, error: "ไม่พบเอกสารค่าใช้จ่าย" };
+    }
+    if (String(expense.status).toUpperCase() !== "ISSUED") {
+      return {
+        success: false,
+        error: "บันทึกจ่ายได้เฉพาะเอกสารสถานะ ISSUED",
+      };
+    }
+
+    const { data: bank, error: bankError } = await supabaseAdmin
+      .from("mst_bank_accounts")
+      .select("id")
+      .eq("id", bankAccountId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (bankError) {
+      return { success: false, error: bankError.message };
+    }
+    if (!bank) {
+      return { success: false, error: "ไม่พบสมุดบัญชีธนาคารที่เลือก" };
+    }
+
+    const numberResult = await generateDocumentNumber("PAY", paidDate);
+    if (!numberResult.data) {
+      return {
+        success: false,
+        error: numberResult.error ?? "สร้างเลขที่เอกสาร PAY ไม่สำเร็จ",
+      };
+    }
+
+    const nowIso = new Date().toISOString();
+    const paymentDateIso = `${paidDate}T00:00:00.000Z`;
+    const period = Number(installment.installment_period ?? 0);
+    const notes = `PAYOUT | Expense ${String(expense.document_no)} | งวดที่ ${period}`;
+
+    const { data: payDoc, error: payDocError } = await supabaseAdmin
+      .from("documents")
+      .insert({
+        doc_no: numberResult.data,
+        doc_type: "PAY",
+        status: "COMPLETED",
+        doc_date: paidDate,
+        contact_id: expense.vendor_id,
+        sub_total: amount,
+        discount_amount: 0,
+        tax_rate: 0,
+        tax_amount: 0,
+        wht_rate: 0,
+        wht_amount: 0,
+        grand_total: amount,
+        total_amount: amount,
+        net_before_vat: amount,
+        vat_amount: 0,
+        vat_rate: 0,
+        vat_type: "NONE",
+        paid_amount: amount,
+        payment_status: "PAID",
+        attachment_url: slipUrl,
+        attached_file_url: slipUrl,
+        notes,
+        updated_at: nowIso,
+      })
+      .select("id")
+      .single();
+
+    if (payDocError || !payDoc) {
+      return {
+        success: false,
+        error: payDocError?.message ?? "สร้างเอกสารจ่าย (PAY) ไม่สำเร็จ",
+      };
+    }
+
+    const payDocId = String(payDoc.id);
+
+    const { data: tx, error: txError } = await supabaseAdmin
+      .from("payment_transactions")
+      .insert({
+        document_id: payDocId,
+        payment_method: "BANK_TRANSFER",
+        bank_account_id: bankAccountId,
+        amount,
+        reference_no: "PAYOUT",
+        payment_date: paymentDateIso,
+        attachment_url: slipUrl,
+        is_reconciled: false,
+        is_voided: false,
+      })
+      .select("id")
+      .single();
+
+    if (txError || !tx) {
+      await supabaseAdmin.from("documents").delete().eq("id", payDocId);
+      return {
+        success: false,
+        error: txError?.message ?? "บันทึก payment_transactions ไม่สำเร็จ",
+      };
+    }
+
+    const txId = String(tx.id);
+
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from("expense_installments")
+      .update({
+        is_paid: true,
+        paid_date: paidDate,
+        payment_transaction_id: txId,
+      })
+      .eq("id", id)
+      .eq("is_paid", false)
+      .select("id")
+      .maybeSingle();
+
+    if (updateError || !updated) {
+      await supabaseAdmin.from("payment_transactions").delete().eq("id", txId);
+      await supabaseAdmin.from("documents").delete().eq("id", payDocId);
+      return {
+        success: false,
+        error:
+          updateError?.message ??
+          "อัปเดตสถานะงวดไม่สำเร็จ (อาจถูกจ่ายไปแล้ว)",
+      };
+    }
+
+    revalidateExpenseCaches(expenseId);
+    revalidatePath("/finance");
+    revalidatePath("/finance/ap-payment");
+
+    return { success: true, error: null };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "บันทึกจ่ายงวดผ่อนไม่สำเร็จ";
+    console.error("[payExpenseInstallment]", message);
+    return { success: false, error: message };
   }
 }

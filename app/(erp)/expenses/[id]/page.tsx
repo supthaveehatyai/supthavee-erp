@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Receipt } from "lucide-react";
-import { getExpenseById } from "@/app/actions/expenses";
+import { getBankAccounts, getExpenseById } from "@/app/actions/expenses";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -16,6 +16,7 @@ import PrintExpenseTemplate from "@/components/expenses/PrintExpenseTemplate";
 import { ExpensePrintButton } from "@/components/expenses/expense-print-button";
 import { ExpenseAttachmentPreview } from "./expense-attachment-preview";
 import { ExpenseDetailActions } from "./expense-detail-actions";
+import { ExpenseInstallmentPayCell } from "./pay-installment-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -87,7 +88,11 @@ export async function generateMetadata({
 
 export default async function ExpenseDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const { data: expense, error } = await getExpenseById(id);
+  const [{ data: expense, error }, bankAccountsResult] = await Promise.all([
+    getExpenseById(id),
+    getBankAccounts(),
+  ]);
+  const bankAccounts = bankAccountsResult.data ?? [];
 
   if (!expense) {
     if (error) {
@@ -234,7 +239,7 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
               ตารางการผ่อนชำระ (Installment Plan)
             </CardTitle>
             <CardDescription>
-              งวดผ่อนจากตาราง expense_installments · Read-only
+              งวดผ่อนจากตาราง expense_installments · ISSUED สามารถบันทึกจ่ายรายงวดได้
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -277,11 +282,13 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
                           {formatThaiBaht(row.total_installment)}
                         </td>
                         <td className="px-3 py-2.5 text-center">
-                          {row.is_paid ? (
-                            <Badge variant="emerald">จ่ายแล้ว</Badge>
-                          ) : (
-                            <Badge variant="slate">ยังไม่จ่าย</Badge>
-                          )}
+                          <ExpenseInstallmentPayCell
+                            installment={row}
+                            bankAccounts={bankAccounts}
+                            canPay={
+                              expense.status.trim().toUpperCase() === "ISSUED"
+                            }
+                          />
                         </td>
                       </tr>
                     ))}

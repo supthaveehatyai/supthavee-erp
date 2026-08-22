@@ -62,6 +62,22 @@ export type ExpenseInstallmentRow = ExpenseInstallmentInput & {
   total_installment: number;
   is_paid: boolean;
   paid_date: string | null;
+  payment_transaction_id: string | null;
+  /** From payment_transactions.attachment_url when paid */
+  slip_url: string | null;
+};
+
+export type PayExpenseInstallmentPayload = {
+  paid_date: string;
+  bank_account_id: string;
+  slip_url?: string | null;
+  /** Serialized File from the Dialog — uploaded to expense_documents (SLIP-*). */
+  slip_file?: File | null;
+};
+
+export type PayExpenseInstallmentResult = {
+  success: boolean;
+  error: string | null;
 };
 
 export type ExpenseDetail = ExpenseRecord & {
