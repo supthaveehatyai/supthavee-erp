@@ -13,14 +13,11 @@ import {
   createFixedAsset,
   updateFixedAsset,
 } from "@/app/actions/fixed-assets";
-import { ExpenseLinkCombobox } from "@/app/(erp)/fixed-assets/expense-link-combobox";
-import type { ExpenseLinkSelection } from "@/app/(erp)/fixed-assets/expense-link-combobox";
 import { FixedAssetAttachmentUploader } from "@/app/(erp)/fixed-assets/fixed-asset-attachment-uploader";
 import type {
   AssetCategory,
   FixedAssetListItem,
   FixedAssetStatus,
-  LinkableExpenseOption,
 } from "@/types/fixed-assets";
 import {
   FIXED_ASSET_STATUS_LABELS,
@@ -42,7 +39,6 @@ export type FixedAssetFormSheetProps = {
   open: boolean;
   mode: "create" | "edit";
   categories: AssetCategory[];
-  expenses: LinkableExpenseOption[];
   initialAsset: FixedAssetListItem | null;
 };
 
@@ -108,15 +104,30 @@ function closeSheetUrl(
   const params = new URLSearchParams(searchParams.toString());
   params.delete("create");
   params.delete("edit_id");
+  params.delete("linked_expense_id");
+  params.delete("cost");
+  params.delete("date");
   const qs = params.toString();
   return qs ? `${pathname}?${qs}` : pathname;
+}
+
+function normalizeIsoDateParam(value: string): string {
+  const trimmed = String(value ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match?.[1] ?? "";
+}
+
+function parseCostParam(value: string): string {
+  const parsed = parseFloat(String(value ?? "").replace(/,/g, "").trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) return "";
+  return String(Number(parsed.toFixed(2)));
 }
 
 export function FixedAssetFormSheet({
   open,
   mode,
   categories,
-  expenses,
   initialAsset,
 }: FixedAssetFormSheetProps) {
   const router = useRouter();
@@ -125,14 +136,41 @@ export function FixedAssetFormSheet({
   const [isSubmitting, startTransition] = useTransition();
   const [form, setForm] = useState<FormState>(() => emptyForm(categories));
 
+  const linkedExpenseId = searchParams.get("linked_expense_id")?.trim() ?? "";
+  const linkedCost = searchParams.get("cost")?.trim() ?? "";
+  const linkedDate = searchParams.get("date")?.trim() ?? "";
+  const isDirectCapitalization =
+    mode === "create" && open && Boolean(linkedExpenseId);
+
   useEffect(() => {
     if (!open) return;
     if (mode === "edit" && initialAsset) {
       setForm(fromAsset(initialAsset, categories));
       return;
     }
-    setForm(emptyForm(categories));
-  }, [open, mode, initialAsset, categories]);
+
+    const base = emptyForm(categories);
+    if (linkedExpenseId) {
+      setForm({
+        ...base,
+        expense_id: linkedExpenseId,
+        acquisition_cost: parseCostParam(linkedCost),
+        purchase_date:
+          normalizeIsoDateParam(linkedDate) || base.purchase_date,
+      });
+      return;
+    }
+
+    setForm(base);
+  }, [
+    open,
+    mode,
+    initialAsset,
+    categories,
+    linkedExpenseId,
+    linkedCost,
+    linkedDate,
+  ]);
 
   function closeSheet() {
     if (isSubmitting) return;
@@ -148,20 +186,6 @@ export function FixedAssetFormSheet({
         mode === "create" && category
           ? String(category.useful_life_years)
           : prev.useful_life_years,
-    }));
-  }
-
-  function handleExpenseSelect(payload: ExpenseLinkSelection | null) {
-    if (!payload) {
-      setForm((prev) => ({ ...prev, expense_id: "" }));
-      return;
-    }
-
-    setForm((prev) => ({
-      ...prev,
-      expense_id: payload.expense_id,
-      acquisition_cost: payload.acquisition_cost,
-      purchase_date: payload.purchase_date || prev.purchase_date,
     }));
   }
 
@@ -239,12 +263,18 @@ export function FixedAssetFormSheet({
             {mode === "edit" ? "แก้ไขสินทรัพย์ถาวร" : "ลงทะเบียนสินทรัพย์ใหม่"}
           </SheetTitle>
           <SheetDescription>
-            หมวดหมู่จาก Master Data · ผูกบิลค่าใช้จ่าย · แนบใบรับประกันผ่าน Server
-            Action
+            หมวดหมู่จาก Master Data · Direct Capitalization จากบิลค่าใช้จ่าย ·
+            แนบใบรับประกันผ่าน Server Action
           </SheetDescription>
         </SheetHeader>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4 px-6 pb-6">
+          {isDirectCapitalization ? (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+              🔗 ข้อมูลอ้างอิงและราคาทุนถูกดึงมาจากบิลค่าใช้จ่ายเรียบร้อยแล้ว
+            </div>
+          ) : null}
+
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="asset_name">
@@ -309,18 +339,17 @@ export function FixedAssetFormSheet({
               </Select>
             </div>
 
-            <div className="space-y-2 sm:col-span-2">
-              <Label>อ้างอิงบิลค่าใช้จ่าย (Link Expense)</Label>
-              <ExpenseLinkCombobox
-                expenses={expenses}
-                value={form.expense_id}
-                disabled={isSubmitting}
-                onSelect={handleExpenseSelect}
-              />
-              <p className="text-xs text-slate-500">
-                เมื่อเลือกบิล ISSUED / PAID ระบบจะเติมราคาทุน (Grand Total) และวันที่ซื้อจากวันที่บิลอัตโนมัติ
-              </p>
-            </div>
+            {isDirectCapitalization ? (
+              <div className="space-y-2 sm:col-span-2">
+                <Label>อ้างอิงบิลค่าใช้จ่าย (Link Expense)</Label>
+                <Input
+                  value={form.expense_id}
+                  readOnly
+                  disabled
+                  className="font-mono text-xs"
+                />
+              </div>
+            ) : null}
 
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="location">สถานที่ตั้ง</Label>
@@ -353,7 +382,8 @@ export function FixedAssetFormSheet({
                   }))
                 }
                 required
-                disabled={isSubmitting}
+                disabled={isSubmitting || isDirectCapitalization}
+                readOnly={isDirectCapitalization}
               />
             </div>
 
@@ -391,7 +421,13 @@ export function FixedAssetFormSheet({
                 }
                 placeholder="0.00"
                 required
-                disabled={isSubmitting}
+                disabled={isSubmitting || isDirectCapitalization}
+                readOnly={isDirectCapitalization}
+                className={
+                  isDirectCapitalization
+                    ? "bg-emerald-50/60 font-semibold tabular-nums"
+                    : undefined
+                }
               />
             </div>
 

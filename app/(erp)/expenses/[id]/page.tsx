@@ -16,6 +16,10 @@ import PrintExpenseTemplate from "@/components/expenses/PrintExpenseTemplate";
 import { ExpensePrintButton } from "@/components/expenses/expense-print-button";
 import { ExpenseAttachmentPreview } from "./expense-attachment-preview";
 import { ExpenseDetailActions } from "./expense-detail-actions";
+import {
+  ExpenseCapitalizeButton,
+  isAssetClearingCategory,
+} from "./expense-capitalize-button";
 import { ExpenseInstallmentPayCell } from "./pay-installment-dialog";
 
 export const dynamic = "force-dynamic";
@@ -117,6 +121,11 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
     notFound();
   }
 
+  const statusNormalized = expense.status.trim().toUpperCase();
+  const showCapitalizeButton =
+    (statusNormalized === "ISSUED" || statusNormalized === "PAID") &&
+    isAssetClearingCategory(expense.category_name);
+
   return (
     <div className="flex flex-col gap-6 p-6 print:gap-0 print:p-0">
       <div className="flex flex-col gap-4 print:hidden lg:flex-row lg:items-start lg:justify-between">
@@ -136,6 +145,13 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
 
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
           <ExpensePrintButton />
+          {showCapitalizeButton ? (
+            <ExpenseCapitalizeButton
+              expenseId={expense.id}
+              grandTotal={Number(expense.grand_total ?? 0)}
+              expenseDate={expense.expense_date}
+            />
+          ) : null}
           {Number(expense.wht_amount) > 0 ? (
             <Link
               href={`/expenses/${expense.id}/print-wht`}
