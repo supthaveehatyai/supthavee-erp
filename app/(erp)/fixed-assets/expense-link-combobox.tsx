@@ -28,7 +28,7 @@ export type ExpenseLinkComboboxProps = {
   expenses: LinkableExpenseOption[];
   value: string;
   disabled?: boolean;
-  onSelect: (expense: LinkableExpenseOption | null) => void;
+  onSelect: (selectedExpenseId: string | null) => void;
 };
 
 function formatThaiBaht(value: number): string {
@@ -109,9 +109,9 @@ export function ExpenseLinkCombobox({
                 {filtered.map((row) => (
                   <CommandItem
                     key={row.id}
-                    value={row.id}
+                    value={`${row.document_no} ${row.id}`}
                     onSelect={() => {
-                      onSelect(row);
+                      onSelect(row.id);
                       setOpen(false);
                       setSearch("");
                     }}

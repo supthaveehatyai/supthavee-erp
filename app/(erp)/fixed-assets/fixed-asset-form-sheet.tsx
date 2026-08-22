@@ -111,6 +111,21 @@ function closeSheetUrl(
   return qs ? `${pathname}?${qs}` : pathname;
 }
 
+/** Normalize expense grand_total for `<input type="number">` (2 dp, no NaN). */
+function formatAcquisitionCostInput(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return "";
+  return String(Number(value.toFixed(2)));
+}
+
+/** Map expense_date (YYYY-MM-DD) → purchase_date field on the form. */
+function expenseDateToPurchaseDate(expenseDate: string): string {
+  const trimmed = expenseDate.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const parsed = new Date(`${trimmed}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString().slice(0, 10);
+}
+
 export function FixedAssetFormSheet({
   open,
   mode,
@@ -150,19 +165,27 @@ export function FixedAssetFormSheet({
     }));
   }
 
-  function handleExpenseSelect(expense: LinkableExpenseOption | null) {
-    if (!expense) {
+  function handleExpenseSelect(selectedExpenseId: string | null) {
+    if (!selectedExpenseId) {
       setForm((prev) => ({ ...prev, expense_id: "" }));
       return;
     }
 
-    const selected =
-      expenses.find((row) => row.id === expense.id) ?? expense;
+    const selectedExpense = expenses.find(
+      (row) => row.id === selectedExpenseId,
+    );
+    if (!selectedExpense) {
+      setForm((prev) => ({ ...prev, expense_id: selectedExpenseId }));
+      return;
+    }
 
     setForm((prev) => ({
       ...prev,
-      expense_id: selected.id,
-      acquisition_cost: String(selected.grand_total),
+      expense_id: selectedExpense.id,
+      acquisition_cost: formatAcquisitionCostInput(selectedExpense.grand_total),
+      purchase_date:
+        expenseDateToPurchaseDate(selectedExpense.expense_date) ||
+        prev.purchase_date,
     }));
   }
 
@@ -319,7 +342,7 @@ export function FixedAssetFormSheet({
                 onSelect={handleExpenseSelect}
               />
               <p className="text-xs text-slate-500">
-                เมื่อเลือกบิล ISSUED / PAID ระบบจะเติมราคาทุนจากยอด Grand Total อัตโนมัติ
+                เมื่อเลือกบิล ISSUED / PAID ระบบจะเติมราคาทุน (Grand Total) และวันที่ซื้อจากวันที่บิลอัตโนมัติ
               </p>
             </div>
 
