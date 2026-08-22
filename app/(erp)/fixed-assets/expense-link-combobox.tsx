@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * Presentational Combobox — Link Expense (data from Server Component).
- * CommandItem `value` MUST be expense.id (matches form field value).
+ * Link Expense Combobox — expense.id is CommandItem value (matches form field).
+ * Auto-fill runs after Popover closes (setTimeout 0) with ISO date strings only.
  */
 
 import { useMemo, useState } from "react";
@@ -24,11 +24,18 @@ import {
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 
+/** Safe auto-fill payload — all native-input compatible (no Date objects). */
+export type ExpenseLinkSelection = {
+  expense_id: string;
+  acquisition_cost: string;
+  purchase_date: string;
+};
+
 export type ExpenseLinkComboboxProps = {
   expenses: LinkableExpenseOption[];
   value: string;
   disabled?: boolean;
-  onSelect: (selectedExpenseId: string | null) => void;
+  onSelect: (payload: ExpenseLinkSelection | null) => void;
 };
 
 function parseDisplayAmount(value: number | string): number {
@@ -67,9 +74,21 @@ function findExpenseById(
 ): LinkableExpenseOption | undefined {
   const normalized = String(id).trim().toLowerCase();
   if (!normalized) return undefined;
-  return expenses.find((row) =>
-    expenseIdsMatch(String(row.id), normalized),
-  );
+  return expenses.find((row) => expenseIdsMatch(String(row.id), normalized));
+}
+
+/** Native `<input type="date">` requires "YYYY-MM-DD" string — never pass Date. */
+function normalizeIsoDateString(value: string): string {
+  const trimmed = String(value ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match?.[1] ?? "";
+}
+
+function formatCostInput(value: number | string): string {
+  const cost = parseDisplayAmount(value);
+  if (cost <= 0) return "";
+  return String(Number(cost.toFixed(2)));
 }
 
 function matchesSearch(row: LinkableExpenseOption, query: string): boolean {
@@ -78,6 +97,19 @@ function matchesSearch(row: LinkableExpenseOption, query: string): boolean {
   return (
     row.document_no.toLocaleLowerCase("th").includes(keyword) ||
     formatThaiBaht(row.grand_total).toLocaleLowerCase("th").includes(keyword)
+  );
+}
+
+function findExpenseBySelectValue(
+  expenses: LinkableExpenseOption[],
+  currentValue: string,
+): LinkableExpenseOption | undefined {
+  const normalized = String(currentValue).trim().toLowerCase();
+  if (!normalized) return undefined;
+  return expenses.find(
+    (row) =>
+      String(row.id).toLowerCase() === normalized ||
+      String(row.document_no).toLowerCase() === normalized,
   );
 }
 
@@ -100,11 +132,43 @@ export function ExpenseLinkCombobox({
   const triggerLabel =
     selected?.document_no?.trim() || "เลือกบิลค่าใช้จ่าย (ถ้ามี)";
 
+  function applyAutoFill(currentValue: string) {
+    setTimeout(() => {
+      try {
+        const selectedExpense = findExpenseBySelectValue(expenses, currentValue);
+
+        if (!selectedExpense) {
+          return;
+        }
+
+        const cost = Number(parseDisplayAmount(selectedExpense.grand_total)) || 0;
+        const purchaseDate = selectedExpense.expense_date
+          ? normalizeIsoDateString(String(selectedExpense.expense_date))
+          : "";
+
+        onSelect({
+          expense_id: String(selectedExpense.id),
+          acquisition_cost: formatCostInput(cost),
+          purchase_date: purchaseDate,
+        });
+      } catch (error) {
+        console.error("Auto-fill safely prevented a crash:", error);
+      }
+    }, 0);
+  }
+
   function handleItemSelect(currentValue: string) {
-    const matched = findExpenseById(expenses, currentValue);
-    onSelect(matched ? String(matched.id) : currentValue.trim());
     setOpen(false);
     setSearch("");
+    applyAutoFill(currentValue);
+  }
+
+  function handleClear() {
+    setOpen(false);
+    setSearch("");
+    setTimeout(() => {
+      onSelect(null);
+    }, 0);
   }
 
   return (
@@ -176,10 +240,7 @@ export function ExpenseLinkCombobox({
           size="icon"
           disabled={disabled}
           aria-label="ล้างการอ้างอิงบิล"
-          onClick={() => {
-            onSelect(null);
-            setSearch("");
-          }}
+          onClick={handleClear}
         >
           <X className="size-4" />
         </Button>

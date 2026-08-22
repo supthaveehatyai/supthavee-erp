@@ -14,6 +14,7 @@ import {
   updateFixedAsset,
 } from "@/app/actions/fixed-assets";
 import { ExpenseLinkCombobox } from "@/app/(erp)/fixed-assets/expense-link-combobox";
+import type { ExpenseLinkSelection } from "@/app/(erp)/fixed-assets/expense-link-combobox";
 import { FixedAssetAttachmentUploader } from "@/app/(erp)/fixed-assets/fixed-asset-attachment-uploader";
 import type {
   AssetCategory,
@@ -111,34 +112,6 @@ function closeSheetUrl(
   return qs ? `${pathname}?${qs}` : pathname;
 }
 
-/** Normalize expense grand_total for `<input type="number">` (2 dp, no NaN). */
-function parseLinkableGrandTotal(value: number | string): number {
-  if (typeof value === "string") {
-    const parsed = parseFloat(value.replace(/,/g, "").trim());
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return Number.isFinite(value) ? value : 0;
-}
-
-function formatAcquisitionCostInput(value: number | string): string {
-  const cost = parseLinkableGrandTotal(value);
-  if (cost <= 0) return "";
-  return String(Number(cost.toFixed(2)));
-}
-
-/** Map expense_date → purchase_date (`acquisition_date` on save). */
-function expenseDateToPurchaseDate(expenseDate: string | Date): string {
-  if (expenseDate instanceof Date) {
-    if (Number.isNaN(expenseDate.getTime())) return "";
-    return expenseDate.toISOString().slice(0, 10);
-  }
-  const trimmed = String(expenseDate ?? "").trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-  const parsed = new Date(`${trimmed}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toISOString().slice(0, 10);
-}
-
 export function FixedAssetFormSheet({
   open,
   mode,
@@ -178,35 +151,17 @@ export function FixedAssetFormSheet({
     }));
   }
 
-  function handleExpenseSelect(selectedExpenseId: string | null) {
-    if (!selectedExpenseId) {
+  function handleExpenseSelect(payload: ExpenseLinkSelection | null) {
+    if (!payload) {
       setForm((prev) => ({ ...prev, expense_id: "" }));
       return;
     }
 
-    const normalizedId = String(selectedExpenseId).trim();
-    const selectedExpense = expenses.find(
-      (row) =>
-        String(row.id).trim().toLowerCase() === normalizedId.toLowerCase(),
-    );
-
-    if (!selectedExpense) {
-      setForm((prev) => ({ ...prev, expense_id: normalizedId }));
-      return;
-    }
-
-    const cost = parseLinkableGrandTotal(selectedExpense.grand_total);
-    const purchaseDate = selectedExpense.expense_date
-      ? expenseDateToPurchaseDate(
-          new Date(`${String(selectedExpense.expense_date).trim()}T00:00:00`),
-        )
-      : "";
-
     setForm((prev) => ({
       ...prev,
-      expense_id: String(selectedExpense.id),
-      acquisition_cost: formatAcquisitionCostInput(cost),
-      purchase_date: purchaseDate || prev.purchase_date,
+      expense_id: payload.expense_id,
+      acquisition_cost: payload.acquisition_cost,
+      purchase_date: payload.purchase_date || prev.purchase_date,
     }));
   }
 
@@ -389,7 +344,6 @@ export function FixedAssetFormSheet({
               </Label>
               <Input
                 id="purchase_date"
-                key={`purchase-date-${form.expense_id || "none"}`}
                 type="date"
                 value={form.purchase_date}
                 onChange={(event) =>
@@ -425,7 +379,6 @@ export function FixedAssetFormSheet({
               </Label>
               <Input
                 id="acquisition_cost"
-                key={`acquisition-cost-${form.expense_id || "none"}`}
                 type="number"
                 min={0}
                 step="0.01"
