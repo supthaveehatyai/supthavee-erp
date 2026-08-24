@@ -29,7 +29,7 @@
 - `technician_rates` (เรตค่าแรงช่าง)
 
 ## 4. Documents & Financials (เอกสารและการเงิน)
-- **Document Conversion Lineage:** `QT` → `SO` → `INV_DO / TAX_INV / CS_TAX / ABB` → `REC` (ห้ามข้าม SO เด็ดขาด)
+- **Document Conversion Lineage:** `QT` -> `SO` -> `INV_DO / TAX_INV / CS_TAX / ABB` -> `REC` (ห้ามข้าม SO เด็ดขาด)
 - **SO (ใบสั่งขาย):** ใช้ยืนยันคำสั่งซื้อ, จองสต็อก (Soft Allocation / ATP)
 - **Inventory Adjustments:** `STK_OB` และ `STK_ADJ` บันทึกผ่าน `inventory_ledger`
 - **Period Closing:** ฟังก์ชัน `is_period_closed(doc_date)`
