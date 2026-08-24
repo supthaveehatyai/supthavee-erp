@@ -40,6 +40,8 @@ export type FixedAssetFormSheetProps = {
   mode: "create" | "edit";
   categories: AssetCategory[];
   initialAsset: FixedAssetListItem | null;
+  /** Resolved on Server from linked_expense_id — display only (UUID stays in form.expense_id). */
+  linkedExpenseDocumentNo?: string | null;
 };
 
 type FormState = {
@@ -129,6 +131,7 @@ export function FixedAssetFormSheet({
   mode,
   categories,
   initialAsset,
+  linkedExpenseDocumentNo = null,
 }: FixedAssetFormSheetProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -141,6 +144,11 @@ export function FixedAssetFormSheet({
   const linkedDate = searchParams.get("date")?.trim() ?? "";
   const isDirectCapitalization =
     mode === "create" && open && Boolean(linkedExpenseId);
+
+  const linkedExpenseLabel =
+    (isDirectCapitalization
+      ? linkedExpenseDocumentNo?.trim()
+      : initialAsset?.expense_document_no?.trim()) || null;
 
   useEffect(() => {
     if (!open) return;
@@ -339,15 +347,24 @@ export function FixedAssetFormSheet({
               </Select>
             </div>
 
-            {isDirectCapitalization ? (
+            {isDirectCapitalization ||
+            (mode === "edit" && Boolean(form.expense_id)) ? (
               <div className="space-y-2 sm:col-span-2">
-                <Label>อ้างอิงบิลค่าใช้จ่าย (Link Expense)</Label>
+                <Label htmlFor="linked_expense_document_no">
+                  อ้างอิงบิลค่าใช้จ่าย (Link Expense)
+                </Label>
                 <Input
-                  value={form.expense_id}
+                  id="linked_expense_document_no"
+                  value={
+                    linkedExpenseLabel ||
+                    (form.expense_id ? "ไม่พบเลขที่เอกสาร" : "")
+                  }
                   readOnly
                   disabled
-                  className="font-mono text-xs"
+                  className="font-mono text-sm font-semibold"
                 />
+                {/* UUID คงอยู่ใน form.expense_id — ส่งเข้า createFixedAsset / updateFixedAsset เป็น expense_id */}
+                <input type="hidden" name="expense_id" value={form.expense_id} readOnly />
               </div>
             ) : null}
 

@@ -24,6 +24,7 @@ import {
   requiresExpenseApproval,
 } from "@/lib/approval/approval-rules";
 import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
+import { buildFixedAssetCapitalizeHref } from "@/lib/utils/expense-capitalize";
 import { IssueDocumentButton } from "@/components/shared/document/issue-document-button";
 import { VoidDocumentButton } from "@/components/shared/document/void-document-button";
 import {
@@ -44,15 +45,54 @@ export type ExpenseDetailActionsProps = {
   documentNo: string;
   status: string;
   grandTotal: number;
+  expenseDate: string;
   approvalStatus: string;
+  canCapitalize: boolean;
+  hasRegisteredAsset: boolean;
 };
+
+function CapitalizeFixedAssetButton({
+  expenseId,
+  grandTotal,
+  expenseDate,
+  canCapitalize,
+  hasRegisteredAsset,
+}: {
+  expenseId: string;
+  grandTotal: number;
+  expenseDate: string;
+  canCapitalize: boolean;
+  hasRegisteredAsset: boolean;
+}) {
+  if (!canCapitalize || hasRegisteredAsset) return null;
+
+  return (
+    <Link
+      href={buildFixedAssetCapitalizeHref({
+        expenseId,
+        grandTotal,
+        expenseDate,
+      })}
+    >
+      <Button
+        variant="default"
+        className="bg-indigo-600 text-white hover:bg-indigo-700"
+      >
+        ⚡ ขึ้นทะเบียนเป็นสินทรัพย์ถาวร
+      </Button>
+    </Link>
+  );
+}
 
 export function ExpenseDetailActions({
   expenseId,
   documentNo,
   status,
   grandTotal,
+  expenseDate,
   approvalStatus,
+  canCapitalize,
+  hasRegisteredAsset,
 }: ExpenseDetailActionsProps) {
   const router = useRouter();
   const normalized = status.trim().toUpperCase();
@@ -61,6 +101,16 @@ export function ExpenseDetailActions({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [isDeleting, startDeleteTransition] = useTransition();
   const [isSending, startSendTransition] = useTransition();
+
+  const capitalizeButton = (
+    <CapitalizeFixedAssetButton
+      expenseId={expenseId}
+      grandTotal={grandTotal}
+      expenseDate={expenseDate}
+      canCapitalize={canCapitalize}
+      hasRegisteredAsset={hasRegisteredAsset}
+    />
+  );
 
   function handleDeleteDraft() {
     if (isDeleting) return;
@@ -255,6 +305,7 @@ export function ExpenseDetailActions({
   if (normalized === "ISSUED") {
     return (
       <div className="flex flex-wrap gap-2">
+        {capitalizeButton}
         <VoidDocumentButton
           documentId={expenseId}
           docNo={documentNo}
@@ -272,6 +323,12 @@ export function ExpenseDetailActions({
           }}
         />
       </div>
+    );
+  }
+
+  if (normalized === "PAID") {
+    return (
+      <div className="flex flex-wrap gap-2">{capitalizeButton}</div>
     );
   }
 

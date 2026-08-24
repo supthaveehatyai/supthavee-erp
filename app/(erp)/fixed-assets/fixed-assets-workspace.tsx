@@ -51,6 +51,8 @@ export type FixedAssetsWorkspaceProps = {
   status: FixedAssetStatus | "ALL";
   createOpen: boolean;
   editAsset: FixedAssetListItem | null;
+  /** Human-readable EXP-YYMM-XXXX when Direct Capitalization via URL. */
+  linkedExpenseDocumentNo: string | null;
 };
 
 function formatThaiBaht(value: number): string {
@@ -98,6 +100,7 @@ export function FixedAssetsWorkspace({
   status,
   createOpen,
   editAsset,
+  linkedExpenseDocumentNo,
 }: FixedAssetsWorkspaceProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -278,6 +281,7 @@ export function FixedAssetsWorkspace({
         mode={sheetMode}
         categories={categories}
         initialAsset={editAsset}
+        linkedExpenseDocumentNo={linkedExpenseDocumentNo}
       />
 
       <AlertDialog

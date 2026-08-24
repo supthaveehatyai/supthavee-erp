@@ -4,6 +4,7 @@ import {
   getAssetCategories,
   getFixedAssetById,
   getFixedAssets,
+  getLinkedExpenseDocumentNo,
 } from "@/app/actions/fixed-assets";
 import type { FixedAssetStatus } from "@/types/fixed-assets";
 import { FIXED_ASSET_STATUSES } from "@/types/fixed-assets";
@@ -25,6 +26,7 @@ type PageProps = {
     status?: string;
     create?: string;
     edit_id?: string;
+    linked_expense_id?: string;
   }>;
 };
 
@@ -45,16 +47,22 @@ export default async function FixedAssetsPage({ searchParams }: PageProps) {
   const status = resolveStatusFilter(params.status);
   const createOpen = params.create === "1" || params.create === "true";
   const editId = params.edit_id?.trim() || null;
+  const linkedExpenseId = params.linked_expense_id?.trim() || null;
 
-  const [assetsResult, categoriesResult, editResult] = await Promise.all([
+  const [assetsResult, categoriesResult, editResult, linkedExpenseResult] =
+    await Promise.all([
       getFixedAssets({ query, status }),
       getAssetCategories({ activeOnly: true }),
       editId
         ? getFixedAssetById(editId)
         : Promise.resolve({ data: null, error: null }),
+      linkedExpenseId
+        ? getLinkedExpenseDocumentNo(linkedExpenseId)
+        : Promise.resolve({ documentNo: null, error: null }),
     ]);
 
   const editAsset = editResult.data;
+  const linkedExpenseDocumentNo = linkedExpenseResult.documentNo;
 
   return (
     <Suspense
@@ -71,6 +79,7 @@ export default async function FixedAssetsPage({ searchParams }: PageProps) {
         status={status}
         createOpen={createOpen}
         editAsset={editAsset}
+        linkedExpenseDocumentNo={linkedExpenseDocumentNo}
       />
     </Suspense>
   );

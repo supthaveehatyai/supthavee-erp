@@ -76,6 +76,18 @@ export type GetLinkableExpensesResult = {
   error: string | null;
 };
 
+/** Whether an expense already has a linked fixed-asset registration. */
+export type HasFixedAssetForExpenseResult = {
+  hasRegisteredAsset: boolean;
+  error: string | null;
+};
+
+/** Resolve expense UUID → human-readable document_no for Direct Capitalization UI. */
+export type GetLinkedExpenseDocumentNoResult = {
+  documentNo: string | null;
+  error: string | null;
+};
+
 export type CreateFixedAssetInput = {
   asset_code: string;
   asset_name: string;

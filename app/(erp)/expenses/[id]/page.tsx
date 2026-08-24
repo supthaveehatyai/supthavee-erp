@@ -4,8 +4,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Receipt } from "lucide-react";
 import { getBankAccounts, getExpenseById } from "@/app/actions/expenses";
+import { hasFixedAssetForExpense } from "@/app/actions/fixed-assets";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -15,10 +15,7 @@ import {
 } from "@/components/ui/card";
 import PrintExpenseTemplate from "@/components/expenses/PrintExpenseTemplate";
 import { ExpensePrintButton } from "@/components/expenses/expense-print-button";
-import {
-  buildFixedAssetCapitalizeHref,
-  isAssetClearingCategory,
-} from "@/lib/utils/expense-capitalize";
+import { isAssetClearingCategory } from "@/lib/utils/expense-capitalize";
 import { ExpenseAttachmentPreview } from "./expense-attachment-preview";
 import { ExpenseDetailActions } from "./expense-detail-actions";
 import { ExpenseInstallmentPayCell } from "./pay-installment-dialog";
@@ -96,11 +93,14 @@ export async function generateMetadata({
 
 export default async function ExpenseDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const [{ data: expense, error }, bankAccountsResult] = await Promise.all([
-    getExpenseById(id),
-    getBankAccounts(),
-  ]);
+  const [{ data: expense, error }, bankAccountsResult, assetLinkResult] =
+    await Promise.all([
+      getExpenseById(id),
+      getBankAccounts(),
+      hasFixedAssetForExpense(id),
+    ]);
   const bankAccounts = bankAccountsResult.data ?? [];
+  const hasRegisteredAsset = assetLinkResult.hasRegisteredAsset;
 
   if (!expense) {
     if (error) {
@@ -147,22 +147,6 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
 
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
           <ExpensePrintButton />
-          {canCapitalize ? (
-            <Link
-              href={buildFixedAssetCapitalizeHref({
-                expenseId: expense.id,
-                grandTotal: Number(expense.grand_total ?? 0),
-                expenseDate: expense.expense_date,
-              })}
-            >
-              <Button
-                variant="default"
-                className="bg-indigo-600 text-white hover:bg-indigo-700"
-              >
-                ⚡ ขึ้นทะเบียนเป็นสินทรัพย์ถาวร
-              </Button>
-            </Link>
-          ) : null}
           {Number(expense.wht_amount) > 0 ? (
             <Link
               href={`/expenses/${expense.id}/print-wht`}
@@ -178,7 +162,10 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
             documentNo={expense.document_no}
             status={expense.status}
             grandTotal={Number(expense.grand_total ?? 0)}
+            expenseDate={expense.expense_date}
             approvalStatus={String(expense.approval_status ?? "APPROVED")}
+            canCapitalize={canCapitalize}
+            hasRegisteredAsset={hasRegisteredAsset}
           />
           <Link
             href="/expenses"

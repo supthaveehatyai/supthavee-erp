@@ -24,6 +24,8 @@ import type {
   GetAssetCategoriesResult,
   GetFixedAssetsResult,
   GetLinkableExpensesResult,
+  HasFixedAssetForExpenseResult,
+  GetLinkedExpenseDocumentNoResult,
   LinkableExpenseOption,
   MutateFixedAssetResult,
   UpdateFixedAssetInput,
@@ -65,9 +67,14 @@ const CATEGORY_SELECT =
 const ASSET_SELECT =
   "id, asset_code, asset_name, category_id, location, acquisition_date, acquisition_cost, salvage_value, useful_life_months, status, accumulated_depreciation, net_book_value, expense_id, warranty_expiry_date, attachment_urls, created_at, updated_at, mst_asset_categories!category_id(category_code, category_name), expenses!expense_id(document_no)" as const;
 
-function revalidateFixedAssetCaches() {
+function revalidateFixedAssetCaches(expenseId?: string | null) {
   revalidatePath(FIXED_ASSETS_PATH);
   revalidatePath(FIXED_ASSETS_PATH, "layout");
+  const linkedExpenseId = String(expenseId ?? "").trim();
+  if (linkedExpenseId) {
+    revalidatePath(`/expenses/${linkedExpenseId}`);
+    revalidatePath("/expenses");
+  }
 }
 
 function isIsoDate(value: string): boolean {
@@ -278,6 +285,45 @@ export async function getLinkableExpenses(
 }
 
 /**
+ * Resolve expense UUID → document_no for Direct Capitalization form display.
+ * UUID stays in form/submit; UI shows human-readable EXP-YYMM-XXXX only.
+ */
+export async function getLinkedExpenseDocumentNo(
+  expenseId: string,
+): Promise<GetLinkedExpenseDocumentNoResult> {
+  try {
+    const id = String(expenseId ?? "").trim();
+    if (!id) {
+      return { documentNo: null, error: null };
+    }
+
+    const supabaseAdmin = createClient();
+    const { data, error } = await supabaseAdmin
+      .from("expenses")
+      .select("document_no")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error) {
+      console.error("[getLinkedExpenseDocumentNo]", error.message, error);
+      return {
+        documentNo: null,
+        error: error.message ?? "ไม่สามารถโหลดเลขที่บิลค่าใช้จ่ายได้",
+      };
+    }
+
+    const documentNo = String(data?.document_no ?? "").trim() || null;
+    return { documentNo, error: null };
+  } catch (err) {
+    console.error("[getLinkedExpenseDocumentNo]", err);
+    return {
+      documentNo: null,
+      error: "ไม่สามารถโหลดเลขที่บิลค่าใช้จ่ายได้",
+    };
+  }
+}
+
+/**
  * อัปโหลดไฟล์แนบสินทรัพย์เข้า Storage bucket `document_attachments`.
  * FormData key: `file` — คืน public URL ให้เก็บลง `attachment_urls`.
  */
@@ -447,6 +493,32 @@ export async function createFixedAsset(
 
     const supabaseAdmin = createClient();
 
+    if (expense_id) {
+      const { data: existingLink, error: linkCheckError } = await supabaseAdmin
+        .from("fixed_assets")
+        .select("id")
+        .eq("expense_id", expense_id)
+        .limit(1)
+        .maybeSingle();
+
+      if (linkCheckError) {
+        console.error(
+          "[createFixedAsset][expense-link-check]",
+          linkCheckError.message,
+        );
+        return {
+          success: false,
+          error: "ไม่สามารถตรวจสอบการขึ้นทะเบียนสินทรัพย์ได้",
+        };
+      }
+      if (existingLink?.id) {
+        return {
+          success: false,
+          error: "บิลค่าใช้จ่ายนี้ขึ้นทะเบียนเป็นสินทรัพย์ถาวรแล้ว",
+        };
+      }
+    }
+
     let resolvedYears = useful_life_years;
     if (resolvedYears == null) {
       const { data: category } = await supabaseAdmin
@@ -508,7 +580,7 @@ export async function createFixedAsset(
       });
     }
 
-    revalidateFixedAssetCaches();
+    revalidateFixedAssetCaches(expense_id);
     return { success: true, error: null, id };
   } catch (err) {
     console.error("[createFixedAsset]", err);
@@ -636,11 +708,50 @@ export async function updateFixedAsset(
       console.error("[updateFixedAsset][audit]", auditErr);
     });
 
-    revalidateFixedAssetCaches();
+    revalidateFixedAssetCaches(expense_id);
     return { success: true, error: null, id };
   } catch (err) {
     console.error("[updateFixedAsset]", err);
     return { success: false, error: "ไม่สามารถแก้ไขสินทรัพย์ได้" };
+  }
+}
+
+/**
+ * Check whether a fixed asset is already registered for the given expense
+ * (Direct Capitalization guard — prevent duplicate registration).
+ */
+export async function hasFixedAssetForExpense(
+  expenseId: string,
+): Promise<HasFixedAssetForExpenseResult> {
+  try {
+    const id = String(expenseId ?? "").trim();
+    if (!id) {
+      return { hasRegisteredAsset: false, error: null };
+    }
+
+    const supabaseAdmin = createClient();
+    const { data, error } = await supabaseAdmin
+      .from("fixed_assets")
+      .select("id")
+      .eq("expense_id", id)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error("[hasFixedAssetForExpense]", error.message, error);
+      return {
+        hasRegisteredAsset: false,
+        error: error.message ?? "ไม่สามารถตรวจสอบการขึ้นทะเบียนสินทรัพย์ได้",
+      };
+    }
+
+    return { hasRegisteredAsset: Boolean(data?.id), error: null };
+  } catch (err) {
+    console.error("[hasFixedAssetForExpense]", err);
+    return {
+      hasRegisteredAsset: false,
+      error: "ไม่สามารถตรวจสอบการขึ้นทะเบียนสินทรัพย์ได้",
+    };
   }
 }
 
