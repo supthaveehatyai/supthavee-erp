@@ -9,6 +9,7 @@ import { disposeFixedAsset } from "@/app/actions/fixed-assets";
 import { FixedAssetFilter } from "@/app/(erp)/fixed-assets/fixed-asset-filter";
 import { AssetDetailSheet } from "@/app/(erp)/fixed-assets/asset-detail-sheet";
 import { FixedAssetFormSheet } from "@/app/(erp)/fixed-assets/fixed-asset-form-sheet";
+import type { AssetDepreciationLedgerRow } from "@/types/depreciation";
 import type {
   AssetCategory,
   FixedAssetListItem,
@@ -57,6 +58,8 @@ export type FixedAssetsWorkspaceProps = {
   viewAsset: FixedAssetListItem | null;
   viewAssetError: string | null;
   viewCloseHref: string;
+  depreciationLedger: AssetDepreciationLedgerRow[];
+  depreciationLedgerError: string | null;
 };
 
 function formatThaiBaht(value: number): string {
@@ -108,6 +111,8 @@ export function FixedAssetsWorkspace({
   viewAsset,
   viewAssetError,
   viewCloseHref,
+  depreciationLedger,
+  depreciationLedgerError,
 }: FixedAssetsWorkspaceProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -326,6 +331,8 @@ export function FixedAssetsWorkspace({
           asset={viewAsset}
           error={viewAssetError}
           closeHref={viewCloseHref}
+          depreciationLedger={depreciationLedger}
+          depreciationLedgerError={depreciationLedgerError}
         />
       ) : null}
 

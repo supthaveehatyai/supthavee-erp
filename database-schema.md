@@ -42,6 +42,7 @@
 - `approval_logs` (Phase 14 Maker-Checker — ประวัติอนุมัติ/ปฏิเสธ)
 - `accounting_periods` (งวดบัญชีรายเดือน)
 - `fixed_assets` (ทะเบียนสินทรัพย์ถาวร — `asset_code`, `asset_name`, `category_id`, `acquisition_date`, `acquisition_cost`, `salvage_value`, `useful_life_months`, `status`, `expense_id`)
+- `asset_depreciation_ledger` (สมุดค่าเสื่อมรายเดือน — `asset_id`, `period_id`, `depreciation_date`, `depreciation_amount`, `accumulated_depreciation`, `net_book_value`)
 - `payment_transactions` (ธุรกรรมการรับ/จ่าย)
 - `payment_allocations` (การตัดยอดหนี้ Knock-off — `expense_id`, `document_id`)
 - `payment_slips` (สลิปโอนเงิน)

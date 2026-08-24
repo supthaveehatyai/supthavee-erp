@@ -8,9 +8,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
-import { Building2, ExternalLink } from "lucide-react";
+import { Building2, ExternalLink, ScrollText } from "lucide-react";
+import type { AssetDepreciationLedgerRow } from "@/types/depreciation";
 import type { FixedAssetListItem } from "@/types/fixed-assets";
 import { FIXED_ASSET_STATUS_LABELS } from "@/types/fixed-assets";
+import { formatAccountingPeriodLabel } from "@/types/accounting-period";
 import { Badge } from "@/components/ui/badge";
 import {
   Sheet,
@@ -19,18 +21,35 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 export type AssetDetailSheetProps = {
   asset: FixedAssetListItem | null;
   error: string | null;
   /** URL without `view_asset_id` — preserves filters and other params */
   closeHref: string;
+  depreciationLedger?: AssetDepreciationLedgerRow[];
+  depreciationLedgerError?: string | null;
 };
 
 function formatThaiBaht(value: number): string {
   return new Intl.NumberFormat("th-TH", {
     style: "currency",
     currency: "THB",
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
+function formatMoney(value: number): string {
+  return new Intl.NumberFormat("th-TH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(Number.isFinite(value) ? value : 0);
 }
 
@@ -43,6 +62,22 @@ function formatDocDate(value: string): string {
     month: "short",
     year: "numeric",
   }).format(date);
+}
+
+/** DATE → DD/MM/YYYY (calendar year, no timezone shift) */
+function formatDdMmYyyy(value: string): string {
+  const iso = String(value ?? "").slice(0, 10);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+  return value || "—";
+}
+
+function formatPeriodCell(
+  year: number | null,
+  month: number | null,
+): string {
+  if (year == null || month == null) return "—";
+  return formatAccountingPeriodLabel(year, month);
 }
 
 function Field({
@@ -62,10 +97,74 @@ function Field({
   );
 }
 
+function DepreciationLedgerSection({
+  rows,
+  error,
+}: {
+  rows: AssetDepreciationLedgerRow[];
+  error: string | null;
+}) {
+  return (
+    <section className="space-y-3 border-t border-slate-100 pt-5">
+      <div className="flex items-center gap-2">
+        <ScrollText className="h-4 w-4 text-blue-600" />
+        <h3 className="text-sm font-semibold text-slate-900">
+          ประวัติการตัดค่าเสื่อมราคา (Depreciation Ledger)
+        </h3>
+      </div>
+
+      {error ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      ) : rows.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+          ยังไม่มีรายการตัดค่าเสื่อมราคา
+        </p>
+      ) : (
+        <Table wrapperClassName="overflow-x-auto rounded-xl border border-slate-200">
+          <TableHeader>
+            <TableRow>
+              <TableHead>งวดบัญชี</TableHead>
+              <TableHead>วันที่ตัดค่าเสื่อม</TableHead>
+              <TableHead className="text-right">ยอดตัดค่าเสื่อม</TableHead>
+              <TableHead className="text-right">ค่าเสื่อมสะสม</TableHead>
+              <TableHead className="text-right">มูลค่าตามบัญชี (NBV)</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={row.id}>
+                <TableCell className="whitespace-nowrap text-sm">
+                  {formatPeriodCell(row.period_year, row.period_month)}
+                </TableCell>
+                <TableCell className="whitespace-nowrap font-mono text-sm tabular-nums">
+                  {formatDdMmYyyy(row.depreciation_date)}
+                </TableCell>
+                <TableCell className="text-right font-mono text-sm tabular-nums">
+                  {formatMoney(row.depreciation_amount)}
+                </TableCell>
+                <TableCell className="text-right font-mono text-sm tabular-nums">
+                  {formatMoney(row.accumulated_depreciation)}
+                </TableCell>
+                <TableCell className="text-right font-mono text-sm font-semibold tabular-nums">
+                  {formatMoney(row.net_book_value)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </section>
+  );
+}
+
 export function AssetDetailSheet({
   asset,
   error,
   closeHref,
+  depreciationLedger = [],
+  depreciationLedgerError = null,
 }: AssetDetailSheetProps) {
   const router = useRouter();
   const open = asset !== null || error !== null;
@@ -77,7 +176,10 @@ export function AssetDetailSheet({
         if (!next) router.push(closeHref);
       }}
     >
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
+      <SheetContent
+        side="right"
+        className="w-full overflow-y-auto sm:max-w-2xl"
+      >
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <Building2 className="h-5 w-5 text-blue-600" />
@@ -170,6 +272,11 @@ export function AssetDetailSheet({
                 )}
               </Field>
             </div>
+
+            <DepreciationLedgerSection
+              rows={depreciationLedger}
+              error={depreciationLedgerError}
+            />
 
             <div className="flex justify-end border-t border-slate-100 pt-4">
               <Link

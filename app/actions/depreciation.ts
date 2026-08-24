@@ -9,8 +9,12 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { createClient } from "@/lib/supabase/server-admin";
-import type { Json } from "@/src/types/supabase";
-import type { CalculateDepreciationResult } from "@/types/depreciation";
+import type { Database, Json } from "@/src/types/supabase";
+import type {
+  AssetDepreciationLedgerRow,
+  CalculateDepreciationResult,
+  GetAssetDepreciationLedgerResult,
+} from "@/types/depreciation";
 
 const PERIOD_LOCK_PATH = "/dashboard/period-lock";
 const ACCOUNTING_PERIODS_PATH = "/accounting-periods";
@@ -149,5 +153,84 @@ export async function calculateDepreciationAction(
     const message =
       err instanceof Error ? err.message : "คำนวณค่าเสื่อมราคาไม่สำเร็จ";
     return emptyResult(message);
+  }
+}
+
+type LedgerRow = Database["public"]["Tables"]["asset_depreciation_ledger"]["Row"];
+type PeriodEmbed = Pick<
+  Database["public"]["Tables"]["accounting_periods"]["Row"],
+  "period_month" | "period_year"
+>;
+type LedgerWithPeriod = LedgerRow & {
+  accounting_periods: PeriodEmbed | PeriodEmbed[] | null;
+};
+
+const LEDGER_SELECT =
+  "id, asset_id, period_id, depreciation_date, depreciation_amount, accumulated_depreciation, net_book_value, accounting_periods!period_id(period_month, period_year)" as const;
+
+function unwrapPeriod(value: unknown): PeriodEmbed | null {
+  if (Array.isArray(value)) {
+    return unwrapPeriod(value[0] ?? null);
+  }
+  const record = asRecord(value);
+  if (!record) return null;
+  const period_month = readNumber(record.period_month);
+  const period_year = readNumber(record.period_year);
+  if (period_month == null || period_year == null) return null;
+  return { period_month, period_year };
+}
+
+function mapLedgerRow(row: LedgerWithPeriod): AssetDepreciationLedgerRow {
+  const period = unwrapPeriod(row.accounting_periods);
+  return {
+    id: String(row.id),
+    asset_id: String(row.asset_id),
+    period_id: String(row.period_id),
+    period_year: period?.period_year ?? null,
+    period_month: period?.period_month ?? null,
+    depreciation_date: String(row.depreciation_date ?? "").slice(0, 10),
+    depreciation_amount: Number(row.depreciation_amount ?? 0),
+    accumulated_depreciation: Number(row.accumulated_depreciation ?? 0),
+    net_book_value: Number(row.net_book_value ?? 0),
+  };
+}
+
+/**
+ * ประวัติการตัดค่าเสื่อมของสินทรัพย์หนึ่งรายการ
+ * JOIN `accounting_periods` ผ่าน `period_id` — เรียง `depreciation_date` DESC
+ */
+export async function getAssetDepreciationLedger(
+  asset_id: string,
+): Promise<GetAssetDepreciationLedgerResult> {
+  try {
+    const assetId = String(asset_id ?? "").trim();
+    if (!assetId) {
+      return { data: [], error: "ไม่พบรหัสสินทรัพย์" };
+    }
+
+    const supabaseAdmin = createClient();
+    const { data, error } = await supabaseAdmin
+      .from("asset_depreciation_ledger")
+      .select(LEDGER_SELECT)
+      .eq("asset_id", assetId)
+      .order("depreciation_date", { ascending: false });
+
+    if (error) {
+      console.error("[getAssetDepreciationLedger]", error.message, error);
+      return {
+        data: [],
+        error: error.message ?? "ไม่สามารถดึงประวัติค่าเสื่อมราคาได้",
+      };
+    }
+
+    return {
+      data: (data ?? []).map((row) => mapLedgerRow(row as LedgerWithPeriod)),
+      error: null,
+    };
+  } catch (err) {
+    console.error("[getAssetDepreciationLedger]", err);
+    const message =
+      err instanceof Error ? err.message : "ไม่สามารถดึงประวัติค่าเสื่อมราคาได้";
+    return { data: [], error: message };
   }
 }

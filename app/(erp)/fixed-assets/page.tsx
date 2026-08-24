@@ -6,6 +6,7 @@ import {
   getFixedAssets,
   getLinkedExpenseDocumentNo,
 } from "@/app/actions/fixed-assets";
+import { getAssetDepreciationLedger } from "@/app/actions/depreciation";
 import type { FixedAssetStatus } from "@/types/fixed-assets";
 import { FIXED_ASSET_STATUSES } from "@/types/fixed-assets";
 import { FixedAssetsWorkspace } from "@/app/(erp)/fixed-assets/fixed-assets-workspace";
@@ -56,8 +57,14 @@ export default async function FixedAssetsPage({ searchParams }: PageProps) {
   const linkedExpenseId = readSearchParam(params, "linked_expense_id") || null;
   const viewAssetId = readSearchParam(params, "view_asset_id") || null;
 
-  const [assetsResult, categoriesResult, editResult, linkedExpenseResult, viewAssetResult] =
-    await Promise.all([
+  const [
+    assetsResult,
+    categoriesResult,
+    editResult,
+    linkedExpenseResult,
+    viewAssetResult,
+    ledgerResult,
+  ] = await Promise.all([
       getFixedAssets({ query, status }),
       getAssetCategories({ activeOnly: true }),
       editId
@@ -69,6 +76,9 @@ export default async function FixedAssetsPage({ searchParams }: PageProps) {
       viewAssetId
         ? getFixedAssetById(viewAssetId)
         : Promise.resolve({ data: null, error: null }),
+      viewAssetId
+        ? getAssetDepreciationLedger(viewAssetId)
+        : Promise.resolve({ data: [], error: null }),
     ]);
 
   const editAsset = editResult.data;
@@ -102,6 +112,8 @@ export default async function FixedAssetsPage({ searchParams }: PageProps) {
         viewAsset={viewAsset}
         viewAssetError={viewAssetError}
         viewCloseHref={viewCloseHref}
+        depreciationLedger={ledgerResult.data}
+        depreciationLedgerError={ledgerResult.error}
       />
     </Suspense>
   );
