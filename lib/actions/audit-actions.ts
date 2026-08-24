@@ -166,6 +166,8 @@ export async function getRecentAuditLogs(): Promise<GetRecentAuditLogsResult> {
         row.action,
         row.old_data,
         row.new_data,
+        4,
+        row.table_name,
       );
       if (changedByName && isActionToken(changedByName)) {
         const token = changedByName.toUpperCase();

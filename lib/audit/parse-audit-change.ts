@@ -14,6 +14,7 @@ export const AUDIT_TABLE_LABELS: Record<string, string> = {
   inventory_ledger: "สต็อกสินค้า",
   expenses: "ค่าใช้จ่าย",
   expense_items: "รายการค่าใช้จ่าย",
+  fixed_assets: "สินทรัพย์ถาวร",
   production_jobs: "ใบสั่งผลิต",
   contacts: "ลูกค้า / คู่ค้า",
   contact_persons: "ผู้ติดต่อ",
@@ -32,6 +33,7 @@ export const AUDIT_TABLE_LABELS: Record<string, string> = {
 /** Critical fields shown first in UPDATE summaries */
 const CRITICAL_FIELDS = [
   "status",
+  "approval_status",
   "payment_status",
   "is_voided",
   "grand_total",
@@ -39,33 +41,42 @@ const CRITICAL_FIELDS = [
   "net_amount",
   "net_before_vat",
   "paid_amount",
+  "wht_rate",
   "qty",
   "quantity",
   "signed_qty",
   "doc_no",
+  "document_no",
   "job_no",
   "job_type",
   "due_date",
   "doc_type",
+  "asset_code",
+  "asset_name",
 ] as const;
 
 const FIELD_LABELS: Record<string, string> = {
   status: "สถานะ",
+  approval_status: "สถานะอนุมัติ",
   payment_status: "สถานะชำระเงิน",
   is_voided: "ยกเลิกเอกสาร",
-  grand_total: "ยอดรวมสุทธิ",
+  grand_total: "ยอดสุทธิ",
   total_amount: "ยอดรวม",
-  net_amount: "ยอดสุทธิ",
+  net_amount: "ยอดก่อนภาษี",
   net_before_vat: "ยอดก่อน VAT",
   paid_amount: "ยอดชำระแล้ว",
+  wht_rate: "อัตราภาษีหัก ณ ที่จ่าย",
   qty: "จำนวน",
   quantity: "จำนวน",
   signed_qty: "จำนวน (±)",
   doc_no: "เลขที่เอกสาร",
+  document_no: "เลขที่เอกสาร",
   job_no: "เลขที่งานผลิต",
   job_type: "ประเภทงาน",
   due_date: "วันครบกำหนด",
   doc_type: "ประเภทเอกสาร",
+  asset_code: "รหัสสินทรัพย์",
+  asset_name: "ชื่อสินทรัพย์",
   details: "รายละเอียด",
   notes: "หมายเหตุ",
   company_name: "ชื่อบริษัท",
@@ -82,6 +93,8 @@ const SKIP_KEYS = new Set([
   "audit_event",
 ]);
 
+const EMPTY_STRING_TOKENS = new Set(["", "—", "-", "null", "undefined"]);
+
 function formatAuditEventLabel(event: unknown): string | null {
   if (typeof event !== "string" || !event.trim()) return null;
   const token = event.trim().toUpperCase();
@@ -95,6 +108,7 @@ function formatAuditEventLabel(event: unknown): string | null {
     CONVERT: "แปลงเอกสาร (CONVERT)",
     DUPLICATE: "คัดลอกเอกสาร (DUPLICATE)",
     CLONE: "โคลนเป็นร่างใหม่ (CLONE)",
+    DISPOSE: "จำหน่ายสินทรัพย์ (DISPOSE)",
   };
   return labels[token] ?? token;
 }
@@ -130,7 +144,10 @@ function formatAuditValue(value: unknown): string {
   }
   if (typeof value === "string") {
     const trimmed = value.trim();
-    return trimmed.length > 48 ? `${trimmed.slice(0, 48)}…` : trimmed || "—";
+    if (EMPTY_STRING_TOKENS.has(trimmed.toLowerCase()) || trimmed === "") {
+      return "—";
+    }
+    return trimmed.length > 48 ? `${trimmed.slice(0, 48)}…` : trimmed;
   }
   if (Array.isArray(value)) {
     return `[${value.length} รายการ]`;
@@ -145,13 +162,80 @@ function fieldLabel(key: string): string {
   return FIELD_LABELS[key] ?? key;
 }
 
+/**
+ * Normalize values before diff comparison to suppress false positives
+ * (e.g. null vs "", "-" vs "—", "100" vs 100).
+ */
+function normalizeForCompare(value: unknown): unknown {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (
+      trimmed === "" ||
+      trimmed === "—" ||
+      trimmed === "-" ||
+      trimmed.toLowerCase() === "null" ||
+      trimmed.toLowerCase() === "undefined"
+    ) {
+      return null;
+    }
+    if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+      const num = Number(trimmed);
+      if (Number.isFinite(num)) return num;
+    }
+    return trimmed;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : value;
+  }
+
+  if (typeof value === "boolean") return value;
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeForCompare(item));
+  }
+
+  if (isPlainObject(value)) {
+    const normalized: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value)) {
+      normalized[key] = normalizeForCompare(nested);
+    }
+    return normalized;
+  }
+
+  return value;
+}
+
 function valuesEqual(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true;
+  const left = normalizeForCompare(a);
+  const right = normalizeForCompare(b);
+
+  if (Object.is(left, right)) return true;
+
+  if (left === null && right === null) return true;
+
   try {
-    return JSON.stringify(a) === JSON.stringify(b);
+    return JSON.stringify(left) === JSON.stringify(right);
   } catch {
     return false;
   }
+}
+
+function formatChangePart(key: string, from: unknown, to: unknown): string {
+  const label = fieldLabel(key);
+  return `เปลี่ยน${label} จาก '${formatAuditValue(from)}' เป็น '${formatAuditValue(to)}'`;
+}
+
+function summarizeFixedAssetInsert(newRec: Record<string, unknown>): string | null {
+  const assetCode = String(newRec.asset_code ?? "").trim();
+  const assetName = String(newRec.asset_name ?? "").trim();
+  if (!assetCode && !assetName) return null;
+
+  const codePart = assetCode ? `[${assetCode}]` : "[—]";
+  const namePart = assetName || "—";
+  return `ขึ้นทะเบียนสินทรัพย์ใหม่: ${codePart} ${namePart}`;
 }
 
 export function getAuditTableLabel(tableName: string): string {
@@ -168,13 +252,25 @@ export function parseAuditChangeSummary(
   oldData: Json | null,
   newData: Json | null,
   maxChanges = 4,
+  tableName?: string,
 ): string {
   const oldRec = toRecord(oldData);
   const newRec = toRecord(newData);
   const normalized = String(action).toUpperCase();
+  const table = String(tableName ?? "").trim();
 
   if (normalized === "INSERT") {
     if (!newRec) return "สร้างรายการใหม่";
+
+    if (table === "fixed_assets") {
+      const fixedAssetSummary = summarizeFixedAssetInsert(newRec);
+      if (fixedAssetSummary) {
+        const eventLabel = formatAuditEventLabel(newRec.audit_event);
+        return eventLabel
+          ? `${eventLabel} · ${fixedAssetSummary}`
+          : fixedAssetSummary;
+      }
+    }
 
     // Phase 9 — Manual Backup audit payload
     if (
@@ -227,10 +323,22 @@ export function parseAuditChangeSummary(
   // UPDATE
   if (!oldRec && !newRec) return "อัปเดตข้อมูล";
   if (!oldRec && newRec) {
-    return parseAuditChangeSummary("INSERT", null, newData, maxChanges);
+    return parseAuditChangeSummary(
+      "INSERT",
+      null,
+      newData,
+      maxChanges,
+      tableName,
+    );
   }
   if (oldRec && !newRec) {
-    return parseAuditChangeSummary("DELETE", oldData, null, maxChanges);
+    return parseAuditChangeSummary(
+      "DELETE",
+      oldData,
+      null,
+      maxChanges,
+      tableName,
+    );
   }
 
   const left = oldRec ?? {};
@@ -265,27 +373,16 @@ export function parseAuditChangeSummary(
   });
 
   const shown = diffs.slice(0, maxChanges);
-  const parts = shown.map((d) => {
-    if (d.key === "status" || d.key === "payment_status") {
-      return `Updated ${d.key} from '${formatAuditValue(d.from)}' to '${formatAuditValue(d.to)}'`;
-    }
-    if (
-      d.key === "grand_total" ||
-      d.key === "total_amount" ||
-      d.key === "net_amount" ||
-      d.key === "paid_amount"
-    ) {
-      return `Changed ${d.key} from ${formatAuditValue(d.from)} to ${formatAuditValue(d.to)}`;
-    }
-    return `เปลี่ยน${fieldLabel(d.key)} จาก '${formatAuditValue(d.from)}' เป็น '${formatAuditValue(d.to)}'`;
-  });
+  const parts = shown.map((d) => formatChangePart(d.key, d.from, d.to));
 
   const remaining = diffs.length - shown.length;
   if (remaining > 0) {
-    parts.push(`และอีก ${remaining} ฟิลด์`);
+    parts.push(`และแก้ไขข้อมูลอื่นๆ อีก ${remaining} รายการ`);
   }
 
-  const eventLabel = formatAuditEventLabel(right.audit_event ?? left.audit_event);
+  const eventLabel = formatAuditEventLabel(
+    right.audit_event ?? left.audit_event,
+  );
   const body = parts.join(" · ");
   return eventLabel ? `${eventLabel} · ${body}` : body;
 }

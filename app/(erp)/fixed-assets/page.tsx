@@ -27,6 +27,7 @@ type PageProps = {
     create?: string;
     edit_id?: string;
     linked_expense_id?: string;
+    view_asset_id?: string;
   }>;
 };
 
@@ -48,8 +49,9 @@ export default async function FixedAssetsPage({ searchParams }: PageProps) {
   const createOpen = params.create === "1" || params.create === "true";
   const editId = params.edit_id?.trim() || null;
   const linkedExpenseId = params.linked_expense_id?.trim() || null;
+  const viewAssetId = params.view_asset_id?.trim() || null;
 
-  const [assetsResult, categoriesResult, editResult, linkedExpenseResult] =
+  const [assetsResult, categoriesResult, editResult, linkedExpenseResult, viewAssetResult] =
     await Promise.all([
       getFixedAssets({ query, status }),
       getAssetCategories({ activeOnly: true }),
@@ -59,10 +61,22 @@ export default async function FixedAssetsPage({ searchParams }: PageProps) {
       linkedExpenseId
         ? getLinkedExpenseDocumentNo(linkedExpenseId)
         : Promise.resolve({ documentNo: null, error: null }),
+      viewAssetId
+        ? getFixedAssetById(viewAssetId)
+        : Promise.resolve({ data: null, error: null }),
     ]);
 
   const editAsset = editResult.data;
   const linkedExpenseDocumentNo = linkedExpenseResult.documentNo;
+  const viewAsset = viewAssetResult.data;
+  const viewAssetError = viewAssetResult.error;
+
+  const closeViewParams = new URLSearchParams();
+  if (query) closeViewParams.set("query", query);
+  if (status && status !== "ALL") closeViewParams.set("status", status);
+  const viewCloseHref = closeViewParams.toString()
+    ? `/fixed-assets?${closeViewParams.toString()}`
+    : "/fixed-assets";
 
   return (
     <Suspense
@@ -80,6 +94,9 @@ export default async function FixedAssetsPage({ searchParams }: PageProps) {
         createOpen={createOpen}
         editAsset={editAsset}
         linkedExpenseDocumentNo={linkedExpenseDocumentNo}
+        viewAsset={viewAsset}
+        viewAssetError={viewAssetError}
+        viewCloseHref={viewCloseHref}
       />
     </Suspense>
   );

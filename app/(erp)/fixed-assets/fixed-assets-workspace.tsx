@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Building2, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { Building2, Eye, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { disposeFixedAsset } from "@/app/actions/fixed-assets";
 import { FixedAssetFilter } from "@/app/(erp)/fixed-assets/fixed-asset-filter";
+import { AssetDetailSheet } from "@/app/(erp)/fixed-assets/asset-detail-sheet";
 import { FixedAssetFormSheet } from "@/app/(erp)/fixed-assets/fixed-asset-form-sheet";
 import type {
   AssetCategory,
@@ -53,6 +54,9 @@ export type FixedAssetsWorkspaceProps = {
   editAsset: FixedAssetListItem | null;
   /** Human-readable EXP-YYMM-XXXX when Direct Capitalization via URL. */
   linkedExpenseDocumentNo: string | null;
+  viewAsset: FixedAssetListItem | null;
+  viewAssetError: string | null;
+  viewCloseHref: string;
 };
 
 function formatThaiBaht(value: number): string {
@@ -101,6 +105,9 @@ export function FixedAssetsWorkspace({
   createOpen,
   editAsset,
   linkedExpenseDocumentNo,
+  viewAsset,
+  viewAssetError,
+  viewCloseHref,
 }: FixedAssetsWorkspaceProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -154,7 +161,7 @@ export function FixedAssetsWorkspace({
           </div>
 
           <Link
-            href={buildHref({ create: "1", edit_id: null })}
+            href={buildHref({ create: "1", edit_id: null, view_asset_id: null })}
             className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
           >
             <Plus className="h-4 w-4" />
@@ -212,14 +219,32 @@ export function FixedAssetsWorkspace({
                         className={
                           row.status === "DISPOSED"
                             ? "bg-slate-50/60 opacity-70"
-                            : undefined
+                            : "cursor-pointer hover:bg-slate-50/80"
                         }
                       >
                         <TableCell className="font-mono text-sm font-semibold text-slate-900">
-                          {row.asset_code}
+                          <Link
+                            href={buildHref({
+                              view_asset_id: row.id,
+                              edit_id: null,
+                              create: null,
+                            })}
+                            className="text-blue-700 hover:underline"
+                          >
+                            {row.asset_code}
+                          </Link>
                         </TableCell>
                         <TableCell className="font-medium text-slate-900">
-                          {row.asset_name}
+                          <Link
+                            href={buildHref({
+                              view_asset_id: row.id,
+                              edit_id: null,
+                              create: null,
+                            })}
+                            className="hover:text-blue-700 hover:underline"
+                          >
+                            {row.asset_name}
+                          </Link>
                         </TableCell>
                         <TableCell className="text-sm text-slate-600">
                           {row.category_name
@@ -243,8 +268,20 @@ export function FixedAssetsWorkspace({
                           <div className="inline-flex items-center gap-1.5">
                             <Link
                               href={buildHref({
+                                view_asset_id: row.id,
+                                edit_id: null,
+                                create: null,
+                              })}
+                              className="inline-flex h-8 items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                            >
+                              <Eye className="size-3.5" />
+                              ดู
+                            </Link>
+                            <Link
+                              href={buildHref({
                                 edit_id: row.id,
                                 create: null,
+                                view_asset_id: null,
                               })}
                               className="inline-flex h-8 items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                             >
@@ -283,6 +320,14 @@ export function FixedAssetsWorkspace({
         initialAsset={editAsset}
         linkedExpenseDocumentNo={linkedExpenseDocumentNo}
       />
+
+      {viewAsset || viewAssetError ? (
+        <AssetDetailSheet
+          asset={viewAsset}
+          error={viewAssetError}
+          closeHref={viewCloseHref}
+        />
+      ) : null}
 
       <AlertDialog
         open={Boolean(pendingDispose)}
