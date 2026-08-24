@@ -12,7 +12,6 @@ import { Building2, ExternalLink } from "lucide-react";
 import type { FixedAssetListItem } from "@/types/fixed-assets";
 import { FIXED_ASSET_STATUS_LABELS } from "@/types/fixed-assets";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
@@ -183,15 +182,21 @@ export function AssetDetailSheet({
           </div>
         ) : !error ? (
           <div className="px-6 pb-8 pt-4">
-            <Button asChild variant="outline">
-              <Link href={closeHref}>ปิด</Link>
-            </Button>
+            <Link
+              href={closeHref}
+              className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              ปิด
+            </Link>
           </div>
         ) : (
           <div className="flex justify-end px-6 pb-8 pt-4">
-            <Button asChild variant="outline">
-              <Link href={closeHref}>ปิด</Link>
-            </Button>
+            <Link
+              href={closeHref}
+              className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              ปิด
+            </Link>
           </div>
         )}
       </SheetContent>

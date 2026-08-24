@@ -7,6 +7,12 @@ import type { Json } from "@/src/types/supabase";
 
 export type AuditActionLike = "INSERT" | "UPDATE" | "DELETE" | string;
 
+/** Strongly-typed JSONB object payload from audit_logs.old_data / new_data */
+export type AuditJsonRecord = Record<string, Json | undefined>;
+
+/** Parsed plain object used for diff comparison (post-normalization) */
+type AuditDiffRecord = Record<string, unknown>;
+
 /** Friendly Thai names for audited tables */
 export const AUDIT_TABLE_LABELS: Record<string, string> = {
   documents: "เอกสาร",
@@ -117,17 +123,17 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function toRecord(data: Json | null | undefined): Record<string, unknown> | null {
+function toRecord(data: Json | null | undefined): AuditDiffRecord | null {
   if (data == null) return null;
   if (typeof data === "string") {
     try {
       const parsed: unknown = JSON.parse(data);
-      return isPlainObject(parsed) ? parsed : null;
+      return isPlainObject(parsed) ? (parsed as AuditDiffRecord) : null;
     } catch {
       return null;
     }
   }
-  return isPlainObject(data) ? data : null;
+  return isPlainObject(data) ? (data as AuditDiffRecord) : null;
 }
 
 function formatAuditValue(value: unknown): string {
@@ -228,7 +234,7 @@ function formatChangePart(key: string, from: unknown, to: unknown): string {
   return `เปลี่ยน${label} จาก '${formatAuditValue(from)}' เป็น '${formatAuditValue(to)}'`;
 }
 
-function summarizeFixedAssetInsert(newRec: Record<string, unknown>): string | null {
+function summarizeFixedAssetInsert(newRec: AuditDiffRecord): string | null {
   const assetCode = String(newRec.asset_code ?? "").trim();
   const assetName = String(newRec.asset_name ?? "").trim();
   if (!assetCode && !assetName) return null;

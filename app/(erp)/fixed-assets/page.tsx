@@ -20,16 +20,20 @@ export const metadata: Metadata = {
   description: "ทะเบียนสินทรัพย์ถาวร (Fixed Asset Register) — Phase 14",
 };
 
-type PageProps = {
+interface PageProps {
   searchParams: Promise<{
-    query?: string;
-    status?: string;
-    create?: string;
-    edit_id?: string;
-    linked_expense_id?: string;
-    view_asset_id?: string;
+    [key: string]: string | string[] | undefined;
   }>;
-};
+}
+
+function readSearchParam(
+  params: Record<string, string | string[] | undefined>,
+  key: string,
+): string | undefined {
+  const value = params[key];
+  if (Array.isArray(value)) return value[0]?.trim() || undefined;
+  return value?.trim() || undefined;
+}
 
 function resolveStatusFilter(
   raw: string | undefined,
@@ -44,12 +48,13 @@ function resolveStatusFilter(
 
 export default async function FixedAssetsPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const query = params.query?.trim() ?? "";
-  const status = resolveStatusFilter(params.status);
-  const createOpen = params.create === "1" || params.create === "true";
-  const editId = params.edit_id?.trim() || null;
-  const linkedExpenseId = params.linked_expense_id?.trim() || null;
-  const viewAssetId = params.view_asset_id?.trim() || null;
+  const query = readSearchParam(params, "query") ?? "";
+  const status = resolveStatusFilter(readSearchParam(params, "status"));
+  const createRaw = readSearchParam(params, "create");
+  const createOpen = createRaw === "1" || createRaw === "true";
+  const editId = readSearchParam(params, "edit_id") || null;
+  const linkedExpenseId = readSearchParam(params, "linked_expense_id") || null;
+  const viewAssetId = readSearchParam(params, "view_asset_id") || null;
 
   const [assetsResult, categoriesResult, editResult, linkedExpenseResult, viewAssetResult] =
     await Promise.all([
