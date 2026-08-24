@@ -83,3 +83,21 @@ export async function getCurrentAuthUser(): Promise<CurrentAuthUser | null> {
     return null;
   }
 }
+
+export type RequireSessionUserIdResult =
+  | { ok: true; userId: string }
+  | { ok: false; error: string };
+
+/**
+ * บังคับมี Auth Session — ใช้ stamp `documents.created_by` ตอนสร้างเอกสารใหม่
+ */
+export async function requireSessionUserId(): Promise<RequireSessionUserIdResult> {
+  const actor = await getCurrentAuthUser();
+  if (!actor?.userId) {
+    return {
+      ok: false,
+      error: "กรุณาเข้าสู่ระบบก่อนบันทึกเอกสาร",
+    };
+  }
+  return { ok: true, userId: actor.userId };
+}

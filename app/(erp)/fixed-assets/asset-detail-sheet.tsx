@@ -12,7 +12,7 @@ import { Building2, ExternalLink, ScrollText } from "lucide-react";
 import type { AssetDepreciationLedgerRow } from "@/types/depreciation";
 import type { FixedAssetListItem } from "@/types/fixed-assets";
 import { FIXED_ASSET_STATUS_LABELS } from "@/types/fixed-assets";
-import { formatAccountingPeriodLabel } from "@/types/accounting-period";
+import { formatThaiDate } from "@/lib/utils/date-formatter";
 import { Badge } from "@/components/ui/badge";
 import {
   Sheet,
@@ -53,31 +53,12 @@ function formatMoney(value: number): string {
   }).format(Number.isFinite(value) ? value : 0);
 }
 
-function formatDocDate(value: string): string {
-  if (!value) return "—";
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("th-TH", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(date);
-}
-
-/** DATE → DD/MM/YYYY (calendar year, no timezone shift) */
-function formatDdMmYyyy(value: string): string {
-  const iso = String(value ?? "").slice(0, 10);
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (match) return `${match[3]}/${match[2]}/${match[1]}`;
-  return value || "—";
-}
-
 function formatPeriodCell(
   year: number | null,
   month: number | null,
 ): string {
-  if (year == null || month == null) return "—";
-  return formatAccountingPeriodLabel(year, month);
+  if (year == null || month == null || month < 1 || month > 12) return "—";
+  return formatThaiDate(new Date(year, month - 1, 1), "monthYear");
 }
 
 function Field({
@@ -139,7 +120,7 @@ function DepreciationLedgerSection({
                   {formatPeriodCell(row.period_year, row.period_month)}
                 </TableCell>
                 <TableCell className="whitespace-nowrap font-mono text-sm tabular-nums">
-                  {formatDdMmYyyy(row.depreciation_date)}
+                  {formatThaiDate(row.depreciation_date, "short")}
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm tabular-nums">
                   {formatMoney(row.depreciation_amount)}
@@ -224,7 +205,7 @@ export function AssetDetailSheet({
                   : "—"}
               </Field>
               <Field label="วันที่ซื้อ (Acquisition Date)">
-                {formatDocDate(asset.purchase_date)}
+                {formatThaiDate(asset.purchase_date, "long")}
               </Field>
               <Field label="อายุใช้งาน (Useful Life)">
                 {asset.useful_life_years != null

@@ -5,6 +5,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
+import { requireSessionUserId } from "@/lib/auth/current-user";
 import { encodeExpenseKnockoffReason } from "@/lib/utils/expense-knockoff";
 import type { ExpenseCashSettlementResult } from "@/types/expense";
 
@@ -123,6 +124,11 @@ export async function settleExpenseCashPurchase(
       : String(expense.vendor_doc_no).trim() || null;
   const notes = `CASH_PURCHASE | Expense ${expenseDocNo}`;
 
+  const owner = await requireSessionUserId();
+  if (!owner.ok) {
+    return { success: false, error: owner.error };
+  }
+
   const { data: payDoc, error: payDocError } = await supabaseAdmin
     .from("documents")
     .insert({
@@ -148,6 +154,7 @@ export async function settleExpenseCashPurchase(
       attachment_url: slipUrl,
       attached_file_url: slipUrl,
       notes,
+      created_by: owner.userId,
       updated_at: nowIso,
     })
     .select("id")

@@ -1,16 +1,16 @@
 "use client";
 
 /**
- * Create User dialog — Admin sets email + PIN (password) directly.
- * Submit via Server Action + useTransition (Zero Client-Side Fetching).
+ * Create User dialog — Admin sets email + PIN (password) + ABAC attributes.
+ * Submit via Server Action (Zero Client-Side Fetching).
  */
 
-import { useState, useTransition, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { createUserWithPin } from "@/lib/actions/user.actions";
-import type { AppRoleOption } from "@/types/user";
+import type { AppRoleOption, DataAccessScope } from "@/types/user";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,6 +24,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { UserAbacFields } from "./user-abac-fields";
 
 export type CreateUserDialogProps = {
   roles: AppRoleOption[];
@@ -32,36 +33,56 @@ export type CreateUserDialogProps = {
 /** @deprecated ชื่อเดิม — ใช้ CreateUserDialog */
 export type InviteUserDialogProps = CreateUserDialogProps;
 
+function defaultScopeForRole(roleCode: string): DataAccessScope {
+  return roleCode.trim().toLowerCase() === "admin" ? "ALL" : "OWN";
+}
+
 export function CreateUserDialog({ roles }: CreateUserDialogProps) {
   const router = useRouter();
+  const defaultRole = roles[0]?.role_code ?? "sales";
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [pin, setPin] = useState("");
-  const [roleCode, setRoleCode] = useState(roles[0]?.role_code ?? "sales");
+  const [roleCode, setRoleCode] = useState(defaultRole);
+  const [dataAccessScope, setDataAccessScope] = useState<DataAccessScope>(
+    defaultScopeForRole(defaultRole),
+  );
+  const [approvalLimit, setApprovalLimit] = useState("0");
   const [pinError, setPinError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   function resetForm() {
     setEmail("");
     setFullName("");
     setPin("");
     setPinError(null);
-    setRoleCode(roles[0]?.role_code ?? "sales");
+    setRoleCode(defaultRole);
+    setDataAccessScope(defaultScopeForRole(defaultRole));
+    setApprovalLimit("0");
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isPending) return;
+    if (isSubmitting) return;
 
     if (pin.length < 6) {
       setPinError("รหัสผ่าน (PIN) ต้องมีอย่างน้อย 6 ตัวอักษร");
       return;
     }
+    const parsedLimit = Number(approvalLimit);
+    if (!Number.isFinite(parsedLimit) || parsedLimit < 0) {
+      toast.error("วงเงินอนุมัติต้องเป็นตัวเลขที่ไม่ติดลบ");
+      return;
+    }
     setPinError(null);
 
-    startTransition(async () => {
-      const result = await createUserWithPin(email, pin, roleCode, fullName);
+    setIsSubmitting(true);
+    try {
+      const result = await createUserWithPin(email, pin, roleCode, fullName, {
+        data_access_scope: dataAccessScope,
+        approval_limit: parsedLimit,
+      });
       if (!result.success) {
         toast.error(result.error ?? "สร้างผู้ใช้งานไม่สำเร็จ");
         return;
@@ -70,20 +91,26 @@ export function CreateUserDialog({ roles }: CreateUserDialogProps) {
       resetForm();
       setOpen(false);
       router.refresh();
-    });
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "สร้างผู้ใช้งานไม่สำเร็จ",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (isPending) return;
+        if (isSubmitting) return;
         setOpen(next);
         if (!next) resetForm();
       }}
     >
       <DialogTrigger asChild>
-        <Button type="button" className="gap-2" disabled={isPending}>
+        <Button type="button" className="gap-2" disabled={isSubmitting}>
           <UserPlus className="size-4" />
           สร้างผู้ใช้งานใหม่
         </Button>
@@ -93,7 +120,7 @@ export function CreateUserDialog({ roles }: CreateUserDialogProps) {
         <DialogHeader>
           <DialogTitle>สร้างผู้ใช้งานใหม่</DialogTitle>
           <DialogDescription>
-            ตั้งอีเมลและรหัสผ่าน (PIN) ทันทีผ่าน Auth Admin — บันทึกลง{" "}
+            ตั้งอีเมล PIN และสิทธิ์ข้อมูล (ABAC) — บันทึกลง{" "}
             <span className="font-mono text-xs">user_profiles</span>
           </DialogDescription>
         </DialogHeader>
@@ -106,7 +133,7 @@ export function CreateUserDialog({ roles }: CreateUserDialogProps) {
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               placeholder="เช่น สมชาย ใจดี"
-              disabled={isPending}
+              disabled={isSubmitting}
               required
               autoComplete="name"
             />
@@ -120,7 +147,7 @@ export function CreateUserDialog({ roles }: CreateUserDialogProps) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="user@company.com"
-              disabled={isPending}
+              disabled={isSubmitting}
               required
               autoComplete="email"
             />
@@ -139,7 +166,7 @@ export function CreateUserDialog({ roles }: CreateUserDialogProps) {
                 }
               }}
               placeholder="อย่างน้อย 6 ตัวอักษร"
-              disabled={isPending}
+              disabled={isSubmitting}
               required
               minLength={6}
               autoComplete="new-password"
@@ -159,8 +186,12 @@ export function CreateUserDialog({ roles }: CreateUserDialogProps) {
             <Select
               id="create-role"
               value={roleCode}
-              onChange={(e) => setRoleCode(e.target.value)}
-              disabled={isPending || roles.length === 0}
+              onChange={(e) => {
+                const nextRole = e.target.value;
+                setRoleCode(nextRole);
+                setDataAccessScope(defaultScopeForRole(nextRole));
+              }}
+              disabled={isSubmitting || roles.length === 0}
               required
             >
               {roles.length === 0 ? (
@@ -175,17 +206,30 @@ export function CreateUserDialog({ roles }: CreateUserDialogProps) {
             </Select>
           </div>
 
+          <UserAbacFields
+            idPrefix="create-abac"
+            dataAccessScope={dataAccessScope}
+            approvalLimit={approvalLimit}
+            disabled={isSubmitting}
+            onDataAccessScopeChange={setDataAccessScope}
+            onApprovalLimitChange={setApprovalLimit}
+          />
+
           <DialogFooter className="gap-2 sm:gap-0">
             <Button
               type="button"
               variant="outline"
-              disabled={isPending}
+              disabled={isSubmitting}
               onClick={() => setOpen(false)}
             >
               ยกเลิก
             </Button>
-            <Button type="submit" disabled={isPending || roles.length === 0}>
-              {isPending ? "กำลังสร้างผู้ใช้..." : "สร้างผู้ใช้งาน"}
+            <Button
+              type="submit"
+              disabled={isSubmitting || roles.length === 0}
+              aria-busy={isSubmitting}
+            >
+              {isSubmitting ? "กำลังสร้างผู้ใช้..." : "สร้างผู้ใช้งาน"}
             </Button>
           </DialogFooter>
         </form>

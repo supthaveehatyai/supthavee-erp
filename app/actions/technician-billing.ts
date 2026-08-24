@@ -13,6 +13,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server-admin";
+import { requireSessionUserId } from "@/lib/auth/current-user";
 import { roundMoney } from "@/lib/utils/payment-fifo";
 import type {
   CreateTechnicianBillInput,
@@ -491,6 +492,11 @@ export async function createTechnicianBill(
     const nowIso = new Date().toISOString();
     const notes = `สรุปวางบิลช่าง · ${eligible.length} บรรทัด · ค่าแรงจาก document_items.wage_cost`;
 
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { success: false, error: owner.error };
+    }
+
     const { data: document, error: insertError } = await supabase
       .from("documents")
       .insert({
@@ -513,6 +519,7 @@ export async function createTechnicianBill(
         payment_status: "UNPAID",
         paid_amount: 0,
         is_voided: false,
+        created_by: owner.userId,
         updated_at: nowIso,
       })
       .select("id, doc_no")

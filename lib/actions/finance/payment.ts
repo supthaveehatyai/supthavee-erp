@@ -8,6 +8,7 @@
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
+import { requireSessionUserId } from "@/lib/auth/current-user";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { syncBillingNotesAfterInvoicePayment } from "@/lib/actions/finance/billing-note-status";
 import { roundMoney } from "@/lib/utils/payment-fifo";
@@ -657,8 +658,14 @@ export async function processPaymentKnockoff(
     }
 
     const receiptGrandTotal = roundMoney(sumAllocated + headerWht);
+    const cashAmount = roundMoney(sumAllocated - depositTotal);
     const nowIso = new Date().toISOString();
     const paymentDateIso = `${paymentDate}T00:00:00.000Z`;
+
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { success: false, error: owner.error };
+    }
 
     // 1) REC receipt document
     // grand_total = มูลค่าบิลที่ตัดยอด (ไม่หักมัดจำ) — มัดจำเป็น payment method
@@ -692,6 +699,7 @@ export async function processPaymentKnockoff(
             ? slipFile.name.slice(0, 255)
             : null,
         notes: `AR Knock-off | invoices=${sumAllocated} | cash=${cashAmount} | deposit=${depositTotal} | wht=${headerWht}${referenceNo ? ` | ref=${referenceNo}` : ""}`,
+        created_by: owner.userId,
         updated_at: nowIso,
       })
       .select("id, doc_no")

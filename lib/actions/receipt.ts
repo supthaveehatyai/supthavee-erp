@@ -37,6 +37,7 @@ import {
   type VatCalculationType,
 } from "@/lib/utils/document-summary";
 import type { DocumentType } from "@/types/document";
+import { requireSessionUserId } from "@/lib/auth/current-user";
 
 function isGoodsReceiptDocType(value: string): value is GoodsReceiptDocType {
   return (GOODS_RECEIPT_DOC_TYPES as readonly string[]).includes(value);
@@ -974,6 +975,12 @@ export async function saveGoodsReceiptToLedger(
     const vendorInvoiceNote = `อ้างอิงบิลซัพพลายเออร์: ${docNo}`;
     const resolvedAttachmentUrl = attachmentUrl?.trim() || null;
 
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeader.id);
+      return { docHeaderId: null, docNo: null, error: owner.error };
+    }
+
     const { data: phase4Document, error: phase4DocError } = await supabaseAdmin
       .from("documents")
       .insert({
@@ -1006,6 +1013,7 @@ export async function saveGoodsReceiptToLedger(
         original_file_name: resolvedAttachmentUrl
           ? resolvedAttachmentUrl.split("/").pop() || null
           : null,
+        created_by: owner.userId,
         updated_at: nowIso,
       })
       .select("id, doc_no")
@@ -1439,6 +1447,13 @@ export async function saveManualGoodsReceipt(
       };
     }
 
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", docHeaderId);
+      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+      return { data: null, error: owner.error };
+    }
+
     const { data: document, error: documentError } = await supabaseAdmin
       .from("documents")
       .insert({
@@ -1465,6 +1480,7 @@ export async function saveManualGoodsReceipt(
             ? grandTotal
             : 0,
         notes,
+        created_by: owner.userId,
         updated_at: nowIso,
       })
       .select("id, doc_no")

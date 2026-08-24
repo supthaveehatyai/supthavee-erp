@@ -7,7 +7,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { MoreHorizontal, UserCheck, UserX } from "lucide-react";
+import { MoreHorizontal, Shield, UserCheck, UserX } from "lucide-react";
 import { toast } from "sonner";
 import {
   deactivateUser,
@@ -31,6 +31,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { EditUserAbacDialog } from "./edit-user-abac-dialog";
 
 export type UserRowActionsProps = {
   user: ManagedUser;
@@ -41,6 +42,7 @@ type ConfirmMode = "deactivate" | "reactivate" | null;
 export function UserRowActions({ user }: UserRowActionsProps) {
   const router = useRouter();
   const [confirmMode, setConfirmMode] = useState<ConfirmMode>(null);
+  const [abacOpen, setAbacOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   function handleConfirm() {
@@ -85,6 +87,14 @@ export function UserRowActions({ user }: UserRowActionsProps) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-[11rem] max-w-[16rem]">
+          <DropdownMenuItem
+            onSelect={() => setAbacOpen(true)}
+            disabled={isPending}
+            className="break-words whitespace-normal"
+          >
+            <Shield className="size-4 shrink-0" />
+            <span className="break-words">แก้ไขสิทธิ์ข้อมูล (ABAC)</span>
+          </DropdownMenuItem>
           {user.is_active ? (
             <DropdownMenuItem
               destructive
@@ -167,6 +177,12 @@ export function UserRowActions({ user }: UserRowActionsProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <EditUserAbacDialog
+        user={user}
+        open={abacOpen}
+        onOpenChange={setAbacOpen}
+      />
     </>
   );
 }

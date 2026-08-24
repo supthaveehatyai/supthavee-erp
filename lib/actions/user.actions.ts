@@ -12,12 +12,16 @@ import type { Database } from "@/src/types/supabase";
 import type {
   AppRoleOption,
   CreateUserWithPinResult,
+  DataAccessScope,
   DeactivateUserResult,
   GetAppRolesResult,
   GetUsersResult,
   ManagedUser,
   ReactivateUserResult,
+  UpdateUserAbacResult,
+  UserAbacInput,
 } from "@/types/user";
+import { DATA_ACCESS_SCOPES } from "@/types/user";
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -48,6 +52,8 @@ type ProfileJoinRow = {
   full_name: string;
   role_code: string;
   is_active: boolean | null;
+  data_access_scope: string | null;
+  approval_limit: number | string | null;
   created_at: string | null;
   updated_at: string | null;
   app_roles:
@@ -55,6 +61,49 @@ type ProfileJoinRow = {
     | { role_code: string; role_name_th: string; description: string | null }[]
     | null;
 };
+
+function isDataAccessScope(value: unknown): value is DataAccessScope {
+  return DATA_ACCESS_SCOPES.includes(String(value ?? "").toUpperCase() as DataAccessScope);
+}
+
+function parseDataAccessScope(value: unknown): DataAccessScope {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  return isDataAccessScope(normalized) ? normalized : "OWN";
+}
+
+function parseApprovalLimit(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.round(parsed * 100) / 100;
+}
+
+function normalizeAbacInput(input: UserAbacInput | undefined): {
+  data_access_scope: DataAccessScope;
+  approval_limit: number;
+  error: string | null;
+} {
+  const scope = parseDataAccessScope(input?.data_access_scope);
+  if (input?.data_access_scope && !isDataAccessScope(String(input.data_access_scope).toUpperCase())) {
+    return {
+      data_access_scope: "OWN",
+      approval_limit: 0,
+      error: "Data Access Scope ต้องเป็น ALL หรือ OWN เท่านั้น",
+    };
+  }
+  const limit = Number(input?.approval_limit ?? 0);
+  if (!Number.isFinite(limit) || limit < 0) {
+    return {
+      data_access_scope: scope,
+      approval_limit: 0,
+      error: "วงเงินอนุมัติต้องเป็นตัวเลขที่ไม่ติดลบ",
+    };
+  }
+  return {
+    data_access_scope: scope,
+    approval_limit: Math.round(limit * 100) / 100,
+    error: null,
+  };
+}
 
 function unwrapRole(
   join: ProfileJoinRow["app_roles"],
@@ -73,6 +122,8 @@ function mapManagedUser(row: ProfileJoinRow): ManagedUser {
     role_code: row.role_code,
     role_name_th: role?.role_name_th ?? row.role_code,
     is_active: row.is_active !== false,
+    data_access_scope: parseDataAccessScope(row.data_access_scope),
+    approval_limit: parseApprovalLimit(row.approval_limit),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -98,6 +149,8 @@ export async function getUsers(): Promise<GetUsersResult> {
         full_name,
         role_code,
         is_active,
+        data_access_scope,
+        approval_limit,
         created_at,
         updated_at,
         app_roles (
@@ -167,6 +220,7 @@ export async function createUserWithPin(
   pin: string,
   roleCode: string,
   fullName: string,
+  abac?: UserAbacInput,
 ): Promise<CreateUserWithPinResult> {
   try {
     const gate = await requireAdmin();
@@ -203,6 +257,16 @@ export async function createUserWithPin(
     }
     if (!normalizedRole) {
       return { success: false, error: "กรุณาเลือกสิทธิ์ (Role)" };
+    }
+
+    const abacFields = normalizeAbacInput(
+      abac ?? {
+        data_access_scope: normalizedRole === "admin" ? "ALL" : "OWN",
+        approval_limit: 0,
+      },
+    );
+    if (abacFields.error) {
+      return { success: false, error: abacFields.error };
     }
 
     const supabaseAdmin = createSupabaseAdminClient();
@@ -271,6 +335,8 @@ export async function createUserWithPin(
         role_code: normalizedRole,
         is_active: true,
         pin_code: password,
+        data_access_scope: abacFields.data_access_scope,
+        approval_limit: abacFields.approval_limit,
         updated_at: new Date().toISOString(),
       });
 
@@ -475,6 +541,68 @@ export async function reactivateUser(
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "เปิดใช้งานผู้ใช้ไม่สำเร็จ";
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * อัปเดต ABAC บน user_profiles: data_access_scope + approval_limit
+ */
+export async function updateUserAbacSettings(
+  userId: string,
+  abac: UserAbacInput,
+): Promise<UpdateUserAbacResult> {
+  try {
+    const gate = await requireAdmin();
+    if (!gate.ok) {
+      return { success: false, error: gate.error };
+    }
+
+    const id = String(userId ?? "").trim();
+    if (!id) {
+      return { success: false, error: "ไม่พบรหัสผู้ใช้ (userId)" };
+    }
+
+    const abacFields = normalizeAbacInput(abac);
+    if (abacFields.error) {
+      return { success: false, error: abacFields.error };
+    }
+
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data: existing, error: lookupError } = await supabaseAdmin
+      .from("user_profiles")
+      .select("id")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (lookupError) {
+      return { success: false, error: lookupError.message };
+    }
+    if (!existing) {
+      return { success: false, error: "ไม่พบผู้ใช้ใน user_profiles" };
+    }
+
+    const { error: updateError } = await supabaseAdmin
+      .from("user_profiles")
+      .update({
+        data_access_scope: abacFields.data_access_scope,
+        approval_limit: abacFields.approval_limit,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+
+    if (updateError) {
+      return {
+        success: false,
+        error: updateError.message ?? "บันทึกสิทธิ์ข้อมูลไม่สำเร็จ",
+      };
+    }
+
+    revalidatePath(USERS_PATH);
+    return { success: true };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "บันทึกสิทธิ์ข้อมูลไม่สำเร็จ";
     return { success: false, error: message };
   }
 }

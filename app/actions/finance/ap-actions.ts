@@ -12,6 +12,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
+import { requireSessionUserId } from "@/lib/auth/current-user";
 import { syncBillingNotesAfterInvoicePayment } from "@/lib/actions/finance/billing-note-status";
 import { roundMoney } from "@/lib/utils/payment-fifo";
 import {
@@ -658,6 +659,11 @@ export async function submitAPPayment(
     const nowIso = new Date().toISOString();
     const paymentDateIso = `${paymentDate}T00:00:00.000Z`;
 
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { success: false, error: owner.error };
+    }
+
     // Step B — Slip upload (optional)
     let slipUrl: string | null = null;
     if (slipFile instanceof File && slipFile.size > 0) {
@@ -701,6 +707,7 @@ export async function submitAPPayment(
             ? slipFile.name.slice(0, 255)
             : null,
         notes: `AP Knock-off | invoices=${totalInvoicePaid} | deposit=${depositTotal} | cash=${totalPaid}${referenceNo ? ` | ref=${referenceNo}` : ""}`,
+        created_by: owner.userId,
         updated_at: nowIso,
       })
       .select("id, doc_no")

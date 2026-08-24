@@ -3,6 +3,8 @@
  * Keep outside `"use server"` modules.
  */
 
+import { formatThaiDate } from "@/lib/utils/date-formatter";
+
 export type AccountingPeriod = {
   id: string | null;
   period_year: number;
@@ -86,6 +88,13 @@ export function formatAccountingPeriodLabel(
   year: number,
   month: number,
 ): string {
-  const label = THAI_MONTH_LABELS[month - 1];
-  return label ? `${label} ${year + 543} (${month}/${year})` : `${month}/${year}`;
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    month < 1 ||
+    month > 12
+  ) {
+    return "—";
+  }
+  return formatThaiDate(new Date(year, month - 1, 1), "monthYear");
 }

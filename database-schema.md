@@ -15,7 +15,7 @@
 ## 2. Core Entities (องค์กร, ผู้ใช้, ตั้งค่า)
 - `contacts` (คู่ค้า Multi-Role: `contact_roles` VARCHAR[] เท่านั้น)
 - `contact_persons` (ผู้ติดต่อภายใต้คู่ค้า)
-- `user_profiles` (โปรไฟล์พนักงาน/ผู้ใช้งาน)
+- `user_profiles` (โปรไฟล์พนักงาน/ผู้ใช้งาน — `data_access_scope`, `approval_limit`)
 - `app_roles` (สิทธิ์การใช้งาน Dynamic RBAC)
 - `system_settings` (ตั้งค่าระบบบริษัท Singleton)
 
@@ -33,7 +33,7 @@
 - **SO (ใบสั่งขาย):** ใช้ยืนยันคำสั่งซื้อ, จองสต็อก (Soft Allocation / ATP)
 - **Inventory Adjustments:** `STK_OB` และ `STK_ADJ` บันทึกผ่าน `inventory_ledger`
 - **Period Closing:** ฟังก์ชัน `is_period_closed(doc_date)`
-- `documents` / `doc_headers` / `doc_details` (เอกสารหลัก)
+- `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — `created_by` stamp จาก Auth Session)
 - `document_items` (รายการสินค้าในเอกสาร)
 - `document_allocations` (การจัดสรรเอกสาร เช่น ตัดมัดจำ)
 - `billing_note_items` (รายการใบวางบิล)

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Users } from "lucide-react";
 import { getAppRoles, getUsers } from "@/lib/actions/user.actions";
 import type { ManagedUser } from "@/types/user";
+import { DATA_ACCESS_SCOPE_LABELS } from "@/types/user";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -25,7 +26,8 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "จัดการผู้ใช้งาน | User Management",
-  description: "สร้างและจัดการผู้ใช้งาน ERP ด้วย PIN (Admin only)",
+  description:
+    "สร้างและจัดการผู้ใช้งาน ERP ด้วย PIN + ABAC Data Access Scope / Approval Limit (Admin only)",
 };
 
 function StatusBadge({ active }: { active: boolean }) {
@@ -57,11 +59,13 @@ function UsersTable({ users }: { users: ManagedUser[] }) {
       <Table className="table-fixed" wrapperClassName="overflow-x-hidden">
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[22%]">ชื่อ</TableHead>
-            <TableHead className="w-[28%]">อีเมล</TableHead>
-            <TableHead className="w-[22%]">สิทธิ์ / Role</TableHead>
-            <TableHead className="w-[14%] min-w-[120px]">สถานะ</TableHead>
-            <TableHead className="w-[14%] min-w-[150px] text-right">
+            <TableHead className="w-[18%]">ชื่อ</TableHead>
+            <TableHead className="w-[22%]">อีเมล</TableHead>
+            <TableHead className="w-[16%]">สิทธิ์ / Role</TableHead>
+            <TableHead className="w-[14%]">Data Access</TableHead>
+            <TableHead className="w-[12%] text-right">Approval Limit</TableHead>
+            <TableHead className="w-[10%] min-w-[120px]">สถานะ</TableHead>
+            <TableHead className="w-[8%] min-w-[150px] text-right">
               จัดการ
             </TableHead>
           </TableRow>
@@ -87,6 +91,15 @@ function UsersTable({ users }: { users: ManagedUser[] }) {
                     {user.role_code}
                   </p>
                 </div>
+              </TableCell>
+              <TableCell className="text-sm text-slate-700">
+                {DATA_ACCESS_SCOPE_LABELS[user.data_access_scope]}
+              </TableCell>
+              <TableCell className="text-right font-mono text-sm tabular-nums text-slate-800">
+                {new Intl.NumberFormat("th-TH", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                }).format(user.approval_limit)}
               </TableCell>
               <TableCell className="align-middle">
                 <StatusBadge active={user.is_active} />
@@ -119,8 +132,8 @@ export default async function UsersSettingsPage() {
             จัดการผู้ใช้งาน
           </h1>
           <p className="text-slate-500">
-            สร้างผู้ใช้พร้อมรหัสผ่าน (PIN) และระงับสิทธิ์แบบ Soft Delete —
-            เฉพาะ Admin
+            สร้างผู้ใช้พร้อม PIN, กำหนด Data Access Scope / Approval Limit
+            (ABAC) และระงับสิทธิ์แบบ Soft Delete — เฉพาะ Admin
           </p>
         </div>
         <CreateUserDialog roles={rolesResult.data} />

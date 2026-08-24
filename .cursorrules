@@ -49,6 +49,7 @@ Tech Stack หลัก: Supabase (PostgreSQL, Auth, Edge Functions, RLS), Next.
 - **AP Auto-Clearing (Cash Purchase):** บิลค่าใช้จ่ายที่ไม่ได้ผ่อนชำระ ให้เปลี่ยนสถานะเป็น `PAID` อัตโนมัติเมื่ออนุมัติสำเร็จ ตามมาตรฐานบัญชี
 - **Direct Capitalization:** การขึ้นทะเบียนสินทรัพย์ให้ใช้วิธีส่ง URL Parameters (`?linked_expense_id=...`) จากหน้า Expense ไปยัง Fixed Asset Form แทนการใช้ Dropdown เพื่อป้องกัน UI Crash
 - **Asset Clearing Integrity:** ห้ามเปลี่ยนหมวดหมู่ของบิล Expense หลังจากนำไปขึ้นทะเบียน Fixed Asset เพื่อรักษา Audit Trail ต้นทางตามหลัก GAAP/TFRS
+- **Document Ownership (ABAC):** ทุก INSERT ลงตาราง `documents` ต้องดึง `user.id` จาก Auth Session แล้ว stamp ลง `created_by` เสมอ (ใช้ `requireSessionUserId`)
 
 ## 3. Data Integrity & Taxonomy
 - **Color Code:** `mst_colors` ต้องล็อกเป็นอักษรภาษาอังกฤษพิมพ์ใหญ่ 3 ตัวอักษร
@@ -59,6 +60,7 @@ Tech Stack หลัก: Supabase (PostgreSQL, Auth, Edge Functions, RLS), Next.
 - **URL-Driven State:** ใช้ URL Search Parameters (`?query=...`) แทน `useState` สำหรับการ Filter และการเปิด Slide-over Sheet (เช่น ดูรายละเอียดสินทรัพย์)
 - **Submit Guard:** ปุ่ม Submit ต้องมีสถานะ `isSubmitting` ระหว่างรอ Server Action ทำงาน
 - **Shared Print Components (TFRS):** ทุกหน้าพิมพ์ต้องใช้ `PrintLayout`, `DocumentPrintHeader`, `DocumentPrintSummary` ห้าม Hard-code ข้อมูลบริษัท
+- **Thai Date Format (พ.ศ.):** ห้ามจัดฟอร์แมตวันที่ด้วยตัวเอง บังคับใช้ `formatThaiDate` จาก `lib/utils/date-formatter.ts` เสมอ เพื่อให้เป็น พ.ศ.
 
 ## 5. Cloud Integration & Edge Functions
 - **Vercel Limits:** Server Actions ที่ทำงานหนัก ต้องมี `export const maxDuration = 60;`

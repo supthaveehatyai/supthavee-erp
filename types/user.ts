@@ -8,7 +8,16 @@ export type AppRoleOption = {
   description: string | null;
 };
 
-/** Row shape for `public.user_profiles` (RBAC + Soft Delete + PIN). */
+export type DataAccessScope = "ALL" | "OWN";
+
+export const DATA_ACCESS_SCOPES: DataAccessScope[] = ["ALL", "OWN"];
+
+export const DATA_ACCESS_SCOPE_LABELS: Record<DataAccessScope, string> = {
+  ALL: "ทั้งหมด (ALL)",
+  OWN: "เฉพาะของตนเอง (OWN)",
+};
+
+/** Row shape for `public.user_profiles` (RBAC + Soft Delete + PIN + ABAC). */
 export type UserProfile = {
   id: string;
   email: string;
@@ -17,6 +26,8 @@ export type UserProfile = {
   is_active: boolean | null;
   /** 6-digit PIN snapshot on profile (nullable for legacy rows). */
   pin_code?: string | null;
+  data_access_scope: DataAccessScope;
+  approval_limit: number;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -28,6 +39,8 @@ export type ManagedUser = {
   role_code: string;
   role_name_th: string;
   is_active: boolean;
+  data_access_scope: DataAccessScope;
+  approval_limit: number;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -51,6 +64,15 @@ export type DeactivateUserResult =
 export type ReactivateUserResult =
   | { success: true }
   | { success: false; error: string };
+
+export type UpdateUserAbacResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export type UserAbacInput = {
+  data_access_scope: DataAccessScope;
+  approval_limit: number;
+};
 
 /** @deprecated ใช้ CreateUserWithPinResult */
 export type InviteUserResult = CreateUserWithPinResult;

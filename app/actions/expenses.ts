@@ -17,6 +17,7 @@ import {
   EXPENSE_MONEY_EPSILON,
 } from "@/lib/constants/expense-constants";
 import { logAuditTrail } from "@/lib/supabase/auditService";
+import { requireSessionUserId } from "@/lib/auth/current-user";
 import {
   generateDraftDocumentNo,
   isTemporaryDraftDocNo,
@@ -2132,6 +2133,11 @@ export async function payExpenseInstallment(
     const period = Number(installment.installment_period ?? 0);
     const notes = `PAYOUT | Expense ${String(expense.document_no)} | งวดที่ ${period}`;
 
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { success: false, error: owner.error };
+    }
+
     const { data: payDoc, error: payDocError } = await supabaseAdmin
       .from("documents")
       .insert({
@@ -2157,6 +2163,7 @@ export async function payExpenseInstallment(
         attachment_url: slipUrl,
         attached_file_url: slipUrl,
         notes,
+        created_by: owner.userId,
         updated_at: nowIso,
       })
       .select("id")

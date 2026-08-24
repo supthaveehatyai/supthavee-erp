@@ -26,6 +26,7 @@ import { revalidatePath } from "next/cache";
 import { logAuditTrail } from "@/lib/supabase/auditService";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { getSystemSettings } from "@/lib/actions/settings";
+import { requireSessionUserId } from "@/lib/auth/current-user";
 import {
   assertStockOutAvailability,
   excludeServiceLines,
@@ -268,6 +269,10 @@ export async function createDraftDocument(
 
     // Late Numbering — do NOT call generate_document_no for drafts.
     const documentNo = generateDraftDocumentNo();
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { data: null, error: owner.error };
+    }
     const supabase = createSupabaseServerClient();
 
     const { data: contact, error: contactError } = await supabase
@@ -408,6 +413,7 @@ export async function createDraftDocument(
         vat_amount: summary.vat_amount,
         discount_text: discountText,
         payment_status: resolveInitialPaymentStatus(docType),
+        created_by: owner.userId,
         updated_at: nowIso,
       })
       .select("id, doc_no")
@@ -526,6 +532,10 @@ export async function createDocument(
 
     const nowIso = new Date().toISOString();
     const draftStatus: DocumentStatus = "DRAFT";
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { data: null, error: owner.error };
+    }
     const insertPayload = {
       doc_no: generateDraftDocumentNo(),
       doc_type: docType,
@@ -534,6 +544,7 @@ export async function createDocument(
       contact_id: contactId,
       contact_person_id: contactPersonId,
       payment_status: resolveInitialPaymentStatus(docType),
+      created_by: owner.userId,
       updated_at: nowIso,
     };
     const selectColumns =
@@ -2502,6 +2513,11 @@ export async function convertDocument(
         ? `${source.notes.trim()}\n${refNote}`
         : refNote;
 
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { data: null, error: owner.error };
+    }
+
     const { data: created, error: createError } = await supabase
       .from("documents")
       .insert({
@@ -2531,6 +2547,7 @@ export async function convertDocument(
         vat_amount: Number(source.vat_amount ?? source.tax_amount ?? 0),
         payment_status: resolveInitialPaymentStatus(targetDocType),
         notes,
+        created_by: owner.userId,
         updated_at: nowIso,
       })
       .select("id, doc_no")
@@ -2924,6 +2941,11 @@ export async function cloneDocumentToNewDraft(
       ? `${replacementRemark}\n${existingRemark}`
       : replacementRemark;
 
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { data: null, error: owner.error };
+    }
+
     const { data: created, error: createError } = await supabase
       .from("documents")
       .insert({
@@ -2953,6 +2975,7 @@ export async function cloneDocumentToNewDraft(
         paid_amount: 0,
         payment_status: resolveInitialPaymentStatus(docType),
         notes,
+        created_by: owner.userId,
         updated_at: nowIso,
       })
       .select("id, doc_no")
@@ -3108,6 +3131,11 @@ export async function duplicateDocument(
       ? source.document_items
       : [];
 
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { data: null, error: owner.error };
+    }
+
     const { data: created, error: createError } = await supabase
       .from("documents")
       .insert({
@@ -3138,6 +3166,7 @@ export async function duplicateDocument(
         paid_amount: 0,
         payment_status: resolveInitialPaymentStatus(docType),
         notes: `คัดลอกจาก ${source.doc_no}`,
+        created_by: owner.userId,
         updated_at: nowIso,
       })
       .select("id, doc_no")

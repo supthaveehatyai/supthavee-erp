@@ -9,6 +9,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server-admin";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
+import { requireSessionUserId } from "@/lib/auth/current-user";
 import { logAuditTrail } from "@/lib/supabase/auditService";
 import { getSystemSettings } from "@/lib/actions/settings";
 import {
@@ -345,6 +346,11 @@ export async function adjustInventory(
     const paymentStatus = resolveInitialPaymentStatus(docType);
     const headerStatus = pendingApproval ? "DRAFT" : issuedStatus;
 
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { success: false, error: owner.error };
+    }
+
     const { data: document, error: docError } = await supabase
       .from("documents")
       .insert({
@@ -372,6 +378,7 @@ export async function adjustInventory(
         approval_status: documentApproval.approval_status,
         approved_by: documentApproval.approved_by,
         approved_at: documentApproval.approved_at,
+        created_by: owner.userId,
         updated_at: nowIso,
       })
       .select("id, doc_no")

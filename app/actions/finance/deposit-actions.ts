@@ -12,6 +12,7 @@
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
+import { requireSessionUserId } from "@/lib/auth/current-user";
 import {
   resolveInitialPaymentStatus,
   resolveIssuedDocumentStatus,
@@ -452,6 +453,11 @@ export async function createDepositDocument(
       remark ? `remark=${remark}` : null,
     ].filter(Boolean);
 
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { success: false, error: owner.error };
+    }
+
     // 1) Primary ledger — documents
     const { data: document, error: documentError } = await supabase
       .from("documents")
@@ -484,6 +490,7 @@ export async function createDepositDocument(
             ? slipFile.name.slice(0, 255)
             : null,
         notes: notesParts.join(" | "),
+        created_by: owner.userId,
         updated_at: nowIso,
       })
       .select("id, doc_no")
@@ -783,6 +790,11 @@ export async function manageDepositBalance(
       slipUrl ? "slip=attached" : null,
     ].filter(Boolean);
 
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { success: false, error: owner.error };
+    }
+
     // 1) Primary ledger — official documents row (VAT inherited from deposit)
     const { data: stubDoc, error: stubError } = await supabase
       .from("documents")
@@ -815,6 +827,7 @@ export async function manageDepositBalance(
         approval_status: documentApproval.approval_status,
         approved_by: documentApproval.approved_by,
         approved_at: documentApproval.approved_at,
+        created_by: owner.userId,
         updated_at: nowIso,
       })
       .select("id, doc_no")

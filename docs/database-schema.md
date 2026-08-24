@@ -17,7 +17,7 @@
 ## 2. Core Entities (องค์กร, ผู้ใช้, ตั้งค่า)
 - `contacts` (คู่ค้า Multi-Role: `contact_roles` VARCHAR[] เท่านั้น — ไม่ใช้ `contact_type`)
 - `contact_persons` (ผู้ติดต่อภายใต้คู่ค้า)
-- `user_profiles` (โปรไฟล์พนักงาน/ผู้ใช้งาน)
+- `user_profiles` (โปรไฟล์พนักงาน/ผู้ใช้งาน — `data_access_scope` IN ('ALL','OWN'), `approval_limit`)
 - `app_roles` (สิทธิ์การใช้งาน Dynamic RBAC)
 - `system_settings` (ตั้งค่าระบบบริษัท Singleton)
 
@@ -36,7 +36,7 @@
 - **Soft Allocation (ATP):** `Available Stock = Physical Stock (Σ inventory_ledger) − Committed Stock (Σ SO ISSUED qty ที่ยังไม่ออกบิล)`
 - **Inventory Adjustments:** `STK_OB` (ยอดยกมา · Prefix **SOB-YYMM-XXXX**) และ `STK_ADJ` (ปรับปรุงสต็อก · Prefix **SAD-YYMM-XXXX**) บันทึกผ่าน `inventory_ledger` และสร้าง Audit Trail เสมอ
 - **Period Closing:** ฟังก์ชัน `is_period_closed(doc_date)` — หากงวดถูกปิด (`accounting_periods.is_closed = true`) ห้าม INSERT/UPDATE/DELETE เอกสารและค่าใช้จ่ายในเดือนนั้น
-- `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — `doc_type` รวม `TB` สรุปวางบิลช่าง; มี `approval_status`, `approved_by`, `approved_at`)
+- `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — `doc_type` รวม `TB` สรุปวางบิลช่าง; มี `approval_status`, `approved_by`, `approved_at`, `created_by`)
 - `document_items` (รายการสินค้าในเอกสาร — งานบริการเก็บ `technician_id`, `wage_cost`, `technician_bill_id` เพื่อรองรับ Line Item Assignment)
 - `document_allocations` (การจัดสรรเอกสาร เช่น ตัดมัดจำ)
 - `billing_note_items` (รายการใบวางบิล)
