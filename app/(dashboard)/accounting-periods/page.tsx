@@ -4,10 +4,13 @@ import { AccountingPeriodsPanel } from "./accounting-periods-panel";
 
 export const dynamic = "force-dynamic";
 
+/** Straight-line depreciation RPC can exceed default Server Action timeout. */
+export const maxDuration = 60;
+
 export const metadata: Metadata = {
   title: "Period Lock | ปิดงบรายเดือน",
   description:
-    "Period Closing Dashboard — ล็อกงวดบัญชีรายเดือนตามมาตรฐาน GAAP/TFRS (Admin only)",
+    "Period Closing Dashboard — ล็อกงวดบัญชีรายเดือนและคำนวณค่าเสื่อมราคาตามมาตรฐาน GAAP/TFRS (Admin only)",
 };
 
 export default async function AccountingPeriodsPage() {

@@ -17,6 +17,7 @@ import {
   formatAccountingPeriodLabel,
   THAI_MONTH_LABELS,
 } from "@/types/accounting-period";
+import { RunDepreciationButton } from "./run-depreciation-button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -306,7 +307,7 @@ export function AccountingPeriodsPanel({ periods }: AccountingPeriodsPanelProps)
         <CardHeader className="pb-3">
           <CardTitle className="text-base">รายการงวดบัญชี</CardTitle>
           <CardDescription>
-            {periods.length} งวด · เรียงจากล่าสุด · สวิตช์ ON = ปิดงบแล้ว
+            {periods.length} งวด · เรียงจากล่าสุด · สวิตช์ ON = ปิดงบแล้ว · คำนวณค่าเสื่อมได้เฉพาะงวดที่ยังเปิด
           </CardDescription>
         </CardHeader>
         <CardContent className="px-0 sm:px-6">
@@ -322,9 +323,10 @@ export function AccountingPeriodsPanel({ periods }: AccountingPeriodsPanelProps)
                     <TableHead className="w-[10%]">ปี</TableHead>
                     <TableHead className="w-[18%]">เดือน</TableHead>
                     <TableHead className="w-[12%]">สถานะ</TableHead>
-                    <TableHead className="w-[12%]">สวิตช์</TableHead>
-                    <TableHead className="w-[20%]">ผู้ปิดงบ</TableHead>
-                    <TableHead className="w-[28%]">วันที่ปิดงบ</TableHead>
+                    <TableHead className="w-[10%]">สวิตช์</TableHead>
+                    <TableHead className="w-[18%]">ค่าเสื่อม</TableHead>
+                    <TableHead className="w-[16%]">ผู้ปิดงบ</TableHead>
+                    <TableHead className="w-[22%]">วันที่ปิดงบ</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -349,6 +351,16 @@ export function AccountingPeriodsPanel({ periods }: AccountingPeriodsPanelProps)
                       </TableCell>
                       <TableCell>
                         <PeriodLockSwitch period={period} />
+                      </TableCell>
+                      <TableCell>
+                        <RunDepreciationButton
+                          periodId={period.id}
+                          periodLabel={formatAccountingPeriodLabel(
+                            period.period_year,
+                            period.period_month,
+                          )}
+                          disabled={period.is_closed}
+                        />
                       </TableCell>
                       <TableCell className="text-sm text-slate-700">
                         {period.is_closed ? closedByLabel(period) : "—"}
