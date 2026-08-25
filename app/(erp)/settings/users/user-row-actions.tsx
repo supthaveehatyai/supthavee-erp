@@ -2,9 +2,11 @@
 
 /**
  * Per-row actions for User Management table.
+ * Profile form opens via URL (`?profile_user_id=`) — Zero Client-Side Fetching.
  * Active → Deactivate · Inactive → Reactivate
  */
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { MoreHorizontal, Shield, UserCheck, UserX } from "lucide-react";
@@ -14,6 +16,7 @@ import {
   reactivateUser,
 } from "@/lib/actions/user.actions";
 import type { ManagedUser } from "@/types/user";
+import { USER_PROFILE_SEARCH_PARAM } from "@/types/user";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,7 +34,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { EditUserAbacDialog } from "./edit-user-abac-dialog";
 
 export type UserRowActionsProps = {
   user: ManagedUser;
@@ -39,10 +41,13 @@ export type UserRowActionsProps = {
 
 type ConfirmMode = "deactivate" | "reactivate" | null;
 
+function profileHref(userId: string): string {
+  return `/settings/users?${USER_PROFILE_SEARCH_PARAM}=${encodeURIComponent(userId)}`;
+}
+
 export function UserRowActions({ user }: UserRowActionsProps) {
   const router = useRouter();
   const [confirmMode, setConfirmMode] = useState<ConfirmMode>(null);
-  const [abacOpen, setAbacOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   function handleConfirm() {
@@ -73,50 +78,63 @@ export function UserRowActions({ user }: UserRowActionsProps) {
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-8 shrink-0 text-slate-500"
-            aria-label={`จัดการ ${user.full_name}`}
-            disabled={isPending}
-          >
-            <MoreHorizontal className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-[11rem] max-w-[16rem]">
-          <DropdownMenuItem
-            onSelect={() => setAbacOpen(true)}
-            disabled={isPending}
-            className="break-words whitespace-normal"
-          >
-            <Shield className="size-4 shrink-0" />
-            <span className="break-words">แก้ไขสิทธิ์ข้อมูล (ABAC)</span>
-          </DropdownMenuItem>
-          {user.is_active ? (
+      <div className="flex items-center justify-end gap-1">
+        <Link
+          href={profileHref(user.id)}
+          className="inline-flex size-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-blue-700"
+          aria-label={`แก้ไขโปรไฟล์ ${user.full_name}`}
+          title="แก้ไข User Profile (ABAC)"
+        >
+          <Shield className="size-4" />
+        </Link>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8 shrink-0 text-slate-500"
+              aria-label={`จัดการ ${user.full_name}`}
+              disabled={isPending}
+            >
+              <MoreHorizontal className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[11rem] max-w-[16rem]">
             <DropdownMenuItem
-              destructive
-              onSelect={() => setConfirmMode("deactivate")}
+              onSelect={() => {
+                router.push(profileHref(user.id));
+              }}
               disabled={isPending}
               className="break-words whitespace-normal"
             >
-              <UserX className="size-4 shrink-0" />
-              <span className="break-words">ระงับการใช้งาน (Deactivate)</span>
+              <Shield className="size-4 shrink-0" />
+              <span className="break-words">แก้ไขโปรไฟล์ (ABAC)</span>
             </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem
-              onSelect={() => setConfirmMode("reactivate")}
-              disabled={isPending}
-              className="break-words whitespace-normal text-emerald-700 hover:bg-emerald-50"
-            >
-              <UserCheck className="size-4 shrink-0" />
-              <span className="break-words">เปิดใช้งานอีกครั้ง (Reactivate)</span>
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+            {user.is_active ? (
+              <DropdownMenuItem
+                destructive
+                onSelect={() => setConfirmMode("deactivate")}
+                disabled={isPending}
+                className="break-words whitespace-normal"
+              >
+                <UserX className="size-4 shrink-0" />
+                <span className="break-words">ระงับการใช้งาน (Deactivate)</span>
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem
+                onSelect={() => setConfirmMode("reactivate")}
+                disabled={isPending}
+                className="break-words whitespace-normal text-emerald-700 hover:bg-emerald-50"
+              >
+                <UserCheck className="size-4 shrink-0" />
+                <span className="break-words">เปิดใช้งานอีกครั้ง (Reactivate)</span>
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       <AlertDialog
         open={confirmMode !== null}
@@ -177,12 +195,6 @@ export function UserRowActions({ user }: UserRowActionsProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      <EditUserAbacDialog
-        user={user}
-        open={abacOpen}
-        onOpenChange={setAbacOpen}
-      />
     </>
   );
 }

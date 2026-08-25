@@ -74,5 +74,8 @@ export type UserAbacInput = {
   approval_limit: number;
 };
 
+/** URL-driven User Profile Form on `/settings/users` (`?profile_user_id=`). */
+export const USER_PROFILE_SEARCH_PARAM = "profile_user_id";
+
 /** @deprecated ใช้ CreateUserWithPinResult */
 export type InviteUserResult = CreateUserWithPinResult;

@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Users } from "lucide-react";
 import { getAppRoles, getUsers } from "@/lib/actions/user.actions";
 import type { ManagedUser } from "@/types/user";
-import { DATA_ACCESS_SCOPE_LABELS } from "@/types/user";
+import {
+  DATA_ACCESS_SCOPE_LABELS,
+  USER_PROFILE_SEARCH_PARAM,
+} from "@/types/user";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -20,9 +24,25 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CreateUserDialog } from "./create-user-dialog";
+import { UserProfileFormSheet } from "./user-profile-form-sheet";
 import { UserRowActions } from "./user-row-actions";
 
 export const dynamic = "force-dynamic";
+
+interface PageProps {
+  searchParams: Promise<{
+    [key: string]: string | string[] | undefined;
+  }>;
+}
+
+function readSearchParam(
+  params: Record<string, string | string[] | undefined>,
+  key: string,
+): string | undefined {
+  const value = params[key];
+  if (Array.isArray(value)) return value[0]?.trim() || undefined;
+  return value?.trim() || undefined;
+}
 
 export const metadata: Metadata = {
   title: "จัดการผู้ใช้งาน | User Management",
@@ -77,7 +97,12 @@ function UsersTable({ users }: { users: ManagedUser[] }) {
               className={user.is_active ? undefined : "bg-slate-50/80"}
             >
               <TableCell className="break-words font-medium text-slate-900">
-                {user.full_name}
+                <Link
+                  href={`/settings/users?${USER_PROFILE_SEARCH_PARAM}=${encodeURIComponent(user.id)}`}
+                  className="text-slate-900 hover:text-blue-700 hover:underline"
+                >
+                  {user.full_name}
+                </Link>
               </TableCell>
               <TableCell className="break-all text-slate-700">
                 {user.email}
@@ -117,11 +142,22 @@ function UsersTable({ users }: { users: ManagedUser[] }) {
   );
 }
 
-export default async function UsersSettingsPage() {
+export default async function UsersSettingsPage({ searchParams }: PageProps) {
+  const params = await searchParams;
+  const profileUserId = readSearchParam(params, USER_PROFILE_SEARCH_PARAM) ?? "";
+
   const [usersResult, rolesResult] = await Promise.all([
     getUsers(),
     getAppRoles(),
   ]);
+
+  const profileUser = profileUserId
+    ? (usersResult.data.find((row) => row.id === profileUserId) ?? null)
+    : null;
+  const profileError =
+    profileUserId && !profileUser
+      ? "ไม่พบผู้ใช้ที่ต้องการแก้ไขโปรไฟล์"
+      : null;
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -162,6 +198,12 @@ export default async function UsersSettingsPage() {
           <UsersTable users={usersResult.data} />
         </CardContent>
       </Card>
+
+      <UserProfileFormSheet
+        user={profileUser}
+        error={profileError}
+        closeHref="/settings/users"
+      />
     </div>
   );
 }

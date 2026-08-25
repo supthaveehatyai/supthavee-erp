@@ -658,7 +658,7 @@ export async function processPaymentKnockoff(
     }
 
     const receiptGrandTotal = roundMoney(sumAllocated + headerWht);
-    const cashAmount = roundMoney(sumAllocated - depositTotal);
+    const netCashAmount = roundMoney(sumAllocated - depositTotal);
     const nowIso = new Date().toISOString();
     const paymentDateIso = `${paymentDate}T00:00:00.000Z`;
 
@@ -678,19 +678,19 @@ export async function processPaymentKnockoff(
         status: "ISSUED",
         doc_date: paymentDate,
         contact_id: contactId,
-        sub_total: cashAmount,
+        sub_total: netCashAmount,
         discount_amount: 0,
         tax_rate: 0,
         tax_amount: 0,
         wht_rate: 0,
         wht_amount: headerWht,
         grand_total: receiptGrandTotal,
-        total_amount: cashAmount,
-        net_before_vat: cashAmount,
+        total_amount: netCashAmount,
+        net_before_vat: netCashAmount,
         vat_amount: 0,
         vat_rate: 0,
         vat_type: "NONE",
-        paid_amount: cashAmount,
+        paid_amount: netCashAmount,
         payment_status: "PAID",
         attachment_url: slipUrl,
         attached_file_url: slipUrl,
@@ -698,7 +698,7 @@ export async function processPaymentKnockoff(
           slipFile instanceof File && slipFile.size > 0
             ? slipFile.name.slice(0, 255)
             : null,
-        notes: `AR Knock-off | invoices=${sumAllocated} | cash=${cashAmount} | deposit=${depositTotal} | wht=${headerWht}${referenceNo ? ` | ref=${referenceNo}` : ""}`,
+        notes: `AR Knock-off | invoices=${sumAllocated} | cash=${netCashAmount} | deposit=${depositTotal} | wht=${headerWht}${referenceNo ? ` | ref=${referenceNo}` : ""}`,
         created_by: owner.userId,
         updated_at: nowIso,
       })
@@ -727,7 +727,7 @@ export async function processPaymentKnockoff(
         document_id: receiptDocId,
         payment_method: isCash ? "CASH" : "BANK_TRANSFER",
         bank_account_id: bankAccountId,
-        amount: cashAmount,
+        amount: netCashAmount,
         reference_no: referenceNo,
         payment_date: paymentDateIso,
         attachment_url: slipUrl,
