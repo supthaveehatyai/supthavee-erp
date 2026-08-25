@@ -7,8 +7,10 @@
 
 import "server-only";
 
+import { parseAccessibleModules } from "@/lib/auth/module-access";
 import { createClient as createAdminClient } from "@/lib/supabase/server-admin";
 import { createSupabaseSSRClient } from "@/lib/supabase/ssr-server";
+import type { AccessibleModules } from "@/types/rbac";
 
 export type CurrentAuthUser = {
   userId: string;
@@ -16,7 +18,20 @@ export type CurrentAuthUser = {
   /** Prefer user_profiles.full_name, then metadata, then email */
   displayName: string | null;
   roleCode: string | null;
+  /** From `app_roles.accessible_modules` for the user's role_code */
+  accessibleModules: AccessibleModules;
 };
+
+type RoleModulesJoin =
+  | { accessible_modules: unknown }
+  | { accessible_modules: unknown }[]
+  | null;
+
+function unwrapRoleModules(join: RoleModulesJoin): unknown {
+  if (!join) return null;
+  if (Array.isArray(join)) return join[0]?.accessible_modules ?? null;
+  return join.accessible_modules ?? null;
+}
 
 function pickMetaDisplayName(
   meta: Record<string, unknown> | undefined,
@@ -31,7 +46,8 @@ function pickMetaDisplayName(
 
 /**
  * Returns the authenticated user from `supabase.auth.getUser()`, enriched with
- * `user_profiles` when available. Returns null when there is no valid session.
+ * `user_profiles` + `app_roles.accessible_modules` when available.
+ * Returns null when there is no valid session.
  */
 export async function getCurrentAuthUser(): Promise<CurrentAuthUser | null> {
   try {
@@ -46,12 +62,22 @@ export async function getCurrentAuthUser(): Promise<CurrentAuthUser | null> {
     let profileFullName: string | null = null;
     let profileEmail: string | null = null;
     let roleCode: string | null = null;
+    let accessibleModules = parseAccessibleModules(null, null);
 
     try {
       const admin = createAdminClient();
       const { data: profile } = await admin
         .from("user_profiles")
-        .select("full_name, email, role_code")
+        .select(
+          `
+          full_name,
+          email,
+          role_code,
+          app_roles (
+            accessible_modules
+          )
+        `,
+        )
         .eq("id", user.id)
         .maybeSingle();
 
@@ -60,6 +86,10 @@ export async function getCurrentAuthUser(): Promise<CurrentAuthUser | null> {
         profileFullName = name || null;
         profileEmail = String(profile.email ?? "").trim() || null;
         roleCode = String(profile.role_code ?? "").trim() || null;
+        accessibleModules = parseAccessibleModules(
+          unwrapRoleModules(profile.app_roles as RoleModulesJoin),
+          roleCode,
+        );
       }
     } catch {
       // Profile lookup is best-effort — Auth session still valid.
@@ -78,6 +108,7 @@ export async function getCurrentAuthUser(): Promise<CurrentAuthUser | null> {
       email: user.email ?? profileEmail,
       displayName,
       roleCode,
+      accessibleModules,
     };
   } catch {
     return null;

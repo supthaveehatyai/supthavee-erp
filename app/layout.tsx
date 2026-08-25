@@ -1,7 +1,14 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Geist, Geist_Mono, Sarabun } from "next/font/google";
 import { Toaster } from "sonner";
+import { ForbiddenScreen } from "@/components/auth/forbidden-screen";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import {
+  canAccessPath,
+  ERP_MODULE_LABELS,
+  resolveModuleForPath,
+} from "@/lib/auth/module-access";
 import AppShell from "./app-shell";
 import "./globals.css";
 
@@ -37,12 +44,36 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const currentUser = await getCurrentAuthUser();
+  const headerList = await headers();
+  const pathname = headerList.get("x-pathname") ?? "";
+  const allowed =
+    !currentUser ||
+    !pathname ||
+    canAccessPath(
+      pathname,
+      currentUser.accessibleModules,
+      currentUser.roleCode,
+    );
+  const deniedModule = allowed ? null : resolveModuleForPath(pathname);
 
   return (
     <html lang="th" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className={sarabun.variable}>
-        <AppShell userDisplayName={currentUser?.displayName ?? null}>
-          {children}
+        <AppShell
+          userDisplayName={currentUser?.displayName ?? null}
+          roleCode={currentUser?.roleCode ?? null}
+          accessibleModules={currentUser?.accessibleModules ?? null}
+        >
+          {allowed ? (
+            children
+          ) : (
+            <ForbiddenScreen
+              pathname={pathname}
+              moduleLabel={
+                deniedModule ? ERP_MODULE_LABELS[deniedModule] : null
+              }
+            />
+          )}
         </AppShell>
         <Toaster richColors position="top-right" closeButton />
       </body>

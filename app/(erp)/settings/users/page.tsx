@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Users } from "lucide-react";
+import { Shield, Users } from "lucide-react";
+import { getRolePermissions } from "@/lib/actions/role-permissions";
 import { getAppRoles, getUsers } from "@/lib/actions/user.actions";
 import type { ManagedUser } from "@/types/user";
 import {
@@ -24,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CreateUserDialog } from "./create-user-dialog";
+import { RolePermissionsPanel } from "./role-permissions-panel";
 import { UserProfileFormSheet } from "./user-profile-form-sheet";
 import { UserRowActions } from "./user-row-actions";
 
@@ -145,10 +147,12 @@ function UsersTable({ users }: { users: ManagedUser[] }) {
 export default async function UsersSettingsPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const profileUserId = readSearchParam(params, USER_PROFILE_SEARCH_PARAM) ?? "";
+  const tab = readSearchParam(params, "tab") === "roles" ? "roles" : "users";
 
-  const [usersResult, rolesResult] = await Promise.all([
+  const [usersResult, rolesResult, permissionsResult] = await Promise.all([
     getUsers(),
     getAppRoles(),
+    getRolePermissions(),
   ]);
 
   const profileUser = profileUserId
@@ -168,36 +172,89 @@ export default async function UsersSettingsPage({ searchParams }: PageProps) {
             จัดการผู้ใช้งาน
           </h1>
           <p className="text-slate-500">
-            สร้างผู้ใช้พร้อม PIN, กำหนด Data Access Scope / Approval Limit
-            (ABAC) และระงับสิทธิ์แบบ Soft Delete — เฉพาะ Admin
+            ผู้ใช้งาน (ABAC) และสิทธิ์ระดับบทบาท (Permission Matrix) — เฉพาะ
+            Admin
           </p>
         </div>
-        <CreateUserDialog roles={rolesResult.data} />
+        {tab === "users" ? (
+          <CreateUserDialog roles={rolesResult.data} />
+        ) : null}
       </div>
 
-      {!usersResult.success ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {usersResult.error}
-        </div>
-      ) : null}
+      <div className="flex flex-wrap gap-2">
+        <Link
+          href="/settings/users"
+          className={`inline-flex h-10 items-center rounded-xl px-4 text-sm font-semibold transition ${
+            tab === "users"
+              ? "bg-blue-600 text-white shadow-sm"
+              : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+          }`}
+        >
+          ผู้ใช้งาน
+        </Link>
+        <Link
+          href="/settings/users?tab=roles"
+          className={`inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold transition ${
+            tab === "roles"
+              ? "bg-blue-600 text-white shadow-sm"
+              : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+          }`}
+        >
+          <Shield className="size-4" />
+          จัดการสิทธิ์ระดับบทบาท (Role Permissions)
+        </Link>
+      </div>
 
-      {!rolesResult.success ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          โหลดรายการสิทธิ์ไม่สำเร็จ: {rolesResult.error}
-        </div>
-      ) : null}
+      {tab === "users" ? (
+        <>
+          {!usersResult.success ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {usersResult.error}
+            </div>
+          ) : null}
 
-      <Card className="border-slate-200 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">รายชื่อผู้ใช้งาน</CardTitle>
-          <CardDescription>
-            {usersResult.data.length} คน · Inactive = ระงับสิทธิ์ (ไม่ลบประวัติ)
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="px-0 sm:px-6">
-          <UsersTable users={usersResult.data} />
-        </CardContent>
-      </Card>
+          {!rolesResult.success ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              โหลดรายการสิทธิ์ไม่สำเร็จ: {rolesResult.error}
+            </div>
+          ) : null}
+
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">รายชื่อผู้ใช้งาน</CardTitle>
+              <CardDescription>
+                {usersResult.data.length} คน · Inactive = ระงับสิทธิ์
+                (ไม่ลบประวัติ)
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="px-0 sm:px-6">
+              <UsersTable users={usersResult.data} />
+            </CardContent>
+          </Card>
+        </>
+      ) : (
+        <>
+          {!permissionsResult.success ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {permissionsResult.error}
+            </div>
+          ) : null}
+
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">
+                จัดการสิทธิ์ระดับบทบาท (Role Permissions)
+              </CardTitle>
+              <CardDescription>
+                เปิด/ปิดการเข้าถึง 5 โมดูลหลัก ต่อบทบาทในตาราง app_roles
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <RolePermissionsPanel roles={permissionsResult.data} />
+            </CardContent>
+          </Card>
+        </>
+      )}
 
       <UserProfileFormSheet
         user={profileUser}

@@ -16,7 +16,7 @@
 - `contacts` (คู่ค้า Multi-Role: `contact_roles` VARCHAR[] เท่านั้น)
 - `contact_persons` (ผู้ติดต่อภายใต้คู่ค้า)
 - `user_profiles` (โปรไฟล์พนักงาน/ผู้ใช้งาน — `data_access_scope`, `approval_limit`)
-- `app_roles` (สิทธิ์การใช้งาน Dynamic RBAC)
+- `app_roles` (สิทธิ์การใช้งาน Dynamic RBAC — `accessible_modules` JSONB)
 - `system_settings` (ตั้งค่าระบบบริษัท Singleton)
 
 ## 3. Products, Inventory & Production (สินค้า, คลัง, ผลิต)

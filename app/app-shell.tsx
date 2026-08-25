@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { SignOutButton } from "@/components/auth/sign-out-button";
+import { canAccessPath } from "@/lib/auth/module-access";
+import type { AccessibleModules } from "@/types/rbac";
 
 type IconName =
   | "dashboard"
@@ -164,8 +166,29 @@ function Icon({
   );
 }
 
-function SidebarContent({ closeMenu }: { closeMenu: () => void }) {
+function SidebarContent({
+  closeMenu,
+  roleCode,
+  accessibleModules,
+}: {
+  closeMenu: () => void;
+  roleCode: string | null;
+  accessibleModules: AccessibleModules | null;
+}) {
   const pathname = usePathname();
+  const visibleGroups = navigationGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) =>
+        canAccessPath(item.href, accessibleModules, roleCode),
+      ),
+    }))
+    .filter((group) => group.items.length > 0);
+  const canOpenSettings = canAccessPath(
+    "/settings",
+    accessibleModules,
+    roleCode,
+  );
 
   return (
     <>
@@ -200,7 +223,7 @@ function SidebarContent({ closeMenu }: { closeMenu: () => void }) {
           เมนูหลัก
         </p>
         <div className="space-y-5">
-          {navigationGroups.map((group) => (
+          {visibleGroups.map((group) => (
             <section key={group.label}>
               <div className="flex items-center gap-3 px-3 py-1.5 text-blue-100">
                 <Icon name={group.icon} className="size-[18px]" />
@@ -242,32 +265,36 @@ function SidebarContent({ closeMenu }: { closeMenu: () => void }) {
           <Icon name="history" className="size-[18px]" />
           ประวัติการทำงาน
         </Link>
-        <Link
-          href="/settings/users"
-          onNavigate={closeMenu}
-          className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition ${
-            pathname === "/settings/users" ||
-            pathname.startsWith("/settings/users/")
-              ? "bg-white/15 font-medium text-white"
-              : "text-blue-200 hover:bg-white/10 hover:text-white"
-          }`}
-        >
-          <Icon name="database" className="size-[18px]" />
-          จัดการผู้ใช้งาน
-        </Link>
-        <Link
-          href="/settings/company"
-          onNavigate={closeMenu}
-          className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition ${
-            pathname === "/settings/company" ||
-            pathname.startsWith("/settings/company/")
-              ? "bg-white/15 font-medium text-white"
-              : "text-blue-200 hover:bg-white/10 hover:text-white"
-          }`}
-        >
-          <Icon name="settings" className="size-[18px]" />
-          ตั้งค่าข้อมูลบริษัท
-        </Link>
+        {canOpenSettings ? (
+          <>
+            <Link
+              href="/settings/users"
+              onNavigate={closeMenu}
+              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition ${
+                pathname === "/settings/users" ||
+                pathname.startsWith("/settings/users/")
+                  ? "bg-white/15 font-medium text-white"
+                  : "text-blue-200 hover:bg-white/10 hover:text-white"
+              }`}
+            >
+              <Icon name="database" className="size-[18px]" />
+              จัดการผู้ใช้งาน
+            </Link>
+            <Link
+              href="/settings/company"
+              onNavigate={closeMenu}
+              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition ${
+                pathname === "/settings/company" ||
+                pathname.startsWith("/settings/company/")
+                  ? "bg-white/15 font-medium text-white"
+                  : "text-blue-200 hover:bg-white/10 hover:text-white"
+              }`}
+            >
+              <Icon name="settings" className="size-[18px]" />
+              ตั้งค่าข้อมูลบริษัท
+            </Link>
+          </>
+        ) : null}
       </div>
     </>
   );
@@ -276,10 +303,14 @@ function SidebarContent({ closeMenu }: { closeMenu: () => void }) {
 export default function AppShell({
   children,
   userDisplayName,
+  roleCode = null,
+  accessibleModules = null,
 }: {
   children: React.ReactNode;
   /** จาก `user_profiles.full_name` ผ่าน Root Layout — ไม่ใช้ brand เป็น fallback */
   userDisplayName?: string | null;
+  roleCode?: string | null;
+  accessibleModules?: AccessibleModules | null;
 }) {
   const pathname = usePathname();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -297,7 +328,11 @@ export default function AppShell({
   return (
     <div className="min-h-dvh bg-slate-50">
       <aside className="app-shell-sidebar fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-blue-700 print:hidden lg:flex">
-        <SidebarContent closeMenu={() => setIsMenuOpen(false)} />
+        <SidebarContent
+          closeMenu={() => setIsMenuOpen(false)}
+          roleCode={roleCode}
+          accessibleModules={accessibleModules}
+        />
       </aside>
 
       {isMenuOpen && (
@@ -314,7 +349,11 @@ export default function AppShell({
           isMenuOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <SidebarContent closeMenu={() => setIsMenuOpen(false)} />
+        <SidebarContent
+          closeMenu={() => setIsMenuOpen(false)}
+          roleCode={roleCode}
+          accessibleModules={accessibleModules}
+        />
       </aside>
 
       <div className="app-shell-content lg:pl-64 print:pl-0">
