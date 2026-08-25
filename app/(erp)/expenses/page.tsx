@@ -68,6 +68,9 @@ function StatusBadge({ status }: { status: string }) {
   if (normalized === "PAID") {
     return <Badge variant="emerald">ชำระครบแล้ว (PAID)</Badge>;
   }
+  if (normalized === "PENDING") {
+    return <Badge variant="amber">รออนุมัติ (PENDING)</Badge>;
+  }
   if (normalized === "VOID") {
     return (
       <Badge variant="amber" className="bg-red-100 text-red-700">

@@ -23,9 +23,8 @@ import {
   isTemporaryDraftDocNo,
 } from "@/lib/utils/draft-document-no";
 import {
-  EXPENSE_APPROVAL_THRESHOLD,
-  PENDING_APPROVAL_TOAST_MESSAGE,
-  requiresExpenseApproval,
+  EXPENSE_OVER_LIMIT_PENDING_MESSAGE,
+  exceedsApprovalLimit,
 } from "@/lib/approval/approval-rules";
 import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
 import type {
@@ -1612,10 +1611,44 @@ export async function getExpenseById(
 }
 
 /**
- * Maker — ส่ง Expense เข้าคิวอนุมัติ (grand_total > threshold).
- * คง status = DRAFT · ตั้ง approval_status = PENDING เท่านั้น (ไม่ ISSUED / ไม่รันเลข)
+ * Maker — ส่ง Expense เข้าคิวอนุมัติด้วยมือ (คงไว้เพื่อความเข้ากันได้).
+ * Prefer {@link issueExpense} ซึ่งตัดสิน ABAC วงเงินอัตโนมัติ
  */
 export async function sendExpenseForApproval(
+  id: string,
+): Promise<MutateExpenseResult> {
+  return routeExpenseToApprovalCenter(id);
+}
+
+async function loadApproverLimit(
+  supabaseAdmin: SupabaseClient,
+  actorId: string,
+): Promise<{ ok: true; approvalLimit: number } | { ok: false; error: string }> {
+  const { data: profile, error } = await supabaseAdmin
+    .from("user_profiles")
+    .select("id, approval_limit")
+    .eq("id", actorId)
+    .maybeSingle();
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  if (!profile) {
+    return { ok: false, error: "ไม่พบโปรไฟล์ผู้ใช้งานที่กำลังยืนยันเอกสาร" };
+  }
+
+  const limit = Number(profile.approval_limit ?? 0);
+  return {
+    ok: true,
+    approvalLimit: Number.isFinite(limit) && limit >= 0 ? limit : 0,
+  };
+}
+
+/**
+ * ส่งบิลเข้า Approval Center — status = PENDING · approval_status = PENDING
+ * (ไม่รันเลข Late Numbering / ไม่ตัดเงิน)
+ */
+async function routeExpenseToApprovalCenter(
   id: string,
 ): Promise<MutateExpenseResult> {
   try {
@@ -1639,24 +1672,22 @@ export async function sendExpenseForApproval(
     if (!before) {
       return { data: null, error: "ไม่พบเอกสารค่าใช้จ่าย" };
     }
-    if (String(before.status) !== "DRAFT") {
+
+    const status = String(before.status ?? "").toUpperCase();
+    if (status !== "DRAFT" && status !== "PENDING") {
       return {
         data: null,
         error: `ส่งขออนุมัติได้เฉพาะสถานะ DRAFT (ปัจจุบัน: ${before.status})`,
       };
     }
-    if (!requiresExpenseApproval(before.grand_total)) {
-      return {
-        data: null,
-        error: `ยอดไม่เกิน ${EXPENSE_APPROVAL_THRESHOLD.toLocaleString("th-TH")} บาท — ใช้ออกเอกสาร (Issue) ได้โดยตรง`,
-      };
-    }
 
     const currentApproval = String(before.approval_status ?? "APPROVED");
-    if (currentApproval === "PENDING") {
+    if (currentApproval === "PENDING" && status === "PENDING") {
       return {
         data: null,
         error: "เอกสารนี้อยู่ในคิวรออนุมัติแล้ว",
+        pending_approval: true,
+        successMessage: EXPENSE_OVER_LIMIT_PENDING_MESSAGE,
       };
     }
 
@@ -1664,13 +1695,14 @@ export async function sendExpenseForApproval(
     const { data: updated, error: updateError } = await supabaseAdmin
       .from("expenses")
       .update({
+        status: "PENDING",
         approval_status: "PENDING",
         approved_by: null,
         approved_at: null,
         updated_at: nowIso,
       })
       .eq("id", expenseId)
-      .eq("status", "DRAFT")
+      .in("status", ["DRAFT", "PENDING"])
       .select(EXPENSE_ROW_SELECT)
       .maybeSingle();
 
@@ -1680,7 +1712,7 @@ export async function sendExpenseForApproval(
     if (!updated) {
       return {
         data: null,
-        error: "ส่งขออนุมัติไม่สำเร็จ (อาจถูกแก้ไขไปแล้ว)",
+        error: "ส่งขออนุมัติไม่สำเร็จ (สถานะอาจถูกแก้ไขไปแล้ว)",
       };
     }
 
@@ -1691,9 +1723,9 @@ export async function sendExpenseForApproval(
       oldData: before as Record<string, unknown>,
       newData: {
         ...mapped,
-        status: "DRAFT",
+        status: "PENDING",
         approval_status: "PENDING",
-        audit_event_detail: "SEND_FOR_APPROVAL",
+        audit_event_detail: "ABAC_OVER_LIMIT_PENDING",
       },
     });
 
@@ -1704,26 +1736,33 @@ export async function sendExpenseForApproval(
       data: mapped,
       error: null,
       pending_approval: true,
-      successMessage: PENDING_APPROVAL_TOAST_MESSAGE,
+      successMessage: EXPENSE_OVER_LIMIT_PENDING_MESSAGE,
     };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "ส่งขออนุมัติไม่สำเร็จ";
-    console.error("[sendExpenseForApproval]", message);
+    console.error("[routeExpenseToApprovalCenter]", message);
     return { data: null, error: message };
   }
 }
 
 /**
- * Confirm DRAFT → ISSUED and assign EXP-YYMM-XXXX via generate_expense_no.
- * YYMM bucket uses CURRENT_DATE at ISSUE time (not expense_date) — see RPC.
- * Guardrail: grand_total > threshold ต้องใช้ sendExpenseForApproval แทน
+ * Confirm DRAFT → ISSUED (หรือ PAID ผ่าน AP Auto-Clearing) หรือ PENDING ตาม ABAC.
+ *
+ * ก่อนเปลี่ยนสถานะ: ดึง `user_profiles.approval_limit` ของ auth.uid() ผ่าน supabaseAdmin
+ * - grand_total > approval_limit หรือ approval_limit == 0 → status/approval_status = PENDING
+ * - grand_total <= approval_limit → ISSUED (+ settle cash purchase เมื่อเข้าเงื่อนไข)
  */
 export async function issueExpense(id: string): Promise<MutateExpenseResult> {
   try {
     const expenseId = id?.trim() ?? "";
     if (!expenseId) {
       return { data: null, error: "ไม่พบรหัสเอกสารค่าใช้จ่าย" };
+    }
+
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { data: null, error: owner.error };
     }
 
     const supabaseAdmin = createSupabaseAdminClient();
@@ -1741,32 +1780,48 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
     if (!before) {
       return { data: null, error: "ไม่พบเอกสารค่าใช้จ่าย" };
     }
-    if (String(before.status) !== "DRAFT") {
+
+    const status = String(before.status ?? "").toUpperCase();
+    if (status === "PENDING") {
+      return {
+        data: null,
+        error: "เอกสารรออนุมัติอยู่ — ยังออกเอกสารไม่ได้",
+        pending_approval: true,
+      };
+    }
+    if (status !== "DRAFT") {
       return {
         data: null,
         error: `ออกเอกสารได้เฉพาะสถานะ DRAFT (ปัจจุบัน: ${before.status})`,
       };
     }
 
-    if (requiresExpenseApproval(before.grand_total)) {
-      return {
-        data: null,
-        error:
-          "ยอดเกินเกณฑ์อนุมัติ — กรุณาใช้ปุ่ม ส่งขออนุมัติ แทนการออกเอกสารโดยตรง",
-      };
-    }
-
     const approvalStatus = String(before.approval_status ?? "APPROVED");
-    if (approvalStatus === "PENDING" || approvalStatus === "REJECTED") {
+    if (approvalStatus === "PENDING") {
       return {
         data: null,
-        error:
-          approvalStatus === "PENDING"
-            ? "เอกสารรออนุมัติอยู่ — ยังออกเอกสารไม่ได้"
-            : "เอกสารถูกปฏิเสธ — กรุณาส่งขออนุมัติใหม่ก่อนออกเอกสาร",
+        error: "เอกสารรออนุมัติอยู่ — ยังออกเอกสารไม่ได้",
+        pending_approval: true,
+      };
+    }
+    if (approvalStatus === "REJECTED") {
+      return {
+        data: null,
+        error: "เอกสารถูกปฏิเสธ — กรุณาแก้ไขแล้วกดยืนยันออกเอกสารอีกครั้ง",
       };
     }
 
+    const limitResult = await loadApproverLimit(supabaseAdmin, owner.userId);
+    if (!limitResult.ok) {
+      return { data: null, error: limitResult.error };
+    }
+
+    // Case 1 — เกินวงเงิน / ไม่มีวงเงิน → ส่ง Approval Center
+    if (exceedsApprovalLimit(before.grand_total, limitResult.approvalLimit)) {
+      return routeExpenseToApprovalCenter(expenseId);
+    }
+
+    // Case 2 — ในวงเงิน → ISSUED (+ AP Auto-Clearing เป็น PAID เมื่อเข้าเงื่อนไข)
     const nowIso = new Date().toISOString();
     let officialNo = String(before.document_no ?? "");
     const expenseDate = String(before.expense_date ?? "").slice(0, 10);
@@ -1798,8 +1853,8 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
         document_no: officialNo,
         status: "ISSUED",
         approval_status: "APPROVED",
-        approved_by: null,
-        approved_at: null,
+        approved_by: owner.userId,
+        approved_at: nowIso,
         updated_at: nowIso,
       })
       .eq("id", expenseId)
@@ -1818,7 +1873,7 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
     if (!updated) {
       return {
         data: null,
-        error: "อัปเดตสถานะเป็น ISSUED ไม่สำเร็จ (อาจถูกแก้ไขไปแล้ว)",
+        error: "อัปเดตสถานะเป็น ISSUED ไม่สำเร็จ (สถานะอาจถูกแก้ไขไปแล้ว)",
       };
     }
 
@@ -1860,6 +1915,7 @@ export async function issueExpense(id: string): Promise<MutateExpenseResult> {
         status: mapped.status,
         document_no: officialNo,
         approval_status: "APPROVED",
+        approval_limit_applied: limitResult.approvalLimit,
       },
     });
 

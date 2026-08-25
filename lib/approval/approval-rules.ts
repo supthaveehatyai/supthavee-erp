@@ -1,6 +1,8 @@
 /**
  * Phase 14 — Maker-Checker approval routing rules.
  * Shared by document / expense Server Actions (no "use server" here).
+ *
+ * Expense routing uses ABAC `user_profiles.approval_limit` (no hard-coded ฿5,000).
  */
 
 import type { Database } from "@/src/types/supabase";
@@ -17,11 +19,12 @@ export const APPROVAL_PENDING_DOCUMENT_TYPES = [
 export type ApprovalPendingDocumentType =
   (typeof APPROVAL_PENDING_DOCUMENT_TYPES)[number];
 
-/** Expenses above this grand_total (THB) enter Approval Center. */
-export const EXPENSE_APPROVAL_THRESHOLD = 5000;
-
 export const PENDING_APPROVAL_TOAST_MESSAGE =
   "เอกสารเข้าสู่สถานะรออนุมัติแล้ว";
+
+/** Toast when issueExpense routes over-limit bills into Approval Center. */
+export const EXPENSE_OVER_LIMIT_PENDING_MESSAGE =
+  "เอกสารเกินวงเงินอนุมัติ ถูกส่งเข้าศูนย์อนุมัติแล้ว";
 
 export const APPROVAL_LIMIT_EXCEEDED_MESSAGE =
   "Forbidden: วงเงินอนุมัติของคุณไม่เพียงพอสำหรับเอกสารฉบับนี้";
@@ -34,7 +37,7 @@ function toLimitMoney(value: number | string | null | undefined): number {
 
 /**
  * ABAC — ยอดเอกสารต้องไม่เกินวงเงินอนุมัติของผู้อนุมัติ (`user_profiles.approval_limit`).
- * 0 = ไม่มีวงเงินอนุมัติ (ห้ามอนุมัติยอดที่มากกว่า 0).
+ * 0 = ไม่มีวงเงินอนุมัติ (ยอด > 0 ต้องเข้า Approval Center / ห้ามอนุมัติเอง).
  */
 export function exceedsApprovalLimit(
   grandTotal: number | string | null | undefined,
@@ -53,19 +56,6 @@ export function resolveDocumentApprovalStatus(
   docType: string,
 ): ApprovalStatus {
   return requiresDocumentApproval(docType) ? "PENDING" : "APPROVED";
-}
-
-export function requiresExpenseApproval(
-  grandTotal: number | string | null | undefined,
-): boolean {
-  const total = Number(grandTotal ?? 0);
-  return Number.isFinite(total) && total > EXPENSE_APPROVAL_THRESHOLD;
-}
-
-export function resolveExpenseApprovalStatus(
-  grandTotal: number | string | null | undefined,
-): ApprovalStatus {
-  return requiresExpenseApproval(grandTotal) ? "PENDING" : "APPROVED";
 }
 
 export function isPendingApprovalStatus(status: ApprovalStatus): boolean {
@@ -101,15 +91,19 @@ export function approvalStatusFields(docType: string): {
   };
 }
 
+/**
+ * @deprecated Expense Maker-Checker ใช้ ABAC `approval_limit` ใน issueExpense แล้ว
+ * ไม่ hard-code เกณฑ์ยอดอีกต่อไป — คงค่าเริ่มต้น APPROVED ตอนสร้างร่าง
+ */
 export function expenseApprovalStatusFields(
-  grandTotal: number | string | null | undefined,
+  _grandTotal?: number | string | null,
 ): {
   approval_status: ApprovalStatus;
   approved_by: null;
   approved_at: null;
 } {
   return {
-    approval_status: resolveExpenseApprovalStatus(grandTotal),
+    approval_status: "APPROVED",
     approved_by: null,
     approved_at: null,
   };

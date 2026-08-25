@@ -2,7 +2,8 @@
 
 /**
  * Expense lifecycle actions — Client island.
- * DRAFT  → Edit / Issue (≤5k) / Send for Approval (>5k) / Delete Draft
+ * DRAFT → Edit / Issue (ABAC ตัดสินวงเงินฝั่ง Server) / Delete Draft
+ * PENDING → รอ Approval Center
  * ISSUED → Void only
  * Mutations via Server Actions only (Zero Client-Side Fetching).
  */
@@ -10,19 +11,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Loader2, Pencil, Send, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   deleteDraftExpense,
   issueExpense,
-  sendExpenseForApproval,
   voidExpense,
 } from "@/app/actions/expenses";
-import {
-  EXPENSE_APPROVAL_THRESHOLD,
-  PENDING_APPROVAL_TOAST_MESSAGE,
-  requiresExpenseApproval,
-} from "@/lib/approval/approval-rules";
+import { EXPENSE_OVER_LIMIT_PENDING_MESSAGE } from "@/lib/approval/approval-rules";
 import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import { buildFixedAssetCapitalizeHref } from "@/lib/utils/expense-capitalize";
 import { IssueDocumentButton } from "@/components/shared/document/issue-document-button";
@@ -97,10 +93,10 @@ export function ExpenseDetailActions({
   const router = useRouter();
   const normalized = status.trim().toUpperCase();
   const approval = approvalStatus.trim().toUpperCase();
-  const needsApproval = requiresExpenseApproval(grandTotal);
+  const isWaitingApproval =
+    normalized === "PENDING" || approval === "PENDING";
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [isDeleting, startDeleteTransition] = useTransition();
-  const [isSending, startSendTransition] = useTransition();
 
   const capitalizeButton = (
     <CapitalizeFixedAssetButton
@@ -137,33 +133,20 @@ export function ExpenseDetailActions({
     });
   }
 
-  function handleSendForApproval() {
-    if (isSending) return;
-
-    startSendTransition(async () => {
-      try {
-        const result = await sendExpenseForApproval(expenseId);
-        if (result.error || !result.data) {
-          toast.error(result.error ?? "ส่งขออนุมัติไม่สำเร็จ");
-          return;
-        }
-        toast.success(
-          result.successMessage ?? PENDING_APPROVAL_TOAST_MESSAGE,
-        );
-        router.refresh();
-      } catch (err) {
-        toast.error(
-          err instanceof Error ? err.message : "ส่งขออนุมัติไม่สำเร็จ",
-        );
-      }
-    });
+  if (normalized === "PENDING" || (normalized === "DRAFT" && approval === "PENDING")) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="amber" className="h-10 gap-1.5 px-3 text-xs">
+          รออนุมัติ (Approval Center)
+        </Badge>
+        <p className="w-full text-xs text-slate-500 sm:w-auto">
+          เอกสารเกินวงเงินอนุมัติของผู้ยืนยัน — รอ Checker อนุมัติที่ศูนย์อนุมัติ
+        </p>
+      </div>
+    );
   }
 
   if (normalized === "DRAFT") {
-    const showWaitingApproval = needsApproval && approval === "PENDING";
-    const showSendForApproval = needsApproval && approval !== "PENDING";
-    const showIssue = !needsApproval;
-
     return (
       <div className="flex flex-wrap items-center gap-2">
         <Link
@@ -174,82 +157,54 @@ export function ExpenseDetailActions({
           {DOCUMENT_ACTIONS.EDIT}
         </Link>
 
-        {showWaitingApproval ? (
-          <Badge variant="amber" className="h-10 gap-1.5 px-3 text-xs">
-            รออนุมัติ (Approval Center)
-          </Badge>
-        ) : null}
-
-        {showSendForApproval ? (
-          <Button
-            type="button"
-            className="h-10 gap-2 bg-amber-600 hover:bg-amber-700"
-            disabled={isSending}
-            onClick={handleSendForApproval}
-          >
-            {isSending ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Send className="size-4" />
-            )}
-            {isSending ? "กำลังส่ง..." : "ส่งขออนุมัติ"}
-          </Button>
-        ) : null}
-
-        {needsApproval && approval === "REJECTED" ? (
+        {approval === "REJECTED" ? (
           <Badge
             variant="amber"
             className="h-10 bg-red-100 px-3 text-xs text-red-800"
           >
-            ถูกปฏิเสธ — ส่งขออนุมัติใหม่
+            ถูกปฏิเสธ — แก้ไขแล้วกดยืนยันอีกครั้ง
           </Badge>
         ) : null}
 
-        {needsApproval ? (
-          <p className="w-full text-xs text-slate-500 sm:w-auto">
-            ยอดเกิน ฿{EXPENSE_APPROVAL_THRESHOLD.toLocaleString("th-TH")} —
-            ต้องผ่าน Approval Center ก่อนออกเอกสาร
-          </p>
-        ) : null}
-
-        {showIssue ? (
-          <IssueDocumentButton
-            documentId={expenseId}
-            docNo={documentNo}
-            issueAction={async (id) => {
-              const result = await issueExpense(id);
-              if (result.error || !result.data) {
-                return { data: null, error: result.error };
-              }
-              return {
-                data: {
-                  id: result.data.id,
-                  document_no: result.data.document_no,
-                  successMessage: result.successMessage,
-                },
-                error: null,
-              };
-            }}
-            confirmTitle="ยืนยันและออกเอกสาร"
-            confirmDescription={
-              <>
-                ระบบจะรันเลขที่ทางการแบบ Late Numbering (
-                <span className="font-mono">EXP-YYMM-XXXX</span>) และเปลี่ยนสถานะเป็น
-                ISSUED การกระทำนี้ไม่สามารถย้อนกลับได้
-              </>
+        <IssueDocumentButton
+          documentId={expenseId}
+          docNo={documentNo}
+          issueAction={async (id) => {
+            const result = await issueExpense(id);
+            if (result.error || !result.data) {
+              return { data: null, error: result.error };
             }
-            confirmLabel="ยืนยันออกเอกสาร"
-            onIssued={() => {
-              router.refresh();
-            }}
-          />
-        ) : null}
+            return {
+              data: {
+                id: result.data.id,
+                document_no: result.data.document_no,
+                successMessage:
+                  result.successMessage ??
+                  (result.pending_approval
+                    ? EXPENSE_OVER_LIMIT_PENDING_MESSAGE
+                    : undefined),
+              },
+              error: null,
+            };
+          }}
+          confirmTitle="ยืนยันและออกเอกสาร"
+          confirmDescription={
+            <>
+              ระบบจะตรวจวงเงินอนุมัติ (ABAC) ของคุณ — หากอยู่ในวงเงินจะรันเลขที่
+              ทางการและเปลี่ยนเป็น ISSUED/PAID หากเกินวงเงินจะส่งเข้าศูนย์อนุมัติ
+            </>
+          }
+          confirmLabel="ยืนยันออกเอกสาร"
+          onIssued={() => {
+            router.refresh();
+          }}
+        />
 
         <Button
           type="button"
           variant="destructive"
           className="h-10 gap-2"
-          disabled={isDeleting || approval === "PENDING"}
+          disabled={isDeleting || isWaitingApproval}
           onClick={() => setDeleteOpen(true)}
         >
           {isDeleting ? (

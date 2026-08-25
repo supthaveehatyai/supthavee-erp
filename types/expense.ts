@@ -36,7 +36,7 @@ export type ExpenseRecord = {
   receipt_url: string | null;
   /** Optional bank transfer slip URL (expense_documents / SLIP-*). */
   payment_slip_url: string | null;
-  status: "DRAFT" | "ISSUED" | "VOID" | string;
+  status: "DRAFT" | "PENDING" | "ISSUED" | "VOID" | "PAID" | string;
   /** Maker-Checker — PENDING | APPROVED | REJECTED */
   approval_status: "PENDING" | "APPROVED" | "REJECTED" | string;
   remark: string | null;
