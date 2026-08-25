@@ -7,7 +7,9 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { requireAdmin } from "@/lib/auth/require-admin";
+import { logAuditTrail } from "@/lib/supabase/auditService";
 import type { Database } from "@/src/types/supabase";
 import type {
   AppRoleOption,
@@ -19,6 +21,8 @@ import type {
   ManagedUser,
   ReactivateUserResult,
   UpdateUserAbacResult,
+  UpdateUserProfileInput,
+  UpdateUserProfileResult,
   UserAbacInput,
 } from "@/types/user";
 import { DATA_ACCESS_SCOPES } from "@/types/user";
@@ -127,6 +131,61 @@ function mapManagedUser(row: ProfileJoinRow): ManagedUser {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+const UNAUTHORIZED = "Unauthorized";
+
+type ProfileAuditSnapshot = {
+  id: string;
+  email: string;
+  full_name: string;
+  role_code: string;
+  is_active: boolean | null;
+  data_access_scope: string | null;
+  approval_limit: number | string | null;
+};
+
+function toProfileAuditPayload(row: ProfileAuditSnapshot) {
+  return {
+    id: row.id,
+    email: row.email,
+    full_name: row.full_name,
+    role_code: row.role_code,
+    is_active: row.is_active !== false,
+    data_access_scope: parseDataAccessScope(row.data_access_scope),
+    approval_limit: parseApprovalLimit(row.approval_limit),
+  };
+}
+
+/**
+ * ITGC / SoD — actor must be an active admin on user_profiles.
+ * Fail closed with exact error `Unauthorized` (no allowlist fallback).
+ */
+async function assertAdminActor(
+  supabaseAdmin: AdminClient,
+): Promise<{ ok: true; actorId: string } | { ok: false; error: string }> {
+  const actor = await getCurrentAuthUser();
+  if (!actor?.userId) {
+    return { ok: false, error: UNAUTHORIZED };
+  }
+
+  const { data: profile, error } = await supabaseAdmin
+    .from("user_profiles")
+    .select("id, role_code, is_active")
+    .eq("id", actor.userId)
+    .maybeSingle();
+
+  if (error || !profile) {
+    return { ok: false, error: UNAUTHORIZED };
+  }
+  if (profile.is_active === false) {
+    return { ok: false, error: UNAUTHORIZED };
+  }
+  if (String(profile.role_code ?? "").trim().toLowerCase() !== "admin") {
+    return { ok: false, error: UNAUTHORIZED };
+  }
+
+  return { ok: true, actorId: actor.userId };
 }
 
 /**
@@ -546,14 +605,19 @@ export async function reactivateUser(
 }
 
 /**
- * อัปเดต ABAC บน user_profiles: data_access_scope + approval_limit
+ * Update User Profile (ITGC / SoD):
+ * - Auth Guard: session user.id ต้องมี role_code = admin มิฉะนั้นคืน `Unauthorized`
+ * - Update user_profiles ผ่าน supabaseAdmin (Service Role / Bypass RLS)
+ * - Insert audit_logs (old_data / new_data) ผ่าน supabaseAdmin เสมอ
  */
-export async function updateUserAbacSettings(
+export async function updateUserProfile(
   userId: string,
-  abac: UserAbacInput,
-): Promise<UpdateUserAbacResult> {
+  input: UpdateUserProfileInput,
+): Promise<UpdateUserProfileResult> {
   try {
-    const gate = await requireAdmin();
+    const supabaseAdmin = createSupabaseAdminClient();
+
+    const gate = await assertAdminActor(supabaseAdmin);
     if (!gate.ok) {
       return { success: false, error: gate.error };
     }
@@ -563,15 +627,19 @@ export async function updateUserAbacSettings(
       return { success: false, error: "ไม่พบรหัสผู้ใช้ (userId)" };
     }
 
-    const abacFields = normalizeAbacInput(abac);
+    const abacFields = normalizeAbacInput({
+      data_access_scope: input.data_access_scope,
+      approval_limit: input.approval_limit,
+    });
     if (abacFields.error) {
       return { success: false, error: abacFields.error };
     }
 
-    const supabaseAdmin = createSupabaseAdminClient();
     const { data: existing, error: lookupError } = await supabaseAdmin
       .from("user_profiles")
-      .select("id")
+      .select(
+        "id, email, full_name, role_code, is_active, data_access_scope, approval_limit",
+      )
       .eq("id", id)
       .maybeSingle();
 
@@ -582,19 +650,89 @@ export async function updateUserAbacSettings(
       return { success: false, error: "ไม่พบผู้ใช้ใน user_profiles" };
     }
 
-    const { error: updateError } = await supabaseAdmin
+    const currentRole = String(existing.role_code ?? "").trim().toLowerCase();
+    const requestedRole = String(input.role_code ?? existing.role_code ?? "")
+      .trim()
+      .toLowerCase();
+    const nextRole = requestedRole || currentRole;
+
+    if (!nextRole) {
+      return { success: false, error: "กรุณาเลือกสิทธิ์ (Role)" };
+    }
+
+    if (nextRole !== currentRole) {
+      if (gate.actorId === id && nextRole !== "admin") {
+        return {
+          success: false,
+          error: "ไม่สามารถลดสิทธิ์ Admin ของบัญชีตนเองได้",
+        };
+      }
+
+      const { data: roleRow, error: roleError } = await supabaseAdmin
+        .from("app_roles")
+        .select("role_code")
+        .eq("role_code", nextRole)
+        .maybeSingle();
+
+      if (roleError) {
+        return { success: false, error: roleError.message };
+      }
+      if (!roleRow) {
+        return {
+          success: false,
+          error: `ไม่พบสิทธิ์ "${nextRole}" ในตาราง app_roles`,
+        };
+      }
+    }
+
+    const oldData = toProfileAuditPayload(existing as ProfileAuditSnapshot);
+    const nextScope = abacFields.data_access_scope;
+    const nextLimit = abacFields.approval_limit;
+    const unchanged =
+      oldData.role_code.toLowerCase() === nextRole &&
+      oldData.data_access_scope === nextScope &&
+      oldData.approval_limit === nextLimit;
+
+    if (unchanged) {
+      return { success: true };
+    }
+
+    const nowIso = new Date().toISOString();
+    const { data: updated, error: updateError } = await supabaseAdmin
       .from("user_profiles")
       .update({
-        data_access_scope: abacFields.data_access_scope,
-        approval_limit: abacFields.approval_limit,
-        updated_at: new Date().toISOString(),
+        role_code: nextRole,
+        data_access_scope: nextScope,
+        approval_limit: nextLimit,
+        updated_at: nowIso,
       })
-      .eq("id", id);
+      .eq("id", id)
+      .select(
+        "id, email, full_name, role_code, is_active, data_access_scope, approval_limit",
+      )
+      .maybeSingle();
 
-    if (updateError) {
+    if (updateError || !updated) {
       return {
         success: false,
-        error: updateError.message ?? "บันทึกสิทธิ์ข้อมูลไม่สำเร็จ",
+        error: updateError?.message ?? "บันทึกโปรไฟล์ผู้ใช้ไม่สำเร็จ",
+      };
+    }
+
+    const newData = toProfileAuditPayload(updated as ProfileAuditSnapshot);
+
+    const audit = await logAuditTrail(
+      "user_profiles",
+      id,
+      "UPDATE",
+      oldData,
+      newData,
+    );
+
+    if (!audit.success) {
+      return {
+        success: false,
+        error: `อัปเดต user_profiles สำเร็จ แต่บันทึก audit_logs ไม่สำเร็จ: ${audit.error}`,
       };
     }
 
@@ -602,7 +740,17 @@ export async function updateUserAbacSettings(
     return { success: true };
   } catch (err) {
     const message =
-      err instanceof Error ? err.message : "บันทึกสิทธิ์ข้อมูลไม่สำเร็จ";
+      err instanceof Error ? err.message : "บันทึกโปรไฟล์ผู้ใช้ไม่สำเร็จ";
     return { success: false, error: message };
   }
+}
+
+/**
+ * @deprecated ใช้ {@link updateUserProfile} — คงไว้เพื่อความเข้ากันได้ของฟอร์มเดิม
+ */
+export async function updateUserAbacSettings(
+  userId: string,
+  abac: UserAbacInput,
+): Promise<UpdateUserAbacResult> {
+  return updateUserProfile(userId, abac);
 }

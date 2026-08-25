@@ -69,9 +69,16 @@ export type UpdateUserAbacResult =
   | { success: true }
   | { success: false; error: string };
 
+export type UpdateUserProfileResult = UpdateUserAbacResult;
+
 export type UserAbacInput = {
   data_access_scope: DataAccessScope;
   approval_limit: number;
+};
+
+/** Update User Profile — Role + ABAC (ITGC / SoD). */
+export type UpdateUserProfileInput = UserAbacInput & {
+  role_code?: string;
 };
 
 /** URL-driven User Profile Form on `/settings/users` (`?profile_user_id=`). */

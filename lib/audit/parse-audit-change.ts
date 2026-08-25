@@ -31,6 +31,7 @@ export const AUDIT_TABLE_LABELS: Record<string, string> = {
   deposit_allocations: "จัดสรรเงินมัดจำ",
   billing_notes: "ใบวางบิล",
   billing_note_items: "รายการใบวางบิล",
+  user_profiles: "โปรไฟล์ผู้ใช้งาน",
   audit_logs: "บันทึกตรวจสอบ",
   system_backup: "สำรองข้อมูลระบบ",
   system: "ระบบ (System)",
@@ -59,6 +60,9 @@ const CRITICAL_FIELDS = [
   "doc_type",
   "asset_code",
   "asset_name",
+  "role_code",
+  "data_access_scope",
+  "approval_limit",
 ] as const;
 
 const FIELD_LABELS: Record<string, string> = {
@@ -83,6 +87,9 @@ const FIELD_LABELS: Record<string, string> = {
   doc_type: "ประเภทเอกสาร",
   asset_code: "รหัสสินทรัพย์",
   asset_name: "ชื่อสินทรัพย์",
+  role_code: "สิทธิ์ (Role)",
+  data_access_scope: "Data Access Scope",
+  approval_limit: "Approval Limit",
   details: "รายละเอียด",
   notes: "หมายเหตุ",
   company_name: "ชื่อบริษัท",
@@ -97,6 +104,7 @@ const SKIP_KEYS = new Set([
   "changed_at",
   "correlation_id",
   "audit_event",
+  "pin_code",
 ]);
 
 const EMPTY_STRING_TOKENS = new Set(["", "—", "-", "null", "undefined"]);

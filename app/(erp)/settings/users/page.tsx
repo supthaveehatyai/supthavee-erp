@@ -203,6 +203,7 @@ export default async function UsersSettingsPage({ searchParams }: PageProps) {
         user={profileUser}
         error={profileError}
         closeHref="/settings/users"
+        roles={rolesResult.data}
       />
     </div>
   );

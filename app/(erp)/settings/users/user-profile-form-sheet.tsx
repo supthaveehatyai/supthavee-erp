@@ -2,17 +2,18 @@
 
 /**
  * User Profile Form — URL-driven slide-over (`?profile_user_id=`).
- * ABAC fields persist via Server Action only (Zero Client-Side Fetching).
+ * Mutations go through Server Actions only (Zero Client-Side Fetching).
  */
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Shield } from "lucide-react";
 import { toast } from "sonner";
-import { updateUserAbacSettings } from "@/lib/actions/user.actions";
-import type { DataAccessScope, ManagedUser } from "@/types/user";
+import { updateUserProfile } from "@/lib/actions/user.actions";
+import type { AppRoleOption, DataAccessScope, ManagedUser } from "@/types/user";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -27,15 +28,18 @@ export type UserProfileFormSheetProps = {
   user: ManagedUser | null;
   error: string | null;
   closeHref: string;
+  roles: AppRoleOption[];
 };
 
 export function UserProfileFormSheet({
   user,
   error,
   closeHref,
+  roles,
 }: UserProfileFormSheetProps) {
   const router = useRouter();
   const open = user !== null || error !== null;
+  const [roleCode, setRoleCode] = useState(user?.role_code ?? "");
   const [dataAccessScope, setDataAccessScope] = useState<DataAccessScope>(
     user?.data_access_scope ?? "OWN",
   );
@@ -46,6 +50,7 @@ export function UserProfileFormSheet({
 
   useEffect(() => {
     if (!user) return;
+    setRoleCode(user.role_code);
     setDataAccessScope(user.data_access_scope);
     setApprovalLimit(String(user.approval_limit ?? 0));
   }, [user]);
@@ -64,15 +69,20 @@ export function UserProfileFormSheet({
       toast.error("วงเงินอนุมัติต้องเป็นตัวเลขที่ไม่ติดลบ");
       return;
     }
+    if (!roleCode.trim()) {
+      toast.error("กรุณาเลือกสิทธิ์ (Role)");
+      return;
+    }
 
     setIsSubmitting(true);
     try {
-      const result = await updateUserAbacSettings(user.id, {
+      const result = await updateUserProfile(user.id, {
+        role_code: roleCode,
         data_access_scope: dataAccessScope,
         approval_limit: parsedLimit,
       });
       if (!result.success) {
-        toast.error(result.error ?? "บันทึกสิทธิ์ข้อมูลไม่สำเร็จ");
+        toast.error(result.error ?? "บันทึกโปรไฟล์ไม่สำเร็จ");
         return;
       }
       toast.success(`อัปเดตโปรไฟล์ของ ${user.full_name} แล้ว`);
@@ -80,7 +90,7 @@ export function UserProfileFormSheet({
       router.refresh();
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "บันทึกสิทธิ์ข้อมูลไม่สำเร็จ",
+        err instanceof Error ? err.message : "บันทึกโปรไฟล์ไม่สำเร็จ",
       );
     } finally {
       setIsSubmitting(false);
@@ -101,8 +111,8 @@ export function UserProfileFormSheet({
             User Profile Form
           </SheetTitle>
           <SheetDescription>
-            กำหนด Data Access Scope และ Approval Limit — บันทึกลง{" "}
-            <span className="font-mono text-xs">user_profiles</span>
+            แก้ไข Role, Data Access Scope และ Approval Limit — บันทึกผ่าน Server
+            Action ลง <span className="font-mono text-xs">user_profiles</span>
           </SheetDescription>
         </SheetHeader>
 
@@ -121,18 +131,29 @@ export function UserProfileFormSheet({
                 </p>
                 <p className="break-all text-xs text-slate-500">{user.email}</p>
                 <p className="mt-1 text-xs text-slate-600">
-                  {user.role_name_th}{" "}
-                  <span className="font-mono text-[11px] text-slate-400">
-                    ({user.role_code})
-                  </span>
+                  สถานะ: {user.is_active ? "Active" : "Inactive"}
                 </p>
               </div>
 
               <div className="space-y-1.5">
-                <Label>สถานะ</Label>
-                <p className="text-sm text-slate-800">
-                  {user.is_active ? "Active" : "Inactive"}
-                </p>
+                <Label htmlFor={`profile-role-${user.id}`}>สิทธิ์ (Role)</Label>
+                <Select
+                  id={`profile-role-${user.id}`}
+                  value={roleCode}
+                  onChange={(event) => setRoleCode(event.target.value)}
+                  disabled={isSubmitting || roles.length === 0}
+                  required
+                >
+                  {roles.length === 0 ? (
+                    <option value="">ไม่พบรายการสิทธิ์</option>
+                  ) : (
+                    roles.map((role) => (
+                      <option key={role.role_code} value={role.role_code}>
+                        {role.role_name_th} ({role.role_code})
+                      </option>
+                    ))
+                  )}
+                </Select>
               </div>
 
               <UserAbacFields
@@ -156,10 +177,10 @@ export function UserProfileFormSheet({
               </Button>
               <Button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || roles.length === 0}
                 aria-busy={isSubmitting}
               >
-                {isSubmitting ? "กำลังบันทึก..." : "บันทึกสิทธิ์ข้อมูล"}
+                {isSubmitting ? "กำลังบันทึก..." : "บันทึกโปรไฟล์"}
               </Button>
             </SheetFooter>
           </form>
