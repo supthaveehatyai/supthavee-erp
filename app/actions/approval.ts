@@ -19,6 +19,10 @@ import {
   INVENTORY_DOC_TYPES,
   resolveIssuedDocumentStatus,
 } from "@/lib/constants/document";
+import {
+  APPROVAL_LIMIT_EXCEEDED_MESSAGE,
+  exceedsApprovalLimit,
+} from "@/lib/approval/approval-rules";
 import { isTemporaryDraftDocNo } from "@/lib/utils/draft-document-no";
 import { settleExpenseCashPurchase } from "@/lib/actions/finance/expense-cash-settlement";
 import type { Database } from "@/src/types/supabase";
@@ -56,6 +60,37 @@ function emptyResult(error: string): GetPendingApprovalsResult {
 function toMoney(value: number | string | null | undefined): number {
   const n = Number(value ?? 0);
   return Number.isFinite(n) ? n : 0;
+}
+
+type AdminClient = ReturnType<typeof createClient>;
+
+/**
+ * ABAC Auth Guard — วงเงินอนุมัติของผู้อนุมัติปัจจุบัน (`auth.uid()` → user_profiles).
+ * ใช้ supabaseAdmin เพื่อ Bypass RLS. ตรวจเฉพาะตอน APPROVE (ก่อน ISSUED / PAID).
+ */
+async function assertApproverLimit(
+  supabaseAdmin: AdminClient,
+  actorId: string,
+  grandTotal: number | string | null | undefined,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data: profile, error } = await supabaseAdmin
+    .from("user_profiles")
+    .select("id, approval_limit")
+    .eq("id", actorId)
+    .maybeSingle();
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  if (!profile) {
+    return { ok: false, error: "ไม่พบโปรไฟล์ผู้ใช้งานที่กำลังอนุมัติ" };
+  }
+
+  if (exceedsApprovalLimit(grandTotal, profile.approval_limit)) {
+    return { ok: false, error: APPROVAL_LIMIT_EXCEEDED_MESSAGE };
+  }
+
+  return { ok: true };
 }
 
 function resolveDocumentDetailHref(
@@ -390,6 +425,15 @@ export async function processApproval(
       const docType = existing.doc_type as DocumentType;
 
       if (action === "APPROVED") {
+        const limitCheck = await assertApproverLimit(
+          supabaseAdmin,
+          actorId,
+          existing.grand_total,
+        );
+        if (!limitCheck.ok) {
+          return { success: false, error: limitCheck.error };
+        }
+
         let officialDocNo = String(existing.doc_no ?? "");
         const issueDate = nowIso.slice(0, 10);
         const issuedStatus = resolveIssuedDocumentStatus(docType);
@@ -510,6 +554,15 @@ export async function processApproval(
       documentNo = existing.document_no;
 
       if (action === "APPROVED") {
+        const limitCheck = await assertApproverLimit(
+          supabaseAdmin,
+          actorId,
+          existing.grand_total,
+        );
+        if (!limitCheck.ok) {
+          return { success: false, error: limitCheck.error };
+        }
+
         let officialNo = String(existing.document_no ?? "");
         const expenseDate = String(existing.expense_date ?? "").slice(0, 10);
 

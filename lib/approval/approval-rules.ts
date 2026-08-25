@@ -23,6 +23,26 @@ export const EXPENSE_APPROVAL_THRESHOLD = 5000;
 export const PENDING_APPROVAL_TOAST_MESSAGE =
   "เอกสารเข้าสู่สถานะรออนุมัติแล้ว";
 
+export const APPROVAL_LIMIT_EXCEEDED_MESSAGE =
+  "Forbidden: วงเงินอนุมัติของคุณไม่เพียงพอสำหรับเอกสารฉบับนี้";
+
+function toLimitMoney(value: number | string | null | undefined): number {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.round(parsed * 100) / 100;
+}
+
+/**
+ * ABAC — ยอดเอกสารต้องไม่เกินวงเงินอนุมัติของผู้อนุมัติ (`user_profiles.approval_limit`).
+ * 0 = ไม่มีวงเงินอนุมัติ (ห้ามอนุมัติยอดที่มากกว่า 0).
+ */
+export function exceedsApprovalLimit(
+  grandTotal: number | string | null | undefined,
+  approvalLimit: number | string | null | undefined,
+): boolean {
+  return toLimitMoney(grandTotal) > toLimitMoney(approvalLimit);
+}
+
 export function requiresDocumentApproval(docType: string): boolean {
   return (APPROVAL_PENDING_DOCUMENT_TYPES as readonly string[]).includes(
     docType,
