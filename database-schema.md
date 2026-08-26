@@ -1,4 +1,4 @@
-# Supthavee ERP - Database Schema Reference
+﻿# Supthavee ERP - Database Schema Reference
 
 **CRITICAL INSTRUCTION FOR AI:** STRICTLY use the table names listed below. DO NOT invent, assume, or create new tables.
 

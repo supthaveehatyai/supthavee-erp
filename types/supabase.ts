@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.17"
   }
   graphql_public: {
     Tables: {
@@ -39,26 +39,168 @@ export type Database = {
   }
   public: {
     Tables: {
+      accounting_periods: {
+        Row: {
+          closed_at: string | null
+          closed_by: string | null
+          created_at: string
+          id: string
+          is_closed: boolean
+          period_month: number
+          period_year: number
+          updated_at: string
+        }
+        Insert: {
+          closed_at?: string | null
+          closed_by?: string | null
+          created_at?: string
+          id?: string
+          is_closed?: boolean
+          period_month: number
+          period_year: number
+          updated_at?: string
+        }
+        Update: {
+          closed_at?: string | null
+          closed_by?: string | null
+          created_at?: string
+          id?: string
+          is_closed?: boolean
+          period_month?: number
+          period_year?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       app_roles: {
         Row: {
+          accessible_modules: Json | null
           created_at: string | null
           description: string | null
           role_code: string
           role_name_th: string
         }
         Insert: {
+          accessible_modules?: Json | null
           created_at?: string | null
           description?: string | null
           role_code: string
           role_name_th: string
         }
         Update: {
+          accessible_modules?: Json | null
           created_at?: string | null
           description?: string | null
           role_code?: string
           role_name_th?: string
         }
         Relationships: []
+      }
+      approval_logs: {
+        Row: {
+          action: string
+          actor_id: string | null
+          comments: string | null
+          created_at: string | null
+          document_id: string | null
+          expense_id: string | null
+          id: string
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          comments?: string | null
+          created_at?: string | null
+          document_id?: string | null
+          expense_id?: string | null
+          id?: string
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          comments?: string | null
+          created_at?: string | null
+          document_id?: string | null
+          expense_id?: string | null
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "approval_logs_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "approval_logs_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "vw_sales_profit_analysis"
+            referencedColumns: ["document_id"]
+          },
+          {
+            foreignKeyName: "approval_logs_expense_id_fkey"
+            columns: ["expense_id"]
+            isOneToOne: false
+            referencedRelation: "expenses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      asset_depreciation_ledger: {
+        Row: {
+          accumulated_depreciation: number
+          asset_id: string
+          created_at: string | null
+          created_by: string | null
+          depreciation_amount: number
+          depreciation_date: string
+          id: string
+          is_prorated: boolean | null
+          net_book_value: number
+          period_id: string
+        }
+        Insert: {
+          accumulated_depreciation: number
+          asset_id: string
+          created_at?: string | null
+          created_by?: string | null
+          depreciation_amount: number
+          depreciation_date: string
+          id?: string
+          is_prorated?: boolean | null
+          net_book_value: number
+          period_id: string
+        }
+        Update: {
+          accumulated_depreciation?: number
+          asset_id?: string
+          created_at?: string | null
+          created_by?: string | null
+          depreciation_amount?: number
+          depreciation_date?: string
+          id?: string
+          is_prorated?: boolean | null
+          net_book_value?: number
+          period_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asset_depreciation_ledger_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "fixed_assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "asset_depreciation_ledger_period_id_fkey"
+            columns: ["period_id"]
+            isOneToOne: false
+            referencedRelation: "accounting_periods"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       audit_logs: {
         Row: {
@@ -146,7 +288,7 @@ export type Database = {
       }
       contact_persons: {
         Row: {
-          contact_id: string
+          contact_id: string | null
           created_at: string | null
           department_or_role: string | null
           email: string | null
@@ -248,6 +390,44 @@ export type Database = {
         }
         Relationships: []
       }
+      depreciation_ledgers: {
+        Row: {
+          asset_id: string | null
+          created_at: string | null
+          created_by: string | null
+          depreciation_amount: number
+          id: string
+          period_month: number
+          period_year: number
+        }
+        Insert: {
+          asset_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          depreciation_amount: number
+          id?: string
+          period_month: number
+          period_year: number
+        }
+        Update: {
+          asset_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          depreciation_amount?: number
+          id?: string
+          period_month?: number
+          period_year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "depreciation_ledgers_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "fixed_assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       doc_details: {
         Row: {
           description: string | null
@@ -311,6 +491,7 @@ export type Database = {
           contact_id: string
           contact_person_id: string | null
           created_at: string | null
+          created_by: string | null
           deposit_deducted: number | null
           discount_amount: number | null
           doc_date: string
@@ -335,6 +516,7 @@ export type Database = {
           contact_id: string
           contact_person_id?: string | null
           created_at?: string | null
+          created_by?: string | null
           deposit_deducted?: number | null
           discount_amount?: number | null
           doc_date: string
@@ -359,6 +541,7 @@ export type Database = {
           contact_id?: string
           contact_person_id?: string | null
           created_at?: string | null
+          created_by?: string | null
           deposit_deducted?: number | null
           discount_amount?: number | null
           doc_date?: string
@@ -558,6 +741,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "document_items_technician_bill_id_fkey"
+            columns: ["technician_bill_id"]
+            isOneToOne: false
+            referencedRelation: "vw_sales_profit_analysis"
+            referencedColumns: ["document_id"]
+          },
+          {
             foreignKeyName: "document_items_technician_id_fkey"
             columns: ["technician_id"]
             isOneToOne: false
@@ -568,11 +758,15 @@ export type Database = {
       }
       documents: {
         Row: {
+          approval_status: Database["public"]["Enums"]["approval_status"]
+          approved_at: string | null
+          approved_by: string | null
           attached_file_url: string | null
           attachment_url: string | null
           contact_id: string | null
           contact_person_id: string | null
           created_at: string
+          created_by: string | null
           deposit_deducted: number
           discount_amount: number
           discount_text: string | null
@@ -610,11 +804,15 @@ export type Database = {
           wht_rate: number
         }
         Insert: {
+          approval_status?: Database["public"]["Enums"]["approval_status"]
+          approved_at?: string | null
+          approved_by?: string | null
           attached_file_url?: string | null
           attachment_url?: string | null
           contact_id?: string | null
           contact_person_id?: string | null
           created_at?: string
+          created_by?: string | null
           deposit_deducted?: number
           discount_amount?: number
           discount_text?: string | null
@@ -652,11 +850,15 @@ export type Database = {
           wht_rate?: number
         }
         Update: {
+          approval_status?: Database["public"]["Enums"]["approval_status"]
+          approved_at?: string | null
+          approved_by?: string | null
           attached_file_url?: string | null
           attachment_url?: string | null
-          contact_id?: string
+          contact_id?: string | null
           contact_person_id?: string | null
           created_at?: string
+          created_by?: string | null
           deposit_deducted?: number
           discount_amount?: number
           discount_text?: string | null
@@ -738,8 +940,64 @@ export type Database = {
           },
         ]
       }
+      expense_installments: {
+        Row: {
+          created_at: string | null
+          due_date: string
+          expense_id: string | null
+          id: string
+          installment_period: number
+          interest_amount: number | null
+          is_paid: boolean | null
+          paid_date: string | null
+          payment_transaction_id: string | null
+          principal_amount: number
+          total_installment: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          due_date: string
+          expense_id?: string | null
+          id?: string
+          installment_period: number
+          interest_amount?: number | null
+          is_paid?: boolean | null
+          paid_date?: string | null
+          payment_transaction_id?: string | null
+          principal_amount: number
+          total_installment?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          due_date?: string
+          expense_id?: string | null
+          id?: string
+          installment_period?: number
+          interest_amount?: number | null
+          is_paid?: boolean | null
+          paid_date?: string | null
+          payment_transaction_id?: string | null
+          principal_amount?: number
+          total_installment?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expense_installments_expense_id_fkey"
+            columns: ["expense_id"]
+            isOneToOne: false
+            referencedRelation: "expenses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       expenses: {
         Row: {
+          approval_status: Database["public"]["Enums"]["approval_status"]
+          approved_at: string | null
+          approved_by: string | null
           bank_account_id: string | null
           category_id: string | null
           created_at: string
@@ -747,6 +1005,7 @@ export type Database = {
           expense_date: string
           grand_total: number | null
           id: string
+          is_installment: boolean | null
           net_amount: number
           net_payable: number
           payment_method: string | null
@@ -755,6 +1014,7 @@ export type Database = {
           recorded_by: string | null
           remark: string | null
           status: string
+          total_interest_amount: number | null
           updated_at: string
           vat_amount: number
           vendor_doc_no: string | null
@@ -766,6 +1026,9 @@ export type Database = {
           wht_type: string | null
         }
         Insert: {
+          approval_status?: Database["public"]["Enums"]["approval_status"]
+          approved_at?: string | null
+          approved_by?: string | null
           bank_account_id?: string | null
           category_id?: string | null
           created_at?: string
@@ -773,6 +1036,7 @@ export type Database = {
           expense_date: string
           grand_total?: number | null
           id?: string
+          is_installment?: boolean | null
           net_amount?: number
           net_payable?: number
           payment_method?: string | null
@@ -781,6 +1045,7 @@ export type Database = {
           recorded_by?: string | null
           remark?: string | null
           status?: string
+          total_interest_amount?: number | null
           updated_at?: string
           vat_amount?: number
           vendor_doc_no?: string | null
@@ -792,6 +1057,9 @@ export type Database = {
           wht_type?: string | null
         }
         Update: {
+          approval_status?: Database["public"]["Enums"]["approval_status"]
+          approved_at?: string | null
+          approved_by?: string | null
           bank_account_id?: string | null
           category_id?: string | null
           created_at?: string
@@ -799,6 +1067,7 @@ export type Database = {
           expense_date?: string
           grand_total?: number | null
           id?: string
+          is_installment?: boolean | null
           net_amount?: number
           net_payable?: number
           payment_method?: string | null
@@ -807,6 +1076,7 @@ export type Database = {
           recorded_by?: string | null
           remark?: string | null
           status?: string
+          total_interest_amount?: number | null
           updated_at?: string
           vat_amount?: number
           vendor_doc_no?: string | null
@@ -837,6 +1107,90 @@ export type Database = {
             columns: ["vendor_id"]
             isOneToOne: false
             referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fixed_assets: {
+        Row: {
+          accumulated_depreciation: number | null
+          acquisition_cost: number
+          acquisition_date: string
+          asset_code: string
+          asset_name: string
+          attachment_urls: string[] | null
+          category_id: string | null
+          created_at: string | null
+          current_accumulated_depreciation: number | null
+          current_net_book_value: number | null
+          expense_id: string | null
+          id: string
+          last_depreciation_date: string | null
+          location: string | null
+          net_book_value: number
+          salvage_value: number | null
+          status: string | null
+          updated_at: string | null
+          useful_life_months: number
+          warranty_expiry_date: string | null
+        }
+        Insert: {
+          accumulated_depreciation?: number | null
+          acquisition_cost: number
+          acquisition_date: string
+          asset_code: string
+          asset_name: string
+          attachment_urls?: string[] | null
+          category_id?: string | null
+          created_at?: string | null
+          current_accumulated_depreciation?: number | null
+          current_net_book_value?: number | null
+          expense_id?: string | null
+          id?: string
+          last_depreciation_date?: string | null
+          location?: string | null
+          net_book_value: number
+          salvage_value?: number | null
+          status?: string | null
+          updated_at?: string | null
+          useful_life_months: number
+          warranty_expiry_date?: string | null
+        }
+        Update: {
+          accumulated_depreciation?: number | null
+          acquisition_cost?: number
+          acquisition_date?: string
+          asset_code?: string
+          asset_name?: string
+          attachment_urls?: string[] | null
+          category_id?: string | null
+          created_at?: string | null
+          current_accumulated_depreciation?: number | null
+          current_net_book_value?: number | null
+          expense_id?: string | null
+          id?: string
+          last_depreciation_date?: string | null
+          location?: string | null
+          net_book_value?: number
+          salvage_value?: number | null
+          status?: string | null
+          updated_at?: string | null
+          useful_life_months?: number
+          warranty_expiry_date?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fixed_assets_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "mst_asset_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fixed_assets_expense_id_fkey"
+            columns: ["expense_id"]
+            isOneToOne: false
+            referencedRelation: "expenses"
             referencedColumns: ["id"]
           },
         ]
@@ -885,6 +1239,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      mst_asset_categories: {
+        Row: {
+          category_code: string
+          category_name: string
+          created_at: string | null
+          depreciation_rate: number | null
+          id: string
+          is_active: boolean | null
+          updated_at: string | null
+          useful_life_years: number
+        }
+        Insert: {
+          category_code: string
+          category_name: string
+          created_at?: string | null
+          depreciation_rate?: number | null
+          id?: string
+          is_active?: boolean | null
+          updated_at?: string | null
+          useful_life_years: number
+        }
+        Update: {
+          category_code?: string
+          category_name?: string
+          created_at?: string | null
+          depreciation_rate?: number | null
+          id?: string
+          is_active?: boolean | null
+          updated_at?: string | null
+          useful_life_years?: number
+        }
+        Relationships: []
       }
       mst_bank_accounts: {
         Row: {
@@ -1106,6 +1493,7 @@ export type Database = {
           account_source: string | null
           created_at: string | null
           id: string
+          nas_archive_url: string | null
           notes: string | null
           payment_date: string
           payment_method: string | null
@@ -1113,12 +1501,14 @@ export type Database = {
           recorded_by: string | null
           reference_no: string | null
           slip_image_url: string | null
+          storage_tier: Database["public"]["Enums"]["storage_tier_type"]
           total_amount: number
         }
         Insert: {
           account_source?: string | null
           created_at?: string | null
           id?: string
+          nas_archive_url?: string | null
           notes?: string | null
           payment_date: string
           payment_method?: string | null
@@ -1126,12 +1516,14 @@ export type Database = {
           recorded_by?: string | null
           reference_no?: string | null
           slip_image_url?: string | null
+          storage_tier?: Database["public"]["Enums"]["storage_tier_type"]
           total_amount: number
         }
         Update: {
           account_source?: string | null
           created_at?: string | null
           id?: string
+          nas_archive_url?: string | null
           notes?: string | null
           payment_date?: string
           payment_method?: string | null
@@ -1139,6 +1531,7 @@ export type Database = {
           recorded_by?: string | null
           reference_no?: string | null
           slip_image_url?: string | null
+          storage_tier?: Database["public"]["Enums"]["storage_tier_type"]
           total_amount?: number
         }
         Relationships: []
@@ -1312,11 +1705,13 @@ export type Database = {
           is_archived: boolean
           job_no: string
           job_type: Database["public"]["Enums"]["production_job_type"]
+          nas_archive_url: string | null
           status: Database["public"]["Enums"]["production_job_status"]
-          technician_id: string | null
+          storage_tier: Database["public"]["Enums"]["storage_tier_type"]
           technician_bill_id: string | null
+          technician_id: string | null
           updated_at: string | null
-          wage_cost: number | null
+          wage_cost: number
         }
         Insert: {
           attachment_paths?: string[]
@@ -1328,11 +1723,13 @@ export type Database = {
           is_archived?: boolean
           job_no: string
           job_type?: Database["public"]["Enums"]["production_job_type"]
+          nas_archive_url?: string | null
           status?: Database["public"]["Enums"]["production_job_status"]
-          technician_id?: string | null
+          storage_tier?: Database["public"]["Enums"]["storage_tier_type"]
           technician_bill_id?: string | null
+          technician_id?: string | null
           updated_at?: string | null
-          wage_cost?: number | null
+          wage_cost?: number
         }
         Update: {
           attachment_paths?: string[]
@@ -1344,11 +1741,13 @@ export type Database = {
           is_archived?: boolean
           job_no?: string
           job_type?: Database["public"]["Enums"]["production_job_type"]
+          nas_archive_url?: string | null
           status?: Database["public"]["Enums"]["production_job_status"]
-          technician_id?: string | null
+          storage_tier?: Database["public"]["Enums"]["storage_tier_type"]
           technician_bill_id?: string | null
+          technician_id?: string | null
           updated_at?: string | null
-          wage_cost?: number | null
+          wage_cost?: number
         }
         Relationships: [
           {
@@ -1366,17 +1765,24 @@ export type Database = {
             referencedColumns: ["document_id"]
           },
           {
-            foreignKeyName: "production_jobs_technician_id_fkey"
-            columns: ["technician_id"]
+            foreignKeyName: "production_jobs_technician_bill_id_fkey"
+            columns: ["technician_bill_id"]
             isOneToOne: false
-            referencedRelation: "contacts"
+            referencedRelation: "documents"
             referencedColumns: ["id"]
           },
           {
             foreignKeyName: "production_jobs_technician_bill_id_fkey"
             columns: ["technician_bill_id"]
             isOneToOne: false
-            referencedRelation: "documents"
+            referencedRelation: "vw_sales_profit_analysis"
+            referencedColumns: ["document_id"]
+          },
+          {
+            foreignKeyName: "production_jobs_technician_id_fkey"
+            columns: ["technician_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
             referencedColumns: ["id"]
           },
         ]
@@ -1633,7 +2039,9 @@ export type Database = {
       }
       user_profiles: {
         Row: {
+          approval_limit: number | null
           created_at: string | null
+          data_access_scope: string | null
           email: string
           full_name: string
           id: string
@@ -1643,7 +2051,9 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          approval_limit?: number | null
           created_at?: string | null
+          data_access_scope?: string | null
           email: string
           full_name: string
           id: string
@@ -1653,7 +2063,9 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          approval_limit?: number | null
           created_at?: string | null
+          data_access_scope?: string | null
           email?: string
           full_name?: string
           id?: string
@@ -1752,6 +2164,10 @@ export type Database = {
       }
     }
     Functions: {
+      calculate_monthly_depreciation: {
+        Args: { p_period_id: string; p_user_id: string }
+        Returns: Json
+      }
       fn_is_admin: { Args: never; Returns: boolean }
       generate_document_no: {
         Args: { p_doc_date: string; p_doc_type: string }
@@ -1761,12 +2177,15 @@ export type Database = {
         Args: { p_expense_date?: string }
         Returns: string
       }
+      get_user_access_scope: { Args: never; Returns: string }
+      is_period_closed: { Args: { doc_date: string }; Returns: boolean }
       void_document_with_stock_reversal: {
         Args: { p_document_id: string }
         Returns: Json
       }
     }
     Enums: {
+      approval_status: "PENDING" | "APPROVED" | "REJECTED"
       audit_action_type: "INSERT" | "UPDATE" | "DELETE"
       document_status:
         | "DRAFT"
@@ -1817,6 +2236,7 @@ export type Database = {
         | "DELIVERED"
         | "CANCELLED"
       production_job_type: "SCREEN" | "EMBROIDERY" | "SEWING" | "OTHER"
+      storage_tier_type: "CLOUD" | "NAS"
       vat_calculation_type: "NONE" | "INCLUSIVE" | "EXCLUSIVE"
     }
     CompositeTypes: {
@@ -1948,6 +2368,7 @@ export const Constants = {
   },
   public: {
     Enums: {
+      approval_status: ["PENDING", "APPROVED", "REJECTED"],
       audit_action_type: ["INSERT", "UPDATE", "DELETE"],
       document_status: [
         "DRAFT",
@@ -2002,6 +2423,7 @@ export const Constants = {
         "CANCELLED",
       ],
       production_job_type: ["SCREEN", "EMBROIDERY", "SEWING", "OTHER"],
+      storage_tier_type: ["CLOUD", "NAS"],
       vat_calculation_type: ["NONE", "INCLUSIVE", "EXCLUSIVE"],
     },
   },

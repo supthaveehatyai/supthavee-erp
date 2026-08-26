@@ -7,6 +7,8 @@
 
 import { useState, type ReactNode } from "react";
 import { FileText, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import { TieredStorageImage } from "@/components/shared/tiered-storage-image";
+import type { StorageTier } from "@/types/storage-tier";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -21,6 +23,8 @@ export type AttachmentSheetViewerProps = {
   fileUrl: string;
   title: string;
   trigger: ReactNode;
+  /** Phase 14 — badge / offline NAS handling */
+  storageTier?: StorageTier | null;
 };
 
 const ZOOM_MIN = 0.5;
@@ -52,6 +56,7 @@ export function AttachmentSheetViewer({
   fileUrl,
   title,
   trigger,
+  storageTier = "CLOUD",
 }: AttachmentSheetViewerProps) {
   const [open, setOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -132,11 +137,8 @@ export function AttachmentSheetViewer({
         <div className="min-h-0 flex-1 overflow-hidden px-4 pb-4">
           {showImage ? (
             <div className="relative mt-4 flex h-[calc(100vh-120px)] w-full items-center justify-center overflow-hidden rounded-md border border-slate-100 bg-slate-50/50 p-2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={url}
-                alt={title}
-                className="h-auto w-auto max-h-full max-w-full object-contain"
+              <div
+                className="relative h-full w-full"
                 style={
                   zoom === 1
                     ? undefined
@@ -145,8 +147,17 @@ export function AttachmentSheetViewer({
                         transformOrigin: "center center",
                       }
                 }
-                draggable={false}
-              />
+              >
+                <TieredStorageImage
+                  src={url}
+                  alt={title}
+                  storageTier={storageTier}
+                  fill
+                  sizes="(max-width: 768px) 100vw, 640px"
+                  objectFit="contain"
+                  showTierBadge={storageTier === "NAS"}
+                />
+              </div>
             </div>
           ) : showPdf ? (
             <iframe

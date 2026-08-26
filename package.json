@@ -13,7 +13,8 @@
     "seed-to-cloud": "node scripts/run-seed-to-cloud.mjs",
     "seed:uat": "npx tsx scripts/seed-uat-data.ts",
     "backup:db": "node scripts/backup/backup-db.mjs",
-    "backup:storage": "node scripts/backup/backup-storage.mjs"
+    "backup:storage": "node scripts/backup/backup-storage.mjs",
+    "archive:nas": "node scripts/nas-archiver.mjs"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",

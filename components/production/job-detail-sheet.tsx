@@ -64,6 +64,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { TieredStorageImage } from "@/components/shared/tiered-storage-image";
+import { isHttpUrl } from "@/lib/utils/storage-tier";
 
 const JOB_TYPE_LABEL: Record<ProductionJobType, string> = {
   SCREEN: "สกรีน",
@@ -394,32 +396,70 @@ export function JobDetailSheet({
                       รูปแนบ Mockup / Logo
                     </h3>
                     <span className="text-xs text-slate-400">
-                      ({job.attachment_paths.length})
+                      ({job.display_attachment_urls.length})
                     </span>
                   </div>
 
-                  {job.attachment_paths.length === 0 ? (
+                  {job.display_attachment_urls.length === 0 &&
+                  job.storage_tier !== "NAS" ? (
                     <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-xs text-slate-400">
                       ไม่มีรูปแนบ
                     </p>
+                  ) : job.display_attachment_urls.length === 0 &&
+                    job.storage_tier === "NAS" ? (
+                    <div className="relative aspect-video overflow-hidden rounded-lg border border-amber-200 bg-amber-50">
+                      <TieredStorageImage
+                        src={null}
+                        alt="NAS archive"
+                        storageTier="NAS"
+                        nasPath={job.nas_archive_url}
+                        fill
+                        sizes="400px"
+                        showTierBadge
+                      />
+                    </div>
                   ) : (
                     <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                      {job.attachment_paths.map((url, index) => (
-                        <a
-                          key={`${url}-${index}`}
-                          href={url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="group overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition hover:border-violet-300 hover:ring-2 hover:ring-violet-100"
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={url}
-                            alt={`Attachment ${index + 1}`}
-                            className="aspect-square w-full object-cover transition group-hover:scale-[1.02]"
-                          />
-                        </a>
-                      ))}
+                      {job.display_attachment_urls.map((url, index) => {
+                        const browsable = isHttpUrl(url);
+                        const inner = (
+                          <div className="relative aspect-square w-full overflow-hidden">
+                            <TieredStorageImage
+                              src={url}
+                              alt={`Mockup ${index + 1}`}
+                              storageTier={job.storage_tier}
+                              nasPath={
+                                job.storage_tier === "NAS" && !browsable
+                                  ? job.nas_archive_url
+                                  : null
+                              }
+                              fill
+                              sizes="120px"
+                              objectFit="cover"
+                              showTierBadge={job.storage_tier === "NAS"}
+                              className="transition group-hover:scale-[1.02]"
+                            />
+                          </div>
+                        );
+                        return browsable ? (
+                          <a
+                            key={`${url}-${index}`}
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="group overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition hover:border-violet-300 hover:ring-2 hover:ring-violet-100"
+                          >
+                            {inner}
+                          </a>
+                        ) : (
+                          <div
+                            key={`nas-${index}`}
+                            className="overflow-hidden rounded-lg border border-amber-200 bg-white shadow-sm"
+                          >
+                            {inner}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </section>

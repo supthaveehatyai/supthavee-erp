@@ -30,6 +30,8 @@ import {
   type UpdateProductionJobAssignmentInput,
   type UpdateProductionJobAssignmentResult,
 } from "@/types/kanban";
+import { resolveProductionAttachmentUrls } from "@/lib/utils/storage-tier";
+import type { StorageTier } from "@/types/storage-tier";
 
 const PRODUCTION_ATTACHMENTS_BUCKET = "production_attachments";
 /** Sales doc types ที่ส่งเข้าสายผลิต (MTO) ได้ */
@@ -67,6 +69,8 @@ type ProductionJobRow = {
   due_date: string | null;
   details: string | null;
   attachment_paths: string[] | null;
+  storage_tier: StorageTier | null;
+  nas_archive_url: string | null;
   created_at: string | null;
   updated_at: string | null;
   document_id: string | null;
@@ -136,6 +140,15 @@ function mapJobCard(row: ProductionJobRow): ProductionJobCard {
     attachment_paths: Array.isArray(row.attachment_paths)
       ? row.attachment_paths.filter(Boolean)
       : [],
+    storage_tier: row.storage_tier === "NAS" ? "NAS" : "CLOUD",
+    nas_archive_url: row.nas_archive_url?.trim() || null,
+    display_attachment_urls: resolveProductionAttachmentUrls({
+      storageTier: row.storage_tier,
+      attachmentPaths: Array.isArray(row.attachment_paths)
+        ? row.attachment_paths.filter(Boolean)
+        : [],
+      nasArchiveUrl: row.nas_archive_url,
+    }),
     created_at: row.created_at,
     updated_at: row.updated_at,
     document_id: row.document_id,

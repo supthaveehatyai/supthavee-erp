@@ -1,4 +1,6 @@
 import { getExpenseById } from "@/app/actions/expenses";
+import { getPaymentSlipStorageMeta } from "@/app/actions/payment-slips";
+import type { StorageTier } from "@/types/storage-tier";
 import type { ExpenseDetail } from "@/types/expense";
 import { ExpenseAttachmentPreview } from "@/app/(erp)/expenses/[id]/expense-attachment-preview";
 import { Badge } from "@/components/ui/badge";
@@ -38,7 +40,16 @@ function Field({
   );
 }
 
-function ExpenseReviewBody({ expense }: { expense: ExpenseDetail }) {
+function ExpenseReviewBody({
+  expense,
+  paymentSlipMeta,
+}: {
+  expense: ExpenseDetail;
+  paymentSlipMeta: {
+    storage_tier: StorageTier;
+    nas_archive_url: string | null;
+  };
+}) {
   return (
     <div className="flex flex-col gap-6 px-6 pb-8 pt-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -108,6 +119,8 @@ function ExpenseReviewBody({ expense }: { expense: ExpenseDetail }) {
             documentNo={expense.document_no}
             title="สลิปโอนเงิน"
             emptyLabel="ไม่มีสลิปโอนเงิน"
+            storageTier={paymentSlipMeta.storage_tier}
+            nasArchiveUrl={paymentSlipMeta.nas_archive_url}
           />
         </div>
       </div>
@@ -134,5 +147,14 @@ export async function ExpenseApprovalReviewContent({
     );
   }
 
-  return <ExpenseReviewBody expense={result.data} />;
+  const paymentSlipMeta = await getPaymentSlipStorageMeta(
+    result.data.payment_slip_url,
+  );
+
+  return (
+    <ExpenseReviewBody
+      expense={result.data}
+      paymentSlipMeta={paymentSlipMeta}
+    />
+  );
 }

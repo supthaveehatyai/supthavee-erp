@@ -25,6 +25,8 @@ import {
   type ProductionJobsByStatus,
 } from "@/types/kanban";
 import { cn } from "@/lib/utils";
+import { TieredStorageImage } from "@/components/shared/tiered-storage-image";
+import { isHttpUrl } from "@/lib/utils/storage-tier";
 
 export type KanbanBoardProps = {
   initialJobs: ProductionJobCard[];
@@ -312,17 +314,29 @@ export function KanbanBoard({
                                     </span>
                                   </div>
 
-                                  {(job.attachment_paths?.length ?? 0) > 0 ? (
+                                  {(job.display_attachment_urls?.length ?? 0) > 0 ||
+                                  job.storage_tier === "NAS" ? (
                                     <div className="mt-2 flex items-center gap-2">
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img
-                                        src={job.attachment_paths[0]}
-                                        alt=""
-                                        className="h-10 w-10 shrink-0 rounded-md border border-slate-200 object-cover"
-                                      />
+                                      <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md border border-slate-200">
+                                        <TieredStorageImage
+                                          src={job.display_attachment_urls[0] ?? null}
+                                          alt={`Mockup ${job.job_no}`}
+                                          storageTier={job.storage_tier}
+                                          nasPath={
+                                            job.storage_tier === "NAS" &&
+                                            !isHttpUrl(job.display_attachment_urls[0])
+                                              ? job.nas_archive_url
+                                              : null
+                                          }
+                                          fill
+                                          sizes="40px"
+                                          objectFit="cover"
+                                          className="rounded-md"
+                                        />
+                                      </div>
                                       <span className="inline-flex items-center gap-1 rounded-md bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 ring-1 ring-violet-100">
                                         <Paperclip className="h-3 w-3" />
-                                        {job.attachment_paths.length}
+                                        {job.display_attachment_urls.length || 1}
                                       </span>
                                     </div>
                                   ) : null}

@@ -3,6 +3,7 @@
  */
 
 import type { Database } from "@/src/types/supabase";
+import type { StorageTier } from "@/types/storage-tier";
 
 export type ProductionJobType =
   Database["public"]["Enums"]["production_job_type"];
@@ -27,8 +28,16 @@ export type ProductionJobCard = {
   status: ProductionJobStatus;
   due_date: string | null;
   details: string | null;
-  /** Public URLs / storage paths of mockup images */
+  /** Raw Storage URLs (CLOUD) — keep for uploads / audit */
   attachment_paths: string[];
+  /** Phase 14 Tiered Storage */
+  storage_tier: StorageTier;
+  nas_archive_url: string | null;
+  /**
+   * Display URLs resolved on Server (CLOUD → attachment_paths, NAS → nas_archive_url).
+   * Client must render these — Zero Client-Side Fetching.
+   */
+  display_attachment_urls: string[];
   created_at: string | null;
   updated_at: string | null;
   document_id: string | null;

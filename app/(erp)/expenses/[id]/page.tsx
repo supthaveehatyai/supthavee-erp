@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Receipt } from "lucide-react";
 import { getBankAccounts, getExpenseById } from "@/app/actions/expenses";
+import { getPaymentSlipStorageMeta } from "@/app/actions/payment-slips";
 import { hasFixedAssetForExpense } from "@/app/actions/fixed-assets";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -130,6 +131,10 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
   const canCapitalize =
     (statusNormalized === "ISSUED" || statusNormalized === "PAID") &&
     isAssetClearingCategory(expense.category_name);
+
+  const paymentSlipMeta = await getPaymentSlipStorageMeta(
+    expense.payment_slip_url,
+  );
 
   return (
     <div className="flex flex-col gap-6 p-6 print:gap-0 print:p-0">
@@ -392,6 +397,8 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
               emptyLabel="ไม่มีสลิปโอนเงินแนบ"
               fileLabel="ไฟล์แนบสลิปโอนเงิน"
               viewFullLabel="ดูสลิปเต็มจอ"
+              storageTier={paymentSlipMeta.storage_tier}
+              nasArchiveUrl={paymentSlipMeta.nas_archive_url}
             />
           </CardContent>
         </Card>

@@ -27,6 +27,10 @@
 # Phase 9 local disaster-recovery dumps (never commit)
 /backups/
 
+# Phase 14 NAS cold archive local store (never commit)
+/nas_storage/
+
+
 # Cloud Master Data review dump (may contain production contacts / bank accounts)
 /cloud_master_data.sql
 

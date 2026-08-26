@@ -26,7 +26,7 @@
 - `products` (สินค้า SKU ย่อย - Phase 2)
 - `vendor_product_mapping` (การผูกรหัสสินค้าซัพพลายเออร์)
 - `inventory_ledger` (สมุดบัญชีคลังสินค้า - ควบคุมการเข้าออกสต็อก)
-- `production_jobs` (ใบสั่งผลิต / งาน MTO — *อัปเดต: ยกเลิกการเก็บ technician_id และ wage_cost ที่ตารางนี้ ย้ายไประดับ Line Item แทน*)
+- `production_jobs` (ใบสั่งผลิต / งาน MTO — *อัปเดต: ยกเลิกการเก็บ technician_id และ wage_cost ที่ตารางนี้ ย้ายไประดับ Line Item แทน*; Phase 14 Tiered Storage: `storage_tier` ENUM `storage_tier_type` ('CLOUD','NAS') default CLOUD, `nas_archive_url`)
 - `service_tracking` (ติดตามสถานะงานบริการ)
 - `technician_rates` (เรตค่าแรงช่าง — FK `service_model_id` → `product_models.id`, `technician_id` → `contacts.id`)
 
@@ -48,7 +48,7 @@
 - `asset_depreciation_ledger` (สมุดค่าเสื่อมรายเดือน — `asset_id`, `period_id` → `accounting_periods`, `depreciation_date`, `depreciation_amount`, `accumulated_depreciation`, `net_book_value`, `is_prorated`)
 - `payment_transactions` (ธุรกรรมการรับ/จ่าย)
 - `payment_allocations` (การตัดยอดหนี้ Knock-off)
-- `payment_slips` (สลิปโอนเงิน)
+- `payment_slips` (สลิปโอนเงิน — Phase 14 Tiered Storage: `storage_tier` ENUM `storage_tier_type` ('CLOUD','NAS') default CLOUD, `nas_archive_url`)
 
 ## 5. System & Auditing (ระบบและการตรวจสอบ)
 - `audit_logs` (ประวัติการเปลี่ยนแปลงข้อมูล JSONB)
