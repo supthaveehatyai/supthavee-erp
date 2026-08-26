@@ -15,8 +15,8 @@
 ## 2. Core Entities (องค์กร, ผู้ใช้, ตั้งค่า)
 - `contacts` (คู่ค้า Multi-Role: `contact_roles` VARCHAR[] เท่านั้น)
 - `contact_persons` (ผู้ติดต่อภายใต้คู่ค้า)
-- `user_profiles` (โปรไฟล์พนักงาน/ผู้ใช้งาน — `data_access_scope`, `approval_limit`)
-- `app_roles` (สิทธิ์การใช้งาน Dynamic RBAC — `accessible_modules` JSONB)
+- `user_profiles` (โปรไฟล์พนักงาน/ผู้ใช้งาน — มี `data_access_scope`, `approval_limit`)
+- `app_roles` (สิทธิ์การใช้งาน Dynamic RBAC — มี `accessible_modules` JSONB)
 - `system_settings` (ตั้งค่าระบบบริษัท Singleton)
 
 ## 3. Products, Inventory & Production (สินค้า, คลัง, ผลิต)
@@ -33,7 +33,7 @@
 - **SO (ใบสั่งขาย):** ใช้ยืนยันคำสั่งซื้อ, จองสต็อก (Soft Allocation / ATP)
 - **Inventory Adjustments:** `STK_OB` และ `STK_ADJ` บันทึกผ่าน `inventory_ledger`
 - **Period Closing:** ฟังก์ชัน `is_period_closed(doc_date)`
-- `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — `created_by` stamp จาก Auth Session)
+- `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — มีฟิลด์ `created_by` เก็บ Auth Session UUID)
 - `document_items` (รายการสินค้าในเอกสาร)
 - `document_allocations` (การจัดสรรเอกสาร เช่น ตัดมัดจำ)
 - `billing_note_items` (รายการใบวางบิล)
@@ -42,7 +42,7 @@
 - `approval_logs` (Phase 14 Maker-Checker — ประวัติอนุมัติ/ปฏิเสธ)
 - `accounting_periods` (งวดบัญชีรายเดือน)
 - `fixed_assets` (ทะเบียนสินทรัพย์ถาวร — `asset_code`, `asset_name`, `category_id`, `acquisition_date`, `acquisition_cost`, `salvage_value`, `useful_life_months`, `status`, `expense_id`)
-- `asset_depreciation_ledger` (สมุดค่าเสื่อมรายเดือน — `asset_id`, `period_id`, `depreciation_date`, `depreciation_amount`, `accumulated_depreciation`, `net_book_value`)
+- `asset_depreciation_ledger` (สมุดบันทึกค่าเสื่อมราคา — `asset_id`, `period_id`, `depreciation_date`, `depreciation_amount`, `accumulated_depreciation`, `net_book_value`)
 - `payment_transactions` (ธุรกรรมการรับ/จ่าย)
 - `payment_allocations` (การตัดยอดหนี้ Knock-off — `expense_id`, `document_id`)
 - `payment_slips` (สลิปโอนเงิน)
