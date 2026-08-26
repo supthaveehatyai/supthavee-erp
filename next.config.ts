@@ -1,6 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  /**
+   * Vercel Output File Tracing: backup Server Action exec's `node scripts/backup/*.mjs`
+   * via dynamic path — NFT cannot detect those files automatically.
+   * Include the whole backup folder in server traces (dashboard + global fallback).
+   */
+  outputFileTracingIncludes: {
+    "/dashboard": ["./scripts/backup/**/*"],
+    "/*": ["./scripts/backup/**/*"],
+  },
   experimental: {
     serverActions: {
       // Expense OCR FormData (compressed image) — avoid 413 on Vercel
