@@ -15,6 +15,9 @@ import { ExecutiveDashboard } from "./executive-dashboard";
 
 export const dynamic = "force-dynamic";
 
+/** Manual Backup may run DB + Storage scripts */
+export const maxDuration = 60;
+
 export const metadata: Metadata = {
   title: "Executive Dashboard",
 };

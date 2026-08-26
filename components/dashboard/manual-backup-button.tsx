@@ -37,8 +37,12 @@ export function ManualBackupButton() {
 
         router.refresh();
       } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : "สำรองข้อมูลไม่สำเร็จ";
         toast.error(
-          err instanceof Error ? err.message : "สำรองข้อมูลไม่สำเร็จ",
+          msg === "Forbidden"
+            ? "Forbidden: ไม่มีสิทธิ์ Manual Backup (ต้องเป็น Admin หรือมีโมดูล settings)"
+            : msg,
         );
       }
     });
