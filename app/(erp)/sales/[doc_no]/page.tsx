@@ -18,6 +18,7 @@ import { DepositAllocationHistoryTable } from "@/components/finance/DepositAlloc
 import { DepositBalanceActions } from "@/components/finance/DepositBalanceActions";
 import { ReferenceDocumentsSection } from "@/components/finance/ReferenceDocumentsSection";
 import { AttachmentSheetViewer } from "@/components/shared/attachment-sheet-viewer";
+import { getPaymentTransactionStorageMetaByDocumentId } from "@/app/actions/payment-slips";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -201,8 +202,17 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   const depositHistoryResult = isDepositDoc
     ? await getDepositAllocationHistory(doc.id)
     : { data: [], error: null };
-  const slipUrl =
+  const docSlipFallback =
     doc.attachment_url?.trim() || doc.attached_file_url?.trim() || "";
+  const slipMeta = await getPaymentTransactionStorageMetaByDocumentId(
+    doc.id,
+    docSlipFallback || null,
+  );
+  const slipUrl = slipMeta.display_url ?? "";
+  const showSlipViewer =
+    slipMeta.storage_tier === "NAS" ||
+    Boolean(slipUrl) ||
+    Boolean(docSlipFallback);
   const canIssue = doc.status === "DRAFT";
   const canPrint =
     isReceiptDoc ||
@@ -485,9 +495,11 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                       emphasize
                     />
                   </div>
-                  {slipUrl ? (
+                  {showSlipViewer ? (
                     <AttachmentSheetViewer
                       fileUrl={slipUrl}
+                      storageTier={slipMeta.storage_tier}
+                      nasPath={slipMeta.nas_path}
                       title={`สลิปโอนเงิน · ${doc.doc_no}`}
                       trigger={
                         <button
@@ -571,9 +583,11 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                   </div>
                 </>
               )}
-              {slipUrl && !isSettlementDoc ? (
+              {showSlipViewer && !isSettlementDoc ? (
                 <AttachmentSheetViewer
                   fileUrl={slipUrl}
+                  storageTier={slipMeta.storage_tier}
+                  nasPath={slipMeta.nas_path}
                   title={`สลิปโอนเงิน · ${doc.doc_no}`}
                   trigger={
                     <button

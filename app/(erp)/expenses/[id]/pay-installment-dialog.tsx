@@ -7,7 +7,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ExternalLink, Loader2 } from "lucide-react";
+import { ExternalLink, HardDrive, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { payExpenseInstallment } from "@/app/actions/expenses";
 import { Badge } from "@/components/ui/badge";
@@ -74,7 +74,15 @@ export function ExpenseInstallmentPayCell({
         <span className="text-[11px] text-slate-500">
           {formatPaidDate(installment.paid_date)}
         </span>
-        {installment.slip_url ? (
+        {installment.storage_tier === "NAS" ? (
+          <span
+            className="inline-flex max-w-[140px] flex-col items-center gap-0.5 text-[11px] font-semibold text-amber-800"
+            title={installment.slip_nas_path ?? installment.nas_archive_url ?? undefined}
+          >
+            <HardDrive className="h-3.5 w-3.5" />
+            เก็บบน NAS
+          </span>
+        ) : installment.slip_url ? (
           <a
             href={installment.slip_url}
             target="_blank"

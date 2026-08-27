@@ -3,10 +3,11 @@
 /**
  * Slide-over attachment viewer (payment slips / file previews).
  * Opens from the right via shadcn Sheet — no new browser tab.
+ * Phase 14: NAS offline path when storage_tier = NAS.
  */
 
 import { useState, type ReactNode } from "react";
-import { FileText, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import { FileText, HardDrive, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { TieredStorageImage } from "@/components/shared/tiered-storage-image";
 import type { StorageTier } from "@/types/storage-tier";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,8 @@ export type AttachmentSheetViewerProps = {
   trigger: ReactNode;
   /** Phase 14 — badge / offline NAS handling */
   storageTier?: StorageTier | null;
+  /** Raw NAS path label when tier = NAS and fileUrl is not browsable */
+  nasPath?: string | null;
 };
 
 const ZOOM_MIN = 0.5;
@@ -40,7 +43,6 @@ function isProbablyImageUrl(url: string): boolean {
   const path = url.split("?")[0]?.toLowerCase() ?? "";
   if (isProbablyPdfUrl(url)) return false;
   if (/\.(jpe?g|png|webp|gif|bmp|svg)$/i.test(path)) return true;
-  // Common ERP Storage path hints (slips / expense docs / production)
   return (
     path.includes("/slip-") ||
     path.includes("/exp-") ||
@@ -57,15 +59,18 @@ export function AttachmentSheetViewer({
   title,
   trigger,
   storageTier = "CLOUD",
+  nasPath = null,
 }: AttachmentSheetViewerProps) {
   const [open, setOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
 
   const url = fileUrl?.trim() ?? "";
-  if (!url) return null;
+  const tier = storageTier === "NAS" ? "NAS" : "CLOUD";
+  if (!url && tier !== "NAS") return null;
 
-  const showImage = isProbablyImageUrl(url);
-  const showPdf = !showImage && isProbablyPdfUrl(url);
+  const showImage = Boolean(url) && isProbablyImageUrl(url);
+  const showPdf = Boolean(url) && !showImage && isProbablyPdfUrl(url);
+  const showNasOffline = tier === "NAS" && !url;
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
@@ -88,11 +93,13 @@ export function AttachmentSheetViewer({
         <SheetHeader className="shrink-0">
           <SheetTitle>{title}</SheetTitle>
           <SheetDescription>
-            {showImage
-              ? "ย่อพอดีจออัตโนมัติ · ซูมขยายได้ถ้าต้องการ"
-              : showPdf
-                ? "แสดงไฟล์ PDF ในแผงด้านข้าง"
-                : "ดูไฟล์แนบในแผงด้านข้าง"}
+            {showNasOffline
+              ? "ไฟล์ถูกเก็บถาวรบน NAS — เปิดจากเครื่องสาขา"
+              : showImage
+                ? "ย่อพอดีจออัตโนมัติ · ซูมขยายได้ถ้าต้องการ"
+                : showPdf
+                  ? "แสดงไฟล์ PDF ในแผงด้านข้าง"
+                  : "ดูไฟล์แนบในแผงด้านข้าง"}
           </SheetDescription>
         </SheetHeader>
 
@@ -135,7 +142,19 @@ export function AttachmentSheetViewer({
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-hidden px-4 pb-4">
-          {showImage ? (
+          {showNasOffline ? (
+            <div className="mt-4 flex h-[calc(100vh-120px)] flex-col items-center justify-center gap-3 rounded-md border border-amber-200 bg-amber-50 p-8 text-center">
+              <HardDrive className="size-10 text-amber-700" />
+              <p className="text-sm font-semibold text-amber-900">
+                สลิปถูกเก็บถาวรบน NAS
+              </p>
+              {nasPath ? (
+                <p className="max-w-full break-all text-xs text-amber-800/80">
+                  {nasPath}
+                </p>
+              ) : null}
+            </div>
+          ) : showImage ? (
             <div className="relative mt-4 flex h-[calc(100vh-120px)] w-full items-center justify-center overflow-hidden rounded-md border border-slate-100 bg-slate-50/50 p-2">
               <div
                 className="relative h-full w-full"
@@ -151,11 +170,12 @@ export function AttachmentSheetViewer({
                 <TieredStorageImage
                   src={url}
                   alt={title}
-                  storageTier={storageTier}
+                  storageTier={tier}
+                  nasPath={nasPath}
                   fill
                   sizes="(max-width: 768px) 100vw, 640px"
                   objectFit="contain"
-                  showTierBadge={storageTier === "NAS"}
+                  showTierBadge={tier === "NAS"}
                 />
               </div>
             </div>
@@ -173,14 +193,16 @@ export function AttachmentSheetViewer({
               <p className="text-sm text-slate-600">
                 ไม่สามารถแสดงตัวอย่างไฟล์นี้ในแผงด้านข้างได้
               </p>
-              <a
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm font-semibold text-blue-700 underline-offset-2 hover:underline"
-              >
-                เปิดไฟล์ต้นฉบับ
-              </a>
+              {url ? (
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm font-semibold text-blue-700 underline-offset-2 hover:underline"
+                >
+                  เปิดไฟล์ต้นฉบับ
+                </a>
+              ) : null}
             </div>
           )}
         </div>

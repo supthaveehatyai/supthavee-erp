@@ -4,6 +4,8 @@
  * exports from Server Action files.
  */
 
+import type { StorageTier } from "@/types/storage-tier";
+
 export type ExpenseCategory = {
   id: string;
   category_name: string;
@@ -63,8 +65,12 @@ export type ExpenseInstallmentRow = ExpenseInstallmentInput & {
   is_paid: boolean;
   paid_date: string | null;
   payment_transaction_id: string | null;
-  /** From payment_transactions.attachment_url when paid */
+  /** Resolved display URL (CLOUD attachment or NAS http gateway) */
   slip_url: string | null;
+  /** Phase 14 — from payment_transactions */
+  storage_tier?: StorageTier | null;
+  nas_archive_url?: string | null;
+  slip_nas_path?: string | null;
 };
 
 export type PayExpenseInstallmentPayload = {

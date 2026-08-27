@@ -18,6 +18,7 @@ import PrintDocumentTemplate from "@/components/sales/print-document-template";
 import PrintSettlementVoucherTemplate from "@/components/finance/PrintSettlementVoucherTemplate";
 import { ReferenceDocumentsSection } from "@/components/finance/ReferenceDocumentsSection";
 import { AttachmentSheetViewer } from "@/components/shared/attachment-sheet-viewer";
+import { getPaymentTransactionStorageMetaByDocumentId } from "@/app/actions/payment-slips";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -87,6 +88,11 @@ function resolveSlipUrl(doc: DocumentDetail): string | null {
   const url =
     doc.attachment_url?.trim() || doc.attached_file_url?.trim() || "";
   return url || null;
+}
+
+async function resolveDocumentSlipMeta(doc: DocumentDetail) {
+  const fallback = resolveSlipUrl(doc);
+  return getPaymentTransactionStorageMetaByDocumentId(doc.id, fallback);
 }
 
 function extractSettlementRemark(notes: string | null | undefined): string {
@@ -187,7 +193,12 @@ export default async function PurchaseDocumentDetailPage({
         : vatType === "EXCLUSIVE"
           ? `แยก VAT ${vatRate}%`
           : String(vatType);
-  const slipUrl = resolveSlipUrl(doc);
+  const slipMeta = await resolveDocumentSlipMeta(doc);
+  const slipUrl = slipMeta.display_url ?? "";
+  const showSlipViewer =
+    slipMeta.storage_tier === "NAS" ||
+    Boolean(slipUrl) ||
+    Boolean(resolveSlipUrl(doc));
   const settlementTitle =
     doc.doc_type === "AP_REFUND"
       ? "ใบสำคัญรับเงินคืน (Refund Receipt)"
@@ -419,9 +430,11 @@ export default async function PurchaseDocumentDetailPage({
               </>
             )}
 
-            {slipUrl ? (
+            {showSlipViewer ? (
               <AttachmentSheetViewer
                 fileUrl={slipUrl}
+                storageTier={slipMeta.storage_tier}
+                nasPath={slipMeta.nas_path}
                 title={`สลิปโอนเงิน · ${doc.doc_no}`}
                 trigger={
                   <button

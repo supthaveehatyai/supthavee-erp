@@ -27,6 +27,7 @@ import {
   exceedsApprovalLimit,
 } from "@/lib/approval/approval-rules";
 import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
+import { resolveStorageDisplayUrl } from "@/lib/utils/storage-tier";
 import type {
   CreateDraftExpenseInput,
   CreateDraftExpenseResult,
@@ -1565,11 +1566,19 @@ export async function getExpenseById(
       ),
     );
 
-    const slipByTxId = new Map<string, string | null>();
+    const slipByTxId = new Map<
+      string,
+      {
+        slip_url: string | null;
+        storage_tier: "CLOUD" | "NAS";
+        nas_archive_url: string | null;
+        slip_nas_path: string | null;
+      }
+    >();
     if (txIds.length > 0) {
       const { data: txRows, error: txError } = await supabaseAdmin
         .from("payment_transactions")
-        .select("id, attachment_url")
+        .select("id, attachment_url, storage_tier, nas_archive_url")
         .in("id", txIds);
 
       if (txError) {
@@ -1578,10 +1587,26 @@ export async function getExpenseById(
       }
 
       for (const tx of txRows ?? []) {
-        slipByTxId.set(
-          String(tx.id),
-          tx.attachment_url == null ? null : String(tx.attachment_url),
-        );
+        const attachment_url =
+          tx.attachment_url == null ? null : String(tx.attachment_url);
+        const storage_tier = tx.storage_tier === "NAS" ? "NAS" : "CLOUD";
+        const nas_archive_url =
+          tx.nas_archive_url == null
+            ? null
+            : String(tx.nas_archive_url).trim() || null;
+
+        const resolved = resolveStorageDisplayUrl({
+          storageTier: storage_tier,
+          cloudUrl: attachment_url,
+          nasArchiveUrl: nas_archive_url,
+        });
+
+        slipByTxId.set(String(tx.id), {
+          slip_url: resolved.url ?? attachment_url,
+          storage_tier: resolved.tier,
+          nas_archive_url,
+          slip_nas_path: resolved.nasPath,
+        });
       }
     }
 
@@ -1594,9 +1619,13 @@ export async function getExpenseById(
         installments: (installmentRows ?? []).map((row) => {
           const mapped = mapInstallmentRow(row as Record<string, unknown>);
           const txId = mapped.payment_transaction_id;
+          const slipMeta = txId ? slipByTxId.get(txId) : undefined;
           return {
             ...mapped,
-            slip_url: txId ? (slipByTxId.get(txId) ?? null) : null,
+            slip_url: slipMeta?.slip_url ?? null,
+            storage_tier: slipMeta?.storage_tier ?? "CLOUD",
+            nas_archive_url: slipMeta?.nas_archive_url ?? null,
+            slip_nas_path: slipMeta?.slip_nas_path ?? null,
           };
         }),
       },

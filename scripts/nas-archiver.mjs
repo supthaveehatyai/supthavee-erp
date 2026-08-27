@@ -1,6 +1,6 @@
 /**
  * scripts/nas-archiver.mjs
- * Phase 14 — Local Worker: archive cold payment_slips from Supabase Storage → NAS disk
+ * Phase 14 — Local Worker: archive cold payment_transactions from Supabase Storage → NAS disk
  *
  * Safety rule (STRICT):
  *   Download + verify MUST succeed before UPDATE DB or DELETE from Cloud.
@@ -33,7 +33,11 @@ checkEnv(["NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]);
 const DRY_RUN = process.env.ARCHIVE_DRY_RUN === "1";
 const COLD_AGE_DAYS = Number(process.env.ARCHIVE_COLD_AGE_DAYS || 365);
 const BATCH_LIMIT = Number(process.env.ARCHIVE_BATCH_LIMIT || 200);
-const LOCAL_SLIPS_DIR = path.resolve(PROJECT_ROOT, "nas_storage", "slips");
+const LOCAL_ATTACHMENTS_DIR = path.resolve(
+  PROJECT_ROOT,
+  "nas_storage",
+  "payment_transactions",
+);
 
 /**
  * Force Service Role only — never fall back to Anon Key (RLS would hide rows).
@@ -76,7 +80,6 @@ function createServiceRoleClient() {
 }
 
 const supabase = createServiceRoleClient();
-
 
 /**
  * Parse Supabase public Storage URL → { bucket, objectPath }
@@ -124,7 +127,6 @@ function localRelativeNasUrl(absolutePath) {
     .join("/");
 }
 
-
 /**
  * Download Storage object → local file, verify size > 0.
  * Throws on failure (caller must NOT update DB / delete cloud).
@@ -162,7 +164,9 @@ async function downloadToLocal({ bucket, objectPath, destPath }) {
     await pipeline(nodeStream, fs.createWriteStream(tmpPath));
     const stat = fs.statSync(tmpPath);
     if (!stat.isFile() || stat.size <= 0) {
-      throw new Error("local file empty or missing after download (" + tmpPath + ")");
+      throw new Error(
+        "local file empty or missing after download (" + tmpPath + ")",
+      );
     }
     fs.renameSync(tmpPath, destPath);
     return { bytes: stat.size };
@@ -178,7 +182,7 @@ async function downloadToLocal({ bucket, objectPath, destPath }) {
 
 async function markAsNas(rowId, nasArchiveUrl) {
   const { error } = await supabase
-    .from("payment_slips")
+    .from("payment_transactions")
     .update({
       storage_tier: "NAS",
       nas_archive_url: nasArchiveUrl,
@@ -191,74 +195,84 @@ async function markAsNas(rowId, nasArchiveUrl) {
   }
 }
 
-async function deleteCloudObject(bucket, objectPath) {
+async function deleteCloudObjectFromAttachmentUrl(attachmentUrl) {
+  const parsed = parseStoragePublicUrl(attachmentUrl);
+  if (!parsed) {
+    throw new Error(
+      "cannot parse attachment_url for cloud delete: " +
+        String(attachmentUrl).slice(0, 120),
+    );
+  }
+
+  const { bucket, objectPath } = parsed;
   const { error } = await supabase.storage.from(bucket).remove([objectPath]);
   if (error) {
     throw new Error("storage.remove failed: " + error.message);
   }
+
+  return { bucket, objectPath };
 }
 
 /**
  * [Debug] Unfiltered row count — proves Service Role can see the whole table.
  */
-async function debugPaymentSlipsTotalCount() {
+async function debugPaymentTransactionsTotalCount() {
   const { count, error } = await supabase
-    .from("payment_slips")
+    .from("payment_transactions")
     .select("*", { count: "exact", head: true });
 
   if (error) {
     console.error(
-      "❌ [Debug] payment_slips total count failed:",
+      "❌ [Debug] payment_transactions total count failed:",
       error.message,
     );
-    throw new Error("Debug count payment_slips failed: " + error.message);
+    throw new Error("Debug count payment_transactions failed: " + error.message);
   }
 
   console.log(
-    "[Debug] payment_slips total rows (no filters, Service Role): " +
+    "[Debug] payment_transactions total rows (no filters, Service Role): " +
       (count ?? 0),
   );
   return count ?? 0;
 }
 
-async function fetchColdCloudSlips() {
+async function fetchColdCloudTransactions() {
   const cutoff = coldCutoffIso(COLD_AGE_DAYS);
 
-  // Schema: storage_tier_type ENUM = 'CLOUD' | 'NAS' (docs/database-schema.md)
+  // Schema: storage_tier_type ENUM = 'CLOUD' | 'NAS', attachment_url TEXT
   const { data, error } = await supabase
-    .from("payment_slips")
+    .from("payment_transactions")
     .select(
-      "id, created_at, slip_image_url, storage_tier, nas_archive_url, reference_no",
+      "id, created_at, attachment_url, storage_tier, nas_archive_url, reference_no",
     )
     .eq("storage_tier", "CLOUD")
     .lt("created_at", cutoff)
-    .not("slip_image_url", "is", null)
+    .not("attachment_url", "is", null)
     .order("created_at", { ascending: true })
     .limit(BATCH_LIMIT);
 
   if (error) {
-    throw new Error("Query payment_slips failed: " + error.message);
+    throw new Error("Query payment_transactions failed: " + error.message);
   }
 
   return data ?? [];
 }
 
-
 async function archiveOne(row) {
   const id = row.id;
-  const cloudUrl = (row.slip_image_url || "").trim();
+  const attachmentUrl = (row.attachment_url || "").trim();
 
-  if (!cloudUrl) {
-    return { status: "skipped", reason: "empty slip_image_url" };
+  if (!attachmentUrl) {
+    return { status: "skipped", reason: "empty attachment_url" };
   }
 
-  const parsed = parseStoragePublicUrl(cloudUrl);
+  const parsed = parseStoragePublicUrl(attachmentUrl);
   if (!parsed) {
     return {
       status: "skipped",
       reason:
-        "unparseable slip_image_url (need /storage/v1/object/public/...): " +
-        cloudUrl.slice(0, 120),
+        "unparseable attachment_url (need /storage/v1/object/public/...): " +
+        attachmentUrl.slice(0, 120),
     };
   }
 
@@ -267,14 +281,19 @@ async function archiveOne(row) {
   const created = row.created_at ? new Date(row.created_at) : new Date();
   const yyyy = String(created.getUTCFullYear());
   const mm = String(created.getUTCMonth() + 1).padStart(2, "0");
-  const destPath = path.join(LOCAL_SLIPS_DIR, yyyy, mm, id + "_" + baseName);
+  const destPath = path.join(
+    LOCAL_ATTACHMENTS_DIR,
+    yyyy,
+    mm,
+    id + "_" + baseName,
+  );
   const nasArchiveUrl = localRelativeNasUrl(destPath);
 
   if (DRY_RUN) {
     console.log(
       "   [DRY] would archive " +
         id +
-        "  " +
+        "  attachment_url → " +
         bucket +
         "/" +
         objectPath +
@@ -294,10 +313,11 @@ async function archiveOne(row) {
       reason: err.message,
       bucket,
       objectPath,
+      attachmentUrl,
     };
   }
 
-  // Step 2: Update DB (only after verified local file)
+  // Step 2: Update payment_transactions (only after verified local file)
   try {
     await markAsNas(id, nasArchiveUrl);
   } catch (err) {
@@ -306,18 +326,20 @@ async function archiveOne(row) {
       reason: err.message,
       localPath: destPath,
       bytes: downloadResult.bytes,
+      attachmentUrl,
     };
   }
 
-  // Step 3: Delete cloud object (only after DB commit)
+  // Step 3: Delete cloud object from attachment_url (only after DB commit)
   try {
-    await deleteCloudObject(bucket, objectPath);
+    await deleteCloudObjectFromAttachmentUrl(attachmentUrl);
   } catch (err) {
     return {
       status: "cloud_delete_failed",
       reason: err.message,
       nasArchiveUrl,
       bytes: downloadResult.bytes,
+      attachmentUrl,
     };
   }
 
@@ -327,27 +349,29 @@ async function archiveOne(row) {
     bytes: downloadResult.bytes,
     bucket,
     objectPath,
+    attachmentUrl,
   };
 }
 
-
 async function main() {
-  console.log("🚀 [NAS Archiver] Phase 14 — payment_slips cold archive");
+  console.log(
+    "🚀 [NAS Archiver] Phase 14 — payment_transactions cold archive",
+  );
   console.log("   DRY_RUN=" + (DRY_RUN ? "1" : "0"));
   console.log("   COLD_AGE_DAYS=" + COLD_AGE_DAYS);
   console.log("   BATCH_LIMIT=" + BATCH_LIMIT);
-  console.log("   LOCAL_DIR=" + LOCAL_SLIPS_DIR);
+  console.log("   LOCAL_DIR=" + LOCAL_ATTACHMENTS_DIR);
   console.log("   CUTOFF=< " + coldCutoffIso(COLD_AGE_DAYS));
 
-  ensureDir(LOCAL_SLIPS_DIR);
+  ensureDir(LOCAL_ATTACHMENTS_DIR);
 
   // [Debug] before filtered fetch — verify Service Role visibility
-  await debugPaymentSlipsTotalCount();
+  await debugPaymentTransactionsTotalCount();
 
-  const rows = await fetchColdCloudSlips();
+  const rows = await fetchColdCloudTransactions();
   console.log("\n📋 Candidates: " + rows.length + " row(s)");
   console.log(
-    "   (filters: storage_tier='CLOUD' AND created_at < cutoff AND slip_image_url IS NOT NULL)\n",
+    "   (filters: storage_tier='CLOUD' AND created_at < cutoff AND attachment_url IS NOT NULL)\n",
   );
 
   const summary = {

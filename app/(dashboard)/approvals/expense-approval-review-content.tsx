@@ -115,7 +115,9 @@ function ExpenseReviewBody({
             สลิปโอนเงิน (Payment Slip)
           </p>
           <ExpenseAttachmentPreview
-            url={expense.payment_slip_url}
+            url={
+              paymentSlipMeta.attachment_url ?? expense.payment_slip_url
+            }
             documentNo={expense.document_no}
             title="สลิปโอนเงิน"
             emptyLabel="ไม่มีสลิปโอนเงิน"

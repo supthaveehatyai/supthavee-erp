@@ -28,7 +28,7 @@ export type ExpenseAttachmentPreviewProps = {
   fileLabel?: string;
   /** Full-size button label when image */
   viewFullLabel?: string;
-  /** Phase 14 Tiered Storage — from payment_slips (Server-resolved props) */
+  /** Phase 14 Tiered Storage — from payment_transactions (Server-resolved props) */
   storageTier?: StorageTier | null;
   nasArchiveUrl?: string | null;
 };
