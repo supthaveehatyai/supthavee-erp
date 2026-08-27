@@ -1,12 +1,12 @@
 ﻿/**
  * Phase 9 / 14 — Manual Backup Request Server Action (Executive Dashboard).
- * Vercel ไม่รองรับ pg_dump / child_process backup scripts —
- * Action นี้บันทึกคำขอลง audit_logs เท่านั้น (รัน backup จริงที่ office/NAS แยกต่างหาก).
- * Zero Client-Side Fetching: Auth Session (SSR) + Service Role for admin DB tasks.
+ * Vercel ไม่รองรับ pg_dump — บันทึกคำขอลง audit_logs เท่านั้น (Service Role ทะลุ RLS).
+ * Zero Client-Side Fetching: Auth Session (SSR) + supabaseAdmin for writes.
  */
 
 "use server";
 
+import { revalidatePath } from "next/cache";
 import {
   isAdminRoleCode,
   parseAccessibleModules,
@@ -20,6 +20,9 @@ export type TriggerManualBackupResult = {
   error?: string | null;
 };
 
+const MANUAL_BACKUP_DR_MESSAGE =
+  "แจ้งเตือน: การสำรองข้อมูลระดับ Database (Disaster Recovery) ไม่สามารถรันบน Cloud ได้ กรุณารันสคริปต์ npm run backup:db และ npm run backup:storage ที่เครื่อง Server สาขาหาดใหญ่โดยตรง เพื่อความปลอดภัยของข้อมูล";
+
 type RoleModulesJoin =
   | { accessible_modules: unknown }
   | { accessible_modules: unknown }[]
@@ -31,11 +34,14 @@ function unwrapRoleModules(join: RoleModulesJoin): unknown {
   return join.accessible_modules ?? null;
 }
 
-type BackupAuthContext = {
+type AuthSuccess = {
+  ok: true;
   userId: string;
-  email: string | null;
-  displayName: string;
-  roleCode: string | null;
+};
+
+type AuthFailure = {
+  ok: false;
+  error: string;
 };
 
 /**
@@ -44,7 +50,7 @@ type BackupAuthContext = {
  * 2) user_profiles ⋈ app_roles (Service Role)
  * 3) Allow when role is Admin OR accessible_modules.settings === true
  */
-async function assertManualBackupAuthorized(): Promise<BackupAuthContext> {
+async function resolveManualBackupAuth(): Promise<AuthSuccess | AuthFailure> {
   const supabaseAuth = await createSupabaseSSRClient();
   const {
     data: { user },
@@ -52,7 +58,7 @@ async function assertManualBackupAuthorized(): Promise<BackupAuthContext> {
   } = await supabaseAuth.auth.getUser();
 
   if (authError || !user?.id) {
-    throw new Error("Forbidden");
+    return { ok: false, error: "Forbidden" };
   }
 
   const supabaseAdmin = createSupabaseAdmin();
@@ -74,11 +80,11 @@ async function assertManualBackupAuthorized(): Promise<BackupAuthContext> {
     .maybeSingle();
 
   if (profileError || !profile) {
-    throw new Error("Forbidden");
+    return { ok: false, error: "Forbidden" };
   }
 
   if (profile.is_active === false) {
-    throw new Error("Forbidden");
+    return { ok: false, error: "Forbidden" };
   }
 
   const roleCode =
@@ -95,80 +101,54 @@ async function assertManualBackupAuthorized(): Promise<BackupAuthContext> {
   const canAccessSettings = modules.settings === true;
 
   if (!isHighLevelAdmin && !canAccessSettings) {
-    throw new Error("Forbidden");
+    return { ok: false, error: "Forbidden" };
   }
 
-  const displayName =
-    String(profile.full_name ?? "").trim() ||
-    String(profile.email ?? "").trim() ||
-    user.email?.trim() ||
-    "Admin";
-
-  return {
-    userId: user.id,
-    email: user.email ?? profile.email ?? null,
-    displayName,
-    roleCode,
-  };
+  return { ok: true, userId: user.id };
 }
 
 /**
- * บันทึกคำขอ Manual Backup จาก Cloud ลง audit_logs เท่านั้น
- * (ไม่รัน pg_dump / backup scripts บน Vercel)
+ * บันทึกคำขอ Manual Backup จาก Cloud ลง audit_logs (supabaseAdmin เท่านั้น)
  */
 export async function triggerManualBackup(): Promise<TriggerManualBackupResult> {
-  let actor: BackupAuthContext;
-
   try {
-    actor = await assertManualBackupAuthorized();
-  } catch {
-    throw new Error("Forbidden");
-  }
+    const auth = await resolveManualBackupAuth();
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
 
-  const supabaseAdmin = createSupabaseAdmin();
+    const supabaseAdmin = createSupabaseAdmin();
+    const timestamp = new Date().toISOString();
 
-  try {
     const { error: auditError } = await supabaseAdmin.from("audit_logs").insert({
+      // audit_logs.action เป็น ENUM (INSERT|UPDATE|DELETE) — เก็บ semantic action ใน new_data
       action: "INSERT",
-      table_name: "system_backups",
-      record_id: "MANUAL_BACKUP",
-      changed_by: actor.userId,
-      changed_by_name: actor.displayName,
-      old_data: {},
+      table_name: "system",
+      record_id: "N/A",
+      changed_by: auth.userId,
       new_data: {
-        event: "MANUAL_BACKUP_REQUESTED",
-        status: "REQUESTED",
-        message:
-          "ผู้ใช้กดปุ่มร้องขอการทำ Manual Backup จากระบบ Cloud",
-        timestamp: new Date().toISOString(),
-        triggered_by: actor.userId,
-        triggered_by_email: actor.email,
-        role_code: actor.roleCode,
-        source: "cloud",
+        action: "MANUAL_BACKUP_REQUEST",
+        status: "Requested Manual Backup via Dashboard",
+        timestamp,
       },
     });
 
     if (auditError) {
       console.error("Audit Log Error:", auditError);
-      return {
-        success: false,
-        error: `บันทึกคำขอ Backup ไม่สำเร็จ: ${auditError.message}`,
-      };
+      return { success: false, error: auditError.message };
     }
+
+    revalidatePath("/dashboard");
 
     return {
       success: true,
-      message:
-        "แจ้งเตือน: การสำรองข้อมูลระดับ Database (Disaster Recovery) ไม่สามารถรันบน Cloud ได้ กรุณารันสคริปต์ npm run backup:db และ npm run backup:storage ที่เครื่อง Server สาขาหาดใหญ่โดยตรง เพื่อความปลอดภัยของข้อมูล",
+      message: MANUAL_BACKUP_DR_MESSAGE,
     };
   } catch (error: unknown) {
     console.error("Manual Backup Request Error:", error);
     return {
       success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "บันทึกคำขอ Manual Backup ไม่สำเร็จ",
+      error: error instanceof Error ? error.message : "Unknown error",
     };
   }
 }

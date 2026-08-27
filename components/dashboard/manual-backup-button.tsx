@@ -28,7 +28,12 @@ export function ManualBackupButton() {
         const result = await triggerManualBackup();
 
         if (!result.success) {
-          toast.error(result.error ?? "บันทึกคำขอ Backup ไม่สำเร็จ");
+          const err = result.error ?? "บันทึกคำขอ Backup ไม่สำเร็จ";
+          toast.error(
+            err === "Forbidden"
+              ? "Forbidden: ไม่มีสิทธิ์ Manual Backup (ต้องเป็น Admin หรือมีโมดูล settings)"
+              : err,
+          );
           return;
         }
 
@@ -41,11 +46,7 @@ export function ManualBackupButton() {
       } catch (err) {
         const msg =
           err instanceof Error ? err.message : "บันทึกคำขอ Backup ไม่สำเร็จ";
-        toast.error(
-          msg === "Forbidden"
-            ? "Forbidden: ไม่มีสิทธิ์ Manual Backup (ต้องเป็น Admin หรือมีโมดูล settings)"
-            : msg,
-        );
+        toast.error(msg);
       }
     });
   }

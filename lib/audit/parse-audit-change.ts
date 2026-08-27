@@ -288,12 +288,20 @@ export function parseAuditChangeSummary(
       }
     }
 
-    // Phase 9 — Manual Backup request audit payload (Cloud → audit only)
+    // Phase 9 — Manual Backup request (Cloud → audit only)
     if (
-      newRec.action === "MANUAL_BACKUP_TRIGGERED" ||
-      newRec.event === "MANUAL_BACKUP_TRIGGERED" ||
-      newRec.event === "MANUAL_BACKUP_REQUESTED"
+      table === "system" ||
+      newRec.action === "MANUAL_BACKUP_REQUEST" ||
+      newRec.event === "MANUAL_BACKUP_REQUESTED" ||
+      newRec.event === "MANUAL_BACKUP_TRIGGERED"
     ) {
+      if (
+        newRec.status === "Requested Manual Backup via Dashboard" ||
+        newRec.action === "MANUAL_BACKUP_REQUEST"
+      ) {
+        return "ผู้ใช้กดปุ่มร้องขอการทำ Manual Backup จากระบบ Cloud";
+      }
+
       const status =
         typeof newRec.status === "string" ? newRec.status : "unknown";
       if (status === "failed" || status === "FAILED") {
@@ -303,10 +311,7 @@ export function parseAuditChangeSummary(
             : "—";
         return `Manual Backup ล้มเหลว · ${errMsg}`;
       }
-      if (
-        newRec.event === "MANUAL_BACKUP_REQUESTED" ||
-        status === "REQUESTED"
-      ) {
+      if (status === "REQUESTED") {
         return "ผู้ใช้กดปุ่มร้องขอการทำ Manual Backup จากระบบ Cloud";
       }
       return "Manual Backup สำเร็จ (Database + Storage)";
