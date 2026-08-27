@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * Phase 9 — Manual Backup button (Client island).
- * Calls Server Action `triggerManualBackup` only — Zero Client-Side Fetching.
- * Toast via sonner (project standard; no window.alert).
+ * Phase 9 — Manual Backup request button (Client island).
+ * Calls Server Action `triggerManualBackup` → audit_logs only (Zero Client-Side Fetching).
+ * Toast via sonner — แจ้งเตือนให้รัน backup ที่ Server สาขาหาดใหญ่
  */
 
 import { useTransition } from "react";
@@ -12,6 +12,9 @@ import { Database, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { triggerManualBackup } from "@/lib/actions/backup-actions";
+
+const FALLBACK_DR_WARNING =
+  "แจ้งเตือน: การสำรองข้อมูลระดับ Database (Disaster Recovery) ไม่สามารถรันบน Cloud ได้ กรุณารันสคริปต์ npm run backup:db และ npm run backup:storage ที่เครื่อง Server สาขาหาดใหญ่โดยตรง เพื่อความปลอดภัยของข้อมูล";
 
 export function ManualBackupButton() {
   const router = useRouter();
@@ -25,20 +28,19 @@ export function ManualBackupButton() {
         const result = await triggerManualBackup();
 
         if (!result.success) {
-          toast.error(result.error ?? "สำรองข้อมูลไม่สำเร็จ");
+          toast.error(result.error ?? "บันทึกคำขอ Backup ไม่สำเร็จ");
           return;
         }
 
-        if (result.error) {
-          toast.warning(result.error);
-        } else {
-          toast.success("สำรองข้อมูลสำเร็จ (Database + Storage)");
-        }
+        toast.warning(result.message ?? FALLBACK_DR_WARNING, {
+          duration: 15000,
+          description: "บันทึกคำขอลง Audit Log เรียบร้อยแล้ว",
+        });
 
         router.refresh();
       } catch (err) {
         const msg =
-          err instanceof Error ? err.message : "สำรองข้อมูลไม่สำเร็จ";
+          err instanceof Error ? err.message : "บันทึกคำขอ Backup ไม่สำเร็จ";
         toast.error(
           msg === "Forbidden"
             ? "Forbidden: ไม่มีสิทธิ์ Manual Backup (ต้องเป็น Admin หรือมีโมดูล settings)"
@@ -62,7 +64,7 @@ export function ManualBackupButton() {
       ) : (
         <Database className="size-4" />
       )}
-      {isPending ? "กำลังสำรองข้อมูล…" : "Manual Backup"}
+      {isPending ? "กำลังบันทึกคำขอ…" : "Manual Backup"}
     </Button>
   );
 }
