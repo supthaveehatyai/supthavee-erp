@@ -35,13 +35,47 @@ const COLD_AGE_DAYS = Number(process.env.ARCHIVE_COLD_AGE_DAYS || 365);
 const BATCH_LIMIT = Number(process.env.ARCHIVE_BATCH_LIMIT || 200);
 const LOCAL_SLIPS_DIR = path.resolve(PROJECT_ROOT, "nas_storage", "slips");
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
-  {
+/**
+ * Force Service Role only — never fall back to Anon Key (RLS would hide rows).
+ */
+function createServiceRoleClient() {
+  const url = String(process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim();
+  const serviceRoleKey = String(
+    process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+  ).trim();
+  const anonKey = String(
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_ANON_KEY ||
+      "",
+  ).trim();
+
+  if (!url) {
+    console.error("❌ [Error] NEXT_PUBLIC_SUPABASE_URL is empty");
+    process.exit(1);
+  }
+  if (!serviceRoleKey) {
+    console.error(
+      "❌ [Error] SUPABASE_SERVICE_ROLE_KEY is required (Anon Key is forbidden)",
+    );
+    process.exit(1);
+  }
+  if (anonKey && serviceRoleKey === anonKey) {
+    console.error(
+      "❌ [Error] SUPABASE_SERVICE_ROLE_KEY must not equal Anon Key — RLS would block archive queries",
+    );
+    process.exit(1);
+  }
+
+  console.log(
+    "🔑 [Auth] Using SUPABASE_SERVICE_ROLE_KEY only (Anon Key forbidden)",
+  );
+
+  return createClient(url, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
-  },
-);
+  });
+}
+
+const supabase = createServiceRoleClient();
 
 
 /**
@@ -164,9 +198,33 @@ async function deleteCloudObject(bucket, objectPath) {
   }
 }
 
+/**
+ * [Debug] Unfiltered row count — proves Service Role can see the whole table.
+ */
+async function debugPaymentSlipsTotalCount() {
+  const { count, error } = await supabase
+    .from("payment_slips")
+    .select("*", { count: "exact", head: true });
+
+  if (error) {
+    console.error(
+      "❌ [Debug] payment_slips total count failed:",
+      error.message,
+    );
+    throw new Error("Debug count payment_slips failed: " + error.message);
+  }
+
+  console.log(
+    "[Debug] payment_slips total rows (no filters, Service Role): " +
+      (count ?? 0),
+  );
+  return count ?? 0;
+}
+
 async function fetchColdCloudSlips() {
   const cutoff = coldCutoffIso(COLD_AGE_DAYS);
 
+  // Schema: storage_tier_type ENUM = 'CLOUD' | 'NAS' (docs/database-schema.md)
   const { data, error } = await supabase
     .from("payment_slips")
     .select(
@@ -283,8 +341,14 @@ async function main() {
 
   ensureDir(LOCAL_SLIPS_DIR);
 
+  // [Debug] before filtered fetch — verify Service Role visibility
+  await debugPaymentSlipsTotalCount();
+
   const rows = await fetchColdCloudSlips();
-  console.log("\n📋 Candidates: " + rows.length + " row(s)\n");
+  console.log("\n📋 Candidates: " + rows.length + " row(s)");
+  console.log(
+    "   (filters: storage_tier='CLOUD' AND created_at < cutoff AND slip_image_url IS NOT NULL)\n",
+  );
 
   const summary = {
     archived: 0,
