@@ -16,11 +16,16 @@ export type WHTContactTax = {
   is_tax_validated: boolean | null;
 };
 
-export type WHTReportExpenseRow = {
+export type WHTReportSource = "EXP" | "TB";
+
+export type WHTReportRow = {
   id: string;
+  /** EXP = expenses, TB = documents (Technician Bill) */
+  source: WHTReportSource;
   document_no: string;
+  /** expense_date (EXP) or doc_date (TB) — YYYY-MM-DD */
   expense_date: string;
-  /** expenses.vendor_id — for TaxValidationModal */
+  /** vendor_id / contact_id — for TaxValidationModal */
   contact_id: string | null;
   wht_type: string | null;
   wht_base_amount: number;
@@ -28,23 +33,34 @@ export type WHTReportExpenseRow = {
   wht_amount: number;
   wht_doc_no: string | null;
   status: string;
+  /** documents.payment_status — TB only */
+  payment_status?: string | null;
   contacts: WHTContactTax | null;
 };
 
+/** @deprecated Use WHTReportRow */
+export type WHTReportExpenseRow = WHTReportRow;
+
 export type MonthlyWHTReportData = {
-  raw: WHTReportExpenseRow[];
+  raw: WHTReportRow[];
   /** ภ.ง.ด.3 — บุคคลธรรมดา */
-  pnd3: WHTReportExpenseRow[];
+  pnd3: WHTReportRow[];
   /** ภ.ง.ด.53 — นิติบุคคล */
-  pnd53: WHTReportExpenseRow[];
+  pnd53: WHTReportRow[];
   /**
    * รอตรวจสอบ: entity_type เป็น null หรือยังไม่ validate
    * (รวมกรณีไม่มีผู้จำหน่าย)
    */
-  pendingValidation: WHTReportExpenseRow[];
+  pendingValidation: WHTReportRow[];
   summary: {
     totalWhtBase: number;
     totalWhtAmount: number;
+    /** ยอด WHT ของเอกสารที่ชำระแล้ว (PAID / COMPLETED) */
+    paidWhtAmount: number;
+    /** ยอด WHT รอดำเนินการ (ISSUED / ยังไม่จ่าย) */
+    issuedWhtAmount: number;
+    paidCount: number;
+    issuedCount: number;
   };
 };
 

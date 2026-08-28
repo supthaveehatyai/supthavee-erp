@@ -110,6 +110,14 @@ export default async function WhtReportPage({ searchParams }: PageProps) {
           totalWhtAmountFormatted={formatThaiBaht(
             result.data.summary.totalWhtAmount,
           )}
+          paidWhtAmountFormatted={formatThaiBaht(
+            result.data.summary.paidWhtAmount,
+          )}
+          issuedWhtAmountFormatted={formatThaiBaht(
+            result.data.summary.issuedWhtAmount,
+          )}
+          paidCount={result.data.summary.paidCount}
+          issuedCount={result.data.summary.issuedCount}
         />
       )}
     </div>

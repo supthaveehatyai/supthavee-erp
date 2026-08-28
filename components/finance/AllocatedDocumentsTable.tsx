@@ -92,6 +92,7 @@ export function AllocatedDocumentsTable({
             <TableHead>เลขที่เอกสารภายใน</TableHead>
             <TableHead>เลขอ้างอิงภายนอก</TableHead>
             <TableHead className="text-right">ยอดที่ตัดชำระ</TableHead>
+            <TableHead className="text-right">หัก ณ ที่จ่าย (WHT)</TableHead>
             <TableHead className="text-center">{statusColumnLabel}</TableHead>
           </TableRow>
         </TableHeader>
@@ -106,6 +107,7 @@ export function AllocatedDocumentsTable({
             // Deposits link to their own detail path
             const hrefBase =
               row.target_doc_type === "DEP_OUT" ||
+              row.target_doc_type === "TB" ||
               row.target_doc_type.startsWith("AP_") ||
               row.target_doc_type === "PO" ||
               row.target_doc_type === "PAY"
@@ -152,11 +154,9 @@ export function AllocatedDocumentsTable({
                   {isDeposit
                     ? `(${formatMoney(Math.abs(signed))})`
                     : formatMoney(signed)}
-                  {row.wht_amount > 0 ? (
-                    <span className="ml-1 text-xs font-normal text-slate-400">
-                      (+WHT {formatMoney(row.wht_amount)})
-                    </span>
-                  ) : null}
+                </TableCell>
+                <TableCell className="text-right tabular-nums text-slate-700">
+                  {row.wht_amount > 0 ? formatMoney(row.wht_amount) : "—"}
                 </TableCell>
                 <TableCell className="text-center">
                   {isDeposit || isExpense ? (
@@ -181,11 +181,9 @@ export function AllocatedDocumentsTable({
             </TableCell>
             <TableCell className="text-right text-sm font-bold tabular-nums text-blue-800">
               {formatMoney(netTotal)}
-              {totalWht > 0 ? (
-                <span className="ml-1 text-xs font-normal text-slate-400">
-                  (+WHT {formatMoney(totalWht)})
-                </span>
-              ) : null}
+            </TableCell>
+            <TableCell className="text-right text-sm font-bold tabular-nums text-slate-800">
+              {totalWht > 0 ? formatMoney(totalWht) : "—"}
             </TableCell>
             <TableCell />
           </TableRow>

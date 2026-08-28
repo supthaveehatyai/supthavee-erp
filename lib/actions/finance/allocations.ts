@@ -47,6 +47,9 @@ type InvoiceJoin = {
   contact_id?: string | null;
   doc_date?: string | null;
   doc_type?: string | null;
+  wht_amount?: number | string | null;
+  grand_total?: number | string | null;
+  sub_total?: number | string | null;
 };
 
 type AllocationQueryRow = {
@@ -89,6 +92,9 @@ type ExpenseJoin = {
   id?: string;
   document_no?: string | null;
   vendor_doc_no?: string | null;
+  wht_amount?: number | string | null;
+  net_payable?: number | string | null;
+  grand_total?: number | string | null;
 };
 
 function unwrapExpense(
@@ -98,12 +104,42 @@ function unwrapExpense(
   return Array.isArray(value) ? (value[0] ?? null) : value;
 }
 
+function resolveProportionalWht(
+  sourceWht: number,
+  sourcePayable: number,
+  allocatedAmount: number,
+): number {
+  const wht = roundMoney(sourceWht);
+  if (wht <= 0) return 0;
+  const payable = roundMoney(sourcePayable);
+  const allocated = roundMoney(allocatedAmount);
+  if (payable <= 0 || allocated <= 0) return 0;
+  if (allocated >= payable - 0.02) return wht;
+  return roundMoney((wht * allocated) / payable);
+}
+
+function resolveAllocationWhtAmount(input: {
+  allocationWht: number;
+  sourceWht: number;
+  sourcePayable: number;
+  allocatedAmount: number;
+}): number {
+  const stored = roundMoney(input.allocationWht);
+  if (stored > 0) return stored;
+  return resolveProportionalWht(
+    input.sourceWht,
+    input.sourcePayable,
+    input.allocatedAmount,
+  );
+}
+
 function mapExpenseAllocationRow(input: {
   id: string;
   expenseId: string;
   documentNo: string;
   vendorDocNo: string | null;
   allocatedAmount: number;
+  whtAmount?: number;
   originalReceiptReceived?: boolean;
 }): DocumentAllocationRow {
   return {
@@ -113,7 +149,7 @@ function mapExpenseAllocationRow(input: {
     target_doc_type: "EXPENSE",
     reference_no: input.vendorDocNo,
     allocated_amount: roundMoney(input.allocatedAmount),
-    wht_amount: 0,
+    wht_amount: roundMoney(input.whtAmount ?? 0),
     original_receipt_received: input.originalReceiptReceived === true,
     expense_id: input.expenseId,
   };
@@ -122,17 +158,36 @@ function mapExpenseAllocationRow(input: {
 async function loadExpensesByIds(
   supabaseAdmin: SupabaseClient,
   ids: string[],
-): Promise<Map<string, { document_no: string; vendor_doc_no: string | null }>> {
+): Promise<
+  Map<
+    string,
+    {
+      document_no: string;
+      vendor_doc_no: string | null;
+      wht_amount: number;
+      net_payable: number;
+      grand_total: number;
+    }
+  >
+> {
   const unique = [...new Set(ids.filter(Boolean))];
   const map = new Map<
     string,
-    { document_no: string; vendor_doc_no: string | null }
+    {
+      document_no: string;
+      vendor_doc_no: string | null;
+      wht_amount: number;
+      net_payable: number;
+      grand_total: number;
+    }
   >();
   if (unique.length === 0) return map;
 
   const { data, error } = await supabaseAdmin
     .from("expenses")
-    .select("id, document_no, vendor_doc_no")
+    .select(
+      "id, document_no, vendor_doc_no, wht_amount, net_payable, grand_total",
+    )
     .in("id", unique);
 
   if (error) {
@@ -147,6 +202,9 @@ async function loadExpensesByIds(
         row.vendor_doc_no == null
           ? null
           : String(row.vendor_doc_no).trim() || null,
+      wht_amount: toMoney(row.wht_amount),
+      net_payable: toMoney(row.net_payable),
+      grand_total: toMoney(row.grand_total),
     });
   }
   return map;
@@ -190,7 +248,8 @@ async function loadExpenseAllocationsForPayDocument(
     if (!expenseId) continue;
     const expense = expensesFromAlloc.get(expenseId);
     if (!expense) continue;
-    const key = `${expenseId}:${roundMoney(toMoney(row.allocated_amount))}`;
+    const allocatedAmount = toMoney(row.allocated_amount);
+    const key = `${expenseId}:${roundMoney(allocatedAmount)}`;
     seenExpenseKeys.add(key);
     rows.push(
       mapExpenseAllocationRow({
@@ -198,7 +257,12 @@ async function loadExpenseAllocationsForPayDocument(
         expenseId,
         documentNo: expense.document_no,
         vendorDocNo: expense.vendor_doc_no,
-        allocatedAmount: toMoney(row.allocated_amount),
+        allocatedAmount,
+        whtAmount: resolveProportionalWht(
+          expense.wht_amount,
+          expense.net_payable || expense.grand_total,
+          allocatedAmount,
+        ),
       }),
     );
   }
@@ -223,7 +287,7 @@ async function loadExpenseAllocationsForPayDocument(
   const { data: installments, error: instError } = await supabaseAdmin
     .from("expense_installments")
     .select(
-      "id, payment_transaction_id, total_installment, expense_id, expenses!expense_id ( id, document_no, vendor_doc_no )",
+      "id, payment_transaction_id, total_installment, expense_id, expenses!expense_id ( id, document_no, vendor_doc_no, wht_amount, net_payable, grand_total )",
     )
     .in("payment_transaction_id", txIds);
 
@@ -249,6 +313,18 @@ async function loadExpenseAllocationsForPayDocument(
     const key = `${expenseId}:${roundMoney(amount)}`;
     if (seenExpenseKeys.has(key)) continue;
     seenExpenseKeys.add(key);
+
+    const expenseFromJoin = expensesFromAlloc.get(expenseId);
+    const expenseWht = toMoney(
+      expenseFromJoin?.wht_amount ?? (expense as ExpenseJoin).wht_amount,
+    );
+    const expensePayable = toMoney(
+      expenseFromJoin?.net_payable ??
+        expenseFromJoin?.grand_total ??
+        (expense as ExpenseJoin).net_payable ??
+        (expense as ExpenseJoin).grand_total,
+    );
+
     rows.push(
       mapExpenseAllocationRow({
         id: String(row.id),
@@ -259,6 +335,11 @@ async function loadExpenseAllocationsForPayDocument(
             ? null
             : String(expense.vendor_doc_no).trim() || null,
         allocatedAmount: amount,
+        whtAmount: resolveProportionalWht(
+          expenseWht,
+          expensePayable,
+          amount,
+        ),
       }),
     );
   }
@@ -312,7 +393,10 @@ export async function getDocumentAllocationsByReceiptId(
           doc_type,
           notes,
           contact_id,
-          doc_date
+          doc_date,
+          wht_amount,
+          grand_total,
+          sub_total
         )
       `;
     const selectWithStatus = `
@@ -328,7 +412,10 @@ export async function getDocumentAllocationsByReceiptId(
           doc_type,
           notes,
           contact_id,
-          doc_date
+          doc_date,
+          wht_amount,
+          grand_total,
+          sub_total
         )
       `;
     const selectLegacy = `
@@ -343,7 +430,10 @@ export async function getDocumentAllocationsByReceiptId(
           doc_type,
           notes,
           contact_id,
-          doc_date
+          doc_date,
+          wht_amount,
+          grand_total,
+          sub_total
         )
       `;
 
@@ -447,6 +537,7 @@ export async function getDocumentAllocationsByReceiptId(
 
       if (knockoff) {
         const expense = expensesById.get(knockoff.expense_id);
+        const allocatedAmount = toMoney(row.allocated_amount);
         mapped.push(
           mapExpenseAllocationRow({
             id: row.id,
@@ -455,8 +546,15 @@ export async function getDocumentAllocationsByReceiptId(
               expense?.document_no || knockoff.document_no,
             vendorDocNo:
               expense?.vendor_doc_no ?? knockoff.vendor_doc_no,
-            allocatedAmount: toMoney(row.allocated_amount),
+            allocatedAmount,
             originalReceiptReceived: row.original_receipt_received === true,
+            whtAmount: expense
+              ? resolveProportionalWht(
+                  expense.wht_amount,
+                  expense.net_payable || expense.grand_total,
+                  allocatedAmount,
+                )
+              : 0,
           }),
         );
         continue;
@@ -464,6 +562,7 @@ export async function getDocumentAllocationsByReceiptId(
 
       const invoice = unwrapInvoice(row.invoice);
       const targetDocNo = invoice?.doc_no?.trim() || "ไม่ระบุ";
+      const allocatedAmount = toMoney(row.allocated_amount);
       const fromNotes = extractVendorReference(invoice?.notes);
       const contactId = invoice?.contact_id?.trim() || "";
       const headerSet = contactId
@@ -476,14 +575,23 @@ export async function getDocumentAllocationsByReceiptId(
         referenceNo = candidates[0] ?? [...headerSet][0] ?? null;
       }
 
+      const sourcePayable = toMoney(
+        invoice?.grand_total ?? invoice?.sub_total ?? allocatedAmount,
+      );
+
       mapped.push({
         id: row.id,
         invoice_doc_id: row.invoice_doc_id,
         target_doc_no: targetDocNo,
         target_doc_type: String(invoice?.doc_type ?? ""),
         reference_no: referenceNo,
-        allocated_amount: roundMoney(toMoney(row.allocated_amount)),
-        wht_amount: roundMoney(toMoney(row.wht_amount)),
+        allocated_amount: roundMoney(allocatedAmount),
+        wht_amount: resolveAllocationWhtAmount({
+          allocationWht: toMoney(row.wht_amount),
+          sourceWht: toMoney(invoice?.wht_amount),
+          sourcePayable,
+          allocatedAmount,
+        }),
         original_receipt_received: row.original_receipt_received === true,
         expense_id: row.expense_id ?? null,
       });

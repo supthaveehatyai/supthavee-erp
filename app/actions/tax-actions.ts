@@ -9,10 +9,11 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server-admin";
 import type {
   GetMonthlyWHTReportResult,
+  MonthlyWHTReportData,
   UpdateVendorTaxInfoResult,
   VendorTaxInfoInput,
   WHTContactTax,
-  WHTReportExpenseRow,
+  WHTReportRow,
 } from "@/types/tax";
 
 function toMoney(value: number | string | null | undefined): number {
@@ -47,7 +48,28 @@ function mapContact(raw: unknown): WHTContactTax | null {
   };
 }
 
-function isPendingValidation(item: WHTReportExpenseRow): boolean {
+function parseWhtTypeFromTbNotes(notes: string | null | undefined): string | null {
+  const text = String(notes ?? "").trim();
+  if (!text) return null;
+  const match = /หัก ณ ที่จ่าย\s+(.+?)\s+[\d.]+%/.exec(text);
+  return match?.[1]?.trim() || null;
+}
+
+function isPaidWhtRow(row: WHTReportRow): boolean {
+  if (row.source === "EXP") {
+    return row.status.trim().toUpperCase() === "PAID";
+  }
+
+  const paymentStatus = (row.payment_status ?? "").trim().toUpperCase();
+  const docStatus = row.status.trim().toUpperCase();
+  return (
+    paymentStatus === "PAID" ||
+    docStatus === "PAID" ||
+    docStatus === "COMPLETED"
+  );
+}
+
+function isPendingValidation(item: WHTReportRow): boolean {
   const contact = item.contacts;
   if (!contact || !item.contact_id) return true;
   if (contact.entity_type == null || String(contact.entity_type).trim() === "") {
@@ -57,9 +79,31 @@ function isPendingValidation(item: WHTReportExpenseRow): boolean {
   return false;
 }
 
+function sortWhtRowsDesc(rows: WHTReportRow[]): WHTReportRow[] {
+  return [...rows].sort((a, b) => {
+    const dateCmp = b.expense_date.localeCompare(a.expense_date);
+    if (dateCmp !== 0) return dateCmp;
+    return b.document_no.localeCompare(a.document_no, "th");
+  });
+}
+
+function buildSummary(rows: WHTReportRow[]): MonthlyWHTReportData["summary"] {
+  const paidRows = rows.filter(isPaidWhtRow);
+  const issuedRows = rows.filter((row) => !isPaidWhtRow(row));
+
+  return {
+    totalWhtBase: rows.reduce((sum, item) => sum + item.wht_base_amount, 0),
+    totalWhtAmount: rows.reduce((sum, item) => sum + item.wht_amount, 0),
+    paidWhtAmount: paidRows.reduce((sum, item) => sum + item.wht_amount, 0),
+    issuedWhtAmount: issuedRows.reduce((sum, item) => sum + item.wht_amount, 0),
+    paidCount: paidRows.length,
+    issuedCount: issuedRows.length,
+  };
+}
+
 /**
- * Monthly WHT Report — ISSUED expenses with wht_amount > 0
- * for the given calendar month (expense_date), grouped for ภ.ง.ด.3 / 53.
+ * Monthly WHT Report — expenses + TB documents with wht_amount > 0
+ * for the given calendar month, merged and sorted newest-first.
  */
 export async function getMonthlyWHTReport(
   year: number,
@@ -76,59 +120,126 @@ export async function getMonthlyWHTReport(
 
     const supabase = createClient();
 
-    const { data, error } = await supabase
-      .from("expenses")
-      .select(
-        `
-        id,
-        document_no,
-        expense_date,
-        vendor_id,
-        wht_type,
-        wht_base_amount,
-        wht_rate,
-        wht_amount,
-        wht_doc_no,
-        status,
-        contacts!expenses_vendor_id_fkey (
+    const [expensesResult, tbResult] = await Promise.all([
+      supabase
+        .from("expenses")
+        .select(
+          `
           id,
-          company_name,
-          tax_id,
-          tax_branch_code,
-          entity_type,
-          tax_address,
-          is_tax_validated
+          document_no,
+          expense_date,
+          vendor_id,
+          wht_type,
+          wht_base_amount,
+          net_amount,
+          wht_rate,
+          wht_amount,
+          wht_doc_no,
+          status,
+          contacts!expenses_vendor_id_fkey (
+            id,
+            company_name,
+            tax_id,
+            tax_branch_code,
+            entity_type,
+            tax_address,
+            is_tax_validated
+          )
+        `,
         )
-      `,
-      )
-      .eq("status", "ISSUED")
-      .gt("wht_amount", 0)
-      .gte("expense_date", bounds.startDate)
-      .lte("expense_date", bounds.endDate)
-      .order("expense_date", { ascending: true })
-      .order("document_no", { ascending: true });
+        .gt("wht_amount", 0)
+        .in("status", ["ISSUED", "PAID"])
+        .gte("expense_date", bounds.startDate)
+        .lte("expense_date", bounds.endDate),
+      supabase
+        .from("documents")
+        .select(
+          `
+          id,
+          doc_no,
+          doc_date,
+          contact_id,
+          sub_total,
+          net_before_vat,
+          wht_rate,
+          wht_amount,
+          status,
+          payment_status,
+          notes,
+          contacts:contact_id (
+            id,
+            company_name,
+            tax_id,
+            tax_branch_code,
+            entity_type,
+            tax_address,
+            is_tax_validated
+          )
+        `,
+        )
+        .eq("doc_type", "TB")
+        .gt("wht_amount", 0)
+        .gte("doc_date", bounds.startDate)
+        .lte("doc_date", bounds.endDate)
+        .in("status", ["ISSUED", "COMPLETED", "PAID"])
+        .or("is_voided.is.null,is_voided.eq.false"),
+    ]);
 
-    if (error) throw new Error(error.message);
+    if (expensesResult.error) {
+      throw new Error(expensesResult.error.message);
+    }
+    if (tbResult.error) {
+      throw new Error(tbResult.error.message);
+    }
 
-    const raw: WHTReportExpenseRow[] = (data ?? []).map((row) => {
+    const expenseRows: WHTReportRow[] = (expensesResult.data ?? []).map(
+      (row) => {
+        const contactId =
+          row.vendor_id == null || String(row.vendor_id).trim() === ""
+            ? null
+            : String(row.vendor_id);
+        return {
+          id: String(row.id),
+          source: "EXP",
+          document_no: String(row.document_no ?? ""),
+          expense_date: String(row.expense_date ?? "").slice(0, 10),
+          contact_id: contactId,
+          wht_type: row.wht_type ?? null,
+          wht_base_amount:
+            toMoney(row.wht_base_amount) || toMoney(row.net_amount),
+          wht_rate: toMoney(row.wht_rate),
+          wht_amount: toMoney(row.wht_amount),
+          wht_doc_no: row.wht_doc_no ?? null,
+          status: String(row.status ?? ""),
+          contacts: mapContact(row.contacts),
+        };
+      },
+    );
+
+    const tbRows: WHTReportRow[] = (tbResult.data ?? []).map((row) => {
       const contactId =
-        row.vendor_id == null || String(row.vendor_id).trim() === ""
+        row.contact_id == null || String(row.contact_id).trim() === ""
           ? null
-          : String(row.vendor_id);
+          : String(row.contact_id);
+      const whtBase = toMoney(row.net_before_vat ?? row.sub_total);
       return {
         id: String(row.id),
-        document_no: String(row.document_no ?? ""),
-        expense_date: String(row.expense_date ?? "").slice(0, 10),
+        source: "TB",
+        document_no: String(row.doc_no ?? ""),
+        expense_date: String(row.doc_date ?? "").slice(0, 10),
         contact_id: contactId,
-        wht_type: row.wht_type ?? null,
-        wht_base_amount: toMoney(row.wht_base_amount),
+        wht_type: parseWhtTypeFromTbNotes(row.notes),
+        wht_base_amount: whtBase,
         wht_rate: toMoney(row.wht_rate),
         wht_amount: toMoney(row.wht_amount),
-        wht_doc_no: row.wht_doc_no ?? null,
+        wht_doc_no: null,
         status: String(row.status ?? ""),
+        payment_status: row.payment_status ?? null,
         contacts: mapContact(row.contacts),
       };
     });
+
+    const raw = sortWhtRowsDesc([...expenseRows, ...tbRows]);
 
     const pnd3 = raw.filter(
       (item) => item.contacts?.entity_type === "INDIVIDUAL",
@@ -145,13 +256,7 @@ export async function getMonthlyWHTReport(
         pnd3,
         pnd53,
         pendingValidation,
-        summary: {
-          totalWhtBase: raw.reduce(
-            (sum, item) => sum + item.wht_base_amount,
-            0,
-          ),
-          totalWhtAmount: raw.reduce((sum, item) => sum + item.wht_amount, 0),
-        },
+        summary: buildSummary(raw),
       },
     };
   } catch (error: unknown) {

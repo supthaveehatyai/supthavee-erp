@@ -14,7 +14,7 @@ import {
   FileSpreadsheet,
   Percent,
 } from "lucide-react";
-import type { WHTReportExpenseRow } from "@/types/tax";
+import type { WHTReportRow } from "@/types/tax";
 import { TaxValidationModal } from "@/components/tax/TaxValidationModal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,18 +39,49 @@ export type WhtReportDashboardProps = {
   year: number;
   month: number;
   monthLabel: string;
-  pnd3: WHTReportExpenseRow[];
-  pnd53: WHTReportExpenseRow[];
-  pendingValidation: WHTReportExpenseRow[];
+  pnd3: WHTReportRow[];
+  pnd53: WHTReportRow[];
+  pendingValidation: WHTReportRow[];
   totalWhtBaseFormatted: string;
   totalWhtAmountFormatted: string;
+  paidWhtAmountFormatted: string;
+  issuedWhtAmountFormatted: string;
+  paidCount: number;
+  issuedCount: number;
 };
 
 type ModalTarget = {
   contactId: string;
   companyName: string;
-  initial: WHTReportExpenseRow["contacts"];
+  initial: WHTReportRow["contacts"];
 };
+
+function whtDocumentHref(row: WHTReportRow): string {
+  if (row.source === "TB") {
+    return `/purchases/${encodeURIComponent(row.document_no)}`;
+  }
+  return `/expenses/${row.id}`;
+}
+
+function sourceBadgeLabel(source: WHTReportRow["source"]): string {
+  return source === "TB" ? "TB" : "EXP";
+}
+
+function paymentStatusLabel(row: WHTReportRow): string {
+  if (row.source === "EXP") {
+    return row.status.trim().toUpperCase() === "PAID" ? "PAID" : "ISSUED";
+  }
+  const paymentStatus = (row.payment_status ?? "").trim().toUpperCase();
+  const docStatus = row.status.trim().toUpperCase();
+  if (
+    paymentStatus === "PAID" ||
+    docStatus === "PAID" ||
+    docStatus === "COMPLETED"
+  ) {
+    return "PAID";
+  }
+  return "ISSUED";
+}
 
 function formatDocDate(value: string): string {
   if (!value) return "—";
@@ -70,7 +101,7 @@ function formatBaht(value: number): string {
   }).format(Number.isFinite(value) ? value : 0);
 }
 
-function pendingReason(row: WHTReportExpenseRow): string {
+function pendingReason(row: WHTReportRow): string {
   if (!row.contact_id || !row.contacts) return "ไม่มีผู้จำหน่าย";
   if (
     row.contacts.entity_type == null ||
@@ -130,9 +161,9 @@ function WhtTable({
   showAction,
   onUpdateVendor,
 }: {
-  rows: WHTReportExpenseRow[];
+  rows: WHTReportRow[];
   showAction?: boolean;
-  onUpdateVendor?: (row: WHTReportExpenseRow) => void;
+  onUpdateVendor?: (row: WHTReportRow) => void;
 }) {
   if (rows.length === 0) {
     return (
@@ -148,8 +179,9 @@ function WhtTable({
         <TableHeader>
           <TableRow className="bg-slate-50/80">
             <TableHead className="whitespace-nowrap">วันที่จ่ายเงิน</TableHead>
+            <TableHead className="whitespace-nowrap">ประเภท</TableHead>
             <TableHead className="whitespace-nowrap">เลขที่เอกสาร</TableHead>
-            <TableHead>ชื่อผู้จำหน่าย</TableHead>
+            <TableHead>ชื่อผู้จำหน่าย / ช่าง</TableHead>
             <TableHead className="whitespace-nowrap">
               เลขประจำตัวผู้เสียภาษี
             </TableHead>
@@ -164,18 +196,27 @@ function WhtTable({
         <TableBody>
           {rows.map((row) => {
             const reason = showAction ? pendingReason(row) : null;
+            const payStatus = paymentStatusLabel(row);
             return (
-              <TableRow key={row.id}>
+              <TableRow key={`${row.source}-${row.id}`}>
                 <TableCell className="whitespace-nowrap text-slate-700">
                   {formatDocDate(row.expense_date)}
                 </TableCell>
+                <TableCell className="whitespace-nowrap">
+                  <Badge variant={row.source === "TB" ? "blue" : "slate"}>
+                    {sourceBadgeLabel(row.source)}
+                  </Badge>
+                </TableCell>
                 <TableCell className="whitespace-nowrap font-medium">
                   <Link
-                    href={`/expenses/${row.id}`}
+                    href={whtDocumentHref(row)}
                     className="text-blue-600 hover:underline"
                   >
                     {row.document_no || "—"}
                   </Link>
+                  <span className="mt-0.5 block text-[10px] font-normal text-slate-400">
+                    {payStatus === "PAID" ? "ชำระแล้ว" : "รอดำเนินการ"}
+                  </span>
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-col gap-1">
@@ -246,6 +287,10 @@ export function WhtReportDashboard({
   pendingValidation,
   totalWhtBaseFormatted,
   totalWhtAmountFormatted,
+  paidWhtAmountFormatted,
+  issuedWhtAmountFormatted,
+  paidCount,
+  issuedCount,
 }: WhtReportDashboardProps) {
   const [modalTarget, setModalTarget] = useState<ModalTarget | null>(null);
 
@@ -257,7 +302,7 @@ export function WhtReportDashboard({
         ? "pnd3"
         : "pnd53";
 
-  function openTaxModal(row: WHTReportExpenseRow) {
+  function openTaxModal(row: WHTReportRow) {
     if (!row.contact_id) return;
     setModalTarget({
       contactId: row.contact_id,
@@ -268,7 +313,7 @@ export function WhtReportDashboard({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
             <div>
@@ -283,7 +328,7 @@ export function WhtReportDashboard({
           </CardHeader>
           <CardContent>
             <p className="text-xs text-slate-500">
-              {monthLabel} {year} · ฐานก่อนหัก ณ ที่จ่าย
+              {monthLabel} {year} · EXP + TB
             </p>
           </CardContent>
         </Card>
@@ -296,7 +341,7 @@ export function WhtReportDashboard({
                 {totalWhtAmountFormatted}
               </CardTitle>
             </div>
-            <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600">
+            <div className="rounded-lg bg-slate-100 p-2 text-slate-600">
               <Percent className="h-5 w-5" />
             </div>
           </CardHeader>
@@ -307,12 +352,31 @@ export function WhtReportDashboard({
           </CardContent>
         </Card>
 
-        <Card className="sm:col-span-2 xl:col-span-1">
+        <Card>
           <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
             <div>
-              <CardDescription>รอดำเนินการ (Pending)</CardDescription>
+              <CardDescription>ชำระแล้ว (PAID)</CardDescription>
+              <CardTitle className="mt-1 text-2xl font-bold tracking-tight text-emerald-700">
+                {paidWhtAmountFormatted}
+              </CardTitle>
+            </div>
+            <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600">
+              <Percent className="h-5 w-5" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-slate-500">
+              {paidCount.toLocaleString("th-TH")} รายการ · ยอด WHT ที่จ่ายแล้ว
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+            <div>
+              <CardDescription>รอดำเนินการ (ISSUED)</CardDescription>
               <CardTitle className="mt-1 text-2xl font-bold tracking-tight text-amber-700">
-                {pendingCount.toLocaleString("th-TH")} รายการ
+                {issuedWhtAmountFormatted}
               </CardTitle>
             </div>
             <div className="rounded-lg bg-amber-50 p-2 text-amber-600">
@@ -321,11 +385,29 @@ export function WhtReportDashboard({
           </CardHeader>
           <CardContent>
             <p className="text-xs text-slate-500">
-              entity_type ว่าง หรือยังไม่ผ่าน Tax Validation
+              {issuedCount.toLocaleString("th-TH")} รายการ · ยังไม่ตัดจ่าย WHT
             </p>
           </CardContent>
         </Card>
       </div>
+
+      {pendingCount > 0 ? (
+        <Card className="border-amber-200 bg-amber-50/40">
+          <CardHeader className="pb-2">
+            <CardDescription className="text-amber-800">
+              รอตรวจสอบข้อมูลภาษี
+            </CardDescription>
+            <CardTitle className="text-lg font-semibold text-amber-900">
+              {pendingCount.toLocaleString("th-TH")} รายการ
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-amber-800/80">
+              entity_type ว่าง หรือยังไม่ผ่าน Tax Validation — ดูในแท็บรอดำเนินการ
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -334,7 +416,7 @@ export function WhtReportDashboard({
             รายการหัก ณ ที่จ่าย
           </CardTitle>
           <CardDescription>
-            แยกแบบฟอร์ม ภ.ง.ด.3 / ภ.ง.ด.53 และแท็บรอดำเนินการสำหรับข้อมูลภาษีที่ไม่ครบ
+            รวม EXP (ค่าใช้จ่าย) + TB (สรุปวางบิลช่าง) · แยกแบบฟอร์ม ภ.ง.ด.3 / ภ.ง.ด.53
           </CardDescription>
         </CardHeader>
         <CardContent>
