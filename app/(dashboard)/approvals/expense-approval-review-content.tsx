@@ -1,7 +1,10 @@
 import { getExpenseById } from "@/app/actions/expenses";
 import { getPaymentSlipStorageMeta } from "@/app/actions/payment-slips";
-import type { StorageTier } from "@/types/storage-tier";
 import type { ExpenseDetail } from "@/types/expense";
+import {
+  resolvePaymentSlipPreviewUrl,
+  type PaymentTransactionDisplayMeta,
+} from "@/types/payment-transaction-meta";
 import { ExpenseAttachmentPreview } from "@/app/(erp)/expenses/[id]/expense-attachment-preview";
 import { Badge } from "@/components/ui/badge";
 
@@ -45,11 +48,13 @@ function ExpenseReviewBody({
   paymentSlipMeta,
 }: {
   expense: ExpenseDetail;
-  paymentSlipMeta: {
-    storage_tier: StorageTier;
-    nas_archive_url: string | null;
-  };
+  paymentSlipMeta: PaymentTransactionDisplayMeta;
 }) {
+  const resolvedUrl = resolvePaymentSlipPreviewUrl(
+    paymentSlipMeta,
+    expense.payment_slip_url,
+  );
+
   return (
     <div className="flex flex-col gap-6 px-6 pb-8 pt-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -115,9 +120,7 @@ function ExpenseReviewBody({
             สลิปโอนเงิน (Payment Slip)
           </p>
           <ExpenseAttachmentPreview
-            url={
-              paymentSlipMeta.attachment_url ?? expense.payment_slip_url
-            }
+            url={resolvedUrl}
             documentNo={expense.document_no}
             title="สลิปโอนเงิน"
             emptyLabel="ไม่มีสลิปโอนเงิน"

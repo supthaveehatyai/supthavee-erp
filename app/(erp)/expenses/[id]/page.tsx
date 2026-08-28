@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Receipt } from "lucide-react";
 import { getBankAccounts, getExpenseById } from "@/app/actions/expenses";
 import { getPaymentSlipStorageMeta } from "@/app/actions/payment-slips";
+import { resolvePaymentSlipPreviewUrl } from "@/types/payment-transaction-meta";
 import { hasFixedAssetForExpense } from "@/app/actions/fixed-assets";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -133,6 +134,10 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
     isAssetClearingCategory(expense.category_name);
 
   const paymentSlipMeta = await getPaymentSlipStorageMeta(
+    expense.payment_slip_url,
+  );
+  const paymentSlipResolvedUrl = resolvePaymentSlipPreviewUrl(
+    paymentSlipMeta,
     expense.payment_slip_url,
   );
 
@@ -391,9 +396,7 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
           </CardHeader>
           <CardContent>
             <ExpenseAttachmentPreview
-              url={
-                paymentSlipMeta.attachment_url ?? expense.payment_slip_url
-              }
+              url={paymentSlipResolvedUrl}
               documentNo={expense.document_no}
               title="สลิปโอนเงิน"
               emptyLabel="ไม่มีสลิปโอนเงินแนบ"

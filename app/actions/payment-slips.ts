@@ -8,19 +8,13 @@
 import { createClient } from "@/lib/supabase/server-admin";
 import { resolveStorageDisplayUrl } from "@/lib/utils/storage-tier";
 import type { StorageTier } from "@/types/storage-tier";
+import type { PaymentTransactionDisplayMeta } from "@/types/payment-transaction-meta";
 
-export type PaymentTransactionDisplayMeta = {
-  storage_tier: StorageTier;
-  nas_archive_url: string | null;
-  attachment_url: string | null;
-  /** Resolved URL for UI — NAS http(s) or CLOUD attachment_url */
-  display_url: string | null;
-  is_browsable: boolean;
-  nas_path: string | null;
+type PaymentTransactionTierRow = {
+  storage_tier?: string | null;
+  nas_archive_url?: string | null;
+  attachment_url?: string | null;
 };
-
-/** @deprecated Use PaymentTransactionDisplayMeta */
-export type PaymentSlipStorageMeta = PaymentTransactionDisplayMeta;
 
 function cloudFallbackMeta(
   cloudUrl?: string | null,
@@ -32,6 +26,7 @@ function cloudFallbackMeta(
     nasArchiveUrl: null,
   });
   return {
+    found_in_transactions: false,
     storage_tier: "CLOUD",
     nas_archive_url: null,
     attachment_url,
@@ -42,15 +37,9 @@ function cloudFallbackMeta(
 }
 
 function rowToDisplayMeta(
-  row: {
-    storage_tier?: string | null;
-    nas_archive_url?: string | null;
-    attachment_url?: string | null;
-  } | null,
+  row: PaymentTransactionTierRow,
   cloudFallback?: string | null,
 ): PaymentTransactionDisplayMeta {
-  if (!row) return cloudFallbackMeta(cloudFallback);
-
   const attachment_url =
     row.attachment_url?.trim() || cloudFallback?.trim() || null;
   const storage_tier: StorageTier =
@@ -64,6 +53,7 @@ function rowToDisplayMeta(
   });
 
   return {
+    found_in_transactions: true,
     storage_tier: resolved.tier,
     nas_archive_url,
     attachment_url,
@@ -96,7 +86,7 @@ export async function getPaymentSlipStorageMeta(
       .maybeSingle();
 
     if (error || !data) return cloudFallbackMeta(url);
-    return rowToDisplayMeta(data, url);
+    return rowToDisplayMeta(data as PaymentTransactionTierRow, url);
   } catch {
     return cloudFallbackMeta(url);
   }
@@ -123,7 +113,7 @@ export async function getPaymentTransactionStorageMetaByDocumentId(
       .maybeSingle();
 
     if (error || !data) return cloudFallbackMeta(cloudFallback);
-    return rowToDisplayMeta(data, cloudFallback);
+    return rowToDisplayMeta(data as PaymentTransactionTierRow, cloudFallback);
   } catch {
     return cloudFallbackMeta(cloudFallback);
   }
