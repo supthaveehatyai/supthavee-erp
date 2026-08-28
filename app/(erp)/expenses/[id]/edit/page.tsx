@@ -8,6 +8,7 @@ import {
   getExpenseCategories,
   getExpenseVendors,
 } from "@/app/actions/expenses";
+import { getSystemParameter } from "@/lib/actions/parameter-actions";
 import { ExpenseCreateWorkspace } from "../../create/expense-create-workspace";
 
 export const dynamic = "force-dynamic";
@@ -39,13 +40,19 @@ export default async function EditExpensePage({ params }: PageProps) {
     notFound();
   }
 
-  const [expenseResult, categoriesResult, vendorsResult, bankAccountsResult] =
-    await Promise.all([
-      getExpenseById(expenseId),
-      getExpenseCategories(),
-      getExpenseVendors(),
-      getBankAccounts(),
-    ]);
+  const [
+    expenseResult,
+    categoriesResult,
+    vendorsResult,
+    bankAccountsResult,
+    defaultWhtRate,
+  ] = await Promise.all([
+    getExpenseById(expenseId),
+    getExpenseCategories(),
+    getExpenseVendors(),
+    getBankAccounts(),
+    getSystemParameter("WHT_RATE"),
+  ]);
 
   if (expenseResult.error && !expenseResult.data) {
     return (
@@ -107,6 +114,7 @@ export default async function EditExpensePage({ params }: PageProps) {
         bankAccountsError={bankAccountsResult.error}
         defaultDate={expense.expense_date}
         defaultTab="manual"
+        defaultWhtRate={defaultWhtRate}
         initialValues={{
           expense_date: expense.expense_date,
           vendor_id: expense.vendor_id,

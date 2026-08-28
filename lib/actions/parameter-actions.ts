@@ -13,13 +13,22 @@ import { createClient as createSupabaseAdmin } from "@/lib/supabase/server-admin
 import type { Json } from "@/src/types/supabase";
 import type {
   GetParameterSettingsPageDataResult,
+  KnownSystemParameterKey,
   ParameterActionResult,
   PendingParameterChangeRequest,
+  SystemParameterValueMap,
   SystemParameterView,
 } from "@/types/parameter";
 
 const SETTINGS_PARAMETERS_PATH = "/settings/parameters";
 const MANAGED_PARAM_KEYS = ["NAS_BACKUP_PATH", "WHT_RATE"] as const;
+
+const SYSTEM_PARAMETER_DEFAULTS: SystemParameterValueMap = {
+  WHT_RATE: 3,
+  NAS_BACKUP_PATH: "nas_storage",
+  ARCHIVE_COLD_AGE_DAYS: 365,
+  MANUAL_BACKUP_ENABLED: true,
+};
 
 const PARAM_KEY_RE = /^[A-Z][A-Z0-9_]{1,98}$/;
 const PIN_RE = /^\d{6}$/;
@@ -51,6 +60,115 @@ function toJsonValue(value: unknown): Json {
 
 function normalizeParamKey(paramKey: string): string {
   return paramKey.trim().toUpperCase();
+}
+
+function isKnownSystemParameterKey(
+  key: string,
+): key is KnownSystemParameterKey {
+  return key in SYSTEM_PARAMETER_DEFAULTS;
+}
+
+function getSystemParameterDefault(
+  key: string,
+): SystemParameterValueMap[KnownSystemParameterKey] | null {
+  if (!isKnownSystemParameterKey(key)) {
+    return null;
+  }
+  return SYSTEM_PARAMETER_DEFAULTS[key];
+}
+
+function castSystemParameterValue<K extends KnownSystemParameterKey>(
+  key: K,
+  raw: Json,
+): SystemParameterValueMap[K] {
+  const fallback = SYSTEM_PARAMETER_DEFAULTS[key];
+
+  switch (key) {
+    case "WHT_RATE":
+    case "ARCHIVE_COLD_AGE_DAYS": {
+      const num = typeof raw === "number" ? raw : Number(raw);
+      return (Number.isFinite(num) ? num : fallback) as SystemParameterValueMap[K];
+    }
+    case "NAS_BACKUP_PATH": {
+      if (typeof raw === "string") {
+        const trimmed = raw.trim();
+        return (trimmed || fallback) as SystemParameterValueMap[K];
+      }
+      if (typeof raw === "number" || typeof raw === "boolean") {
+        return String(raw) as SystemParameterValueMap[K];
+      }
+      return fallback as SystemParameterValueMap[K];
+    }
+    case "MANUAL_BACKUP_ENABLED": {
+      if (typeof raw === "boolean") {
+        return raw as SystemParameterValueMap[K];
+      }
+      if (typeof raw === "string") {
+        const normalized = raw.trim().toLowerCase();
+        if (normalized === "true") return true as SystemParameterValueMap[K];
+        if (normalized === "false") return false as SystemParameterValueMap[K];
+      }
+      if (typeof raw === "number") {
+        return (raw !== 0) as SystemParameterValueMap[K];
+      }
+      return fallback as SystemParameterValueMap[K];
+    }
+    default:
+      return fallback as SystemParameterValueMap[K];
+  }
+}
+
+/**
+ * อ่านค่า runtime จาก system_parameters (Service Role).
+ * คืนค่าแบบ type-safe ตาม param_key พร้อม fallback เมื่อไม่พบหรือ error.
+ */
+export async function getSystemParameter<K extends KnownSystemParameterKey>(
+  paramKey: K,
+): Promise<SystemParameterValueMap[K]>;
+export async function getSystemParameter(
+  paramKey: string,
+): Promise<string | number | boolean | null>;
+export async function getSystemParameter(
+  paramKey: string,
+): Promise<string | number | boolean | null> {
+  const key = normalizeParamKey(paramKey);
+  const knownDefault = getSystemParameterDefault(key);
+
+  try {
+    const supabaseAdmin = createSupabaseAdmin();
+    const { data, error } = await supabaseAdmin
+      .from("system_parameters")
+      .select("param_value")
+      .eq("param_key", key)
+      .maybeSingle();
+
+    if (error) {
+      console.error("[getSystemParameter]", key, error);
+      return knownDefault;
+    }
+
+    if (data?.param_value === null || data?.param_value === undefined) {
+      return knownDefault;
+    }
+
+    if (isKnownSystemParameterKey(key)) {
+      return castSystemParameterValue(key, data.param_value);
+    }
+
+    const raw = data.param_value;
+    if (
+      typeof raw === "string" ||
+      typeof raw === "number" ||
+      typeof raw === "boolean"
+    ) {
+      return raw;
+    }
+
+    return JSON.stringify(raw);
+  } catch (error: unknown) {
+    console.error("[getSystemParameter]", key, error);
+    return knownDefault;
+  }
 }
 
 async function assertAdminActor(

@@ -98,6 +98,8 @@ export type ExpenseCreateWorkspaceProps = {
   bankAccountsError?: string | null;
   defaultDate: string;
   defaultTab?: ExpenseCreateTab;
+  /** จาก system_parameters.WHT_RATE (Server Component) */
+  defaultWhtRate: number;
   /** When set, form updates an existing DRAFT instead of creating. */
   mode?: "create" | "edit";
   expenseId?: string;
@@ -181,6 +183,23 @@ function formatThaiBaht(value: number): string {
 
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function normalizeDefaultWhtRate(value: number): number {
+  const n = roundMoney(Number(value));
+  if (!Number.isFinite(n) || n < 0 || n > 100) return 3;
+  return n;
+}
+
+function resolveEffectiveWhtRate(
+  whtType: string | null | undefined,
+  whtRate: number | null | undefined,
+  defaultWhtRate: number,
+): number {
+  if (!String(whtType ?? "").trim()) return 0;
+  const rate = roundMoney(Number(whtRate ?? 0));
+  if (Number.isFinite(rate) && rate > 0) return rate;
+  return normalizeDefaultWhtRate(defaultWhtRate);
 }
 
 function parseAmount(raw: string): number {
@@ -405,6 +424,7 @@ export function ExpenseCreateWorkspace({
   bankAccountsError,
   defaultDate,
   defaultTab = "manual",
+  defaultWhtRate,
   mode = "create",
   expenseId,
   documentNo,
@@ -413,6 +433,10 @@ export function ExpenseCreateWorkspace({
   const router = useRouter();
   const isEdit = mode === "edit";
   const cancelHref = isEdit && expenseId ? `/expenses/${expenseId}` : "/expenses";
+  const resolvedDefaultWhtRate = useMemo(
+    () => normalizeDefaultWhtRate(defaultWhtRate),
+    [defaultWhtRate],
+  );
 
   const inferredVatType = initialValues
     ? inferExpenseVatType(
@@ -565,14 +589,26 @@ export function ExpenseCreateWorkspace({
 
   // Client-side WHT math — Sub Total × rate; Net Payable = Grand Total − WHT
   useEffect(() => {
+    const effectiveRate = resolveEffectiveWhtRate(
+      watchedWhtType,
+      watchedWhtRate,
+      resolvedDefaultWhtRate,
+    );
     const { whtAmount, netPayable } = calculateExpenseWht(
       Number(watchedSubTotal ?? 0),
-      Number(watchedWhtRate ?? 0),
+      effectiveRate,
       Number(watchedGrandTotal ?? 0),
     );
     setValue("wht_amount", whtAmount, { shouldValidate: true });
     setValue("net_payable", netPayable, { shouldValidate: true });
-  }, [watchedSubTotal, watchedWhtRate, watchedGrandTotal, setValue]);
+  }, [
+    watchedSubTotal,
+    watchedWhtType,
+    watchedWhtRate,
+    watchedGrandTotal,
+    resolvedDefaultWhtRate,
+    setValue,
+  ]);
 
   /**
    * Auto-split principal จาก Net Payable ÷ จำนวนงวด
@@ -1066,6 +1102,17 @@ export function ExpenseCreateWorkspace({
             ? values.attachment_file
             : null;
 
+      const effectiveWhtRate = resolveEffectiveWhtRate(
+        values.wht_type,
+        values.wht_rate,
+        resolvedDefaultWhtRate,
+      );
+      const whtTotals = calculateExpenseWht(
+        values.sub_total,
+        effectiveWhtRate,
+        values.grand_total,
+      );
+
       const formData = new FormData();
       formData.append("category_id", values.category_id);
       formData.append("vendor_id", values.vendor_id);
@@ -1073,9 +1120,9 @@ export function ExpenseCreateWorkspace({
       formData.append("net_amount", String(values.sub_total));
       formData.append("vat_amount", String(values.vat_amount));
       formData.append("wht_type", values.wht_type.trim());
-      formData.append("wht_rate", String(values.wht_rate));
-      formData.append("wht_amount", String(values.wht_amount));
-      formData.append("net_payable", String(values.net_payable));
+      formData.append("wht_rate", String(effectiveWhtRate));
+      formData.append("wht_amount", String(whtTotals.whtAmount));
+      formData.append("net_payable", String(whtTotals.netPayable));
       formData.append("payment_method", values.payment_method);
       formData.append(
         "bank_account_id",
@@ -1598,14 +1645,14 @@ export function ExpenseCreateWorkspace({
                     value={watchedWhtType ?? ""}
                     onChange={(e) => {
                       const nextType = e.target.value;
-                      const option =
-                        EXPENSE_WHT_OPTIONS.find(
-                          (row) => row.value === nextType,
-                        ) ?? EXPENSE_WHT_OPTIONS[0];
-                      setValue("wht_type", option.value, {
+                      setValue("wht_type", nextType, {
                         shouldValidate: true,
                       });
-                      setValue("wht_rate", option.rate, {
+                      if (!nextType.trim()) {
+                        setValue("wht_rate", 0, { shouldValidate: true });
+                        return;
+                      }
+                      setValue("wht_rate", resolvedDefaultWhtRate, {
                         shouldValidate: true,
                       });
                     }}
@@ -1618,9 +1665,44 @@ export function ExpenseCreateWorkspace({
                   </Select>
                   <p className="mt-1 text-[11px] text-slate-400">
                     WHT คำนวณจากยอดก่อนภาษี (Sub Total) × อัตรา{" "}
-                    {Number(watchedWhtRate ?? 0)}%
+                    {resolveEffectiveWhtRate(
+                      watchedWhtType,
+                      watchedWhtRate,
+                      resolvedDefaultWhtRate,
+                    )}
+                    %
                   </p>
                 </div>
+
+                {watchedWhtType?.trim() ? (
+                  <div>
+                    <Label htmlFor="wht_rate">อัตราหัก ณ ที่จ่าย (%)</Label>
+                    <Input
+                      id="wht_rate"
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      max={100}
+                      step="0.01"
+                      disabled={formBusy}
+                      value={watchedWhtRate ?? resolvedDefaultWhtRate}
+                      onChange={(e) => {
+                        const next = roundMoney(Number(e.target.value));
+                        setValue(
+                          "wht_rate",
+                          Number.isFinite(next) && next >= 0 ? next : 0,
+                          { shouldValidate: true },
+                        );
+                      }}
+                    />
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      ค่าเริ่มต้นจากระบบ {resolvedDefaultWhtRate}% — ปรับได้ตามประเภท
+                      หัก ณ ที่จ่าย
+                    </p>
+                  </div>
+                ) : (
+                  <div className="hidden md:block" aria-hidden />
+                )}
 
                 <div>
                   <Label htmlFor="wht_amount">ยอดหัก ณ ที่จ่าย (WHT)</Label>

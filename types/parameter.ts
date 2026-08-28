@@ -40,3 +40,13 @@ export type ParameterSettingsPageData = {
 export type GetParameterSettingsPageDataResult =
   | { success: true; data: ParameterSettingsPageData }
   | { success: false; error: string };
+
+/** Known runtime keys + typed return values for getSystemParameter(). */
+export type SystemParameterValueMap = {
+  WHT_RATE: number;
+  NAS_BACKUP_PATH: string;
+  ARCHIVE_COLD_AGE_DAYS: number;
+  MANUAL_BACKUP_ENABLED: boolean;
+};
+
+export type KnownSystemParameterKey = keyof SystemParameterValueMap;
