@@ -5,7 +5,7 @@
  * Filters are URL-driven (?type=TB&technicianId=&from=&to=).
  */
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, Receipt } from "lucide-react";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ import type {
   TechnicianBillingContact,
   TechnicianBillingJobRow,
 } from "@/types/technician-billing";
+import type { MstWhtRate } from "@/types/wht-rate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -56,8 +57,36 @@ export type TechnicianBillingPanelProps = {
   rows: TechnicianBillingJobRow[];
   totalWage: number;
   technicians: TechnicianBillingContact[];
+  whtRates: MstWhtRate[];
+  whtRatesError?: string | null;
   error: string | null;
 };
+
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function formatWhtRatePercent(rate: number): string {
+  const rounded = roundMoney(rate);
+  return Number.isInteger(rounded)
+    ? String(rounded)
+    : rounded.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function formatWhtOptionLabel(name: string, rate: number): string {
+  return `${name} (${formatWhtRatePercent(rate)}%)`;
+}
+
+function calculateTechnicianBillWht(
+  totalWageCost: number,
+  whtRate: number,
+): { whtAmount: number; netAmount: number } {
+  const base = roundMoney(Math.max(0, totalWageCost));
+  const rate = Number.isFinite(whtRate) && whtRate > 0 ? whtRate : 0;
+  const whtAmount = roundMoney(base * (rate / 100));
+  const netAmount = roundMoney(Math.max(0, base - whtAmount));
+  return { whtAmount, netAmount };
+}
 
 function formatMoney(value: number): string {
   return value.toLocaleString("th-TH", {
@@ -99,12 +128,15 @@ export function TechnicianBillingPanel({
   rows,
   totalWage,
   technicians,
+  whtRates,
+  whtRatesError,
   error,
 }: TechnicianBillingPanelProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isCreating, startCreate] = useTransition();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [whtType, setWhtType] = useState("");
   const [technicianId, setTechnicianId] = useState(urlTechnicianId);
   const [from, setFrom] = useState(urlFrom);
   const [to, setTo] = useState(urlTo);
@@ -153,6 +185,32 @@ export function TechnicianBillingPanel({
   const canCreate = Boolean(urlTechnicianId) && rows.length > 0 && !isCreating;
   const busy = isPending || isCreating;
 
+  const whtOptions = useMemo(
+    () => [
+      { value: "", label: "None (0%)", rate: 0 },
+      ...whtRates.map((row) => ({
+        value: row.wht_name,
+        label: formatWhtOptionLabel(row.wht_name, Number(row.wht_rate)),
+        rate: Number(row.wht_rate),
+      })),
+    ],
+    [whtRates],
+  );
+
+  const selectedWhtRate = useMemo(() => {
+    if (!whtType.trim()) return 0;
+    return (
+      whtOptions.find((opt) => opt.value === whtType)?.rate ??
+      whtRates.find((row) => row.wht_name === whtType)?.wht_rate ??
+      0
+    );
+  }, [whtType, whtOptions, whtRates]);
+
+  const whtTotals = useMemo(
+    () => calculateTechnicianBillWht(totalWage, selectedWhtRate),
+    [totalWage, selectedWhtRate],
+  );
+
   function handleViewJob(jobId: string) {
     const params = new URLSearchParams(searchParams.toString());
     params.set("view_job_id", jobId);
@@ -165,6 +223,8 @@ export function TechnicianBillingPanel({
       const result = await createTechnicianBill({
         technicianId: urlTechnicianId,
         itemIds: rows.map((row) => row.id),
+        whtType: whtType.trim() || null,
+        whtRate: selectedWhtRate,
       });
       if (!result.success) {
         toast.error(result.error);
@@ -172,7 +232,10 @@ export function TechnicianBillingPanel({
         return;
       }
       toast.success(
-        `สร้าง ${result.docNo} แล้ว · ${result.jobCount} บรรทัด · ฿${formatMoney(result.totalWage)}`,
+        `สร้าง ${result.docNo} แล้ว · ${result.jobCount} บรรทัด · ค่าแรง ฿${formatMoney(result.totalWage)}` +
+          (result.whtAmount > 0
+            ? ` · หัก ณ ที่จ่าย ฿${formatMoney(result.whtAmount)} · โอนจ่าย ฿${formatMoney(result.netAmount)}`
+            : ""),
       );
       setConfirmOpen(false);
       router.replace(buildTbHref({ technicianId: urlTechnicianId, from: urlFrom, to: urlTo }));
@@ -252,9 +315,60 @@ export function TechnicianBillingPanel({
           ) : null}
         </CardHeader>
         <CardContent>
-          {error ? (
+          {error || whtRatesError ? (
             <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {error}
+              {[error, whtRatesError ? `โหลดอัตราหัก ณ ที่จ่ายไม่สำเร็จ: ${whtRatesError}` : null]
+                .filter(Boolean)
+                .join(" · ")}
+            </div>
+          ) : null}
+
+          {urlTechnicianId && rows.length > 0 ? (
+            <div className="mb-4 grid gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="tb-wht-type">หัก ณ ที่จ่าย (WHT Type)</Label>
+                <Select
+                  id="tb-wht-type"
+                  value={whtType}
+                  disabled={busy}
+                  onChange={(event) => setWhtType(event.target.value)}
+                >
+                  {whtOptions.map((option) => (
+                    <option key={option.value || "none"} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+                <p className="text-[11px] text-slate-500">
+                  WHT คำนวณจากยอดรวมค่าแรง × อัตรา {formatWhtRatePercent(selectedWhtRate)}%
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-[11px] font-medium text-slate-500">
+                    ยอดรวมค่าแรง
+                  </p>
+                  <p className="mt-1 text-base font-semibold tabular-nums text-slate-900">
+                    ฿{formatMoney(totalWage)}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-3">
+                  <p className="text-[11px] font-medium text-amber-800">
+                    หัก ณ ที่จ่าย
+                  </p>
+                  <p className="mt-1 text-base font-semibold tabular-nums text-amber-900">
+                    ฿{formatMoney(whtTotals.whtAmount)}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-3">
+                  <p className="text-[11px] font-medium text-emerald-800">
+                    ยอดโอนจ่ายจริง
+                  </p>
+                  <p className="mt-1 text-base font-bold tabular-nums text-emerald-900">
+                    ฿{formatMoney(whtTotals.netAmount)}
+                  </p>
+                </div>
+              </div>
             </div>
           ) : null}
 
@@ -351,8 +465,29 @@ export function TechnicianBillingPanel({
             <AlertDialogTitle>ยืนยันสร้างใบสรุปค่าแรง</AlertDialogTitle>
             <AlertDialogDescription>
               จะรวบยอด {rows.length} บรรทัดงานบริการ ตามตัวกรองปัจจุบัน เป็นเอกสาร TB
-              (สรุปวางบิลช่าง) ยอด ฿{formatMoney(totalWage)} — รายการเหล่านี้จะถูก
-              ทำเครื่องหมายว่าวางบิลแล้ว
+              (สรุปวางบิลช่าง)
+              <span className="mt-2 block space-y-1 text-slate-600">
+                <span className="block">
+                  ยอดรวมค่าแรง ฿{formatMoney(totalWage)}
+                </span>
+                {whtTotals.whtAmount > 0 ? (
+                  <>
+                    <span className="block">
+                      หัก ณ ที่จ่าย ({whtType}) ฿{formatMoney(whtTotals.whtAmount)}
+                    </span>
+                    <span className="block font-semibold text-emerald-700">
+                      ยอดโอนจ่ายจริง ฿{formatMoney(whtTotals.netAmount)}
+                    </span>
+                  </>
+                ) : (
+                  <span className="block font-semibold text-emerald-700">
+                    ยอดโอนจ่ายจริง ฿{formatMoney(whtTotals.netAmount)}
+                  </span>
+                )}
+              </span>
+              <span className="mt-2 block">
+                รายการเหล่านี้จะถูกทำเครื่องหมายว่าวางบิลแล้ว
+              </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

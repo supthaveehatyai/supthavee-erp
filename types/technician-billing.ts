@@ -52,8 +52,20 @@ export type GetUnbilledTechnicianJobsResult =
 export type CreateTechnicianBillInput = {
   technicianId: string;
   itemIds: string[];
+  /** mst_wht_rates.wht_name — empty = no WHT */
+  whtType?: string | null;
+  /** Percent from master (client hint; server re-validates) */
+  whtRate?: number | null;
 };
 
 export type CreateTechnicianBillResult =
-  | { success: true; documentId: string; docNo: string; jobCount: number; totalWage: number }
+  | {
+      success: true;
+      documentId: string;
+      docNo: string;
+      jobCount: number;
+      totalWage: number;
+      whtAmount: number;
+      netAmount: number;
+    }
   | { success: false; error: string };

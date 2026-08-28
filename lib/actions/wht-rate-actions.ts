@@ -17,6 +17,7 @@ import type {
 
 const SETTINGS_PATH = "/settings/parameters";
 const EXPENSE_REVALIDATE_PATHS = ["/expenses/create", "/expenses"] as const;
+const BILLING_NOTES_PATH = "/finance/billing-notes";
 
 type WhtRateRow = {
   id: string;
@@ -36,6 +37,7 @@ function mapWhtRateRow(row: WhtRateRow): MstWhtRate {
 
 function revalidateWhtRatePaths(): void {
   revalidatePath(SETTINGS_PATH);
+  revalidatePath(BILLING_NOTES_PATH);
   for (const path of EXPENSE_REVALIDATE_PATHS) {
     revalidatePath(path);
   }

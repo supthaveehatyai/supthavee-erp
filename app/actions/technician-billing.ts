@@ -14,6 +14,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server-admin";
 import { requireSessionUserId } from "@/lib/auth/current-user";
+import { getActiveWhtRates } from "@/lib/actions/wht-rate-actions";
 import { roundMoney } from "@/lib/utils/payment-fifo";
 import type {
   CreateTechnicianBillInput,
@@ -45,6 +46,58 @@ function deliveredOnFromJob(updatedAt: string | null | undefined): string | null
   const raw = String(updatedAt ?? "").trim();
   if (!raw) return null;
   return raw.slice(0, 10);
+}
+
+/** WHT on gross wage — net payable = total_wage_cost − wht_amount */
+function calculateTechnicianBillWht(
+  totalWageCost: number,
+  whtRate: number,
+): { whtAmount: number; netAmount: number } {
+  const base = roundMoney(Math.max(0, totalWageCost));
+  const rate = Number.isFinite(whtRate) && whtRate > 0 ? whtRate : 0;
+  const whtAmount = roundMoney(base * (rate / 100));
+  const netAmount = roundMoney(Math.max(0, base - whtAmount));
+  return { whtAmount, netAmount };
+}
+
+async function resolveTbWhtFromMaster(
+  whtType: string | null | undefined,
+  whtRateHint: number | null | undefined,
+): Promise<
+  | { ok: true; whtType: string | null; whtRate: number }
+  | { ok: false; error: string }
+> {
+  const type = (whtType ?? "").trim();
+  if (!type) {
+    return { ok: true, whtType: null, whtRate: 0 };
+  }
+
+  const ratesResult = await getActiveWhtRates();
+  if (ratesResult.error) {
+    return {
+      ok: false,
+      error: ratesResult.error,
+    };
+  }
+
+  const match = ratesResult.data.find((row) => row.wht_name === type);
+  if (!match) {
+    return {
+      ok: false,
+      error: "ประเภทหัก ณ ที่จ่ายที่เลือกไม่ถูกต้องหรือถูกปิดใช้งานแล้ว",
+    };
+  }
+
+  const masterRate = roundMoney(Number(match.wht_rate));
+  const hintRate = roundMoney(Number(whtRateHint ?? 0));
+  if (hintRate > 0 && Math.abs(hintRate - masterRate) > 0.001) {
+    return {
+      ok: false,
+      error: "อัตราหัก ณ ที่จ่ายไม่ตรงกับ Master Data",
+    };
+  }
+
+  return { ok: true, whtType: type, whtRate: masterRate };
 }
 
 type DocumentJoin = { id?: string | null; doc_no?: string | null };
@@ -472,6 +525,19 @@ export async function createTechnicianBill(
       return { success: false, error: "ยอดรวมค่าแรงต้องมากกว่า 0" };
     }
 
+    const whtResolved = await resolveTbWhtFromMaster(
+      input.whtType,
+      input.whtRate,
+    );
+    if (!whtResolved.ok) {
+      return { success: false, error: whtResolved.error };
+    }
+
+    const { whtAmount, netAmount } = calculateTechnicianBillWht(
+      totalWage,
+      whtResolved.whtRate,
+    );
+
     const docDate = new Date().toISOString().slice(0, 10);
     const { data: docNoRaw, error: rpcError } = await supabase.rpc(
       "generate_document_no",
@@ -490,7 +556,10 @@ export async function createTechnicianBill(
 
     const docNo = docNoRaw.trim();
     const nowIso = new Date().toISOString();
-    const notes = `สรุปวางบิลช่าง · ${eligible.length} บรรทัด · ค่าแรงจาก document_items.wage_cost`;
+    const whtNote = whtResolved.whtType
+      ? ` · หัก ณ ที่จ่าย ${whtResolved.whtType} ${whtResolved.whtRate}% (฿${whtAmount.toFixed(2)})`
+      : "";
+    const notes = `สรุปวางบิลช่าง · ${eligible.length} บรรทัด · ค่าแรงจาก document_items.wage_cost${whtNote}`;
 
     const owner = await requireSessionUserId();
     if (!owner.ok) {
@@ -509,10 +578,12 @@ export async function createTechnicianBill(
         discount_amount: 0,
         tax_rate: 0,
         tax_amount: 0,
-        grand_total: totalWage,
+        wht_rate: whtResolved.whtRate,
+        wht_amount: whtAmount,
+        grand_total: netAmount,
         vat_type: "NONE",
         vat_rate: 0,
-        total_amount: totalWage,
+        total_amount: netAmount,
         net_before_vat: totalWage,
         vat_amount: 0,
         notes,
@@ -584,6 +655,8 @@ export async function createTechnicianBill(
       docNo: String(document.doc_no ?? docNo),
       jobCount: eligible.length,
       totalWage,
+      whtAmount,
+      netAmount,
     };
   } catch (err) {
     if (createdDocumentId) {

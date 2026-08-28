@@ -6,6 +6,7 @@ import {
   getTechnicianOptions,
 } from "@/app/actions/kanban-actions";
 import { getUnbilledTechnicianJobs } from "@/app/actions/technician-billing";
+import { getActiveWhtRates } from "@/lib/actions/wht-rate-actions";
 import { BillingNoteList } from "@/components/finance/BillingNoteList";
 import { JobDetailSheet } from "@/components/production/job-detail-sheet";
 import type { BillingNotesTab } from "@/types/technician-billing";
@@ -56,11 +57,14 @@ export default async function BillingNotesPage({ searchParams }: PageProps) {
     const technicianId = params.technicianId?.trim() ?? "";
     const from = params.from?.trim() ?? "";
     const to = params.to?.trim() ?? "";
-    const tb = await getUnbilledTechnicianJobs({
-      technicianId,
-      from,
-      to,
-    });
+    const [tb, whtRatesResult] = await Promise.all([
+      getUnbilledTechnicianJobs({
+        technicianId,
+        from,
+        to,
+      }),
+      getActiveWhtRates(),
+    ]);
 
     const jobResults = await jobDetailPromise;
     const jobDetailsResult = jobResults?.[0] ?? null;
@@ -87,6 +91,8 @@ export default async function BillingNotesPage({ searchParams }: PageProps) {
             rows: tb.rows,
             totalWage: tb.totalWage,
             technicians: tb.technicians,
+            whtRates: whtRatesResult.data,
+            whtRatesError: whtRatesResult.error,
             error: tb.success ? null : tb.error,
           }}
         />
