@@ -24,6 +24,7 @@ export type ExpenseWhtOption = {
 };
 
 /**
+ * @deprecated Use `mst_wht_rates` master data via `getActiveWhtRates()` instead.
  * Standard Thai WHT presets for OPEX (หัก ณ ที่จ่าย).
  * Selecting an option sets both `wht_type` and `wht_rate` in the form.
  */

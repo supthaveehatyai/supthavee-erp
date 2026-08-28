@@ -10,6 +10,7 @@
 - `mst_categories` (หมวดหมู่สินค้า)
 - `mst_colors` (สีมาตรฐาน - ล็อก 3 ตัวอักษรพิมพ์ใหญ่)
 - `mst_expense_categories` (หมวดหมู่ค่าใช้จ่าย)
+- `mst_wht_rates` (อัตราหัก ณ ที่จ่ายมาตรฐาน — `wht_name`, `wht_rate`, `is_active`; RLS: authenticated SELECT)
 - `mst_asset_categories` (หมวดหมู่สินทรัพย์ถาวร — `category_code`, `useful_life_years`, `depreciation_rate`)
 - `mst_genders` (เพศ/ทรงเสื้อ)
 - `mst_sizes` (ไซส์มาตรฐาน Global Size รวมถึงไซส์บริการ)

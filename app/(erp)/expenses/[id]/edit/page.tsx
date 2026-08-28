@@ -9,6 +9,7 @@ import {
   getExpenseVendors,
 } from "@/app/actions/expenses";
 import { getSystemParameter } from "@/lib/actions/parameter-actions";
+import { getActiveWhtRates } from "@/lib/actions/wht-rate-actions";
 import { ExpenseCreateWorkspace } from "../../create/expense-create-workspace";
 
 export const dynamic = "force-dynamic";
@@ -46,12 +47,14 @@ export default async function EditExpensePage({ params }: PageProps) {
     vendorsResult,
     bankAccountsResult,
     defaultWhtRate,
+    whtRatesResult,
   ] = await Promise.all([
     getExpenseById(expenseId),
     getExpenseCategories(),
     getExpenseVendors(),
     getBankAccounts(),
     getSystemParameter("WHT_RATE"),
+    getActiveWhtRates(),
   ]);
 
   if (expenseResult.error && !expenseResult.data) {
@@ -115,6 +118,8 @@ export default async function EditExpensePage({ params }: PageProps) {
         defaultDate={expense.expense_date}
         defaultTab="manual"
         defaultWhtRate={defaultWhtRate}
+        whtRates={whtRatesResult.data}
+        whtRatesError={whtRatesResult.error}
         initialValues={{
           expense_date: expense.expense_date,
           vendor_id: expense.vendor_id,

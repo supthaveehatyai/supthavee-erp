@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { SlidersHorizontal } from "lucide-react";
 import { getParameterSettingsPageData } from "@/lib/actions/parameter-actions";
+import { getAllWhtRates } from "@/lib/actions/wht-rate-actions";
 import { ParameterApprovalTable } from "./parameter-approval-table";
 import { ParameterSettingsForm } from "./parameter-settings-form";
+import { WhtRatesTable } from "./wht-rates-table";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +15,10 @@ export const metadata: Metadata = {
 };
 
 export default async function SystemParametersPage() {
-  const result = await getParameterSettingsPageData();
+  const [result, whtRatesResult] = await Promise.all([
+    getParameterSettingsPageData(),
+    getAllWhtRates(),
+  ]);
 
   if (!result.success) {
     return (
@@ -49,6 +54,14 @@ export default async function SystemParametersPage() {
         rows={pendingRequests}
         isAdmin={isAdmin}
       />
+
+      {whtRatesResult.error ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          โหลดอัตราหัก ณ ที่จ่ายไม่สำเร็จ: {whtRatesResult.error}
+        </div>
+      ) : (
+        <WhtRatesTable rows={whtRatesResult.data} isAdmin={isAdmin} />
+      )}
     </div>
   );
 }

@@ -32,13 +32,13 @@ import {
 import {
   DUPLICATE_INVOICE_ERROR,
   DUPLICATE_INVOICE_MESSAGE,
-  EXPENSE_WHT_OPTIONS,
 } from "@/lib/constants/expense-constants";
 import type {
   ExpenseBankAccountOption,
   ExpenseCategory,
   ExpenseVendorOption,
 } from "@/types/expense";
+import type { MstWhtRate } from "@/types/wht-rate";
 import { processExpenseOCR } from "@/app/actions/expense/ocr-action";
 import type { ExpenseOcrExtraction } from "@/types/expense";
 import VendorCombobox from "@/components/procurement/VendorCombobox";
@@ -98,8 +98,11 @@ export type ExpenseCreateWorkspaceProps = {
   bankAccountsError?: string | null;
   defaultDate: string;
   defaultTab?: ExpenseCreateTab;
-  /** จาก system_parameters.WHT_RATE (Server Component) */
+  /** จาก system_parameters.WHT_RATE (Server Component) — fallback เมื่อไม่มี master match */
   defaultWhtRate: number;
+  /** Active rows จาก mst_wht_rates (Server Component) */
+  whtRates: MstWhtRate[];
+  whtRatesError?: string | null;
   /** When set, form updates an existing DRAFT instead of creating. */
   mode?: "create" | "edit";
   expenseId?: string;
@@ -266,23 +269,73 @@ function resolvePaymentMethod(
   return raw?.trim().toUpperCase() === "TRANSFER" ? "TRANSFER" : "CASH";
 }
 
+function formatWhtRatePercent(rate: number): string {
+  const rounded = roundMoney(rate);
+  return Number.isInteger(rounded)
+    ? String(rounded)
+    : rounded.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function formatWhtOptionLabel(name: string, rate: number): string {
+  return `${name} (${formatWhtRatePercent(rate)}%)`;
+}
+
+type ExpenseWhtDropdownOption = {
+  value: string;
+  label: string;
+  rate: number;
+};
+
+function buildWhtDropdownOptions(
+  whtRates: MstWhtRate[],
+  legacyType?: string | null,
+  legacyRate?: number | null,
+): ExpenseWhtDropdownOption[] {
+  const options: ExpenseWhtDropdownOption[] = whtRates.map((row) => ({
+    value: row.wht_name,
+    label: formatWhtOptionLabel(row.wht_name, Number(row.wht_rate)),
+    rate: Number(row.wht_rate),
+  }));
+
+  const legacy = (legacyType ?? "").trim();
+  if (legacy && !options.some((opt) => opt.value === legacy)) {
+    const rate = roundMoney(Number(legacyRate ?? 0));
+    options.push({
+      value: legacy,
+      label: `${formatWhtOptionLabel(legacy, rate)} (ไม่ใช้งาน)`,
+      rate,
+    });
+  }
+
+  return [{ value: "", label: "None (0%)", rate: 0 }, ...options];
+}
+
 /** Resolve WHT preset from stored type/rate (edit mode). */
 function resolveExpenseWht(
   whtType: string | null | undefined,
   whtRate: number | null | undefined,
+  whtRates: MstWhtRate[],
 ): { type: string; rate: number } {
   const type = (whtType ?? "").trim();
   if (type) {
-    const byType = EXPENSE_WHT_OPTIONS.find((opt) => opt.value === type);
-    if (byType) return { type: byType.value, rate: byType.rate };
+    const byType = whtRates.find((opt) => opt.wht_name === type);
+    if (byType) {
+      return { type: byType.wht_name, rate: Number(byType.wht_rate) };
+    }
   }
 
   const rate = roundMoney(Number(whtRate ?? 0));
   if (rate > 0) {
-    const byRate = EXPENSE_WHT_OPTIONS.find(
-      (opt) => Math.abs(opt.rate - rate) < 0.001,
+    const byRate = whtRates.find(
+      (opt) => Math.abs(Number(opt.wht_rate) - rate) < 0.001,
     );
-    if (byRate) return { type: byRate.value, rate: byRate.rate };
+    if (byRate) {
+      return { type: byRate.wht_name, rate: Number(byRate.wht_rate) };
+    }
+  }
+
+  if (type && rate > 0) {
+    return { type, rate };
   }
 
   return { type: "", rate: 0 };
@@ -425,6 +478,8 @@ export function ExpenseCreateWorkspace({
   defaultDate,
   defaultTab = "manual",
   defaultWhtRate,
+  whtRates,
+  whtRatesError,
   mode = "create",
   expenseId,
   documentNo,
@@ -449,6 +504,7 @@ export function ExpenseCreateWorkspace({
   const initialWht = resolveExpenseWht(
     initialValues?.wht_type,
     initialValues?.wht_rate,
+    whtRates,
   );
   const initialAmounts = initialValues
     ? {
@@ -836,6 +892,16 @@ export function ExpenseCreateWorkspace({
     setValue("vat_amount", amounts.vat, { shouldValidate: true });
     setValue("grand_total", amounts.grand, { shouldValidate: true });
   }
+
+  const whtOptions = useMemo(
+    () =>
+      buildWhtDropdownOptions(
+        whtRates,
+        initialValues?.wht_type,
+        initialValues?.wht_rate,
+      ),
+    [whtRates, initialValues?.wht_type, initialValues?.wht_rate],
+  );
 
   const vendorOptions = useMemo(
     () =>
@@ -1232,7 +1298,7 @@ export function ExpenseCreateWorkspace({
 
   return (
     <div className="space-y-5">
-      {categoriesError || vendorsError || bankAccountsError ? (
+      {categoriesError || vendorsError || bankAccountsError || whtRatesError ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           {[
             categoriesError
@@ -1243,6 +1309,9 @@ export function ExpenseCreateWorkspace({
               : null,
             bankAccountsError
               ? `โหลดบัญชีธนาคารไม่สำเร็จ: ${bankAccountsError}`
+              : null,
+            whtRatesError
+              ? `โหลดอัตราหัก ณ ที่จ่ายไม่สำเร็จ: ${whtRatesError}`
               : null,
           ]
             .filter(Boolean)
@@ -1652,13 +1721,20 @@ export function ExpenseCreateWorkspace({
                         setValue("wht_rate", 0, { shouldValidate: true });
                         return;
                       }
-                      setValue("wht_rate", resolvedDefaultWhtRate, {
-                        shouldValidate: true,
-                      });
+                      const selected = whtOptions.find(
+                        (opt) => opt.value === nextType,
+                      );
+                      setValue(
+                        "wht_rate",
+                        selected
+                          ? selected.rate
+                          : resolvedDefaultWhtRate,
+                        { shouldValidate: true },
+                      );
                     }}
                   >
-                    {EXPENSE_WHT_OPTIONS.map((option) => (
-                      <option key={option.label} value={option.value}>
+                    {whtOptions.map((option) => (
+                      <option key={option.value || "none"} value={option.value}>
                         {option.label}
                       </option>
                     ))}
@@ -1696,8 +1772,7 @@ export function ExpenseCreateWorkspace({
                       }}
                     />
                     <p className="mt-1 text-[11px] text-slate-400">
-                      ค่าเริ่มต้นจากระบบ {resolvedDefaultWhtRate}% — ปรับได้ตามประเภท
-                      หัก ณ ที่จ่าย
+                      ค่าเริ่มต้นจาก Master Data — ปรับได้ตามประเภทหัก ณ ที่จ่าย
                     </p>
                   </div>
                 ) : (

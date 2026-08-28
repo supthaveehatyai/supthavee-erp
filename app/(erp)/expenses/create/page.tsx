@@ -7,6 +7,7 @@ import {
   getExpenseVendors,
 } from "@/app/actions/expenses";
 import { getSystemParameter } from "@/lib/actions/parameter-actions";
+import { getActiveWhtRates } from "@/lib/actions/wht-rate-actions";
 import { todayIsoDate } from "@/lib/utils/outstanding-summary";
 import {
   ExpenseCreateWorkspace,
@@ -37,13 +38,19 @@ export default async function CreateExpensePage({ searchParams }: PageProps) {
   const params = await searchParams;
   const defaultTab = resolveTab(params.tab);
 
-  const [categoriesResult, vendorsResult, bankAccountsResult, defaultWhtRate] =
-    await Promise.all([
-      getExpenseCategories(),
-      getExpenseVendors(),
-      getBankAccounts(),
-      getSystemParameter("WHT_RATE"),
-    ]);
+  const [
+    categoriesResult,
+    vendorsResult,
+    bankAccountsResult,
+    defaultWhtRate,
+    whtRatesResult,
+  ] = await Promise.all([
+    getExpenseCategories(),
+    getExpenseVendors(),
+    getBankAccounts(),
+    getSystemParameter("WHT_RATE"),
+    getActiveWhtRates(),
+  ]);
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -81,6 +88,8 @@ export default async function CreateExpensePage({ searchParams }: PageProps) {
         defaultDate={todayIsoDate()}
         defaultTab={defaultTab}
         defaultWhtRate={defaultWhtRate}
+        whtRates={whtRatesResult.data}
+        whtRatesError={whtRatesResult.error}
       />
     </div>
   );
