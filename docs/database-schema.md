@@ -20,6 +20,8 @@
 - `user_profiles` (โปรไฟล์พนักงาน/ผู้ใช้งาน — `data_access_scope` IN ('ALL','OWN'), `approval_limit`)
 - `app_roles` (สิทธิ์การใช้งาน Dynamic RBAC — `accessible_modules` JSONB: sales, purchases, inventory, finance, settings)
 - `system_settings` (ตั้งค่าระบบบริษัท Singleton)
+- `system_parameters` (ค่า config ปัจจุบัน — `param_key` PK, `param_value` JSONB, `data_type`; RLS: authenticated SELECT, write ผ่าน service_role)
+- `parameter_change_requests` (คำขอแก้ config แบบ Maker-Checker — `param_key` FK, `status` PENDING|APPROVED|REJECTED; RLS: service_role only)
 
 ## 3. Products, Inventory & Production (สินค้า, คลัง, ผลิต)
 - `product_models` (รุ่นสินค้า - Phase 1 ของการสร้าง Matrix)

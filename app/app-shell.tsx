@@ -15,7 +15,8 @@ type IconName =
   | "warehouse"
   | "book"
   | "history"
-  | "settings";
+  | "settings"
+  | "sliders";
 
 type NavigationItem = {
   label: string;
@@ -146,6 +147,19 @@ function Icon({
       <>
         <circle cx="12" cy="12" r="3" />
         <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.56 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.2 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.4v-4h.09A1.7 1.7 0 0 0 4.2 8.56a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 8.56 4.2a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V2.4h4v.09A1.7 1.7 0 0 0 15 4.2a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 8.56a1.7 1.7 0 0 0 .6 1c.3.26.7.4 1.1.4h.09v4h-.09A1.7 1.7 0 0 0 19.4 15Z" />
+      </>
+    ),
+    sliders: (
+      <>
+        <path d="M4 21v-7" />
+        <path d="M4 10V3" />
+        <path d="M12 21v-9" />
+        <path d="M12 8V3" />
+        <path d="M20 21v-5" />
+        <path d="M20 12V3" />
+        <path d="M2 14h4" />
+        <path d="M10 8h4" />
+        <path d="M18 16h4" />
       </>
     ),
   };
@@ -292,6 +306,19 @@ function SidebarContent({
             >
               <Icon name="settings" className="size-[18px]" />
               ตั้งค่าข้อมูลบริษัท
+            </Link>
+            <Link
+              href="/settings/parameters"
+              onNavigate={closeMenu}
+              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition ${
+                pathname === "/settings/parameters" ||
+                pathname.startsWith("/settings/parameters/")
+                  ? "bg-white/15 font-medium text-white"
+                  : "text-blue-200 hover:bg-white/10 hover:text-white"
+              }`}
+            >
+              <Icon name="sliders" className="size-[18px]" />
+              ตั้งค่าระบบ
             </Link>
           </>
         ) : null}
