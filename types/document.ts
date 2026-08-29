@@ -306,6 +306,7 @@ export type DocumentDetail = {
   total_amount: number | null;
   net_before_vat: number | null;
   vat_amount: number | null;
+  wht_rate: number;
   wht_amount: number;
   payment_status: string;
   notes: string | null;

@@ -6,15 +6,17 @@
  */
 
 import { useState } from "react";
-import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   CircleDollarSign,
   Download,
   FileSpreadsheet,
   Percent,
+  Printer,
 } from "lucide-react";
 import type { WHTReportRow } from "@/types/tax";
+import { buildWht50TawiPrintHref } from "@/lib/tax/wht-50tawi-format";
 import { TaxValidationModal } from "@/components/tax/TaxValidationModal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,6 +36,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { buildViewWhtHref } from "./wht-document-preview-sheet";
 
 export type WhtReportDashboardProps = {
   year: number;
@@ -55,13 +58,6 @@ type ModalTarget = {
   companyName: string;
   initial: WHTReportRow["contacts"];
 };
-
-function whtDocumentHref(row: WHTReportRow): string {
-  if (row.source === "TB") {
-    return `/purchases/${encodeURIComponent(row.document_no)}`;
-  }
-  return `/expenses/${row.id}`;
-}
 
 function sourceBadgeLabel(source: WHTReportRow["source"]): string {
   return source === "TB" ? "TB" : "EXP";
@@ -158,12 +154,18 @@ function TabExportBar({
 
 function WhtTable({
   rows,
+  year,
+  month,
   showAction,
   onUpdateVendor,
+  onViewDocument,
 }: {
   rows: WHTReportRow[];
+  year: number;
+  month: number;
   showAction?: boolean;
   onUpdateVendor?: (row: WHTReportRow) => void;
+  onViewDocument?: (row: WHTReportRow) => void;
 }) {
   if (rows.length === 0) {
     return (
@@ -188,6 +190,7 @@ function WhtTable({
             <TableHead className="text-right whitespace-nowrap">ฐานภาษี</TableHead>
             <TableHead className="text-right whitespace-nowrap">อัตรา (%)</TableHead>
             <TableHead className="text-right whitespace-nowrap">ยอดภาษี</TableHead>
+            <TableHead className="whitespace-nowrap text-right">การจัดการ</TableHead>
             {showAction ? (
               <TableHead className="whitespace-nowrap text-right">Action</TableHead>
             ) : null}
@@ -208,12 +211,13 @@ function WhtTable({
                   </Badge>
                 </TableCell>
                 <TableCell className="whitespace-nowrap font-medium">
-                  <Link
-                    href={whtDocumentHref(row)}
-                    className="text-blue-600 hover:underline"
+                  <button
+                    type="button"
+                    onClick={() => onViewDocument?.(row)}
+                    className="text-left text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1"
                   >
                     {row.document_no || "—"}
-                  </Link>
+                  </button>
                   <span className="mt-0.5 block text-[10px] font-normal text-slate-400">
                     {payStatus === "PAID" ? "ชำระแล้ว" : "รอดำเนินการ"}
                   </span>
@@ -250,6 +254,23 @@ function WhtTable({
                 </TableCell>
                 <TableCell className="text-right font-semibold tabular-nums text-slate-900">
                   {formatBaht(row.wht_amount)}
+                </TableCell>
+                <TableCell className="text-right">
+                  <a
+                    href={buildWht50TawiPrintHref(
+                      row.source,
+                      row.id,
+                      year,
+                      month,
+                    )}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 text-[11px] font-semibold text-amber-900 transition hover:bg-amber-100"
+                    title="พิมพ์หนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ)"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    พิมพ์ 50 ทวิ
+                  </a>
                 </TableCell>
                 {showAction ? (
                   <TableCell className="text-right">
@@ -292,6 +313,9 @@ export function WhtReportDashboard({
   paidCount,
   issuedCount,
 }: WhtReportDashboardProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [modalTarget, setModalTarget] = useState<ModalTarget | null>(null);
 
   const pendingCount = pendingValidation.length;
@@ -309,6 +333,13 @@ export function WhtReportDashboard({
       companyName: row.contacts?.company_name?.trim() || "ผู้จำหน่าย",
       initial: row.contacts,
     });
+  }
+
+  function openDocumentPreview(row: WHTReportRow) {
+    router.push(
+      buildViewWhtHref(pathname, searchParams.toString(), row.source, row.id),
+      { scroll: false },
+    );
   }
 
   return (
@@ -449,7 +480,12 @@ export function WhtReportDashboard({
                 href={buildExportHref(year, month, "PND3")}
                 disabled={pnd3.length === 0}
               />
-              <WhtTable rows={pnd3} />
+              <WhtTable
+                rows={pnd3}
+                year={year}
+                month={month}
+                onViewDocument={openDocumentPreview}
+              />
             </TabsContent>
             <TabsContent value="pnd53">
               <TabExportBar
@@ -457,13 +493,21 @@ export function WhtReportDashboard({
                 href={buildExportHref(year, month, "PND53")}
                 disabled={pnd53.length === 0}
               />
-              <WhtTable rows={pnd53} />
+              <WhtTable
+                rows={pnd53}
+                year={year}
+                month={month}
+                onViewDocument={openDocumentPreview}
+              />
             </TabsContent>
             <TabsContent value="pending">
               <WhtTable
                 rows={pendingValidation}
+                year={year}
+                month={month}
                 showAction
                 onUpdateVendor={openTaxModal}
+                onViewDocument={openDocumentPreview}
               />
             </TabsContent>
           </Tabs>

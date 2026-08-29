@@ -2,6 +2,11 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Landmark } from "lucide-react";
 import { getMonthlyWHTReport } from "@/app/actions/tax-actions";
+import { WhtDocumentPreviewContent } from "./wht-document-preview-content";
+import {
+  parseWhtDocumentPreviewTarget,
+  WhtDocumentPreviewSheet,
+} from "./wht-document-preview-sheet";
 import { WhtPeriodPicker } from "./wht-period-picker";
 import { WhtReportDashboard } from "./wht-report-dashboard";
 
@@ -16,6 +21,8 @@ type PageProps = {
   searchParams: Promise<{
     year?: string;
     month?: string;
+    view_wht_source?: string;
+    view_wht_id?: string;
   }>;
 };
 
@@ -67,6 +74,10 @@ function parsePeriod(rawYear?: string, rawMonth?: string): {
 export default async function WhtReportPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const { year, month } = parsePeriod(params.year, params.month);
+  const previewTarget = parseWhtDocumentPreviewTarget(
+    params.view_wht_source,
+    params.view_wht_id,
+  );
   const result = await getMonthlyWHTReport(year, month);
 
   const monthLabel = THAI_MONTH_LABELS[month] ?? `เดือน ${month}`;
@@ -99,26 +110,53 @@ export default async function WhtReportPage({ searchParams }: PageProps) {
           ไม่สามารถโหลดรายงาน WHT ได้: {result.error}
         </div>
       ) : (
-        <WhtReportDashboard
-          year={year}
-          month={month}
-          monthLabel={monthLabel}
-          pnd3={result.data.pnd3}
-          pnd53={result.data.pnd53}
-          pendingValidation={result.data.pendingValidation}
-          totalWhtBaseFormatted={formatThaiBaht(result.data.summary.totalWhtBase)}
-          totalWhtAmountFormatted={formatThaiBaht(
-            result.data.summary.totalWhtAmount,
-          )}
-          paidWhtAmountFormatted={formatThaiBaht(
-            result.data.summary.paidWhtAmount,
-          )}
-          issuedWhtAmountFormatted={formatThaiBaht(
-            result.data.summary.issuedWhtAmount,
-          )}
-          paidCount={result.data.summary.paidCount}
-          issuedCount={result.data.summary.issuedCount}
-        />
+        <>
+          <Suspense
+            fallback={
+              <div className="h-64 animate-pulse rounded-xl bg-slate-100" />
+            }
+          >
+            <WhtReportDashboard
+              year={year}
+              month={month}
+              monthLabel={monthLabel}
+              pnd3={result.data.pnd3}
+              pnd53={result.data.pnd53}
+              pendingValidation={result.data.pendingValidation}
+              totalWhtBaseFormatted={formatThaiBaht(
+                result.data.summary.totalWhtBase,
+              )}
+              totalWhtAmountFormatted={formatThaiBaht(
+                result.data.summary.totalWhtAmount,
+              )}
+              paidWhtAmountFormatted={formatThaiBaht(
+                result.data.summary.paidWhtAmount,
+              )}
+              issuedWhtAmountFormatted={formatThaiBaht(
+                result.data.summary.issuedWhtAmount,
+              )}
+              paidCount={result.data.summary.paidCount}
+              issuedCount={result.data.summary.issuedCount}
+            />
+          </Suspense>
+
+          <WhtDocumentPreviewSheet target={previewTarget}>
+            {previewTarget ? (
+              <Suspense
+                fallback={
+                  <div className="px-6 py-8 text-sm text-slate-500">
+                    กำลังโหลดรายละเอียดเอกสาร...
+                  </div>
+                }
+              >
+                <WhtDocumentPreviewContent
+                  source={previewTarget.source}
+                  documentId={previewTarget.documentId}
+                />
+              </Suspense>
+            ) : null}
+          </WhtDocumentPreviewSheet>
+        </>
       )}
     </div>
   );

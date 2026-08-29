@@ -160,6 +160,7 @@ export default async function PurchaseDocumentDetailPage({
   }
 
   const isPaymentDoc = doc.doc_type === "PAY";
+  const isTbDoc = doc.doc_type === "TB";
   const isDepositDoc = doc.doc_type === "DEP_OUT";
   const isSettlementDoc =
     doc.doc_type === "AP_REFUND" || doc.doc_type === "AP_WRITEOFF";
@@ -172,6 +173,11 @@ export default async function PurchaseDocumentDetailPage({
     : { data: [], error: null };
 
   const grandTotal = Number(doc.grand_total ?? 0);
+  const whtAmount = Number(doc.wht_amount ?? 0);
+  const whtRate = Number(doc.wht_rate ?? 0);
+  const wageGross = Number(
+    doc.net_before_vat ?? doc.sub_total ?? grandTotal + whtAmount,
+  );
   const depositDeducted = Number(doc.deposit_deducted ?? 0);
   const depositUsedFromHistory = depositHistoryResult.data.reduce(
     (sum, row) => sum + row.allocated_amount,
@@ -276,9 +282,11 @@ export default async function PurchaseDocumentDetailPage({
             <CardDescription>
               {isSettlementDoc
                 ? `${settlementTitle} · ${vatTypeLabel}`
-                : isDepositDoc
-                  ? `เอกสารมัดจำจ่าย · ${vatTypeLabel} · สถานะ ${doc.payment_status}`
-                  : `สถานะ ${doc.payment_status}`}
+                : isTbDoc
+                  ? `สรุปวางบิลช่าง (Technician Bill) · สถานะ ${doc.payment_status}`
+                  : isDepositDoc
+                    ? `เอกสารมัดจำจ่าย · ${vatTypeLabel} · สถานะ ${doc.payment_status}`
+                    : `สถานะ ${doc.payment_status}`}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
@@ -338,6 +346,34 @@ export default async function PurchaseDocumentDetailPage({
                     ยอดรวมสุทธิ (Grand Total)
                   </span>
                   <span className="text-lg font-bold tabular-nums text-orange-700">
+                    {formatMoney(grandTotal)}
+                  </span>
+                </div>
+              </>
+            ) : isTbDoc ? (
+              <>
+                <div className="flex items-center justify-between gap-3 text-slate-600">
+                  <span>ยอดรวมค่าแรง (Wage Gross)</span>
+                  <span className="tabular-nums font-medium text-slate-800">
+                    {formatMoney(wageGross)}
+                  </span>
+                </div>
+                {whtAmount > 0 ? (
+                  <div className="flex items-center justify-between gap-3 text-amber-800">
+                    <span>
+                      หัก ณ ที่จ่าย (WHT)
+                      {whtRate > 0 ? ` · ${whtRate}%` : ""}
+                    </span>
+                    <span className="tabular-nums font-medium">
+                      -{formatMoney(whtAmount)}
+                    </span>
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-2">
+                  <span className="text-base font-bold text-slate-900">
+                    ยอดโอนจ่ายจริง (Net Payable)
+                  </span>
+                  <span className="text-lg font-bold tabular-nums text-emerald-700">
                     {formatMoney(grandTotal)}
                   </span>
                 </div>

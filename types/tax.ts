@@ -68,6 +68,20 @@ export type GetMonthlyWHTReportResult =
   | { success: true; data: MonthlyWHTReportData }
   | { success: false; error: string };
 
+/** Normalized row for WHT Excel export (ภ.ง.ด.3 / ภ.ง.ด.53). */
+export type UnifiedWhtRow = {
+  payment_date: string;
+  document_no: string;
+  source: WHTReportSource;
+  company_name: string;
+  tax_id: string;
+  tax_branch_code: string;
+  tax_address: string;
+  wht_base_amount: number;
+  wht_rate: number;
+  wht_amount: number;
+};
+
 export type VendorTaxInfoInput = {
   entity_type: TaxEntityType;
   tax_id: string;

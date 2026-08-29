@@ -1275,6 +1275,7 @@ export async function getDocumentByNo(
         total_amount,
         net_before_vat,
         vat_amount,
+        wht_rate,
         wht_amount,
         payment_status,
         notes,
@@ -1438,6 +1439,7 @@ export async function getDocumentByNo(
         data.net_before_vat == null ? null : Number(data.net_before_vat),
       vat_amount:
         data.vat_amount == null ? null : Number(data.vat_amount),
+      wht_rate: Number(data.wht_rate ?? 0),
       wht_amount: Number(data.wht_amount ?? 0),
       payment_status: String(data.payment_status ?? "Pending"),
       notes,

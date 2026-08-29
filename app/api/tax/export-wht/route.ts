@@ -6,22 +6,17 @@
 
 import ExcelJS from "exceljs";
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server-admin";
+import { loadMonthlyWhtReportRows } from "@/lib/tax/monthly-wht-report-data";
+import {
+  formatWhtPaymentDate,
+  mapWhtReportRowsForExport,
+} from "@/lib/tax/wht-export";
+import type { TaxEntityType } from "@/types/tax";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type FormType = "PND3" | "PND53";
-
-type ContactEmbed = {
-  id: string;
-  company_name: string;
-  tax_id: string | null;
-  tax_branch_code: string | null;
-  entity_type: string | null;
-  tax_address: string | null;
-  address: string | null;
-};
 
 function parsePeriod(
   yearRaw: string | null,
@@ -32,41 +27,6 @@ function parsePeriod(
   if (!Number.isInteger(year) || year < 2000 || year > 2100) return null;
   if (!Number.isInteger(month) || month < 1 || month > 12) return null;
   return { year, month };
-}
-
-function monthBounds(year: number, month: number): {
-  startDate: string;
-  endDate: string;
-} {
-  const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
-  const lastDay = new Date(year, month, 0).getDate();
-  const endDate = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-  return { startDate, endDate };
-}
-
-function toMoney(value: number | string | null | undefined): number {
-  const n = Number(value ?? 0);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function normalizeTaxId(value: string | null | undefined): string {
-  const digits = String(value ?? "").replace(/\D/g, "");
-  return digits.slice(0, 13);
-}
-
-function normalizeBranchCode(value: string | null | undefined): string {
-  const digits = String(value ?? "00000").replace(/\D/g, "") || "00000";
-  return digits.slice(0, 5).padStart(5, "0");
-}
-
-function formatExpenseDate(value: string): string {
-  if (!value) return "";
-  const d = new Date(`${value.slice(0, 10)}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return value.slice(0, 10);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
 }
 
 export async function GET(request: NextRequest) {
@@ -93,71 +53,11 @@ export async function GET(request: NextRequest) {
     }
 
     const formType = formTypeRaw as FormType;
-    const entityType =
+    const entityType: TaxEntityType =
       formType === "PND3" ? "INDIVIDUAL" : "CORPORATE";
-    const { startDate, endDate } = monthBounds(period.year, period.month);
 
-    const supabase = createClient();
-
-    const { data, error } = await supabase
-      .from("expenses")
-      .select(
-        `
-        id,
-        document_no,
-        expense_date,
-        wht_base_amount,
-        wht_rate,
-        wht_amount,
-        status,
-        contacts!expenses_vendor_id_fkey!inner (
-          id,
-          company_name,
-          tax_id,
-          tax_branch_code,
-          entity_type,
-          tax_address,
-          address
-        )
-      `,
-      )
-      .eq("status", "ISSUED")
-      .gt("wht_amount", 0)
-      .gte("expense_date", startDate)
-      .lte("expense_date", endDate)
-      .eq("contacts.entity_type", entityType)
-      .order("expense_date", { ascending: true })
-      .order("document_no", { ascending: true });
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    const rows = (data ?? []).map((row) => {
-      const contactRaw = row.contacts as unknown;
-      const contact =
-        contactRaw &&
-        typeof contactRaw === "object" &&
-        !Array.isArray(contactRaw)
-          ? (contactRaw as ContactEmbed)
-          : null;
-
-      const taxAddress =
-        contact?.tax_address?.trim() ||
-        contact?.address?.trim() ||
-        "";
-
-      return {
-        taxId: normalizeTaxId(contact?.tax_id),
-        branchCode: normalizeBranchCode(contact?.tax_branch_code),
-        companyName: contact?.company_name?.trim() || "",
-        address: taxAddress,
-        expenseDate: formatExpenseDate(String(row.expense_date ?? "")),
-        whtBase: toMoney(row.wht_base_amount),
-        whtRate: toMoney(row.wht_rate),
-        whtAmount: toMoney(row.wht_amount),
-      };
-    });
+    const sourceRows = await loadMonthlyWhtReportRows(period.year, period.month);
+    const rows = mapWhtReportRowsForExport(sourceRows, entityType);
 
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "Supthavee ERP";
@@ -173,9 +73,11 @@ export async function GET(request: NextRequest) {
       { header: "ลำดับ", key: "seq", width: 8 },
       { header: "เลขผู้เสียภาษี (13 หลัก)", key: "taxId", width: 18 },
       { header: "รหัสสาขา (5 หลัก)", key: "branchCode", width: 14 },
-      { header: "ชื่อผู้จำหน่าย", key: "companyName", width: 32 },
+      { header: "ชื่อผู้จำหน่าย / ช่าง", key: "companyName", width: 32 },
       { header: "ที่อยู่", key: "address", width: 40 },
       { header: "วันที่จ่ายเงิน", key: "expenseDate", width: 14 },
+      { header: "เลขที่เอกสาร", key: "documentNo", width: 16 },
+      { header: "ประเภท", key: "source", width: 8 },
       { header: "ฐานภาษี", key: "whtBase", width: 14 },
       { header: "อัตราภาษี (%)", key: "whtRate", width: 12 },
       { header: "ยอดภาษีหัก ณ ที่จ่าย", key: "whtAmount", width: 18 },
@@ -188,24 +90,25 @@ export async function GET(request: NextRequest) {
     rows.forEach((row, index) => {
       worksheet.addRow({
         seq: index + 1,
-        taxId: row.taxId,
-        branchCode: row.branchCode,
-        companyName: row.companyName,
-        address: row.address,
-        expenseDate: row.expenseDate,
-        whtBase: row.whtBase,
-        whtRate: row.whtRate,
-        whtAmount: row.whtAmount,
+        taxId: row.tax_id,
+        branchCode: row.tax_branch_code,
+        companyName: row.company_name,
+        address: row.tax_address,
+        expenseDate: formatWhtPaymentDate(row.payment_date),
+        documentNo: row.document_no,
+        source: row.source,
+        whtBase: row.wht_base_amount,
+        whtRate: row.wht_rate,
+        whtAmount: row.wht_amount,
       });
     });
 
-    // Keep tax id / branch as text (leading zeros)
     for (let r = 2; r <= rows.length + 1; r += 1) {
       worksheet.getCell(`B${r}`).numFmt = "@";
       worksheet.getCell(`C${r}`).numFmt = "@";
-      worksheet.getCell(`G${r}`).numFmt = "#,##0.00";
-      worksheet.getCell(`H${r}`).numFmt = "0.00";
       worksheet.getCell(`I${r}`).numFmt = "#,##0.00";
+      worksheet.getCell(`J${r}`).numFmt = "0.00";
+      worksheet.getCell(`K${r}`).numFmt = "#,##0.00";
     }
 
     const buffer = await workbook.xlsx.writeBuffer();
