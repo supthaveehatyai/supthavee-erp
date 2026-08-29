@@ -104,7 +104,7 @@ export async function getMonthlyWHTReport(
       },
     };
   } catch (error: unknown) {
-    console.error("Error fetching WHT report:", error);
+    console.error("[WHT_REPORT_ERROR]", error);
     return { success: true, data: emptyMonthlyReport() };
   }
 }

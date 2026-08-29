@@ -6,9 +6,16 @@
 import { createClient } from "@/lib/supabase/server-admin";
 import type { WHTContactTax, WHTReportRow } from "@/types/tax";
 
-function toMoney(value: number | string | null | undefined): number {
+/** Explicit numeric coercion for WHT tax fields. */
+function toWhtNumber(value: unknown): number {
   const n = Number(value ?? 0);
   return Number.isFinite(n) ? n : 0;
+}
+
+function safeTrim(value: unknown, fallback = ""): string {
+  if (value == null) return fallback;
+  if (typeof value === "string") return value.trim() || fallback;
+  return String(value).trim() || fallback;
 }
 
 /** Normalize DB date/timestamp → YYYY-MM-DD (empty string if invalid). */
@@ -91,8 +98,8 @@ function mapContact(raw: unknown): WHTContactTax | null {
   };
 }
 
-function parseWhtTypeFromTbNotes(notes: string | null | undefined): string | null {
-  const text = String(notes ?? "").trim();
+function parseWhtTypeFromTbNotes(notes: unknown): string | null {
+  const text = safeTrim(notes);
   if (!text) return null;
   const match = /หัก ณ ที่จ่าย\s+(.+?)\s+[\d.]+%/.exec(text);
   return match?.[1]?.trim() || null;
@@ -114,27 +121,30 @@ function mapExpenseRow(row: Record<string, unknown>): WHTReportRow | null {
     if (!id) return null;
 
     const expenseDate = safeWhtDateString(row.expense_date);
-    const whtAmount = toMoney(row.wht_amount as number | string | null);
+    const whtAmount = toWhtNumber(row.wht_amount);
     if (whtAmount <= 0) return null;
+
+    const contact = mapContact(row.contacts);
+    const whtBaseAmount =
+      toWhtNumber(row.wht_base_amount) || toWhtNumber(row.net_amount);
+    const whtRate = toWhtNumber(row.wht_rate);
 
     return {
       id,
       source: "EXP",
       document_no: safeString(row.document_no),
-      expense_date: expenseDate,
+      expense_date: expenseDate || "",
       contact_id: safeContactId(row.vendor_id),
       wht_type: safeNullableString(row.wht_type),
-      wht_base_amount:
-        toMoney(row.wht_base_amount as number | string | null) ||
-        toMoney(row.net_amount as number | string | null),
-      wht_rate: toMoney(row.wht_rate as number | string | null),
+      wht_base_amount: whtBaseAmount,
+      wht_rate: whtRate,
       wht_amount: whtAmount,
       wht_doc_no: safeNullableString(row.wht_doc_no),
       status: safeString(row.status),
-      contacts: mapContact(row.contacts),
+      contacts: contact,
     };
   } catch (error) {
-    console.error("[loadMonthlyWhtReportRows] mapExpenseRow failed:", error, row);
+    console.error("[WHT_REPORT_ERROR] mapExpenseRow failed:", error, row);
     return null;
   }
 }
@@ -145,31 +155,31 @@ function mapTbRow(row: Record<string, unknown>): WHTReportRow | null {
     if (!id) return null;
 
     const expenseDate = safeWhtDateString(row.doc_date);
-    const whtAmount = toMoney(row.wht_amount as number | string | null);
+    const whtAmount = toWhtNumber(row.wht_amount);
     if (whtAmount <= 0) return null;
 
-    const notes =
-      typeof row.notes === "string" ? row.notes : safeNullableString(row.notes);
+    const notes = safeTrim(row.notes) || null;
+    const contact = mapContact(row.contacts);
+    const whtBaseAmount = toWhtNumber(row.net_before_vat ?? row.sub_total);
+    const whtRate = toWhtNumber(row.wht_rate);
 
     return {
       id,
       source: "TB",
       document_no: safeString(row.doc_no),
-      expense_date: expenseDate,
+      expense_date: expenseDate || "",
       contact_id: safeContactId(row.contact_id),
       wht_type: parseWhtTypeFromTbNotes(notes),
-      wht_base_amount: toMoney(
-        (row.net_before_vat ?? row.sub_total) as number | string | null,
-      ),
-      wht_rate: toMoney(row.wht_rate as number | string | null),
+      wht_base_amount: whtBaseAmount,
+      wht_rate: whtRate,
       wht_amount: whtAmount,
       wht_doc_no: null,
       status: safeString(row.status),
       payment_status: safeNullableString(row.payment_status),
-      contacts: mapContact(row.contacts),
+      contacts: contact,
     };
   } catch (error) {
-    console.error("[loadMonthlyWhtReportRows] mapTbRow failed:", error, row);
+    console.error("[WHT_REPORT_ERROR] mapTbRow failed:", error, row);
     return null;
   }
 }
@@ -182,11 +192,15 @@ export async function loadMonthlyWhtReportRows(
   try {
     const bounds = monthBounds(year, month);
     if (!bounds) {
-      console.error("[loadMonthlyWhtReportRows] invalid period:", { year, month });
+      console.error("[WHT_REPORT_ERROR] invalid period:", { year, month });
       return [];
     }
 
     const supabase = createClient();
+
+    // Explicit FK joins (contacts has multiple relations on documents).
+    const EXPENSES_CONTACT_FK = "expenses_vendor_id_fkey";
+    const DOCUMENTS_CONTACT_FK = "documents_contact_id_fkey";
 
     const [expensesResult, tbResult] = await Promise.all([
       supabase
@@ -204,7 +218,7 @@ export async function loadMonthlyWhtReportRows(
           wht_amount,
           wht_doc_no,
           status,
-          contacts!expenses_vendor_id_fkey (
+          contacts!${EXPENSES_CONTACT_FK} (
             id,
             company_name,
             tax_id,
@@ -234,7 +248,7 @@ export async function loadMonthlyWhtReportRows(
           status,
           payment_status,
           notes,
-          contacts!documents_contact_id_fkey (
+          contacts!${DOCUMENTS_CONTACT_FK} (
             id,
             company_name,
             tax_id,
@@ -254,16 +268,10 @@ export async function loadMonthlyWhtReportRows(
     ]);
 
     if (expensesResult.error) {
-      console.error(
-        "[loadMonthlyWhtReportRows] expenses query failed:",
-        expensesResult.error,
-      );
+      console.error("[WHT_REPORT_ERROR] expenses query failed:", expensesResult.error);
     }
     if (tbResult.error) {
-      console.error(
-        "[loadMonthlyWhtReportRows] documents (TB) query failed:",
-        tbResult.error,
-      );
+      console.error("[WHT_REPORT_ERROR] documents (TB) query failed:", tbResult.error);
     }
 
     const expenseRows = (expensesResult.data ?? [])
@@ -276,7 +284,7 @@ export async function loadMonthlyWhtReportRows(
 
     return sortWhtRowsDesc([...expenseRows, ...tbRows]);
   } catch (error) {
-    console.error("[loadMonthlyWhtReportRows] unexpected error:", error);
+    console.error("[WHT_REPORT_ERROR]", error);
     return [];
   }
 }

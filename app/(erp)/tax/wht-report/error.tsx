@@ -14,14 +14,13 @@ type WhtReportErrorProps = {
   reset: () => void;
 };
 
-const isDev = process.env.NODE_ENV === "development";
-
 export default function WhtReportError({ error, reset }: WhtReportErrorProps) {
   useEffect(() => {
     console.error("[tax/wht-report/error]", error);
   }, [error]);
 
   const message = error.message?.trim() || "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
+  const stack = error.stack?.trim() || "";
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -39,22 +38,6 @@ export default function WhtReportError({ error, reset }: WhtReportErrorProps) {
           </p>
         </div>
 
-        {isDev ? (
-          <div className="w-full rounded-xl border border-red-200 bg-white px-4 py-3 text-left">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-red-700">
-              Dev — Error Message
-            </p>
-            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-red-800">
-              {message}
-            </pre>
-            {error.digest ? (
-              <p className="mt-2 font-mono text-[10px] text-slate-500">
-                digest: {error.digest}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-
         <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
           <button
             type="button"
@@ -71,6 +54,41 @@ export default function WhtReportError({ error, reset }: WhtReportErrorProps) {
             กลับหน้ารายงาน
           </Link>
         </div>
+
+        <details className="w-full rounded-xl border border-red-200 bg-white text-left">
+          <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-red-800">
+            รายละเอียดข้อผิดพลาด (สำหรับ Developer)
+          </summary>
+          <div className="space-y-3 border-t border-red-100 px-4 py-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                error.message
+              </p>
+              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-red-800">
+                {message}
+              </pre>
+            </div>
+
+            {stack ? (
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  error.stack
+                </p>
+                <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-slate-700">
+                  {stack}
+                </pre>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500">ไม่มี error.stack</p>
+            )}
+
+            {error.digest ? (
+              <p className="font-mono text-[10px] text-slate-500">
+                digest: {error.digest}
+              </p>
+            ) : null}
+          </div>
+        </details>
       </div>
     </div>
   );
