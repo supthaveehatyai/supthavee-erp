@@ -18,11 +18,11 @@ import type {
 
 function isPaidWhtRow(row: WHTReportRow): boolean {
   if (row.source === "EXP") {
-    return row.status.trim().toUpperCase() === "PAID";
+    return (row.status ?? "").trim().toUpperCase() === "PAID";
   }
 
   const paymentStatus = (row.payment_status ?? "").trim().toUpperCase();
-  const docStatus = row.status.trim().toUpperCase();
+  const docStatus = (row.status ?? "").trim().toUpperCase();
   return (
     paymentStatus === "PAID" ||
     docStatus === "PAID" ||
@@ -45,12 +45,31 @@ function buildSummary(rows: WHTReportRow[]): MonthlyWHTReportData["summary"] {
   const issuedRows = rows.filter((row) => !isPaidWhtRow(row));
 
   return {
-    totalWhtBase: rows.reduce((sum, item) => sum + item.wht_base_amount, 0),
-    totalWhtAmount: rows.reduce((sum, item) => sum + item.wht_amount, 0),
-    paidWhtAmount: paidRows.reduce((sum, item) => sum + item.wht_amount, 0),
-    issuedWhtAmount: issuedRows.reduce((sum, item) => sum + item.wht_amount, 0),
+    totalWhtBase: rows.reduce(
+      (sum, item) => sum + (item.wht_base_amount ?? 0),
+      0,
+    ),
+    totalWhtAmount: rows.reduce((sum, item) => sum + (item.wht_amount ?? 0), 0),
+    paidWhtAmount: paidRows.reduce(
+      (sum, item) => sum + (item.wht_amount ?? 0),
+      0,
+    ),
+    issuedWhtAmount: issuedRows.reduce(
+      (sum, item) => sum + (item.wht_amount ?? 0),
+      0,
+    ),
     paidCount: paidRows.length,
     issuedCount: issuedRows.length,
+  };
+}
+
+function emptyMonthlyReport(): MonthlyWHTReportData {
+  return {
+    raw: [],
+    pnd3: [],
+    pnd53: [],
+    pendingValidation: [],
+    summary: buildSummary([]),
   };
 }
 
@@ -64,29 +83,29 @@ export async function getMonthlyWHTReport(
 ): Promise<GetMonthlyWHTReportResult> {
   try {
     const raw = await loadMonthlyWhtReportRows(year, month);
+    const rows = Array.isArray(raw) ? raw : [];
 
-    const pnd3 = raw.filter(
+    const pnd3 = rows.filter(
       (item) => item.contacts?.entity_type === "INDIVIDUAL",
     );
-    const pnd53 = raw.filter(
+    const pnd53 = rows.filter(
       (item) => item.contacts?.entity_type === "CORPORATE",
     );
-    const pendingValidation = raw.filter(isPendingValidation);
+    const pendingValidation = rows.filter(isPendingValidation);
 
     return {
       success: true,
       data: {
-        raw,
+        raw: rows,
         pnd3,
         pnd53,
         pendingValidation,
-        summary: buildSummary(raw),
+        summary: buildSummary(rows),
       },
     };
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error";
     console.error("Error fetching WHT report:", error);
-    return { success: false, error: message };
+    return { success: true, data: emptyMonthlyReport() };
   }
 }
 

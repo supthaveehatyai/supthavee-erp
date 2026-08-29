@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Landmark } from "lucide-react";
 import { getMonthlyWHTReport } from "@/app/actions/tax-actions";
+import type { WHTReportRow } from "@/types/tax";
 import { WhtDocumentPreviewContent } from "./wht-document-preview-content";
 import {
   parseWhtDocumentPreviewTarget,
@@ -72,7 +73,7 @@ function parsePeriod(rawYear?: string, rawMonth?: string): {
 }
 
 export default async function WhtReportPage({ searchParams }: PageProps) {
-  const params = await searchParams;
+  const params = (await searchParams) ?? {};
   const { year, month } = parsePeriod(params.year, params.month);
   const previewTarget = parseWhtDocumentPreviewTarget(
     params.view_wht_source,
@@ -81,6 +82,9 @@ export default async function WhtReportPage({ searchParams }: PageProps) {
   const result = await getMonthlyWHTReport(year, month);
 
   const monthLabel = THAI_MONTH_LABELS[month] ?? `เดือน ${month}`;
+  const report = result.success ? result.data : null;
+  const summary = report?.summary;
+  const emptyRows: WHTReportRow[] = [];
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -105,9 +109,10 @@ export default async function WhtReportPage({ searchParams }: PageProps) {
         </Suspense>
       </div>
 
-      {!result.success ? (
+      {!result.success || !report ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          ไม่สามารถโหลดรายงาน WHT ได้: {result.error}
+          ไม่สามารถโหลดรายงาน WHT ได้
+          {result.success ? "" : `: ${result.error ?? "Unknown error"}`}
         </div>
       ) : (
         <>
@@ -120,23 +125,21 @@ export default async function WhtReportPage({ searchParams }: PageProps) {
               year={year}
               month={month}
               monthLabel={monthLabel}
-              pnd3={result.data.pnd3}
-              pnd53={result.data.pnd53}
-              pendingValidation={result.data.pendingValidation}
-              totalWhtBaseFormatted={formatThaiBaht(
-                result.data.summary.totalWhtBase,
-              )}
+              pnd3={report.pnd3 ?? emptyRows}
+              pnd53={report.pnd53 ?? emptyRows}
+              pendingValidation={report.pendingValidation ?? emptyRows}
+              totalWhtBaseFormatted={formatThaiBaht(summary?.totalWhtBase ?? 0)}
               totalWhtAmountFormatted={formatThaiBaht(
-                result.data.summary.totalWhtAmount,
+                summary?.totalWhtAmount ?? 0,
               )}
               paidWhtAmountFormatted={formatThaiBaht(
-                result.data.summary.paidWhtAmount,
+                summary?.paidWhtAmount ?? 0,
               )}
               issuedWhtAmountFormatted={formatThaiBaht(
-                result.data.summary.issuedWhtAmount,
+                summary?.issuedWhtAmount ?? 0,
               )}
-              paidCount={result.data.summary.paidCount}
-              issuedCount={result.data.summary.issuedCount}
+              paidCount={summary?.paidCount ?? 0}
+              issuedCount={summary?.issuedCount ?? 0}
             />
           </Suspense>
 
