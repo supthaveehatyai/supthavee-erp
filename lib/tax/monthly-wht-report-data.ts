@@ -1,10 +1,32 @@
 /**
  * Shared monthly WHT report data loader (EXP + TB).
  * Used by Server Actions and API export — not a `"use server"` module.
+ *
+ * Contact joins (schema):
+ * - expenses.vendor_id  → contacts  (FK: expenses_vendor_id_fkey)
+ * - documents.contact_id → contacts (FK: documents_contact_id_fkey) — TB only
  */
 
 import { createClient } from "@/lib/supabase/server-admin";
 import type { WHTContactTax, WHTReportRow } from "@/types/tax";
+
+const EXPENSES_CONTACT_FK = "expenses_vendor_id_fkey";
+const DOCUMENTS_CONTACT_FK = "documents_contact_id_fkey";
+
+const DEFAULT_VENDOR_NAME = "ไม่ระบุชื่อคู่ค้า";
+const DEFAULT_TAX_ID = "-";
+const DEFAULT_BRANCH_CODE = "00000";
+
+/** Extreme fallback — never null after resolveWhtContact(). */
+const EMPTY_CONTACT: WHTContactTax = {
+  id: "",
+  company_name: DEFAULT_VENDOR_NAME,
+  tax_id: DEFAULT_TAX_ID,
+  tax_branch_code: DEFAULT_BRANCH_CODE,
+  entity_type: null,
+  tax_address: null,
+  is_tax_validated: null,
+};
 
 /** Explicit numeric coercion for WHT tax fields. */
 function toWhtNumber(value: unknown): number {
@@ -21,7 +43,7 @@ function safeTrim(value: unknown, fallback = ""): string {
 /** Normalize DB date/timestamp → YYYY-MM-DD (empty string if invalid). */
 export function safeWhtDateString(value: unknown): string {
   if (value == null) return "";
-  const raw = String(value).trim();
+  const raw = safeTrim(value);
   if (!raw) return "";
 
   const iso = raw.slice(0, 10);
@@ -39,21 +61,13 @@ export function safeWhtDateString(value: unknown): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function safeString(value: unknown, fallback = ""): string {
-  if (value == null) return fallback;
-  const text = String(value).trim();
-  return text || fallback;
-}
-
 function safeNullableString(value: unknown): string | null {
-  if (value == null) return null;
-  const text = String(value).trim();
+  const text = safeTrim(value);
   return text || null;
 }
 
 function safeContactId(value: unknown): string | null {
-  if (value == null) return null;
-  const id = String(value).trim();
+  const id = safeTrim(value);
   return id || null;
 }
 
@@ -76,26 +90,60 @@ function unwrapJoin<T>(value: T | T[] | null | undefined): T | null {
   return value;
 }
 
-function mapContact(raw: unknown): WHTContactTax | null {
-  const row = unwrapJoin(
-    raw as WHTContactTax | WHTContactTax[] | null | undefined,
+function asContactRecord(raw: unknown): Record<string, unknown> {
+  const row = unwrapJoin(raw as Record<string, unknown> | Record<string, unknown>[] | null);
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    return {};
+  }
+  return row as Record<string, unknown>;
+}
+
+/**
+ * Resolve joined contacts row → WHTContactTax with extreme fallbacks.
+ * Never throws; never returns null.
+ */
+function resolveWhtContact(raw: unknown): WHTContactTax {
+  try {
+    const contact = asContactRecord(raw);
+
+    const id = safeTrim(contact?.id ?? "");
+    const companyName =
+      safeTrim(contact?.company_name ?? contact?.name) || DEFAULT_VENDOR_NAME;
+    const taxId = safeTrim(contact?.tax_id) || DEFAULT_TAX_ID;
+    const branch =
+      safeTrim(contact?.tax_branch_code ?? contact?.branch_code) ||
+      DEFAULT_BRANCH_CODE;
+
+    return {
+      id,
+      company_name: companyName,
+      tax_id: taxId,
+      tax_branch_code: branch,
+      entity_type: safeNullableString(contact?.entity_type),
+      tax_address: safeNullableString(contact?.tax_address ?? contact?.address),
+      is_tax_validated:
+        typeof contact?.is_tax_validated === "boolean"
+          ? contact.is_tax_validated
+          : null,
+    };
+  } catch (error) {
+    console.error("[WHT_REPORT_ERROR] resolveWhtContact failed:", error, raw);
+    return { ...EMPTY_CONTACT };
+  }
+}
+
+function resolveExpenseWhtBase(row: Record<string, unknown>): number {
+  const base = Number(
+    row?.wht_base_amount ?? row?.net_amount ?? row?.sub_total ?? 0,
   );
-  if (!row || typeof row !== "object") return null;
+  return Number.isFinite(base) ? base : 0;
+}
 
-  const c = row as Record<string, unknown>;
-  const id = safeString(c.id);
-  if (!id) return null;
-
-  return {
-    id,
-    company_name: safeString(c.company_name),
-    tax_id: safeNullableString(c.tax_id),
-    tax_branch_code: safeNullableString(c.tax_branch_code),
-    entity_type: safeNullableString(c.entity_type),
-    tax_address: safeNullableString(c.tax_address),
-    is_tax_validated:
-      typeof c.is_tax_validated === "boolean" ? c.is_tax_validated : null,
-  };
+function resolveTbWhtBase(row: Record<string, unknown>): number {
+  const base = Number(
+    row?.net_before_vat ?? row?.sub_total ?? row?.net_amount ?? 0,
+  );
+  return Number.isFinite(base) ? base : 0;
 }
 
 function parseWhtTypeFromTbNotes(notes: unknown): string | null {
@@ -107,40 +155,39 @@ function parseWhtTypeFromTbNotes(notes: unknown): string | null {
 
 export function sortWhtRowsDesc(rows: WHTReportRow[]): WHTReportRow[] {
   return [...rows].sort((a, b) => {
-    const leftDate = a.expense_date || "";
-    const rightDate = b.expense_date || "";
+    const leftDate = a?.expense_date ?? "";
+    const rightDate = b?.expense_date ?? "";
     const dateCmp = rightDate.localeCompare(leftDate);
     if (dateCmp !== 0) return dateCmp;
-    return (b.document_no || "").localeCompare(a.document_no || "", "th");
+    return (b?.document_no ?? "").localeCompare(a?.document_no ?? "", "th");
   });
 }
 
 function mapExpenseRow(row: Record<string, unknown>): WHTReportRow | null {
   try {
-    const id = safeString(row.id);
+    const id = safeTrim(row?.id);
     if (!id) return null;
 
-    const expenseDate = safeWhtDateString(row.expense_date);
-    const whtAmount = toWhtNumber(row.wht_amount);
-    if (whtAmount <= 0) return null;
+    const expenseDate = safeWhtDateString(row?.expense_date);
+    const whtAmount = Number(row?.wht_amount ?? 0);
+    if (!Number.isFinite(whtAmount) || whtAmount <= 0) return null;
 
-    const contact = mapContact(row.contacts);
-    const whtBaseAmount =
-      toWhtNumber(row.wht_base_amount) || toWhtNumber(row.net_amount);
-    const whtRate = toWhtNumber(row.wht_rate);
+    const contact = resolveWhtContact(row?.contacts);
+    const whtBaseAmount = resolveExpenseWhtBase(row);
+    const whtRate = Number(row?.wht_rate ?? 0);
 
     return {
       id,
       source: "EXP",
-      document_no: safeString(row.document_no),
+      document_no: safeTrim(row?.document_no),
       expense_date: expenseDate || "",
-      contact_id: safeContactId(row.vendor_id),
-      wht_type: safeNullableString(row.wht_type),
-      wht_base_amount: whtBaseAmount,
-      wht_rate: whtRate,
+      contact_id: safeContactId(row?.vendor_id),
+      wht_type: safeNullableString(row?.wht_type),
+      wht_base_amount: Number.isFinite(whtBaseAmount) ? whtBaseAmount : 0,
+      wht_rate: Number.isFinite(whtRate) ? whtRate : 0,
       wht_amount: whtAmount,
-      wht_doc_no: safeNullableString(row.wht_doc_no),
-      status: safeString(row.status),
+      wht_doc_no: safeNullableString(row?.wht_doc_no),
+      status: safeTrim(row?.status),
       contacts: contact,
     };
   } catch (error) {
@@ -151,31 +198,31 @@ function mapExpenseRow(row: Record<string, unknown>): WHTReportRow | null {
 
 function mapTbRow(row: Record<string, unknown>): WHTReportRow | null {
   try {
-    const id = safeString(row.id);
+    const id = safeTrim(row?.id);
     if (!id) return null;
 
-    const expenseDate = safeWhtDateString(row.doc_date);
-    const whtAmount = toWhtNumber(row.wht_amount);
-    if (whtAmount <= 0) return null;
+    const expenseDate = safeWhtDateString(row?.doc_date);
+    const whtAmount = Number(row?.wht_amount ?? 0);
+    if (!Number.isFinite(whtAmount) || whtAmount <= 0) return null;
 
-    const notes = safeTrim(row.notes) || null;
-    const contact = mapContact(row.contacts);
-    const whtBaseAmount = toWhtNumber(row.net_before_vat ?? row.sub_total);
-    const whtRate = toWhtNumber(row.wht_rate);
+    const contact = resolveWhtContact(row?.contacts);
+    const whtBaseAmount = resolveTbWhtBase(row);
+    const whtRate = Number(row?.wht_rate ?? 0);
+    const notes = safeTrim(row?.notes) || null;
 
     return {
       id,
       source: "TB",
-      document_no: safeString(row.doc_no),
+      document_no: safeTrim(row?.doc_no),
       expense_date: expenseDate || "",
-      contact_id: safeContactId(row.contact_id),
+      contact_id: safeContactId(row?.contact_id),
       wht_type: parseWhtTypeFromTbNotes(notes),
-      wht_base_amount: whtBaseAmount,
-      wht_rate: whtRate,
+      wht_base_amount: Number.isFinite(whtBaseAmount) ? whtBaseAmount : 0,
+      wht_rate: Number.isFinite(whtRate) ? whtRate : 0,
       wht_amount: whtAmount,
       wht_doc_no: null,
-      status: safeString(row.status),
-      payment_status: safeNullableString(row.payment_status),
+      status: safeTrim(row?.status),
+      payment_status: safeNullableString(row?.payment_status),
       contacts: contact,
     };
   } catch (error) {
@@ -183,6 +230,18 @@ function mapTbRow(row: Record<string, unknown>): WHTReportRow | null {
     return null;
   }
 }
+
+const CONTACT_SELECT_FIELDS = `
+  id,
+  company_name,
+  tax_id,
+  tax_branch_code,
+  branch_code,
+  entity_type,
+  tax_address,
+  address,
+  is_tax_validated
+`;
 
 /** Load merged EXP + TB rows for a calendar month. Never throws — returns [] on failure. */
 export async function loadMonthlyWhtReportRows(
@@ -197,10 +256,6 @@ export async function loadMonthlyWhtReportRows(
     }
 
     const supabase = createClient();
-
-    // Explicit FK joins (contacts has multiple relations on documents).
-    const EXPENSES_CONTACT_FK = "expenses_vendor_id_fkey";
-    const DOCUMENTS_CONTACT_FK = "documents_contact_id_fkey";
 
     const [expensesResult, tbResult] = await Promise.all([
       supabase
@@ -219,13 +274,7 @@ export async function loadMonthlyWhtReportRows(
           wht_doc_no,
           status,
           contacts!${EXPENSES_CONTACT_FK} (
-            id,
-            company_name,
-            tax_id,
-            tax_branch_code,
-            entity_type,
-            tax_address,
-            is_tax_validated
+            ${CONTACT_SELECT_FIELDS}
           )
         `,
         )
@@ -249,13 +298,7 @@ export async function loadMonthlyWhtReportRows(
           payment_status,
           notes,
           contacts!${DOCUMENTS_CONTACT_FK} (
-            id,
-            company_name,
-            tax_id,
-            tax_branch_code,
-            entity_type,
-            tax_address,
-            is_tax_validated
+            ${CONTACT_SELECT_FIELDS}
           )
         `,
         )
@@ -268,10 +311,16 @@ export async function loadMonthlyWhtReportRows(
     ]);
 
     if (expensesResult.error) {
-      console.error("[WHT_REPORT_ERROR] expenses query failed:", expensesResult.error);
+      console.error(
+        "[WHT_REPORT_ERROR] expenses query failed:",
+        expensesResult.error,
+      );
     }
     if (tbResult.error) {
-      console.error("[WHT_REPORT_ERROR] documents (TB) query failed:", tbResult.error);
+      console.error(
+        "[WHT_REPORT_ERROR] documents (TB) query failed:",
+        tbResult.error,
+      );
     }
 
     const expenseRows = (expensesResult.data ?? [])
