@@ -41,21 +41,25 @@ function isPendingValidation(item: WHTReportRow): boolean {
 }
 
 function buildSummary(rows: WHTReportRow[]): MonthlyWHTReportData["summary"] {
-  const paidRows = rows.filter(isPaidWhtRow);
-  const issuedRows = rows.filter((row) => !isPaidWhtRow(row));
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const paidRows = safeRows.filter(isPaidWhtRow);
+  const issuedRows = safeRows.filter((row) => !isPaidWhtRow(row));
 
   return {
-    totalWhtBase: rows.reduce(
-      (sum, item) => sum + (item.wht_base_amount ?? 0),
+    totalWhtBase: safeRows.reduce(
+      (sum, item) => sum + (item?.wht_base_amount ?? 0),
       0,
     ),
-    totalWhtAmount: rows.reduce((sum, item) => sum + (item.wht_amount ?? 0), 0),
+    totalWhtAmount: safeRows.reduce(
+      (sum, item) => sum + (item?.wht_amount ?? 0),
+      0,
+    ),
     paidWhtAmount: paidRows.reduce(
-      (sum, item) => sum + (item.wht_amount ?? 0),
+      (sum, item) => sum + (item?.wht_amount ?? 0),
       0,
     ),
     issuedWhtAmount: issuedRows.reduce(
-      (sum, item) => sum + (item.wht_amount ?? 0),
+      (sum, item) => sum + (item?.wht_amount ?? 0),
       0,
     ),
     paidCount: paidRows.length,
@@ -86,10 +90,10 @@ export async function getMonthlyWHTReport(
     const rows = Array.isArray(raw) ? raw : [];
 
     const pnd3 = rows.filter(
-      (item) => item.contacts?.entity_type === "INDIVIDUAL",
+      (item) => item?.contacts?.entity_type === "INDIVIDUAL",
     );
     const pnd53 = rows.filter(
-      (item) => item.contacts?.entity_type === "CORPORATE",
+      (item) => item?.contacts?.entity_type === "CORPORATE",
     );
     const pendingValidation = rows.filter(isPendingValidation);
 

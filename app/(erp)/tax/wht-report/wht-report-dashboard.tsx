@@ -36,7 +36,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { buildViewWhtHref } from "./wht-document-preview-sheet";
+import { buildViewWhtHref } from "./wht-document-preview-utils";
 
 export type WhtReportDashboardProps = {
   year: number;
@@ -64,11 +64,11 @@ function sourceBadgeLabel(source: WHTReportRow["source"]): string {
 }
 
 function paymentStatusLabel(row: WHTReportRow): string {
-  if (row.source === "EXP") {
-    return row.status.trim().toUpperCase() === "PAID" ? "PAID" : "ISSUED";
+  if (row?.source === "EXP") {
+    return (row?.status ?? "").trim().toUpperCase() === "PAID" ? "PAID" : "ISSUED";
   }
-  const paymentStatus = (row.payment_status ?? "").trim().toUpperCase();
-  const docStatus = row.status.trim().toUpperCase();
+  const paymentStatus = (row?.payment_status ?? "").trim().toUpperCase();
+  const docStatus = (row?.status ?? "").trim().toUpperCase();
   if (
     paymentStatus === "PAID" ||
     docStatus === "PAID" ||
@@ -153,21 +153,23 @@ function TabExportBar({
 }
 
 function WhtTable({
-  rows,
+  rows = [],
   year,
   month,
   showAction,
   onUpdateVendor,
   onViewDocument,
 }: {
-  rows: WHTReportRow[];
+  rows?: WHTReportRow[];
   year: number;
   month: number;
   showAction?: boolean;
   onUpdateVendor?: (row: WHTReportRow) => void;
   onViewDocument?: (row: WHTReportRow) => void;
 }) {
-  if (rows.length === 0) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+
+  if (safeRows.length === 0) {
     return (
       <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 py-12 text-center text-sm text-slate-500">
         ไม่พบรายการหัก ณ ที่จ่ายในกลุ่มนี้
@@ -197,7 +199,7 @@ function WhtTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((row) => {
+          {safeRows.map((row) => {
             const reason = showAction ? pendingReason(row) : null;
             const payStatus = paymentStatusLabel(row);
             return (
@@ -303,26 +305,30 @@ export function WhtReportDashboard({
   year,
   month,
   monthLabel,
-  pnd3,
-  pnd53,
-  pendingValidation,
+  pnd3 = [],
+  pnd53 = [],
+  pendingValidation = [],
   totalWhtBaseFormatted,
   totalWhtAmountFormatted,
   paidWhtAmountFormatted,
   issuedWhtAmountFormatted,
-  paidCount,
-  issuedCount,
+  paidCount = 0,
+  issuedCount = 0,
 }: WhtReportDashboardProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [modalTarget, setModalTarget] = useState<ModalTarget | null>(null);
 
-  const pendingCount = pendingValidation.length;
+  const safePnd3 = Array.isArray(pnd3) ? pnd3 : [];
+  const safePnd53 = Array.isArray(pnd53) ? pnd53 : [];
+  const safePending = Array.isArray(pendingValidation) ? pendingValidation : [];
+
+  const pendingCount = safePending.length;
   const defaultTab =
     pendingCount > 0
       ? "pending"
-      : pnd3.length >= pnd53.length
+      : safePnd3.length >= safePnd53.length
         ? "pnd3"
         : "pnd53";
 
@@ -456,13 +462,13 @@ export function WhtReportDashboard({
               <TabsTrigger value="pnd3">
                 ภ.ง.ด. 3
                 <Badge variant="slate" className="ml-2">
-                  {pnd3.length}
+                  {safePnd3.length}
                 </Badge>
               </TabsTrigger>
               <TabsTrigger value="pnd53">
                 ภ.ง.ด. 53
                 <Badge variant="slate" className="ml-2">
-                  {pnd53.length}
+                  {safePnd53.length}
                 </Badge>
               </TabsTrigger>
               <TabsTrigger value="pending" className="gap-1.5">
@@ -478,10 +484,10 @@ export function WhtReportDashboard({
               <TabExportBar
                 title="แบบฟอร์ม ภ.ง.ด.3 — บุคคลธรรมดา"
                 href={buildExportHref(year, month, "PND3")}
-                disabled={pnd3.length === 0}
+                disabled={safePnd3.length === 0}
               />
               <WhtTable
-                rows={pnd3}
+                rows={safePnd3}
                 year={year}
                 month={month}
                 onViewDocument={openDocumentPreview}
@@ -491,10 +497,10 @@ export function WhtReportDashboard({
               <TabExportBar
                 title="แบบฟอร์ม ภ.ง.ด.53 — นิติบุคคล"
                 href={buildExportHref(year, month, "PND53")}
-                disabled={pnd53.length === 0}
+                disabled={safePnd53.length === 0}
               />
               <WhtTable
-                rows={pnd53}
+                rows={safePnd53}
                 year={year}
                 month={month}
                 onViewDocument={openDocumentPreview}
@@ -502,7 +508,7 @@ export function WhtReportDashboard({
             </TabsContent>
             <TabsContent value="pending">
               <WhtTable
-                rows={pendingValidation}
+                rows={safePending}
                 year={year}
                 month={month}
                 showAction

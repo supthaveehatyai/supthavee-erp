@@ -2,16 +2,13 @@
  * Shared monthly WHT report data loader (EXP + TB).
  * Used by Server Actions and API export — not a `"use server"` module.
  *
- * Contact joins (schema):
- * - expenses.vendor_id  → contacts  (FK: expenses_vendor_id_fkey)
- * - documents.contact_id → contacts (FK: documents_contact_id_fkey) — TB only
+ * Contact joins (PostgREST column hints — disambiguate FK):
+ * - expenses:  contacts:vendor_id  → expenses.vendor_id
+ * - documents: contacts:contact_id → documents.contact_id (TB)
  */
 
 import { createClient } from "@/lib/supabase/server-admin";
 import type { WHTContactTax, WHTReportRow } from "@/types/tax";
-
-const EXPENSES_CONTACT_FK = "expenses_vendor_id_fkey";
-const DOCUMENTS_CONTACT_FK = "documents_contact_id_fkey";
 
 const DEFAULT_VENDOR_NAME = "ไม่ระบุชื่อคู่ค้า";
 const DEFAULT_TAX_ID = "-";
@@ -27,12 +24,6 @@ const EMPTY_CONTACT: WHTContactTax = {
   tax_address: null,
   is_tax_validated: null,
 };
-
-/** Explicit numeric coercion for WHT tax fields. */
-function toWhtNumber(value: unknown): number {
-  const n = Number(value ?? 0);
-  return Number.isFinite(n) ? n : 0;
-}
 
 function safeTrim(value: unknown, fallback = ""): string {
   if (value == null) return fallback;
@@ -154,6 +145,7 @@ function parseWhtTypeFromTbNotes(notes: unknown): string | null {
 }
 
 export function sortWhtRowsDesc(rows: WHTReportRow[]): WHTReportRow[] {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
   return [...rows].sort((a, b) => {
     const leftDate = a?.expense_date ?? "";
     const rightDate = b?.expense_date ?? "";
@@ -231,7 +223,7 @@ function mapTbRow(row: Record<string, unknown>): WHTReportRow | null {
   }
 }
 
-const CONTACT_SELECT_FIELDS = `
+const CONTACT_EMBED = `
   id,
   company_name,
   tax_id,
@@ -242,6 +234,112 @@ const CONTACT_SELECT_FIELDS = `
   address,
   is_tax_validated
 `;
+
+function mapExpenseRows(data: unknown): WHTReportRow[] {
+  if (!Array.isArray(data) || data.length === 0) return [];
+  const mapped: WHTReportRow[] = [];
+  for (const row of data) {
+    const mappedRow = mapExpenseRow(row as Record<string, unknown>);
+    if (mappedRow) mapped.push(mappedRow);
+  }
+  return mapped;
+}
+
+function mapTbRows(data: unknown): WHTReportRow[] {
+  if (!Array.isArray(data) || data.length === 0) return [];
+  const mapped: WHTReportRow[] = [];
+  for (const row of data) {
+    const mappedRow = mapTbRow(row as Record<string, unknown>);
+    if (mappedRow) mapped.push(mappedRow);
+  }
+  return mapped;
+}
+
+async function fetchExpenseWhtRows(
+  bounds: { startDate: string; endDate: string },
+): Promise<WHTReportRow[]> {
+  try {
+    const supabase = createClient();
+    const expensesResult = await supabase
+      .from("expenses")
+      .select(
+        `
+          id,
+          document_no,
+          expense_date,
+          vendor_id,
+          wht_type,
+          wht_base_amount,
+          net_amount,
+          wht_rate,
+          wht_amount,
+          wht_doc_no,
+          status,
+          contacts:vendor_id (
+            ${CONTACT_EMBED}
+          )
+        `,
+      )
+      .gt("wht_amount", 0)
+      .in("status", ["ISSUED", "PAID"])
+      .gte("expense_date", bounds.startDate)
+      .lte("expense_date", bounds.endDate);
+
+    if (expensesResult.error) {
+      console.error("[SUPABASE_WHT_QUERY_ERROR]", expensesResult.error);
+      return [];
+    }
+
+    return mapExpenseRows(expensesResult.data);
+  } catch (error) {
+    console.error("[SUPABASE_WHT_QUERY_ERROR]", error);
+    return [];
+  }
+}
+
+async function fetchTbWhtRows(
+  bounds: { startDate: string; endDate: string },
+): Promise<WHTReportRow[]> {
+  try {
+    const supabase = createClient();
+    const tbResult = await supabase
+      .from("documents")
+      .select(
+        `
+          id,
+          doc_no,
+          doc_date,
+          contact_id,
+          sub_total,
+          net_before_vat,
+          wht_rate,
+          wht_amount,
+          status,
+          payment_status,
+          notes,
+          contacts:contact_id (
+            ${CONTACT_EMBED}
+          )
+        `,
+      )
+      .eq("doc_type", "TB")
+      .gt("wht_amount", 0)
+      .gte("doc_date", bounds.startDate)
+      .lte("doc_date", bounds.endDate)
+      .in("status", ["ISSUED", "COMPLETED", "PAID"])
+      .or("is_voided.is.null,is_voided.eq.false");
+
+    if (tbResult.error) {
+      console.error("[SUPABASE_WHT_QUERY_ERROR]", tbResult.error);
+      return [];
+    }
+
+    return mapTbRows(tbResult.data);
+  } catch (error) {
+    console.error("[SUPABASE_WHT_QUERY_ERROR]", error);
+    return [];
+  }
+}
 
 /** Load merged EXP + TB rows for a calendar month. Never throws — returns [] on failure. */
 export async function loadMonthlyWhtReportRows(
@@ -255,85 +353,19 @@ export async function loadMonthlyWhtReportRows(
       return [];
     }
 
-    const supabase = createClient();
-
-    const [expensesResult, tbResult] = await Promise.all([
-      supabase
-        .from("expenses")
-        .select(
-          `
-          id,
-          document_no,
-          expense_date,
-          vendor_id,
-          wht_type,
-          wht_base_amount,
-          net_amount,
-          wht_rate,
-          wht_amount,
-          wht_doc_no,
-          status,
-          contacts!${EXPENSES_CONTACT_FK} (
-            ${CONTACT_SELECT_FIELDS}
-          )
-        `,
-        )
-        .gt("wht_amount", 0)
-        .in("status", ["ISSUED", "PAID"])
-        .gte("expense_date", bounds.startDate)
-        .lte("expense_date", bounds.endDate),
-      supabase
-        .from("documents")
-        .select(
-          `
-          id,
-          doc_no,
-          doc_date,
-          contact_id,
-          sub_total,
-          net_before_vat,
-          wht_rate,
-          wht_amount,
-          status,
-          payment_status,
-          notes,
-          contacts!${DOCUMENTS_CONTACT_FK} (
-            ${CONTACT_SELECT_FIELDS}
-          )
-        `,
-        )
-        .eq("doc_type", "TB")
-        .gt("wht_amount", 0)
-        .gte("doc_date", bounds.startDate)
-        .lte("doc_date", bounds.endDate)
-        .in("status", ["ISSUED", "COMPLETED", "PAID"])
-        .or("is_voided.is.null,is_voided.eq.false"),
+    const [expenseRows, tbRows] = await Promise.all([
+      fetchExpenseWhtRows(bounds),
+      fetchTbWhtRows(bounds),
     ]);
 
-    if (expensesResult.error) {
-      console.error(
-        "[WHT_REPORT_ERROR] expenses query failed:",
-        expensesResult.error,
-      );
-    }
-    if (tbResult.error) {
-      console.error(
-        "[WHT_REPORT_ERROR] documents (TB) query failed:",
-        tbResult.error,
-      );
-    }
+    const merged = [
+      ...(Array.isArray(expenseRows) ? expenseRows : []),
+      ...(Array.isArray(tbRows) ? tbRows : []),
+    ];
 
-    const expenseRows = (expensesResult.data ?? [])
-      .map((row) => mapExpenseRow(row as Record<string, unknown>))
-      .filter((row): row is WHTReportRow => row != null);
-
-    const tbRows = (tbResult.data ?? [])
-      .map((row) => mapTbRow(row as Record<string, unknown>))
-      .filter((row): row is WHTReportRow => row != null);
-
-    return sortWhtRowsDesc([...expenseRows, ...tbRows]);
+    return sortWhtRowsDesc(merged);
   } catch (error) {
-    console.error("[WHT_REPORT_ERROR]", error);
+    console.error("[SUPABASE_WHT_QUERY_ERROR]", error);
     return [];
   }
 }

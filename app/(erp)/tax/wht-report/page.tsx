@@ -1,15 +1,10 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { Landmark } from "lucide-react";
 import { getMonthlyWHTReport } from "@/app/actions/tax-actions";
-import type { WHTReportRow } from "@/types/tax";
+import type { MonthlyWHTReportData, WHTReportRow } from "@/types/tax";
 import { WhtDocumentPreviewContent } from "./wht-document-preview-content";
-import {
-  parseWhtDocumentPreviewTarget,
-  WhtDocumentPreviewSheet,
-} from "./wht-document-preview-sheet";
-import { WhtPeriodPicker } from "./wht-period-picker";
-import { WhtReportDashboard } from "./wht-report-dashboard";
+import { parseWhtDocumentPreviewTarget } from "./wht-document-preview-utils";
+import { WhtReportClient } from "./wht-report-client";
 
 export const dynamic = "force-dynamic";
 
@@ -42,11 +37,32 @@ const THAI_MONTH_LABELS: Record<number, string> = {
   12: "ธันวาคม",
 };
 
+const EMPTY_WHT_ROWS: WHTReportRow[] = [];
+
+const EMPTY_WHT_REPORT: MonthlyWHTReportData = {
+  raw: EMPTY_WHT_ROWS,
+  pnd3: EMPTY_WHT_ROWS,
+  pnd53: EMPTY_WHT_ROWS,
+  pendingValidation: EMPTY_WHT_ROWS,
+  summary: {
+    totalWhtBase: 0,
+    totalWhtAmount: 0,
+    paidWhtAmount: 0,
+    issuedWhtAmount: 0,
+    paidCount: 0,
+    issuedCount: 0,
+  },
+};
+
 function formatThaiBaht(value: number): string {
   return new Intl.NumberFormat("th-TH", {
     style: "currency",
     currency: "THB",
   }).format(Number.isFinite(value) ? value : 0);
+}
+
+function asWhtRows(value: unknown): WHTReportRow[] {
+  return Array.isArray(value) ? value : EMPTY_WHT_ROWS;
 }
 
 function parsePeriod(rawYear?: string, rawMonth?: string): {
@@ -74,93 +90,66 @@ function parsePeriod(rawYear?: string, rawMonth?: string): {
 
 export default async function WhtReportPage({ searchParams }: PageProps) {
   const params = (await searchParams) ?? {};
-  const { year, month } = parsePeriod(params.year, params.month);
+  const { year, month } = parsePeriod(params?.year, params?.month);
   const previewTarget = parseWhtDocumentPreviewTarget(
-    params.view_wht_source,
-    params.view_wht_id,
+    params?.view_wht_source,
+    params?.view_wht_id,
   );
-  const result = await getMonthlyWHTReport(year, month);
+
+  let result: Awaited<ReturnType<typeof getMonthlyWHTReport>>;
+  try {
+    result = await getMonthlyWHTReport(year, month);
+  } catch (error) {
+    console.error("[WHT_REPORT_ERROR] page load failed:", error);
+    result = { success: true, data: EMPTY_WHT_REPORT };
+  }
+
+  const report =
+    result?.success && result.data ? result.data : EMPTY_WHT_REPORT;
+  const summary = report?.summary ?? EMPTY_WHT_REPORT.summary;
+  const pnd3 = asWhtRows(report?.pnd3);
+  const pnd53 = asWhtRows(report?.pnd53);
+  const pendingValidation = asWhtRows(report?.pendingValidation);
+  const loadFailed = !result?.success;
+  const loadError =
+    loadFailed && result && !result.success ? result.error : undefined;
 
   const monthLabel = THAI_MONTH_LABELS[month] ?? `เดือน ${month}`;
-  const report = result.success ? result.data : null;
-  const summary = report?.summary;
-  const emptyRows: WHTReportRow[] = [];
 
   return (
-    <div className="flex flex-col gap-6 p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex flex-col gap-2">
-          <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
-            <Landmark className="h-8 w-8 text-blue-600" />
-            รายงานหัก ณ ที่จ่าย (WHT Report)
-          </h1>
-          <p className="text-slate-500">
-            สรุปรายเดือนสำหรับเตรียมยื่น ภ.ง.ด.3 / ภ.ง.ด.53 · Phase 8.5 · Zero
-            Client-Side Fetching
-          </p>
-        </div>
-
+    <WhtReportClient
+      year={year}
+      month={month}
+      monthLabel={monthLabel}
+      pnd3={pnd3}
+      pnd53={pnd53}
+      pendingValidation={pendingValidation}
+      totalWhtBaseFormatted={formatThaiBaht(summary?.totalWhtBase ?? 0)}
+      totalWhtAmountFormatted={formatThaiBaht(summary?.totalWhtAmount ?? 0)}
+      paidWhtAmountFormatted={formatThaiBaht(summary?.paidWhtAmount ?? 0)}
+      issuedWhtAmountFormatted={formatThaiBaht(
+        summary?.issuedWhtAmount ?? 0,
+      )}
+      paidCount={summary?.paidCount ?? 0}
+      issuedCount={summary?.issuedCount ?? 0}
+      loadFailed={loadFailed}
+      loadError={loadError}
+      previewTarget={previewTarget}
+    >
+      {previewTarget ? (
         <Suspense
           fallback={
-            <div className="h-10 w-64 animate-pulse rounded-xl bg-slate-100" />
+            <div className="px-6 py-8 text-sm text-slate-500">
+              กำลังโหลดรายละเอียดเอกสาร...
+            </div>
           }
         >
-          <WhtPeriodPicker year={year} month={month} />
+          <WhtDocumentPreviewContent
+            source={previewTarget.source}
+            documentId={previewTarget.documentId}
+          />
         </Suspense>
-      </div>
-
-      {!result.success || !report ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          ไม่สามารถโหลดรายงาน WHT ได้
-          {result.success ? "" : `: ${result.error ?? "Unknown error"}`}
-        </div>
-      ) : (
-        <>
-          <Suspense
-            fallback={
-              <div className="h-64 animate-pulse rounded-xl bg-slate-100" />
-            }
-          >
-            <WhtReportDashboard
-              year={year}
-              month={month}
-              monthLabel={monthLabel}
-              pnd3={report.pnd3 ?? emptyRows}
-              pnd53={report.pnd53 ?? emptyRows}
-              pendingValidation={report.pendingValidation ?? emptyRows}
-              totalWhtBaseFormatted={formatThaiBaht(summary?.totalWhtBase ?? 0)}
-              totalWhtAmountFormatted={formatThaiBaht(
-                summary?.totalWhtAmount ?? 0,
-              )}
-              paidWhtAmountFormatted={formatThaiBaht(
-                summary?.paidWhtAmount ?? 0,
-              )}
-              issuedWhtAmountFormatted={formatThaiBaht(
-                summary?.issuedWhtAmount ?? 0,
-              )}
-              paidCount={summary?.paidCount ?? 0}
-              issuedCount={summary?.issuedCount ?? 0}
-            />
-          </Suspense>
-
-          <WhtDocumentPreviewSheet target={previewTarget}>
-            {previewTarget ? (
-              <Suspense
-                fallback={
-                  <div className="px-6 py-8 text-sm text-slate-500">
-                    กำลังโหลดรายละเอียดเอกสาร...
-                  </div>
-                }
-              >
-                <WhtDocumentPreviewContent
-                  source={previewTarget.source}
-                  documentId={previewTarget.documentId}
-                />
-              </Suspense>
-            ) : null}
-          </WhtDocumentPreviewSheet>
-        </>
-      )}
-    </div>
+      ) : null}
+    </WhtReportClient>
   );
 }
