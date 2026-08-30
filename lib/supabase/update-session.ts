@@ -8,17 +8,9 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import {
   canAccessPath,
+  isAuthPath,
   parseAccessibleModules,
 } from "@/lib/auth/module-access";
-
-/** Routes that do not require a signed-in session */
-const PUBLIC_PATH_PREFIXES = ["/login"] as const;
-
-function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATH_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
-}
 
 function isStaticAsset(pathname: string): boolean {
   return (
@@ -81,23 +73,16 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
     return supabaseResponse;
   }
 
-  const onLogin = isPublicPath(pathname);
+  const onAuthPage = isAuthPath(pathname);
 
-  if (!user && !onLogin) {
+  if (!user && !onAuthPage) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  if (user && onLogin) {
-    const dashboardUrl = request.nextUrl.clone();
-    dashboardUrl.pathname = "/dashboard";
-    dashboardUrl.search = "";
-    return NextResponse.redirect(dashboardUrl);
-  }
-
-  if (user && !onLogin) {
+  if (user && !onAuthPage) {
     const denied = await isModuleAccessDenied(pathname, user.id);
     if (denied) {
       const forbiddenUrl = request.nextUrl.clone();

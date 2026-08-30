@@ -101,6 +101,7 @@ function SummaryRow({
  */
 export function DocumentPrintSummary({
   subtotal,
+  freightCost,
   discountAmount,
   vatType: vatTypeProp,
   vatRate,
@@ -110,7 +111,10 @@ export function DocumentPrintSummary({
   className,
 }: DocumentPrintSummaryProps) {
   const vatType = normalizeVatType(vatTypeProp);
+  const safeFreight = round2(Math.max(0, Number(freightCost ?? 0)));
   const safeSubtotal = round2(subtotal);
+  const linesSubtotal =
+    safeFreight > 0 ? round2(Math.max(0, safeSubtotal - safeFreight)) : safeSubtotal;
   const safeDiscount = round2(Math.max(0, discountAmount));
   const safeGrand = round2(grandTotal);
   const safeWht = round2(Math.max(0, Number(withholdingTaxAmount ?? 0)));
@@ -123,7 +127,10 @@ export function DocumentPrintSummary({
     grandTotal: safeGrand,
   });
 
-  const showSubtotal = safeSubtotal !== 0;
+  const showLinesSubtotal = safeFreight > 0 && linesSubtotal !== 0;
+  const showFreight = safeFreight > 0;
+  const showSubtotal = !showLinesSubtotal && safeSubtotal !== 0;
+  const showCombinedSubtotal = showFreight && safeSubtotal !== 0;
   const showDiscount = safeDiscount > 0;
   const showAfterDiscount = showDiscount && afterDiscount !== safeSubtotal;
   const showVat = vatType !== "NONE" && vatAmount > 0;
@@ -148,7 +155,20 @@ export function DocumentPrintSummary({
       )}
     >
       <div className="space-y-1.5 border border-neutral-300 bg-white p-2.5">
-        {showSubtotal ? (
+        {showLinesSubtotal ? (
+          <SummaryRow label="รวมรายการสินค้า" value={formatMoney(linesSubtotal)} />
+        ) : null}
+
+        {showFreight ? (
+          <SummaryRow
+            label="ค่าขนส่งต้นทาง"
+            value={formatMoney(safeFreight)}
+          />
+        ) : null}
+
+        {showCombinedSubtotal ? (
+          <SummaryRow label="รวมเป็นเงิน" value={formatMoney(safeSubtotal)} />
+        ) : showSubtotal ? (
           <SummaryRow label="รวมเป็นเงิน" value={formatMoney(safeSubtotal)} />
         ) : null}
 

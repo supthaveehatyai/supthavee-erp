@@ -23,7 +23,12 @@ import {
   type ApportionmentItem,
 } from "@/lib/utils/accounting";
 import { VAT_OPTIONS } from "@/lib/constants/accounting";
-import type { VatCalculationType } from "@/lib/utils/document-summary";
+import {
+  calculateDocumentSummary,
+  type VatCalculationType,
+} from "@/lib/utils/document-summary";
+import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
+import type { PrintVatType } from "@/types/print-document";
 import type { SalesProductSearchItem } from "@/types/document";
 import SmartSkuPicker from "@/components/sales/smart-sku-picker";
 import VendorCombobox from "@/components/procurement/VendorCombobox";
@@ -111,6 +116,7 @@ export default function ManualReceiptWorkspace({
   const [docType, setDocType] = useState<GoodsReceiptDocType>("AP_TAX");
   const [vatType, setVatType] = useState<VatCalculationType>("NONE");
   const [discountText, setDiscountText] = useState("");
+  const [freightCostInput, setFreightCostInput] = useState("");
   const [lines, setLines] = useState<ManualReceiptLine[]>([]);
 
   const costPreviewByKey = useMemo(() => {
@@ -158,6 +164,24 @@ export default function ManualReceiptWorkspace({
       netCost: roundMoney(netCost),
     };
   }, [lines, costPreviewByKey]);
+
+  const freightCostNormalized = useMemo(
+    () => roundMoney(Math.max(0, Number(freightCostInput) || 0)),
+    [freightCostInput],
+  );
+
+  const documentSummary = useMemo(() => {
+    const lineTotals = lines.map(
+      (line) => invoicePreviewByKey.get(line.key)?.finalLineTotal ?? 0,
+    );
+    return calculateDocumentSummary({
+      lineTotals,
+      freightCost: freightCostNormalized,
+      discountText: null,
+      vatType,
+      vatRate: vatType === "NONE" ? 0 : 7,
+    });
+  }, [lines, invoicePreviewByKey, freightCostNormalized, vatType]);
 
   function handleSelectProduct(product: SalesProductSearchItem) {
     setLines((current) => {
@@ -230,6 +254,7 @@ export default function ManualReceiptWorkspace({
         docType,
         vatType,
         discountText: discountText.trim() || null,
+        freightCost: freightCostNormalized,
         lines: lines.map((line) => ({
           product_id: line.product_id,
           qty: line.qty,
@@ -387,6 +412,25 @@ export default function ManualReceiptWorkspace({
                 : "ระบบจะกระจายส่วนลดตามสัดส่วนมูลค่าก่อนอัปเดตต้นทุนสุทธิ"}
             </p>
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="manual-receipt-freight">
+              ค่าขนส่งต้นทาง (Freight Cost)
+            </Label>
+            <Input
+              id="manual-receipt-freight"
+              type="number"
+              min={0}
+              step="0.01"
+              value={freightCostInput}
+              onChange={(e) => setFreightCostInput(e.target.value)}
+              placeholder="0.00"
+              disabled={isPending}
+              className="text-right tabular-nums"
+            />
+            <p className="text-[11px] text-slate-400">
+              รวมใน Sub Total ก่อนคำนวณ VAT · บันทึกลง documents.freight_cost
+            </p>
+          </div>
         </CardContent>
       </Card>
 
@@ -517,7 +561,7 @@ export default function ManualReceiptWorkspace({
         </CardContent>
       </Card>
 
-      <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
             Net Cost รวม (ใช้ อัปเดต LPP)
@@ -530,6 +574,16 @@ export default function ManualReceiptWorkspace({
             {vatType}
           </p>
         </div>
+        <DocumentPrintSummary
+          className="w-full max-w-sm"
+          subtotal={documentSummary.total_amount}
+          freightCost={freightCostNormalized}
+          discountAmount={documentSummary.discount_amount}
+          vatType={vatType as PrintVatType}
+          vatRate={documentSummary.vat_rate}
+          grandTotal={documentSummary.grand_total}
+          discountText={discountText}
+        />
         <Button
           type="button"
           size="lg"

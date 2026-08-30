@@ -38,6 +38,7 @@ Tech Stack หลัก: Supabase (PostgreSQL, Auth, Edge Functions, RLS), Next.
 - **Direct Capitalization:** การขึ้นทะเบียนสินทรัพย์ให้ใช้วิธีส่ง URL Parameters (`?linked_expense_id=...`) จากหน้า Expense ไปยัง Fixed Asset Form
 - **Asset Clearing Integrity:** ห้ามเปลี่ยนหมวดหมู่ของบิล Expense หลังจากนำไปขึ้นทะเบียน Fixed Asset เพื่อรักษา Audit Trail
 - **Document Ownership (ABAC):** ทุก INSERT ลงตาราง `documents` (หรือเอกสารการเงินต่างๆ) ต้องดึง `user.id` จาก Auth Session แล้ว stamp ลง `created_by` เสมอ เพื่อให้ RLS Data Access Scope ทำงานได้ถูกต้อง
+- **Landed Cost / Freight-In Integration:** ในฟอร์ม AP Documents (AP_INV, AP_TAX, AP_CASH) ต้องมีช่องสำหรับกรอก "ค่าขนส่ง (Freight Cost)" โดยค่านั้นต้องบันทึกลง `freight_cost` ระดับ Header การคำนวณ `sub_total` ต้องรวมค่าขนส่งนี้ก่อนคิด VAT (หากค่าขนส่งมี VAT) และตอนบันทึกรับเข้าคลัง (inventory_ledger) ต้องหารเฉลี่ยค่าขนส่งนี้เข้าเป็นต้นทุนสินค้า (Moving Average Cost)
 
 ## 3. Data Integrity & Taxonomy
 - **Color Code:** `mst_colors` ต้องล็อกเป็นอักษรภาษาอังกฤษพิมพ์ใหญ่ 3 ตัวอักษร

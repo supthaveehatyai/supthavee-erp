@@ -1,6 +1,6 @@
 System Blueprint: Supthavee ERP SuperApp
 
-Version: 14.4 (Phase 14 Post-Go-Live Enterprise Enhancements)
+Version: 15.0 (Phase 15 Inventory \& Material Management)
 
 Company: บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด
 

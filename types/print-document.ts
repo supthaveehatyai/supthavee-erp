@@ -43,8 +43,10 @@ export type PrintPaperSize = "A4" | "A5-Portrait" | "A5-Landscape";
 export type PrintVatType = "NONE" | "INCLUSIVE" | "EXCLUSIVE";
 
 export type DocumentPrintSummaryProps = {
-  /** ยอดรวมสินค้า (Σ line totals) */
+  /** ยอดรวม (Σ line_net_amount + freight_cost) ก่อนหักส่วนลดท้ายบิล */
   subtotal: number;
+  /** ค่าขนส่งต้นทาง — แสดงแยกบรรทัดเมื่อ > 0 */
+  freightCost?: number | null;
   /** ส่วนลดท้ายบิล (บาท) */
   discountAmount: number;
   vatType: PrintVatType;

@@ -306,6 +306,8 @@ export type DocumentDetail = {
   total_amount: number | null;
   net_before_vat: number | null;
   vat_amount: number | null;
+  /** Inbound freight (ค่าขนส่งต้นทาง) — included in sub_total before VAT. */
+  freight_cost?: number | null;
   wht_rate: number;
   wht_amount: number;
   payment_status: string;

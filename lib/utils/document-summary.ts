@@ -14,6 +14,11 @@ export type VatCalculationType = (typeof VAT_CALCULATION_TYPES)[number];
 export type DocumentSummaryInput = {
   /** Line totals (qty × unit_price) already computed. */
   lineTotals: number[];
+  /**
+   * Inbound freight (ค่าขนส่งต้นทาง) — added to total_amount before bill
+   * discount / VAT (follows the same vat_type as line prices).
+   */
+  freightCost?: number | null;
   /** Bill discount text — "10%", "500", "10" (baht if no %). */
   discountText?: string | null;
   vatType: VatCalculationType;
@@ -92,12 +97,15 @@ export function calculateDocumentSummary(
   const vatRate =
     Number.isFinite(vatRateRaw) && vatRateRaw >= 0 ? vatRateRaw : 7;
 
-  const total_amount = round2(
-    (input.lineTotals ?? []).reduce(
-      (sum, value) => sum + (Number.isFinite(value) ? value : 0),
-      0,
-    ),
+  const lineSum = (input.lineTotals ?? []).reduce(
+    (sum, value) => sum + (Number.isFinite(value) ? value : 0),
+    0,
   );
+  const freightRaw = Number(input.freightCost ?? 0);
+  const freightAmount =
+    Number.isFinite(freightRaw) && freightRaw > 0 ? freightRaw : 0;
+
+  const total_amount = round2(lineSum + freightAmount);
 
   const discount_amount = parseBillDiscountAmount(
     total_amount,

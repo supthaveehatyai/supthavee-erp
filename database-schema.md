@@ -48,6 +48,7 @@
 - `payment_transactions` (ธุรกรรมการรับ/จ่าย)
 - `payment_allocations` (การตัดยอดหนี้ Knock-off — `expense_id`, `document_id`)
 - `payment_slips` (สลิปโอนเงิน)
+- `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — เพิ่มฟิลด์ `freight_cost` NUMERIC DEFAULT 0 สำหรับบันทึกค่าขนส่งต้นทาง เพื่อใช้คำนวณ Landed Cost รับเข้าคลัง, มีฟิลด์ `created_by` เก็บ Auth Session UUID)
 
 ## 5. System & Auditing (ระบบและการตรวจสอบ)
 - `audit_logs` (ประวัติการเปลี่ยนแปลงข้อมูล JSONB)

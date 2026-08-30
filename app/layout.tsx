@@ -7,6 +7,7 @@ import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import {
   canAccessPath,
   ERP_MODULE_LABELS,
+  isAuthPath,
   resolveModuleForPath,
 } from "@/lib/auth/module-access";
 import AppShell from "./app-shell";
@@ -43,12 +44,17 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const currentUser = await getCurrentAuthUser();
   const headerList = await headers();
   const pathname = headerList.get("x-pathname") ?? "";
+  const onAuthPage = isAuthPath(pathname);
+
+  // Never call getCurrentAuthUser on /login or /auth — cookie refresh in RSC
+  // causes an HTTP-200 re-render loop (ERR_TOO_MANY_REDIRECTS-style navigation).
+  const currentUser = onAuthPage ? null : await getCurrentAuthUser();
+
   const allowed =
+    onAuthPage ||
     !currentUser ||
-    !pathname ||
     canAccessPath(
       pathname,
       currentUser.accessibleModules,

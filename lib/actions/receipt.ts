@@ -36,6 +36,13 @@ import {
   isVatCalculationType,
   type VatCalculationType,
 } from "@/lib/utils/document-summary";
+import {
+  apportionFreightByNetValue,
+  apportionFreightToLines,
+  calculateApSubTotalWithFreight,
+  calculateMovingAverageUnitCost,
+} from "@/lib/inventory/landed-cost";
+import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
 import type { DocumentType } from "@/types/document";
 import { requireSessionUserId } from "@/lib/auth/current-user";
 
@@ -670,9 +677,8 @@ export type SaveGoodsReceiptToLedgerResult = {
  * discount (`billDiscountText`) across every line by relative value.
  *
  * After a successful `inventory_ledger` insert, each non-FOC line's
- * `finalUnitCost` is written back to `products.cost_price` (Last Purchase
- * Price / LPP) via the same admin client — master data stays in sync with
- * the true net receipt cost without any client-side Supabase calls.
+ * landed unit cost (net + apportioned freight) updates `products.cost_price`
+ * via Moving Average — master data stays in sync without client-side calls.
  *
  * `vendorId` is intentionally NOT a parameter — it's derived from each row's
  * `mappingId` (`vendor_product_mapping.vendor_id`), the same Ground Truth
@@ -709,6 +715,8 @@ export async function saveGoodsReceiptToLedger(
   attachmentUrl?: string | null,
   /** Manual override จากกล่อง AI VAT Analysis — ยึดตัวเลขที่ผู้ใช้พิมพ์ */
   ledgerOverrides?: GoodsReceiptLedgerOverrides | null,
+  /** ค่าขนส่งต้นทาง (Freight-In) — รวมใน sub_total ก่อน VAT และกระจายลงต้นทุนสินค้า */
+  freightCost?: number | null,
 ): Promise<SaveGoodsReceiptToLedgerResult> {
   if (!Array.isArray(rows) || rows.length === 0) {
     return { docHeaderId: null, docNo: null, error: "ไม่มีรายการให้บันทึกรับสินค้า" };
@@ -839,8 +847,41 @@ export async function saveGoodsReceiptToLedger(
       return { row, qty, unitPrice, unitCostPrice, discountAmount, lineTotal };
     });
 
-    const subTotal = roundMoney(
-      lines.reduce((sum, line) => sum + line.unitPrice * line.qty, 0),
+    const freightCostNormalized = roundMoney(
+      Math.max(0, Number(freightCost) || 0),
+    );
+
+    const landedByLineKey = new Map(
+      apportionFreightToLines(
+        freightCostNormalized,
+        lines.map((line) => ({
+          id: line.row.lineKey,
+          qty: line.qty,
+          unitCostPrice: line.unitCostPrice,
+          lineNetExVat:
+            costApportionmentByLineKey.get(line.row.lineKey)?.finalLineTotal ?? 0,
+          isFoc: Boolean(line.row.isFoc),
+        })),
+        resolvedVatType,
+        vatRate,
+      ).map((landed) => [landed.id, landed]),
+    );
+
+    /** document_items.prorated_freight — header freight_cost × line_net ratio (remainder on last line). */
+    const proratedFreightByLineKey = new Map(
+      apportionFreightByNetValue(
+        freightCostNormalized,
+        lines.map((line) => ({
+          id: line.row.lineKey,
+          lineNetAmount: line.row.isFoc ? 0 : line.lineTotal,
+          isFoc: Boolean(line.row.isFoc),
+        })),
+      ).map((row) => [row.id, row.proratedFreight]),
+    );
+
+    const subTotal = calculateApSubTotalWithFreight(
+      lines.map((line) => line.lineTotal),
+      freightCostNormalized,
     );
     const discountAmount = roundMoney(
       lines.reduce((sum, line) => sum + line.discountAmount, 0),
@@ -848,6 +889,7 @@ export async function saveGoodsReceiptToLedger(
 
     const vatSummary = calculateDocumentSummary({
       lineTotals: lines.map((line) => line.lineTotal),
+      freightCost: freightCostNormalized,
       discountText: null,
       vatType: resolvedVatType,
       vatRate,
@@ -905,6 +947,7 @@ export async function saveGoodsReceiptToLedger(
         sub_total: subTotal,
         discount_amount: discountAmount,
         grand_total: grandTotal,
+        freight_cost: freightCostNormalized,
         payment_status: resolveInitialPaymentStatus(resolvedDocType),
       })
       .select("id, doc_no")
@@ -924,18 +967,22 @@ export async function saveGoodsReceiptToLedger(
     const docHeaderId = (docHeader as { id: string; doc_no: string }).id;
 
     // 2. doc_details — line-level cost/qty (unit_cost_price via VAT-aware apportionment)
-    const docDetailsPayload = lines.map((line) => ({
-      doc_header_id: docHeaderId,
-      product_id: line.row.matchedProduct!.id,
-      description: line.row.raw_description ?? line.row.matchedProduct!.name,
-      qty: line.qty,
-      uom_used: "ตัว",
-      unit_price: line.unitPrice,
-      unit_cost_price: line.unitCostPrice,
-      discount_text: line.row.discount_text ?? "",
-      discount_amount: line.discountAmount,
-      line_total: line.lineTotal,
-    }));
+    const docDetailsPayload = lines.map((line) => {
+      const landed = landedByLineKey.get(line.row.lineKey);
+      const unitCostWithFreight = landed?.landedUnitCost ?? line.unitCostPrice;
+      return {
+        doc_header_id: docHeaderId,
+        product_id: line.row.matchedProduct!.id,
+        description: line.row.raw_description ?? line.row.matchedProduct!.name,
+        qty: line.qty,
+        uom_used: "ตัว",
+        unit_price: line.unitPrice,
+        unit_cost_price: unitCostWithFreight,
+        discount_text: line.row.discount_text ?? "",
+        discount_amount: line.discountAmount,
+        line_total: line.lineTotal,
+      };
+    });
 
     const { error: docDetailsError } = await supabaseAdmin
       .from("doc_details")
@@ -995,6 +1042,7 @@ export async function saveGoodsReceiptToLedger(
         tax_rate: vatRate,
         tax_amount: vatAmountPersisted,
         grand_total: grandTotal,
+        freight_cost: freightCostNormalized,
         vat_type: resolvedVatType,
         vat_rate: vatRate,
         total_amount: totalAmountHeader,
@@ -1033,23 +1081,28 @@ export async function saveGoodsReceiptToLedger(
 
     const phase4DocumentId = phase4Document.id as string;
 
-    const phase4ItemsPayload = lines.map((line, index) => ({
-      document_id: phase4DocumentId,
-      product_id: line.row.matchedProduct!.id,
-      description: (
-        line.row.raw_description ??
-        line.row.matchedProduct!.name ??
-        ""
-      ).slice(0, 255),
-      qty: line.qty,
-      uom_used: "ตัว",
-      unit_price: line.unitPrice,
-      unit_cost_price: line.unitCostPrice,
-      discount_text: line.row.discount_text?.trim() || null,
-      discount_amount: line.discountAmount,
-      line_total: line.lineTotal,
-      sort_order: index,
-    }));
+    const phase4ItemsPayload = lines.map((line, index) => {
+      const landed = landedByLineKey.get(line.row.lineKey);
+      const unitCostWithFreight = landed?.landedUnitCost ?? line.unitCostPrice;
+      return {
+        document_id: phase4DocumentId,
+        product_id: line.row.matchedProduct!.id,
+        description: (
+          line.row.raw_description ??
+          line.row.matchedProduct!.name ??
+          ""
+        ).slice(0, 255),
+        qty: line.qty,
+        uom_used: "ตัว",
+        unit_price: line.unitPrice,
+        unit_cost_price: unitCostWithFreight,
+        discount_text: line.row.discount_text?.trim() || null,
+        discount_amount: line.discountAmount,
+        line_total: line.lineTotal,
+        prorated_freight: proratedFreightByLineKey.get(line.row.lineKey) ?? 0,
+        sort_order: index,
+      };
+    });
 
     const { error: phase4ItemsError } = await supabaseAdmin
       .from("document_items")
@@ -1069,14 +1122,22 @@ export async function saveGoodsReceiptToLedger(
     }
 
     // 3. inventory_ledger — the ONLY table allowed to move stock ("IN")
-    // Net unit cost (4 dp) is stamped in notes — ledger table has no cost column.
-    const ledgerPayload = lines.map((line) => ({
-      product_id: line.row.matchedProduct!.id,
-      doc_header_id: docHeaderId,
-      trans_type: "IN",
-      qty: line.qty,
-      notes: `รับสินค้าจากเอกสาร ${docNo} (${phase4DocNo}) — Vendor SKU: ${line.row.raw_vendor_sku} | unit_cost=${line.unitCostPrice.toFixed(4)}`,
-    }));
+    // Landed unit cost (4 dp, incl. apportioned freight) is stamped in notes.
+    const ledgerPayload = lines.map((line) => {
+      const landed = landedByLineKey.get(line.row.lineKey);
+      const unitCostWithFreight = landed?.landedUnitCost ?? line.unitCostPrice;
+      const freightNote =
+        landed && landed.freightPerUnit > 0
+          ? ` | freight/unit=${landed.freightPerUnit.toFixed(4)}`
+          : "";
+      return {
+        product_id: line.row.matchedProduct!.id,
+        doc_header_id: docHeaderId,
+        trans_type: "IN",
+        qty: line.qty,
+        notes: `รับสินค้าจากเอกสาร ${docNo} (${phase4DocNo}) — Vendor SKU: ${line.row.raw_vendor_sku} | unit_cost=${unitCostWithFreight.toFixed(4)}${freightNote}`,
+      };
+    });
 
     const { error: ledgerError } = await supabaseAdmin
       .from("inventory_ledger")
@@ -1094,28 +1155,92 @@ export async function saveGoodsReceiptToLedger(
       };
     }
 
-    // 4. Last Purchase Price (LPP) — push unit_cost_price (net after discounts)
-    // into products.cost_price. NEVER use retail_price / wholesale_price / unit_price.
-    // Skips FOC lines so free goods never wipe a real historical cost.
-    const lppTargets = lines.filter(
+    // 4. Moving Average Cost — products.cost_price blended with landed unit cost
+    // (net after discounts + apportioned freight). Skips FOC lines.
+    const maTargets = lines.filter(
       (line) => !line.row.isFoc && line.row.matchedProduct?.id,
     );
 
-    if (lppTargets.length > 0) {
-      // Collapse duplicates (same internal product on multiple receipt rows)
-      // so the latest net unit cost for that product wins.
-      const costByProductId = new Map<string, number>();
-      for (const line of lppTargets) {
-        const lpp = resolveLppFromUnitCostPrice(line.unitCostPrice);
-        if (lpp == null) continue;
-        costByProductId.set(line.row.matchedProduct!.id, lpp);
+    if (maTargets.length > 0) {
+      const productIds = [
+        ...new Set(maTargets.map((line) => line.row.matchedProduct!.id)),
+      ];
+
+      const { balances, error: balanceError } = await fetchOnHandQtyByProductIds(
+        supabaseAdmin,
+        productIds,
+      );
+      if (balanceError) {
+        await supabaseAdmin
+          .from("inventory_ledger")
+          .delete()
+          .eq("doc_header_id", docHeaderId);
+        await supabaseAdmin.from("documents").delete().eq("id", phase4DocumentId);
+        await supabaseAdmin
+          .from("doc_details")
+          .delete()
+          .eq("doc_header_id", docHeaderId);
+        await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+        return { docHeaderId: null, docNo: null, error: balanceError };
       }
 
-      if (costByProductId.size === 0) {
-        // No valid net costs — skip LPP (do not fall back to selling prices)
-      } else {
-        const lppResults = await Promise.all(
-          [...costByProductId.entries()].map(([productId, unitCostPrice]) =>
+      const { data: productCosts, error: productCostError } = await supabaseAdmin
+        .from("products")
+        .select("id, cost_price")
+        .in("id", productIds);
+
+      if (productCostError) {
+        await supabaseAdmin
+          .from("inventory_ledger")
+          .delete()
+          .eq("doc_header_id", docHeaderId);
+        await supabaseAdmin.from("documents").delete().eq("id", phase4DocumentId);
+        await supabaseAdmin
+          .from("doc_details")
+          .delete()
+          .eq("doc_header_id", docHeaderId);
+        await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+        return {
+          docHeaderId: null,
+          docNo: null,
+          error: productCostError.message ?? "ดึงต้นทุนสินค้าปัจจุบันไม่สำเร็จ",
+        };
+      }
+
+      const currentCostById = new Map(
+        (productCosts ?? []).map((row) => [
+          String(row.id),
+          Number(row.cost_price ?? 0),
+        ]),
+      );
+
+      const virtualQty = new Map(balances);
+      const virtualCost = new Map(currentCostById);
+
+      const maCostByProductId = new Map<string, number>();
+      for (const line of maTargets) {
+        const productId = line.row.matchedProduct!.id;
+        const landed = landedByLineKey.get(line.row.lineKey);
+        const landedUnitCost = landed?.landedUnitCost ?? line.unitCostPrice;
+        const resolved = resolveLppFromUnitCostPrice(landedUnitCost);
+        if (resolved == null) continue;
+
+        const onHand = virtualQty.get(productId) ?? 0;
+        const currentAvg = virtualCost.get(productId) ?? 0;
+        const blended = calculateMovingAverageUnitCost(
+          onHand,
+          currentAvg,
+          line.qty,
+          resolved,
+        );
+        virtualQty.set(productId, onHand + line.qty);
+        virtualCost.set(productId, blended);
+        maCostByProductId.set(productId, blended);
+      }
+
+      if (maCostByProductId.size > 0) {
+        const maResults = await Promise.all(
+          [...maCostByProductId.entries()].map(([productId, unitCostPrice]) =>
             supabaseAdmin
               .from("products")
               .update({ cost_price: unitCostPrice })
@@ -1123,9 +1248,8 @@ export async function saveGoodsReceiptToLedger(
           ),
         );
 
-        const lppError = lppResults.find((result) => result.error)?.error;
-        if (lppError) {
-          // Compensating rollback — keep receipt + LPP atomic.
+        const maError = maResults.find((result) => result.error)?.error;
+        if (maError) {
           await supabaseAdmin
             .from("inventory_ledger")
             .delete()
@@ -1140,8 +1264,8 @@ export async function saveGoodsReceiptToLedger(
             docHeaderId: null,
             docNo: null,
             error:
-              lppError.message ??
-              "อัปเดตราคาต้นทุนล่าสุด (products.cost_price) ไม่สำเร็จ",
+              maError.message ??
+              "อัปเดตต้นทุนเฉลี่ย (products.cost_price) ไม่สำเร็จ",
           };
         }
       }
@@ -1182,6 +1306,8 @@ export type SaveManualGoodsReceiptInput = {
   vatType?: VatCalculationType;
   /** Bill discount text e.g. "10%" or "500". */
   discountText?: string | null;
+  /** ค่าขนส่งต้นทาง (Freight-In) — รวมใน sub_total และกระจายลงต้นทุน */
+  freightCost?: number | null;
   lines: ManualGoodsReceiptLineInput[];
 };
 
@@ -1196,7 +1322,8 @@ export type SaveManualGoodsReceiptResult = {
 
 /**
  * Manual Goods Receipt (no OCR): create Phase 4 `documents` + items,
- * post `inventory_ledger` IN, and push LPP to `products.cost_price`.
+ * post `inventory_ledger` IN, and blend `products.cost_price` via Moving Average
+ * (landed unit cost incl. apportioned freight).
  *
  * Net unit cost always goes through Apportionment Math Engine
  * (INCLUSIVE strips VAT before discount; bill discount is prorated).
@@ -1226,6 +1353,9 @@ export async function saveManualGoodsReceipt(
       : "NONE";
     const vatRate = resolvedVatType === "NONE" ? 0 : 7;
     const discountText = input?.discountText?.trim() || null;
+    const freightCostNormalized = roundMoney(
+      Math.max(0, Number(input?.freightCost) || 0),
+    );
 
     if (!vendorId) {
       return { data: null, error: "กรุณาเลือกผู้จำหน่าย (Vendor)" };
@@ -1347,10 +1477,10 @@ export async function saveManualGoodsReceipt(
       const cost = costByLineKey.get(line.lineKey);
       const invoice = invoiceByLineKey.get(line.lineKey);
       const invoiceLineTotal = roundMoney(invoice?.finalLineTotal ?? 0);
-      // Net unit cost after discounts (4 dp) — source of truth for LPP / unit_cost_price
       const unitCostPrice = roundTo4Decimals(cost?.finalUnitCost ?? 0);
       const discountAmount = roundMoney(line.unitPrice * line.qty - invoiceLineTotal);
       return {
+        lineKey: line.lineKey,
         product_id: line.product_id,
         description: line.description,
         sku: line.sku,
@@ -1364,14 +1494,51 @@ export async function saveManualGoodsReceipt(
       };
     });
 
-    const subTotal = roundMoney(
-      normalizedLines.reduce((sum, line) => sum + line.unit_price * line.qty, 0),
+    const landedByLineKey = new Map(
+      apportionFreightToLines(
+        freightCostNormalized,
+        preparedLines.map((line) => ({
+          id: line.lineKey,
+          qty: line.qty,
+          unitCostPrice:
+            normalizedLines.find((n) => n.lineKey === line.lineKey)?.unit_cost ?? 0,
+          lineNetExVat: costByLineKey.get(line.lineKey)?.finalLineTotal ?? 0,
+          isFoc: false,
+        })),
+        resolvedVatType,
+        vatRate,
+      ).map((landed) => [landed.id, landed]),
+    );
+
+    const proratedFreightByLineKey = new Map(
+      apportionFreightByNetValue(
+        freightCostNormalized,
+        normalizedLines.map((line) => ({
+          id: line.lineKey,
+          lineNetAmount: line.line_total,
+          isFoc: false,
+        })),
+      ).map((row) => [row.id, row.proratedFreight]),
+    );
+
+    const receiptLines = normalizedLines.map((line) => {
+      const landed = landedByLineKey.get(line.lineKey);
+      return {
+        ...line,
+        unit_cost: landed?.landedUnitCost ?? line.unit_cost,
+      };
+    });
+
+    const subTotal = calculateApSubTotalWithFreight(
+      receiptLines.map((line) => line.line_total),
+      freightCostNormalized,
     );
     const discountAmount = roundMoney(
-      normalizedLines.reduce((sum, line) => sum + line.discount_amount, 0),
+      receiptLines.reduce((sum, line) => sum + line.discount_amount, 0),
     );
     const vatSummary = calculateDocumentSummary({
-      lineTotals: normalizedLines.map((line) => line.line_total),
+      lineTotals: receiptLines.map((line) => line.line_total),
+      freightCost: freightCostNormalized,
       discountText: null,
       vatType: resolvedVatType,
       vatRate,
@@ -1407,6 +1574,7 @@ export async function saveManualGoodsReceipt(
         sub_total: subTotal,
         discount_amount: discountAmount,
         grand_total: grandTotal,
+        freight_cost: freightCostNormalized,
         payment_status: resolveInitialPaymentStatus(resolvedDocType),
       })
       .select("id")
@@ -1425,7 +1593,7 @@ export async function saveManualGoodsReceipt(
     const docHeaderId = docHeader.id as string;
 
     const { error: detailsError } = await supabaseAdmin.from("doc_details").insert(
-      normalizedLines.map((line) => ({
+      receiptLines.map((line) => ({
         doc_header_id: docHeaderId,
         product_id: line.product_id,
         description: line.description,
@@ -1468,6 +1636,7 @@ export async function saveManualGoodsReceipt(
         tax_rate: vatSummary.vat_rate,
         tax_amount: vatSummary.vat_amount,
         grand_total: grandTotal,
+        freight_cost: freightCostNormalized,
         vat_type: resolvedVatType,
         vat_rate: vatSummary.vat_rate,
         total_amount: vatSummary.total_amount,
@@ -1498,19 +1667,23 @@ export async function saveManualGoodsReceipt(
     const documentId = document.id as string;
 
     const { error: itemsError } = await supabaseAdmin.from("document_items").insert(
-      normalizedLines.map((line) => ({
-        document_id: documentId,
-        product_id: line.product_id,
-        description: line.description,
-        qty: line.qty,
-        uom_used: line.uom_used,
-        unit_price: line.unit_price,
-        unit_cost_price: line.unit_cost,
-        discount_text: null,
-        discount_amount: line.discount_amount,
-        line_total: line.line_total,
-        sort_order: line.sort_order,
-      })),
+      receiptLines.map((line) => {
+        const landed = landedByLineKey.get(line.lineKey);
+        return {
+          document_id: documentId,
+          product_id: line.product_id,
+          description: line.description,
+          qty: line.qty,
+          uom_used: line.uom_used,
+          unit_price: line.unit_price,
+          unit_cost_price: line.unit_cost,
+          discount_text: null,
+          discount_amount: line.discount_amount,
+          line_total: line.line_total,
+          prorated_freight: proratedFreightByLineKey.get(line.lineKey) ?? 0,
+          sort_order: line.sort_order,
+        };
+      }),
     );
 
     if (itemsError) {
@@ -1523,13 +1696,20 @@ export async function saveManualGoodsReceipt(
       };
     }
 
-    const ledgerPayload = normalizedLines.map((line) => ({
-      product_id: line.product_id,
-      doc_header_id: docHeaderId,
-      trans_type: "IN",
-      qty: line.qty,
-      notes: `รับสินค้า Manual จากเอกสาร ${phase4DocNo} (อ้างอิง ${documentRef}) | document_id=${documentId} | net_cost=${line.unit_cost} | SKU: ${line.sku || "-"}`,
-    }));
+    const ledgerPayload = receiptLines.map((line) => {
+      const landed = landedByLineKey.get(line.lineKey);
+      const freightNote =
+        landed && landed.freightPerUnit > 0
+          ? ` | freight/unit=${landed.freightPerUnit.toFixed(4)}`
+          : "";
+      return {
+        product_id: line.product_id,
+        doc_header_id: docHeaderId,
+        trans_type: "IN",
+        qty: line.qty,
+        notes: `รับสินค้า Manual จากเอกสาร ${phase4DocNo} (อ้างอิง ${documentRef}) | document_id=${documentId} | unit_cost=${line.unit_cost.toFixed(4)}${freightNote} | SKU: ${line.sku || "-"}`,
+      };
+    });
 
     const { error: ledgerError } = await supabaseAdmin
       .from("inventory_ledger")
@@ -1546,17 +1726,67 @@ export async function saveManualGoodsReceipt(
       };
     }
 
-    // LPP — products.cost_price ← unit_cost (net) only — never retail/selling price
-    const costByProductId = new Map<string, number>();
-    for (const line of normalizedLines) {
-      const lpp = resolveLppFromUnitCostPrice(line.unit_cost);
-      if (lpp == null) continue;
-      costByProductId.set(line.product_id, lpp);
+    const { balances, error: balanceError } = await fetchOnHandQtyByProductIds(
+      supabaseAdmin,
+      productIds,
+    );
+    if (balanceError) {
+      await supabaseAdmin
+        .from("inventory_ledger")
+        .delete()
+        .eq("doc_header_id", docHeaderId);
+      await supabaseAdmin.from("documents").delete().eq("id", documentId);
+      await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", docHeaderId);
+      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+      return { data: null, error: balanceError };
     }
 
-    if (costByProductId.size > 0) {
-      const lppResults = await Promise.all(
-        [...costByProductId.entries()].map(([productId, unitCostPrice]) =>
+    const { data: productCosts, error: productCostError } = await supabaseAdmin
+      .from("products")
+      .select("id, cost_price")
+      .in("id", productIds);
+
+    if (productCostError) {
+      await supabaseAdmin
+        .from("inventory_ledger")
+        .delete()
+        .eq("doc_header_id", docHeaderId);
+      await supabaseAdmin.from("documents").delete().eq("id", documentId);
+      await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", docHeaderId);
+      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+      return { data: null, error: productCostError.message };
+    }
+
+    const currentCostById = new Map(
+      (productCosts ?? []).map((row) => [
+        String(row.id),
+        Number(row.cost_price ?? 0),
+      ]),
+    );
+
+    const virtualQty = new Map(balances);
+    const virtualCost = new Map(currentCostById);
+
+    const maCostByProductId = new Map<string, number>();
+    for (const line of receiptLines) {
+      const resolved = resolveLppFromUnitCostPrice(line.unit_cost);
+      if (resolved == null) continue;
+      const onHand = virtualQty.get(line.product_id) ?? 0;
+      const currentAvg = virtualCost.get(line.product_id) ?? 0;
+      const blended = calculateMovingAverageUnitCost(
+        onHand,
+        currentAvg,
+        line.qty,
+        resolved,
+      );
+      virtualQty.set(line.product_id, onHand + line.qty);
+      virtualCost.set(line.product_id, blended);
+      maCostByProductId.set(line.product_id, blended);
+    }
+
+    if (maCostByProductId.size > 0) {
+      const maResults = await Promise.all(
+        [...maCostByProductId.entries()].map(([productId, unitCostPrice]) =>
           supabaseAdmin
             .from("products")
             .update({ cost_price: unitCostPrice })
@@ -1564,8 +1794,8 @@ export async function saveManualGoodsReceipt(
         ),
       );
 
-      const lppError = lppResults.find((result) => result.error)?.error;
-      if (lppError) {
+      const maError = maResults.find((result) => result.error)?.error;
+      if (maError) {
         await supabaseAdmin
           .from("inventory_ledger")
           .delete()
@@ -1576,8 +1806,8 @@ export async function saveManualGoodsReceipt(
         return {
           data: null,
           error:
-            lppError.message ??
-            "อัปเดตราคาต้นทุนล่าสุด (products.cost_price) ไม่สำเร็จ",
+            maError.message ??
+            "อัปเดตต้นทุนเฉลี่ย (products.cost_price) ไม่สำเร็จ",
         };
       }
     }

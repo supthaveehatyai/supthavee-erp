@@ -7,6 +7,7 @@ export const metadata: Metadata = {
   description: "Supthavee ERP — Secure Login",
 };
 
+/** Public route — Root layout skips session lookup when pathname is /login or /auth. */
 export default function LoginPage() {
   return (
     <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-slate-950 px-4 py-10">

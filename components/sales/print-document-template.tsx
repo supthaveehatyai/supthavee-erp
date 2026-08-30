@@ -41,6 +41,10 @@ function formatMoney(value: number): string {
   });
 }
 
+function roundMoney(value: number): number {
+  return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+}
+
 function normalizePrintVatType(value: string | null | undefined): PrintVatType {
   if (value === "INCLUSIVE" || value === "EXCLUSIVE" || value === "NONE") {
     return value;
@@ -66,6 +70,7 @@ export default async function PrintDocumentTemplate({
 }: PrintDocumentTemplateProps) {
   const isDepositDoc =
     doc.doc_type === "DEP_IN" || doc.doc_type === "DEP_OUT";
+  const freightCost = roundMoney(Math.max(0, Number(doc.freight_cost ?? 0)));
   const subtotal = Number(doc.total_amount ?? doc.sub_total ?? 0);
   const discountAmount = Number(doc.discount_amount ?? 0);
   const vatRate = Number(doc.vat_rate ?? doc.tax_rate ?? 7);
@@ -224,6 +229,7 @@ export default async function PrintDocumentTemplate({
       <DocumentPrintSummary
         className={cn("mt-4", compact && "max-w-[14rem]")}
         subtotal={isDepositDoc ? grandTotal : subtotal}
+        freightCost={isDepositDoc ? 0 : freightCost}
         discountAmount={isDepositDoc ? 0 : discountAmount}
         vatType={vatType}
         vatRate={vatRate}

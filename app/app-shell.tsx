@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { SignOutButton } from "@/components/auth/sign-out-button";
-import { canAccessPath } from "@/lib/auth/module-access";
+import { canAccessPath, isAuthPath } from "@/lib/auth/module-access";
 import type { AccessibleModules } from "@/types/rbac";
 
 type IconName =
@@ -343,10 +343,7 @@ export default function AppShell({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   // Auth routes render without ERP chrome (sidebar / top bar).
-  const isAuthRoute =
-    pathname === "/login" || pathname.startsWith("/login/");
-
-  if (isAuthRoute) {
+  if (isAuthPath(pathname)) {
     return <>{children}</>;
   }
 

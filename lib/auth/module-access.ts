@@ -48,8 +48,18 @@ export const MODULE_PATH_PREFIXES: Record<ErpModuleKey, readonly string[]> = {
   settings: ["/settings"],
 };
 
+/** Login / OAuth callback — skip session guards and never redirect away */
+export const AUTH_PATH_PREFIXES = ["/login", "/auth"] as const;
+
+export function isAuthPath(pathname: string): boolean {
+  const path = pathname.trim();
+  return AUTH_PATH_PREFIXES.some(
+    (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+  );
+}
+
 const PUBLIC_OR_UNGATED_PREFIXES = [
-  "/login",
+  ...AUTH_PATH_PREFIXES,
   "/forbidden",
   "/dashboard",
   "/contacts",

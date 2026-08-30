@@ -62,6 +62,8 @@ import {
   calculateDocumentSummary,
   type VatCalculationType,
 } from "@/lib/utils/document-summary";
+import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
+import type { PrintVatType } from "@/types/print-document";
 import VendorCombobox from "@/components/procurement/VendorCombobox";
 import InternalProductCombobox from "@/components/procurement/InternalProductCombobox";
 import QuickCreateDialog from "@/components/procurement/QuickCreateDialog";
@@ -205,6 +207,9 @@ export default function GoodsReceiptUI({
   /** End-of-bill discount text (e.g. "40%", "1500") — fed into calculateNetCostApportionment. */
   const [billDiscountText, setBillDiscountText] = useState("");
 
+  /** ค่าขนส่งต้นทาง (Freight-In) — preview only; รวมใน sub_total ก่อน VAT */
+  const [freightCostInput, setFreightCostInput] = useState("");
+
   /** AI VAT Analysis — controlled amounts (auto from lines until user overrides). */
   const [netBeforeVatInput, setNetBeforeVatInput] = useState("");
   const [vatAmountInput, setVatAmountInput] = useState("");
@@ -281,6 +286,7 @@ export default function GoodsReceiptUI({
     setAiDocType("AP_TAX");
     setAiVatType("NONE");
     setBillDiscountText("");
+    setFreightCostInput("");
     setNetBeforeVatInput("");
     setVatAmountInput("");
     setGrandTotalInput("");
@@ -301,6 +307,7 @@ export default function GoodsReceiptUI({
       setAiDocType("AP_TAX");
       setAiVatType("NONE");
       setBillDiscountText("");
+      setFreightCostInput("");
       setVatTotalsManual(false);
       setNetBeforeVatInput("");
       setVatAmountInput("");
@@ -569,9 +576,14 @@ export default function GoodsReceiptUI({
     ),
   };
 
+  const freightCostNormalized = useMemo(
+    () => roundMoney2(Math.max(0, parseMoneyInput(freightCostInput))),
+    [freightCostInput],
+  );
+
   /**
    * Auto VAT from line Total Amounts (already include line/bill discounts).
-   * When `vatTotalsManual` is false, controlled inputs stay synced to this.
+   * sub_total = Σ line_net + freight_cost → แล้วคำนวณ VAT / Grand Total
    */
   const vatPreview = useMemo(() => {
     const lineTotals = rows.map((row) =>
@@ -579,11 +591,12 @@ export default function GoodsReceiptUI({
     );
     return calculateDocumentSummary({
       lineTotals,
+      freightCost: freightCostNormalized,
       discountText: null,
       vatType: aiVatType,
       vatRate: aiVatType === "NONE" ? 0 : 7,
     });
-  }, [rows, aiVatType]);
+  }, [rows, aiVatType, freightCostNormalized]);
 
   useEffect(() => {
     if (vatTotalsManual) return;
@@ -665,6 +678,7 @@ export default function GoodsReceiptUI({
                   lineTotals: rowsForSave.map((row) =>
                     row.isFoc ? 0 : Math.max(0, Number(row.totalAmount) || 0),
                   ),
+                  freightCost: freightCostNormalized,
                   discountText: null,
                   vatType: payload.vatType,
                   vatRate: payload.vatType === "NONE" ? 0 : 7,
@@ -672,6 +686,7 @@ export default function GoodsReceiptUI({
               ),
           ),
         },
+        freightCostNormalized,
       );
       if (result.error || !result.docHeaderId) {
         toast.error(result.error ?? "บันทึกรับสินค้าเข้าคลังไม่สำเร็จ");
@@ -1150,8 +1165,8 @@ export default function GoodsReceiptUI({
       {/* VAT summary (AI) — above sticky Save footer */}
       {rows.length > 0 ? (
         <Card className="border-violet-200 bg-violet-50/40">
-          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
+          <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0 flex-1">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-500">
                 AI VAT Analysis — ตรวจสอบก่อนบันทึก
               </p>
@@ -1163,10 +1178,40 @@ export default function GoodsReceiptUI({
                 ประเภทเอกสารจาก AI: {aiDocType} · แก้ไขได้ในหน้าต่าง Save to Ledger
                 {vatTotalsManual
                   ? " · ใช้ยอดที่พิมพ์ทับ (Manual Override)"
-                  : " · Auto จาก Total Amount รายบรรทัด"}
+                  : " · Auto จาก Total Amount รายบรรทัด + ค่าขนส่ง"}
               </p>
+              <div className="mt-3 max-w-xs">
+                <Label
+                  htmlFor="freight-cost-input"
+                  className="text-[10px] font-medium text-slate-500"
+                >
+                  ค่าขนส่งต้นทาง (Freight Cost)
+                </Label>
+                <div className="mt-1 flex items-center gap-1">
+                  <span className="text-xs text-slate-400">฿</span>
+                  <Input
+                    id="freight-cost-input"
+                    type="text"
+                    inputMode="decimal"
+                    value={freightCostInput}
+                    onChange={(e) => {
+                      setFreightCostInput(e.target.value);
+                      setVatTotalsManual(false);
+                    }}
+                    placeholder="0.00"
+                    className="h-9 text-right text-sm font-semibold tabular-nums"
+                  />
+                </div>
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
+              <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
+                <p className="text-[10px] font-medium text-slate-400">Sub Total</p>
+                <p className="mt-1 text-sm font-bold tabular-nums text-slate-900">
+                  {formatMoney(vatPreview.total_amount)}
+                </p>
+                <p className="text-[10px] text-slate-400">รายการ + ขนส่ง</p>
+              </div>
               <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
                 <Label
                   htmlFor="vat-net-before"
@@ -1264,6 +1309,16 @@ export default function GoodsReceiptUI({
                 ) : null}
               </div>
             </div>
+            <DocumentPrintSummary
+              className="w-full max-w-sm shrink-0"
+              subtotal={vatPreview.total_amount}
+              freightCost={freightCostNormalized}
+              discountAmount={vatPreview.discount_amount}
+              vatType={aiVatType as PrintVatType}
+              vatRate={vatPreview.vat_rate}
+              grandTotal={vatPreview.grand_total}
+              discountText={billDiscountText}
+            />
           </CardContent>
         </Card>
       ) : null}
