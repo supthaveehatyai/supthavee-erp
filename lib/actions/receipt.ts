@@ -38,8 +38,8 @@ import {
 } from "@/lib/utils/document-summary";
 import {
   apportionFreightByNetValue,
-  apportionFreightToLines,
   calculateApSubTotalWithFreight,
+  calculateLandedUnitCostFromProration,
   calculateMovingAverageUnitCost,
 } from "@/lib/inventory/landed-cost";
 import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
@@ -182,6 +182,21 @@ function resolveLppFromUnitCostPrice(
   const n = Number(unitCostPrice);
   if (!Number.isFinite(n) || n < 0) return null;
   return roundTo4Decimals(n);
+}
+
+/** Landed unit cost = (line_net_amount + prorated_freight) / qty — skips FOC. */
+function resolveReceiptLineLandedUnitCost(input: {
+  lineNetAmount: number;
+  proratedFreight: number;
+  qty: number;
+  isFoc?: boolean;
+}): number {
+  if (input.isFoc) return 0;
+  return calculateLandedUnitCostFromProration(
+    input.lineNetAmount,
+    input.proratedFreight,
+    input.qty,
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -851,22 +866,6 @@ export async function saveGoodsReceiptToLedger(
       Math.max(0, Number(freightCost) || 0),
     );
 
-    const landedByLineKey = new Map(
-      apportionFreightToLines(
-        freightCostNormalized,
-        lines.map((line) => ({
-          id: line.row.lineKey,
-          qty: line.qty,
-          unitCostPrice: line.unitCostPrice,
-          lineNetExVat:
-            costApportionmentByLineKey.get(line.row.lineKey)?.finalLineTotal ?? 0,
-          isFoc: Boolean(line.row.isFoc),
-        })),
-        resolvedVatType,
-        vatRate,
-      ).map((landed) => [landed.id, landed]),
-    );
-
     /** document_items.prorated_freight — header freight_cost × line_net ratio (remainder on last line). */
     const proratedFreightByLineKey = new Map(
       apportionFreightByNetValue(
@@ -877,6 +876,22 @@ export async function saveGoodsReceiptToLedger(
           isFoc: Boolean(line.row.isFoc),
         })),
       ).map((row) => [row.id, row.proratedFreight]),
+    );
+
+    const landedUnitCostByLineKey = new Map(
+      lines.map((line) => {
+        const proratedFreight =
+          proratedFreightByLineKey.get(line.row.lineKey) ?? 0;
+        return [
+          line.row.lineKey,
+          resolveReceiptLineLandedUnitCost({
+            lineNetAmount: line.lineTotal,
+            proratedFreight,
+            qty: line.qty,
+            isFoc: Boolean(line.row.isFoc),
+          }),
+        ] as const;
+      }),
     );
 
     const subTotal = calculateApSubTotalWithFreight(
@@ -968,8 +983,8 @@ export async function saveGoodsReceiptToLedger(
 
     // 2. doc_details — line-level cost/qty (unit_cost_price via VAT-aware apportionment)
     const docDetailsPayload = lines.map((line) => {
-      const landed = landedByLineKey.get(line.row.lineKey);
-      const unitCostWithFreight = landed?.landedUnitCost ?? line.unitCostPrice;
+      const unitCostWithFreight =
+        landedUnitCostByLineKey.get(line.row.lineKey) ?? line.unitCostPrice;
       return {
         doc_header_id: docHeaderId,
         product_id: line.row.matchedProduct!.id,
@@ -1082,8 +1097,8 @@ export async function saveGoodsReceiptToLedger(
     const phase4DocumentId = phase4Document.id as string;
 
     const phase4ItemsPayload = lines.map((line, index) => {
-      const landed = landedByLineKey.get(line.row.lineKey);
-      const unitCostWithFreight = landed?.landedUnitCost ?? line.unitCostPrice;
+      const unitCostWithFreight =
+        landedUnitCostByLineKey.get(line.row.lineKey) ?? line.unitCostPrice;
       return {
         document_id: phase4DocumentId,
         product_id: line.row.matchedProduct!.id,
@@ -1122,20 +1137,18 @@ export async function saveGoodsReceiptToLedger(
     }
 
     // 3. inventory_ledger — the ONLY table allowed to move stock ("IN")
-    // Landed unit cost (4 dp, incl. apportioned freight) is stamped in notes.
     const ledgerPayload = lines.map((line) => {
-      const landed = landedByLineKey.get(line.row.lineKey);
-      const unitCostWithFreight = landed?.landedUnitCost ?? line.unitCostPrice;
-      const freightNote =
-        landed && landed.freightPerUnit > 0
-          ? ` | freight/unit=${landed.freightPerUnit.toFixed(4)}`
-          : "";
+      const proratedFreight =
+        proratedFreightByLineKey.get(line.row.lineKey) ?? 0;
+      const landedUnitCost =
+        landedUnitCostByLineKey.get(line.row.lineKey) ?? 0;
       return {
         product_id: line.row.matchedProduct!.id,
         doc_header_id: docHeaderId,
         trans_type: "IN",
         qty: line.qty,
-        notes: `รับสินค้าจากเอกสาร ${docNo} (${phase4DocNo}) — Vendor SKU: ${line.row.raw_vendor_sku} | unit_cost=${unitCostWithFreight.toFixed(4)}${freightNote}`,
+        unit_cost: landedUnitCost,
+        notes: `รับสินค้าจากเอกสาร ${docNo} (${phase4DocNo}) — Vendor SKU: ${line.row.raw_vendor_sku} | unit_cost=${landedUnitCost.toFixed(4)} | prorated_freight=${proratedFreight.toFixed(2)}`,
       };
     });
 
@@ -1220,8 +1233,8 @@ export async function saveGoodsReceiptToLedger(
       const maCostByProductId = new Map<string, number>();
       for (const line of maTargets) {
         const productId = line.row.matchedProduct!.id;
-        const landed = landedByLineKey.get(line.row.lineKey);
-        const landedUnitCost = landed?.landedUnitCost ?? line.unitCostPrice;
+        const landedUnitCost =
+          landedUnitCostByLineKey.get(line.row.lineKey) ?? line.unitCostPrice;
         const resolved = resolveLppFromUnitCostPrice(landedUnitCost);
         if (resolved == null) continue;
 
@@ -1494,22 +1507,6 @@ export async function saveManualGoodsReceipt(
       };
     });
 
-    const landedByLineKey = new Map(
-      apportionFreightToLines(
-        freightCostNormalized,
-        preparedLines.map((line) => ({
-          id: line.lineKey,
-          qty: line.qty,
-          unitCostPrice:
-            normalizedLines.find((n) => n.lineKey === line.lineKey)?.unit_cost ?? 0,
-          lineNetExVat: costByLineKey.get(line.lineKey)?.finalLineTotal ?? 0,
-          isFoc: false,
-        })),
-        resolvedVatType,
-        vatRate,
-      ).map((landed) => [landed.id, landed]),
-    );
-
     const proratedFreightByLineKey = new Map(
       apportionFreightByNetValue(
         freightCostNormalized,
@@ -1522,10 +1519,15 @@ export async function saveManualGoodsReceipt(
     );
 
     const receiptLines = normalizedLines.map((line) => {
-      const landed = landedByLineKey.get(line.lineKey);
+      const proratedFreight = proratedFreightByLineKey.get(line.lineKey) ?? 0;
+      const landedUnitCost = resolveReceiptLineLandedUnitCost({
+        lineNetAmount: line.line_total,
+        proratedFreight,
+        qty: line.qty,
+      });
       return {
         ...line,
-        unit_cost: landed?.landedUnitCost ?? line.unit_cost,
+        unit_cost: landedUnitCost,
       };
     });
 
@@ -1667,23 +1669,20 @@ export async function saveManualGoodsReceipt(
     const documentId = document.id as string;
 
     const { error: itemsError } = await supabaseAdmin.from("document_items").insert(
-      receiptLines.map((line) => {
-        const landed = landedByLineKey.get(line.lineKey);
-        return {
-          document_id: documentId,
-          product_id: line.product_id,
-          description: line.description,
-          qty: line.qty,
-          uom_used: line.uom_used,
-          unit_price: line.unit_price,
-          unit_cost_price: line.unit_cost,
-          discount_text: null,
-          discount_amount: line.discount_amount,
-          line_total: line.line_total,
-          prorated_freight: proratedFreightByLineKey.get(line.lineKey) ?? 0,
-          sort_order: line.sort_order,
-        };
-      }),
+      receiptLines.map((line) => ({
+        document_id: documentId,
+        product_id: line.product_id,
+        description: line.description,
+        qty: line.qty,
+        uom_used: line.uom_used,
+        unit_price: line.unit_price,
+        unit_cost_price: line.unit_cost,
+        discount_text: null,
+        discount_amount: line.discount_amount,
+        line_total: line.line_total,
+        prorated_freight: proratedFreightByLineKey.get(line.lineKey) ?? 0,
+        sort_order: line.sort_order,
+      })),
     );
 
     if (itemsError) {
@@ -1697,17 +1696,14 @@ export async function saveManualGoodsReceipt(
     }
 
     const ledgerPayload = receiptLines.map((line) => {
-      const landed = landedByLineKey.get(line.lineKey);
-      const freightNote =
-        landed && landed.freightPerUnit > 0
-          ? ` | freight/unit=${landed.freightPerUnit.toFixed(4)}`
-          : "";
+      const proratedFreight = proratedFreightByLineKey.get(line.lineKey) ?? 0;
       return {
         product_id: line.product_id,
         doc_header_id: docHeaderId,
         trans_type: "IN",
         qty: line.qty,
-        notes: `รับสินค้า Manual จากเอกสาร ${phase4DocNo} (อ้างอิง ${documentRef}) | document_id=${documentId} | unit_cost=${line.unit_cost.toFixed(4)}${freightNote} | SKU: ${line.sku || "-"}`,
+        unit_cost: line.unit_cost,
+        notes: `รับสินค้า Manual จากเอกสาร ${phase4DocNo} (อ้างอิง ${documentRef}) | document_id=${documentId} | unit_cost=${line.unit_cost.toFixed(4)} | prorated_freight=${proratedFreight.toFixed(2)} | SKU: ${line.sku || "-"}`,
       };
     });
 

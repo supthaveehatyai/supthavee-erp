@@ -128,6 +128,26 @@ export function calculateApSubTotalWithFreight(
 }
 
 /**
+ * Landed unit cost from prorated freight (Phase 15 pipeline):
+ * true_total_cost = line_net_amount + prorated_freight
+ * landed_unit_cost = true_total_cost / qty
+ */
+export function calculateLandedUnitCostFromProration(
+  lineNetAmount: number,
+  proratedFreight: number,
+  qty: number,
+): number {
+  const quantity = Math.max(0, Math.trunc(Number(qty) || 0));
+  if (quantity <= 0) return 0;
+
+  const lineNet = Number.isFinite(lineNetAmount) ? lineNetAmount : 0;
+  const freight = Number.isFinite(proratedFreight) ? Math.max(0, proratedFreight) : 0;
+  const trueTotalCost = lineNet + freight;
+
+  return roundTo4Decimals(trueTotalCost / quantity);
+}
+
+/**
  * Prorate ex-VAT freight across receipt lines by relative net line value,
  * then derive per-unit landed cost for inventory_ledger / Moving Average.
  */
