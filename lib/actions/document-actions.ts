@@ -718,9 +718,31 @@ type ProductSearchRow = {
  * and returns `unit_price` (from retail_price) + `cost_price` for Cost Snapshot.
  *
  * Match: `products.sku` OR `product_models.name` (ilike), limit 10.
+ * Excludes raw materials (`product_models.is_raw_material = false`).
  */
 export async function searchProductsForSales(
   keyword: string,
+): Promise<SearchProductsForSalesResult> {
+  return searchProductsInternal(keyword, { excludeRawMaterials: true });
+}
+
+/**
+ * Search active products for AP / Goods Receipt SKU picker.
+ * Same shape as sales search but includes raw materials and finished goods.
+ */
+export async function searchProductsForPurchases(
+  keyword: string,
+): Promise<SearchProductsForSalesResult> {
+  return searchProductsInternal(keyword, { excludeRawMaterials: false });
+}
+
+type SearchProductsOptions = {
+  excludeRawMaterials: boolean;
+};
+
+async function searchProductsInternal(
+  keyword: string,
+  options: SearchProductsOptions,
 ): Promise<SearchProductsForSalesResult> {
   try {
     const trimmed = keyword?.trim() ?? "";
@@ -730,8 +752,27 @@ export async function searchProductsForSales(
 
     const pattern = `%${escapeIlikePattern(trimmed)}%`;
     const supabase = createSupabaseServerClient();
+    const { excludeRawMaterials } = options;
 
-    const productSelect = `
+    const productSelect = excludeRawMaterials
+      ? `
+      id,
+      sku,
+      name,
+      retail_price,
+      cost_price,
+      base_uom,
+      color,
+      size,
+      product_models!inner (
+        id,
+        name,
+        model_code,
+        image_url,
+        is_raw_material
+      )
+    `
+      : `
       id,
       sku,
       name,
@@ -748,20 +789,34 @@ export async function searchProductsForSales(
       )
     `;
 
+    const activeProductQuery = () => {
+      let query = supabase
+        .from("products")
+        .select(productSelect)
+        .eq("is_active", true);
+      if (excludeRawMaterials) {
+        query = query.eq("product_models.is_raw_material", false);
+      }
+      return query;
+    };
+
+    let modelLookup = supabase
+      .from("product_models")
+      .select("id")
+      .ilike("name", pattern)
+      .limit(30);
+    if (excludeRawMaterials) {
+      modelLookup = modelLookup.eq("is_raw_material", false);
+    }
+
     const [{ data: matchedModels, error: modelError }, skuResult, nameResult] =
       await Promise.all([
-        supabase.from("product_models").select("id").ilike("name", pattern).limit(30),
-        supabase
-          .from("products")
-          .select(productSelect)
-          .eq("is_active", true)
+        modelLookup,
+        activeProductQuery()
           .ilike("sku", pattern)
           .order("sku", { ascending: true })
           .limit(10),
-        supabase
-          .from("products")
-          .select(productSelect)
-          .eq("is_active", true)
+        activeProductQuery()
           .ilike("name", pattern)
           .order("sku", { ascending: true })
           .limit(10),
@@ -777,11 +832,15 @@ export async function searchProductsForSales(
 
     let modelProducts: ProductSearchRow[] = [];
     if (modelIds.length > 0) {
-      const byModel = await supabase
+      let byModelQuery = supabase
         .from("products")
         .select(productSelect)
         .eq("is_active", true)
-        .in("model_id", modelIds)
+        .in("model_id", modelIds);
+      if (excludeRawMaterials) {
+        byModelQuery = byModelQuery.eq("product_models.is_raw_material", false);
+      }
+      const byModel = await byModelQuery
         .order("sku", { ascending: true })
         .limit(10);
 

@@ -113,3 +113,48 @@ export function ProductMatrixServiceToggle({
     </div>
   );
 }
+
+export type ProductMatrixRawMaterialToggleProps = {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  disabled?: boolean;
+  className?: string;
+};
+
+/**
+ * Marks product_models.is_raw_material — excluded from Sales SKU Picker.
+ */
+export function ProductMatrixRawMaterialToggle({
+  checked,
+  onCheckedChange,
+  disabled = false,
+  className,
+}: ProductMatrixRawMaterialToggleProps) {
+  return (
+    <div
+      className={cn(
+        "flex items-start justify-between gap-4 rounded-xl border px-4 py-3",
+        checked
+          ? "border-amber-200 bg-amber-50/70"
+          : "border-slate-200 bg-slate-50/80",
+        className,
+      )}
+    >
+      <div>
+        <p className="text-sm font-semibold text-slate-800">
+          เป็นวัตถุดิบ (Is Raw Material)
+        </p>
+        <p className="mt-0.5 text-[11px] text-slate-500">
+          เปิดเมื่อรุ่นนี้เป็นวัตถุดิบ — ใช้รับเข้าคลังผ่าน AP/Goods Receipt
+          แต่จะไม่แสดงใน Smart SKU Picker ของเอกสารขาย
+        </p>
+      </div>
+      <Switch
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onCheckedChange}
+        aria-label="เป็นวัตถุดิบ Is Raw Material"
+      />
+    </div>
+  );
+}

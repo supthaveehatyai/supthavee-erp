@@ -438,12 +438,13 @@ export default function ManualReceiptWorkspace({
         <CardHeader className="pb-3">
           <CardTitle className="text-base">เพิ่มสินค้า</CardTitle>
           <CardDescription>
-            Smart SKU Picker · ค้นหาผ่าน Server Action `searchProductsForSales`
-            (debounce 300ms)
+            Smart SKU Picker · ค้นหาผ่าน Server Action `searchProductsForPurchases`
+            (debounce 300ms) — รวมวัตถุดิบและสินค้าสำเร็จรูป
           </CardDescription>
         </CardHeader>
         <CardContent>
           <SmartSkuPicker
+            mode="purchases"
             disabled={isPending}
             placeholder="ค้นหา SKU หรือชื่อสินค้าเพื่อรับเข้าคลัง..."
             onSelectProduct={handleSelectProduct}

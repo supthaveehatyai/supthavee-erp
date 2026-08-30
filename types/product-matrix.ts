@@ -21,6 +21,8 @@ export type SaveDraftModelInput = {
   imageUrl?: string;
   /** product_models.is_service — งานบริการ ไม่ตัดสต็อก */
   isService?: boolean;
+  /** product_models.is_raw_material — วัตถุดิบ (ไม่แสดงใน Sales SKU Picker) */
+  isRawMaterial?: boolean;
 };
 
 export type ExistingProductModel = {
@@ -37,6 +39,7 @@ export type ExistingProductModel = {
   size_pricing_config: unknown;
   image_url: string | null;
   is_service: boolean;
+  is_raw_material: boolean;
 };
 
 export type UploadProductModelImageResult = {

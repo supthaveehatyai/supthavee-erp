@@ -26,7 +26,7 @@ import BrandCombobox, { type Brand } from "./brand-combobox";
 import CategoryCombobox, { type Category } from "./category-combobox";
 import { type Vendor } from "./vendor-combobox";
 import ModelLoadCombobox from "./model-load-combobox";
-import { ProductMatrixServiceToggle, ProductMatrixVendorField } from "./ProductMatrixForm";
+import { ProductMatrixRawMaterialToggle, ProductMatrixServiceToggle, ProductMatrixVendorField } from "./ProductMatrixForm";
 import { ProductModelImageUpload } from "@/components/products/ProductModelImageUpload";
 import {
   findProductModelByCode,
@@ -144,6 +144,8 @@ type BatchEditForm = {
   imageUrl: string;
   /** product_models.is_service */
   isService: boolean;
+  /** product_models.is_raw_material */
+  isRawMaterial: boolean;
   prices: Record<string, SizePrice>;
 };
 
@@ -198,6 +200,8 @@ type MatrixForm = {
   imageUrl: string;
   /** product_models.is_service — งานบริการ ไม่ตัดสต็อก */
   isService: boolean;
+  /** product_models.is_raw_material — วัตถุดิบ */
+  isRawMaterial: boolean;
   colorIds: string[];
   sizeIds: string[];
 };
@@ -492,6 +496,7 @@ function createEmptyForm(vendorId = ""): MatrixForm {
     shortName: "",
     imageUrl: "",
     isService: false,
+    isRawMaterial: false,
     colorIds: [],
     sizeIds: [],
   };
@@ -1391,6 +1396,7 @@ export default function ProductsClient() {
       shortName: model.short_name ?? "",
       imageUrl: (model.image_url ?? "").split("?")[0],
       isService: model.is_service === true,
+      isRawMaterial: model.is_raw_material === true,
       colorIds: [],
       sizeIds: [],
     }));
@@ -1662,6 +1668,7 @@ export default function ProductsClient() {
       gender: selectedGender.gender_name,
       taxType: form.taxType,
       isService: form.isService,
+      isRawMaterial: form.isRawMaterial,
     });
     if (!identity.ok) {
       setFormError(identity.error);
@@ -1680,6 +1687,7 @@ export default function ProductsClient() {
       sizePricingConfig: serializeSizePricingConfig(sizePricing),
       imageUrl: form.imageUrl.trim() || undefined,
       isService: identity.data.is_service,
+      isRawMaterial: identity.data.is_raw_material,
     };
 
     setIsDraftSaving(true);
@@ -1789,6 +1797,7 @@ export default function ProductsClient() {
       gender: selectedGender.gender_name,
       taxType: form.taxType,
       isService: form.isService,
+      isRawMaterial: form.isRawMaterial,
     });
     if (!identity.ok) {
       setFormError(identity.error);
@@ -1814,6 +1823,7 @@ export default function ProductsClient() {
         sizePricingConfig: serializeSizePricingConfig(sizePricing),
         imageUrl: form.imageUrl.trim() || undefined,
         isService: identity.data.is_service,
+        isRawMaterial: identity.data.is_raw_material,
       },
       skus: previewRows.map((row) => ({
         sku: row.sku,
@@ -1999,6 +2009,7 @@ export default function ProductsClient() {
         let modelCode = "";
         let imageUrl = "";
         let isService = false;
+        let isRawMaterial = false;
         const modelId =
           group.modelId ??
           group.products.find((item) => item.model_id)?.model_id ??
@@ -2016,6 +2027,7 @@ export default function ProductsClient() {
             .trim()
             .split("?")[0];
           isService = modelResult.existing?.is_service === true;
+          isRawMaterial = modelResult.existing?.is_raw_material === true;
         } else {
           const mappedVendor = vendorByProductId[group.products[0]?.id ?? ""];
           vendorId = mappedVendor?.id ?? "";
@@ -2031,6 +2043,7 @@ export default function ProductsClient() {
           modelCode,
           imageUrl,
           isService,
+          isRawMaterial,
           prices,
         });
         setEditError("");
@@ -2185,6 +2198,10 @@ export default function ProductsClient() {
       editForm.imageUrl.trim().split("?")[0] || "",
     );
     formData.set("is_service", editForm.isService ? "true" : "false");
+    formData.set(
+      "is_raw_material",
+      editForm.isRawMaterial ? "true" : "false",
+    );
     formData.set("sizePrices", JSON.stringify(sizePrices));
 
     const result = await updateProductModel(formData);
@@ -2731,6 +2748,15 @@ export default function ProductsClient() {
                     disabled={isMasterLoading || isSaving || isDraftSaving}
                     onCheckedChange={(checked) =>
                       updateForm("isService", checked)
+                    }
+                  />
+
+                  <ProductMatrixRawMaterialToggle
+                    className="mb-4"
+                    checked={form.isRawMaterial}
+                    disabled={isMasterLoading || isSaving || isDraftSaving}
+                    onCheckedChange={(checked) =>
+                      updateForm("isRawMaterial", checked)
                     }
                   />
 
@@ -3714,6 +3740,19 @@ export default function ProductsClient() {
                   onCheckedChange={(checked) =>
                     setEditForm((current) =>
                       current ? { ...current, isService: checked } : current,
+                    )
+                  }
+                />
+
+                <ProductMatrixRawMaterialToggle
+                  className="mb-4"
+                  checked={editForm.isRawMaterial}
+                  disabled={isEditSaving}
+                  onCheckedChange={(checked) =>
+                    setEditForm((current) =>
+                      current
+                        ? { ...current, isRawMaterial: checked }
+                        : current,
                     )
                   }
                 />

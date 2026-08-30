@@ -60,6 +60,7 @@ function validateStep1(input: SaveDraftModelInput): string | null {
     taxType: input.taxType,
     imageUrl: input.imageUrl ?? null,
     isService: input.isService,
+    isRawMaterial: input.isRawMaterial,
   });
   if (!identity.ok) return identity.error;
   if (!isValidModelCode(identity.data.model_code)) {
@@ -73,6 +74,7 @@ function buildDraftPayload(input: SaveDraftModelInput) {
   const shortName =
     input.shortName?.trim() || `${input.name.trim()}`.slice(0, 100);
   const isService = Boolean(input.isService);
+  const isRawMaterial = Boolean(input.isRawMaterial);
 
   return {
     vendor_id: isService ? null : toNullableUuid(input.vendorId),
@@ -87,11 +89,12 @@ function buildDraftPayload(input: SaveDraftModelInput) {
     size_pricing_config: parseSizePricingConfig(input.sizePricingConfig),
     image_url: input.imageUrl?.trim().split("?")[0] || null,
     is_service: isService,
+    is_raw_material: isRawMaterial,
   };
 }
 
 const EXISTING_MODEL_SELECT =
-  "id, model_code, name, short_name, gender, tax_type, status, vendor_id, brand_id, category_id, size_pricing_config, image_url, is_service";
+  "id, model_code, name, short_name, gender, tax_type, status, vendor_id, brand_id, category_id, size_pricing_config, image_url, is_service, is_raw_material";
 
 const PRODUCT_ASSETS_BUCKET = "product_assets";
 const MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -315,6 +318,7 @@ export async function listLoadableProductModels(): Promise<{
       size_pricing_config: record.size_pricing_config,
       image_url: record.image_url ?? null,
       is_service: record.is_service === true,
+      is_raw_material: record.is_raw_material === true,
       brand_code: brand?.brand_code ?? null,
       brand_name: brand?.brand_name ?? null,
       category_code: category?.category_code ?? null,
@@ -769,6 +773,9 @@ export async function updateProductModel(
       isService:
         formDataText(formData, "is_service") === "true" ||
         formDataText(formData, "isService") === "true",
+      isRawMaterial:
+        formDataText(formData, "is_raw_material") === "true" ||
+        formDataText(formData, "isRawMaterial") === "true",
       sizePrices: sizePricesOrError,
     });
 
@@ -805,6 +812,7 @@ export async function updateProductModel(
         tax_type: taxType,
         image_url: input.image_url?.trim() || null,
         is_service: input.isService,
+        is_raw_material: input.isRawMaterial,
       })
       .eq("id", input.modelId);
 

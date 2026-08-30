@@ -101,6 +101,7 @@ export const productModelSchema = z
     /** Public URL จาก Storage product_assets (Visual Verification) */
     image_url: z.string().nullable().optional(),
     is_service: z.boolean().default(false),
+    is_raw_material: z.boolean().default(false),
   })
   .superRefine((data, ctx) => {
     if (data.is_service) return;
@@ -156,6 +157,7 @@ export const updateProductModelSchema = z
     taxType: taxTypeSchema,
     image_url: z.string().nullable().optional(),
     isService: z.boolean().default(false),
+    isRawMaterial: z.boolean().default(false),
     sizePrices: z
       .array(updateProductModelSizePriceSchema)
       .min(1, "ต้องระบุราคาตามไซส์อย่างน้อย 1 รายการ"),
@@ -204,6 +206,7 @@ export function parseProductModelIdentity(input: {
   taxType: "INC_VAT" | "EXC_VAT" | "NON_VAT";
   imageUrl?: string | null;
   isService?: boolean;
+  isRawMaterial?: boolean;
 }):
   | { ok: true; data: ProductModelSchemaOutput }
   | { ok: false; error: string } {
@@ -218,6 +221,7 @@ export function parseProductModelIdentity(input: {
     tax_type: input.taxType,
     image_url: input.imageUrl ?? null,
     is_service: Boolean(input.isService),
+    is_raw_material: Boolean(input.isRawMaterial),
   });
 
   if (!result.success) {

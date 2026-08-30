@@ -8,7 +8,10 @@
 
 import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { ChevronsUpDown, Loader2, PackageSearch } from "lucide-react";
-import { searchProductsForSales } from "@/lib/actions/document-actions";
+import {
+  searchProductsForPurchases,
+  searchProductsForSales,
+} from "@/lib/actions/document-actions";
 import type { SalesProductSearchItem } from "@/types/document";
 import { cn } from "@/lib/utils";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
@@ -29,10 +32,14 @@ import {
 
 const SEARCH_DEBOUNCE_MS = 300;
 
+export type SmartSkuPickerMode = "sales" | "purchases";
+
 export type SmartSkuPickerProps = {
   disabled?: boolean;
   className?: string;
   placeholder?: string;
+  /** `sales` excludes raw materials; `purchases` includes all active products. */
+  mode?: SmartSkuPickerMode;
   /** Fires with the full product payload (incl. cost_price) when user picks a row. */
   onSelectProduct: (product: SalesProductSearchItem) => void;
 };
@@ -48,6 +55,7 @@ export default function SmartSkuPicker({
   disabled = false,
   className,
   placeholder = "ค้นหา SKU หรือชื่อรุ่น...",
+  mode = "sales",
   onSelectProduct,
 }: SmartSkuPickerProps) {
   const listboxId = useId();
@@ -84,9 +92,13 @@ export default function SmartSkuPicker({
     }
 
     let active = true;
+    const searchProducts =
+      mode === "purchases"
+        ? searchProductsForPurchases
+        : searchProductsForSales;
     startTransition(async () => {
       try {
-        const result = await searchProductsForSales(debouncedQuery);
+        const result = await searchProducts(debouncedQuery);
         if (!active) return;
         if (result.error) {
           setError(result.error);
@@ -107,7 +119,7 @@ export default function SmartSkuPicker({
     return () => {
       active = false;
     };
-  }, [debouncedQuery, open]);
+  }, [debouncedQuery, mode, open]);
 
   function pickProduct(product: SalesProductSearchItem) {
     onSelectProduct(product);
