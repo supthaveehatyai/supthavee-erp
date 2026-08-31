@@ -1320,20 +1320,31 @@ export type Database = {
           category_name: string
           id: string
           is_active: boolean | null
+          parent_id: string | null
         }
         Insert: {
           category_code: string
           category_name: string
           id?: string
           is_active?: boolean | null
+          parent_id?: string | null
         }
         Update: {
           category_code?: string
           category_name?: string
           id?: string
           is_active?: boolean | null
+          parent_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "mst_categories_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "mst_categories"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       mst_colors: {
         Row: {
