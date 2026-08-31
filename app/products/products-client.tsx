@@ -525,6 +525,20 @@ function findNoneGenderId(genders: Gender[]): string {
   );
 }
 
+const SYSTEM_NA_SIZE_CODE = "00";
+
+function findSystemNaSize(catalog: Size[]): Size | undefined {
+  return catalog.find(
+    (size) =>
+      size.size_code.trim().toUpperCase() === SYSTEM_NA_SIZE_CODE ||
+      size.size_label.trim().toUpperCase() === "N/A",
+  );
+}
+
+function matrixUsesNaSizeOnly(form: Pick<MatrixForm, "isService" | "isRawMaterial">): boolean {
+  return form.isService || form.isRawMaterial;
+}
+
 /**
  * Vendors / Brands / Categories / Colors / Genders ALL come from the
  * `getMasterDataForMatrix` Server Action (Service Role Key — Phase 3
@@ -1050,7 +1064,14 @@ export default function ProductsClient() {
     const brandChanged = prevBrandIdForSizesRef.current !== form.brandId;
     prevBrandIdForSizesRef.current = form.brandId;
 
-    if (!form.brandId && !form.isService) {
+    if (matrixUsesNaSizeOnly(form)) {
+      if (pendingSizePricingConfig != null) {
+        setPendingSizePricingConfig(null);
+      }
+      return;
+    }
+
+    if (!form.brandId && !form.isService && !form.isRawMaterial) {
       setSizes([]);
       setQuickSizeLabels([]);
       setIsStandardSizePanelOpen(false);
@@ -1123,7 +1144,7 @@ export default function ProductsClient() {
       setIsStandardSizePanelOpen(false);
       setIsSizeLoading(false);
     }
-  }, [form.brandId, form.isService, pendingSizePricingConfig]);
+  }, [form.brandId, form.isService, form.isRawMaterial, pendingSizePricingConfig]);
 
   const selectedBrand = masterData.brands.find(
     (brand) => brand.id === form.brandId,
@@ -1150,7 +1171,7 @@ export default function ProductsClient() {
 
   const previewRows = useMemo<PreviewRow[]>(() => {
     if (
-      (!selectedBrand && !form.isService) ||
+      (!selectedBrand && !form.isService && !form.isRawMaterial) ||
       !selectedCategory ||
       !selectedGender ||
       !isValidModelCode(form.modelCode)
@@ -1197,6 +1218,7 @@ export default function ProductsClient() {
     form.colorIds,
     form.modelCode,
     form.isService,
+    form.isRawMaterial,
     form.sizeIds,
     masterData.colors,
     selectedBrand,
@@ -1321,6 +1343,86 @@ export default function ProductsClient() {
   const { kids: kidsSizes, adults: adultSizes, serviceCustom: serviceCustomSizes } =
     useMemo(() => partitionGlobalSizes(globalSizeCatalog), [globalSizeCatalog]);
 
+  const matrixUsesNaSizeOnlyFlag = matrixUsesNaSizeOnly(form);
+  const prevMatrixUsesNaSizeOnlyRef = useRef(false);
+
+  const systemNaSize = useMemo(
+    () => findSystemNaSize(sizes) ?? findSystemNaSize(globalSizeCatalog),
+    [sizes, globalSizeCatalog],
+  );
+
+  const applyNaSizeOnlyMatrix = useCallback(async () => {
+    setIsStandardSizePanelOpen(false);
+    setQuickSizeLabels([]);
+
+    let catalog = globalSizeCatalog;
+    if (catalog.length === 0) {
+      try {
+        catalog = await fetchGlobalSizes();
+        setGlobalSizeCatalog(catalog);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "โหลดไซส์ไม่สำเร็จ";
+        setFormError(message);
+        toast.error(message);
+        return;
+      }
+    }
+
+    const naSize = findSystemNaSize(catalog);
+    if (!naSize) {
+      const message =
+        "ไม่พบไซส์ระบบ 00 (N/A) ใน mst_sizes — กรุณา seed ไซส์ก่อน";
+      setFormError(message);
+      toast.error(message);
+      return;
+    }
+
+    setSizes([naSize]);
+    setForm((current) => ({ ...current, sizeIds: [naSize.id] }));
+    setSizePricing((current) => {
+      const existing = current.find((row) => row.sizeId === naSize.id);
+      if (existing) return current;
+      return [createEmptySizePricing(naSize)];
+    });
+  }, [globalSizeCatalog]);
+
+  const clearNaSizeMatrixSelection = useCallback(() => {
+    setIsStandardSizePanelOpen(false);
+    setQuickSizeLabels([]);
+    setSizes([]);
+    setForm((current) => ({ ...current, sizeIds: [] }));
+    setSizePricing([]);
+  }, []);
+
+  useEffect(() => {
+    if (!isDialogOpen) {
+      prevMatrixUsesNaSizeOnlyRef.current = false;
+      return;
+    }
+
+    if (matrixUsesNaSizeOnlyFlag) {
+      const naId = systemNaSize?.id;
+      if (form.sizeIds.length !== 1 || form.sizeIds[0] !== naId) {
+        void applyNaSizeOnlyMatrix();
+      }
+      prevMatrixUsesNaSizeOnlyRef.current = true;
+      return;
+    }
+
+    if (prevMatrixUsesNaSizeOnlyRef.current) {
+      clearNaSizeMatrixSelection();
+    }
+    prevMatrixUsesNaSizeOnlyRef.current = false;
+  }, [
+    isDialogOpen,
+    matrixUsesNaSizeOnlyFlag,
+    form.sizeIds,
+    systemNaSize?.id,
+    applyNaSizeOnlyMatrix,
+    clearNaSizeMatrixSelection,
+  ]);
+
   async function openDialog(presetVendorId?: string) {
     setForm(createEmptyForm(presetVendorId ?? ""));
     setSizes([]);
@@ -1336,6 +1438,7 @@ export default function ProductsClient() {
     setPendingDraftPayload(null);
     setIsStandardSizePanelOpen(false);
     setQuickSizeLabels([]);
+    prevMatrixUsesNaSizeOnlyRef.current = false;
     setIsDialogOpen(true);
     setIsMasterLoading(true);
     setIsLoadableModelsLoading(true);
@@ -1425,7 +1528,8 @@ export default function ProductsClient() {
     setForm((current) => ({
       ...current,
       brandId,
-      sizeIds: [],
+      sizeIds:
+        current.isService || current.isRawMaterial ? current.sizeIds : [],
     }));
     setFormError("");
   }
@@ -1441,7 +1545,11 @@ export default function ProductsClient() {
     setLoadedModelStatus(model.status === "ACTIVE" ? "ACTIVE" : "DRAFT");
     setShortNameTouched(true);
     setProductNameTouched(true);
-    setPendingSizePricingConfig(model.size_pricing_config ?? []);
+    const loadsNaMatrix =
+      model.is_raw_material === true || model.is_service === true;
+    setPendingSizePricingConfig(
+      loadsNaMatrix ? null : (model.size_pricing_config ?? []),
+    );
     setSizePricing([]);
     setQuickSizeLabels([]);
 
@@ -1497,6 +1605,8 @@ export default function ProductsClient() {
 
   /** Open the Global Size selection grid — always refetch (no stale Turbopack cache). */
   async function openStandardSizePanel() {
+    if (matrixUsesNaSizeOnly(form)) return;
+
     const alreadySelectedLabels = sizes
       .filter((size) => form.sizeIds.includes(size.id))
       .map((size) => size.size_label);
@@ -1664,6 +1774,8 @@ export default function ProductsClient() {
   }
 
   function toggleSize(sizeId: string) {
+    if (matrixUsesNaSizeOnly(form)) return;
+
     const size =
       sizes.find((item) => item.id === sizeId) ??
       globalSizeCatalog.find((item) => item.id === sizeId);
@@ -3199,6 +3311,31 @@ export default function ProductsClient() {
                     </div>
 
                     <div>
+                      {matrixUsesNaSizeOnlyFlag ? (
+                        <>
+                          <span className={labelClass}>ไซส์ (Matrix)</span>
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
+                            <p className="text-xs font-semibold text-slate-700">
+                              00 — N/A (ไม่ใช้ไซส์เสื้อผ้า)
+                            </p>
+                            <p className="mt-1 text-[11px] text-slate-500">
+                              {form.isRawMaterial
+                                ? "วัตถุดิบใช้ไซส์ระบบ 00 อัตโนมัติ — สร้าง 1 SKU ต่อ 1 สี"
+                                : "สินค้าบริการใช้ไซส์ระบบ 00 อัตโนมัติ — สร้าง 1 SKU ต่อ 1 สี"}
+                            </p>
+                            {systemNaSize ? (
+                              <span className="mt-2 inline-flex items-center rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 font-mono text-xs font-semibold text-blue-800">
+                                {systemNaSize.size_label} ({systemNaSize.size_code})
+                              </span>
+                            ) : (
+                              <p className="mt-2 text-xs text-amber-700">
+                                กำลังโหลดไซส์ระบบ 00...
+                              </p>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <>
                       <div className="mb-1.5 flex items-center justify-between gap-3">
                         <span className="text-xs font-semibold text-slate-700">
                           ไซส์ (Global Size){" "}
@@ -3466,6 +3603,8 @@ export default function ProductsClient() {
                             </div>
                           )}
                         </div>
+                      )}
+                        </>
                       )}
                     </div>
                   </div>
