@@ -54,7 +54,56 @@ export type MasterCategory = {
   category_code: string;
   category_name: string;
   parent_id?: string | null;
+  /** Parent row joined from mst_categories (for hierarchy grouping in UI) */
+  parent_category_code?: string | null;
+  parent_category_name?: string | null;
 };
+
+type CategoryRowFromDb = {
+  id: string;
+  category_code: string;
+  category_name: string;
+  parent_id: string | null;
+  parent?:
+    | {
+        id: string;
+        category_code: string;
+        category_name: string;
+      }
+    | {
+        id: string;
+        category_code: string;
+        category_name: string;
+      }[]
+    | null;
+};
+
+const CATEGORY_PARENT_FK =
+  "mst_categories!mst_categories_parent_id_fkey";
+
+const CATEGORY_SELECT_WITH_PARENT = `
+  id,
+  category_code,
+  category_name,
+  parent_id,
+  parent:${CATEGORY_PARENT_FK} (
+    id,
+    category_code,
+    category_name
+  )
+`;
+
+function mapCategoryRow(row: CategoryRowFromDb): MasterCategory {
+  const parent = unwrapEmbeddedRow(row.parent);
+  return {
+    id: row.id,
+    category_code: row.category_code,
+    category_name: row.category_name,
+    parent_id: row.parent_id,
+    parent_category_code: parent?.category_code ?? null,
+    parent_category_name: parent?.category_name ?? null,
+  };
+}
 
 export type MasterGender = {
   id: string;
@@ -146,12 +195,17 @@ export async function getCategories(): Promise<GetCategoriesResult> {
     const supabaseAdmin = createSupabaseAdminClient();
     const { data, error } = await supabaseAdmin
       .from("mst_categories")
-      .select("id, category_code, category_name, parent_id")
+      .select(CATEGORY_SELECT_WITH_PARENT)
       .eq("is_active", true)
       .order("category_code");
 
     if (error) return { data: [], error: error.message };
-    return { data: (data ?? []) as MasterCategory[], error: null };
+    return {
+      data: (data ?? []).map((row) =>
+        mapCategoryRow(row as CategoryRowFromDb),
+      ),
+      error: null,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : "โหลดรายการหมวดหมู่ไม่สำเร็จ";
     return { data: [], error: message };
@@ -923,7 +977,7 @@ export async function createCategory(
         parent_id: parentId,
         is_active: true,
       })
-      .select("id, category_code, category_name, parent_id")
+      .select(CATEGORY_SELECT_WITH_PARENT)
       .single();
 
     if (error || !data) {
@@ -934,7 +988,7 @@ export async function createCategory(
       return { data: null, error: message };
     }
 
-    return { data: data as MasterCategory, error: null };
+    return { data: mapCategoryRow(data as CategoryRowFromDb), error: null };
   } catch (err) {
     const message = err instanceof Error ? err.message : "สร้างหมวดหมู่ใหม่ไม่สำเร็จ";
     return { data: null, error: message };

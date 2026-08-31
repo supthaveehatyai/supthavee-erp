@@ -25,6 +25,8 @@ export type Category = {
   category_code: string;
   category_name: string;
   parent_id?: string | null;
+  parent_category_code?: string | null;
+  parent_category_name?: string | null;
 };
 
 type CategoryComboboxProps = {
@@ -37,36 +39,17 @@ type CategoryComboboxProps = {
   className?: string;
 };
 
+type CategoryGroup = {
+  parentId: string;
+  heading: string;
+  items: Category[];
+};
+
 const fieldClass =
   "h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400";
 const labelClass = "mb-1.5 block text-xs font-semibold text-slate-700";
 
 const CATEGORY_CODE_PATTERN = /^[A-Z]{2}$/;
-
-const CATEGORY_GROUP_MAP: Record<string, string> = {
-  A: "เสื้อโปโล",
-  B: "เสื้อยืด",
-  C: "เสื้อเชิ้ต",
-  D: "เสื้อแจ็คเก็ต",
-  E: "เสื้ออื่นๆ",
-  F: "กางเกง",
-  G: "ชุดกีฬา",
-  H: "อุปกรณ์กีฬา",
-  I: "ชุดวอร์ม",
-  J: "อุปกรณ์เสริม",
-  K: "กระเป๋า",
-  L: "ผ้าผืน",
-  M: "ผ้ากันเปื้อน",
-  N: "หมวก",
-  O: "เสื้อกั๊ก",
-  P: "ขนส่ง",
-  Q: "งานสั่งตัด",
-  R: "อื่นๆ",
-  S: "บริการ",
-  T: "เครื่องดนตรี",
-  U: "ชุดปฏิบัติธรรม",
-  V: "วัตถุดิบ",
-};
 
 function normalizeCategoryCode(value: string): string {
   return value
@@ -75,37 +58,104 @@ function normalizeCategoryCode(value: string): string {
     .slice(0, 2);
 }
 
-function getGroupLetter(categoryCode: string): string {
-  const code = categoryCode.trim().toUpperCase();
-  return code.charAt(0) || "#";
+function formatGroupHeading(
+  name: string,
+  code: string | null | undefined,
+): string {
+  const trimmedCode = code?.trim();
+  return trimmedCode ? `${name} (${trimmedCode})` : name;
 }
 
-function buildGroupHeading(letter: string): string {
-  return `${letter}: ${CATEGORY_GROUP_MAP[letter] ?? "อื่นๆ"}`;
+function isRootCategory(category: Category): boolean {
+  return !category.parent_id;
 }
 
-function groupCategories(categories: Category[]) {
-  const groups = new Map<string, Category[]>();
+function isSelectableCategory(category: Category): boolean {
+  return Boolean(category.parent_id);
+}
 
-  for (const category of categories) {
-    const letter = getGroupLetter(category.category_code);
-    const existing = groups.get(letter) ?? [];
-    existing.push(category);
-    groups.set(letter, existing);
-  }
+function groupCategoriesByHierarchy(
+  categories: Category[],
+  selectableItems: Category[],
+): CategoryGroup[] {
+  const roots = categories
+    .filter(isRootCategory)
+    .sort((left, right) =>
+      left.category_code
+        .trim()
+        .toUpperCase()
+        .localeCompare(right.category_code.trim().toUpperCase(), "en"),
+    );
 
-  return Array.from(groups.entries())
-    .sort(([left], [right]) => left.localeCompare(right, "en"))
-    .map(([letter, items]) => ({
-      letter,
-      heading: buildGroupHeading(letter),
-      items: [...items].sort((left, right) =>
+  const selectableById = new Map(
+    selectableItems.map((item) => [item.id, item]),
+  );
+  const groups: CategoryGroup[] = [];
+  const groupedChildIds = new Set<string>();
+
+  for (const root of roots) {
+    const items = categories
+      .filter(
+        (item) =>
+          item.parent_id === root.id && selectableById.has(item.id),
+      )
+      .sort((left, right) =>
         left.category_code
           .trim()
           .toUpperCase()
           .localeCompare(right.category_code.trim().toUpperCase(), "en"),
-      ),
-    }));
+      );
+
+    for (const item of items) {
+      groupedChildIds.add(item.id);
+    }
+
+    if (items.length > 0) {
+      groups.push({
+        parentId: root.id,
+        heading: formatGroupHeading(root.category_name, root.category_code),
+        items,
+      });
+    }
+  }
+
+  const orphans = selectableItems.filter((item) => !groupedChildIds.has(item.id));
+  if (orphans.length > 0) {
+    const orphanGroups = new Map<string, CategoryGroup>();
+
+    for (const child of orphans) {
+      const parentId = child.parent_id ?? "__orphan__";
+      const heading = child.parent_category_name
+        ? formatGroupHeading(
+            child.parent_category_name,
+            child.parent_category_code,
+          )
+        : "อื่นๆ";
+
+      const existing = orphanGroups.get(parentId);
+      if (existing) {
+        existing.items.push(child);
+      } else {
+        orphanGroups.set(parentId, {
+          parentId,
+          heading,
+          items: [child],
+        });
+      }
+    }
+
+    for (const group of orphanGroups.values()) {
+      group.items.sort((left, right) =>
+        left.category_code
+          .trim()
+          .toUpperCase()
+          .localeCompare(right.category_code.trim().toUpperCase(), "en"),
+      );
+      groups.push(group);
+    }
+  }
+
+  return groups;
 }
 
 function matchesSearch(category: Category, query: string): boolean {
@@ -113,7 +163,13 @@ function matchesSearch(category: Category, query: string): boolean {
   if (!keyword) return true;
   return (
     category.category_name.toLocaleLowerCase("th").includes(keyword) ||
-    category.category_code.toLocaleLowerCase("th").includes(keyword)
+    category.category_code.toLocaleLowerCase("th").includes(keyword) ||
+    (category.parent_category_name ?? "")
+      .toLocaleLowerCase("th")
+      .includes(keyword) ||
+    (category.parent_category_code ?? "")
+      .toLocaleLowerCase("th")
+      .includes(keyword)
   );
 }
 
@@ -136,17 +192,29 @@ export default function CategoryCombobox({
   const [isSaving, setIsSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  const selected = categories.find((item) => item.id === value);
+  const rootCategories = useMemo(
+    () => categories.filter(isRootCategory),
+    [categories],
+  );
 
-  const filteredCategories = useMemo(
-    () => categories.filter((item) => matchesSearch(item, search)),
-    [categories, search],
+  const selectableCategories = useMemo(
+    () => categories.filter(isSelectableCategory),
+    [categories],
+  );
+
+  const selected = selectableCategories.find((item) => item.id === value);
+
+  const filteredSelectable = useMemo(
+    () => selectableCategories.filter((item) => matchesSearch(item, search)),
+    [selectableCategories, search],
   );
 
   const grouped = useMemo(
-    () => groupCategories(filteredCategories),
-    [filteredCategories],
+    () => groupCategoriesByHierarchy(categories, filteredSelectable),
+    [categories, filteredSelectable],
   );
+
+  const selectableCount = filteredSelectable.length;
 
   useEffect(() => {
     setMounted(true);
@@ -245,7 +313,9 @@ export default function CategoryCombobox({
     );
 
     onCategoriesChange(nextCategories);
-    onChange(created.id);
+    if (created.parent_id) {
+      onChange(created.id);
+    }
     setIsSaving(false);
     setIsCreateOpen(false);
     setSearch("");
@@ -312,7 +382,7 @@ export default function CategoryCombobox({
                     void saveCategory();
                   }
                 }}
-                placeholder="เช่น เสื้อโปโลแขนสั้น"
+                placeholder="เช่น ผ้าโพลีเอสเตอร์"
                 className={fieldClass}
               />
             </label>
@@ -334,7 +404,7 @@ export default function CategoryCombobox({
                     void saveCategory();
                   }
                 }}
-                placeholder="เช่น AA, BB"
+                placeholder="เช่น VC, VB"
                 maxLength={2}
                 className={`${fieldClass} font-mono uppercase tracking-widest`}
               />
@@ -351,15 +421,19 @@ export default function CategoryCombobox({
                 disabled={isSaving}
                 className={fieldClass}
               >
-                <option value="">— ไม่ระบุ (หมวดหมู่ระดับราก) —</option>
-                {categories.map((category) => (
+                <option value="">— ไม่ระบุ (หมวดหมู่ระดับราก / Group Header) —</option>
+                {rootCategories.map((category) => (
                   <option key={category.id} value={category.id}>
-                    {category.category_code}: {category.category_name}
+                    {formatGroupHeading(
+                      category.category_name,
+                      category.category_code,
+                    )}
                   </option>
                 ))}
               </select>
               <span className="mt-1 block text-[11px] text-slate-400">
-                ตัวอย่าง: สร้าง &quot;ปกเสื้อ&quot; ภายใต้ &quot;V: วัตถุดิบ&quot;
+                เลือกหมวดหมู่หลักเพื่อสร้างหมวดย่อยที่เลือกได้ใน Matrix
+                (เช่น &quot;ผ้าโพลีเอสเตอร์&quot; ภายใต้ &quot;วัตถุดิบ (RM)&quot;)
               </span>
             </label>
 
@@ -445,16 +519,18 @@ export default function CategoryCombobox({
                 onValueChange={setSearch}
               />
               <CommandList>
-                {filteredCategories.length === 0 && (
+                {selectableCount === 0 && (
                   <div className="px-3 py-4 text-center text-xs text-slate-400">
                     {search.trim()
-                      ? `ไม่พบหมวดหมู่ที่ตรงกับ “${search.trim()}”`
-                      : "ยังไม่มีหมวดหมู่"}
+                      ? `ไม่พบหมวดหมู่ย่อยที่ตรงกับ “${search.trim()}”`
+                      : selectableCategories.length === 0
+                        ? "ยังไม่มีหมวดหมู่ย่อย — สร้างหมวดหมู่ภายใต้หมวดหมู่หลักก่อน"
+                        : "ยังไม่มีหมวดหมู่ย่อย"}
                   </div>
                 )}
 
                 {grouped.map((group) => (
-                  <CommandGroup key={group.letter} heading={group.heading}>
+                  <CommandGroup key={group.parentId} heading={group.heading}>
                     {group.items.map((category) => (
                       <CommandItem
                         key={category.id}
