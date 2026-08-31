@@ -39,7 +39,7 @@ export type SmartSkuPickerProps = {
   disabled?: boolean;
   className?: string;
   placeholder?: string;
-  /** `sales` excludes raw materials; `purchases` includes all active products. */
+  /** `sales` excludes raw materials; `purchases` includes raw materials + FG, excludes services. */
   mode?: SmartSkuPickerMode;
   /** Fires with the full product payload (incl. cost_price) when user picks a row. */
   onSelectProduct: (product: SalesProductSearchItem) => void;
@@ -242,6 +242,14 @@ export default function SmartSkuPicker({
                               className="shrink-0 px-1.5 py-0 text-[9px] uppercase tracking-wide"
                             >
                               Service
+                            </Badge>
+                          ) : null}
+                          {mode === "purchases" && product.is_raw_material ? (
+                            <Badge
+                              variant="slate"
+                              className="shrink-0 px-1.5 py-0 text-[9px] uppercase tracking-wide"
+                            >
+                              Raw
                             </Badge>
                           ) : null}
                         </p>

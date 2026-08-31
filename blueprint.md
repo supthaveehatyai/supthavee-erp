@@ -1,6 +1,6 @@
 System Blueprint: Supthavee ERP SuperApp
 
-Version: 15.0 (Phase 15 Inventory \& Material Management)
+Version: 15.1 (Phase 15 Inventory \& Material Management)
 
 Company: บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด
 
@@ -72,9 +72,21 @@ app\_roles (สิทธิ์การใช้งาน Dynamic RBAC — เ�
 
 system\_settings (ตั้งค่าระบบบริษัท Singleton)
 
+
+
 3\. Products, Inventory \& Production (สินค้า, คลัง, ผลิต)
 
-(คงข้อมูลเดิม)
+mst\_categories (หมวดหมู่สินค้า — Hierarchy parent\_id, Parent 1-char, Child 2-char)
+
+mst\_uom (หน่วยนับ — uom\_code เช่น PCS, KGS, MTR)
+
+mst\_sizes (ขนาด — มี system size '00' สำหรับ N/A)
+
+product\_models (รุ่นสินค้า — เพิ่ม is\_raw\_material, is\_service แยกประเภทชัดเจน, base\_uom\_id)
+
+products (สินค้า SKU ย่อย)
+
+
 
 4\. Documents \& Financials (เอกสารและการเงิน)
 

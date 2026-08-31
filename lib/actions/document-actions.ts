@@ -726,6 +726,23 @@ function filterSalesSkuRows(rows: ProductSearchRow[]): ProductSearchRow[] {
 }
 
 /**
+ * Purchases / AP SKU picker eligibility:
+ * - Include raw materials (`is_raw_material = true`)
+ * - Include finished goods (`is_raw_material = false`, `is_service = false`)
+ * - Exclude billable services (`is_service = true`)
+ */
+function isPurchasesSkuEligible(model: ProductModelSearchJoin | null): boolean {
+  if (!model) return false;
+  return model.is_service !== true;
+}
+
+function filterPurchasesSkuRows(rows: ProductSearchRow[]): ProductSearchRow[] {
+  return rows.filter((row) =>
+    isPurchasesSkuEligible(unwrapJoin(row.product_models)),
+  );
+}
+
+/**
  * Search active products for the sales SKU picker.
  * Joins `product_models` (+ enriches color/size via `mst_colors` / `mst_sizes`)
  * and returns `unit_price` (from retail_price) + `cost_price` for Cost Snapshot.
@@ -742,16 +759,20 @@ export async function searchProductsForSales(
 
 /**
  * Search active products for AP / Goods Receipt SKU picker.
- * Same shape as sales search but includes raw materials and finished goods.
+ * Includes raw materials + finished goods; excludes billable services (`is_service`).
  */
 export async function searchProductsForPurchases(
   keyword: string,
 ): Promise<SearchProductsForSalesResult> {
-  return searchProductsInternal(keyword, { excludeRawMaterials: false });
+  return searchProductsInternal(keyword, {
+    excludeRawMaterials: false,
+    excludeServices: true,
+  });
 }
 
 type SearchProductsOptions = {
   excludeRawMaterials: boolean;
+  excludeServices?: boolean;
 };
 
 async function searchProductsInternal(
@@ -766,9 +787,10 @@ async function searchProductsInternal(
 
     const pattern = `%${escapeIlikePattern(trimmed)}%`;
     const supabase = createSupabaseServerClient();
-    const { excludeRawMaterials } = options;
+    const { excludeRawMaterials, excludeServices = false } = options;
+    const needsModelInner = excludeRawMaterials || excludeServices;
 
-    const productSelect = excludeRawMaterials
+    const productSelect = needsModelInner
       ? `
       id,
       sku,
@@ -800,7 +822,9 @@ async function searchProductsInternal(
         id,
         name,
         model_code,
-        image_url
+        image_url,
+        is_raw_material,
+        is_service
       )
     `;
 
@@ -815,6 +839,11 @@ async function searchProductsInternal(
           { referencedTable: "product_models" },
         );
       }
+      if (excludeServices) {
+        query = query.eq("is_service", false, {
+          referencedTable: "product_models",
+        });
+      }
       return query;
     };
 
@@ -827,6 +856,9 @@ async function searchProductsInternal(
       modelLookup = modelLookup.or(
         "is_raw_material.eq.false,is_service.eq.true",
       );
+    }
+    if (excludeServices) {
+      modelLookup = modelLookup.eq("is_service", false);
     }
 
     const [{ data: matchedModels, error: modelError }, skuResult, nameResult] =
@@ -863,6 +895,11 @@ async function searchProductsInternal(
           { referencedTable: "product_models" },
         );
       }
+      if (excludeServices) {
+        byModelQuery = byModelQuery.eq("is_service", false, {
+          referencedTable: "product_models",
+        });
+      }
       const byModel = await byModelQuery
         .order("sku", { ascending: true })
         .limit(10);
@@ -881,7 +918,9 @@ async function searchProductsInternal(
     ];
     const eligibleRows = excludeRawMaterials
       ? filterSalesSkuRows(mergedRows)
-      : mergedRows;
+      : excludeServices
+        ? filterPurchasesSkuRows(mergedRows)
+        : mergedRows;
 
     for (const row of eligibleRows) {
       if (!byId.has(row.id)) byId.set(row.id, row);
@@ -975,6 +1014,7 @@ async function searchProductsInternal(
         base_uom: row.base_uom,
         image_url: model?.image_url?.trim() || null,
         is_service: model?.is_service === true,
+        is_raw_material: model?.is_raw_material === true,
       };
     });
 

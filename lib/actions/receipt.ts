@@ -37,11 +37,10 @@ import {
   type VatCalculationType,
 } from "@/lib/utils/document-summary";
 import {
-  apportionFreightByNetValue,
   calculateApSubTotalWithFreight,
-  calculateLandedUnitCostFromProration,
+  calculateLandedCost,
   calculateMovingAverageUnitCost,
-} from "@/lib/inventory/landed-cost";
+} from "@/lib/utils/landed-cost";
 import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
 import type { DocumentType } from "@/types/document";
 import { requireSessionUserId } from "@/lib/auth/current-user";
@@ -182,21 +181,6 @@ function resolveLppFromUnitCostPrice(
   const n = Number(unitCostPrice);
   if (!Number.isFinite(n) || n < 0) return null;
   return roundTo4Decimals(n);
-}
-
-/** Landed unit cost = (line_net_amount + prorated_freight) / qty — skips FOC. */
-function resolveReceiptLineLandedUnitCost(input: {
-  lineNetAmount: number;
-  proratedFreight: number;
-  qty: number;
-  isFoc?: boolean;
-}): number {
-  if (input.isFoc) return 0;
-  return calculateLandedUnitCostFromProration(
-    input.lineNetAmount,
-    input.proratedFreight,
-    input.qty,
-  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -416,7 +400,14 @@ export async function matchReceiptItemsToProducts(
           id,
           vendor_sku,
           internal_product_id,
-          product:products ( id, sku, name, color, size )
+          product:products!inner (
+            id,
+            sku,
+            name,
+            color,
+            size,
+            product_models!inner ( is_service )
+          )
         `,
         )
         .eq("vendor_id", trimmedVendorId)
@@ -426,18 +417,39 @@ export async function matchReceiptItemsToProducts(
         return { data: [], error: error.message };
       }
 
+      type ProductJoin = ReceiptProductSummary & {
+        product_models:
+          | { is_service?: boolean | null }
+          | { is_service?: boolean | null }[]
+          | null;
+      };
+
       type Row = {
         id: string;
         vendor_sku: string;
         internal_product_id: string;
-        product: ReceiptProductSummary | ReceiptProductSummary[] | null;
+        product: ProductJoin | ProductJoin[] | null;
       };
 
       for (const row of (data ?? []) as Row[]) {
-        const product = Array.isArray(row.product)
+        const productRaw = Array.isArray(row.product)
           ? (row.product[0] ?? null)
           : row.product;
-        if (!product) continue;
+        if (!productRaw) continue;
+
+        const modelJoin = Array.isArray(productRaw.product_models)
+          ? (productRaw.product_models[0] ?? null)
+          : productRaw.product_models;
+        if (modelJoin?.is_service === true) continue;
+
+        const product: ReceiptProductSummary = {
+          id: productRaw.id,
+          sku: productRaw.sku,
+          name: productRaw.name,
+          color: productRaw.color,
+          size: productRaw.size,
+        };
+
         mappingByNormalizedSku.set(normalizeVendorSku(row.vendor_sku), {
           id: row.id,
           product,
@@ -489,22 +501,43 @@ export type GetInternalProductsResult = {
   error: string | null;
 };
 
-/** Active products list — feeds the on-the-fly mapping Smart Combobox. */
+/** Active products for on-the-fly mapping — raw materials + finished goods only (no services). */
 export async function getInternalProductsForMatching(): Promise<GetInternalProductsResult> {
   try {
     const supabaseAdmin = createSupabaseAdminClient();
 
     const { data, error } = await supabaseAdmin
       .from("products")
-      .select("id, sku, name, color, size")
+      .select(
+        `
+        id,
+        sku,
+        name,
+        color,
+        size,
+        product_models!inner (
+          is_raw_material,
+          is_service
+        )
+      `,
+      )
       .eq("is_active", true)
+      .eq("is_service", false, { referencedTable: "product_models" })
       .order("sku", { ascending: true });
 
     if (error) {
       return { data: [], error: error.message };
     }
 
-    return { data: (data ?? []) as ReceiptProductSummary[], error: null };
+    const rows = (data ?? []).map((row) => ({
+      id: String(row.id),
+      sku: String(row.sku),
+      name: String(row.name ?? ""),
+      color: row.color ? String(row.color) : null,
+      size: row.size ? String(row.size) : null,
+    }));
+
+    return { data: rows as ReceiptProductSummary[], error: null };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "ไม่สามารถโหลดรายการสินค้าได้";
@@ -561,6 +594,39 @@ export async function createOnTheFlyReceiptMapping(
   try {
     const supabaseAdmin = createSupabaseAdminClient();
 
+    const { data: eligibleProduct, error: productLookupError } = await supabaseAdmin
+      .from("products")
+      .select(
+        `
+        id,
+        sku,
+        name,
+        color,
+        size,
+        product_models!inner ( is_service )
+      `,
+      )
+      .eq("id", internalProductId)
+      .eq("is_active", true)
+      .eq("is_service", false, { referencedTable: "product_models" })
+      .maybeSingle();
+
+    if (productLookupError) {
+      return {
+        mappingId: null,
+        product: null,
+        error: productLookupError.message,
+      };
+    }
+    if (!eligibleProduct) {
+      return {
+        mappingId: null,
+        product: null,
+        error:
+          "ไม่สามารถจับคู่งานบริการ (Service) เข้าคลัง — เลือกวัตถุดิบหรือสินค้าสำเร็จรูป",
+      };
+    }
+
     const { data, error } = await supabaseAdmin
       .from("vendor_product_mapping")
       .upsert(
@@ -594,6 +660,20 @@ export async function createOnTheFlyReceiptMapping(
     const product = Array.isArray(row.product)
       ? (row.product[0] ?? null)
       : row.product;
+
+    if (!product) {
+      return {
+        mappingId: row.id,
+        product: {
+          id: String(eligibleProduct.id),
+          sku: String(eligibleProduct.sku),
+          name: String(eligibleProduct.name ?? ""),
+          color: eligibleProduct.color ? String(eligibleProduct.color) : null,
+          size: eligibleProduct.size ? String(eligibleProduct.size) : null,
+        },
+        error: null,
+      };
+    }
 
     return { mappingId: row.id, product, error: null };
   } catch (err) {
@@ -866,32 +946,35 @@ export async function saveGoodsReceiptToLedger(
       Math.max(0, Number(freightCost) || 0),
     );
 
-    /** document_items.prorated_freight — header freight_cost × line_net ratio (remainder on last line). */
-    const proratedFreightByLineKey = new Map(
-      apportionFreightByNetValue(
+    /** Landed Cost — prorate header freight_cost by ex-VAT net line value (remainder on last line). */
+    const landedCostByLineKey = new Map(
+      calculateLandedCost(
         freightCostNormalized,
         lines.map((line) => ({
           id: line.row.lineKey,
-          lineNetAmount: line.row.isFoc ? 0 : line.lineTotal,
+          qty: line.qty,
+          lineNetAmount: line.row.isFoc
+            ? 0
+            : roundTo4Decimals(line.unitCostPrice * line.qty),
+          unitNetCost: line.unitCostPrice,
           isFoc: Boolean(line.row.isFoc),
         })),
-      ).map((row) => [row.id, row.proratedFreight]),
+        { vatType: resolvedVatType, vatRate },
+      ).map((row) => [row.id, row]),
+    );
+
+    const proratedFreightByLineKey = new Map(
+      [...landedCostByLineKey.entries()].map(([id, row]) => [
+        id,
+        row.proratedFreight,
+      ]),
     );
 
     const landedUnitCostByLineKey = new Map(
-      lines.map((line) => {
-        const proratedFreight =
-          proratedFreightByLineKey.get(line.row.lineKey) ?? 0;
-        return [
-          line.row.lineKey,
-          resolveReceiptLineLandedUnitCost({
-            lineNetAmount: line.lineTotal,
-            proratedFreight,
-            qty: line.qty,
-            isFoc: Boolean(line.row.isFoc),
-          }),
-        ] as const;
-      }),
+      [...landedCostByLineKey.entries()].map(([id, row]) => [
+        id,
+        row.landedUnitCost,
+      ]),
     );
 
     const subTotal = calculateApSubTotalWithFreight(
@@ -1507,27 +1590,37 @@ export async function saveManualGoodsReceipt(
       };
     });
 
-    const proratedFreightByLineKey = new Map(
-      apportionFreightByNetValue(
+    const landedCostByLineKey = new Map(
+      calculateLandedCost(
         freightCostNormalized,
-        normalizedLines.map((line) => ({
-          id: line.lineKey,
-          lineNetAmount: line.line_total,
-          isFoc: false,
-        })),
-      ).map((row) => [row.id, row.proratedFreight]),
+        normalizedLines.map((line) => {
+          const costLineTotal =
+            costByLineKey.get(line.lineKey)?.finalLineTotal ??
+            roundTo4Decimals(line.unit_cost * line.qty);
+          return {
+            id: line.lineKey,
+            qty: line.qty,
+            lineNetAmount: costLineTotal,
+            unitNetCost: line.unit_cost,
+            isFoc: false,
+          };
+        }),
+        { vatType: resolvedVatType, vatRate },
+      ).map((row) => [row.id, row]),
+    );
+
+    const proratedFreightByLineKey = new Map(
+      [...landedCostByLineKey.entries()].map(([id, row]) => [
+        id,
+        row.proratedFreight,
+      ]),
     );
 
     const receiptLines = normalizedLines.map((line) => {
-      const proratedFreight = proratedFreightByLineKey.get(line.lineKey) ?? 0;
-      const landedUnitCost = resolveReceiptLineLandedUnitCost({
-        lineNetAmount: line.line_total,
-        proratedFreight,
-        qty: line.qty,
-      });
+      const landed = landedCostByLineKey.get(line.lineKey);
       return {
         ...line,
-        unit_cost: landedUnitCost,
+        unit_cost: landed?.landedUnitCost ?? line.unit_cost,
       };
     });
 

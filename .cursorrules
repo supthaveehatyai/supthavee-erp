@@ -39,11 +39,15 @@ Tech Stack หลัก: Supabase (PostgreSQL, Auth, Edge Functions, RLS), Next.
 - **Asset Clearing Integrity:** ห้ามเปลี่ยนหมวดหมู่ของบิล Expense หลังจากนำไปขึ้นทะเบียน Fixed Asset เพื่อรักษา Audit Trail
 - **Document Ownership (ABAC):** ทุก INSERT ลงตาราง `documents` (หรือเอกสารการเงินต่างๆ) ต้องดึง `user.id` จาก Auth Session แล้ว stamp ลง `created_by` เสมอ เพื่อให้ RLS Data Access Scope ทำงานได้ถูกต้อง
 - **Landed Cost / Freight-In Integration:** ในฟอร์ม AP Documents (AP_INV, AP_TAX, AP_CASH) ต้องมีช่องสำหรับกรอก "ค่าขนส่ง (Freight Cost)" โดยค่านั้นต้องบันทึกลง `freight_cost` ระดับ Header การคำนวณ `sub_total` ต้องรวมค่าขนส่งนี้ก่อนคิด VAT (หากค่าขนส่งมี VAT) และตอนบันทึกรับเข้าคลัง (inventory_ledger) ต้องหารเฉลี่ยค่าขนส่งนี้เข้าเป็นต้นทุนสินค้า (Moving Average Cost)
+- **Service vs Raw Material:** สินค้าที่มี `is_service = true` (เช่น งานสกรีน) ต้องดึงไปเปิดบิลขายได้ แต่ระบบห้ามนำไปหักลดสต็อก สินค้าที่มี `is_raw_material = true` ต้องซ่อนจากหน้าบิลขายเด็ดขาด (ใช้เฉพาะรับของเข้าและเบิกผลิต)
+- **Non-Clothing Size Enforcement:** สินค้าประเภทวัตถุดิบและงานบริการ บังคับให้ใช้รหัสไซส์ `00` (N/A ไม่มีไซส์) เสมอ ห้ามให้ผู้ใช้เลือกไซส์เสื้อผ้า (เช่น S, M, L) มาปะปน
 
 ## 3. Data Integrity & Taxonomy
 - **Color Code:** `mst_colors` ต้องล็อกเป็นอักษรภาษาอังกฤษพิมพ์ใหญ่ 3 ตัวอักษร
 - **Size Sort Order:** `mst_sizes` การจัดเรียงต้องเป็นมาตราส่วน Gap of 10
 - **Inventory Update:** ห้ามแก้ไขสต็อกที่ตาราง `products` โดยตรง ต้องผ่าน `inventory_ledger` เสมอ
+- **Category Code Standard:** `mst_categories` หมวดหมู่หลัก (Parent) ต้องมี 1 ตัวอักษร, ประเภทย่อย (Child) ต้องมี 2 ตัวอักษร (โดยอักษรตัวแรกสืบทอดจาก Parent)
+
 
 ## 4. UI / UX Pattern
 - **URL-Driven State:** ใช้ URL Search Parameters (`?query=...`) แทน `useState` สำหรับการ Filter และการเปิด Slide-over Sheet (เช่น ดูรายละเอียดสินทรัพย์)

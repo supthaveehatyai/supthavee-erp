@@ -11,6 +11,8 @@
 - `mst_asset_categories` (หมวดหมู่สินทรัพย์ถาวร — `category_code`, `useful_life_years`, `depreciation_rate`)
 - `mst_genders` (เพศ/ทรงเสื้อ)
 - `mst_sizes` (ไซส์มาตรฐาน Global Size รวมถึงไซส์บริการ)
+- `mst_categories` (หมวดหมู่สินค้า — โครงสร้าง `parent_id` แม่-ลูก, รหัส Parent = 1 ตัวอักษร, Child = 2 ตัวอักษร)
+- `mst_sizes` (ไซส์มาตรฐาน Global Size — มีไซส์ `00` สำหรับวัตถุดิบ/งานบริการ)
 
 ## 2. Core Entities (องค์กร, ผู้ใช้, ตั้งค่า)
 - `contacts` (คู่ค้า Multi-Role: `contact_roles` VARCHAR[] เท่านั้น)
@@ -29,6 +31,8 @@
 - `production_jobs` (ใบสั่งผลิต / งาน MTO)
 - `service_tracking` (ติดตามสถานะงานบริการ)
 - `technician_rates` (เรตค่าแรงช่าง)
+- `product_models` (รุ่นสินค้า — เพิ่มคอลัมน์ `base_uom_id` FK โยงไป `mst_uom`, และเพิ่ม boolean `is_raw_material`, `is_service`)
+- `mst_uom` (หน่วยนับสินค้า — เช่น PCS, KGS, MTR)
 
 ## 4. Documents & Financials (เอกสารและการเงิน)
 - **Document Conversion Lineage:** `QT` -> `SO` -> `INV_DO / TAX_INV / CS_TAX / ABB` -> `REC` (ห้ามข้าม SO เด็ดขาด)

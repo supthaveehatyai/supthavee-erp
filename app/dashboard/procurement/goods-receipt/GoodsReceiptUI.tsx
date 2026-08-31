@@ -1178,31 +1178,8 @@ export default function GoodsReceiptUI({
                 ประเภทเอกสารจาก AI: {aiDocType} · แก้ไขได้ในหน้าต่าง Save to Ledger
                 {vatTotalsManual
                   ? " · ใช้ยอดที่พิมพ์ทับ (Manual Override)"
-                  : " · Auto จาก Total Amount รายบรรทัด + ค่าขนส่ง"}
+                  : " · Auto จาก Total Amount รายบรรทัด + ค่าขนส่ง (Freight-In)"}
               </p>
-              <div className="mt-3 max-w-xs">
-                <Label
-                  htmlFor="freight-cost-input"
-                  className="text-[10px] font-medium text-slate-500"
-                >
-                  ค่าขนส่งต้นทาง (Freight Cost)
-                </Label>
-                <div className="mt-1 flex items-center gap-1">
-                  <span className="text-xs text-slate-400">฿</span>
-                  <Input
-                    id="freight-cost-input"
-                    type="text"
-                    inputMode="decimal"
-                    value={freightCostInput}
-                    onChange={(e) => {
-                      setFreightCostInput(e.target.value);
-                      setVatTotalsManual(false);
-                    }}
-                    placeholder="0.00"
-                    className="h-9 text-right text-sm font-semibold tabular-nums"
-                  />
-                </div>
-              </div>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
               <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
@@ -1339,10 +1316,28 @@ export default function GoodsReceiptUI({
             <div className="h-8 w-px bg-slate-200" />
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                Total Document Value
+                รายการรวม (ก่อนขนส่ง)
               </p>
               <p className="text-lg font-bold text-slate-900">
                 ฿{formatMoney(totals.value)}
+              </p>
+            </div>
+            <div className="h-8 w-px bg-slate-200" />
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Sub Total (+ ขนส่ง)
+              </p>
+              <p className="text-lg font-bold text-slate-900">
+                ฿{formatMoney(vatPreview.total_amount)}
+              </p>
+            </div>
+            <div className="h-8 w-px bg-slate-200" />
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Grand Total
+              </p>
+              <p className="text-lg font-bold text-emerald-700">
+                ฿{formatMoney(vatPreview.grand_total)}
               </p>
             </div>
             <div className="h-8 w-px bg-slate-200" />
@@ -1361,6 +1356,29 @@ export default function GoodsReceiptUI({
                 className="mt-1 h-9 text-sm"
               />
               <p className="mt-0.5 text-[10px] text-slate-400">เช่น 40%, 1500</p>
+            </div>
+            <div className="w-40">
+              <Label
+                htmlFor="freight-cost-input"
+                className="text-[10px] font-semibold uppercase tracking-wide text-slate-400"
+              >
+                ค่าขนส่ง (Freight Cost)
+              </Label>
+              <Input
+                id="freight-cost-input"
+                type="text"
+                inputMode="decimal"
+                value={freightCostInput}
+                onChange={(e) => {
+                  setFreightCostInput(e.target.value);
+                  setVatTotalsManual(false);
+                }}
+                placeholder="0.00"
+                className="mt-1 h-9 text-right text-sm tabular-nums"
+              />
+              <p className="mt-0.5 text-[10px] text-slate-400">
+                รวมใน Sub Total ก่อน VAT
+              </p>
             </div>
             {stats.unmatched > 0 && (
               <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-800">

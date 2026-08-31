@@ -177,6 +177,8 @@ export type SalesProductSearchItem = {
   image_url: string | null;
   /** `product_models.is_service` — งานบริการ (ไม่ตัดสต็อก) */
   is_service: boolean;
+  /** `product_models.is_raw_material` — วัตถุดิบ (รับเข้าคลัง AP) */
+  is_raw_material?: boolean;
 };
 
 export type SearchProductsForSalesResult = {

@@ -184,6 +184,13 @@ export default function ManualReceiptWorkspace({
   }, [lines, invoicePreviewByKey, freightCostNormalized, vatType]);
 
   function handleSelectProduct(product: SalesProductSearchItem) {
+    if (product.is_service) {
+      toast.error(
+        "ไม่สามารถรับงานบริการ (Service) เข้าคลัง — เลือกวัตถุดิบหรือสินค้าสำเร็จรูป",
+      );
+      return;
+    }
+
     setLines((current) => {
       const existing = current.find((row) => row.product_id === product.id);
       if (existing) {
@@ -327,7 +334,7 @@ export default function ManualReceiptWorkspace({
         <CardHeader className="pb-3">
           <CardTitle className="text-base">หัวเอกสาร</CardTitle>
           <CardDescription>
-            Vendor · วันที่ · เลขอ้างอิง (บังคับ) · ประเภทเอกสาร / VAT · ส่วนลดท้ายบิล
+            Vendor · วันที่ · เลขอ้างอิง · ประเภทเอกสาร / VAT · ส่วนลดท้ายบิล · ค่าขนส่ง (Freight-In)
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -438,8 +445,8 @@ export default function ManualReceiptWorkspace({
         <CardHeader className="pb-3">
           <CardTitle className="text-base">เพิ่มสินค้า</CardTitle>
           <CardDescription>
-            Smart SKU Picker · ค้นหาผ่าน Server Action `searchProductsForPurchases`
-            (debounce 300ms) — รวมวัตถุดิบและสินค้าสำเร็จรูป
+            Smart SKU Picker · แสดงวัตถุดิบ (`is_raw_material`) และสินค้าสำเร็จรูป
+            — ซ่อนงานบริการ (`is_service`)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -458,7 +465,8 @@ export default function ManualReceiptWorkspace({
           <CardDescription>
             {lines.length} รายการ · จำนวนรวม {totals.qty.toLocaleString("th-TH")} ·
             ยอดตั้ง {formatMoney(totals.gross)} · Net Cost (LPP){" "}
-            {formatMoney(totals.netCost)}
+            {formatMoney(totals.netCost)} · Sub Total (รวมขนส่ง){" "}
+            {formatMoney(documentSummary.total_amount)}
           </CardDescription>
         </CardHeader>
         <CardContent className="px-0 sm:px-6">
