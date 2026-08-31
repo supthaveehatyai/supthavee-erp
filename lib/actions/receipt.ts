@@ -522,7 +522,7 @@ export async function getInternalProductsForMatching(): Promise<GetInternalProdu
       `,
       )
       .eq("is_active", true)
-      .eq("is_service", false, { referencedTable: "product_models" })
+      .eq("product_models.is_service", false)
       .order("sku", { ascending: true });
 
     if (error) {
@@ -608,7 +608,7 @@ export async function createOnTheFlyReceiptMapping(
       )
       .eq("id", internalProductId)
       .eq("is_active", true)
-      .eq("is_service", false, { referencedTable: "product_models" })
+      .eq("product_models.is_service", false)
       .maybeSingle();
 
     if (productLookupError) {

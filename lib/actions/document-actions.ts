@@ -840,9 +840,7 @@ async function searchProductsInternal(
         );
       }
       if (excludeServices) {
-        query = query.eq("is_service", false, {
-          referencedTable: "product_models",
-        });
+        query = query.eq("product_models.is_service", false);
       }
       return query;
     };
@@ -896,9 +894,7 @@ async function searchProductsInternal(
         );
       }
       if (excludeServices) {
-        byModelQuery = byModelQuery.eq("is_service", false, {
-          referencedTable: "product_models",
-        });
+        byModelQuery = byModelQuery.eq("product_models.is_service", false);
       }
       const byModel = await byModelQuery
         .order("sku", { ascending: true })
