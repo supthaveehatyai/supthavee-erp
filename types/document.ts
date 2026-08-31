@@ -175,6 +175,8 @@ export type SalesProductSearchItem = {
   base_uom: string | null;
   /** Public URL จาก `product_models.image_url` (Visual Verification). */
   image_url: string | null;
+  /** `product_models.is_service` — งานบริการ (ไม่ตัดสต็อก) */
+  is_service: boolean;
 };
 
 export type SearchProductsForSalesResult = {

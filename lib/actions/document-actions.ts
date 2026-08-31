@@ -687,6 +687,15 @@ function unwrapJoin<T>(value: T | T[] | null | undefined): T | null {
   return value ?? null;
 }
 
+type ProductModelSearchJoin = {
+  id: string;
+  name: string | null;
+  model_code: string | null;
+  image_url: string | null;
+  is_raw_material?: boolean | null;
+  is_service?: boolean | null;
+};
+
 type ProductSearchRow = {
   id: string;
   sku: string;
@@ -696,21 +705,25 @@ type ProductSearchRow = {
   base_uom: string | null;
   color: string | null;
   size: string | null;
-  product_models:
-    | {
-        id: string;
-        name: string | null;
-        model_code: string | null;
-        image_url: string | null;
-      }
-    | {
-        id: string;
-        name: string | null;
-        model_code: string | null;
-        image_url: string | null;
-      }[]
-    | null;
+  product_models: ProductModelSearchJoin | ProductModelSearchJoin[] | null;
 };
+
+/**
+ * Sales SKU picker eligibility:
+ * - Exclude raw materials (`is_raw_material = true`)
+ * - Always include billable services (`is_service = true`)
+ */
+function isSalesSkuEligible(model: ProductModelSearchJoin | null): boolean {
+  if (!model) return false;
+  if (model.is_service === true) return true;
+  return model.is_raw_material === false;
+}
+
+function filterSalesSkuRows(rows: ProductSearchRow[]): ProductSearchRow[] {
+  return rows.filter((row) =>
+    isSalesSkuEligible(unwrapJoin(row.product_models)),
+  );
+}
 
 /**
  * Search active products for the sales SKU picker.
@@ -719,6 +732,7 @@ type ProductSearchRow = {
  *
  * Match: `products.sku` OR `product_models.name` (ilike), limit 10.
  * Excludes raw materials (`product_models.is_raw_material = false`).
+ * Billable services (`product_models.is_service = true`) are always included.
  */
 export async function searchProductsForSales(
   keyword: string,
@@ -769,7 +783,8 @@ async function searchProductsInternal(
         name,
         model_code,
         image_url,
-        is_raw_material
+        is_raw_material,
+        is_service
       )
     `
       : `
@@ -795,7 +810,10 @@ async function searchProductsInternal(
         .select(productSelect)
         .eq("is_active", true);
       if (excludeRawMaterials) {
-        query = query.eq("product_models.is_raw_material", false);
+        query = query.or(
+          "is_raw_material.eq.false,is_service.eq.true",
+          { referencedTable: "product_models" },
+        );
       }
       return query;
     };
@@ -806,7 +824,9 @@ async function searchProductsInternal(
       .ilike("name", pattern)
       .limit(30);
     if (excludeRawMaterials) {
-      modelLookup = modelLookup.eq("is_raw_material", false);
+      modelLookup = modelLookup.or(
+        "is_raw_material.eq.false,is_service.eq.true",
+      );
     }
 
     const [{ data: matchedModels, error: modelError }, skuResult, nameResult] =
@@ -838,7 +858,10 @@ async function searchProductsInternal(
         .eq("is_active", true)
         .in("model_id", modelIds);
       if (excludeRawMaterials) {
-        byModelQuery = byModelQuery.eq("product_models.is_raw_material", false);
+        byModelQuery = byModelQuery.or(
+          "is_raw_material.eq.false,is_service.eq.true",
+          { referencedTable: "product_models" },
+        );
       }
       const byModel = await byModelQuery
         .order("sku", { ascending: true })
@@ -851,11 +874,16 @@ async function searchProductsInternal(
     }
 
     const byId = new Map<string, ProductSearchRow>();
-    for (const row of [
+    const mergedRows = [
       ...((skuResult.data ?? []) as ProductSearchRow[]),
       ...((nameResult.data ?? []) as ProductSearchRow[]),
       ...modelProducts,
-    ]) {
+    ];
+    const eligibleRows = excludeRawMaterials
+      ? filterSalesSkuRows(mergedRows)
+      : mergedRows;
+
+    for (const row of eligibleRows) {
       if (!byId.has(row.id)) byId.set(row.id, row);
     }
 
@@ -946,6 +974,7 @@ async function searchProductsInternal(
         size_label: sizeLabel,
         base_uom: row.base_uom,
         image_url: model?.image_url?.trim() || null,
+        is_service: model?.is_service === true,
       };
     });
 
