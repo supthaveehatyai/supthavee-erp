@@ -108,6 +108,7 @@ function toBillItem(
     size_label: sku.size_label || null,
     base_uom: sku.base_uom,
     image_url: matrix.image_url,
+    is_service: matrix.is_service || sku.is_service,
     qty,
   };
 }
