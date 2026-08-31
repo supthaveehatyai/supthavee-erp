@@ -532,17 +532,36 @@ function findNoneGenderId(genders: Gender[]): string {
  * `contacts`, `mst_brands`, `mst_categories`, `mst_colors`, and `mst_genders`.
  * Zero client-side `supabase.from(...)` calls remain for Master Data.
  */
-async function fetchMasterData(): Promise<MasterData> {
+async function fetchMasterData(): Promise<{
+  data: MasterData;
+  warnings: string[];
+}> {
   const masterResult = await getMasterDataForMatrix();
-  if (masterResult.error) throw new Error(masterResult.error);
+
+  const sourceLabels: Record<string, string> = {
+    brands: "แบรนด์",
+    categories: "หมวดหมู่",
+    colors: "สี",
+    genders: "เพศ",
+    vendors: "ผู้จำหน่าย",
+    uoms: "หน่วยนับ",
+  };
+
+  const warnings = Object.entries(masterResult.errors ?? {}).map(
+    ([source, message]) =>
+      `${sourceLabels[source] ?? source}: ${message}`,
+  );
 
   return {
-    brands: masterResult.brands,
-    categories: masterResult.categories,
-    colors: masterResult.colors,
-    genders: masterResult.genders,
-    vendors: masterResult.vendors,
-    uoms: masterResult.uoms,
+    data: {
+      brands: masterResult.brands,
+      categories: masterResult.categories,
+      colors: masterResult.colors,
+      genders: masterResult.genders,
+      vendors: masterResult.vendors,
+      uoms: masterResult.uoms,
+    },
+    warnings,
   };
 }
 
@@ -1322,21 +1341,43 @@ export default function ProductsClient() {
     setIsLoadableModelsLoading(true);
 
     try {
-      const data = await fetchMasterData();
-      setMasterData(data);
-      const defaultGender =
-        data.genders.find((item) => item.gender_name === "ทั่วไป") ??
-        data.genders[0];
-      const pcsUomId = findPcsUomId(data.uoms);
-      setForm((current) => ({
-        ...current,
-        genderId: current.isRawMaterial
-          ? findNoneGenderId(data.genders) || current.genderId
-          : defaultGender?.id ?? current.genderId,
-        baseUomId: current.isRawMaterial
-          ? current.baseUomId
-          : current.baseUomId || pcsUomId,
-      }));
+      const { data, warnings } = await fetchMasterData();
+
+      const allEmpty =
+        data.brands.length === 0 &&
+        data.categories.length === 0 &&
+        data.colors.length === 0 &&
+        data.genders.length === 0 &&
+        data.vendors.length === 0 &&
+        data.uoms.length === 0;
+
+      if (allEmpty && warnings.length > 0) {
+        setMasterData(emptyMasterData);
+        setFormError(
+          `ไม่สามารถโหลด Master Data ได้: ${warnings.join(" · ")}`,
+        );
+      } else {
+        setMasterData(data);
+        if (warnings.length > 0) {
+          toast.warning(
+            `โหลด Master Data บางส่วนไม่สำเร็จ — dropdown ที่โหลดได้ยังใช้งานได้ (${warnings.join(" · ")})`,
+          );
+        }
+
+        const defaultGender =
+          data.genders.find((item) => item.gender_name === "ทั่วไป") ??
+          data.genders[0];
+        const pcsUomId = findPcsUomId(data.uoms);
+        setForm((current) => ({
+          ...current,
+          genderId: current.isRawMaterial
+            ? findNoneGenderId(data.genders) || current.genderId
+            : defaultGender?.id ?? current.genderId,
+          baseUomId: current.isRawMaterial
+            ? current.baseUomId
+            : current.baseUomId || pcsUomId,
+        }));
+      }
     } catch (error) {
       setMasterData(emptyMasterData);
       setFormError(

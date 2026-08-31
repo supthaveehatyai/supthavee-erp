@@ -602,9 +602,17 @@ export async function getVendorMappingsByProductIds(
 }
 
 /**
- * All five in one round trip — for the Matrix Generator's initial load.
- * Individual actions above stay exported for callers that only need one list.
+ * All master lists in one round trip — for the Matrix Generator's initial load.
+ * Each source is fetched independently; one failure must not empty the others.
  */
+export type MasterDataSource =
+  | "brands"
+  | "categories"
+  | "colors"
+  | "genders"
+  | "vendors"
+  | "uoms";
+
 export type GetMasterDataResult = {
   brands: MasterBrand[];
   categories: MasterCategory[];
@@ -612,10 +620,34 @@ export type GetMasterDataResult = {
   genders: MasterGender[];
   vendors: MasterVendor[];
   uoms: MasterUom[];
+  /** Non-null only when every source failed */
   error: string | null;
+  /** Per-source errors — successful lists still return data */
+  errors: Partial<Record<MasterDataSource, string>>;
 };
 
+async function fetchMasterDataSlice<T>(
+  source: MasterDataSource,
+  fetcher: () => Promise<{ data: T[]; error: string | null }>,
+): Promise<{ data: T[]; error: string | null }> {
+  try {
+    const result = await fetcher();
+    if (result.error) {
+      console.error(`[getMasterDataForMatrix] ${source} failed:`, result.error);
+      return { data: result.data ?? [], error: result.error };
+    }
+    return { data: result.data ?? [], error: null };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : `โหลด ${source} ไม่สำเร็จ`;
+    console.error(`[getMasterDataForMatrix] ${source} threw:`, err);
+    return { data: [], error: message };
+  }
+}
+
 export async function getMasterDataForMatrix(): Promise<GetMasterDataResult> {
+  noStore();
+
   const [
     brandsResult,
     categoriesResult,
@@ -624,21 +656,24 @@ export async function getMasterDataForMatrix(): Promise<GetMasterDataResult> {
     vendorsResult,
     uomsResult,
   ] = await Promise.all([
-    getBrands(),
-    getCategories(),
-    getColors(),
-    getGenders(),
-    getVendors(),
-    getUoms(),
+    fetchMasterDataSlice("brands", getBrands),
+    fetchMasterDataSlice("categories", getCategories),
+    fetchMasterDataSlice("colors", getColors),
+    fetchMasterDataSlice("genders", getGenders),
+    fetchMasterDataSlice("vendors", getVendors),
+    fetchMasterDataSlice("uoms", getUoms),
   ]);
 
-  const error =
-    brandsResult.error ??
-    categoriesResult.error ??
-    colorsResult.error ??
-    gendersResult.error ??
-    vendorsResult.error ??
-    uomsResult.error;
+  const errors: Partial<Record<MasterDataSource, string>> = {};
+  if (brandsResult.error) errors.brands = brandsResult.error;
+  if (categoriesResult.error) errors.categories = categoriesResult.error;
+  if (colorsResult.error) errors.colors = colorsResult.error;
+  if (gendersResult.error) errors.genders = gendersResult.error;
+  if (vendorsResult.error) errors.vendors = vendorsResult.error;
+  if (uomsResult.error) errors.uoms = uomsResult.error;
+
+  const errorEntries = Object.values(errors);
+  const allSourcesFailed = errorEntries.length === 6;
 
   return {
     brands: brandsResult.data,
@@ -647,7 +682,10 @@ export async function getMasterDataForMatrix(): Promise<GetMasterDataResult> {
     genders: gendersResult.data,
     vendors: vendorsResult.data,
     uoms: uomsResult.data,
-    error,
+    error: allSourcesFailed
+      ? (errorEntries.join("; ") || "ไม่สามารถโหลด Master Data ได้")
+      : null,
+    errors,
   };
 }
 
