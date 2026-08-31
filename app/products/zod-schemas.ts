@@ -102,6 +102,9 @@ export const productModelSchema = z
     image_url: z.string().nullable().optional(),
     is_service: z.boolean().default(false),
     is_raw_material: z.boolean().default(false),
+    base_uom_id: z.uuid({
+      error: "ต้องเลือกหน่วยนับ (base_uom_id) เป็น UUID ที่ถูกต้อง",
+    }),
   })
   .superRefine((data, ctx) => {
     if (data.is_service) return;
@@ -158,6 +161,9 @@ export const updateProductModelSchema = z
     image_url: z.string().nullable().optional(),
     isService: z.boolean().default(false),
     isRawMaterial: z.boolean().default(false),
+    baseUomId: z.uuid({
+      error: "ต้องเลือกหน่วยนับ (base_uom_id) เป็น UUID ที่ถูกต้อง",
+    }),
     sizePrices: z
       .array(updateProductModelSizePriceSchema)
       .min(1, "ต้องระบุราคาตามไซส์อย่างน้อย 1 รายการ"),
@@ -207,6 +213,7 @@ export function parseProductModelIdentity(input: {
   imageUrl?: string | null;
   isService?: boolean;
   isRawMaterial?: boolean;
+  baseUomId?: string | null;
 }):
   | { ok: true; data: ProductModelSchemaOutput }
   | { ok: false; error: string } {
@@ -222,6 +229,7 @@ export function parseProductModelIdentity(input: {
     image_url: input.imageUrl ?? null,
     is_service: Boolean(input.isService),
     is_raw_material: Boolean(input.isRawMaterial),
+    base_uom_id: input.baseUomId,
   });
 
   if (!result.success) {

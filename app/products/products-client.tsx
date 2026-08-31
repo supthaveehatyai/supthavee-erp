@@ -14,9 +14,11 @@ import {
   getGlobalSizes,
   getMasterDataForMatrix,
   getSizesByBrand,
+  getUoms,
   getVendorMappingsByProductIds,
   getVendors,
   type MasterSize,
+  type MasterUom,
 } from "@/lib/actions/master";
 import SmartColorCombobox, {
   type SmartColor,
@@ -146,6 +148,8 @@ type BatchEditForm = {
   isService: boolean;
   /** product_models.is_raw_material */
   isRawMaterial: boolean;
+  /** product_models.base_uom_id */
+  baseUomId: string;
   prices: Record<string, SizePrice>;
 };
 
@@ -165,6 +169,7 @@ type MasterData = {
   colors: Color[];
   genders: Gender[];
   vendors: Vendor[];
+  uoms: MasterUom[];
 };
 
 type SizePrice = {
@@ -202,6 +207,8 @@ type MatrixForm = {
   isService: boolean;
   /** product_models.is_raw_material — วัตถุดิบ */
   isRawMaterial: boolean;
+  /** product_models.base_uom_id → mst_uom.uom_id */
+  baseUomId: string;
   colorIds: string[];
   sizeIds: string[];
 };
@@ -224,6 +231,7 @@ const emptyMasterData: MasterData = {
   colors: [],
   genders: [],
   vendors: [],
+  uoms: [],
 };
 
 const emptyPrice: SizePrice = { cost: "", retail: "", wholesale: "" };
@@ -497,9 +505,24 @@ function createEmptyForm(vendorId = ""): MatrixForm {
     imageUrl: "",
     isService: false,
     isRawMaterial: false,
+    baseUomId: "",
     colorIds: [],
     sizeIds: [],
   };
+}
+
+function findPcsUomId(uoms: MasterUom[]): string {
+  return (
+    uoms.find((item) => item.uom_code.trim().toUpperCase() === "PCS")?.uom_id ??
+    ""
+  );
+}
+
+function findNoneGenderId(genders: Gender[]): string {
+  return (
+    genders.find((item) => item.gender_code.trim().toUpperCase() === "N")?.id ??
+    ""
+  );
 }
 
 /**
@@ -519,6 +542,7 @@ async function fetchMasterData(): Promise<MasterData> {
     colors: masterResult.colors,
     genders: masterResult.genders,
     vendors: masterResult.vendors,
+    uoms: masterResult.uoms,
   };
 }
 
@@ -1209,6 +1233,7 @@ export default function ProductsClient() {
     (form.isService || (form.vendorId && form.brandId)) &&
       form.categoryId &&
       form.genderId &&
+      form.baseUomId &&
       isValidModelCode(form.modelCode) &&
       baseProductName,
   );
@@ -1302,9 +1327,16 @@ export default function ProductsClient() {
       const defaultGender =
         data.genders.find((item) => item.gender_name === "ทั่วไป") ??
         data.genders[0];
-      if (defaultGender) {
-        setForm((current) => ({ ...current, genderId: defaultGender.id }));
-      }
+      const pcsUomId = findPcsUomId(data.uoms);
+      setForm((current) => ({
+        ...current,
+        genderId: current.isRawMaterial
+          ? findNoneGenderId(data.genders) || current.genderId
+          : defaultGender?.id ?? current.genderId,
+        baseUomId: current.isRawMaterial
+          ? current.baseUomId
+          : current.baseUomId || pcsUomId,
+      }));
     } catch (error) {
       setMasterData(emptyMasterData);
       setFormError(
@@ -1397,9 +1429,17 @@ export default function ProductsClient() {
       imageUrl: (model.image_url ?? "").split("?")[0],
       isService: model.is_service === true,
       isRawMaterial: model.is_raw_material === true,
+      baseUomId: model.base_uom_id ?? "",
       colorIds: [],
       sizeIds: [],
     }));
+
+    if (model.is_raw_material === true) {
+      const noneGenderId = findNoneGenderId(masterData.genders);
+      if (noneGenderId) {
+        setForm((current) => ({ ...current, genderId: noneGenderId }));
+      }
+    }
 
     toast.success(
       `โหลดโมเดล ${model.model_code} (${model.status ?? "DRAFT"}) แล้ว — เพิ่มสี/ไซส์ใหม่แล้วกดสร้าง SKU ได้`,
@@ -1669,6 +1709,7 @@ export default function ProductsClient() {
       taxType: form.taxType,
       isService: form.isService,
       isRawMaterial: form.isRawMaterial,
+      baseUomId: form.baseUomId,
     });
     if (!identity.ok) {
       setFormError(identity.error);
@@ -1688,6 +1729,7 @@ export default function ProductsClient() {
       imageUrl: form.imageUrl.trim() || undefined,
       isService: identity.data.is_service,
       isRawMaterial: identity.data.is_raw_material,
+      baseUomId: identity.data.base_uom_id,
     };
 
     setIsDraftSaving(true);
@@ -1798,6 +1840,7 @@ export default function ProductsClient() {
       taxType: form.taxType,
       isService: form.isService,
       isRawMaterial: form.isRawMaterial,
+      baseUomId: form.baseUomId,
     });
     if (!identity.ok) {
       setFormError(identity.error);
@@ -1824,6 +1867,7 @@ export default function ProductsClient() {
         imageUrl: form.imageUrl.trim() || undefined,
         isService: identity.data.is_service,
         isRawMaterial: identity.data.is_raw_material,
+        baseUomId: identity.data.base_uom_id,
       },
       skus: previewRows.map((row) => ({
         sku: row.sku,
@@ -1973,15 +2017,19 @@ export default function ProductsClient() {
       try {
         let genders = masterData.genders;
         let vendors = masterData.vendors;
+        let uoms = masterData.uoms;
 
-        if (genders.length === 0 || vendors.length === 0) {
-          const [gendersResult, vendorsResult] = await Promise.all([
+        if (genders.length === 0 || vendors.length === 0 || uoms.length === 0) {
+          const [gendersResult, vendorsResult, uomsResult] = await Promise.all([
             genders.length === 0
               ? getGenders()
               : Promise.resolve({ data: genders, error: null }),
             vendors.length === 0
               ? getVendors()
               : Promise.resolve({ data: vendors, error: null }),
+            uoms.length === 0
+              ? getUoms()
+              : Promise.resolve({ data: uoms, error: null }),
           ]);
 
           if (gendersResult.error) {
@@ -1990,13 +2038,18 @@ export default function ProductsClient() {
           if (vendorsResult.error) {
             throw new Error(vendorsResult.error);
           }
+          if (uomsResult.error) {
+            throw new Error(uomsResult.error);
+          }
 
           genders = gendersResult.data;
           vendors = vendorsResult.data;
+          uoms = uomsResult.data;
           setMasterData((current) => ({
             ...current,
             genders,
             vendors,
+            uoms,
           }));
         }
 
@@ -2010,6 +2063,7 @@ export default function ProductsClient() {
         let imageUrl = "";
         let isService = false;
         let isRawMaterial = false;
+        let baseUomId = "";
         const modelId =
           group.modelId ??
           group.products.find((item) => item.model_id)?.model_id ??
@@ -2028,22 +2082,30 @@ export default function ProductsClient() {
             .split("?")[0];
           isService = modelResult.existing?.is_service === true;
           isRawMaterial = modelResult.existing?.is_raw_material === true;
+          baseUomId = modelResult.existing?.base_uom_id ?? "";
         } else {
           const mappedVendor = vendorByProductId[group.products[0]?.id ?? ""];
           vendorId = mappedVendor?.id ?? "";
+          baseUomId = findPcsUomId(uoms);
         }
+
+        const noneGenderId = findNoneGenderId(genders);
+        const genderId = isRawMaterial
+          ? noneGenderId || matched?.id || ""
+          : matched?.id ?? "";
 
         setEditTarget(group);
         setEditForm({
           description: group.title,
           shortName: group.shortName,
-          genderId: matched?.id ?? "",
+          genderId,
           taxType: group.taxType || "INC_VAT",
           vendorId,
           modelCode,
           imageUrl,
           isService,
           isRawMaterial,
+          baseUomId,
           prices,
         });
         setEditError("");
@@ -2161,6 +2223,13 @@ export default function ProductsClient() {
       return;
     }
 
+    if (!editForm.baseUomId.trim()) {
+      setEditError("กรุณาเลือกหน่วยนับ (UOM)");
+      setIsEditSaving(false);
+      setIsEditConfirmOpen(false);
+      return;
+    }
+
     const modelId =
       editTarget.modelId ??
       editTarget.products.find((item) => item.model_id)?.model_id ??
@@ -2202,6 +2271,7 @@ export default function ProductsClient() {
       "is_raw_material",
       editForm.isRawMaterial ? "true" : "false",
     );
+    formData.set("base_uom_id", editForm.baseUomId.trim());
     formData.set("sizePrices", JSON.stringify(sizePrices));
 
     const result = await updateProductModel(formData);
@@ -2755,9 +2825,20 @@ export default function ProductsClient() {
                     className="mb-4"
                     checked={form.isRawMaterial}
                     disabled={isMasterLoading || isSaving || isDraftSaving}
-                    onCheckedChange={(checked) =>
-                      updateForm("isRawMaterial", checked)
-                    }
+                    onCheckedChange={(checked) => {
+                      const noneGenderId = findNoneGenderId(masterData.genders);
+                      const pcsUomId = findPcsUomId(masterData.uoms);
+                      setForm((current) => ({
+                        ...current,
+                        isRawMaterial: checked,
+                        genderId: checked
+                          ? noneGenderId || current.genderId
+                          : current.genderId,
+                        baseUomId: checked
+                          ? ""
+                          : current.baseUomId || pcsUomId,
+                      }));
+                    }}
                   />
 
                   <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
@@ -2859,25 +2940,64 @@ export default function ProductsClient() {
                         }
                       />
                     </div>
+                    {form.isRawMaterial ? (
+                      <div className="block lg:col-span-1">
+                        <span className={labelClass}>เพศ (Gender)</span>
+                        <div className="flex h-10 items-center rounded-xl border border-amber-200 bg-amber-50/70 px-3 text-sm font-medium text-amber-900">
+                          N — None/ไม่ระบุ
+                        </div>
+                        <p className="mt-1 text-[11px] text-slate-400">
+                          วัตถุดิบล็อก Gender เป็น N อัตโนมัติ
+                        </p>
+                      </div>
+                    ) : (
+                      <label className="block lg:col-span-1">
+                        <span className={labelClass}>
+                          เพศ (Gender) <span className="text-red-500">*</span>
+                        </span>
+                        <select
+                          required
+                          disabled={isMasterLoading}
+                          value={form.genderId}
+                          onChange={(event) =>
+                            updateForm("genderId", event.target.value)
+                          }
+                          className={fieldClass}
+                        >
+                          <option value="">
+                            {isMasterLoading ? "กำลังโหลด..." : "เลือกเพศ"}
+                          </option>
+                          {masterData.genders.map((gender) => (
+                            <option key={gender.id} value={gender.id}>
+                              {formatGenderOption(gender)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
                     <label className="block lg:col-span-1">
                       <span className={labelClass}>
-                        เพศ (Gender) <span className="text-red-500">*</span>
+                        หน่วยนับ (UOM) <span className="text-red-500">*</span>
                       </span>
                       <select
                         required
                         disabled={isMasterLoading}
-                        value={form.genderId}
+                        value={form.baseUomId}
                         onChange={(event) =>
-                          updateForm("genderId", event.target.value)
+                          updateForm("baseUomId", event.target.value)
                         }
                         className={fieldClass}
                       >
                         <option value="">
-                          {isMasterLoading ? "กำลังโหลด..." : "เลือกเพศ"}
+                          {form.isRawMaterial
+                            ? "เลือกหน่วยนับวัตถุดิบ"
+                            : isMasterLoading
+                              ? "กำลังโหลด..."
+                              : "เลือกหน่วยนับ"}
                         </option>
-                        {masterData.genders.map((gender) => (
-                          <option key={gender.id} value={gender.id}>
-                            {formatGenderOption(gender)}
+                        {masterData.uoms.map((uom) => (
+                          <option key={uom.uom_id} value={uom.uom_id}>
+                            {uom.uom_code} — {uom.uom_name}
                           </option>
                         ))}
                       </select>
@@ -3748,13 +3868,24 @@ export default function ProductsClient() {
                   className="mb-4"
                   checked={editForm.isRawMaterial}
                   disabled={isEditSaving}
-                  onCheckedChange={(checked) =>
-                    setEditForm((current) =>
-                      current
-                        ? { ...current, isRawMaterial: checked }
-                        : current,
-                    )
-                  }
+                    onCheckedChange={(checked) => {
+                      const noneGenderId = findNoneGenderId(masterData.genders);
+                      const pcsUomId = findPcsUomId(masterData.uoms);
+                      setEditForm((current) =>
+                        current
+                          ? {
+                              ...current,
+                              isRawMaterial: checked,
+                              genderId: checked
+                                ? noneGenderId || current.genderId
+                                : current.genderId,
+                              baseUomId: checked
+                                ? ""
+                                : current.baseUomId || pcsUomId,
+                            }
+                          : current,
+                      );
+                    }}
                 />
 
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -3791,26 +3922,60 @@ export default function ProductsClient() {
                       placeholder="เช่น Portman 6401"
                     />
                   </label>
+                  {editForm.isRawMaterial ? (
+                    <div className="block">
+                      <span className={labelClass}>เพศ</span>
+                      <div className="flex h-10 items-center rounded-xl border border-amber-200 bg-amber-50/70 px-3 text-sm font-medium text-amber-900">
+                        N — None/ไม่ระบุ
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="block">
+                      <span className={labelClass}>เพศ</span>
+                      <select
+                        value={editForm.genderId}
+                        onChange={(event) =>
+                          setEditForm((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  genderId: event.target.value,
+                                }
+                              : current,
+                          )
+                        }
+                        className={fieldClass}
+                      >
+                        <option value="">เลือกเพศ</option>
+                        {masterData.genders.map((gender) => (
+                          <option key={gender.id} value={gender.id}>
+                            {formatGenderOption(gender)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                   <label className="block">
-                    <span className={labelClass}>เพศ</span>
+                    <span className={labelClass}>
+                      หน่วยนับ (UOM) <span className="text-red-500">*</span>
+                    </span>
                     <select
-                      value={editForm.genderId}
+                      required
+                      disabled={isEditSaving}
+                      value={editForm.baseUomId}
                       onChange={(event) =>
                         setEditForm((current) =>
                           current
-                            ? {
-                                ...current,
-                                genderId: event.target.value,
-                              }
+                            ? { ...current, baseUomId: event.target.value }
                             : current,
                         )
                       }
                       className={fieldClass}
                     >
-                      <option value="">เลือกเพศ</option>
-                      {masterData.genders.map((gender) => (
-                        <option key={gender.id} value={gender.id}>
-                          {formatGenderOption(gender)}
+                      <option value="">เลือกหน่วยนับ</option>
+                      {masterData.uoms.map((uom) => (
+                        <option key={uom.uom_id} value={uom.uom_id}>
+                          {uom.uom_code} — {uom.uom_name}
                         </option>
                       ))}
                     </select>

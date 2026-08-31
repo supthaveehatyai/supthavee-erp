@@ -1,0 +1,10 @@
+{
+    "files.encoding": "utf8",
+    "files.autoGuessEncoding": false,
+    "[typescript]": {
+      "files.encoding": "utf8"
+    },
+    "[sql]": {
+      "files.encoding": "utf8"
+    }
+  }

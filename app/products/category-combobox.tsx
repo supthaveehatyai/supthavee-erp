@@ -24,6 +24,7 @@ export type Category = {
   id: string;
   category_code: string;
   category_name: string;
+  parent_id?: string | null;
 };
 
 type CategoryComboboxProps = {
@@ -130,6 +131,7 @@ export default function CategoryCombobox({
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryCode, setNewCategoryCode] = useState("");
+  const [newParentId, setNewParentId] = useState("");
   const [createError, setCreateError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -168,6 +170,7 @@ export default function CategoryCombobox({
   function openCreateDialog() {
     setNewCategoryName(search.trim());
     setNewCategoryCode("");
+    setNewParentId("");
     setCreateError("");
     setOpen(false);
     setIsCreateOpen(true);
@@ -222,6 +225,7 @@ export default function CategoryCombobox({
     const { data, error } = await createCategory({
       category_code: categoryCode,
       category_name: categoryName,
+      parent_id: newParentId.trim() || null,
     });
 
     if (error || !data) {
@@ -336,6 +340,26 @@ export default function CategoryCombobox({
               />
               <span className="mt-1 block text-[11px] text-slate-400">
                 บังคับตัวพิมพ์ใหญ่ภาษาอังกฤษ 2 ตัวอักษร (A–Z)
+              </span>
+            </label>
+
+            <label className="block">
+              <span className={labelClass}>หมวดหมู่หลัก (Parent Category)</span>
+              <select
+                value={newParentId}
+                onChange={(event) => setNewParentId(event.target.value)}
+                disabled={isSaving}
+                className={fieldClass}
+              >
+                <option value="">— ไม่ระบุ (หมวดหมู่ระดับราก) —</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.category_code}: {category.category_name}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1 block text-[11px] text-slate-400">
+                ตัวอย่าง: สร้าง &quot;ปกเสื้อ&quot; ภายใต้ &quot;V: วัตถุดิบ&quot;
               </span>
             </label>
 

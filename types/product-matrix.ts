@@ -23,6 +23,8 @@ export type SaveDraftModelInput = {
   isService?: boolean;
   /** product_models.is_raw_material — วัตถุดิบ (ไม่แสดงใน Sales SKU Picker) */
   isRawMaterial?: boolean;
+  /** product_models.base_uom_id → mst_uom.uom_id */
+  baseUomId?: string | null;
 };
 
 export type ExistingProductModel = {
@@ -40,6 +42,7 @@ export type ExistingProductModel = {
   image_url: string | null;
   is_service: boolean;
   is_raw_material: boolean;
+  base_uom_id: string | null;
 };
 
 export type UploadProductModelImageResult = {

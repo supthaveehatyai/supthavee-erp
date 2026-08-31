@@ -53,12 +53,19 @@ export type MasterCategory = {
   id: string;
   category_code: string;
   category_name: string;
+  parent_id?: string | null;
 };
 
 export type MasterGender = {
   id: string;
   gender_code: string;
   gender_name: string;
+};
+
+export type MasterUom = {
+  uom_id: string;
+  uom_code: string;
+  uom_name: string;
 };
 
 export type MasterVendor = {
@@ -139,7 +146,7 @@ export async function getCategories(): Promise<GetCategoriesResult> {
     const supabaseAdmin = createSupabaseAdminClient();
     const { data, error } = await supabaseAdmin
       .from("mst_categories")
-      .select("id, category_code, category_name")
+      .select("id, category_code, category_name, parent_id")
       .eq("is_active", true)
       .order("category_code");
 
@@ -147,6 +154,24 @@ export async function getCategories(): Promise<GetCategoriesResult> {
     return { data: (data ?? []) as MasterCategory[], error: null };
   } catch (err) {
     const message = err instanceof Error ? err.message : "โหลดรายการหมวดหมู่ไม่สำเร็จ";
+    return { data: [], error: message };
+  }
+}
+
+export type GetUomsResult = { data: MasterUom[]; error: string | null };
+
+export async function getUoms(): Promise<GetUomsResult> {
+  try {
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data, error } = await supabaseAdmin
+      .from("mst_uom")
+      .select("uom_id, uom_code, uom_name")
+      .order("uom_code");
+
+    if (error) return { data: [], error: error.message };
+    return { data: (data ?? []) as MasterUom[], error: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "โหลดรายการหน่วยนับไม่สำเร็จ";
     return { data: [], error: message };
   }
 }
@@ -586,25 +611,34 @@ export type GetMasterDataResult = {
   colors: MasterColor[];
   genders: MasterGender[];
   vendors: MasterVendor[];
+  uoms: MasterUom[];
   error: string | null;
 };
 
 export async function getMasterDataForMatrix(): Promise<GetMasterDataResult> {
-  const [brandsResult, categoriesResult, colorsResult, gendersResult, vendorsResult] =
-    await Promise.all([
-      getBrands(),
-      getCategories(),
-      getColors(),
-      getGenders(),
-      getVendors(),
-    ]);
+  const [
+    brandsResult,
+    categoriesResult,
+    colorsResult,
+    gendersResult,
+    vendorsResult,
+    uomsResult,
+  ] = await Promise.all([
+    getBrands(),
+    getCategories(),
+    getColors(),
+    getGenders(),
+    getVendors(),
+    getUoms(),
+  ]);
 
   const error =
     brandsResult.error ??
     categoriesResult.error ??
     colorsResult.error ??
     gendersResult.error ??
-    vendorsResult.error;
+    vendorsResult.error ??
+    uomsResult.error;
 
   return {
     brands: brandsResult.data,
@@ -612,6 +646,7 @@ export async function getMasterDataForMatrix(): Promise<GetMasterDataResult> {
     colors: colorsResult.data,
     genders: gendersResult.data,
     vendors: vendorsResult.data,
+    uoms: uomsResult.data,
     error,
   };
 }
@@ -801,6 +836,8 @@ const CATEGORY_CODE_PATTERN = /^[A-Z]{2}$/;
 export type CreateCategoryInput = {
   category_code: string;
   category_name: string;
+  /** Optional parent category → mst_categories.parent_id */
+  parent_id?: string | null;
 };
 
 export type CreateCategoryResult = {
@@ -813,6 +850,7 @@ export async function createCategory(
 ): Promise<CreateCategoryResult> {
   const categoryName = input.category_name?.trim() ?? "";
   const categoryCode = normalizeCode(input.category_code ?? "", 2);
+  const parentId = input.parent_id?.trim() || null;
 
   if (!categoryName) {
     return { data: null, error: "กรุณากรอกชื่อหมวดหมู่" };
@@ -824,14 +862,30 @@ export async function createCategory(
   try {
     const supabaseAdmin = createSupabaseAdminClient();
 
+    if (parentId) {
+      const { data: parentRow, error: parentError } = await supabaseAdmin
+        .from("mst_categories")
+        .select("id")
+        .eq("id", parentId)
+        .maybeSingle();
+
+      if (parentError) {
+        return { data: null, error: parentError.message };
+      }
+      if (!parentRow) {
+        return { data: null, error: "ไม่พบหมวดหมู่หลัก (Parent Category)" };
+      }
+    }
+
     const { data, error } = await supabaseAdmin
       .from("mst_categories")
       .insert({
         category_code: categoryCode,
         category_name: categoryName,
+        parent_id: parentId,
         is_active: true,
       })
-      .select("id, category_code, category_name")
+      .select("id, category_code, category_name, parent_id")
       .single();
 
     if (error || !data) {

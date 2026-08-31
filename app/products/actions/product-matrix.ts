@@ -61,6 +61,7 @@ function validateStep1(input: SaveDraftModelInput): string | null {
     imageUrl: input.imageUrl ?? null,
     isService: input.isService,
     isRawMaterial: input.isRawMaterial,
+    baseUomId: input.baseUomId,
   });
   if (!identity.ok) return identity.error;
   if (!isValidModelCode(identity.data.model_code)) {
@@ -90,11 +91,12 @@ function buildDraftPayload(input: SaveDraftModelInput) {
     image_url: input.imageUrl?.trim().split("?")[0] || null,
     is_service: isService,
     is_raw_material: isRawMaterial,
+    base_uom_id: toNullableUuid(input.baseUomId ?? ""),
   };
 }
 
 const EXISTING_MODEL_SELECT =
-  "id, model_code, name, short_name, gender, tax_type, status, vendor_id, brand_id, category_id, size_pricing_config, image_url, is_service, is_raw_material";
+  "id, model_code, name, short_name, gender, tax_type, status, vendor_id, brand_id, category_id, size_pricing_config, image_url, is_service, is_raw_material, base_uom_id";
 
 const PRODUCT_ASSETS_BUCKET = "product_assets";
 const MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -319,6 +321,7 @@ export async function listLoadableProductModels(): Promise<{
       image_url: record.image_url ?? null,
       is_service: record.is_service === true,
       is_raw_material: record.is_raw_material === true,
+      base_uom_id: record.base_uom_id ?? null,
       brand_code: brand?.brand_code ?? null,
       brand_name: brand?.brand_name ?? null,
       category_code: category?.category_code ?? null,
@@ -509,6 +512,21 @@ export async function generateSkusFromModel(
   );
   const skipped = input.skus.filter((row) => existingSkuSet.has(row.sku)).length;
 
+  let baseUomLabel = "ตัว";
+  const baseUomId = toNullableUuid(input.model.baseUomId ?? "");
+  if (baseUomId) {
+    const { data: uomRow } = await supabase
+      .from("mst_uom")
+      .select("uom_name, uom_code")
+      .eq("uom_id", baseUomId)
+      .maybeSingle();
+    if (uomRow?.uom_name) {
+      baseUomLabel = String(uomRow.uom_name);
+    } else if (uomRow?.uom_code) {
+      baseUomLabel = String(uomRow.uom_code);
+    }
+  }
+
   const productRows = input.skus.map((row) => ({
     model_id: modelId,
     sku: row.sku,
@@ -520,7 +538,7 @@ export async function generateSkusFromModel(
     size: row.size,
     gender: row.gender,
     tax_type: normalizeTaxType(row.taxType),
-    base_uom: "ตัว",
+    base_uom: baseUomLabel,
     cost_price: row.costPrice,
     retail_price: row.retailPrice,
     wholesale_price: row.wholesalePrice,
@@ -776,6 +794,9 @@ export async function updateProductModel(
       isRawMaterial:
         formDataText(formData, "is_raw_material") === "true" ||
         formDataText(formData, "isRawMaterial") === "true",
+      baseUomId:
+        formDataText(formData, "base_uom_id") ||
+        formDataText(formData, "baseUomId"),
       sizePrices: sizePricesOrError,
     });
 
@@ -813,6 +834,7 @@ export async function updateProductModel(
         image_url: input.image_url?.trim() || null,
         is_service: input.isService,
         is_raw_material: input.isRawMaterial,
+        base_uom_id: toNullableUuid(input.baseUomId),
       })
       .eq("id", input.modelId);
 
