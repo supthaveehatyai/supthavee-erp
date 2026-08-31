@@ -249,6 +249,28 @@ function createEmptySizePricing(size: Size): SizePricingRow {
   };
 }
 
+/** Raw materials: sell prices locked at 0; cost entered directly (NET mode). */
+function applyRawMaterialPricingRow(row: SizePricingRow): SizePricingRow {
+  return {
+    ...row,
+    retailPrice: "0",
+    wholesalePrice: "0",
+    discountType: "NET",
+    discountValue: "",
+  };
+}
+
+function resolveSizeForPricing(
+  sizeId: string,
+  sizesCatalog: Size[],
+  globalCatalog: Size[],
+): Size | undefined {
+  return (
+    sizesCatalog.find((item) => item.id === sizeId) ??
+    globalCatalog.find((item) => item.id === sizeId)
+  );
+}
+
 /** Real-time cost from retail ± discount. Skipped for NET (manual entry). */
 function calculateCostPrice(
   retailPrice: string,
@@ -1287,6 +1309,12 @@ export default function ProductsClient() {
     form.sizeIds.every((sizeId) => {
       const pricing = sizePricingById.get(sizeId);
       if (!pricing) return false;
+      if (form.isRawMaterial) {
+        return (
+          pricing.costPrice.trim() !== "" &&
+          Number.isFinite(Number(pricing.costPrice))
+        );
+      }
       return (
         pricing.retailPrice.trim() !== "" &&
         Number.isFinite(Number(pricing.retailPrice)) &&
@@ -1383,9 +1411,11 @@ export default function ProductsClient() {
     setSizePricing((current) => {
       const existing = current.find((row) => row.sizeId === naSize.id);
       if (existing) return current;
-      return [createEmptySizePricing(naSize)];
+      const base = createEmptySizePricing(naSize);
+      const row = form.isRawMaterial ? applyRawMaterialPricingRow(base) : base;
+      return [row];
     });
-  }, [globalSizeCatalog]);
+  }, [globalSizeCatalog, form.isRawMaterial]);
 
   const clearNaSizeMatrixSelection = useCallback(() => {
     setIsStandardSizePanelOpen(false);
@@ -1418,9 +1448,46 @@ export default function ProductsClient() {
     isDialogOpen,
     matrixUsesNaSizeOnlyFlag,
     form.sizeIds,
+    form.isRawMaterial,
     systemNaSize?.id,
     applyNaSizeOnlyMatrix,
     clearNaSizeMatrixSelection,
+  ]);
+
+  /** Ensure every selected size has a sizePricing row (fixes size 00 auto-fill key drift). */
+  useEffect(() => {
+    if (!isDialogOpen || form.sizeIds.length === 0) return;
+
+    setSizePricing((current) => {
+      const missingIds = form.sizeIds.filter(
+        (sizeId) => !current.some((row) => row.sizeId === sizeId),
+      );
+      if (missingIds.length === 0) return current;
+
+      const additions = missingIds
+        .map((sizeId) => {
+          const size = resolveSizeForPricing(
+            sizeId,
+            sizes,
+            globalSizeCatalog,
+          );
+          if (!size) return null;
+          const base = createEmptySizePricing(size);
+          return form.isRawMaterial
+            ? applyRawMaterialPricingRow(base)
+            : base;
+        })
+        .filter((row): row is SizePricingRow => row !== null);
+
+      if (additions.length === 0) return current;
+      return [...current, ...additions];
+    });
+  }, [
+    isDialogOpen,
+    form.sizeIds,
+    form.isRawMaterial,
+    sizes,
+    globalSizeCatalog,
   ]);
 
   async function openDialog(presetVendorId?: string) {
@@ -1745,18 +1812,22 @@ export default function ProductsClient() {
           const existing = byId.get(sizeId);
           if (existing) return existing;
           const size = sizeById.get(sizeId);
-          return size
-            ? createEmptySizePricing(size)
-            : {
-                sizeId,
-                sizeCode: "",
-                sizeLabel: "?",
-                retailPrice: "",
-                wholesalePrice: "",
-                discountType: "PERCENT" as const,
-                discountValue: "",
-                costPrice: "",
-              };
+          if (!size) {
+            return {
+              sizeId,
+              sizeCode: "",
+              sizeLabel: "?",
+              retailPrice: "",
+              wholesalePrice: "",
+              discountType: "PERCENT" as const,
+              discountValue: "",
+              costPrice: "",
+            };
+          }
+          const base = createEmptySizePricing(size);
+          return form.isRawMaterial
+            ? applyRawMaterialPricingRow(base)
+            : base;
         });
       });
 
@@ -1792,7 +1863,11 @@ export default function ProductsClient() {
       const exists = current.some((row) => row.sizeId === sizeId);
       if (exists) return current.filter((row) => row.sizeId !== sizeId);
       if (!size) return current;
-      return [...current, createEmptySizePricing(size)];
+      const base = createEmptySizePricing(size);
+      return [
+        ...current,
+        form.isRawMaterial ? applyRawMaterialPricingRow(base) : base,
+      ];
     });
   }
 
@@ -1809,10 +1884,50 @@ export default function ProductsClient() {
       >
     >,
   ) {
-    setSizePricing((current) =>
-      current.map((row) => {
+    setSizePricing((current) => {
+      const index = current.findIndex((row) => row.sizeId === sizeId);
+
+      if (index === -1) {
+        const size = resolveSizeForPricing(sizeId, sizes, globalSizeCatalog);
+        if (!size) return current;
+        let next: SizePricingRow = {
+          ...createEmptySizePricing(size),
+          ...patch,
+        };
+
+        if (form.isRawMaterial) {
+          next = applyRawMaterialPricingRow({
+            ...next,
+            costPrice: patch.costPrice ?? next.costPrice,
+          });
+          return [...current, next];
+        }
+
+        if (patch.discountType === "NET") {
+          return [
+            ...current,
+            { ...next, discountType: "NET", discountValue: "" },
+          ];
+        }
+
+        if (patch.costPrice !== undefined && next.discountType === "NET") {
+          return [...current, next];
+        }
+
+        return [...current, withCalculatedCost(next)];
+      }
+
+      return current.map((row) => {
         if (row.sizeId !== sizeId) return row;
-        const next = { ...row, ...patch };
+        let next = { ...row, ...patch };
+
+        if (form.isRawMaterial) {
+          next = applyRawMaterialPricingRow({
+            ...next,
+            costPrice: patch.costPrice ?? next.costPrice,
+          });
+          return next;
+        }
 
         // Switching into Net Price: keep current cost as a starting seed
         // the user can edit; clear the unused discount value field.
@@ -1830,8 +1945,8 @@ export default function ProductsClient() {
         }
 
         return withCalculatedCost(next);
-      }),
-    );
+      });
+    });
   }
 
   async function handleSaveDraftModel() {
@@ -2991,6 +3106,11 @@ export default function ProductsClient() {
                           ? ""
                           : current.baseUomId || pcsUomId,
                       }));
+                      if (checked) {
+                        setSizePricing((current) =>
+                          current.map((row) => applyRawMaterialPricingRow(row)),
+                        );
+                      }
                     }}
                   />
 
@@ -3614,8 +3734,17 @@ export default function ProductsClient() {
                   <StepHeading
                     number={3}
                     title="ราคาตามไซส์"
-                    description="ต้นทุนคำนวณอัตโนมัติจากราคาปลีกและส่วนลด — หรือเลือก “ราคาเน็ต” เพื่อพิมพ์ต้นทุนตรงๆ (ใช้กับทุกสีในไซส์เดียวกัน)"
+                    description={
+                      form.isRawMaterial
+                        ? "วัตถุดิบ — กรอกราคาต้นทุนเท่านั้น (ราคาขายปลีก/ส่งและส่วนลดล็อกที่ 0)"
+                        : "ต้นทุนคำนวณอัตโนมัติจากราคาปลีกและส่วนลด — หรือเลือก “ราคาเน็ต” เพื่อพิมพ์ต้นทุนตรงๆ (ใช้กับทุกสีในไซส์เดียวกัน)"
+                    }
                   />
+                  {form.isRawMaterial && (
+                    <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-2.5 text-xs text-amber-900">
+                      สินค้ารหัสนี้เป็นวัตถุดิบ (Raw Material) ระบบจะอนุญาตให้กำหนดเฉพาะราคาต้นทุนเท่านั้น
+                    </div>
+                  )}
                   {form.sizeIds.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-xs text-slate-400">
                       เลือกไซส์เพื่อกำหนดราคา
@@ -3651,8 +3780,14 @@ export default function ProductsClient() {
                             .map((size) => {
                               const pricing =
                                 sizePricingById.get(size.id) ??
-                                createEmptySizePricing(size);
-                              const isNetPrice = pricing.discountType === "NET";
+                                (form.isRawMaterial
+                                  ? applyRawMaterialPricingRow(
+                                      createEmptySizePricing(size),
+                                    )
+                                  : createEmptySizePricing(size));
+                              const isNetPrice =
+                                pricing.discountType === "NET" || form.isRawMaterial;
+                              const rawMaterialLocked = form.isRawMaterial;
                               return (
                                 <tr key={size.id}>
                                   <td className="px-4 py-3">
@@ -3674,6 +3809,7 @@ export default function ProductsClient() {
                                     <PriceInput
                                       value={pricing.retailPrice}
                                       ariaLabel={`ราคาขายปลีกไซส์ ${size.size_label}`}
+                                      disabled={rawMaterialLocked}
                                       onChange={(value) =>
                                         updateSizePricing(size.id, {
                                           retailPrice: value,
@@ -3685,6 +3821,7 @@ export default function ProductsClient() {
                                     <PriceInput
                                       value={pricing.wholesalePrice}
                                       ariaLabel={`ราคาขายส่งไซส์ ${size.size_label}`}
+                                      disabled={rawMaterialLocked}
                                       onChange={(value) =>
                                         updateSizePricing(size.id, {
                                           wholesalePrice: value,
@@ -3696,6 +3833,7 @@ export default function ProductsClient() {
                                     <select
                                       aria-label={`ประเภทส่วนลดไซส์ ${size.size_label}`}
                                       value={pricing.discountType}
+                                      disabled={rawMaterialLocked}
                                       onChange={(event) =>
                                         updateSizePricing(size.id, {
                                           discountType: event.target
@@ -3718,8 +3856,8 @@ export default function ProductsClient() {
                                         inputMode="decimal"
                                         aria-label={`ค่าส่วนลดไซส์ ${size.size_label}`}
                                         value={pricing.discountValue}
-                                        disabled={isNetPrice}
-                                        readOnly={isNetPrice}
+                                        disabled={isNetPrice || rawMaterialLocked}
+                                        readOnly={isNetPrice || rawMaterialLocked}
                                         onChange={(event) =>
                                           updateSizePricing(size.id, {
                                             discountValue: event.target.value,
@@ -3727,7 +3865,7 @@ export default function ProductsClient() {
                                         }
                                         placeholder={isNetPrice ? "—" : "0"}
                                         className={`${fieldClass} pr-10 text-right tabular-nums ${
-                                          isNetPrice
+                                          isNetPrice || rawMaterialLocked
                                             ? "cursor-not-allowed bg-slate-50 text-slate-400"
                                             : ""
                                         }`}
