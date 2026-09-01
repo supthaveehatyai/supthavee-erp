@@ -30,6 +30,13 @@ import { type Vendor } from "./vendor-combobox";
 import ModelLoadCombobox from "./model-load-combobox";
 import { ProductMatrixRawMaterialToggle, ProductMatrixServiceToggle, ProductMatrixVendorField } from "./ProductMatrixForm";
 import { ProductModelImageUpload } from "@/components/products/ProductModelImageUpload";
+import { BOMSetupPanel } from "@/components/products/BOMSetupPanel";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import {
   findProductModelByCode,
   generateSkusFromModel,
@@ -951,6 +958,7 @@ export default function ProductsClient() {
 
   const [editTarget, setEditTarget] = useState<ProductGroup | null>(null);
   const [editForm, setEditForm] = useState<BatchEditForm | null>(null);
+  const [batchEditTab, setBatchEditTab] = useState<"general" | "bom">("general");
   const [editError, setEditError] = useState("");
   const [isEditSaving, setIsEditSaving] = useState(false);
   const [isEditConfirmOpen, setIsEditConfirmOpen] = useState(false);
@@ -2363,6 +2371,7 @@ export default function ProductsClient() {
           : matched?.id ?? "";
 
         setEditTarget(group);
+        setBatchEditTab("general");
         setEditForm({
           description: group.title,
           shortName: group.shortName,
@@ -2392,6 +2401,7 @@ export default function ProductsClient() {
     if (isEditSaving) return;
     setEditTarget(null);
     setEditForm(null);
+    setBatchEditTab("general");
     setEditError("");
     setIsEditConfirmOpen(false);
   }
@@ -4116,6 +4126,18 @@ export default function ProductsClient() {
             if (event.target === event.currentTarget) closeBatchEdit();
           }}
         >
+          {(() => {
+            const editModelId =
+              editTarget.modelId ??
+              editTarget.products.find((item) => item.model_id)?.model_id ??
+              "";
+            const showBomTab =
+              !editForm.isService &&
+              !editForm.isRawMaterial &&
+              Boolean(editModelId);
+
+            return (
+          <>
           <div
             role="dialog"
             aria-modal="true"
@@ -4151,7 +4173,30 @@ export default function ProductsClient() {
               </button>
             </div>
 
-            <div className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+              <Tabs
+                value={
+                  showBomTab ? batchEditTab : "general"
+                }
+                onValueChange={(value) => {
+                  if (value === "general" || value === "bom") {
+                    setBatchEditTab(value);
+                  }
+                }}
+                className="space-y-4"
+              >
+                <TabsList
+                  className={
+                    showBomTab ? "grid w-full max-w-lg grid-cols-2" : "max-w-lg"
+                  }
+                >
+                  <TabsTrigger value="general">ข้อมูลรุ่น</TabsTrigger>
+                  {showBomTab ? (
+                    <TabsTrigger value="bom">สูตรการผลิต (BOM)</TabsTrigger>
+                  ) : null}
+                </TabsList>
+
+                <TabsContent value="general" className="mt-0 space-y-5">
               <section className="rounded-2xl border border-slate-200 bg-white p-5">
                 <StepHeading
                   number={1}
@@ -4175,11 +4220,12 @@ export default function ProductsClient() {
                   className="mb-4"
                   checked={editForm.isService}
                   disabled={isEditSaving}
-                  onCheckedChange={(checked) =>
+                  onCheckedChange={(checked) => {
+                    setBatchEditTab("general");
                     setEditForm((current) =>
                       current ? { ...current, isService: checked } : current,
-                    )
-                  }
+                    );
+                  }}
                 />
 
                 <ProductMatrixRawMaterialToggle
@@ -4189,6 +4235,7 @@ export default function ProductsClient() {
                     onCheckedChange={(checked) => {
                       const noneGenderId = findNoneGenderId(masterData.genders);
                       const pcsUomId = findPcsUomId(masterData.uoms);
+                      setBatchEditTab("general");
                       setEditForm((current) =>
                         current
                           ? {
@@ -4490,6 +4537,14 @@ export default function ProductsClient() {
                   {editError}
                 </div>
               )}
+                </TabsContent>
+
+                {showBomTab ? (
+                  <TabsContent value="bom" className="mt-0">
+                    <BOMSetupPanel modelId={editModelId} />
+                  </TabsContent>
+                ) : null}
+              </Tabs>
             </div>
 
             <footer className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7">
@@ -4591,6 +4646,9 @@ export default function ProductsClient() {
               </div>
             </div>
           )}
+          </>
+            );
+          })()}
         </div>
       )}
 
