@@ -5,7 +5,7 @@
 
 export type BOMItemRow = {
   id: string;
-  model_id: string;
+  finished_model_id: string;
   raw_material_model_id: string;
   raw_material_model_code: string;
   raw_material_model_name: string;
@@ -23,8 +23,8 @@ export type GetBOMByModelIdResult =
   | { success: false; error: string; data: BOMItemRow[] };
 
 export type AddBOMItemPayload = {
-  /** รุ่นสินค้าสำเร็จรูป (product_models.id) */
-  model_id: string;
+  /** รุ่นสินค้าสำเร็จรูป (product_models.id → product_boms.finished_model_id) */
+  finished_model_id: string;
   /** รุ่นวัตถุดิบ (product_models.id, is_raw_material = true) */
   raw_material_model_id: string;
   /** ปริมาณที่ใช้ต่อ 1 หน่วยสินค้าสำเร็จรูป */

@@ -5,7 +5,7 @@
 
 CREATE TABLE IF NOT EXISTS public.product_boms (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  model_id UUID NOT NULL
+  finished_model_id UUID NOT NULL
     REFERENCES public.product_models(id) ON DELETE CASCADE,
   raw_material_model_id UUID NOT NULL
     REFERENCES public.product_models(id) ON DELETE CASCADE,
@@ -19,10 +19,10 @@ CREATE TABLE IF NOT EXISTS public.product_boms (
     CHECK (waste_percent >= 0),
   created_by UUID REFERENCES auth.users(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT product_boms_model_raw_material_unique
-    UNIQUE (model_id, raw_material_model_id),
+  CONSTRAINT product_boms_finished_raw_material_unique
+    UNIQUE (finished_model_id, raw_material_model_id),
   CONSTRAINT product_boms_no_self_reference
-    CHECK (model_id <> raw_material_model_id)
+    CHECK (finished_model_id <> raw_material_model_id)
 );
 
 COMMENT ON TABLE public.product_boms IS
@@ -32,8 +32,8 @@ COMMENT ON COLUMN public.product_boms.quantity_required IS
 COMMENT ON COLUMN public.product_boms.waste_percent IS
   'เปอร์เซ็นต์เผื่อเสีย (%)';
 
-CREATE INDEX IF NOT EXISTS idx_product_boms_model_id
-  ON public.product_boms (model_id);
+CREATE INDEX IF NOT EXISTS idx_product_boms_finished_model_id
+  ON public.product_boms (finished_model_id);
 
 CREATE INDEX IF NOT EXISTS idx_product_boms_raw_material_model_id
   ON public.product_boms (raw_material_model_id);

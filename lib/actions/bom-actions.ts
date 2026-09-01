@@ -36,7 +36,7 @@ function escapeIlikePattern(raw: string): string {
 
 type ProductBomDbRow = {
   id: string;
-  model_id: string;
+  finished_model_id: string;
   raw_material_model_id: string;
   uom_id: string;
   quantity_required: number | string | null;
@@ -230,9 +230,9 @@ export async function getBOMByModelId(
     const { data: rows, error } = await supabaseAdmin
       .from("product_boms")
       .select(
-        "id, model_id, raw_material_model_id, uom_id, quantity_required, waste_percent, created_by, created_at",
+        "id, finished_model_id, raw_material_model_id, uom_id, quantity_required, waste_percent, created_by, created_at",
       )
-      .eq("model_id", id)
+      .eq("finished_model_id", id)
       .order("created_at", { ascending: true });
 
     if (error) {
@@ -328,7 +328,7 @@ export async function getBOMByModelId(
 
       return {
         id: String(row.id),
-        model_id: String(row.model_id),
+        finished_model_id: String(row.finished_model_id),
         raw_material_model_id: String(row.raw_material_model_id),
         raw_material_model_code: rawMaterial?.model_code || "—",
         raw_material_model_name:
@@ -367,13 +367,16 @@ export async function addBOMItem(
       return { success: false, error: owner.error };
     }
 
-    const modelId = payload.model_id?.trim() ?? "";
+    const finishedModelId = payload.finished_model_id?.trim() ?? "";
     const rawMaterialModelId = payload.raw_material_model_id?.trim() ?? "";
     const quantityRequired = toQuantityRequired(payload.quantity_required);
     const wastePercent = toWastePercent(payload.waste_percent ?? 0);
 
-    if (!modelId) {
-      return { success: false, error: "กรุณาระบุรุ่นสินค้าสำเร็จรูป (model_id)" };
+    if (!finishedModelId) {
+      return {
+        success: false,
+        error: "กรุณาระบุรุ่นสินค้าสำเร็จรูป (finished_model_id)",
+      };
     }
     if (!rawMaterialModelId) {
       return { success: false, error: "กรุณาเลือกวัตถุดิบ (raw_material_model_id)" };
@@ -390,7 +393,7 @@ export async function addBOMItem(
         error: "%เผื่อเสียต้องอยู่ระหว่าง 0 ถึง 100",
       };
     }
-    if (modelId === rawMaterialModelId) {
+    if (finishedModelId === rawMaterialModelId) {
       return {
         success: false,
         error: "ไม่สามารถใส่รุ่นสินค้าเป็นวัตถุดิบของตัวเองได้",
@@ -403,7 +406,7 @@ export async function addBOMItem(
       supabaseAdmin
         .from("product_models")
         .select("id, is_raw_material, is_service")
-        .eq("id", modelId)
+        .eq("id", finishedModelId)
         .maybeSingle(),
       supabaseAdmin
         .from("product_models")
@@ -474,7 +477,7 @@ export async function addBOMItem(
     const { data, error } = await supabaseAdmin
       .from("product_boms")
       .insert({
-        model_id: modelId,
+        finished_model_id: finishedModelId,
         raw_material_model_id: rawMaterialModelId,
         uom_id: uomId,
         quantity_required: quantityRequired,

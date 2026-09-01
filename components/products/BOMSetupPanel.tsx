@@ -195,7 +195,7 @@ export function BOMSetupPanel({ modelId }: BOMSetupPanelProps) {
 
     startAdd(async () => {
       const result = await addBOMItem({
-        model_id: modelId,
+        finished_model_id: modelId,
         raw_material_model_id: selectedMaterial.id,
         quantity_required: qty,
         waste_percent: waste,
