@@ -77,7 +77,8 @@ const optionalUuid = z.preprocess(
 
 /**
  * Product model identity (Phase 1 Base Model).
- * `vendor_id` / `brand_id` required for goods; null when `is_service`.
+ * `vendor_id` / `brand_id` required for Buy goods;
+ * `vendor_id` optional when `is_service` or `is_manufactured` (Make).
  */
 export const productModelSchema = z
   .object({
@@ -102,13 +103,15 @@ export const productModelSchema = z
     image_url: z.string().nullable().optional(),
     is_service: z.boolean().default(false),
     is_raw_material: z.boolean().default(false),
+    /** Make vs Buy — true = ผลิตเอง (vendor ไม่บังคับ) */
+    is_manufactured: z.boolean().default(false),
     base_uom_id: z.uuid({
       error: "ต้องเลือกหน่วยนับ (base_uom_id) เป็น UUID ที่ถูกต้อง",
     }),
   })
   .superRefine((data, ctx) => {
     if (data.is_service) return;
-    if (!data.vendor_id) {
+    if (!data.is_manufactured && !data.vendor_id) {
       ctx.addIssue({
         code: "custom",
         path: ["vendor_id"],
@@ -126,6 +129,13 @@ export const productModelSchema = z
   .transform((data) => {
     if (data.is_service) {
       return { ...data, vendor_id: null, brand_id: null };
+    }
+    if (data.is_manufactured) {
+      return {
+        ...data,
+        vendor_id: null,
+        brand_id: data.brand_id ?? null,
+      };
     }
     return {
       ...data,
@@ -161,6 +171,7 @@ export const updateProductModelSchema = z
     image_url: z.string().nullable().optional(),
     isService: z.boolean().default(false),
     isRawMaterial: z.boolean().default(false),
+    isManufactured: z.boolean().default(false),
     baseUomId: z.uuid({
       error: "ต้องเลือกหน่วยนับ (base_uom_id) เป็น UUID ที่ถูกต้อง",
     }),
@@ -169,7 +180,7 @@ export const updateProductModelSchema = z
       .min(1, "ต้องระบุราคาตามไซส์อย่างน้อย 1 รายการ"),
   })
   .superRefine((data, ctx) => {
-    if (data.isService) return;
+    if (data.isService || data.isManufactured) return;
     if (!data.vendorId) {
       ctx.addIssue({
         code: "custom",
@@ -180,7 +191,8 @@ export const updateProductModelSchema = z
   })
   .transform((data) => ({
     ...data,
-    vendorId: data.isService ? null : (data.vendorId ?? null),
+    vendorId:
+      data.isService || data.isManufactured ? null : (data.vendorId ?? null),
   }));
 
 export type UpdateProductModelSchemaInput = z.input<
@@ -213,6 +225,7 @@ export function parseProductModelIdentity(input: {
   imageUrl?: string | null;
   isService?: boolean;
   isRawMaterial?: boolean;
+  isManufactured?: boolean;
   baseUomId?: string | null;
 }):
   | { ok: true; data: ProductModelSchemaOutput }
@@ -229,6 +242,7 @@ export function parseProductModelIdentity(input: {
     image_url: input.imageUrl ?? null,
     is_service: Boolean(input.isService),
     is_raw_material: Boolean(input.isRawMaterial),
+    is_manufactured: Boolean(input.isManufactured),
     base_uom_id: input.baseUomId,
   });
 

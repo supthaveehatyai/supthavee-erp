@@ -61,6 +61,7 @@ function validateStep1(input: SaveDraftModelInput): string | null {
     imageUrl: input.imageUrl ?? null,
     isService: input.isService,
     isRawMaterial: input.isRawMaterial,
+    isManufactured: input.isManufactured,
     baseUomId: input.baseUomId,
   });
   if (!identity.ok) return identity.error;
@@ -76,9 +77,11 @@ function buildDraftPayload(input: SaveDraftModelInput) {
     input.shortName?.trim() || `${input.name.trim()}`.slice(0, 100);
   const isService = Boolean(input.isService);
   const isRawMaterial = Boolean(input.isRawMaterial);
+  const isManufactured = Boolean(input.isManufactured);
 
   return {
-    vendor_id: isService ? null : toNullableUuid(input.vendorId),
+    vendor_id:
+      isService || isManufactured ? null : toNullableUuid(input.vendorId),
     brand_id: isService ? null : toNullableUuid(input.brandId),
     category_id: input.categoryId,
     model_code: modelCode,
@@ -91,12 +94,13 @@ function buildDraftPayload(input: SaveDraftModelInput) {
     image_url: input.imageUrl?.trim().split("?")[0] || null,
     is_service: isService,
     is_raw_material: isRawMaterial,
+    is_manufactured: isManufactured,
     base_uom_id: toNullableUuid(input.baseUomId ?? ""),
   };
 }
 
 const EXISTING_MODEL_SELECT =
-  "id, model_code, name, short_name, gender, tax_type, status, vendor_id, brand_id, category_id, size_pricing_config, image_url, is_service, is_raw_material, base_uom_id";
+  "id, model_code, name, short_name, gender, tax_type, status, vendor_id, brand_id, category_id, size_pricing_config, image_url, is_service, is_raw_material, is_manufactured, base_uom_id";
 
 const PRODUCT_ASSETS_BUCKET = "product_assets";
 const MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -321,6 +325,7 @@ export async function listLoadableProductModels(): Promise<{
       image_url: record.image_url ?? null,
       is_service: record.is_service === true,
       is_raw_material: record.is_raw_material === true,
+      is_manufactured: record.is_manufactured === true,
       base_uom_id: record.base_uom_id ?? null,
       brand_code: brand?.brand_code ?? null,
       brand_name: brand?.brand_name ?? null,
@@ -430,7 +435,8 @@ export async function generateSkusFromModel(
   }
 
   const isService = Boolean(input.model.isService);
-  if (!isService) {
+  const isManufactured = Boolean(input.model.isManufactured);
+  if (!isService && !isManufactured) {
     if (!input.vendorId) {
       return { ok: false, error: "กรุณาเลือกผู้จำหน่าย" };
     }
@@ -578,9 +584,10 @@ export async function generateSkusFromModel(
     insertedCount = insertedProducts?.length ?? 0;
 
     if (insertedProducts && insertedProducts.length > 0) {
-      const mappingVendorId = isService
-        ? null
-        : toNullableUuid(input.vendorId ?? input.model.vendorId);
+      const mappingVendorId =
+        isService || isManufactured
+          ? null
+          : toNullableUuid(input.vendorId ?? input.model.vendorId);
 
       if (mappingVendorId) {
         const mappings = insertedProducts.map((product) => ({
@@ -794,6 +801,9 @@ export async function updateProductModel(
       isRawMaterial:
         formDataText(formData, "is_raw_material") === "true" ||
         formDataText(formData, "isRawMaterial") === "true",
+      isManufactured:
+        formDataText(formData, "is_manufactured") === "true" ||
+        formDataText(formData, "isManufactured") === "true",
       baseUomId:
         formDataText(formData, "base_uom_id") ||
         formDataText(formData, "baseUomId"),
@@ -826,7 +836,10 @@ export async function updateProductModel(
     const { error: modelUpdateError } = await supabaseAdmin
       .from("product_models")
       .update({
-        vendor_id: input.isService ? null : toNullableUuid(input.vendorId),
+        vendor_id:
+          input.isService || input.isManufactured
+            ? null
+            : toNullableUuid(input.vendorId),
         name: baseName,
         short_name: shortName,
         gender: input.gender,
@@ -834,6 +847,7 @@ export async function updateProductModel(
         image_url: input.image_url?.trim() || null,
         is_service: input.isService,
         is_raw_material: input.isRawMaterial,
+        is_manufactured: input.isManufactured,
         base_uom_id: toNullableUuid(input.baseUomId),
       })
       .eq("id", input.modelId);

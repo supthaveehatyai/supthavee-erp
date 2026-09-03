@@ -1672,6 +1672,7 @@ export type Database = {
           id: string
           image_url: string | null
           is_active: boolean | null
+          is_manufactured: boolean | null
           is_raw_material: boolean | null
           is_service: boolean | null
           model_code: string
@@ -1691,6 +1692,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean | null
+          is_manufactured?: boolean | null
           is_raw_material?: boolean | null
           is_service?: boolean | null
           model_code: string
@@ -1710,6 +1712,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean | null
+          is_manufactured?: boolean | null
           is_raw_material?: boolean | null
           is_service?: boolean | null
           model_code?: string

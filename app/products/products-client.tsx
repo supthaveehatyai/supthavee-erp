@@ -28,7 +28,7 @@ import BrandCombobox, { type Brand } from "./brand-combobox";
 import CategoryCombobox, { type Category } from "./category-combobox";
 import { type Vendor } from "./vendor-combobox";
 import ModelLoadCombobox from "./model-load-combobox";
-import { ProductMatrixRawMaterialToggle, ProductMatrixServiceToggle, ProductMatrixVendorField } from "./ProductMatrixForm";
+import { ProductMatrixManufacturedToggle, ProductMatrixRawMaterialToggle, ProductMatrixServiceToggle, ProductMatrixVendorField } from "./ProductMatrixForm";
 import { ProductModelImageUpload } from "@/components/products/ProductModelImageUpload";
 import { BOMSetupPanel } from "@/components/products/BOMSetupPanel";
 import {
@@ -155,6 +155,8 @@ type BatchEditForm = {
   isService: boolean;
   /** product_models.is_raw_material */
   isRawMaterial: boolean;
+  /** product_models.is_manufactured — Make vs Buy */
+  isManufactured: boolean;
   /** product_models.base_uom_id */
   baseUomId: string;
   prices: Record<string, SizePrice>;
@@ -214,6 +216,8 @@ type MatrixForm = {
   isService: boolean;
   /** product_models.is_raw_material — วัตถุดิบ */
   isRawMaterial: boolean;
+  /** product_models.is_manufactured — ผลิตเอง (Make) */
+  isManufactured: boolean;
   /** product_models.base_uom_id → mst_uom.uom_id */
   baseUomId: string;
   colorIds: string[];
@@ -534,6 +538,7 @@ function createEmptyForm(vendorId = ""): MatrixForm {
     imageUrl: "",
     isService: false,
     isRawMaterial: false,
+    isManufactured: false,
     baseUomId: "",
     colorIds: [],
     sizeIds: [],
@@ -1301,7 +1306,8 @@ export default function ProductsClient() {
   ]);
 
   const isStep1Complete = Boolean(
-    (form.isService || (form.vendorId && form.brandId)) &&
+    (form.isService ||
+      (form.brandId && (form.isManufactured || form.vendorId))) &&
       form.categoryId &&
       form.genderId &&
       form.baseUomId &&
@@ -1653,10 +1659,15 @@ export default function ProductsClient() {
       imageUrl: (model.image_url ?? "").split("?")[0],
       isService: model.is_service === true,
       isRawMaterial: model.is_raw_material === true,
+      isManufactured: model.is_manufactured === true,
       baseUomId: model.base_uom_id ?? "",
       colorIds: [],
       sizeIds: [],
     }));
+
+    if (model.is_manufactured === true) {
+      setForm((current) => ({ ...current, vendorId: "" }));
+    }
 
     if (model.is_raw_material === true) {
       const noneGenderId = findNoneGenderId(masterData.genders);
@@ -1985,6 +1996,7 @@ export default function ProductsClient() {
       taxType: form.taxType,
       isService: form.isService,
       isRawMaterial: form.isRawMaterial,
+      isManufactured: form.isManufactured,
       baseUomId: form.baseUomId,
     });
     if (!identity.ok) {
@@ -2005,6 +2017,7 @@ export default function ProductsClient() {
       imageUrl: form.imageUrl.trim() || undefined,
       isService: identity.data.is_service,
       isRawMaterial: identity.data.is_raw_material,
+      isManufactured: identity.data.is_manufactured,
       baseUomId: identity.data.base_uom_id,
     };
 
@@ -2089,8 +2102,12 @@ export default function ProductsClient() {
       setFormError("กรุณาเลือก Category / Gender ให้ครบ");
       return;
     }
-    if (!form.isService && (!selectedBrand || !form.vendorId)) {
-      setFormError("กรุณาเลือก Vendor / Brand ให้ครบ");
+    if (!form.isService && !selectedBrand) {
+      setFormError("กรุณาเลือก Brand ให้ครบ");
+      return;
+    }
+    if (!form.isService && !form.isManufactured && !form.vendorId) {
+      setFormError("กรุณาเลือก Vendor ให้ครบ");
       return;
     }
     if (
@@ -2116,6 +2133,7 @@ export default function ProductsClient() {
       taxType: form.taxType,
       isService: form.isService,
       isRawMaterial: form.isRawMaterial,
+      isManufactured: form.isManufactured,
       baseUomId: form.baseUomId,
     });
     if (!identity.ok) {
@@ -2143,6 +2161,7 @@ export default function ProductsClient() {
         imageUrl: form.imageUrl.trim() || undefined,
         isService: identity.data.is_service,
         isRawMaterial: identity.data.is_raw_material,
+        isManufactured: identity.data.is_manufactured,
         baseUomId: identity.data.base_uom_id,
       },
       skus: previewRows.map((row) => ({
@@ -2339,6 +2358,7 @@ export default function ProductsClient() {
         let imageUrl = "";
         let isService = false;
         let isRawMaterial = false;
+        let isManufactured = false;
         let baseUomId = "";
         const modelId =
           group.modelId ??
@@ -2358,7 +2378,9 @@ export default function ProductsClient() {
             .split("?")[0];
           isService = modelResult.existing?.is_service === true;
           isRawMaterial = modelResult.existing?.is_raw_material === true;
+          isManufactured = modelResult.existing?.is_manufactured === true;
           baseUomId = modelResult.existing?.base_uom_id ?? "";
+          if (isManufactured) vendorId = "";
         } else {
           const mappedVendor = vendorByProductId[group.products[0]?.id ?? ""];
           vendorId = mappedVendor?.id ?? "";
@@ -2382,6 +2404,7 @@ export default function ProductsClient() {
           imageUrl,
           isService,
           isRawMaterial,
+          isManufactured,
           baseUomId,
           prices,
         });
@@ -2435,7 +2458,7 @@ export default function ProductsClient() {
       return;
     }
 
-    if (!editForm.isService) {
+    if (!editForm.isService && !editForm.isManufactured) {
       const vendorResult = vendorIdSchema.safeParse(editForm.vendorId.trim());
       if (!vendorResult.success) {
         setEditError(zodFirstError(vendorResult.error, VENDOR_ID_REQUIRED_MESSAGE));
@@ -2471,7 +2494,7 @@ export default function ProductsClient() {
     setIsEditSaving(true);
     setEditError("");
 
-    if (!editForm.isService) {
+    if (!editForm.isService && !editForm.isManufactured) {
       const vendorResult = vendorIdSchema.safeParse(editForm.vendorId.trim());
       if (!vendorResult.success) {
         setEditError(zodFirstError(vendorResult.error, VENDOR_ID_REQUIRED_MESSAGE));
@@ -2535,7 +2558,7 @@ export default function ProductsClient() {
 
     const formData = new FormData();
     formData.set("modelId", modelId);
-    formData.set("vendorId", editForm.isService ? editForm.vendorId.trim() : editForm.vendorId.trim());
+    formData.set("vendorId", editForm.isService || editForm.isManufactured ? "" : editForm.vendorId.trim());
     formData.set("name", baseName);
     formData.set("shortName", shortName);
     formData.set("gender", selectedEditGender.gender_name);
@@ -2548,6 +2571,10 @@ export default function ProductsClient() {
     formData.set(
       "is_raw_material",
       editForm.isRawMaterial ? "true" : "false",
+    );
+    formData.set(
+      "is_manufactured",
+      editForm.isManufactured ? "true" : "false",
     );
     formData.set("base_uom_id", editForm.baseUomId.trim());
     formData.set("sizePrices", JSON.stringify(sizePrices));
@@ -3094,9 +3121,16 @@ export default function ProductsClient() {
                     className="mb-4"
                     checked={form.isService}
                     disabled={isMasterLoading || isSaving || isDraftSaving}
-                    onCheckedChange={(checked) =>
-                      updateForm("isService", checked)
-                    }
+                    onCheckedChange={(checked) => {
+                      setForm((current) => ({
+                        ...current,
+                        isService: checked,
+                        isManufactured: checked
+                          ? false
+                          : current.isManufactured,
+                        vendorId: checked ? "" : current.vendorId,
+                      }));
+                    }}
                   />
 
                   <ProductMatrixRawMaterialToggle
@@ -3123,6 +3157,31 @@ export default function ProductsClient() {
                       }
                     }}
                   />
+
+                  <ProductMatrixManufacturedToggle
+                    className="mb-4"
+                    checked={form.isManufactured}
+                    disabled={
+                      isMasterLoading ||
+                      isSaving ||
+                      isDraftSaving ||
+                      form.isService
+                    }
+                    onCheckedChange={(checked) => {
+                      setForm((current) => ({
+                        ...current,
+                        isManufactured: checked,
+                        vendorId: checked ? "" : current.vendorId,
+                      }));
+                    }}
+                  />
+
+                  {form.isManufactured && !form.isService ? (
+                    <p className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-[11px] text-emerald-900">
+                      สินค้าผลิตเองจะคำนวณต้นทุนผ่านสูตรการผลิต (BOM)
+                      แทนการรับซื้อจากผู้จำหน่าย
+                    </p>
+                  ) : null}
 
                   <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
                     <div className="mb-1.5 flex flex-wrap items-center gap-2">
@@ -3162,6 +3221,7 @@ export default function ProductsClient() {
                     <ProductMatrixVendorField
                       className="sm:col-span-2"
                       disabled={isMasterLoading}
+                      isManufactured={form.isManufactured}
                       vendors={masterData.vendors}
                       value={form.vendorId}
                       onChange={(vendorId) => updateForm("vendorId", vendorId)}
@@ -4223,7 +4283,16 @@ export default function ProductsClient() {
                   onCheckedChange={(checked) => {
                     setBatchEditTab("general");
                     setEditForm((current) =>
-                      current ? { ...current, isService: checked } : current,
+                      current
+                        ? {
+                            ...current,
+                            isService: checked,
+                            isManufactured: checked
+                              ? false
+                              : current.isManufactured,
+                            vendorId: checked ? "" : current.vendorId,
+                          }
+                        : current,
                     );
                   }}
                 />
@@ -4252,6 +4321,30 @@ export default function ProductsClient() {
                       );
                     }}
                 />
+
+                <ProductMatrixManufacturedToggle
+                  className="mb-4"
+                  checked={editForm.isManufactured}
+                  disabled={isEditSaving || editForm.isService}
+                  onCheckedChange={(checked) => {
+                    setEditForm((current) =>
+                      current
+                        ? {
+                            ...current,
+                            isManufactured: checked,
+                            vendorId: checked ? "" : current.vendorId,
+                          }
+                        : current,
+                    );
+                  }}
+                />
+
+                {editForm.isManufactured && !editForm.isService ? (
+                  <p className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-[11px] text-emerald-900">
+                    สินค้าผลิตเองจะคำนวณต้นทุนผ่านสูตรการผลิต (BOM)
+                    แทนการรับซื้อจากผู้จำหน่าย
+                  </p>
+                ) : null}
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="block sm:col-span-2">
@@ -4389,6 +4482,7 @@ export default function ProductsClient() {
                         }))
                       }
                       disabled={isEditSaving}
+                      isManufactured={editForm.isManufactured}
                       error={
                         editError.includes("vendor_id") ||
                         editError.includes("ผู้จำหน่าย")

@@ -31,7 +31,7 @@
 - `production_jobs` (ใบสั่งผลิต / งาน MTO)
 - `service_tracking` (ติดตามสถานะงานบริการ)
 - `technician_rates` (เรตค่าแรงช่าง)
-- `product_models` (รุ่นสินค้า — เพิ่มคอลัมน์ `base_uom_id` FK โยงไป `mst_uom`, และเพิ่ม boolean `is_raw_material`, `is_service`)
+- `product_models` (รุ่นสินค้า — เพิ่มคอลัมน์ `base_uom_id` FK โยงไป `mst_uom`, และเพิ่ม boolean `is_raw_material`, `is_service`, `is_manufactured`)
 - `mst_uom` (หน่วยนับสินค้า — เช่น PCS, KGS, MTR)
 
 ## 4. Documents & Financials (เอกสารและการเงิน)
