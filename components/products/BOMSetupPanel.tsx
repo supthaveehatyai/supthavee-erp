@@ -5,7 +5,14 @@
  * Zero Client-Side Fetching via `@/lib/actions/bom-actions`
  */
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { Check, ChevronsUpDown, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -73,6 +80,18 @@ function formatPercent(value: number): string {
   });
 }
 
+/** Debounce a string value (typing delay for Server Action search). */
+function useDebounce<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [value, delayMs]);
+
+  return debounced;
+}
+
 export type BOMSetupPanelProps = {
   modelId: string;
 };
@@ -85,6 +104,7 @@ export function BOMSetupPanel({ modelId }: BOMSetupPanelProps) {
   const [addOpen, setAddOpen] = useState(false);
   const [comboOpen, setComboOpen] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState("");
+  const debouncedKeyword = useDebounce(searchKeyword, 300);
   const [materialOptions, setMaterialOptions] = useState<
     RawMaterialModelOption[]
   >([]);
@@ -93,6 +113,7 @@ export function BOMSetupPanel({ modelId }: BOMSetupPanelProps) {
     useState<RawMaterialModelOption | null>(null);
   const [quantityRequired, setQuantityRequired] = useState("");
   const [wastePercent, setWastePercent] = useState("0");
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const [pendingDelete, setPendingDelete] = useState<BOMItemRow | null>(null);
   const [isAdding, startAdd] = useTransition();
@@ -127,34 +148,34 @@ export function BOMSetupPanel({ modelId }: BOMSetupPanelProps) {
     };
   }, [reload]);
 
+  /** Search raw materials when ComboBox is open (debounced keyword → Server Action). */
   useEffect(() => {
-    if (!addOpen) return;
+    if (!addOpen || !comboOpen) return;
 
     let cancelled = false;
     setIsSearching(true);
 
-    const timer = window.setTimeout(() => {
-      void searchRawMaterialModels(searchKeyword).then((result) => {
-        if (cancelled) return;
-        if (!result.success) {
-          toast.error(result.error ?? "ค้นหาวัตถุดิบไม่สำเร็จ");
-          setMaterialOptions([]);
-        } else {
-          setMaterialOptions(result.data);
-        }
-        setIsSearching(false);
-      });
-    }, 300);
+    void searchRawMaterialModels(debouncedKeyword).then((result) => {
+      if (cancelled) return;
+      if (!result.success) {
+        toast.error(result.error ?? "ค้นหาวัตถุดิบไม่สำเร็จ");
+        setMaterialOptions([]);
+      } else {
+        setMaterialOptions(result.data);
+      }
+      setIsSearching(false);
+    });
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
     };
-  }, [addOpen, searchKeyword]);
+  }, [addOpen, comboOpen, debouncedKeyword]);
 
   function resetAddForm() {
     setSelectedMaterial(null);
     setSearchKeyword("");
+    setMaterialOptions([]);
+    setIsSearching(false);
     setQuantityRequired("");
     setWastePercent("0");
     setComboOpen(false);
@@ -163,6 +184,14 @@ export function BOMSetupPanel({ modelId }: BOMSetupPanelProps) {
   function openAddDialog() {
     resetAddForm();
     setAddOpen(true);
+  }
+
+  function handleComboOpenChange(nextOpen: boolean) {
+    if (isAdding) return;
+    setComboOpen(nextOpen);
+    if (!nextOpen) {
+      setSearchKeyword("");
+    }
   }
 
   function handleAdd() {
@@ -324,7 +353,19 @@ export function BOMSetupPanel({ modelId }: BOMSetupPanelProps) {
           if (!open) resetAddForm();
         }}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent
+          className="sm:max-w-md"
+          onInteractOutside={(event) => {
+            // Popover portals outside Dialog — don't dismiss Dialog while Combo is open
+            if (comboOpen) event.preventDefault();
+          }}
+          onPointerDownOutside={(event) => {
+            if (comboOpen) event.preventDefault();
+          }}
+          onFocusOutside={(event) => {
+            if (comboOpen) event.preventDefault();
+          }}
+        >
           <DialogHeader>
             <DialogTitle>เพิ่มวัตถุดิบในสูตร</DialogTitle>
             <DialogDescription>
@@ -335,7 +376,11 @@ export function BOMSetupPanel({ modelId }: BOMSetupPanelProps) {
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
               <Label>วัตถุดิบ</Label>
-              <Popover open={comboOpen} onOpenChange={setComboOpen}>
+              <Popover
+                modal={true}
+                open={comboOpen}
+                onOpenChange={handleComboOpenChange}
+              >
                 <PopoverTrigger asChild>
                   <Button
                     type="button"
@@ -350,25 +395,41 @@ export function BOMSetupPanel({ modelId }: BOMSetupPanelProps) {
                         ? `${selectedMaterial.model_code} — ${selectedMaterial.name}`
                         : "ค้นหาวัตถุดิบ..."}
                     </span>
-                    <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
+                    {isSearching && comboOpen ? (
+                      <Loader2 className="size-4 shrink-0 animate-spin opacity-50" />
+                    ) : (
+                      <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
+                    )}
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent
-                  className="w-[var(--radix-popover-trigger-width)] p-0"
+                  className="z-[10050] w-[var(--radix-popover-trigger-width)] p-0"
                   align="start"
+                  sideOffset={6}
+                  onOpenAutoFocus={(event) => {
+                    event.preventDefault();
+                    searchInputRef.current?.focus();
+                  }}
+                  onCloseAutoFocus={(event) => {
+                    // Keep focus inside Dialog after Popover closes
+                    event.preventDefault();
+                  }}
                 >
                   <Command shouldFilter={false}>
                     <CommandInput
+                      ref={searchInputRef}
                       placeholder="ค้นหารหัสหรือชื่อวัตถุดิบ..."
                       value={searchKeyword}
                       onValueChange={setSearchKeyword}
                     />
                     <CommandList>
                       {isSearching ? (
-                        <div className="flex items-center justify-center gap-2 py-6 text-xs text-slate-400">
-                          <Loader2 className="size-3.5 animate-spin" />
-                          กำลังค้นหา...
-                        </div>
+                        <CommandEmpty>
+                          <span className="inline-flex items-center gap-2">
+                            <Loader2 className="size-3.5 animate-spin" />
+                            กำลังค้นหา...
+                          </span>
+                        </CommandEmpty>
                       ) : filteredOptions.length === 0 ? (
                         <CommandEmpty>ไม่พบวัตถุดิบ</CommandEmpty>
                       ) : (
@@ -376,10 +437,11 @@ export function BOMSetupPanel({ modelId }: BOMSetupPanelProps) {
                           {filteredOptions.map((option) => (
                             <CommandItem
                               key={option.id}
-                              value={option.id}
+                              value={`${option.model_code} ${option.name}`}
                               onSelect={() => {
                                 setSelectedMaterial(option);
                                 setComboOpen(false);
+                                setSearchKeyword("");
                               }}
                             >
                               <Check
