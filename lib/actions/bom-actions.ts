@@ -57,6 +57,25 @@ function toWastePercent(value: unknown): number | null {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
+function toCostPrice(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round((n + Number.EPSILON) * 10000) / 10000;
+}
+
+/** quantity_required × (1 + waste%/100) × unit cost */
+function calculateEstimatedCost(
+  quantityRequired: number,
+  wastePercent: number,
+  costPrice: number | null,
+): number {
+  if (costPrice == null || !Number.isFinite(costPrice)) return 0;
+  const factor = 1 + wastePercent / 100;
+  const raw = quantityRequired * factor * costPrice;
+  return Math.round((raw + Number.EPSILON) * 100) / 100;
+}
+
 function mapBomDuplicateError(): string {
   return "วัตถุดิบนี้มีในสูตรการผลิตแล้ว — ไม่สามารถเพิ่มซ้ำได้";
 }
@@ -271,7 +290,7 @@ export async function getBOMByModelId(
       ),
     ];
 
-    const [modelsRes, uomsRes] = await Promise.all([
+    const [modelsRes, uomsRes, productsRes] = await Promise.all([
       rawMaterialIds.length > 0
         ? supabaseAdmin
             .from("product_models")
@@ -283,6 +302,15 @@ export async function getBOMByModelId(
             .from("mst_uom")
             .select("uom_id, uom_code, uom_name")
             .in("uom_id", uomIds)
+        : Promise.resolve({ data: [], error: null }),
+      // First child SKU cost per raw-material model (Moving Average / LPP)
+      rawMaterialIds.length > 0
+        ? supabaseAdmin
+            .from("products")
+            .select("model_id, cost_price, created_at")
+            .in("model_id", rawMaterialIds)
+            .eq("is_active", true)
+            .order("created_at", { ascending: true })
         : Promise.resolve({ data: [], error: null }),
     ]);
 
@@ -297,6 +325,13 @@ export async function getBOMByModelId(
       return {
         success: false,
         error: uomsRes.error.message ?? "ดึงข้อมูลหน่วยนับไม่สำเร็จ",
+        data: [],
+      };
+    }
+    if (productsRes.error) {
+      return {
+        success: false,
+        error: productsRes.error.message ?? "ดึงต้นทุนวัตถุดิบไม่สำเร็จ",
         data: [],
       };
     }
@@ -320,16 +355,26 @@ export async function getBOMByModelId(
       ]),
     );
 
+    /** First SKU's cost_price per raw_material_model_id */
+    const costByModelId = new Map<string, number | null>();
+    for (const product of productsRes.data ?? []) {
+      const modelKey = String(product.model_id ?? "").trim();
+      if (!modelKey || costByModelId.has(modelKey)) continue;
+      costByModelId.set(modelKey, toCostPrice(product.cost_price));
+    }
+
     const data: BOMItemRow[] = bomRows.map((row) => {
-      const rawMaterial = modelById.get(String(row.raw_material_model_id));
+      const rawMaterialId = String(row.raw_material_model_id);
+      const rawMaterial = modelById.get(rawMaterialId);
       const uom = uomById.get(String(row.uom_id));
       const quantityRequired = toQuantityRequired(row.quantity_required) ?? 0;
       const wastePercent = toWastePercent(row.waste_percent) ?? 0;
+      const costPrice = costByModelId.get(rawMaterialId) ?? null;
 
       return {
         id: String(row.id),
         finished_model_id: String(row.finished_model_id),
-        raw_material_model_id: String(row.raw_material_model_id),
+        raw_material_model_id: rawMaterialId,
         raw_material_model_code: rawMaterial?.model_code || "—",
         raw_material_model_name:
           rawMaterial?.name || rawMaterial?.model_code || "วัตถุดิบ",
@@ -338,6 +383,12 @@ export async function getBOMByModelId(
         uom_name: uom?.uom_name || uom?.uom_code || "—",
         quantity_required: quantityRequired,
         waste_percent: wastePercent,
+        cost_price: costPrice,
+        estimated_cost: calculateEstimatedCost(
+          quantityRequired,
+          wastePercent,
+          costPrice,
+        ),
         created_by: row.created_by ? String(row.created_by) : null,
         created_at: row.created_at ? String(row.created_at) : null,
       };

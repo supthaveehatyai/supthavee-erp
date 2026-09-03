@@ -14,6 +14,16 @@ export type BOMItemRow = {
   uom_name: string;
   quantity_required: number;
   waste_percent: number;
+  /**
+   * products.cost_price จาก SKU ลูกตัวแรกของวัตถุดิบ
+   * (null หากยังไม่มี SKU / ยังไม่มีต้นทุน)
+   */
+  cost_price: number | null;
+  /**
+   * ต้นทุนประเมินต่อ 1 หน่วยสำเร็จรูป:
+   * quantity_required * (1 + waste_percent/100) * cost_price
+   */
+  estimated_cost: number;
   created_by: string | null;
   created_at: string | null;
 };

@@ -13,7 +13,7 @@ import {
   useState,
   useTransition,
 } from "react";
-import { Check, ChevronsUpDown, Loader2, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronsUpDown, Info, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   addBOMItem,
@@ -76,6 +76,13 @@ function formatQty(value: number): string {
 function formatPercent(value: number): string {
   return value.toLocaleString("th-TH", {
     minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatMoney(value: number): string {
+  return value.toLocaleString("th-TH", {
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 }
@@ -261,6 +268,12 @@ export function BOMSetupPanel({ modelId }: BOMSetupPanelProps) {
     (option) => !assignedMaterialIds.has(option.id),
   );
 
+  const estimatedMaterialTotal = useMemo(
+    () =>
+      items.reduce((sum, row) => sum + (Number(row.estimated_cost) || 0), 0),
+    [items],
+  );
+
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -295,55 +308,93 @@ export function BOMSetupPanel({ modelId }: BOMSetupPanelProps) {
           ยังไม่มีวัตถุดิบในสูตร — กด &quot;เพิ่มวัตถุดิบ&quot; เพื่อเริ่มต้น
         </div>
       ) : (
-        <Table wrapperClassName="rounded-xl border border-slate-200">
-          <TableHeader>
-            <TableRow className="bg-slate-50 hover:bg-slate-50">
-              <TableHead>รหัสวัตถุดิบ</TableHead>
-              <TableHead>ชื่อ</TableHead>
-              <TableHead className="text-right">ปริมาณที่ใช้</TableHead>
-              <TableHead className="text-right">%เผื่อเสีย</TableHead>
-              <TableHead>หน่วยนับ</TableHead>
-              <TableHead className="w-12" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.map((row) => (
-              <TableRow key={row.id}>
-                <TableCell className="font-mono text-xs font-semibold text-slate-800">
-                  {row.raw_material_model_code}
-                </TableCell>
-                <TableCell className="text-sm text-slate-800">
-                  {row.raw_material_model_name}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {formatQty(row.quantity_required)}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {formatPercent(row.waste_percent)}%
-                </TableCell>
-                <TableCell className="text-sm text-slate-600">
-                  {row.uom_code}
-                  {row.uom_name && row.uom_name !== row.uom_code
-                    ? ` — ${row.uom_name}`
-                    : ""}
-                </TableCell>
-                <TableCell>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                    aria-label={`ลบ ${row.raw_material_model_name}`}
-                    disabled={isDeleting}
-                    onClick={() => setPendingDelete(row)}
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                </TableCell>
+        <div className="space-y-3">
+          <Table wrapperClassName="rounded-xl border border-slate-200">
+            <TableHeader>
+              <TableRow className="bg-slate-50 hover:bg-slate-50">
+                <TableHead>รหัสวัตถุดิบ</TableHead>
+                <TableHead>ชื่อ</TableHead>
+                <TableHead className="text-right">ปริมาณที่ใช้</TableHead>
+                <TableHead className="text-right">%เผื่อเสีย</TableHead>
+                <TableHead>หน่วยนับ</TableHead>
+                <TableHead className="text-right">ต้นทุนประเมิน</TableHead>
+                <TableHead className="w-12" />
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {items.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell className="font-mono text-xs font-semibold text-slate-800">
+                    {row.raw_material_model_code}
+                  </TableCell>
+                  <TableCell className="text-sm text-slate-800">
+                    {row.raw_material_model_name}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatQty(row.quantity_required)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatPercent(row.waste_percent)}%
+                  </TableCell>
+                  <TableCell className="text-sm text-slate-600">
+                    {row.uom_code}
+                    {row.uom_name && row.uom_name !== row.uom_code
+                      ? ` — ${row.uom_name}`
+                      : ""}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {row.cost_price == null ? (
+                      <span
+                        className="text-xs text-amber-600"
+                        title="ยังไม่มี SKU หรือต้นทุนของวัตถุดิบนี้"
+                      >
+                        —
+                      </span>
+                    ) : (
+                      <span className="font-medium text-slate-800">
+                        {formatMoney(row.estimated_cost)}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                      aria-label={`ลบ ${row.raw_material_model_name}`}
+                      disabled={isDeleting}
+                      onClick={() => setPendingDelete(row)}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+
+          <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs font-semibold text-slate-600">
+              รวมต้นทุนวัตถุดิบประเมิน (Estimated Material Cost)
+            </p>
+            <p className="text-right text-base font-bold tabular-nums text-slate-900">
+              {formatMoney(estimatedMaterialTotal)} ฿
+            </p>
+          </div>
+
+          <div
+            role="note"
+            className="flex gap-2 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2.5 text-[11px] leading-relaxed text-blue-900"
+            title="ต้นทุนประเมินจาก BOM ยังไม่รวมค่าแรงช่าง"
+          >
+            <Info className="mt-0.5 size-3.5 shrink-0 text-blue-600" aria-hidden />
+            <p>
+              นี่คือต้นทุนวัตถุดิบประเมินเท่านั้น ต้นทุนสินค้าจริงจะถูกคำนวณเมื่อมีการเปิดใบสั่งผลิต
+              (MTO) และรวมค่าแรงช่าง (Technician Billing) แล้ว
+            </p>
+          </div>
+        </div>
       )}
 
       <Dialog
