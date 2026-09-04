@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/table";
 
 const JOB_STATUS_LABEL: Record<string, string> = {
+  COMPLETED: "เสร็จสิ้น",
   READY_TO_SHIP: "พร้อมส่งมอบ",
   DELIVERED: "ส่งมอบแล้ว",
 };
@@ -251,8 +252,8 @@ export function TechnicianBillingPanel({
             <div>
               <CardTitle>งานค้างสรุปวางบิลช่าง</CardTitle>
               <CardDescription>
-                ดึงบรรทัดงานบริการจาก document_items ที่ JOB เสร็จ/ส่งมอบแล้ว ·
-                มีช่าง · มีค่าแรง · ยังไม่ถูกผูกเอกสาร TB
+                ดึงบรรทัดงานบริการจาก document_items ที่มอบหมายช่างแล้ว ·
+                ใบสั่งผลิตสถานะ COMPLETED · มีค่าแรง · ยังไม่ถูกผูกเอกสาร TB
               </CardDescription>
             </div>
             <Button
