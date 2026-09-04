@@ -562,6 +562,37 @@ function findPcsUomId(uoms: MasterUom[]): string {
   );
 }
 
+function findUomLabel(uoms: MasterUom[], uomId: string): string | null {
+  const id = uomId.trim();
+  if (!id) return null;
+  const uom = uoms.find((item) => item.uom_id === id);
+  if (!uom) return null;
+  const code = uom.uom_code.trim();
+  const name = uom.uom_name.trim();
+  if (code && name) return `${code} · ${name}`;
+  return code || name || null;
+}
+
+/**
+ * UI Guardrail — เมื่อมี UoM conversion เตือนให้กรอกต้นทุนต่อหน่วยฐานเท่านั้น
+ * (ไม่แตะ logic บันทึก)
+ */
+function buildBaseCostPriceGuardMessage(
+  uoms: MasterUom[],
+  baseUomId: string,
+  purchasingUomId: string,
+  conversionFactorRaw: string,
+): string | null {
+  const factor = Number(conversionFactorRaw);
+  if (!Number.isFinite(factor) || factor <= 1) return null;
+
+  const baseLabel = findUomLabel(uoms, baseUomId) ?? "หน่วยฐาน";
+  const purchasingLabel =
+    findUomLabel(uoms, purchasingUomId) ?? "หน่วยจัดซื้อ";
+
+  return `หมายเหตุ: กรุณาระบุราคาต้นทุนต่อหน่วยฐาน (${baseLabel}) ไม่ใช่ราคาต่อหน่วยจัดซื้อ (${purchasingLabel})`;
+}
+
 function findNoneGenderId(genders: Gender[]): string {
   return (
     genders.find((item) => item.gender_code.trim().toUpperCase() === "N")?.id ??
@@ -2648,6 +2679,20 @@ export default function ProductsClient() {
 
   const activeCount = products.filter((product) => product.is_active).length;
   const groupCount = productGroups.length;
+  const createCostPriceGuardMessage = buildBaseCostPriceGuardMessage(
+    masterData.uoms,
+    form.baseUomId,
+    form.purchasingUomId,
+    form.uomConversionFactor,
+  );
+  const editCostPriceGuardMessage = editForm
+    ? buildBaseCostPriceGuardMessage(
+        masterData.uoms,
+        editForm.baseUomId,
+        editForm.purchasingUomId,
+        editForm.uomConversionFactor,
+      )
+    : null;
 
   return (
     <div className="mx-auto max-w-[1600px]">
@@ -3918,6 +3963,14 @@ export default function ProductsClient() {
                       สินค้ารหัสนี้เป็นวัตถุดิบ (Raw Material) ระบบจะอนุญาตให้กำหนดเฉพาะราคาต้นทุนเท่านั้น
                     </div>
                   )}
+                  {createCostPriceGuardMessage ? (
+                    <div
+                      role="note"
+                      className="mb-4 rounded-xl border border-orange-200 bg-orange-50/80 px-4 py-2.5 text-xs font-medium leading-relaxed text-orange-800"
+                    >
+                      {createCostPriceGuardMessage}
+                    </div>
+                  ) : null}
                   {form.sizeIds.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-xs text-slate-400">
                       เลือกไซส์เพื่อกำหนดราคา
@@ -4063,6 +4116,11 @@ export default function ProductsClient() {
                                         })
                                       }
                                     />
+                                    {createCostPriceGuardMessage ? (
+                                      <p className="mt-1.5 text-[10px] leading-snug text-orange-700/90">
+                                        ต้นทุนต่อหน่วยฐานเท่านั้น
+                                      </p>
+                                    ) : null}
                                   </td>
                                 </tr>
                               );
@@ -4664,6 +4722,14 @@ export default function ProductsClient() {
                   title="ราคาตามไซส์"
                   description="ราคานี้จะอัปเดตทุกสีในไซส์เดียวกันทั้งกลุ่ม"
                 />
+                {editCostPriceGuardMessage ? (
+                  <div
+                    role="note"
+                    className="mb-4 rounded-xl border border-orange-200 bg-orange-50/80 px-4 py-2.5 text-xs font-medium leading-relaxed text-orange-800"
+                  >
+                    {editCostPriceGuardMessage}
+                  </div>
+                ) : null}
                 {editSizeLabels.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-xs text-slate-400">
                     ไม่พบข้อมูลไซส์ในกลุ่มนี้
@@ -4704,6 +4770,11 @@ export default function ProductsClient() {
                                     updateEditPrice(sizeLabel, "cost", value)
                                   }
                                 />
+                                {editCostPriceGuardMessage ? (
+                                  <p className="mt-1.5 text-[10px] leading-snug text-orange-700/90">
+                                    ต้นทุนต่อหน่วยฐานเท่านั้น
+                                  </p>
+                                ) : null}
                               </td>
                               <td className="px-4 py-3">
                                 <PriceInput
