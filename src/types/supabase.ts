@@ -1725,92 +1725,62 @@ export type Database = {
       production_jobs: {
         Row: {
           created_at: string | null
-          remark: string | null
-          document_id: string | null
+          created_by: string | null
           estimated_completion_date: string | null
+          finished_model_id: string
           id: string
-          is_archived: boolean
           job_no: string
-          job_type: Database["public"]["Enums"]["production_job_type"]
           mockup_image_url: string | null
-          nas_archive_url: string | null
-          status: Database["public"]["Enums"]["production_job_status"]
-          storage_tier: Database["public"]["Enums"]["storage_tier_type"]
-          technician_bill_id: string | null
-          technician_id: string | null
+          ref_document_id: string | null
+          remark: string | null
+          start_date: string | null
+          status: string
+          target_quantity: number
           updated_at: string | null
-          wage_cost: number
         }
         Insert: {
           created_at?: string | null
-          remark?: string | null
-          document_id?: string | null
+          created_by?: string | null
           estimated_completion_date?: string | null
+          finished_model_id: string
           id?: string
-          is_archived?: boolean
           job_no: string
-          job_type?: Database["public"]["Enums"]["production_job_type"]
           mockup_image_url?: string | null
-          nas_archive_url?: string | null
-          status?: Database["public"]["Enums"]["production_job_status"]
-          storage_tier?: Database["public"]["Enums"]["storage_tier_type"]
-          technician_bill_id?: string | null
-          technician_id?: string | null
+          ref_document_id?: string | null
+          remark?: string | null
+          start_date?: string | null
+          status?: string
+          target_quantity: number
           updated_at?: string | null
-          wage_cost?: number
         }
         Update: {
           created_at?: string | null
-          remark?: string | null
-          document_id?: string | null
+          created_by?: string | null
           estimated_completion_date?: string | null
+          finished_model_id?: string
           id?: string
-          is_archived?: boolean
           job_no?: string
-          job_type?: Database["public"]["Enums"]["production_job_type"]
           mockup_image_url?: string | null
-          nas_archive_url?: string | null
-          status?: Database["public"]["Enums"]["production_job_status"]
-          storage_tier?: Database["public"]["Enums"]["storage_tier_type"]
-          technician_bill_id?: string | null
-          technician_id?: string | null
+          ref_document_id?: string | null
+          remark?: string | null
+          start_date?: string | null
+          status?: string
+          target_quantity?: number
           updated_at?: string | null
-          wage_cost?: number
         }
         Relationships: [
           {
-            foreignKeyName: "production_jobs_document_id_fkey"
-            columns: ["document_id"]
+            foreignKeyName: "production_jobs_finished_model_id_fkey"
+            columns: ["finished_model_id"]
             isOneToOne: false
-            referencedRelation: "documents"
+            referencedRelation: "product_models"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "production_jobs_document_id_fkey"
-            columns: ["document_id"]
-            isOneToOne: false
-            referencedRelation: "vw_sales_profit_analysis"
-            referencedColumns: ["document_id"]
-          },
-          {
-            foreignKeyName: "production_jobs_technician_bill_id_fkey"
-            columns: ["technician_bill_id"]
+            foreignKeyName: "production_jobs_ref_document_id_fkey"
+            columns: ["ref_document_id"]
             isOneToOne: false
             referencedRelation: "documents"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "production_jobs_technician_bill_id_fkey"
-            columns: ["technician_bill_id"]
-            isOneToOne: false
-            referencedRelation: "vw_sales_profit_analysis"
-            referencedColumns: ["document_id"]
-          },
-          {
-            foreignKeyName: "production_jobs_technician_id_fkey"
-            columns: ["technician_id"]
-            isOneToOne: false
-            referencedRelation: "contacts"
             referencedColumns: ["id"]
           },
         ]

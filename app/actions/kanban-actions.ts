@@ -31,7 +31,6 @@ import {
   type UpdateProductionJobAssignmentResult,
 } from "@/types/kanban";
 import { resolveProductionAttachmentUrls } from "@/lib/utils/storage-tier";
-import type { StorageTier } from "@/types/storage-tier";
 
 const PRODUCTION_ATTACHMENTS_BUCKET = "production_attachments";
 /** Sales doc types ที่ส่งเข้าสายผลิต (MTO) ได้ */
@@ -64,20 +63,17 @@ type DocumentJoin = {
 type ProductionJobRow = {
   id: string;
   job_no: string;
-  job_type: ProductionJobType;
   status: ProductionJobStatus;
   estimated_completion_date: string | null;
   remark: string | null;
   mockup_image_url: string | null;
-  storage_tier: StorageTier | null;
-  nas_archive_url: string | null;
   created_at: string | null;
   updated_at: string | null;
-  document_id: string | null;
-  technician_id: string | null;
-  wage_cost: number | string | null;
+  /** Schema: production_jobs.ref_document_id → documents.id (SO) */
+  ref_document_id: string | null;
+  finished_model_id?: string | null;
+  target_quantity?: number | null;
   documents: DocumentJoin | DocumentJoin[] | null;
-  technician?: ContactJoin | ContactJoin[] | null;
 };
 
 function unwrapJoin<T extends object>(
@@ -127,58 +123,55 @@ function toWageCost(value: number | string | null | undefined): number {
 function mapJobCard(row: ProductionJobRow): ProductionJobCard {
   const doc = unwrapJoin(row.documents);
   const contact = unwrapJoin(doc?.contacts ?? null);
-  const technician = unwrapJoin(row.technician ?? null);
   const mockupUrl = row.mockup_image_url?.trim() || null;
   const attachmentPaths = mockupUrl ? [mockupUrl] : [];
 
   return {
     id: row.id,
     job_no: row.job_no,
-    job_type: row.job_type,
+    // job_type ถูกลบจาก schema production_jobs — คง default ให้ UI เดิม
+    job_type: "OTHER",
     status: row.status,
     estimated_completion_date: row.estimated_completion_date,
     remark: row.remark,
     attachment_paths: attachmentPaths,
-    storage_tier: row.storage_tier === "NAS" ? "NAS" : "CLOUD",
-    nas_archive_url: row.nas_archive_url?.trim() || null,
+    storage_tier: "CLOUD",
+    nas_archive_url: null,
     display_attachment_urls: resolveProductionAttachmentUrls({
-      storageTier: row.storage_tier,
+      storageTier: "CLOUD",
       attachmentPaths,
-      nasArchiveUrl: row.nas_archive_url,
+      nasArchiveUrl: null,
     }),
     created_at: row.created_at,
     updated_at: row.updated_at,
-    document_id: row.document_id,
+    document_id: row.ref_document_id,
     document_no: doc?.doc_no?.trim() || null,
     customer_name: contact?.company_name?.trim() || null,
-    technician_id: row.technician_id ?? null,
-    technician_name: technician?.company_name?.trim() || null,
-    wage_cost: toWageCost(row.wage_cost),
+    technician_id: null,
+    technician_name: null,
+    wage_cost: 0,
   };
 }
 
+/** คอลัมน์ตรง schema: job_no, ref_document_id, status, estimated_completion_date, mockup_image_url, remark (+ finished_model_id, target_quantity) */
 const JOB_SELECT = `
         id,
         job_no,
-        job_type,
         status,
         estimated_completion_date,
         remark,
         mockup_image_url,
         created_at,
         updated_at,
-        document_id,
-        technician_id,
-        wage_cost,
-        documents!production_jobs_document_id_fkey (
+        ref_document_id,
+        finished_model_id,
+        target_quantity,
+        documents!production_jobs_ref_document_id_fkey (
           id,
           doc_no,
           contacts!documents_contact_id_fkey (
             company_name
           )
-        ),
-        technician:contacts!production_jobs_technician_id_fkey (
-          company_name
         )
       ` as const;
 
@@ -287,7 +280,6 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
     const { data, error } = await supabase
       .from("production_jobs")
       .select(JOB_SELECT)
-      .eq("is_archived", false)
       .order("estimated_completion_date", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
 
@@ -430,7 +422,7 @@ export async function createProductionJob(
     const { data: existing, error: existingError } = await supabase
       .from("production_jobs")
       .select("id, job_no, status")
-      .eq("document_id", documentId)
+      .eq("ref_document_id", documentId)
       .neq("status", "CANCELLED")
       .limit(1)
       .maybeSingle();
@@ -446,6 +438,20 @@ export async function createProductionJob(
       return {
         success: false,
         error: `เอกสารนี้มีใบสั่งผลิตแล้ว (${existing.job_no} · ${existing.status})`,
+        data: null,
+      };
+    }
+
+    // Schema บังคับ finished_model_id + target_quantity — ดึงจากบรรทัดเอกสาร
+    const modelResolved = await resolveFinishedModelQtyFromDocument(
+      supabase,
+      documentId,
+    );
+    if (!modelResolved) {
+      return {
+        success: false,
+        error:
+          "ไม่พบรุ่นสินค้า (บริการ/ผลิตเอง) ในเอกสาร — ไม่สามารถเปิดใบสั่งผลิตได้",
         data: null,
       };
     }
@@ -467,18 +473,18 @@ export async function createProductionJob(
         attachmentPaths = uploaded.paths;
       }
 
+      // Payload ตรง schema production_jobs เท่านั้น
       const { data: created, error: insertError } = await supabase
         .from("production_jobs")
         .insert({
           job_no: jobNo,
-          document_id: documentId,
-          job_type: jobTypeRaw,
+          ref_document_id: documentId,
+          finished_model_id: modelResolved.finished_model_id,
+          target_quantity: modelResolved.target_quantity,
           status: "PLANNED",
           estimated_completion_date: estimatedCompletionDate,
-          remark,
+          remark: remark ? `[${jobTypeRaw}] ${remark}` : remark,
           mockup_image_url: attachmentPaths[0] ?? null,
-          technician_id: null,
-          wage_cost: 0,
         })
         .select("id, job_no")
         .maybeSingle();
@@ -629,7 +635,7 @@ export async function getJobDetails(
 
     let lineItems: ProductionJobLineItem[] = [];
 
-    if (row.document_id) {
+    if (row.ref_document_id) {
       // ไม่ embed contacts ผ่าน PostgREST — ดึง technician_id แล้ว lookup ชื่อแยก
       // เพื่อไม่พังถ้า Schema Cache ยังไม่เห็น FK document_items → contacts
       const { data: items, error: itemsError } = await supabase
@@ -662,7 +668,7 @@ export async function getJobDetails(
           )
         `,
         )
-        .eq("document_id", row.document_id)
+        .eq("document_id", row.ref_document_id)
         .order("sort_order", { ascending: true });
 
       if (itemsError) {
@@ -791,7 +797,7 @@ export async function getJobDetails(
 
     const serviceModel = await resolveServiceModelFromDocument(
       supabase,
-      row.document_id,
+      row.ref_document_id,
     );
 
     const jobDetails: ProductionJobDetails = {
@@ -901,7 +907,85 @@ type ServiceModelJoin = {
   name?: string | null;
   short_name?: string | null;
   is_service?: boolean | null;
+  is_manufactured?: boolean | null;
+  is_raw_material?: boolean | null;
 };
+
+/**
+ * ดึง finished_model_id + target_quantity จากบรรทัดเอกสาร
+ * สำหรับ createProductionJob (schema บังคับทั้งสองฟิลด์)
+ */
+async function resolveFinishedModelQtyFromDocument(
+  supabase: ReturnType<typeof createClient>,
+  documentId: string,
+): Promise<{ finished_model_id: string; target_quantity: number } | null> {
+  const { data, error } = await supabase
+    .from("document_items")
+    .select(
+      `
+      qty,
+      sort_order,
+      products!document_items_product_id_fkey (
+        model_id,
+        product_models!products_model_id_fkey (
+          id,
+          is_service,
+          is_manufactured,
+          is_raw_material
+        )
+      )
+    `,
+    )
+    .eq("document_id", documentId)
+    .order("sort_order", { ascending: true });
+
+  if (error || !data?.length) {
+    if (error) {
+      console.error("[resolveFinishedModelQtyFromDocument]", error.message);
+    }
+    return null;
+  }
+
+  type Agg = { finished_model_id: string; target_quantity: number };
+  const byModel = new Map<string, Agg>();
+
+  for (const item of data) {
+    const product = unwrapJoin(
+      item.products as
+        | {
+            model_id?: string | null;
+            product_models?: ServiceModelJoin | ServiceModelJoin[] | null;
+          }
+        | {
+            model_id?: string | null;
+            product_models?: ServiceModelJoin | ServiceModelJoin[] | null;
+          }[]
+        | null,
+    );
+    const model = unwrapJoin(product?.product_models ?? null);
+    if (!model?.id) continue;
+    if (model.is_raw_material === true) continue;
+    if (model.is_service !== true && model.is_manufactured !== true) continue;
+
+    const qty = Number(item.qty ?? 0);
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+
+    const modelId = String(model.id);
+    const existing = byModel.get(modelId);
+    if (existing) {
+      existing.target_quantity += qty;
+    } else {
+      byModel.set(modelId, {
+        finished_model_id: modelId,
+        target_quantity: qty,
+      });
+    }
+  }
+
+  const first = byModel.values().next().value as Agg | undefined;
+  if (!first || first.target_quantity <= 0) return null;
+  return first;
+}
 
 async function resolveServiceModelFromDocument(
   supabase: ReturnType<typeof createClient>,
@@ -1140,7 +1224,7 @@ export async function updateProductionJobAssignment(
 
     const { data: current, error: currentError } = await supabase
       .from("production_jobs")
-      .select("id, status, document_id")
+      .select("id, status, ref_document_id")
       .eq("id", jobId)
       .maybeSingle();
 
@@ -1156,7 +1240,7 @@ export async function updateProductionJobAssignment(
     if (current.status === "CANCELLED") {
       return { success: false, error: "งานถูกยกเลิกแล้ว ไม่สามารถบันทึกค่าแรงได้" };
     }
-    if (!current.document_id) {
+    if (!current.ref_document_id) {
       return { success: false, error: "ใบสั่งผลิตนี้ไม่ได้ผูกเอกสารขาย" };
     }
 
@@ -1173,7 +1257,7 @@ export async function updateProductionJobAssignment(
     const { data: existingItems, error: itemsError } = await supabase
       .from("document_items")
       .select("id, technician_bill_id, document_id")
-      .eq("document_id", current.document_id)
+      .eq("document_id", current.ref_document_id)
       .in("id", itemIds);
 
     if (itemsError) {
@@ -1252,7 +1336,7 @@ export async function updateProductionJobAssignment(
           wage_cost: toWageCost(line.wage_cost),
         })
         .eq("id", itemId)
-        .eq("document_id", current.document_id);
+        .eq("document_id", current.ref_document_id);
 
       if (updateError) {
         return {

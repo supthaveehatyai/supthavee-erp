@@ -474,6 +474,9 @@ async function routeServiceFlow(
       [line.model_code, line.model_name].filter(Boolean).join(" · ") ||
       "งานบริการจากใบสั่งขาย";
 
+    // production_jobs schema: job_no, ref_document_id, finished_model_id,
+    // target_quantity, status, estimated_completion_date, mockup_image_url, remark
+    // (technician_id / wage_cost อยู่ที่ document_items — ห้ามใส่ใน jobs)
     const jobInsert: Record<string, unknown> = {
       job_no: jobNo,
       status: "PLANNED",
@@ -482,9 +485,6 @@ async function routeServiceFlow(
       target_quantity: line.qty,
       mockup_image_url: line.mockup_image_url,
       remark,
-      // Preserve line-level technician if already assigned on SO
-      technician_id: line.technician_id,
-      wage_cost: line.wage_cost,
     };
 
     const { data: created, error: insertError } = await supabase

@@ -267,8 +267,8 @@ export async function getUnbilledTechnicianJobs(
 
     const { data: jobs, error: jobsError } = await supabase
       .from("production_jobs")
-      .select("id, job_no, status, updated_at, document_id")
-      .in("document_id", documentIds)
+      .select("id, job_no, status, updated_at, ref_document_id")
+      .in("ref_document_id", documentIds)
       .in("status", [...BILLABLE_JOB_STATUSES])
       .order("updated_at", { ascending: false });
 
@@ -284,12 +284,12 @@ export async function getUnbilledTechnicianJobs(
       job_no: string;
       status: string;
       updated_at: string | null;
-      document_id: string | null;
+      ref_document_id: string | null;
     };
 
     const jobByDocument = new Map<string, JobRow>();
     for (const job of (jobs ?? []) as JobRow[]) {
-      const docId = String(job.document_id ?? "").trim();
+      const docId = String(job.ref_document_id ?? "").trim();
       if (!docId || jobByDocument.has(docId)) continue;
       const deliveredOn = deliveredOnFromJob(job.updated_at);
       if (from && (!deliveredOn || deliveredOn < from)) continue;
@@ -470,8 +470,8 @@ export async function createTechnicianBill(
     ];
     const { data: jobs, error: jobsError } = await supabase
       .from("production_jobs")
-      .select("document_id, job_no, status")
-      .in("document_id", documentIds)
+      .select("ref_document_id, job_no, status")
+      .in("ref_document_id", documentIds)
       .in("status", [...BILLABLE_JOB_STATUSES]);
 
     if (jobsError) {
@@ -483,7 +483,7 @@ export async function createTechnicianBill(
 
     const jobByDocument = new Map<string, { job_no: string }>();
     for (const job of jobs ?? []) {
-      const docId = String(job.document_id ?? "").trim();
+      const docId = String(job.ref_document_id ?? "").trim();
       if (docId) jobByDocument.set(docId, { job_no: String(job.job_no ?? "—") });
     }
     for (const docId of documentIds) {
