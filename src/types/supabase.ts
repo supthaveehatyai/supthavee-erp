@@ -1724,7 +1724,6 @@ export type Database = {
       }
       production_jobs: {
         Row: {
-          attachment_paths: string[]
           created_at: string | null
           remark: string | null
           document_id: string | null
@@ -1733,6 +1732,7 @@ export type Database = {
           is_archived: boolean
           job_no: string
           job_type: Database["public"]["Enums"]["production_job_type"]
+          mockup_image_url: string | null
           nas_archive_url: string | null
           status: Database["public"]["Enums"]["production_job_status"]
           storage_tier: Database["public"]["Enums"]["storage_tier_type"]
@@ -1742,7 +1742,6 @@ export type Database = {
           wage_cost: number
         }
         Insert: {
-          attachment_paths?: string[]
           created_at?: string | null
           remark?: string | null
           document_id?: string | null
@@ -1751,6 +1750,7 @@ export type Database = {
           is_archived?: boolean
           job_no: string
           job_type?: Database["public"]["Enums"]["production_job_type"]
+          mockup_image_url?: string | null
           nas_archive_url?: string | null
           status?: Database["public"]["Enums"]["production_job_status"]
           storage_tier?: Database["public"]["Enums"]["storage_tier_type"]
@@ -1760,7 +1760,6 @@ export type Database = {
           wage_cost?: number
         }
         Update: {
-          attachment_paths?: string[]
           created_at?: string | null
           remark?: string | null
           document_id?: string | null
@@ -1769,6 +1768,7 @@ export type Database = {
           is_archived?: boolean
           job_no?: string
           job_type?: Database["public"]["Enums"]["production_job_type"]
+          mockup_image_url?: string | null
           nas_archive_url?: string | null
           status?: Database["public"]["Enums"]["production_job_status"]
           storage_tier?: Database["public"]["Enums"]["storage_tier_type"]

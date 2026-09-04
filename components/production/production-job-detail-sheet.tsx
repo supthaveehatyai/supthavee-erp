@@ -6,6 +6,7 @@
  */
 
 import Link from "next/link";
+import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   CalendarDays,
@@ -13,6 +14,7 @@ import {
   ImageIcon,
   Package,
   Scissors,
+  X,
 } from "lucide-react";
 import type { ProductionJobDetail } from "@/types/production";
 import {
@@ -77,8 +79,10 @@ export function ProductionJobDetailSheet({
   const router = useRouter();
   const pathname = usePathname();
   const open = Boolean(jobId);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   function closeSheet() {
+    setPreviewOpen(false);
     router.push(pathname || "/production/kanban", { scroll: false });
   }
 
@@ -190,27 +194,58 @@ export function ProductionJobDetailSheet({
                 ) : null}
               </section>
 
-              {/* Mockup */}
-              <section className="space-y-2">
-                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
-                  <ImageIcon className="size-4 text-slate-500" aria-hidden />
-                  รูป Mockup
-                </h3>
-                {detail.mockup_image_url ? (
-                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
+              {/* Mockup — แสดงเฉพาะเมื่อมี mockup_image_url */}
+              {detail.mockup_image_url?.trim() ? (
+                <section className="space-y-2">
+                  <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                    <ImageIcon className="size-4 text-slate-500" aria-hidden />
+                    รูป Mockup
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewOpen(true)}
+                    className="group block w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-100 text-left outline-none transition hover:border-blue-300 focus-visible:ring-2 focus-visible:ring-blue-400"
+                    aria-label="ดูรูป Mockup ขนาดใหญ่"
+                  >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={detail.mockup_image_url}
                       alt={`Mockup ${detail.job_no}`}
-                      className="max-h-72 w-full object-contain bg-white"
+                      className="mx-auto max-h-48 w-auto object-contain bg-white transition group-hover:opacity-95"
                     />
-                  </div>
-                ) : (
-                  <div className="grid h-36 place-items-center rounded-xl border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-400">
-                    ไม่มีรูป Mockup
-                  </div>
-                )}
-              </section>
+                    <p className="border-t border-slate-200 bg-white px-3 py-1.5 text-center text-[11px] text-slate-500">
+                      แตะเพื่อดูภาพใหญ่
+                    </p>
+                  </button>
+                </section>
+              ) : null}
+
+              {/* Lightbox preview */}
+              {previewOpen && detail.mockup_image_url?.trim() ? (
+                <div
+                  className="fixed inset-0 z-[10020] flex items-center justify-center bg-slate-950/80 p-4"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="ดูรูป Mockup"
+                  onClick={() => setPreviewOpen(false)}
+                >
+                  <button
+                    type="button"
+                    className="absolute right-4 top-4 rounded-lg bg-white/10 p-2 text-white outline-none hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white"
+                    aria-label="ปิด"
+                    onClick={() => setPreviewOpen(false)}
+                  >
+                    <X className="size-5" />
+                  </button>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={detail.mockup_image_url}
+                    alt={`Mockup ${detail.job_no}`}
+                    className="max-h-[90vh] max-w-full rounded-lg object-contain shadow-2xl"
+                    onClick={(event) => event.stopPropagation()}
+                  />
+                </div>
+              ) : null}
 
               {/* Items — งานผลิต */}
               <section className="space-y-2">

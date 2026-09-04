@@ -33,13 +33,13 @@ export type ProductionJobCard = {
   status: ProductionJobStatus;
   estimated_completion_date: string | null;
   remark: string | null;
-  /** Raw Storage URLs (CLOUD) — keep for uploads / audit */
+  /** production_jobs.mockup_image_url — mapped to array for legacy UI thumbs */
   attachment_paths: string[];
   /** Phase 14 Tiered Storage */
   storage_tier: StorageTier;
   nas_archive_url: string | null;
   /**
-   * Display URLs resolved on Server (CLOUD → attachment_paths, NAS → nas_archive_url).
+   * Display URLs resolved on Server (CLOUD → mockup_image_url, NAS → nas_archive_url).
    * Client must render these — Zero Client-Side Fetching.
    */
   display_attachment_urls: string[];

@@ -68,7 +68,7 @@ type ProductionJobRow = {
   status: ProductionJobStatus;
   estimated_completion_date: string | null;
   remark: string | null;
-  attachment_paths: string[] | null;
+  mockup_image_url: string | null;
   storage_tier: StorageTier | null;
   nas_archive_url: string | null;
   created_at: string | null;
@@ -128,6 +128,8 @@ function mapJobCard(row: ProductionJobRow): ProductionJobCard {
   const doc = unwrapJoin(row.documents);
   const contact = unwrapJoin(doc?.contacts ?? null);
   const technician = unwrapJoin(row.technician ?? null);
+  const mockupUrl = row.mockup_image_url?.trim() || null;
+  const attachmentPaths = mockupUrl ? [mockupUrl] : [];
 
   return {
     id: row.id,
@@ -136,16 +138,12 @@ function mapJobCard(row: ProductionJobRow): ProductionJobCard {
     status: row.status,
     estimated_completion_date: row.estimated_completion_date,
     remark: row.remark,
-    attachment_paths: Array.isArray(row.attachment_paths)
-      ? row.attachment_paths.filter(Boolean)
-      : [],
+    attachment_paths: attachmentPaths,
     storage_tier: row.storage_tier === "NAS" ? "NAS" : "CLOUD",
     nas_archive_url: row.nas_archive_url?.trim() || null,
     display_attachment_urls: resolveProductionAttachmentUrls({
       storageTier: row.storage_tier,
-      attachmentPaths: Array.isArray(row.attachment_paths)
-        ? row.attachment_paths.filter(Boolean)
-        : [],
+      attachmentPaths,
       nasArchiveUrl: row.nas_archive_url,
     }),
     created_at: row.created_at,
@@ -166,7 +164,7 @@ const JOB_SELECT = `
         status,
         estimated_completion_date,
         remark,
-        attachment_paths,
+        mockup_image_url,
         created_at,
         updated_at,
         document_id,
@@ -478,7 +476,7 @@ export async function createProductionJob(
           status: "PLANNED",
           estimated_completion_date: estimatedCompletionDate,
           remark,
-          attachment_paths: attachmentPaths,
+          mockup_image_url: attachmentPaths[0] ?? null,
           technician_id: null,
           wage_cost: 0,
         })

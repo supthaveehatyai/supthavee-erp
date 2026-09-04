@@ -969,10 +969,6 @@ export async function createProductionJobFromSO(
       if (estimatedCompletionDate) {
         jobInsert.estimated_completion_date = estimatedCompletionDate;
       }
-      if (mockupImageUrl) {
-        // เก็บ URL ใน attachment_paths ด้วย (Phase 7 / Kanban thumbnail)
-        jobInsert.attachment_paths = [mockupImageUrl];
-      }
 
       const { data: created, error: insertError } = await supabaseAdmin
         .from("production_jobs")
@@ -1233,8 +1229,7 @@ export async function getProductionJobDetails(
         estimated_completion_date,
         ref_document_id,
         mockup_image_url,
-        remark,
-        attachment_paths
+        remark
       `,
       )
       .eq("id", id)
@@ -1419,15 +1414,8 @@ export async function getProductionJobDetails(
       "— ยังไม่ผูกสินค้า";
 
     const mockupFromCol = String(job.mockup_image_url ?? "").trim();
-    const attachmentPaths = Array.isArray(job.attachment_paths)
-      ? job.attachment_paths
-      : [];
-    const mockupFromAttachments = attachmentPaths
-      .map((path) => String(path ?? "").trim())
-      .find((path) => path.length > 0);
     const modelImage = String(model?.image_url ?? "").trim();
-    const mockupImageUrl =
-      mockupFromCol || mockupFromAttachments || modelImage || null;
+    const mockupImageUrl = mockupFromCol || modelImage || null;
 
     const remark = String(job.remark ?? "").trim() || null;
 
