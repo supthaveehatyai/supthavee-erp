@@ -1256,7 +1256,20 @@ export async function updateProductionJobAssignment(
 
     const { data: existingItems, error: itemsError } = await supabase
       .from("document_items")
-      .select("id, technician_bill_id, document_id")
+      .select(
+        `
+        id,
+        technician_bill_id,
+        document_id,
+        products!document_items_product_id_fkey (
+          model_id,
+          product_models!products_model_id_fkey (
+            id,
+            is_service
+          )
+        )
+      `,
+      )
       .eq("document_id", current.ref_document_id)
       .in("id", itemIds);
 
@@ -1271,6 +1284,21 @@ export async function updateProductionJobAssignment(
         success: false,
         error: "พบรายการที่ไม่ได้อยู่ในเอกสารต้นทางของใบสั่งผลิตนี้",
       };
+    }
+
+    for (const row of existingItems ?? []) {
+      const product = Array.isArray(row.products)
+        ? row.products[0]
+        : row.products;
+      const modelRaw = product?.product_models;
+      const model = Array.isArray(modelRaw) ? modelRaw[0] : modelRaw;
+      if (model?.is_service !== true) {
+        return {
+          success: false,
+          error:
+            "บันทึกช่าง/ค่าแรงได้เฉพาะรายการงานบริการ (product_models.is_service)",
+        };
+      }
     }
 
     const billed = new Set(

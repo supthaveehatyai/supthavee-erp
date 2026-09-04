@@ -29,6 +29,9 @@ import {
   type ProductionJobDetail,
   type ProductionJobDetailItem,
   type ProductionJobDetailMaterial,
+  type ProductionJobServiceLine,
+  type ProductionJobTechnicianOption,
+  type ProductionJobTechnicianRate,
   type ProductionKanbanStatus,
   type SearchManufacturedModelsResult,
   type UpdateJobStatusResult,
@@ -1260,34 +1263,81 @@ export async function getProductionJobDetails(
       ? String(job.ref_document_id)
       : null;
 
-    const [modelRes, soRes, itemsRes, materialsRes] = await Promise.all([
-      finishedModelId
-        ? supabaseAdmin
-            .from("product_models")
-            .select("id, name, model_code, short_name, image_url")
-            .eq("id", finishedModelId)
-            .maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-      refDocumentId
-        ? supabaseAdmin
-            .from("documents")
-            .select("id, doc_no, doc_type")
-            .eq("id", refDocumentId)
-            .maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-      supabaseAdmin
-        .from("production_job_items")
-        .select("id, product_id, quantity")
-        .eq("job_id", id)
-        .order("id", { ascending: true }),
-      supabaseAdmin
-        .from("production_job_materials")
-        .select(
-          "id, raw_material_model_id, uom_id, planned_qty, cost_price_snapshot",
-        )
-        .eq("job_id", id)
-        .order("id", { ascending: true }),
-    ]);
+    const [modelRes, soRes, itemsRes, materialsRes, serviceDocItemsRes, techRes, ratesRes] =
+      await Promise.all([
+        finishedModelId
+          ? supabaseAdmin
+              .from("product_models")
+              .select(
+                "id, name, model_code, short_name, image_url, is_service, is_manufactured",
+              )
+              .eq("id", finishedModelId)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        refDocumentId
+          ? supabaseAdmin
+              .from("documents")
+              .select("id, doc_no, doc_type")
+              .eq("id", refDocumentId)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        supabaseAdmin
+          .from("production_job_items")
+          .select("id, product_id, quantity")
+          .eq("job_id", id)
+          .order("id", { ascending: true }),
+        supabaseAdmin
+          .from("production_job_materials")
+          .select(
+            "id, raw_material_model_id, uom_id, planned_qty, cost_price_snapshot",
+          )
+          .eq("job_id", id)
+          .order("id", { ascending: true }),
+        // Phase 13: service lines live on SO document_items (not production_job_items)
+        refDocumentId
+          ? supabaseAdmin
+              .from("document_items")
+              .select(
+                `
+              id,
+              qty,
+              description,
+              uom_used,
+              sort_order,
+              technician_id,
+              wage_cost,
+              technician_bill_id,
+              products!document_items_product_id_fkey (
+                id,
+                sku,
+                name,
+                short_name,
+                color,
+                size,
+                model_id,
+                product_models!products_model_id_fkey (
+                  id,
+                  model_code,
+                  name,
+                  short_name,
+                  is_service
+                )
+              )
+            `,
+              )
+              .eq("document_id", refDocumentId)
+              .order("sort_order", { ascending: true })
+          : Promise.resolve({ data: [], error: null }),
+        supabaseAdmin
+          .from("contacts")
+          .select("id, company_name, contact_roles, is_active")
+          .contains("contact_roles", ["Technician"])
+          .neq("is_active", false)
+          .order("company_name", { ascending: true }),
+        supabaseAdmin
+          .from("technician_rates")
+          .select("technician_id, service_model_id, default_wage"),
+      ]);
 
     if (itemsRes.error) {
       return {
@@ -1302,6 +1352,27 @@ export async function getProductionJobDetails(
         error: materialsRes.error.message ?? "ดึงรายการวัตถุดิบไม่สำเร็จ",
         data: null,
       };
+    }
+    if (serviceDocItemsRes.error) {
+      return {
+        success: false,
+        error:
+          serviceDocItemsRes.error.message ??
+          "ดึงรายการงานบริการจากเอกสารต้นทางไม่สำเร็จ",
+        data: null,
+      };
+    }
+    if (techRes.error) {
+      console.warn(
+        "[getProductionJobDetails] technicians:",
+        techRes.error.message,
+      );
+    }
+    if (ratesRes.error) {
+      console.warn(
+        "[getProductionJobDetails] technician_rates:",
+        ratesRes.error.message,
+      );
     }
 
     const itemRows = itemsRes.data ?? [];
@@ -1413,6 +1484,96 @@ export async function getProductionJobDetails(
       };
     });
 
+    type NestedProductModel = {
+      id?: string | null;
+      model_code?: string | null;
+      name?: string | null;
+      short_name?: string | null;
+      is_service?: boolean | null;
+    };
+    type NestedProduct = {
+      id?: string | null;
+      sku?: string | null;
+      name?: string | null;
+      short_name?: string | null;
+      color?: string | null;
+      size?: string | null;
+      model_id?: string | null;
+      product_models?: NestedProductModel | NestedProductModel[] | null;
+    };
+
+    function unwrapOne<T extends object>(
+      value: T | T[] | null | undefined,
+    ): T | null {
+      if (!value) return null;
+      return Array.isArray(value) ? (value[0] ?? null) : value;
+    }
+
+    const technicianNameById = new Map<string, string>();
+    const technicians: ProductionJobTechnicianOption[] = [];
+    for (const row of techRes.data ?? []) {
+      const techId = String(row.id ?? "").trim();
+      if (!techId) continue;
+      const name =
+        String(row.company_name ?? "").trim() || "ไม่ระบุชื่อ";
+      technicianNameById.set(techId, name);
+      technicians.push({ id: techId, company_name: name });
+    }
+
+    const technician_rates: ProductionJobTechnicianRate[] = [];
+    for (const rate of ratesRes.data ?? []) {
+      const techId = String(rate.technician_id ?? "").trim();
+      const modelId = String(rate.service_model_id ?? "").trim();
+      if (!techId || !modelId) continue;
+      technician_rates.push({
+        technician_id: techId,
+        service_model_id: modelId,
+        default_wage: toCostPrice(rate.default_wage) ?? 0,
+      });
+    }
+
+    const service_lines: ProductionJobServiceLine[] = [];
+    for (const row of serviceDocItemsRes.data ?? []) {
+      const product = unwrapOne(
+        row.products as NestedProduct | NestedProduct[] | null,
+      );
+      const model = unwrapOne(product?.product_models ?? null);
+      if (model?.is_service !== true) continue;
+
+      const techId = row.technician_id
+        ? String(row.technician_id).trim()
+        : null;
+      service_lines.push({
+        id: String(row.id),
+        sku: String(product?.sku ?? "—").trim() || "—",
+        name:
+          String(product?.name ?? "").trim() ||
+          String(product?.short_name ?? "").trim() ||
+          String(model?.name ?? "").trim() ||
+          "งานบริการ",
+        qty: toQty(row.qty),
+        uom: row.uom_used ? String(row.uom_used).trim() || null : null,
+        color: product?.color ? String(product.color) : null,
+        size: product?.size ? String(product.size) : null,
+        description: row.description
+          ? String(row.description).trim() || null
+          : null,
+        model_id: model?.id
+          ? String(model.id)
+          : product?.model_id
+            ? String(product.model_id)
+            : null,
+        technician_id: techId || null,
+        technician_name: techId
+          ? technicianNameById.get(techId) ?? null
+          : null,
+        wage_cost: toCostPrice(row.wage_cost) ?? 0,
+        technician_bill_id: row.technician_bill_id
+          ? String(row.technician_bill_id).trim() || null
+          : null,
+      });
+    }
+
     const model = modelRes.data;
     const productName =
       String(model?.name ?? "").trim() ||
@@ -1435,6 +1596,8 @@ export async function getProductionJobDetails(
       product_model_code: model?.model_code
         ? String(model.model_code).trim()
         : null,
+      is_manufactured: model?.is_manufactured === true,
+      is_service: model?.is_service === true,
       target_quantity: toQty(job.target_quantity),
       estimated_completion_date: job.estimated_completion_date
         ? String(job.estimated_completion_date)
@@ -1445,6 +1608,9 @@ export async function getProductionJobDetails(
       remark,
       items,
       materials,
+      service_lines,
+      technicians,
+      technician_rates,
     };
 
     return { success: true, data: detail };

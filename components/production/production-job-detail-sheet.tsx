@@ -2,26 +2,41 @@
 
 /**
  * Production Job Detail — Slide-over Sheet (URL-driven ?jobId=)
- * Minimalist UI สำหรับช่างหน้างาน / Tablet
+ * Phase 17 MTO: SKU + WIP tables
+ * Phase 13 Service: technician / wage assignment → document_items (TB)
  */
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   CalendarDays,
   FileText,
   ImageIcon,
+  Loader2,
   Package,
+  Save,
   Scissors,
+  Wrench,
   X,
 } from "lucide-react";
-import type { ProductionJobDetail } from "@/types/production";
+import { toast } from "sonner";
+import {
+  lookupTechnicianWageForService,
+  updateProductionJobAssignment,
+} from "@/app/actions/kanban-actions";
+import type {
+  ProductionJobDetail,
+  ProductionJobServiceLine,
+} from "@/types/production";
 import {
   isProductionKanbanStatus,
   PRODUCTION_STATUS_LABEL,
 } from "@/types/production";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -44,6 +59,11 @@ export type ProductionJobDetailSheetProps = {
   jobId: string | null;
   detail: ProductionJobDetail | null;
   error?: string | null;
+};
+
+type LineDraft = {
+  technicianId: string;
+  wageCost: string;
 };
 
 function formatQty(value: number): string {
@@ -80,22 +100,163 @@ export function ProductionJobDetailSheet({
   const pathname = usePathname();
   const open = Boolean(jobId);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [isSaving, startSaveTransition] = useTransition();
+  const [lookingUpItemId, setLookingUpItemId] = useState<string | null>(null);
+  const [lineDrafts, setLineDrafts] = useState<Record<string, LineDraft>>({});
+  const lookupSeqRef = useRef<Record<string, number>>({});
+
+  const busy = isSaving || Boolean(lookingUpItemId);
+  const canEditAssignment =
+    detail != null && String(detail.status).toUpperCase() !== "CANCELLED";
+
+  const showSkuTable =
+    (detail?.items.length ?? 0) > 0 || detail?.is_manufactured === true;
+  const showWipTable =
+    (detail?.materials.length ?? 0) > 0 || detail?.is_manufactured === true;
+  const serviceLines = detail?.service_lines ?? [];
+  const technicians = detail?.technicians ?? [];
+  const rates = detail?.technician_rates ?? [];
+
+  useEffect(() => {
+    const next: Record<string, LineDraft> = {};
+    for (const item of detail?.service_lines ?? []) {
+      next[item.id] = {
+        technicianId: item.technician_id ?? "",
+        wageCost: String(Number.isFinite(item.wage_cost) ? item.wage_cost : 0),
+      };
+    }
+    setLineDrafts(next);
+  }, [detail?.id, detail?.service_lines]);
 
   function closeSheet() {
     setPreviewOpen(false);
     router.push(pathname || "/production/kanban", { scroll: false });
   }
 
+  function techniciansForLine(item: ProductionJobServiceLine) {
+    const modelId = item.model_id ?? "";
+    if (!modelId) return technicians;
+    const ratedIds = new Set(
+      rates
+        .filter((rate) => rate.service_model_id === modelId)
+        .map((rate) => rate.technician_id),
+    );
+    if (ratedIds.size === 0) return technicians;
+    const preferred = technicians.filter((tech) => ratedIds.has(tech.id));
+    return preferred.length > 0 ? preferred : technicians;
+  }
+
+  function applyLineTechnician(
+    item: ProductionJobServiceLine,
+    nextTechnicianId: string,
+  ) {
+    const rate = rates.find(
+      (row) =>
+        row.service_model_id === (item.model_id ?? "") &&
+        row.technician_id === nextTechnicianId,
+    );
+
+    setLineDrafts((prev) => ({
+      ...prev,
+      [item.id]: {
+        technicianId: nextTechnicianId,
+        wageCost:
+          rate != null
+            ? String(rate.default_wage)
+            : (prev[item.id]?.wageCost ?? String(item.wage_cost ?? 0)),
+      },
+    }));
+
+    if (!nextTechnicianId || !item.model_id) return;
+
+    const seq = (lookupSeqRef.current[item.id] ?? 0) + 1;
+    lookupSeqRef.current[item.id] = seq;
+    setLookingUpItemId(item.id);
+
+    void (async () => {
+      const result = await lookupTechnicianWageForService(
+        nextTechnicianId,
+        item.model_id,
+      );
+      if (lookupSeqRef.current[item.id] !== seq) return;
+      setLookingUpItemId((current) => (current === item.id ? null : current));
+      if (!result.success) {
+        toast.error(result.error ?? "ดึงเรตค่าแรงไม่สำเร็จ");
+        return;
+      }
+      if (result.has_rate) {
+        setLineDrafts((prev) => ({
+          ...prev,
+          [item.id]: {
+            technicianId: nextTechnicianId,
+            wageCost: String(result.default_wage),
+          },
+        }));
+      }
+    })();
+  }
+
+  function handleSaveAssignment() {
+    if (!detail || isSaving) return;
+    if (serviceLines.length === 0) {
+      toast.error("เอกสารนี้ไม่มีรายการงานบริการ");
+      return;
+    }
+
+    const lines: Array<{
+      item_id: string;
+      document_item_id: string;
+      technician_id: string | null;
+      wage_cost: number;
+    }> = [];
+
+    for (const item of serviceLines) {
+      if (item.technician_bill_id) continue;
+      const draft = lineDrafts[item.id];
+      const wage = Number.parseFloat(draft?.wageCost ?? "0");
+      if (!Number.isFinite(wage) || wage < 0) {
+        toast.error(`ค่าแรงของ ${item.sku} ต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0`);
+        return;
+      }
+      lines.push({
+        item_id: item.id,
+        document_item_id: item.id,
+        technician_id: draft?.technicianId?.trim() || null,
+        wage_cost: wage,
+      });
+    }
+
+    if (lines.length === 0) {
+      toast.error("ทุกรายการงานบริการถูกวางบิลแล้ว");
+      return;
+    }
+
+    startSaveTransition(async () => {
+      const result = await updateProductionJobAssignment({
+        job_id: detail.id,
+        lines,
+      });
+
+      if (!result.success) {
+        toast.error(result.error ?? "บันทึกช่างรับเหมา / ค่าแรงไม่สำเร็จ");
+        return;
+      }
+
+      toast.success("บันทึกช่างรับเหมาและค่าแรงรายบรรทัดแล้ว");
+      router.refresh();
+    });
+  }
+
   return (
     <Sheet
       open={open}
       onOpenChange={(next) => {
-        if (!next) closeSheet();
+        if (!next && !busy) closeSheet();
       }}
     >
       <SheetContent
         side="right"
-        className="w-full gap-0 overflow-y-auto p-0 sm:max-w-xl"
+        className="w-full gap-0 overflow-y-auto p-0 sm:max-w-2xl"
       >
         <SheetHeader className="sticky top-0 z-10 border-b border-slate-200 bg-white px-5 py-4 pr-12 text-left">
           <SheetTitle className="font-mono text-lg tracking-tight text-slate-900">
@@ -125,13 +286,22 @@ export function ProductionJobDetailSheet({
 
           {detail ? (
             <>
-              {/* Meta */}
               <section className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
                   {statusBadge(String(detail.status))}
                   {detail.product_model_code ? (
                     <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600">
                       {detail.product_model_code}
+                    </span>
+                  ) : null}
+                  {detail.is_service ? (
+                    <span className="rounded-md bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200">
+                      งานบริการ
+                    </span>
+                  ) : null}
+                  {detail.is_manufactured ? (
+                    <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 ring-1 ring-blue-200">
+                      MTO
                     </span>
                   ) : null}
                 </div>
@@ -194,7 +364,6 @@ export function ProductionJobDetailSheet({
                 ) : null}
               </section>
 
-              {/* Mockup — แสดงเฉพาะเมื่อมี mockup_image_url */}
               {detail.mockup_image_url?.trim() ? (
                 <section className="space-y-2">
                   <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
@@ -220,7 +389,6 @@ export function ProductionJobDetailSheet({
                 </section>
               ) : null}
 
-              {/* Lightbox preview */}
               {previewOpen && detail.mockup_image_url?.trim() ? (
                 <div
                   className="fixed inset-0 z-[10020] flex items-center justify-center bg-slate-950/80 p-4"
@@ -247,126 +415,291 @@ export function ProductionJobDetailSheet({
                 </div>
               ) : null}
 
-              {/* Items — งานผลิต */}
-              <section className="space-y-2">
-                <div className="flex items-end justify-between gap-2">
-                  <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
-                    <Scissors className="size-4 text-slate-500" aria-hidden />
-                    ตารางงานผลิต
-                  </h3>
-                  <span className="text-xs text-slate-400">
-                    {detail.items.length} SKU
-                  </span>
-                </div>
-                <div className="overflow-hidden rounded-xl border border-slate-200">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-slate-50/90 hover:bg-slate-50/90">
-                        <TableHead className="px-3 text-xs">SKU</TableHead>
-                        <TableHead className="px-3 text-xs">ไซส์/สี</TableHead>
-                        <TableHead className="px-3 text-right text-xs">
-                          จำนวน
-                        </TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {detail.items.length === 0 ? (
-                        <TableRow>
-                          <TableCell
-                            colSpan={3}
-                            className="px-3 py-8 text-center text-sm text-slate-400"
-                          >
-                            ไม่มีรายการ SKU
-                          </TableCell>
+              {/* MTO SKU — แสดงเมื่อเป็นงานผลิตเองหรือมีรายการ */}
+              {showSkuTable ? (
+                <section className="space-y-2">
+                  <div className="flex items-end justify-between gap-2">
+                    <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                      <Scissors className="size-4 text-slate-500" aria-hidden />
+                      ตารางงานผลิต
+                    </h3>
+                    <span className="text-xs text-slate-400">
+                      {detail.items.length} SKU
+                    </span>
+                  </div>
+                  <div className="overflow-hidden rounded-xl border border-slate-200">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-50/90 hover:bg-slate-50/90">
+                          <TableHead className="px-3 text-xs">SKU</TableHead>
+                          <TableHead className="px-3 text-xs">ไซส์/สี</TableHead>
+                          <TableHead className="px-3 text-right text-xs">
+                            จำนวน
+                          </TableHead>
                         </TableRow>
-                      ) : (
-                        detail.items.map((item) => (
-                          <TableRow key={item.id}>
-                            <TableCell className="px-3 py-2.5 align-top">
-                              <p className="font-mono text-xs font-semibold text-slate-800">
-                                {item.sku}
-                              </p>
-                              <p
-                                className={cn(
-                                  "mt-0.5 text-sm leading-snug text-slate-600",
-                                  "line-clamp-2",
-                                )}
-                              >
-                                {item.product_name}
-                              </p>
-                            </TableCell>
-                            <TableCell className="px-3 py-2.5 text-sm text-slate-700">
-                              {[item.size, item.color]
-                                .filter(Boolean)
-                                .join(" / ") || "—"}
-                            </TableCell>
-                            <TableCell className="px-3 py-2.5 text-right text-base font-semibold tabular-nums text-slate-900">
-                              {formatQty(item.quantity)}
+                      </TableHeader>
+                      <TableBody>
+                        {detail.items.length === 0 ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={3}
+                              className="px-3 py-8 text-center text-sm text-slate-400"
+                            >
+                              ไม่มีรายการ SKU
                             </TableCell>
                           </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </section>
+                        ) : (
+                          detail.items.map((item) => (
+                            <TableRow key={item.id}>
+                              <TableCell className="px-3 py-2.5 align-top">
+                                <p className="font-mono text-xs font-semibold text-slate-800">
+                                  {item.sku}
+                                </p>
+                                <p
+                                  className={cn(
+                                    "mt-0.5 text-sm leading-snug text-slate-600",
+                                    "line-clamp-2",
+                                  )}
+                                >
+                                  {item.product_name}
+                                </p>
+                              </TableCell>
+                              <TableCell className="px-3 py-2.5 text-sm text-slate-700">
+                                {[item.size, item.color]
+                                  .filter(Boolean)
+                                  .join(" / ") || "—"}
+                              </TableCell>
+                              <TableCell className="px-3 py-2.5 text-right text-base font-semibold tabular-nums text-slate-900">
+                                {formatQty(item.quantity)}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </section>
+              ) : null}
 
-              {/* Materials — WIP */}
-              <section className="space-y-2 pb-4">
-                <div className="flex items-end justify-between gap-2">
-                  <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
-                    <Package className="size-4 text-slate-500" aria-hidden />
-                    ตารางวัตถุดิบ (WIP)
-                  </h3>
-                  <span className="text-xs text-slate-400">
-                    {detail.materials.length} รายการ
-                  </span>
-                </div>
-                <div className="overflow-hidden rounded-xl border border-slate-200">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-slate-50/90 hover:bg-slate-50/90">
-                        <TableHead className="px-3 text-xs">วัตถุดิบ</TableHead>
-                        <TableHead className="px-3 text-right text-xs">
-                          เบิก (planned)
-                        </TableHead>
-                        <TableHead className="px-3 text-xs">หน่วย</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {detail.materials.length === 0 ? (
-                        <TableRow>
-                          <TableCell
-                            colSpan={3}
-                            className="px-3 py-8 text-center text-sm text-slate-400"
-                          >
-                            ไม่มีรายการวัตถุดิบ
-                          </TableCell>
+              {/* MTO WIP */}
+              {showWipTable ? (
+                <section className="space-y-2">
+                  <div className="flex items-end justify-between gap-2">
+                    <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                      <Package className="size-4 text-slate-500" aria-hidden />
+                      ตารางวัตถุดิบ (WIP)
+                    </h3>
+                    <span className="text-xs text-slate-400">
+                      {detail.materials.length} รายการ
+                    </span>
+                  </div>
+                  <div className="overflow-hidden rounded-xl border border-slate-200">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-50/90 hover:bg-slate-50/90">
+                          <TableHead className="px-3 text-xs">วัตถุดิบ</TableHead>
+                          <TableHead className="px-3 text-right text-xs">
+                            เบิก (planned)
+                          </TableHead>
+                          <TableHead className="px-3 text-xs">หน่วย</TableHead>
                         </TableRow>
-                      ) : (
-                        detail.materials.map((mat) => (
-                          <TableRow key={mat.id}>
-                            <TableCell className="px-3 py-2.5 align-top">
-                              <p className="font-mono text-xs font-semibold text-slate-800">
-                                {mat.raw_material_code}
-                              </p>
-                              <p className="mt-0.5 line-clamp-2 text-sm text-slate-600">
-                                {mat.raw_material_name}
-                              </p>
-                            </TableCell>
-                            <TableCell className="px-3 py-2.5 text-right text-base font-semibold tabular-nums text-slate-900">
-                              {formatQty(mat.planned_qty)}
-                            </TableCell>
-                            <TableCell className="px-3 py-2.5 text-sm text-slate-600">
-                              {mat.uom_code ?? "—"}
+                      </TableHeader>
+                      <TableBody>
+                        {detail.materials.length === 0 ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={3}
+                              className="px-3 py-8 text-center text-sm text-slate-400"
+                            >
+                              ไม่มีรายการวัตถุดิบ
                             </TableCell>
                           </TableRow>
-                        ))
+                        ) : (
+                          detail.materials.map((mat) => (
+                            <TableRow key={mat.id}>
+                              <TableCell className="px-3 py-2.5 align-top">
+                                <p className="font-mono text-xs font-semibold text-slate-800">
+                                  {mat.raw_material_code}
+                                </p>
+                                <p className="mt-0.5 line-clamp-2 text-sm text-slate-600">
+                                  {mat.raw_material_name}
+                                </p>
+                              </TableCell>
+                              <TableCell className="px-3 py-2.5 text-right text-base font-semibold tabular-nums text-slate-900">
+                                {formatQty(mat.planned_qty)}
+                              </TableCell>
+                              <TableCell className="px-3 py-2.5 text-sm text-slate-600">
+                                {mat.uom_code ?? "—"}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </section>
+              ) : null}
+
+              {/* Phase 13 Service Assignment → document_items (TB) */}
+              {serviceLines.length > 0 ? (
+                <section className="space-y-3 pb-4">
+                  <div className="flex items-end justify-between gap-2">
+                    <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                      <Wrench className="size-4 text-violet-500" aria-hidden />
+                      ตารางงานบริการ (Service Assignment)
+                    </h3>
+                    <span className="text-xs text-slate-400">
+                      {serviceLines.length} รายการ
+                    </span>
+                  </div>
+                  <p className="text-xs leading-relaxed text-slate-500">
+                    มอบหมายช่างและค่าแรงลง{" "}
+                    <span className="font-mono">document_items</span>{" "}
+                    ของ SO — โมดูลวางบิลช่าง (TB) จะดึงรายการที่ระบุช่าง +
+                    ค่าแรงและงาน COMPLETED
+                  </p>
+
+                  <div className="overflow-hidden rounded-xl border border-violet-200">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-violet-50/90 hover:bg-violet-50/90">
+                          <TableHead className="px-3 text-xs">งานบริการ</TableHead>
+                          <TableHead className="px-3 text-right text-xs">
+                            จุด
+                          </TableHead>
+                          <TableHead className="min-w-[9rem] px-3 text-xs">
+                            ช่าง
+                          </TableHead>
+                          <TableHead className="min-w-[6.5rem] px-3 text-right text-xs">
+                            ค่าแรง
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {serviceLines.map((item) => {
+                          const draft = lineDrafts[item.id];
+                          const billed = Boolean(item.technician_bill_id);
+                          const lineTechs = techniciansForLine(item);
+                          const selectedTechId =
+                            draft?.technicianId || item.technician_id || "";
+                          const hasRate = rates.some(
+                            (rate) =>
+                              rate.service_model_id === (item.model_id ?? "") &&
+                              rate.technician_id === selectedTechId,
+                          );
+                          return (
+                            <TableRow key={item.id}>
+                              <TableCell className="px-3 py-2.5 align-top">
+                                <p className="font-mono text-xs font-semibold text-slate-800">
+                                  {item.sku}
+                                </p>
+                                <p className="mt-0.5 line-clamp-2 text-sm text-slate-600">
+                                  {item.name}
+                                </p>
+                                {item.description ? (
+                                  <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-400">
+                                    {item.description}
+                                  </p>
+                                ) : null}
+                              </TableCell>
+                              <TableCell className="px-3 py-2.5 align-top text-right text-sm font-semibold tabular-nums text-slate-900">
+                                {formatQty(item.qty)}
+                                {item.uom ? (
+                                  <span className="ml-1 text-xs font-normal text-slate-400">
+                                    {item.uom}
+                                  </span>
+                                ) : null}
+                              </TableCell>
+                              <TableCell className="px-3 py-2.5 align-top">
+                                <Select
+                                  value={draft?.technicianId ?? ""}
+                                  disabled={
+                                    !canEditAssignment || busy || billed
+                                  }
+                                  onChange={(event) =>
+                                    applyLineTechnician(
+                                      item,
+                                      event.target.value,
+                                    )
+                                  }
+                                  className="h-9 text-xs"
+                                >
+                                  <option value="">— ไม่ระบุ —</option>
+                                  {lineTechs.map((tech) => (
+                                    <option key={tech.id} value={tech.id}>
+                                      {tech.company_name}
+                                    </option>
+                                  ))}
+                                </Select>
+                                {lineTechs.length === 0 ? (
+                                  <p className="mt-1 text-[10px] text-amber-700">
+                                    ยังไม่มีรายชื่อช่าง (role Technician)
+                                  </p>
+                                ) : null}
+                                {selectedTechId && !hasRate ? (
+                                  <p className="mt-1 text-[10px] text-amber-700">
+                                    ไม่มี Rate Card สำหรับงานนี้
+                                  </p>
+                                ) : null}
+                                {billed ? (
+                                  <p className="mt-1 text-[10px] text-emerald-700">
+                                    วางบิลช่างแล้ว
+                                  </p>
+                                ) : null}
+                              </TableCell>
+                              <TableCell className="px-3 py-2.5 align-top">
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step="0.0001"
+                                  inputMode="decimal"
+                                  value={draft?.wageCost ?? "0"}
+                                  disabled={
+                                    !canEditAssignment || busy || billed
+                                  }
+                                  onChange={(event) =>
+                                    setLineDrafts((prev) => ({
+                                      ...prev,
+                                      [item.id]: {
+                                        technicianId:
+                                          prev[item.id]?.technicianId ?? "",
+                                        wageCost: event.target.value,
+                                      },
+                                    }))
+                                  }
+                                  className="h-9 text-right text-xs tabular-nums"
+                                />
+                                {lookingUpItemId === item.id ? (
+                                  <p className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-400">
+                                    <Loader2 className="size-3 animate-spin" />
+                                    ดึงเรต...
+                                  </p>
+                                ) : null}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {canEditAssignment ? (
+                    <Button
+                      type="button"
+                      className="h-10 w-full gap-2"
+                      disabled={busy}
+                      onClick={handleSaveAssignment}
+                    >
+                      {isSaving ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Save className="size-4" />
                       )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </section>
+                      บันทึกช่าง / ค่าแรงรายบรรทัด
+                    </Button>
+                  ) : null}
+                </section>
+              ) : null}
             </>
           ) : null}
         </div>

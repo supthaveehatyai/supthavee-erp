@@ -142,6 +142,37 @@ export type ProductionJobDetailMaterial = {
   cost_price_snapshot: number;
 };
 
+/**
+ * บรรทัดงานบริการจาก document_items ของ SO (ref_document_id)
+ * Phase 13 Subcontracting — บันทึก technician_id / wage_cost ที่นี่เพื่อให้ TB ตรวจจับได้
+ */
+export type ProductionJobServiceLine = {
+  id: string;
+  sku: string;
+  name: string;
+  qty: number;
+  uom: string | null;
+  color: string | null;
+  size: string | null;
+  description: string | null;
+  model_id: string | null;
+  technician_id: string | null;
+  technician_name: string | null;
+  wage_cost: number;
+  technician_bill_id: string | null;
+};
+
+export type ProductionJobTechnicianOption = {
+  id: string;
+  company_name: string;
+};
+
+export type ProductionJobTechnicianRate = {
+  technician_id: string;
+  service_model_id: string;
+  default_wage: number;
+};
+
 /** รายละเอียดใบสั่งผลิตสำหรับ Slide-over */
 export type ProductionJobDetail = {
   id: string;
@@ -150,6 +181,10 @@ export type ProductionJobDetail = {
   finished_model_id: string | null;
   product_name: string;
   product_model_code: string | null;
+  /** product_models.is_manufactured ของ finished model */
+  is_manufactured: boolean;
+  /** product_models.is_service ของ finished model */
+  is_service: boolean;
   target_quantity: number;
   estimated_completion_date: string | null;
   ref_document_id: string | null;
@@ -159,6 +194,10 @@ export type ProductionJobDetail = {
   remark: string | null;
   items: ProductionJobDetailItem[];
   materials: ProductionJobDetailMaterial[];
+  /** งานบริการในเอกสารต้นทาง (is_service) — สำหรับมอบหมายช่าง */
+  service_lines: ProductionJobServiceLine[];
+  technicians: ProductionJobTechnicianOption[];
+  technician_rates: ProductionJobTechnicianRate[];
 };
 
 export type GetProductionJobDetailResult =
