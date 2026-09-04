@@ -29,7 +29,8 @@
 - `products` (สินค้า SKU ย่อย - Phase 2)
 - `vendor_product_mapping` (การผูกรหัสสินค้าซัพพลายเออร์)
 - `inventory_ledger` (สมุดบัญชีคลังสินค้า - ควบคุมการเข้าออกสต็อก)
-- `production_jobs` (ใบสั่งผลิต / งาน MTO — มี `finished_model_id`, `target_quantity`, `estimated_completion_date`, สถานะ Kanban: PLANNED / IN_PROGRESS / QA / COMPLETED; Phase 14 Tiered Storage: `storage_tier`)
+- `production_jobs` (ใบสั่งผลิต / งาน MTO — มี `finished_model_id`, `target_quantity`, `estimated_completion_date`, `ref_document_id` → SO, `mockup_image_url`, `remark`; สถานะ Kanban: PLANNED / IN_PROGRESS / QA / COMPLETED; Phase 14 Tiered Storage: `storage_tier`)
+- `production_job_items` (รายการ SKU/ไซส์ ต่อใบสั่งผลิต — `job_id`, `product_id`, `quantity`)
 - `production_job_materials` (BOM Snapshot ต่อใบสั่งผลิต — `job_id`, `raw_material_model_id`, `uom_id`, `planned_qty`, `cost_price_snapshot`)
 - `product_boms` (สูตรการผลิต — `finished_model_id`, `raw_material_model_id`, `uom_id`, `quantity_required`, `waste_percent`)
 - `service_tracking` (ติดตามสถานะงานบริการ)
@@ -42,7 +43,7 @@
 - **Inventory Adjustments:** `STK_OB` (ยอดยกมา · Prefix **SOB-YYMM-XXXX**) และ `STK_ADJ` (ปรับปรุงสต็อก · Prefix **SAD-YYMM-XXXX**) บันทึกผ่าน `inventory_ledger` และสร้าง Audit Trail เสมอ
 - **Period Closing:** ฟังก์ชัน `is_period_closed(doc_date)` — หากงวดถูกปิด (`accounting_periods.is_closed = true`) ห้าม INSERT/UPDATE/DELETE เอกสารและค่าใช้จ่ายในเดือนนั้น
 - `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — `doc_type` รวม `TB` สรุปวางบิลช่าง; มี `approval_status`, `approved_by`, `approved_at`, `created_by`)
-- `document_items` (รายการสินค้าในเอกสาร — งานบริการเก็บ `technician_id`, `wage_cost`, `technician_bill_id` เพื่อรองรับ Line Item Assignment)
+- `document_items` (รายการสินค้าในเอกสาร — งานบริการเก็บ `technician_id`, `wage_cost`, `technician_bill_id`; MTO ใช้ `production_status` = NONE / IN_PRODUCTION / COMPLETED)
 - `document_allocations` (การจัดสรรเอกสาร เช่น ตัดมัดจำ)
 - `billing_note_items` (รายการใบวางบิล)
 - `expenses` (บิลค่าใช้จ่าย / OPEX — มี `approval_status`, `approved_by`, `approved_at`, `is_installment`, `total_interest_amount`)

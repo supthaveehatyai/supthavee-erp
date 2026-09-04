@@ -268,6 +268,17 @@ export type DocumentDetailItem = {
   product_name: string | null;
   /** จาก products → product_models.image_url */
   image_url: string | null;
+  /** products.model_id → product_models.id */
+  model_id: string | null;
+  model_code: string | null;
+  /** product_models.is_manufactured — สินค้าผลิตเอง (MTO) */
+  is_manufactured: boolean;
+  /**
+   * สถานะผลิตของรายการ (derive จาก production_jobs.ref_document_id
+   * หรือ document_items.production_status ถ้ามี)
+   */
+  production_status: "NONE" | "IN_PRODUCTION" | "COMPLETED";
+  production_job_no: string | null;
 };
 
 /** Child document that references this row via `ref_document_id` (lineage). */

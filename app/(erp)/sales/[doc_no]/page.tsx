@@ -43,6 +43,8 @@ import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import ConvertDocumentDropdown from "./convert-document-dropdown";
 import { SendToProductionButton } from "@/components/production/send-to-production-button";
+import type { ManufacturedSendGroup } from "@/types/production";
+import type { DocumentDetailItem } from "@/types/document";
 
 type PageProps = {
   params: Promise<{ doc_no: string }>;
@@ -64,6 +66,81 @@ function formatDate(value: string | null | undefined): string {
     month: "short",
     day: "numeric",
   });
+}
+
+function buildManufacturedSendGroups(
+  items: DocumentDetailItem[],
+): ManufacturedSendGroup[] {
+  const byModel = new Map<
+    string,
+    {
+      model_code: string;
+      model_name: string;
+      mockup_image_url: string | null;
+      items: { product_id: string; quantity: number }[];
+      already_sent: boolean;
+      production_job_no: string | null;
+    }
+  >();
+
+  for (const item of items) {
+    if (!item.is_manufactured) continue;
+    const modelId = item.model_id?.trim() ?? "";
+    const productId = item.product_id?.trim() ?? "";
+    if (!modelId || !productId || item.qty <= 0) continue;
+
+    const existing = byModel.get(modelId);
+    if (existing) {
+      existing.items.push({ product_id: productId, quantity: item.qty });
+      if (!existing.mockup_image_url && item.image_url) {
+        existing.mockup_image_url = item.image_url;
+      }
+      if (item.production_job_no) {
+        existing.already_sent = true;
+        existing.production_job_no = item.production_job_no;
+      }
+      continue;
+    }
+
+    byModel.set(modelId, {
+      model_code: item.model_code?.trim() || "—",
+      model_name:
+        item.product_name?.trim() ||
+        item.description?.trim() ||
+        item.model_code?.trim() ||
+        "สินค้าผลิตเอง",
+      mockup_image_url: item.image_url?.trim() || null,
+      items: [{ product_id: productId, quantity: item.qty }],
+      already_sent: item.production_status !== "NONE",
+      production_job_no: item.production_job_no,
+    });
+  }
+
+  return [...byModel.entries()].map(([finished_model_id, group]) => ({
+    finished_model_id,
+    ...group,
+  }));
+}
+
+function productionStatusBadge(
+  status: DocumentDetailItem["production_status"],
+  jobNo: string | null,
+) {
+  if (status === "COMPLETED") {
+    return (
+      <Badge className="mt-1 border-emerald-200 bg-emerald-50 text-[10px] font-semibold text-emerald-800 hover:bg-emerald-50">
+        ผลิตเสร็จ{jobNo ? ` · ${jobNo}` : ""}
+      </Badge>
+    );
+  }
+  if (status === "IN_PRODUCTION") {
+    return (
+      <Badge className="mt-1 border-violet-200 bg-violet-50 text-[10px] font-semibold text-violet-800 hover:bg-violet-50">
+        กำลังผลิต{jobNo ? ` · ${jobNo}` : ""}
+      </Badge>
+    );
+  }
+  return null;
 }
 
 function statusBadge(status: DocumentStatus) {
@@ -231,14 +308,24 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
     !isAlreadyConverted;
   const canVoid =
     doc.status === "ISSUED" && Number(doc.paid_amount ?? 0) === 0;
-  /** MTO — SO / TAX_INV / ABB / CS_TAX / INV_DO ที่ ISSUED เท่านั้น (ห้าม DRAFT) */
-  const canSendToProduction =
+  /** MTO — SO ISSUED ที่มีสินค้า is_manufactured หรือเอกสารบริการเดิม (สกรีน/ปัก) */
+  const manufacturedGroups = buildManufacturedSendGroups(doc.items);
+  const hasManufacturedPending = manufacturedGroups.some(
+    (group) => !group.already_sent,
+  );
+  const canSendMto =
+    doc.doc_type === "SO" &&
+    doc.status === "ISSUED" &&
+    manufacturedGroups.length > 0;
+  const canSendLegacyProduction =
     (doc.doc_type === "SO" ||
       doc.doc_type === "TAX_INV" ||
       doc.doc_type === "ABB" ||
       doc.doc_type === "CS_TAX" ||
       doc.doc_type === "INV_DO") &&
-    doc.status === "ISSUED";
+    doc.status === "ISSUED" &&
+    manufacturedGroups.length === 0;
+  const canSendToProduction = canSendMto || canSendLegacyProduction;
   const canDuplicate =
     !isReceiptDoc &&
     !isSettlementDoc &&
@@ -296,6 +383,9 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
             <SendToProductionButton
               documentId={doc.id}
               documentNo={doc.doc_no}
+              manufacturedGroups={canSendMto ? manufacturedGroups : []}
+              remark={doc.notes}
+              disabled={canSendMto && !hasManufacturedPending}
             />
           )}
           {canDuplicate && (
@@ -722,6 +812,12 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                             <span className="line-clamp-2">
                               {item.description || item.product_name || "—"}
                             </span>
+                            {item.is_manufactured
+                              ? productionStatusBadge(
+                                  item.production_status,
+                                  item.production_job_no,
+                                )
+                              : null}
                           </TableCell>
                           <TableCell className="px-4 text-right text-sm tabular-nums text-slate-700">
                             {item.qty}

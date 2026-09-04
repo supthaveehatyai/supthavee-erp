@@ -18,11 +18,17 @@ import { createClient } from "@/lib/supabase/server-admin";
 import {
   emptyProductionBoard,
   isProductionKanbanStatus,
+  type CreateProductionJobFromSOPayload,
+  type CreateProductionJobFromSOResult,
   type CreateProductionJobPayload,
   type CreateProductionJobResult,
+  type GetProductionJobDetailResult,
   type GetProductionJobsResult,
   type ManufacturedModelOption,
   type ProductionJobCard,
+  type ProductionJobDetail,
+  type ProductionJobDetailItem,
+  type ProductionJobDetailMaterial,
   type ProductionKanbanStatus,
   type SearchManufacturedModelsResult,
   type UpdateJobStatusResult,
@@ -141,7 +147,109 @@ async function rollbackCreatedJob(
     .from("production_job_materials")
     .delete()
     .eq("job_id", jobId);
+  await supabase.from("production_job_items").delete().eq("job_id", jobId);
   await supabase.from("production_jobs").delete().eq("id", jobId);
+}
+
+type MaterialInsertRow = {
+  raw_material_model_id: string;
+  uom_id: string;
+  planned_qty: number;
+  cost_price_snapshot: number;
+};
+
+/**
+ * ดึง BOM ของ finished_model_id แล้วคำนวณ planned_qty รวม %เผื่อเสีย
+ * planned_qty = (quantity_required × target_quantity) × (1 + waste%/100)
+ */
+async function buildBomMaterialRows(
+  supabase: SupabaseClient,
+  finishedModelId: string,
+  targetQuantity: number,
+): Promise<
+  | { success: true; rows: MaterialInsertRow[] }
+  | { success: false; error: string }
+> {
+  const { data: bomRows, error: bomError } = await supabase
+    .from("product_boms")
+    .select(
+      "id, raw_material_model_id, uom_id, quantity_required, waste_percent",
+    )
+    .eq("finished_model_id", finishedModelId);
+
+  if (bomError) {
+    if (bomError.code === POSTGRES_UNDEFINED_TABLE) {
+      return {
+        success: false,
+        error: "ยังไม่มีตาราง product_boms — ตั้งค่าสูตรการผลิตก่อน",
+      };
+    }
+    return {
+      success: false,
+      error: bomError.message ?? "ดึงสูตรการผลิต (BOM) ไม่สำเร็จ",
+    };
+  }
+
+  const bomList = (bomRows as BomSnapshotRow[] | null) ?? [];
+  if (bomList.length === 0) {
+    return {
+      success: false,
+      error:
+        "ยังไม่มีสูตรการผลิต (BOM) สำหรับรุ่นนี้ — กรุณาตั้งค่า BOM ก่อนเปิดใบสั่งผลิต",
+    };
+  }
+
+  const rawMaterialIds = [
+    ...new Set(
+      bomList
+        .map((row) => String(row.raw_material_model_id ?? "").trim())
+        .filter(Boolean),
+    ),
+  ];
+
+  const costByModelId = new Map<string, number | null>();
+  if (rawMaterialIds.length > 0) {
+    const { data: products, error: productsError } = await supabase
+      .from("products")
+      .select("model_id, cost_price, created_at")
+      .in("model_id", rawMaterialIds)
+      .eq("is_active", true)
+      .order("created_at", { ascending: true });
+
+    if (productsError) {
+      return {
+        success: false,
+        error: productsError.message ?? "ดึงต้นทุนวัตถุดิบไม่สำเร็จ",
+      };
+    }
+
+    for (const product of products ?? []) {
+      const modelKey = String(product.model_id ?? "").trim();
+      if (!modelKey || costByModelId.has(modelKey)) continue;
+      costByModelId.set(modelKey, toCostPrice(product.cost_price));
+    }
+  }
+
+  const rows: MaterialInsertRow[] = bomList.map((bom) => {
+    const rawMaterialId = String(bom.raw_material_model_id).trim();
+    const quantityRequired = toPositiveQty(bom.quantity_required) ?? 0;
+    const wastePercent = toWastePercent(bom.waste_percent);
+    const plannedQty = calculatePlannedQty(
+      quantityRequired,
+      targetQuantity,
+      wastePercent,
+    );
+    const costSnapshot = costByModelId.get(rawMaterialId) ?? null;
+
+    return {
+      raw_material_model_id: rawMaterialId,
+      uom_id: String(bom.uom_id),
+      planned_qty: plannedQty,
+      cost_price_snapshot: costSnapshot ?? 0,
+    };
+  });
+
+  return { success: true, rows };
 }
 
 type ProductModelJoin =
@@ -510,92 +618,18 @@ export async function createProductionJob(
       };
     }
 
-    // 2) Load BOM for snapshot
-    const { data: bomRows, error: bomError } = await supabaseAdmin
-      .from("product_boms")
-      .select(
-        "id, raw_material_model_id, uom_id, quantity_required, waste_percent",
-      )
-      .eq("finished_model_id", finishedModelId);
-
-    if (bomError) {
-      if (bomError.code === POSTGRES_UNDEFINED_TABLE) {
-        return {
-          success: false,
-          error: "ยังไม่มีตาราง product_boms — ตั้งค่าสูตรการผลิตก่อน",
-          data: null,
-        };
-      }
-      return {
-        success: false,
-        error: bomError.message ?? "ดึงสูตรการผลิต (BOM) ไม่สำเร็จ",
-        data: null,
-      };
+    // 2) BOM Snapshot rows
+    const bomBuilt = await buildBomMaterialRows(
+      supabaseAdmin,
+      finishedModelId,
+      targetQuantity,
+    );
+    if (!bomBuilt.success) {
+      return { success: false, error: bomBuilt.error, data: null };
     }
+    const materialRows = bomBuilt.rows;
 
-    const bomList = (bomRows as BomSnapshotRow[] | null) ?? [];
-    if (bomList.length === 0) {
-      return {
-        success: false,
-        error:
-          "ยังไม่มีสูตรการผลิต (BOM) สำหรับรุ่นนี้ — กรุณาตั้งค่า BOM ก่อนเปิดใบสั่งผลิต",
-        data: null,
-      };
-    }
-
-    // 3) Snapshot cost_price จาก SKU ลูกตัวแรกของแต่ละวัตถุดิบ
-    const rawMaterialIds = [
-      ...new Set(
-        bomList
-          .map((row) => String(row.raw_material_model_id ?? "").trim())
-          .filter(Boolean),
-      ),
-    ];
-
-    const costByModelId = new Map<string, number | null>();
-    if (rawMaterialIds.length > 0) {
-      const { data: products, error: productsError } = await supabaseAdmin
-        .from("products")
-        .select("model_id, cost_price, created_at")
-        .in("model_id", rawMaterialIds)
-        .eq("is_active", true)
-        .order("created_at", { ascending: true });
-
-      if (productsError) {
-        return {
-          success: false,
-          error: productsError.message ?? "ดึงต้นทุนวัตถุดิบไม่สำเร็จ",
-          data: null,
-        };
-      }
-
-      for (const product of products ?? []) {
-        const modelKey = String(product.model_id ?? "").trim();
-        if (!modelKey || costByModelId.has(modelKey)) continue;
-        costByModelId.set(modelKey, toCostPrice(product.cost_price));
-      }
-    }
-
-    const materialRows = bomList.map((bom) => {
-      const rawMaterialId = String(bom.raw_material_model_id).trim();
-      const quantityRequired = toPositiveQty(bom.quantity_required) ?? 0;
-      const wastePercent = toWastePercent(bom.waste_percent);
-      const plannedQty = calculatePlannedQty(
-        quantityRequired,
-        targetQuantity,
-        wastePercent,
-      );
-      const costSnapshot = costByModelId.get(rawMaterialId) ?? null;
-
-      return {
-        raw_material_model_id: rawMaterialId,
-        uom_id: String(bom.uom_id),
-        planned_qty: plannedQty,
-        cost_price_snapshot: costSnapshot ?? 0,
-      };
-    });
-
-    // 4) Insert job (retry on job_no unique collision) + materials with rollback
+    // 3) Insert job (retry on job_no unique collision) + materials with rollback
     let lastError = "สร้างใบสั่งผลิตไม่สำเร็จ";
 
     for (let attempt = 0; attempt < JOB_NO_MAX_RETRIES; attempt += 1) {
@@ -697,6 +731,386 @@ export async function createProductionJob(
 }
 
 /**
+ * สร้างใบสั่งผลิตจาก Sales Order (SO) โดยตรง — ลด Human Error
+ *
+ * 1) production_jobs.ref_document_id = so_id (Audit Trail)
+ * 2) production_job_items จากรายการ SKU ที่ลูกค้าสั่ง
+ * 3) BOM Snapshot → production_job_materials (รวม %เผื่อเสีย)
+ *
+ * Compensating rollback หากขั้นตอนใดล้มเหลวหลังสร้าง job
+ */
+export async function createProductionJobFromSO(
+  payload: CreateProductionJobFromSOPayload,
+): Promise<CreateProductionJobFromSOResult> {
+  try {
+    const soId = String(payload?.so_id ?? "").trim();
+    const finishedModelId = String(payload?.finished_model_id ?? "").trim();
+    const mockupImageUrl = String(payload?.mockup_image_url ?? "").trim() || null;
+    const remark = String(payload?.remark ?? "").trim() || null;
+    const estimatedRaw = String(payload?.estimated_completion_date ?? "")
+      .trim()
+      .slice(0, 10);
+    const estimatedCompletionDate =
+      estimatedRaw && isYmdDate(estimatedRaw) ? estimatedRaw : null;
+
+    const rawItems = Array.isArray(payload?.items) ? payload.items : [];
+    const items = rawItems
+      .map((item) => ({
+        product_id: String(item?.product_id ?? "").trim(),
+        quantity: toPositiveQty(item?.quantity),
+      }))
+      .filter(
+        (item): item is { product_id: string; quantity: number } =>
+          Boolean(item.product_id) && item.quantity != null,
+      );
+
+    if (!soId) {
+      return {
+        success: false,
+        error: "ไม่พบรหัสเอกสารขาย (so_id)",
+        data: null,
+      };
+    }
+    if (!finishedModelId) {
+      return {
+        success: false,
+        error: "กรุณาระบุรุ่นสินค้าสำเร็จรูป (finished_model_id)",
+        data: null,
+      };
+    }
+    if (items.length === 0) {
+      return {
+        success: false,
+        error: "ต้องมีรายการสินค้าอย่างน้อย 1 รายการ (product_id + quantity > 0)",
+        data: null,
+      };
+    }
+
+    const targetQuantity = toQty(
+      items.reduce((sum, item) => sum + item.quantity, 0),
+    );
+    if (targetQuantity <= 0) {
+      return {
+        success: false,
+        error: "จำนวนรวมจากรายการสินค้าต้องมากกว่า 0",
+        data: null,
+      };
+    }
+
+    const supabaseAdmin = getSupabaseAdmin();
+
+    // 1) Validate SO document
+    const { data: soDoc, error: soError } = await supabaseAdmin
+      .from("documents")
+      .select("id, doc_no, doc_type, status")
+      .eq("id", soId)
+      .maybeSingle();
+
+    if (soError) {
+      return {
+        success: false,
+        error: soError.message ?? "ตรวจสอบเอกสารขายไม่สำเร็จ",
+        data: null,
+      };
+    }
+    if (!soDoc) {
+      return {
+        success: false,
+        error: "ไม่พบเอกสารขาย (SO) ในระบบ",
+        data: null,
+      };
+    }
+    if (String(soDoc.doc_type ?? "").trim().toUpperCase() !== "SO") {
+      return {
+        success: false,
+        error: `เอกสาร ${soDoc.doc_no ?? soId} ไม่ใช่ใบสั่งขาย (SO)`,
+        data: null,
+      };
+    }
+
+    // 1b) Prevent duplicate send — same SO + finished_model already has an active job
+    {
+      const { data: existingJobs, error: existingError } = await supabaseAdmin
+        .from("production_jobs")
+        .select("id, job_no, status")
+        .eq("ref_document_id", soId)
+        .eq("finished_model_id", finishedModelId)
+        .neq("status", "CANCELLED")
+        .limit(1);
+
+      if (existingError) {
+        // If finished_model_id filter unsupported, fallback: any job for this SO
+        const fallback = await supabaseAdmin
+          .from("production_jobs")
+          .select("id, job_no, status")
+          .eq("ref_document_id", soId)
+          .neq("status", "CANCELLED")
+          .limit(1);
+        if (!fallback.error && (fallback.data?.length ?? 0) > 0) {
+          const jobNo = String(fallback.data?.[0]?.job_no ?? "").trim();
+          return {
+            success: false,
+            error: jobNo
+              ? `เอกสารนี้ถูกส่งเข้าผลิตแล้ว (${jobNo}) — ไม่สามารถส่งซ้ำได้`
+              : "เอกสารนี้ถูกส่งเข้าผลิตแล้ว — ไม่สามารถส่งซ้ำได้",
+            data: null,
+          };
+        }
+      } else if ((existingJobs?.length ?? 0) > 0) {
+        const jobNo = String(existingJobs?.[0]?.job_no ?? "").trim();
+        return {
+          success: false,
+          error: jobNo
+            ? `รุ่นนี้ถูกส่งเข้าผลิตแล้ว (${jobNo}) — ไม่สามารถส่งซ้ำได้`
+            : "รุ่นนี้ถูกส่งเข้าผลิตแล้ว — ไม่สามารถส่งซ้ำได้",
+          data: null,
+        };
+      }
+    }
+
+    // 2) Validate finished model
+    const { data: finishedModel, error: modelError } = await supabaseAdmin
+      .from("product_models")
+      .select("id, name, model_code, is_raw_material, is_service, is_manufactured")
+      .eq("id", finishedModelId)
+      .maybeSingle();
+
+    if (modelError) {
+      return {
+        success: false,
+        error: modelError.message ?? "ตรวจสอบรุ่นสินค้าไม่สำเร็จ",
+        data: null,
+      };
+    }
+    if (!finishedModel) {
+      return {
+        success: false,
+        error: "ไม่พบรุ่นสินค้าสำเร็จรูปในระบบ",
+        data: null,
+      };
+    }
+    if (finishedModel.is_raw_material === true) {
+      return {
+        success: false,
+        error: "ไม่สามารถเปิดใบสั่งผลิตจากรุ่นวัตถุดิบได้",
+        data: null,
+      };
+    }
+    if (finishedModel.is_service === true) {
+      return {
+        success: false,
+        error: "ไม่สามารถเปิดใบสั่งผลิตจากงานบริการได้",
+        data: null,
+      };
+    }
+
+    // 3) Validate SKUs belong to finished_model_id
+    const productIds = [...new Set(items.map((item) => item.product_id))];
+    const { data: productRows, error: productsError } = await supabaseAdmin
+      .from("products")
+      .select("id, model_id, sku")
+      .in("id", productIds);
+
+    if (productsError) {
+      return {
+        success: false,
+        error: productsError.message ?? "ตรวจสอบรายการสินค้าไม่สำเร็จ",
+        data: null,
+      };
+    }
+
+    const productById = new Map(
+      (productRows ?? []).map((row) => [String(row.id), row]),
+    );
+    for (const item of items) {
+      const product = productById.get(item.product_id);
+      if (!product) {
+        return {
+          success: false,
+          error: `ไม่พบสินค้า (product_id: ${item.product_id}) ในระบบ`,
+          data: null,
+        };
+      }
+      if (String(product.model_id ?? "").trim() !== finishedModelId) {
+        return {
+          success: false,
+          error: `SKU ${product.sku ?? item.product_id} ไม่ได้อยู่ภายใต้รุ่นสินค้าที่เลือก`,
+          data: null,
+        };
+      }
+    }
+
+    // 4) BOM Snapshot จากยอดรวมที่ลูกค้าสั่ง
+    const bomBuilt = await buildBomMaterialRows(
+      supabaseAdmin,
+      finishedModelId,
+      targetQuantity,
+    );
+    if (!bomBuilt.success) {
+      return { success: false, error: bomBuilt.error, data: null };
+    }
+    const materialRows = bomBuilt.rows;
+
+    // 5) Insert job + items + materials (compensating rollback)
+    let lastError = "สร้างใบสั่งผลิตจาก SO ไม่สำเร็จ";
+
+    for (let attempt = 0; attempt < JOB_NO_MAX_RETRIES; attempt += 1) {
+      const jobNo = await nextMtoJobNo(supabaseAdmin);
+
+      const jobInsert: Record<string, unknown> = {
+        job_no: jobNo,
+        status: "PLANNED",
+        finished_model_id: finishedModelId,
+        target_quantity: targetQuantity,
+        ref_document_id: soId,
+        remark,
+        mockup_image_url: mockupImageUrl,
+      };
+      if (estimatedCompletionDate) {
+        jobInsert.estimated_completion_date = estimatedCompletionDate;
+      }
+      if (mockupImageUrl) {
+        // เก็บ URL ใน attachment_paths ด้วย (Phase 7 / Kanban thumbnail)
+        jobInsert.attachment_paths = [mockupImageUrl];
+      }
+
+      const { data: created, error: insertError } = await supabaseAdmin
+        .from("production_jobs")
+        .insert(jobInsert)
+        .select("id, job_no")
+        .maybeSingle();
+
+      if (insertError) {
+        lastError = insertError.message ?? "สร้างใบสั่งผลิตจาก SO ไม่สำเร็จ";
+        if (insertError.code === POSTGRES_UNIQUE_VIOLATION) {
+          continue;
+        }
+        if (insertError.code === POSTGRES_FOREIGN_KEY_VIOLATION) {
+          return {
+            success: false,
+            error:
+              "อ้างอิงเอกสารขายหรือรุ่นสินค้าไม่ถูกต้อง (ref_document_id / finished_model_id)",
+            data: null,
+          };
+        }
+        return { success: false, error: lastError, data: null };
+      }
+
+      if (!created?.id) {
+        return {
+          success: false,
+          error: "สร้างใบสั่งผลิตไม่สำเร็จ — ไม่ได้รหัสงานกลับมา",
+          data: null,
+        };
+      }
+
+      const jobId = String(created.id);
+
+      const itemsPayload = items.map((item) => ({
+        job_id: jobId,
+        product_id: item.product_id,
+        quantity: item.quantity,
+      }));
+
+      const { error: itemsError } = await supabaseAdmin
+        .from("production_job_items")
+        .insert(itemsPayload);
+
+      if (itemsError) {
+        await rollbackCreatedJob(supabaseAdmin, jobId);
+
+        if (itemsError.code === POSTGRES_UNDEFINED_TABLE) {
+          return {
+            success: false,
+            error:
+              "ยังไม่มีตาราง production_job_items — ไม่สามารถบันทึกรายการไซส์/SKU ได้",
+            data: null,
+          };
+        }
+        return {
+          success: false,
+          error: `${itemsError.message ?? "บันทึก production_job_items ไม่สำเร็จ"} (Rollback แล้ว)`,
+          data: null,
+        };
+      }
+
+      const materialsPayload = materialRows.map((row) => ({
+        ...row,
+        job_id: jobId,
+      }));
+
+      const { error: materialsError } = await supabaseAdmin
+        .from("production_job_materials")
+        .insert(materialsPayload);
+
+      if (materialsError) {
+        await rollbackCreatedJob(supabaseAdmin, jobId);
+
+        if (materialsError.code === POSTGRES_UNDEFINED_TABLE) {
+          return {
+            success: false,
+            error:
+              "ยังไม่มีตาราง production_job_materials — ไม่สามารถ Snapshot BOM ได้",
+            data: null,
+          };
+        }
+        return {
+          success: false,
+          error: `${materialsError.message ?? "บันทึก production_job_materials ไม่สำเร็จ"} (Rollback แล้ว)`,
+          data: null,
+        };
+      }
+
+      // Mark SO line items as "กำลังผลิต" (best-effort — column may be cloud-only)
+      {
+        const productIdsForStatus = items.map((item) => item.product_id);
+        const { error: statusError } = await supabaseAdmin
+          .from("document_items")
+          .update({ production_status: "IN_PRODUCTION" })
+          .eq("document_id", soId)
+          .in("product_id", productIdsForStatus);
+
+        if (statusError) {
+          console.warn(
+            "[createProductionJobFromSO] mark production_status skipped:",
+            statusError.message,
+          );
+        }
+      }
+
+      revalidatePath(KANBAN_PATH);
+      revalidatePath("/sales");
+      if (soDoc.doc_no) {
+        revalidatePath(`/sales/${encodeURIComponent(String(soDoc.doc_no))}`);
+      }
+
+      return {
+        success: true,
+        error: null,
+        data: {
+          id: jobId,
+          job_no: String(created.job_no ?? jobNo),
+          items_count: itemsPayload.length,
+          materials_count: materialsPayload.length,
+        },
+      };
+    }
+
+    return { success: false, error: lastError, data: null };
+  } catch (err) {
+    console.error("[createProductionJobFromSO]", err);
+    return {
+      success: false,
+      error:
+        err instanceof Error
+          ? err.message
+          : "สร้างใบสั่งผลิตจาก SO ไม่สำเร็จ",
+      data: null,
+    };
+  }
+}
+
+/**
  * ค้นหารุ่นสินค้าผลิตเอง (is_manufactured = true) สำหรับ Create MTO ComboBox
  */
 export async function searchManufacturedModels(
@@ -788,6 +1202,268 @@ export async function searchManufacturedModels(
       error:
         err instanceof Error ? err.message : "ค้นหารุ่นสินค้าไม่สำเร็จ",
       data: [],
+    };
+  }
+}
+
+/**
+ * รายละเอียดใบสั่งผลิตสำหรับ Slide-over (Job Details)
+ * — header + production_job_items + production_job_materials
+ */
+export async function getProductionJobDetails(
+  jobId: string,
+): Promise<GetProductionJobDetailResult> {
+  try {
+    const id = jobId?.trim() ?? "";
+    if (!id) {
+      return { success: false, error: "ไม่พบรหัสงาน (jobId)", data: null };
+    }
+
+    const supabaseAdmin = getSupabaseAdmin();
+
+    const { data: job, error: jobError } = await supabaseAdmin
+      .from("production_jobs")
+      .select(
+        `
+        id,
+        job_no,
+        status,
+        finished_model_id,
+        target_quantity,
+        estimated_completion_date,
+        ref_document_id,
+        mockup_image_url,
+        remark,
+        details,
+        attachment_paths
+      `,
+      )
+      .eq("id", id)
+      .maybeSingle();
+
+    if (jobError) {
+      return {
+        success: false,
+        error: jobError.message ?? "ดึงใบสั่งผลิตไม่สำเร็จ",
+        data: null,
+      };
+    }
+    if (!job) {
+      return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ", data: null };
+    }
+
+    const finishedModelId = job.finished_model_id
+      ? String(job.finished_model_id)
+      : null;
+    const refDocumentId = job.ref_document_id
+      ? String(job.ref_document_id)
+      : null;
+
+    const [modelRes, soRes, itemsRes, materialsRes] = await Promise.all([
+      finishedModelId
+        ? supabaseAdmin
+            .from("product_models")
+            .select("id, name, model_code, short_name, image_url")
+            .eq("id", finishedModelId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      refDocumentId
+        ? supabaseAdmin
+            .from("documents")
+            .select("id, doc_no, doc_type")
+            .eq("id", refDocumentId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      supabaseAdmin
+        .from("production_job_items")
+        .select("id, product_id, quantity")
+        .eq("job_id", id)
+        .order("id", { ascending: true }),
+      supabaseAdmin
+        .from("production_job_materials")
+        .select(
+          "id, raw_material_model_id, uom_id, planned_qty, cost_price_snapshot",
+        )
+        .eq("job_id", id)
+        .order("id", { ascending: true }),
+    ]);
+
+    if (itemsRes.error) {
+      return {
+        success: false,
+        error: itemsRes.error.message ?? "ดึงรายการ SKU ไม่สำเร็จ",
+        data: null,
+      };
+    }
+    if (materialsRes.error) {
+      return {
+        success: false,
+        error: materialsRes.error.message ?? "ดึงรายการวัตถุดิบไม่สำเร็จ",
+        data: null,
+      };
+    }
+
+    const itemRows = itemsRes.data ?? [];
+    const materialRows = materialsRes.data ?? [];
+
+    const productIds = [
+      ...new Set(
+        itemRows
+          .map((row) => String(row.product_id ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
+    const rawModelIds = [
+      ...new Set(
+        materialRows
+          .map((row) => String(row.raw_material_model_id ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
+    const uomIds = [
+      ...new Set(
+        materialRows
+          .map((row) => String(row.uom_id ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    const [productsRes, rawModelsRes, uomsRes] = await Promise.all([
+      productIds.length > 0
+        ? supabaseAdmin
+            .from("products")
+            .select("id, sku, name, size, color")
+            .in("id", productIds)
+        : Promise.resolve({ data: [], error: null }),
+      rawModelIds.length > 0
+        ? supabaseAdmin
+            .from("product_models")
+            .select("id, model_code, name, short_name")
+            .in("id", rawModelIds)
+        : Promise.resolve({ data: [], error: null }),
+      uomIds.length > 0
+        ? supabaseAdmin
+            .from("mst_uom")
+            .select("uom_id, uom_code")
+            .in("uom_id", uomIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    if (productsRes.error) {
+      return {
+        success: false,
+        error: productsRes.error.message ?? "ดึงข้อมูล SKU ไม่สำเร็จ",
+        data: null,
+      };
+    }
+    if (rawModelsRes.error) {
+      return {
+        success: false,
+        error: rawModelsRes.error.message ?? "ดึงข้อมูลวัตถุดิบไม่สำเร็จ",
+        data: null,
+      };
+    }
+    if (uomsRes.error) {
+      return {
+        success: false,
+        error: uomsRes.error.message ?? "ดึงหน่วยนับไม่สำเร็จ",
+        data: null,
+      };
+    }
+
+    const productById = new Map(
+      (productsRes.data ?? []).map((row) => [String(row.id), row]),
+    );
+    const rawModelById = new Map(
+      (rawModelsRes.data ?? []).map((row) => [String(row.id), row]),
+    );
+    const uomById = new Map(
+      (uomsRes.data ?? []).map((row) => [String(row.uom_id), row]),
+    );
+
+    const items: ProductionJobDetailItem[] = itemRows.map((row) => {
+      const productId = String(row.product_id ?? "");
+      const product = productById.get(productId);
+      return {
+        id: String(row.id),
+        product_id: productId,
+        sku: String(product?.sku ?? "—").trim() || "—",
+        product_name: String(product?.name ?? "—").trim() || "—",
+        size: product?.size ? String(product.size) : null,
+        color: product?.color ? String(product.color) : null,
+        quantity: toQty(row.quantity),
+      };
+    });
+
+    const materials: ProductionJobDetailMaterial[] = materialRows.map((row) => {
+      const rawId = String(row.raw_material_model_id ?? "");
+      const raw = rawModelById.get(rawId);
+      const uom = uomById.get(String(row.uom_id ?? ""));
+      return {
+        id: String(row.id),
+        raw_material_model_id: rawId,
+        raw_material_code: String(raw?.model_code ?? "—").trim() || "—",
+        raw_material_name:
+          String(raw?.name ?? raw?.short_name ?? "—").trim() || "—",
+        uom_id: String(row.uom_id ?? ""),
+        uom_code: uom?.uom_code ? String(uom.uom_code) : null,
+        planned_qty: toQty(row.planned_qty),
+        cost_price_snapshot: toCostPrice(row.cost_price_snapshot) ?? 0,
+      };
+    });
+
+    const model = modelRes.data;
+    const productName =
+      String(model?.name ?? "").trim() ||
+      String(model?.short_name ?? "").trim() ||
+      String(model?.model_code ?? "").trim() ||
+      "— ยังไม่ผูกสินค้า";
+
+    const mockupFromCol = String(job.mockup_image_url ?? "").trim();
+    const attachmentPaths = Array.isArray(job.attachment_paths)
+      ? job.attachment_paths
+      : [];
+    const mockupFromAttachments = attachmentPaths
+      .map((path) => String(path ?? "").trim())
+      .find((path) => path.length > 0);
+    const modelImage = String(model?.image_url ?? "").trim();
+    const mockupImageUrl =
+      mockupFromCol || mockupFromAttachments || modelImage || null;
+
+    const remark =
+      String(job.remark ?? "").trim() ||
+      String(job.details ?? "").trim() ||
+      null;
+
+    const detail: ProductionJobDetail = {
+      id: String(job.id),
+      job_no: String(job.job_no ?? "").trim() || "—",
+      status: String(job.status ?? "").trim().toUpperCase(),
+      finished_model_id: finishedModelId,
+      product_name: productName,
+      product_model_code: model?.model_code
+        ? String(model.model_code).trim()
+        : null,
+      target_quantity: toQty(job.target_quantity),
+      estimated_completion_date: job.estimated_completion_date
+        ? String(job.estimated_completion_date)
+        : null,
+      ref_document_id: refDocumentId,
+      so_doc_no: soRes.data?.doc_no ? String(soRes.data.doc_no) : null,
+      mockup_image_url: mockupImageUrl,
+      remark,
+      items,
+      materials,
+    };
+
+    return { success: true, data: detail };
+  } catch (err) {
+    console.error("[getProductionJobDetails]", err);
+    return {
+      success: false,
+      error:
+        err instanceof Error ? err.message : "ดึงรายละเอียดใบสั่งผลิตไม่สำเร็จ",
+      data: null,
     };
   }
 }

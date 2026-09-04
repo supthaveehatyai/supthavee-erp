@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
 import { KanbanSquare } from "lucide-react";
-import { getProductionJobs } from "@/lib/actions/production-actions";
+import {
+  getProductionJobDetails,
+  getProductionJobs,
+} from "@/lib/actions/production-actions";
 import { CreateMtoJobDialog } from "@/components/production/create-mto-job-dialog";
 import { KanbanBoard } from "@/components/production/kanban-board";
+import { ProductionJobDetailSheet } from "@/components/production/production-job-detail-sheet";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -12,12 +16,28 @@ export const metadata: Metadata = {
   description: "กระดานงานผลิต MTO — รอผลิต / กำลังผลิต / QA / เสร็จสิ้น",
 };
 
+type PageProps = {
+  searchParams: Promise<{ jobId?: string | string[] }>;
+};
+
 /**
  * Server Component — โหลด Initial Data แล้วส่งให้ Client Board
  * Zero Client-Side Fetching: ห้าม supabase.from() ใน Client
+ * URL-driven Sheet: ?jobId=
  */
-export default async function ProductionKanbanPage() {
-  const result = await getProductionJobs();
+export default async function ProductionKanbanPage({ searchParams }: PageProps) {
+  const params = await searchParams;
+  const jobIdRaw = params.jobId;
+  const jobId = Array.isArray(jobIdRaw)
+    ? jobIdRaw[0]?.trim() || null
+    : jobIdRaw?.trim() || null;
+
+  const [result, detailResult] = await Promise.all([
+    getProductionJobs(),
+    jobId
+      ? getProductionJobDetails(jobId)
+      : Promise.resolve(null),
+  ]);
 
   if (!result.success) {
     return (
@@ -37,6 +57,13 @@ export default async function ProductionKanbanPage() {
     <div className="space-y-6 p-6">
       <PageHeader />
       <KanbanBoard initialJobs={result.flat} />
+      <ProductionJobDetailSheet
+        jobId={jobId}
+        detail={detailResult?.success ? detailResult.data : null}
+        error={
+          detailResult && !detailResult.success ? detailResult.error : null
+        }
+      />
     </div>
   );
 }
@@ -50,8 +77,7 @@ function PageHeader() {
           Production Kanban
         </h1>
         <p className="text-sm text-slate-500">
-          Make-to-Order — ลากการ์ดเพื่ออัปเดตสถานะ (PLANNED → IN_PROGRESS → QA →
-          COMPLETED)
+          Make-to-Order — ลากการ์ดเพื่ออัปเดตสถานะ · คลิกการ์ดเพื่อดูรายละเอียด
         </p>
       </div>
       <CreateMtoJobDialog />

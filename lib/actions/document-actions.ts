@@ -1339,9 +1339,26 @@ type NestedProduct = {
   id: string;
   sku: string | null;
   name: string | null;
+  model_id: string | null;
   product_models:
-    | { image_url: string | null }
-    | { image_url: string | null }[]
+    | {
+        id: string;
+        image_url: string | null;
+        model_code: string | null;
+        name: string | null;
+        is_manufactured: boolean | null;
+        is_service: boolean | null;
+        is_raw_material: boolean | null;
+      }
+    | {
+        id: string;
+        image_url: string | null;
+        model_code: string | null;
+        name: string | null;
+        is_manufactured: boolean | null;
+        is_service: boolean | null;
+        is_raw_material: boolean | null;
+      }[]
     | null;
 };
 
@@ -1440,8 +1457,15 @@ export async function getDocumentByNo(
             id,
             sku,
             name,
+            model_id,
             product_models!products_model_id_fkey (
-              image_url
+              id,
+              image_url,
+              model_code,
+              name,
+              is_manufactured,
+              is_service,
+              is_raw_material
             )
           )
         )
@@ -1509,10 +1533,42 @@ export async function getDocumentByNo(
       ? (data.document_items as NestedItemRow[])
       : [];
 
+    // MTO linkage — production_jobs.ref_document_id = documents.id
+    const productionByModelId = new Map<
+      string,
+      { job_no: string; status: string }
+    >();
+    {
+      const { data: prodJobs } = await supabase
+        .from("production_jobs")
+        .select("job_no, status, finished_model_id")
+        .eq("ref_document_id", documentId)
+        .neq("status", "CANCELLED");
+
+      for (const job of prodJobs ?? []) {
+        const modelKey = String(job.finished_model_id ?? "").trim();
+        if (!modelKey || productionByModelId.has(modelKey)) continue;
+        productionByModelId.set(modelKey, {
+          job_no: String(job.job_no ?? "").trim(),
+          status: String(job.status ?? "").trim().toUpperCase(),
+        });
+      }
+    }
+
     const items: DocumentDetailItem[] = rawItems
       .map((row) => {
         const product = unwrapJoin(row.products);
         const model = unwrapJoin(product?.product_models);
+        const modelId =
+          String(model?.id ?? product?.model_id ?? "").trim() || null;
+        const isManufactured = model?.is_manufactured === true;
+        const linkedJob = modelId ? productionByModelId.get(modelId) : undefined;
+        let productionStatus: DocumentDetailItem["production_status"] = "NONE";
+        if (linkedJob) {
+          productionStatus =
+            linkedJob.status === "COMPLETED" ? "COMPLETED" : "IN_PRODUCTION";
+        }
+
         return {
           id: row.id,
           product_id: row.product_id,
@@ -1526,8 +1582,13 @@ export async function getDocumentByNo(
           line_total: Number(row.line_total ?? 0),
           sort_order: Number(row.sort_order ?? 0),
           sku: product?.sku ?? null,
-          product_name: product?.name ?? null,
+          product_name: product?.name ?? model?.name ?? null,
           image_url: model?.image_url?.trim() || null,
+          model_id: modelId,
+          model_code: model?.model_code?.trim() || null,
+          is_manufactured: isManufactured,
+          production_status: productionStatus,
+          production_job_no: linkedJob?.job_no || null,
         };
       })
       .sort((left, right) => left.sort_order - right.sort_order);

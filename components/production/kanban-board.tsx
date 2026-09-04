@@ -13,7 +13,7 @@ import {
   useState,
   useTransition,
 } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   DragDropContext,
   Draggable,
@@ -99,6 +99,7 @@ function formatQty(value: number): string {
 
 export function KanbanBoard({ initialJobs }: KanbanBoardProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [isPending, startTransition] = useTransition();
 
   /** Source of truth — synced from Server Component props */
@@ -107,6 +108,15 @@ export function KanbanBoard({ initialJobs }: KanbanBoardProps) {
   useEffect(() => {
     setJobs(initialJobs);
   }, [initialJobs]);
+
+  const openJobDetail = useCallback(
+    (jobId: string) => {
+      const params = new URLSearchParams();
+      params.set("jobId", jobId);
+      router.push(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [pathname, router],
+  );
 
   const baseBoard = useMemo(() => groupByStatus(jobs), [jobs]);
 
@@ -260,7 +270,11 @@ export function KanbanBoard({ initialJobs }: KanbanBoardProps) {
                                   <GripVertical className="size-4" />
                                 </button>
 
-                                <div className="min-w-0 flex-1 space-y-1.5">
+                                <button
+                                  type="button"
+                                  className="min-w-0 flex-1 space-y-1.5 rounded-md text-left outline-none transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-300"
+                                  onClick={() => openJobDetail(job.id)}
+                                >
                                   <p className="font-mono text-sm font-semibold text-slate-900">
                                     {job.job_no}
                                   </p>
@@ -273,7 +287,7 @@ export function KanbanBoard({ initialJobs }: KanbanBoardProps) {
                                       {formatQty(job.target_quantity)}
                                     </span>
                                   </p>
-                                </div>
+                                </button>
                               </div>
                             </article>
                           )}
