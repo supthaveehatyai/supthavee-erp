@@ -21,8 +21,6 @@ import type {
 } from "@/types/production";
 import { isProductionOperationStatus } from "@/types/production";
 
-export const maxDuration = 60;
-
 const KANBAN_PATH = "/production/kanban";
 
 function getSupabaseAdmin(): SupabaseClient {

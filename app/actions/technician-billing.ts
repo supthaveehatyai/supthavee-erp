@@ -32,8 +32,6 @@ const BILLABLE_JOB_STATUS = "COMPLETED" as const;
 /** In-house Routing — วางบิลเมื่อขั้นตอนเองเสร็จ */
 const BILLABLE_OPERATION_STATUS = "COMPLETED" as const;
 
-export const maxDuration = 60;
-
 type AdminClient = ReturnType<typeof createClient>;
 
 /** production_job_operations ยังไม่อยู่ใน generated Database types — bypass typed schema */
