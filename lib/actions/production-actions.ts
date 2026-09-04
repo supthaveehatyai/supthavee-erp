@@ -40,6 +40,7 @@ import {
 const KANBAN_PATH = "/production/kanban";
 const POSTGRES_UNIQUE_VIOLATION = "23505";
 const POSTGRES_UNDEFINED_TABLE = "42P01";
+const POSTGRES_UNDEFINED_COLUMN = "42703";
 const POSTGRES_FOREIGN_KEY_VIOLATION = "23503";
 const JOB_NO_MAX_RETRIES = 5;
 
@@ -1067,20 +1068,38 @@ export async function createProductionJobFromSO(
         };
       }
 
-      // Mark SO line items as "กำลังผลิต" (best-effort — column may be cloud-only)
+      // Mark SO line items as sent / in production (best-effort)
       {
         const productIdsForStatus = items.map((item) => item.product_id);
-        const { error: statusError } = await supabaseAdmin
+        const fullUpdate = await supabaseAdmin
           .from("document_items")
-          .update({ production_status: "IN_PRODUCTION" })
+          .update({
+            production_status: "IN_PRODUCTION",
+            is_sent_to_production: true,
+            ...(mockupImageUrl ? { mockup_image_url: mockupImageUrl } : {}),
+          })
           .eq("document_id", soId)
           .in("product_id", productIdsForStatus);
 
-        if (statusError) {
-          console.warn(
-            "[createProductionJobFromSO] mark production_status skipped:",
-            statusError.message,
-          );
+        if (fullUpdate.error) {
+          if (fullUpdate.error.code === POSTGRES_UNDEFINED_COLUMN) {
+            const statusOnly = await supabaseAdmin
+              .from("document_items")
+              .update({ production_status: "IN_PRODUCTION" })
+              .eq("document_id", soId)
+              .in("product_id", productIdsForStatus);
+            if (statusOnly.error) {
+              console.warn(
+                "[createProductionJobFromSO] mark production_status skipped:",
+                statusOnly.error.message,
+              );
+            }
+          } else {
+            console.warn(
+              "[createProductionJobFromSO] mark document_items skipped:",
+              fullUpdate.error.message,
+            );
+          }
         }
       }
 

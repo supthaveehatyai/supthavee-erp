@@ -119,6 +119,40 @@ export type ManufacturedSendGroup = {
   production_job_no: string | null;
 };
 
+/** Batch MTO — ผลลัพธ์ต่อรุ่น */
+export type BatchSendToProductionJobResult = {
+  finished_model_id: string;
+  model_code: string;
+  job_id: string;
+  job_no: string;
+  items_count: number;
+  materials_count: number;
+};
+
+export type BatchSendToProductionResult =
+  | {
+      success: true;
+      error: string | null;
+      data: {
+        document_id: string;
+        jobs: BatchSendToProductionJobResult[];
+        skipped: string[];
+      };
+    }
+  | {
+      success: false;
+      error: string;
+      data: {
+        document_id: string;
+        jobs: BatchSendToProductionJobResult[];
+        skipped: string[];
+      } | null;
+    };
+
+export type UploadBatchModelMockupResult =
+  | { success: true; error: null; data: { url: string; path: string } }
+  | { success: false; error: string; data: null };
+
 /** รายการ SKU ในใบสั่งผลิต (production_job_items) */
 export type ProductionJobDetailItem = {
   id: string;

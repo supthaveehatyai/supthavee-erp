@@ -43,7 +43,6 @@ import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import ConvertDocumentDropdown from "./convert-document-dropdown";
 import { SendToProductionButton } from "@/components/production/send-to-production-button";
-import { SoLineItemProductionActions } from "@/components/sales/so-line-item-production-actions";
 import type { ManufacturedSendGroup } from "@/types/production";
 import type { DocumentDetailItem } from "@/types/document";
 
@@ -92,16 +91,26 @@ function buildManufacturedSendGroups(
     if (!modelId || !productId || item.qty <= 0) continue;
 
     const existing = byModel.get(modelId);
+    const lineSent =
+      item.is_sent_to_production === true ||
+      item.production_status === "IN_PRODUCTION" ||
+      item.production_status === "COMPLETED" ||
+      Boolean(item.production_job_no);
+
     if (existing) {
       existing.items.push({ product_id: productId, quantity: item.qty });
-      if (!existing.mockup_image_url && headerMockupUrl) {
+      if (!existing.mockup_image_url && item.mockup_image_url) {
+        existing.mockup_image_url = item.mockup_image_url.trim();
+      } else if (!existing.mockup_image_url && headerMockupUrl) {
         existing.mockup_image_url = headerMockupUrl.trim();
       } else if (!existing.mockup_image_url && item.image_url) {
         existing.mockup_image_url = item.image_url;
       }
-      if (item.production_job_no) {
+      if (lineSent) {
         existing.already_sent = true;
-        existing.production_job_no = item.production_job_no;
+        if (item.production_job_no) {
+          existing.production_job_no = item.production_job_no;
+        }
       }
       continue;
     }
@@ -114,9 +123,12 @@ function buildManufacturedSendGroups(
         item.model_code?.trim() ||
         "สินค้าผลิตเอง",
       mockup_image_url:
-        headerMockupUrl?.trim() || item.image_url?.trim() || null,
+        item.mockup_image_url?.trim() ||
+        headerMockupUrl?.trim() ||
+        item.image_url?.trim() ||
+        null,
       items: [{ product_id: productId, quantity: item.qty }],
-      already_sent: item.production_status !== "NONE",
+      already_sent: lineSent,
       production_job_no: item.production_job_no,
     });
   }
@@ -826,19 +838,6 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                                   item.production_job_no,
                                 )
                               : null}
-                            {doc.doc_type === "SO" &&
-                            (item.is_service || item.is_manufactured) ? (
-                              <SoLineItemProductionActions
-                                documentItemId={item.id}
-                                docNo={doc.doc_no}
-                                canSend={doc.status === "ISSUED"}
-                                isService={item.is_service}
-                                isManufactured={item.is_manufactured}
-                                isSentToProduction={item.is_sent_to_production}
-                                mockupImageUrl={item.mockup_image_url}
-                                productionJobNo={item.production_job_no}
-                              />
-                            ) : null}
                           </TableCell>
                           <TableCell className="px-4 text-right text-sm tabular-nums text-slate-700">
                             {item.qty}
