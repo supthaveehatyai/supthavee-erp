@@ -87,10 +87,12 @@ export function SoLineItemProductionActions({
       try {
         const compressed = await compressImage(file);
         const formData = new FormData();
-        formData.set("document_item_id", documentItemId);
         formData.set("file", compressed);
 
-        const result = await uploadDocumentItemMockup(formData);
+        const result = await uploadDocumentItemMockup(
+          documentItemId,
+          formData,
+        );
         if (!result.success || !result.data) {
           toast.error(result.error ?? "อัปโหลด Mockup ไม่สำเร็จ");
           return;

@@ -1,8 +1,11 @@
-"use server";
+'use server';
 
 /**
  * Phase 17 — Smart Routing Engine: Sales Order Driven Production
  * Zero Client-Side Fetching — Service Role (`supabaseAdmin`) only.
+ *
+ * Next.js rule: a `"use server"` file may ONLY export async functions.
+ * Do NOT export const / types / sync helpers from this module.
  *
  * Route by product_models flags on a single document_items row:
  *   Flow 1 — is_service      → Kanban service job (technician assignment later)
@@ -25,8 +28,6 @@ import type {
   SendToProductionResult,
   UploadDocumentItemMockupResult,
 } from "@/types/production";
-
-export const maxDuration = 60;
 
 const KANBAN_PATH = "/production/kanban";
 const PRODUCTION_ATTACHMENTS_BUCKET = "production_attachments";
@@ -845,18 +846,18 @@ function isUploadFile(value: unknown): value is File {
  * อัปโหลด Mockup รายบรรทัด → bucket production_attachments
  * แล้วบันทึก URL ลง document_items.mockup_image_url
  *
- * FormData: document_item_id + file (WebP บีบอัดฝั่ง Client แล้ว)
+ * @param documentItemId — document_items.id
+ * @param formData — ต้องมี key `file` (WebP บีบอัดฝั่ง Client แล้ว)
  */
 export async function uploadDocumentItemMockup(
+  documentItemId: string,
   formData: FormData,
 ): Promise<UploadDocumentItemMockupResult> {
   try {
-    const documentItemId = String(
-      formData.get("document_item_id") ?? "",
-    ).trim();
+    const id = String(documentItemId ?? "").trim();
     const fileEntry = formData.get("file") ?? formData.get("mockup");
 
-    if (!documentItemId) {
+    if (!id) {
       return { success: false, error: "ไม่พบรหัสรายการเอกสาร" };
     }
     if (!isUploadFile(fileEntry)) {
@@ -890,7 +891,7 @@ export async function uploadDocumentItemMockup(
         )
       `,
       )
-      .eq("id", documentItemId)
+      .eq("id", id)
       .maybeSingle();
 
     if (itemError) {
@@ -905,7 +906,7 @@ export async function uploadDocumentItemMockup(
 
     const doc = unwrapOne(item.documents as { doc_no?: string } | null);
     const safeName = sanitizeFileName(fileEntry.name || "mockup.webp");
-    const objectPath = `items/${documentItemId}/${Date.now()}-${safeName}`;
+    const objectPath = `items/${id}/${Date.now()}-${safeName}`;
     const buffer = Buffer.from(await fileEntry.arrayBuffer());
 
     const { error: uploadError } = await supabase.storage
@@ -936,7 +937,7 @@ export async function uploadDocumentItemMockup(
     const { error: updateError } = await supabase
       .from("document_items")
       .update({ mockup_image_url: url })
-      .eq("id", documentItemId);
+      .eq("id", id);
 
     if (updateError) {
       if (updateError.code === POSTGRES_UNDEFINED_COLUMN) {
@@ -961,7 +962,7 @@ export async function uploadDocumentItemMockup(
     return {
       success: true,
       data: {
-        document_item_id: documentItemId,
+        document_item_id: id,
         mockup_image_url: url,
       },
     };
