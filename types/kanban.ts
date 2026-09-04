@@ -31,7 +31,7 @@ export type ProductionJobCard = {
   job_no: string;
   job_type: ProductionJobType;
   status: ProductionJobStatus;
-  due_date: string | null;
+  estimated_completion_date: string | null;
   details: string | null;
   /** Raw Storage URLs (CLOUD) — keep for uploads / audit */
   attachment_paths: string[];
@@ -129,7 +129,7 @@ export const JOB_STATUS_LABEL: Record<ProductionJobStatus, string> = {
 export type CreateProductionJobInput = {
   document_id: string;
   job_type: string;
-  due_date: string;
+  estimated_completion_date: string;
   details: string;
 };
 

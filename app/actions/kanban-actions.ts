@@ -66,7 +66,7 @@ type ProductionJobRow = {
   job_no: string;
   job_type: ProductionJobType;
   status: ProductionJobStatus;
-  due_date: string | null;
+  estimated_completion_date: string | null;
   details: string | null;
   attachment_paths: string[] | null;
   storage_tier: StorageTier | null;
@@ -134,7 +134,7 @@ function mapJobCard(row: ProductionJobRow): ProductionJobCard {
     job_no: row.job_no,
     job_type: row.job_type,
     status: row.status,
-    due_date: row.due_date,
+    estimated_completion_date: row.estimated_completion_date,
     details: row.details,
     attachment_paths: Array.isArray(row.attachment_paths)
       ? row.attachment_paths.filter(Boolean)
@@ -164,7 +164,7 @@ const JOB_SELECT = `
         job_no,
         job_type,
         status,
-        due_date,
+        estimated_completion_date,
         details,
         attachment_paths,
         created_at,
@@ -290,7 +290,7 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
       .from("production_jobs")
       .select(JOB_SELECT)
       .eq("is_archived", false)
-      .order("due_date", { ascending: true, nullsFirst: false })
+      .order("estimated_completion_date", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
 
     if (error) {
@@ -337,7 +337,7 @@ export async function getKanbanBoardData(): Promise<GetProductionJobsResult> {
  * สร้างใบสั่งผลิตจากเอกสารขาย (SO / TAX_INV / ABB / CS_TAX / INV_DO) พร้อมแนบรูป Mockup
  *
  * Fields: documentId | document_id, jobType | job_type,
- * description | details, targetDate | due_date, attachments (File[])
+ * description | details, targetDate | estimated_completion_date, attachments (File[])
  */
 export async function createProductionJob(
   formData: FormData,
@@ -353,8 +353,10 @@ export async function createProductionJob(
   const details = String(
     formData.get("description") ?? formData.get("details") ?? "",
   ).trim();
-  const dueDate = String(
-    formData.get("targetDate") ?? formData.get("due_date") ?? "",
+  const estimatedCompletionDate = String(
+    formData.get("targetDate") ??
+      formData.get("estimated_completion_date") ??
+      "",
   )
     .trim()
     .slice(0, 10);
@@ -369,7 +371,7 @@ export async function createProductionJob(
       data: null,
     };
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(estimatedCompletionDate)) {
     return {
       success: false,
       error: "กรุณาระบุวันกำหนดส่ง (YYYY-MM-DD)",
@@ -474,7 +476,7 @@ export async function createProductionJob(
           document_id: documentId,
           job_type: jobTypeRaw,
           status: "PLANNED",
-          due_date: dueDate,
+          estimated_completion_date: estimatedCompletionDate,
           details,
           attachment_paths: attachmentPaths,
           technician_id: null,

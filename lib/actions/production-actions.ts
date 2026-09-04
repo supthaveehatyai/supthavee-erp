@@ -46,7 +46,7 @@ type JobQueryRow = {
   status: string | null;
   finished_model_id: string | null;
   target_quantity: number | string | null;
-  due_date: string | null;
+  estimated_completion_date: string | null;
   created_at: string | null;
   updated_at: string | null;
   product_models?: ProductModelJoin;
@@ -89,7 +89,9 @@ function mapJobCard(row: JobQueryRow): ProductionJobCard | null {
     product_name: productName,
     product_model_code: model?.model_code || null,
     target_quantity: toQty(row.target_quantity),
-    due_date: row.due_date ? String(row.due_date) : null,
+    estimated_completion_date: row.estimated_completion_date
+      ? String(row.estimated_completion_date)
+      : null,
     created_at: row.created_at ? String(row.created_at) : null,
     updated_at: row.updated_at ? String(row.updated_at) : null,
   };
@@ -132,7 +134,7 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
         status,
         finished_model_id,
         target_quantity,
-        due_date,
+        estimated_completion_date,
         created_at,
         updated_at,
         product_models!production_jobs_finished_model_id_fkey (
@@ -143,7 +145,7 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
         )
       `,
       )
-      .order("due_date", { ascending: true, nullsFirst: false })
+      .order("estimated_completion_date", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
 
     if (!error) {
@@ -162,9 +164,9 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
     const { data: rows, error: jobsError } = await supabaseAdmin
       .from("production_jobs")
       .select(
-        "id, job_no, status, finished_model_id, target_quantity, due_date, created_at, updated_at",
+        "id, job_no, status, finished_model_id, target_quantity, estimated_completion_date, created_at, updated_at",
       )
-      .order("due_date", { ascending: true, nullsFirst: false })
+      .order("estimated_completion_date", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
 
     if (jobsError) {

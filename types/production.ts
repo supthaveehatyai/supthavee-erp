@@ -23,7 +23,7 @@ export type ProductionJobCard = {
   product_name: string;
   product_model_code: string | null;
   target_quantity: number;
-  due_date: string | null;
+  estimated_completion_date: string | null;
   created_at: string | null;
   updated_at: string | null;
 };

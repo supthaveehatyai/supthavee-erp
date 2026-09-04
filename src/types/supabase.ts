@@ -1728,7 +1728,7 @@ export type Database = {
           created_at: string | null
           details: string | null
           document_id: string | null
-          due_date: string | null
+          estimated_completion_date: string | null
           id: string
           is_archived: boolean
           job_no: string
@@ -1746,7 +1746,7 @@ export type Database = {
           created_at?: string | null
           details?: string | null
           document_id?: string | null
-          due_date?: string | null
+          estimated_completion_date?: string | null
           id?: string
           is_archived?: boolean
           job_no: string
@@ -1764,7 +1764,7 @@ export type Database = {
           created_at?: string | null
           details?: string | null
           document_id?: string | null
-          due_date?: string | null
+          estimated_completion_date?: string | null
           id?: string
           is_archived?: boolean
           job_no?: string

@@ -367,7 +367,9 @@ export function JobDetailSheet({
                   </div>
                   <div className="flex items-center gap-2 text-slate-600">
                     <CalendarDays className="size-4 shrink-0 text-slate-400" />
-                    <span>กำหนดส่ง {formatDueDate(job.due_date)}</span>
+                    <span>
+                      กำหนดส่ง {formatDueDate(job.estimated_completion_date)}
+                    </span>
                   </div>
                   <div className="flex items-start gap-2 text-slate-600">
                     <Factory className="mt-0.5 size-4 shrink-0 text-slate-400" />
