@@ -89,11 +89,10 @@ function unwrapJoin<T extends object>(
 
 function emptyBoard(): ProductionJobsByStatus {
   return {
-    TODO: [],
+    PLANNED: [],
     IN_PROGRESS: [],
-    QC: [],
-    READY_TO_SHIP: [],
-    DELIVERED: [],
+    QA: [],
+    COMPLETED: [],
   };
 }
 
@@ -474,7 +473,7 @@ export async function createProductionJob(
           job_no: jobNo,
           document_id: documentId,
           job_type: jobTypeRaw,
-          status: "TODO",
+          status: "PLANNED",
           due_date: dueDate,
           details,
           attachment_paths: attachmentPaths,
@@ -526,15 +525,12 @@ export async function updateJobStatus(
     return { success: false, error: "ไม่พบรหัสงาน (jobId)" };
   }
 
-  const normalized =
-    newStatus?.trim() === "READY_FOR_DELIVERY"
-      ? "READY_TO_SHIP"
-      : (newStatus?.trim() ?? "");
+  const normalized = newStatus?.trim() ?? "";
 
   if (!isKanbanColumnStatus(normalized)) {
     return {
       success: false,
-      error: `สถานะไม่ถูกต้อง: ${newStatus || "(ว่าง)"}`,
+      error: `สถานะไม่ถูกต้อง: ${newStatus || "(ว่าง)"} — ใช้ PLANNED / IN_PROGRESS / QA / COMPLETED`,
     };
   }
 
@@ -559,10 +555,10 @@ export async function updateJobStatus(
     if (current.status === "CANCELLED") {
       return { success: false, error: "งานถูกยกเลิกแล้ว ไม่สามารถย้ายสถานะได้" };
     }
-    if (current.status === "DELIVERED" && normalized !== "DELIVERED") {
+    if (current.status === "COMPLETED" && normalized !== "COMPLETED") {
       return {
         success: false,
-        error: "งานส่งมอบแล้ว — ไม่สามารถย้ายกลับได้",
+        error: "งานเสร็จสิ้นแล้ว — ไม่สามารถย้ายกลับได้",
       };
     }
 
@@ -853,10 +849,10 @@ export async function cancelProductionJob(
         data: null,
       };
     }
-    if (current.status === "DELIVERED") {
+    if (current.status === "COMPLETED") {
       return {
         success: false,
-        error: `งาน ${current.job_no} ส่งมอบแล้ว — ไม่สามารถยกเลิกได้`,
+        error: `งาน ${current.job_no} เสร็จสิ้นแล้ว — ไม่สามารถยกเลิกได้`,
         data: null,
       };
     }

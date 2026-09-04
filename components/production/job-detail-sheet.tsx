@@ -76,16 +76,14 @@ const JOB_TYPE_LABEL: Record<ProductionJobType, string> = {
 
 function statusBadgeClass(status: ProductionJobStatus): string {
   switch (status) {
-    case "TODO":
+    case "PLANNED":
       return "bg-slate-100 text-slate-700 ring-slate-200";
     case "IN_PROGRESS":
       return "bg-blue-50 text-blue-700 ring-blue-200";
-    case "QC":
+    case "QA":
       return "bg-amber-50 text-amber-800 ring-amber-200";
-    case "READY_TO_SHIP":
+    case "COMPLETED":
       return "bg-emerald-50 text-emerald-700 ring-emerald-200";
-    case "DELIVERED":
-      return "bg-violet-50 text-violet-700 ring-violet-200";
     case "CANCELLED":
       return "bg-red-50 text-red-700 ring-red-200";
     default:
@@ -302,7 +300,7 @@ export function JobDetailSheet({
   }
 
   const canCancel =
-    job && job.status !== "DELIVERED" && job.status !== "CANCELLED";
+    job && job.status !== "COMPLETED" && job.status !== "CANCELLED";
   const canEditAssignment = job && job.status !== "CANCELLED";
   const goodsItems = (job?.line_items ?? []).filter((item) => !item.is_service);
   const serviceItems = (job?.line_items ?? []).filter((item) => item.is_service);

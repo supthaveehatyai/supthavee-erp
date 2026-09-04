@@ -241,7 +241,7 @@ export function CreateJobModal({
         <DialogHeader>
           <DialogTitle>สร้างใบสั่งผลิต (MTO)</DialogTitle>
           <DialogDescription>
-            ส่งเอกสารขายเข้าสายการผลิต — สถานะเริ่มต้น TODO · เลขงาน
+            ส่งเอกสารขายเข้าสายการผลิต — สถานะเริ่มต้น PLANNED · เลขงาน
             JOB-YYMM-XXXX
             {resolvedDocumentNo ? (
               <>

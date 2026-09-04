@@ -7,16 +7,21 @@ import type { StorageTier } from "@/types/storage-tier";
 
 export type ProductionJobType =
   Database["public"]["Enums"]["production_job_type"];
+
+/** ERP Standard — production_jobs.status (VARCHAR / TS union) */
 export type ProductionJobStatus =
-  Database["public"]["Enums"]["production_job_status"];
+  | "PLANNED"
+  | "IN_PROGRESS"
+  | "QA"
+  | "COMPLETED"
+  | "CANCELLED";
 
 /** Active Kanban columns — CANCELLED is excluded from the board */
 export const KANBAN_STATUSES = [
-  "TODO",
+  "PLANNED",
   "IN_PROGRESS",
-  "QC",
-  "READY_TO_SHIP",
-  "DELIVERED",
+  "QA",
+  "COMPLETED",
 ] as const satisfies readonly ProductionJobStatus[];
 
 export type KanbanColumnStatus = (typeof KANBAN_STATUSES)[number];
@@ -114,12 +119,11 @@ export const PRODUCTION_JOB_TYPES: ProductionJobType[] = [
 ];
 
 export const JOB_STATUS_LABEL: Record<ProductionJobStatus, string> = {
-  TODO: "รอดำเนินการ",
-  IN_PROGRESS: "กำลังทำ",
-  QC: "ตรวจคุณภาพ",
-  READY_TO_SHIP: "พร้อมส่งมอบ",
-  DELIVERED: "ส่งมอบแล้ว",
-  CANCELLED: "ยกเลิกแล้ว",
+  PLANNED: "รอผลิต",
+  IN_PROGRESS: "กำลังผลิต",
+  QA: "ตรวจสอบคุณภาพ",
+  COMPLETED: "เสร็จสิ้น",
+  CANCELLED: "ยกเลิก",
 };
 
 export type CreateProductionJobInput = {
