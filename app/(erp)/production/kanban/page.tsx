@@ -1,57 +1,30 @@
 import type { Metadata } from "next";
 import { KanbanSquare } from "lucide-react";
-import {
-  getJobDetails,
-  getKanbanBoardData,
-  getTechnicianOptions,
-} from "@/app/actions/kanban-actions";
-import { JobDetailSheet } from "@/components/production/job-detail-sheet";
+import { getProductionJobs } from "@/lib/actions/production-actions";
 import { KanbanBoard } from "@/components/production/kanban-board";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Production Kanban | งานผลิต",
-  description: "กระดานงานผลิต — สกรีน ปัก เย็บ (Phase 7)",
+  description: "กระดานงานผลิต MTO — รอผลิต / กำลังผลิต / QA / เสร็จสิ้น",
 };
 
-type PageProps = {
-  searchParams: Promise<{ jobId?: string }>;
-};
-
-export default async function ProductionKanbanPage({ searchParams }: PageProps) {
-  const params = await searchParams;
-  const jobId = params.jobId?.trim() ?? "";
-
-  const result = await getKanbanBoardData();
-
-  const jobDetailsResult = jobId
-    ? await getJobDetails(jobId).catch((err: unknown) => ({
-        success: false as const,
-        error:
-          err instanceof Error ? err.message : "ดึงรายละเอียดงานไม่สำเร็จ",
-        data: null,
-      }))
-    : null;
-
-  const techniciansResult = await getTechnicianOptions().catch(
-    (err: unknown) => ({
-      success: false as const,
-      error:
-        err instanceof Error ? err.message : "ดึงรายชื่อช่างรับเหมาไม่สำเร็จ",
-      data: [] as Awaited<ReturnType<typeof getTechnicianOptions>>["data"],
-      rates: [] as Awaited<ReturnType<typeof getTechnicianOptions>>["rates"],
-    }),
-  );
+/**
+ * Server Component — โหลด Initial Data แล้วส่งให้ Client Board
+ * Zero Client-Side Fetching: ห้าม supabase.from() ใน Client
+ */
+export default async function ProductionKanbanPage() {
+  const result = await getProductionJobs();
 
   if (!result.success) {
     return (
-      <div className="flex flex-col gap-4 p-6">
-        <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
-          <KanbanSquare className="h-8 w-8 text-blue-600" />
-          Production Kanban
-        </h1>
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div className="space-y-4 p-6">
+        <PageHeader />
+        <div
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
           {result.error}
         </div>
       </div>
@@ -59,30 +32,24 @@ export default async function ProductionKanbanPage({ searchParams }: PageProps) 
   }
 
   return (
-    <div className="flex flex-col gap-6 p-6">
-      <div className="flex flex-col gap-2">
-        <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
-          <KanbanSquare className="h-8 w-8 text-blue-600" />
-          Production Kanban
-        </h1>
-        <p className="text-sm text-slate-500">
-          Make-to-Order — ส่งงานจาก INV_DO · ลากการ์ดเพื่ออัปเดตสถานะ ·
-          คลิกการ์ดเพื่อดูรายละเอียด
-        </p>
-      </div>
+    <div className="space-y-6 p-6">
+      <PageHeader />
+      <KanbanBoard initialJobs={result.flat} />
+    </div>
+  );
+}
 
-      <KanbanBoard initialJobs={result.flat} selectedJobId={jobId || null} />
-
-      <JobDetailSheet
-        job={jobDetailsResult?.success ? jobDetailsResult.data : null}
-        technicians={techniciansResult.data}
-        rates={techniciansResult.rates}
-        error={
-          jobDetailsResult && !jobDetailsResult.success
-            ? jobDetailsResult.error
-            : null
-        }
-      />
+function PageHeader() {
+  return (
+    <div className="space-y-1">
+      <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-slate-900">
+        <KanbanSquare className="size-7 text-blue-600" aria-hidden />
+        Production Kanban
+      </h1>
+      <p className="text-sm text-slate-500">
+        Make-to-Order — ลากการ์ดเพื่ออัปเดตสถานะ (PLANNED → IN_PROGRESS → QA →
+        COMPLETED)
+      </p>
     </div>
   );
 }

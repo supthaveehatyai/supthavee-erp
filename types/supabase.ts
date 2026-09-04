@@ -2326,10 +2326,13 @@ export type Database = {
       payment_status_enum: "UNPAID" | "PARTIAL" | "PAID" | "VOIDED"
       production_job_status:
         | "TODO"
+        | "PLANNED"
         | "IN_PROGRESS"
         | "QC"
+        | "QA"
         | "READY_TO_SHIP"
         | "DELIVERED"
+        | "COMPLETED"
         | "CANCELLED"
       production_job_type: "SCREEN" | "EMBROIDERY" | "SEWING" | "OTHER"
       storage_tier_type: "CLOUD" | "NAS"
@@ -2509,10 +2512,13 @@ export const Constants = {
       payment_status_enum: ["UNPAID", "PARTIAL", "PAID", "VOIDED"],
       production_job_status: [
         "TODO",
+        "PLANNED",
         "IN_PROGRESS",
         "QC",
+        "QA",
         "READY_TO_SHIP",
         "DELIVERED",
+        "COMPLETED",
         "CANCELLED",
       ],
       production_job_type: ["SCREEN", "EMBROIDERY", "SEWING", "OTHER"],

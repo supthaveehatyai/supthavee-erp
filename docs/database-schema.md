@@ -29,7 +29,7 @@
 - `products` (สินค้า SKU ย่อย - Phase 2)
 - `vendor_product_mapping` (การผูกรหัสสินค้าซัพพลายเออร์)
 - `inventory_ledger` (สมุดบัญชีคลังสินค้า - ควบคุมการเข้าออกสต็อก)
-- `production_jobs` (ใบสั่งผลิต / งาน MTO — *อัปเดต: ยกเลิกการเก็บ technician_id และ wage_cost ที่ตารางนี้ ย้ายไประดับ Line Item แทน*; Phase 14 Tiered Storage: `storage_tier` ENUM `storage_tier_type` ('CLOUD','NAS') default CLOUD, `nas_archive_url`)
+- `production_jobs` (ใบสั่งผลิต / งาน MTO — มี `product_model_id`, `target_quantity`, สถานะ Kanban: PLANNED / IN_PROGRESS / QA / COMPLETED; Phase 14 Tiered Storage: `storage_tier`)
 - `service_tracking` (ติดตามสถานะงานบริการ)
 - `technician_rates` (เรตค่าแรงช่าง — FK `service_model_id` → `product_models.id`, `technician_id` → `contacts.id`)
 
