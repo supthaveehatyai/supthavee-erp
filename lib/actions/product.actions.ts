@@ -6,14 +6,21 @@
  */
 
 import { createClient } from "@/lib/supabase/server-admin";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getCommittedStockByProducts } from "@/lib/inventory/stock-availability";
 import type {
   GetModelMatrixForSaleResult,
   ModelMatrixForSale,
   ModelMatrixSkuRow,
   ProductModelSearchItem,
+  SearchProductModelsOptions,
   SearchProductModelsResult,
 } from "@/types/product-sale";
+
+/** Cloud schema มี is_manufactured / is_raw_material — generated types ฝั่ง src/ ยังไม่ครบ */
+function getUntypedAdmin(): SupabaseClient {
+  return createClient() as unknown as SupabaseClient;
+}
 
 function escapeIlikePattern(raw: string): string {
   return raw.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
@@ -53,11 +60,28 @@ type ProductRow = {
   is_active: boolean | null;
 };
 
+const MODEL_SEARCH_SELECT =
+  "id, model_code, name, short_name, image_url, status, is_active, is_service, is_raw_material, is_manufactured";
+
+type ProductModelSearchRow = {
+  id: string;
+  model_code: string;
+  name: string;
+  short_name: string | null;
+  image_url: string | null;
+  status: string | null;
+  is_active: boolean | null;
+  is_service: boolean | null;
+  is_raw_material: boolean | null;
+  is_manufactured: boolean | null;
+};
+
 /**
  * ค้นหารุ่นสินค้า (product_models) ด้วย name / model_code — จำกัด 10 รายการ.
  */
 export async function searchProductModels(
   keyword: string,
+  options?: SearchProductModelsOptions,
 ): Promise<SearchProductModelsResult> {
   try {
     const trimmed = keyword?.trim() ?? "";
@@ -65,23 +89,35 @@ export async function searchProductModels(
       return { success: true, data: [] };
     }
 
+    const manufacturedOnly = options?.manufacturedOnly === true;
     const pattern = `%${escapeIlikePattern(trimmed)}%`;
-    const supabase = createClient();
+    const supabase = getUntypedAdmin();
 
-    const [byName, byCode] = await Promise.all([
-      supabase
-        .from("product_models")
-        .select("id, model_code, name, short_name, image_url, status, is_active, is_service")
-        .ilike("name", pattern)
-        .order("name", { ascending: true })
-        .limit(10),
-      supabase
-        .from("product_models")
-        .select("id, model_code, name, short_name, image_url, status, is_active, is_service")
-        .ilike("model_code", pattern)
-        .order("model_code", { ascending: true })
-        .limit(10),
-    ]);
+    let nameQuery = supabase
+      .from("product_models")
+      .select(MODEL_SEARCH_SELECT)
+      .ilike("name", pattern)
+      .order("name", { ascending: true })
+      .limit(10);
+    let codeQuery = supabase
+      .from("product_models")
+      .select(MODEL_SEARCH_SELECT)
+      .ilike("model_code", pattern)
+      .order("model_code", { ascending: true })
+      .limit(10);
+
+    if (manufacturedOnly) {
+      nameQuery = nameQuery
+        .eq("is_manufactured", true)
+        .neq("is_raw_material", true)
+        .neq("is_service", true);
+      codeQuery = codeQuery
+        .eq("is_manufactured", true)
+        .neq("is_raw_material", true)
+        .neq("is_service", true);
+    }
+
+    const [byName, byCode] = await Promise.all([nameQuery, codeQuery]);
 
     if (byName.error) {
       return { success: false, error: byName.error.message, data: [] };
@@ -90,33 +126,15 @@ export async function searchProductModels(
       return { success: false, error: byCode.error.message, data: [] };
     }
 
-    const byId = new Map<
-      string,
-      {
-        id: string;
-        model_code: string;
-        name: string;
-        short_name: string | null;
-        image_url: string | null;
-        status: string | null;
-        is_active: boolean | null;
-        is_service: boolean | null;
-      }
-    >();
+    const byId = new Map<string, ProductModelSearchRow>();
 
     for (const row of [...(byName.data ?? []), ...(byCode.data ?? [])]) {
       if (!row.id || byId.has(row.id)) continue;
       if (row.is_active === false) continue;
-      byId.set(row.id, {
-        id: row.id,
-        model_code: row.model_code,
-        name: row.name,
-        short_name: row.short_name,
-        image_url: row.image_url,
-        status: row.status,
-        is_active: row.is_active,
-        is_service: row.is_service ?? false,
-      });
+      if (manufacturedOnly && row.is_raw_material === true) continue;
+      if (manufacturedOnly && row.is_service === true) continue;
+      if (manufacturedOnly && row.is_manufactured !== true) continue;
+      byId.set(row.id, row as ProductModelSearchRow);
     }
 
     const data: ProductModelSearchItem[] = [...byId.values()]
@@ -135,6 +153,7 @@ export async function searchProductModels(
         image_url: row.image_url,
         display_name: [row.model_code, row.name].filter(Boolean).join(" · "),
         is_service: Boolean(row.is_service),
+        is_manufactured: Boolean(row.is_manufactured),
       }));
 
     return { success: true, data };
@@ -158,11 +177,11 @@ export async function getModelMatrixForSale(
       return { success: false, error: "ไม่พบรหัสรุ่นสินค้า (modelId)", data: null };
     }
 
-    const supabase = createClient();
+    const supabase = getUntypedAdmin();
 
     const { data: model, error: modelError } = await supabase
       .from("product_models")
-      .select("id, model_code, name, short_name, image_url, is_service")
+      .select("id, model_code, name, short_name, image_url, is_service, is_manufactured")
       .eq("id", id)
       .maybeSingle();
 
@@ -174,6 +193,7 @@ export async function getModelMatrixForSale(
     }
 
     const isService = Boolean(model.is_service);
+    const isManufactured = Boolean(model.is_manufactured);
 
     const empty: ModelMatrixForSale = {
       model_id: model.id,
@@ -181,6 +201,7 @@ export async function getModelMatrixForSale(
       model_name: model.name || model.short_name || model.model_code,
       image_url: model.image_url,
       is_service: isService,
+      is_manufactured: isManufactured,
       skus: [],
     };
 
@@ -355,6 +376,7 @@ export async function getModelMatrixForSale(
         model_name: model.name || model.short_name || model.model_code,
         image_url: model.image_url,
         is_service: isService,
+        is_manufactured: isManufactured,
         skus,
       },
     };

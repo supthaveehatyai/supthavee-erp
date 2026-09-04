@@ -133,13 +133,22 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
             ประวัติเอกสารขายทั้งหมด (เรียงจากใหม่ไปเก่า)
           </p>
         </div>
-        <Link
-          href="/sales/create"
-          className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-        >
-          <Plus className="size-4" />
-          เปิดบิลขาย (+)
-        </Link>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Link
+            href="/sales/orders/create"
+            className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-4 text-sm font-semibold text-violet-800 shadow-sm transition hover:bg-violet-100"
+          >
+            <Plus className="size-4" />
+            เปิดใบสั่งขาย (SO)
+          </Link>
+          <Link
+            href="/sales/create"
+            className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+          >
+            <Plus className="size-4" />
+            เปิดบิลขาย (+)
+          </Link>
+        </div>
       </div>
 
       <Card>

@@ -43,7 +43,7 @@
 - **Inventory Adjustments:** `STK_OB` (ยอดยกมา · Prefix **SOB-YYMM-XXXX**) และ `STK_ADJ` (ปรับปรุงสต็อก · Prefix **SAD-YYMM-XXXX**) บันทึกผ่าน `inventory_ledger` และสร้าง Audit Trail เสมอ
 - **Period Closing:** ฟังก์ชัน `is_period_closed(doc_date)` — หากงวดถูกปิด (`accounting_periods.is_closed = true`) ห้าม INSERT/UPDATE/DELETE เอกสารและค่าใช้จ่ายในเดือนนั้น
 - `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — `doc_type` รวม `TB` สรุปวางบิลช่าง; มี `approval_status`, `approved_by`, `approved_at`, `created_by`)
-- `document_items` (รายการสินค้าในเอกสาร — งานบริการเก็บ `technician_id`, `wage_cost`, `technician_bill_id`; MTO ใช้ `production_status` = NONE / IN_PRODUCTION / COMPLETED)
+- `document_items` (รายการสินค้าในเอกสาร — งานบริการเก็บ `technician_id`, `wage_cost`, `technician_bill_id`; MTO ใช้ `production_status` = NONE / IN_PRODUCTION / COMPLETED; Phase 17: `mockup_image_url` รูป Mockup รายบรรทัดใน bucket `production_attachments`, `is_sent_to_production` BOOLEAN หลังกดส่งงานผลิต)
 - `document_allocations` (การจัดสรรเอกสาร เช่น ตัดมัดจำ)
 - `billing_note_items` (รายการใบวางบิล)
 - `expenses` (บิลค่าใช้จ่าย / OPEX — มี `approval_status`, `approved_by`, `approved_at`, `is_installment`, `total_interest_amount`)

@@ -60,12 +60,19 @@ import {
 
 const SEARCH_DEBOUNCE_MS = 300;
 
-export type ModelMatrixBillItem = SalesProductSearchItem & { qty: number };
+export type ModelMatrixBillItem = SalesProductSearchItem & {
+  qty: number;
+  model_id: string;
+  model_code: string;
+  is_manufactured: boolean;
+};
 
 export type ModelMatrixPickerProps = {
   disabled?: boolean;
   className?: string;
   placeholder?: string;
+  /** จำกัดเฉพาะรุ่น is_manufactured = true (หน้า Sales Order / MTO) */
+  manufacturedOnly?: boolean;
   /** บรรทัดที่มีจำนวน > 0 จาก Matrix Dialog */
   onAddToBill: (items: ModelMatrixBillItem[]) => void;
 };
@@ -110,6 +117,9 @@ function toBillItem(
     image_url: matrix.image_url,
     is_service: matrix.is_service || sku.is_service,
     qty,
+    model_id: matrix.model_id,
+    model_code: matrix.model_code,
+    is_manufactured: matrix.is_manufactured,
   };
 }
 
@@ -117,6 +127,7 @@ export default function ModelMatrixPicker({
   disabled = false,
   className,
   placeholder = "ค้นหารหัสรุ่นหรือชื่อรุ่นสินค้า...",
+  manufacturedOnly = false,
   onAddToBill,
 }: ModelMatrixPickerProps) {
   const listboxId = useId();
@@ -165,7 +176,10 @@ export default function ModelMatrixPicker({
     let active = true;
     startSearchTransition(async () => {
       try {
-        const result = await searchProductModels(debouncedQuery);
+        const result = await searchProductModels(
+          debouncedQuery,
+          manufacturedOnly ? { manufacturedOnly: true } : undefined,
+        );
         if (!active) return;
         if (!result.success) {
           setSearchError(result.error);
@@ -186,7 +200,7 @@ export default function ModelMatrixPicker({
     return () => {
       active = false;
     };
-  }, [debouncedQuery, open]);
+  }, [debouncedQuery, open, manufacturedOnly]);
 
   function closeSearch() {
     setOpen(false);
@@ -331,7 +345,11 @@ export default function ModelMatrixPicker({
               !isSearchPending &&
               debouncedQuery.length > 0 &&
               results.length === 0 ? (
-                <CommandEmpty>ไม่พบรุ่นสินค้าที่ตรงกับคำค้น</CommandEmpty>
+                <CommandEmpty>
+                  {manufacturedOnly
+                    ? "ไม่พบรุ่นผลิตเอง (is_manufactured) ที่ตรงกับคำค้น"
+                    : "ไม่พบรุ่นสินค้าที่ตรงกับคำค้น"}
+                </CommandEmpty>
               ) : null}
 
               {!searchError && results.length > 0 ? (

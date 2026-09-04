@@ -1374,6 +1374,10 @@ type NestedItemRow = {
   discount_amount: number | string | null;
   line_total: number | string | null;
   sort_order: number | null;
+  /** Phase 17 — optional until Cloud migration applied */
+  mockup_image_url?: string | null;
+  production_status?: string | null;
+  is_sent_to_production?: boolean | null;
   products: NestedProduct | NestedProduct[] | null;
 };
 
@@ -1453,6 +1457,9 @@ export async function getDocumentByNo(
           discount_amount,
           line_total,
           sort_order,
+          mockup_image_url,
+          production_status,
+          is_sent_to_production,
           products!document_items_product_id_fkey (
             id,
             sku,
@@ -1477,6 +1484,27 @@ export async function getDocumentByNo(
       .eq("doc_no", trimmed)
       .maybeSingle();
 
+    // Phase 17 columns may be missing until Cloud migration — retry without them
+    if (
+      error &&
+      (error.message?.includes("mockup_image_url") ||
+        error.message?.includes("is_sent_to_production") ||
+        error.message?.includes("production_status") ||
+        error.code === "42703")
+    ) {
+      const legacySelect = selectSql
+        .replace(/\s*mockup_image_url,\s*/g, "\n          ")
+        .replace(/\s*production_status,\s*/g, "\n          ")
+        .replace(/\s*is_sent_to_production,\s*/g, "\n          ");
+      const retry = await supabase
+        .from("documents")
+        .select(legacySelect)
+        .eq("doc_no", trimmed)
+        .maybeSingle();
+      data = retry.data as typeof data;
+      error = retry.error;
+    }
+
     if (!data && !error && uuidPattern.test(trimmed)) {
       const byId = await supabase
         .from("documents")
@@ -1485,6 +1513,26 @@ export async function getDocumentByNo(
         .maybeSingle();
       data = byId.data;
       error = byId.error;
+
+      if (
+        error &&
+        (error.message?.includes("mockup_image_url") ||
+          error.message?.includes("is_sent_to_production") ||
+          error.message?.includes("production_status") ||
+          error.code === "42703")
+      ) {
+        const legacySelect = selectSql
+          .replace(/\s*mockup_image_url,\s*/g, "\n          ")
+          .replace(/\s*production_status,\s*/g, "\n          ")
+          .replace(/\s*is_sent_to_production,\s*/g, "\n          ");
+        const retry = await supabase
+          .from("documents")
+          .select(legacySelect)
+          .eq("id", trimmed)
+          .maybeSingle();
+        data = retry.data as typeof data;
+        error = retry.error;
+      }
     }
 
     if (error) {
@@ -1562,12 +1610,24 @@ export async function getDocumentByNo(
         const modelId =
           String(model?.id ?? product?.model_id ?? "").trim() || null;
         const isManufactured = model?.is_manufactured === true;
+        const isService = model?.is_service === true;
         const linkedJob = modelId ? productionByModelId.get(modelId) : undefined;
-        let productionStatus: DocumentDetailItem["production_status"] = "NONE";
+
+        const rawStatus = String(row.production_status ?? "NONE")
+          .trim()
+          .toUpperCase();
+        let productionStatus: DocumentDetailItem["production_status"] =
+          rawStatus === "IN_PRODUCTION" || rawStatus === "COMPLETED"
+            ? rawStatus
+            : "NONE";
         if (linkedJob) {
           productionStatus =
             linkedJob.status === "COMPLETED" ? "COMPLETED" : "IN_PRODUCTION";
         }
+
+        const isSentToProduction =
+          row.is_sent_to_production === true ||
+          productionStatus !== "NONE";
 
         return {
           id: row.id,
@@ -1587,7 +1647,10 @@ export async function getDocumentByNo(
           model_id: modelId,
           model_code: model?.model_code?.trim() || null,
           is_manufactured: isManufactured,
+          is_service: isService,
+          mockup_image_url: row.mockup_image_url?.trim() || null,
           production_status: productionStatus,
+          is_sent_to_production: isSentToProduction,
           production_job_no: linkedJob?.job_no || null,
         };
       })

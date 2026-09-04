@@ -827,6 +827,13 @@ export async function createProductionJobFromSO(
         data: null,
       };
     }
+    if (String(soDoc.status ?? "").trim().toUpperCase() !== "ISSUED") {
+      return {
+        success: false,
+        error: `ส่งงานผลิตได้เมื่อใบสั่งขายเป็นสถานะ ISSUED (ปัจจุบัน: ${soDoc.status ?? "—"})`,
+        data: null,
+      };
+    }
 
     // 1b) Prevent duplicate send — same SO + finished_model already has an active job
     {

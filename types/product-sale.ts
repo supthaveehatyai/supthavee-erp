@@ -3,6 +3,11 @@
  * Keep outside `"use server"` modules.
  */
 
+export type SearchProductModelsOptions = {
+  /** จำกัดเฉพาะรุ่นผลิตเอง (Make-to-Order) */
+  manufacturedOnly?: boolean;
+};
+
 export type ProductModelSearchItem = {
   id: string;
   model_code: string;
@@ -13,6 +18,8 @@ export type ProductModelSearchItem = {
   display_name: string;
   /** true = งานบริการ — Bypass เช็คสต็อก */
   is_service: boolean;
+  /** product_models.is_manufactured — สินค้าผลิตเอง (MTO) */
+  is_manufactured?: boolean;
 };
 
 export type SearchProductModelsResult =
@@ -53,6 +60,8 @@ export type ModelMatrixForSale = {
   image_url: string | null;
   /** true = รุ่นงานบริการ — Bypass เช็คสต็อกใน UI */
   is_service: boolean;
+  /** product_models.is_manufactured — สินค้าผลิตเอง (MTO) */
+  is_manufactured: boolean;
   /** SKUs เรียง color_name แล้วตาม size sort_order */
   skus: ModelMatrixSkuRow[];
 };

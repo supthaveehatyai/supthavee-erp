@@ -273,11 +273,20 @@ export type DocumentDetailItem = {
   model_code: string | null;
   /** product_models.is_manufactured — สินค้าผลิตเอง (MTO) */
   is_manufactured: boolean;
+  /** product_models.is_service — งานบริการ (สกรีน/ปัก) */
+  is_service: boolean;
+  /**
+   * รูป Mockup รายบรรทัด (document_items.mockup_image_url)
+   * bucket: production_attachments
+   */
+  mockup_image_url: string | null;
   /**
    * สถานะผลิตของรายการ (derive จาก production_jobs.ref_document_id
    * หรือ document_items.production_status ถ้ามี)
    */
   production_status: "NONE" | "IN_PRODUCTION" | "COMPLETED";
+  /** document_items.is_sent_to_production — หรือ derive จาก production_status */
+  is_sent_to_production: boolean;
   production_job_no: string | null;
 };
 

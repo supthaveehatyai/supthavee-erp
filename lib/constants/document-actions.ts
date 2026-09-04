@@ -9,6 +9,7 @@ export const DOCUMENT_ACTIONS = {
   VOID: "ยกเลิกเอกสาร (Void)",
   DELETE_DRAFT: "ลบเอกสารร่าง (Delete Draft)",
   SAVE_DRAFT: "บันทึกร่าง (Save Draft)",
+  SEND_TO_PRODUCTION: "ส่งงานผลิต (Send to Production)",
 } as const;
 
 export type DocumentActionKey = keyof typeof DOCUMENT_ACTIONS;

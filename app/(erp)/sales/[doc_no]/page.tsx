@@ -43,6 +43,7 @@ import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import ConvertDocumentDropdown from "./convert-document-dropdown";
 import { SendToProductionButton } from "@/components/production/send-to-production-button";
+import { SoLineItemProductionActions } from "@/components/sales/so-line-item-production-actions";
 import type { ManufacturedSendGroup } from "@/types/production";
 import type { DocumentDetailItem } from "@/types/document";
 
@@ -70,6 +71,7 @@ function formatDate(value: string | null | undefined): string {
 
 function buildManufacturedSendGroups(
   items: DocumentDetailItem[],
+  headerMockupUrl?: string | null,
 ): ManufacturedSendGroup[] {
   const byModel = new Map<
     string,
@@ -92,7 +94,9 @@ function buildManufacturedSendGroups(
     const existing = byModel.get(modelId);
     if (existing) {
       existing.items.push({ product_id: productId, quantity: item.qty });
-      if (!existing.mockup_image_url && item.image_url) {
+      if (!existing.mockup_image_url && headerMockupUrl) {
+        existing.mockup_image_url = headerMockupUrl.trim();
+      } else if (!existing.mockup_image_url && item.image_url) {
         existing.mockup_image_url = item.image_url;
       }
       if (item.production_job_no) {
@@ -109,7 +113,8 @@ function buildManufacturedSendGroups(
         item.description?.trim() ||
         item.model_code?.trim() ||
         "สินค้าผลิตเอง",
-      mockup_image_url: item.image_url?.trim() || null,
+      mockup_image_url:
+        headerMockupUrl?.trim() || item.image_url?.trim() || null,
       items: [{ product_id: productId, quantity: item.qty }],
       already_sent: item.production_status !== "NONE",
       production_job_no: item.production_job_no,
@@ -309,7 +314,10 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   const canVoid =
     doc.status === "ISSUED" && Number(doc.paid_amount ?? 0) === 0;
   /** MTO — SO ISSUED ที่มีสินค้า is_manufactured หรือเอกสารบริการเดิม (สกรีน/ปัก) */
-  const manufacturedGroups = buildManufacturedSendGroups(doc.items);
+  const manufacturedGroups = buildManufacturedSendGroups(
+    doc.items,
+    doc.attachment_url || doc.attached_file_url,
+  );
   const hasManufacturedPending = manufacturedGroups.some(
     (group) => !group.already_sent,
   );
@@ -818,6 +826,19 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                                   item.production_job_no,
                                 )
                               : null}
+                            {doc.doc_type === "SO" &&
+                            (item.is_service || item.is_manufactured) ? (
+                              <SoLineItemProductionActions
+                                documentItemId={item.id}
+                                docNo={doc.doc_no}
+                                canSend={doc.status === "ISSUED"}
+                                isService={item.is_service}
+                                isManufactured={item.is_manufactured}
+                                isSentToProduction={item.is_sent_to_production}
+                                mockupImageUrl={item.mockup_image_url}
+                                productionJobNo={item.production_job_no}
+                              />
+                            ) : null}
                           </TableCell>
                           <TableCell className="px-4 text-right text-sm tabular-nums text-slate-700">
                             {item.qty}

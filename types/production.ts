@@ -186,3 +186,28 @@ export function emptyProductionBoard(): ProductionJobsByStatus {
     COMPLETED: [],
   };
 }
+
+/** Smart Routing — ส่งรายการ document_items เข้าผลิต (Service vs MTO) */
+export type SendToProductionFlow = "SERVICE" | "MANUFACTURED";
+
+export type SendToProductionResult = {
+  success: boolean;
+  error?: string;
+  data?: {
+    flow: SendToProductionFlow;
+    document_item_id: string;
+    document_id: string;
+    job_id: string | null;
+    job_no: string | null;
+    materials_count: number;
+  };
+};
+
+export type UploadDocumentItemMockupResult = {
+  success: boolean;
+  error?: string;
+  data?: {
+    document_item_id: string;
+    mockup_image_url: string;
+  };
+};

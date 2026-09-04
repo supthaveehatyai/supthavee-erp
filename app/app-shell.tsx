@@ -44,6 +44,7 @@ const navigationGroups: NavigationGroup[] = [
     items: [
       { label: "เอกสารขาย", href: "/sales" },
       { label: "เปิดบิลขาย", href: "/sales/create" },
+      { label: "ใบสั่งขาย (SO)", href: "/sales/orders" },
       { label: "เอกสารซื้อ", href: "/purchases" },
       { label: "วิเคราะห์กำไร", href: "/profit-analysis" },
     ],

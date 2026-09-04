@@ -44,7 +44,7 @@
 - **Inventory Adjustments:** `STK_OB` และ `STK_ADJ` บันทึกผ่าน `inventory_ledger`
 - **Period Closing:** ฟังก์ชัน `is_period_closed(doc_date)`
 - `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — มีฟิลด์ `created_by` เก็บ Auth Session UUID)
-- `document_items` (รายการสินค้าในเอกสาร)
+- `document_items` (รายการสินค้าในเอกสาร — มี `technician_id`, `wage_cost`, `technician_bill_id`; Phase 17: `mockup_image_url`, `production_status`, `is_sent_to_production`)
 - `document_allocations` (การจัดสรรเอกสาร เช่น ตัดมัดจำ)
 - `billing_note_items` (รายการใบวางบิล)
 - `expenses` (บิลค่าใช้จ่าย / OPEX — `approval_status`, `is_installment`, `total_interest_amount`, **`status` IN ('DRAFT', 'PENDING', 'ISSUED', 'VOID', 'PAID')**)
