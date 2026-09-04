@@ -33,6 +33,10 @@
 - `technician_rates` (เรตค่าแรงช่าง)
 - `product_models` (รุ่นสินค้า — เพิ่มคอลัมน์ `base_uom_id` FK โยงไป `mst_uom`, และเพิ่ม boolean `is_raw_material`, `is_service`, `is_manufactured`)
 - `mst_uom` (หน่วยนับสินค้า — เช่น PCS, KGS, MTR)
+- `product_boms` (สูตรการผลิต — `finished_model_id`, `raw_material_model_id`, `quantity_required`, `waste_percent`)
+- `production_jobs` (ใบสั่งผลิต / งาน MTO — `job_no`, `ref_document_id` โยงไปเอกสาร SO, `finished_model_id`, `target_quantity`, `status`, `estimated_completion_date`, `mockup_image_url`, `remark`)
+- `production_job_items` (รายละเอียดไซส์สินค้าที่ต้องผลิต — `job_id`, `product_id` โยงไป SKU, `quantity`)
+- `production_job_materials` (การจัดสรรวัตถุดิบ WIP — `job_id`, `raw_material_model_id`, `uom_id`, `planned_qty`, `actual_used_qty`, `cost_price_snapshot`)
 
 ## 4. Documents & Financials (เอกสารและการเงิน)
 - **Document Conversion Lineage:** `QT` -> `SO` -> `INV_DO / TAX_INV / CS_TAX / ABB` -> `REC` (ห้ามข้าม SO เด็ดขาด)
