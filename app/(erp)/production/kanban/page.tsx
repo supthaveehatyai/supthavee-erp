@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { KanbanSquare } from "lucide-react";
 import { getProductionJobs } from "@/lib/actions/production-actions";
+import { CreateMtoJobDialog } from "@/components/production/create-mto-job-dialog";
 import { KanbanBoard } from "@/components/production/kanban-board";
 
 export const dynamic = "force-dynamic";
@@ -41,15 +42,18 @@ export default async function ProductionKanbanPage() {
 
 function PageHeader() {
   return (
-    <div className="space-y-1">
-      <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-slate-900">
-        <KanbanSquare className="size-7 text-blue-600" aria-hidden />
-        Production Kanban
-      </h1>
-      <p className="text-sm text-slate-500">
-        Make-to-Order — ลากการ์ดเพื่ออัปเดตสถานะ (PLANNED → IN_PROGRESS → QA →
-        COMPLETED)
-      </p>
+    <div className="flex items-start justify-between gap-4">
+      <div className="space-y-1">
+        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-slate-900">
+          <KanbanSquare className="size-7 text-blue-600" aria-hidden />
+          Production Kanban
+        </h1>
+        <p className="text-sm text-slate-500">
+          Make-to-Order — ลากการ์ดเพื่ออัปเดตสถานะ (PLANNED → IN_PROGRESS → QA →
+          COMPLETED)
+        </p>
+      </div>
+      <CreateMtoJobDialog />
     </div>
   );
 }

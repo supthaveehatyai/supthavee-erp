@@ -30,6 +30,8 @@
 - `vendor_product_mapping` (การผูกรหัสสินค้าซัพพลายเออร์)
 - `inventory_ledger` (สมุดบัญชีคลังสินค้า - ควบคุมการเข้าออกสต็อก)
 - `production_jobs` (ใบสั่งผลิต / งาน MTO — มี `finished_model_id`, `target_quantity`, `estimated_completion_date`, สถานะ Kanban: PLANNED / IN_PROGRESS / QA / COMPLETED; Phase 14 Tiered Storage: `storage_tier`)
+- `production_job_materials` (BOM Snapshot ต่อใบสั่งผลิต — `production_job_id`, `raw_material_model_id`, `uom_id`, `planned_qty`, `cost_price_snapshot`)
+- `product_boms` (สูตรการผลิต — `finished_model_id`, `raw_material_model_id`, `uom_id`, `quantity_required`, `waste_percent`)
 - `service_tracking` (ติดตามสถานะงานบริการ)
 - `technician_rates` (เรตค่าแรงช่าง — FK `service_model_id` → `product_models.id`, `technician_id` → `contacts.id`)
 
