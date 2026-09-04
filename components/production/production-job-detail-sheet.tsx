@@ -54,6 +54,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
+import { JobOperationsSection } from "@/components/production/job-operations-section";
 
 export type ProductionJobDetailSheetProps = {
   jobId: string | null;
@@ -539,6 +540,13 @@ export function ProductionJobDetailSheet({
                   </div>
                 </section>
               ) : null}
+
+              {/* In-house Routing — production_job_operations (แยกจาก Service Assignment) */}
+              <JobOperationsSection
+                jobId={detail.id}
+                technicians={technicians}
+                disabled={!canEditAssignment}
+              />
 
               {/* Phase 13 Service Assignment → document_items (TB) */}
               {serviceLines.length > 0 ? (

@@ -32,6 +32,7 @@
 - `production_jobs` (ใบสั่งผลิต / งาน MTO — มี `finished_model_id`, `target_quantity`, `estimated_completion_date`, `ref_document_id` → SO, `mockup_image_url`, `remark`; สถานะ Kanban: PLANNED / IN_PROGRESS / QA / COMPLETED; Phase 14 Tiered Storage: `storage_tier`)
 - `production_job_items` (รายการ SKU/ไซส์ ต่อใบสั่งผลิต — `job_id`, `product_id`, `quantity`)
 - `production_job_materials` (BOM Snapshot ต่อใบสั่งผลิต — `job_id`, `raw_material_model_id`, `uom_id`, `planned_qty`, `cost_price_snapshot`)
+- `production_job_operations` (ขั้นตอนการผลิตและค่าแรง In-house Routing — `job_id` → production_jobs, `operation_name` เช่น เย็บ/รีด/แพ็ค, `technician_id` → contacts, `wage_cost` NUMERIC, `technician_bill_id` โยง TB, `status` PENDING|COMPLETED — แยกจาก Service Assignment บน document_items)
 - `product_boms` (สูตรการผลิต — `finished_model_id`, `raw_material_model_id`, `uom_id`, `quantity_required`, `waste_percent`)
 - `service_tracking` (ติดตามสถานะงานบริการ)
 - `technician_rates` (เรตค่าแรงช่าง — FK `service_model_id` → `product_models.id`, `technician_id` → `contacts.id`)

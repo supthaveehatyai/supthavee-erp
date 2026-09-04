@@ -32,6 +32,7 @@ export function SendToProductionButton({
   documentNo,
   disabled = false,
   manufacturedGroups = [],
+  remark = null,
 }: SendToProductionButtonProps) {
   const [legacyOpen, setLegacyOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
@@ -93,6 +94,7 @@ export function SendToProductionButton({
           documentNo={documentNo}
           pendingGroups={pendingGroups}
           sentCount={sentGroups.length}
+          defaultRemark={remark}
         />
       ) : (
         <CreateJobModal

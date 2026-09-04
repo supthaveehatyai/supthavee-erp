@@ -29,6 +29,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 export type BatchProductionModalProps = {
@@ -38,6 +41,8 @@ export type BatchProductionModalProps = {
   documentNo: string;
   pendingGroups: ManufacturedSendGroup[];
   sentCount?: number;
+  /** ค่าเริ่มต้นจาก SO notes (documents.notes) */
+  defaultRemark?: string | null;
 };
 
 type ModelDraft = {
@@ -63,10 +68,13 @@ export function BatchProductionModal({
   documentNo,
   pendingGroups,
   sentCount = 0,
+  defaultRemark = null,
 }: BatchProductionModalProps) {
   const router = useRouter();
   const [isSubmitting, startSubmit] = useTransition();
   const [drafts, setDrafts] = useState<Record<string, ModelDraft>>({});
+  const [estimatedCompletionDate, setEstimatedCompletionDate] = useState("");
+  const [remark, setRemark] = useState("");
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const busy =
@@ -85,7 +93,9 @@ export function BatchProductionModal({
       };
     }
     setDrafts(next);
-  }, [open, pendingGroups]);
+    setEstimatedCompletionDate("");
+    setRemark(String(defaultRemark ?? "").trim());
+  }, [open, pendingGroups, defaultRemark]);
 
   const totalSku = useMemo(
     () =>
@@ -172,6 +182,12 @@ export function BatchProductionModal({
   function handleConfirm() {
     if (pendingGroups.length === 0 || busy) return;
 
+    const dueDate = estimatedCompletionDate.trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+      toast.error("กรุณาระบุวันที่กำหนดเสร็จ");
+      return;
+    }
+
     startSubmit(async () => {
       const modelMockups: Record<string, string> = {};
       for (const group of pendingGroups) {
@@ -184,7 +200,12 @@ export function BatchProductionModal({
         }
       }
 
-      const result = await batchSendToProduction(documentId, modelMockups);
+      const result = await batchSendToProduction(
+        documentId,
+        modelMockups,
+        dueDate,
+        remark.trim() || null,
+      );
       if (!result.success || !result.data) {
         toast.error(result.error ?? "ส่งงานผลิตไม่สำเร็จ");
         return;
@@ -233,6 +254,36 @@ export function BatchProductionModal({
         </DialogHeader>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
+          <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="batch-mto-due">วันที่กำหนดเสร็จ</Label>
+              <Input
+                id="batch-mto-due"
+                type="date"
+                value={estimatedCompletionDate}
+                onChange={(event) =>
+                  setEstimatedCompletionDate(event.target.value)
+                }
+                disabled={busy}
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="batch-mto-remark">
+                รายละเอียดคำสั่งทำ / Remark
+              </Label>
+              <Textarea
+                id="batch-mto-remark"
+                value={remark}
+                onChange={(event) => setRemark(event.target.value)}
+                disabled={busy}
+                rows={3}
+                placeholder="เช่น สกรีนหน้าอกโลโก้ลูกค้า / ปักแขนซ้าย / สีตาม Mockup"
+                className="resize-none"
+              />
+            </div>
+          </div>
+
           {pendingGroups.length === 0 ? (
             <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-400">
               ไม่มีรุ่นที่รอส่งผลิต

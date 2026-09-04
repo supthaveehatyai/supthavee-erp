@@ -49,6 +49,12 @@ const JOB_STATUS_LABEL: Record<string, string> = {
   COMPLETED: "เสร็จสิ้น",
   READY_TO_SHIP: "พร้อมส่งมอบ",
   DELIVERED: "ส่งมอบแล้ว",
+  PENDING: "รอดำเนินการ",
+};
+
+const SOURCE_TYPE_LABEL: Record<string, string> = {
+  SERVICE: "งานบริการ",
+  ROUTING: "Routing",
 };
 
 export type TechnicianBillingPanelProps = {
@@ -223,7 +229,10 @@ export function TechnicianBillingPanel({
     startCreate(async () => {
       const result = await createTechnicianBill({
         technicianId: urlTechnicianId,
-        itemIds: rows.map((row) => row.id),
+        items: rows.map((row) => ({
+          id: row.id,
+          source_type: row.source_type,
+        })),
         whtType: whtType.trim() || null,
         whtRate: selectedWhtRate,
       });
@@ -252,8 +261,9 @@ export function TechnicianBillingPanel({
             <div>
               <CardTitle>งานค้างสรุปวางบิลช่าง</CardTitle>
               <CardDescription>
-                ดึงบรรทัดงานบริการจาก document_items ที่มอบหมายช่างแล้ว ·
-                ใบสั่งผลิตสถานะ COMPLETED · มีค่าแรง · ยังไม่ถูกผูกเอกสาร TB
+                รวมค่าแรงค้างจ่าย 2 แหล่ง (Accrual): งานบริการลูกค้า
+                (document_items) + In-house Routing
+                (production_job_operations · สถานะ COMPLETED) · ยังไม่ผูกเอกสาร TB
               </CardDescription>
             </div>
             <Button
@@ -382,14 +392,15 @@ export function TechnicianBillingPanel({
               <Table>
                 <TableHeader>
                   <TableRow className="bg-slate-50">
+                    <TableHead className="whitespace-nowrap">แหล่ง</TableHead>
                     <TableHead className="whitespace-nowrap">เลขที่ Job</TableHead>
                     <TableHead className="whitespace-nowrap">เลขที่บิลอ้างอิง</TableHead>
-                    <TableHead>SKU / งานบริการ</TableHead>
+                    <TableHead>SKU / รายละเอียด</TableHead>
                     <TableHead className="hidden whitespace-nowrap md:table-cell">
                       ช่างรับเหมา
                     </TableHead>
                     <TableHead className="hidden whitespace-nowrap text-right lg:table-cell">
-                      จำนวนจุด
+                      จำนวน
                     </TableHead>
                     <TableHead className="hidden whitespace-nowrap lg:table-cell">
                       วันที่ส่งงาน
@@ -401,7 +412,19 @@ export function TechnicianBillingPanel({
                 </TableHeader>
                 <TableBody>
                   {rows.map((row) => (
-                    <TableRow key={row.id}>
+                    <TableRow key={`${row.source_type}:${row.id}`}>
+                      <TableCell className="whitespace-nowrap">
+                        <span
+                          className={
+                            row.source_type === "ROUTING"
+                              ? "rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 ring-1 ring-blue-200"
+                              : "rounded-md bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 ring-1 ring-violet-200"
+                          }
+                        >
+                          {SOURCE_TYPE_LABEL[row.source_type] ??
+                            row.source_type}
+                        </span>
+                      </TableCell>
                       <TableCell className="whitespace-nowrap font-mono text-sm">
                         <button
                           type="button"
@@ -441,7 +464,7 @@ export function TechnicianBillingPanel({
                   ))}
                   <TableRow className="bg-slate-50">
                     <TableCell
-                      colSpan={6}
+                      colSpan={7}
                       className="text-right text-sm font-semibold text-slate-700"
                     >
                       ยอดรวมค่าแรงทั้งหมด ({rows.length} รายการ)
@@ -465,8 +488,8 @@ export function TechnicianBillingPanel({
           <AlertDialogHeader>
             <AlertDialogTitle>ยืนยันสร้างใบสรุปค่าแรง</AlertDialogTitle>
             <AlertDialogDescription>
-              จะรวบยอด {rows.length} บรรทัดงานบริการ ตามตัวกรองปัจจุบัน เป็นเอกสาร TB
-              (สรุปวางบิลช่าง)
+              จะรวบยอด {rows.length} บรรทัด (SERVICE + ROUTING) ตามตัวกรองปัจจุบัน
+              เป็นเอกสาร TB (สรุปวางบิลช่าง)
               <span className="mt-2 block space-y-1 text-slate-600">
                 <span className="block">
                   ยอดรวมค่าแรง ฿{formatMoney(totalWage)}

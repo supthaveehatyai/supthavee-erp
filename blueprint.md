@@ -137,11 +137,15 @@ Data Archiving (Tiered Storage): สคริปต์สำรองข้อ�
 
 Module L: Production \& Order-to-Cash (ส่วนขยาย Phase 16-17)
 
+
+
 \- Production Kanban \& MTO: ระบบติดตามงานผลิตแบบลากวาง (Zero Client-Side Fetching) แบ่งเป็น 4 สถานะ (PLANNED, IN\_PROGRESS, QA, COMPLETED)
 
-\- BOM Snapshot \& Estimated Cost: ระบบถอดสูตรการผลิต (BOM) อัตโนมัติเพื่อคำนวณวัตถุดิบที่ต้องใช้ (WIP) และดึงราคาต้นทุนล่าสุด (LPP) มาประเมินต้นทุน 
+\- BOM Snapshot \& Estimated Cost: ระบบถอดสูตรการผลิต (BOM) อัตโนมัติเพื่อคำนวณวัตถุดิบที่ต้องใช้ (WIP) และดึงราคาต้นทุนล่าสุด (LPP) มาประเมินต้นทุน
 
 \- Sales Order Driven Production: ยึดเอกสารใบสั่งขาย (SO) เป็นจุดศูนย์กลางในการเปิดงานผลิต เพื่อควบคุม Job Costing (Matching Principle) ลดความผิดพลาดในการกรอกข้อมูล
+
+\- In-house Routing \& Direct Labor: สร้างสถาปัตยกรรมแยกส่วนค่าแรงผลิตภายใน (เช่น งานเย็บ, งานรีด, งานแพ็ค) ผ่านตาราง production\_job\_operations โดยรองรับการจ่ายงานให้ช่างหลายแผนกใน 1 ใบสั่งผลิต (MTO) และทำงานประสานกับ Unified Billing Hub (TB) ทันทีที่ช่างส่งมอบงานในแต่ละขั้นตอนสำเร็จ ตามมาตรฐานการคำนวณต้นทุนสินค้าที่ผลิตสำเร็จ (COGM)
 
 
 

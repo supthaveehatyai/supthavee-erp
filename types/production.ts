@@ -119,6 +119,14 @@ export type ManufacturedSendGroup = {
   production_job_no: string | null;
 };
 
+/** Batch MTO — พารามิเตอร์ส่งงาน (นอกเหนือจาก mockup ต่อรุ่น) */
+export type BatchSendToProductionOptions = {
+  /** YYYY-MM-DD → production_jobs.estimated_completion_date */
+  estimated_completion_date: string;
+  /** → production_jobs.remark */
+  remark?: string | null;
+};
+
 /** Batch MTO — ผลลัพธ์ต่อรุ่น */
 export type BatchSendToProductionJobResult = {
   finished_model_id: string;
@@ -283,4 +291,57 @@ export type UploadDocumentItemMockupResult = {
     document_item_id: string;
     mockup_image_url: string;
   };
+};
+
+/** In-house Routing — สถานะขั้นตอนผลิต (production_job_operations.status) */
+export const PRODUCTION_OPERATION_STATUSES = ["PENDING", "COMPLETED"] as const;
+export type ProductionOperationStatus =
+  (typeof PRODUCTION_OPERATION_STATUSES)[number];
+
+export const PRODUCTION_OPERATION_STATUS_LABEL: Record<
+  ProductionOperationStatus,
+  string
+> = {
+  PENDING: "รอดำเนินการ",
+  COMPLETED: "เสร็จสิ้น",
+};
+
+export function isProductionOperationStatus(
+  value: string,
+): value is ProductionOperationStatus {
+  return (PRODUCTION_OPERATION_STATUSES as readonly string[]).includes(value);
+}
+
+/** ขั้นตอนผลิต + ค่าแรง (production_job_operations) — ไม่ใช่ document_items */
+export type ProductionJobOperation = {
+  id: string;
+  job_id: string;
+  operation_name: string;
+  technician_id: string | null;
+  technician_name: string | null;
+  wage_cost: number;
+  technician_bill_id: string | null;
+  status: ProductionOperationStatus | string;
+};
+
+export type UpsertJobOperationPayload = {
+  id?: string | null;
+  job_id: string;
+  operation_name: string;
+  technician_id?: string | null;
+  wage_cost: number | string;
+  status?: ProductionOperationStatus | string;
+};
+
+export type GetJobOperationsResult =
+  | { success: true; error: null; data: ProductionJobOperation[] }
+  | { success: false; error: string; data: ProductionJobOperation[] };
+
+export type UpsertJobOperationResult =
+  | { success: true; error: null; data: ProductionJobOperation }
+  | { success: false; error: string; data: null };
+
+export type DeleteJobOperationResult = {
+  success: boolean;
+  error: string | null;
 };

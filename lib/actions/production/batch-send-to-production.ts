@@ -364,10 +364,14 @@ async function markDocumentItemsSent(
  *
  * @param documentId — documents.id (SO ISSUED)
  * @param modelMockups — map finished_model_id → mockup public URL
+ * @param estimatedCompletionDate — YYYY-MM-DD → production_jobs.estimated_completion_date
+ * @param remark — รายละเอียดคำสั่งทำ → production_jobs.remark
  */
 export async function batchSendToProduction(
   documentId: string,
   modelMockups: Record<string, string> = {},
+  estimatedCompletionDate?: string | null,
+  remark?: string | null,
 ): Promise<BatchSendToProductionResult> {
   const docId = String(documentId ?? "").trim();
   const emptyJobs: BatchSendToProductionJobResult[] = [];
@@ -379,6 +383,19 @@ export async function batchSendToProduction(
       data: null,
     };
   }
+
+  const estimatedRaw = String(estimatedCompletionDate ?? "")
+    .trim()
+    .slice(0, 10);
+  if (!estimatedRaw || !/^\d{4}-\d{2}-\d{2}$/.test(estimatedRaw)) {
+    return {
+      success: false,
+      error: "กรุณาระบุวันที่กำหนดเสร็จ (estimated_completion_date) เป็น YYYY-MM-DD",
+      data: null,
+    };
+  }
+
+  const jobRemark = String(remark ?? "").trim() || null;
 
   try {
     const supabase = getSupabaseAdmin();
@@ -405,14 +422,6 @@ export async function batchSendToProduction(
     const skipped: string[] = [];
     const errors: string[] = [];
 
-    // Resolve SO remark once
-    const { data: soHeader } = await supabase
-      .from("documents")
-      .select("notes")
-      .eq("id", docId)
-      .maybeSingle();
-    const remark = String(soHeader?.notes ?? "").trim() || null;
-
     for (const group of loaded.groups) {
       const mockupUrl =
         String(mockupMap[group.finished_model_id] ?? "").trim() || null;
@@ -421,7 +430,8 @@ export async function batchSendToProduction(
         so_id: docId,
         finished_model_id: group.finished_model_id,
         mockup_image_url: mockupUrl,
-        remark,
+        remark: jobRemark,
+        estimated_completion_date: estimatedRaw,
         items: group.items,
       });
 
