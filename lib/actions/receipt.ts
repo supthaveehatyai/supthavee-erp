@@ -41,12 +41,90 @@ import {
   calculateLandedCost,
   calculateMovingAverageUnitCost,
 } from "@/lib/utils/landed-cost";
+import { applyPurchaseUomConversion } from "@/lib/utils/uom-conversion";
 import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
 import type { DocumentType } from "@/types/document";
 import { requireSessionUserId } from "@/lib/auth/current-user";
 
 function isGoodsReceiptDocType(value: string): value is GoodsReceiptDocType {
   return (GOODS_RECEIPT_DOC_TYPES as readonly string[]).includes(value);
+}
+
+/**
+ * Map product_id → product_models.uom_conversion_factor (default 1).
+ * Used when posting inventory_ledger IN from purchase qty (purchasing UoM).
+ */
+async function loadUomConversionFactorByProductId(
+  supabaseAdmin: SupabaseClient,
+  productIds: string[],
+): Promise<{ factors: Map<string, number>; error: string | null }> {
+  const uniqueIds = [...new Set(productIds.map((id) => id.trim()).filter(Boolean))];
+  const factors = new Map<string, number>();
+  for (const id of uniqueIds) factors.set(id, 1);
+  if (uniqueIds.length === 0) return { factors, error: null };
+
+  const { data: products, error: productsError } = await supabaseAdmin
+    .from("products")
+    .select("id, model_id")
+    .in("id", uniqueIds);
+
+  if (productsError) {
+    return {
+      factors,
+      error: productsError.message ?? "ดึงข้อมูลสินค้าสำหรับแปลงหน่วยไม่สำเร็จ",
+    };
+  }
+
+  const modelIds = [
+    ...new Set(
+      (products ?? [])
+        .map((row) => String(row.model_id ?? "").trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (modelIds.length === 0) return { factors, error: null };
+
+  const { data: models, error: modelsError } = await supabaseAdmin
+    .from("product_models")
+    .select("id, uom_conversion_factor")
+    .in("id", modelIds);
+
+  if (modelsError) {
+    // Column may be absent on older environments — fail soft (factor = 1)
+    if (
+      /uom_conversion_factor/i.test(modelsError.message ?? "") ||
+      modelsError.code === "42703"
+    ) {
+      console.warn(
+        "[loadUomConversionFactorByProductId] uom_conversion_factor missing — skip conversion",
+      );
+      return { factors, error: null };
+    }
+    return {
+      factors,
+      error: modelsError.message ?? "ดึงอัตราแปลงหน่วยจากรุ่นสินค้าไม่สำเร็จ",
+    };
+  }
+
+  const factorByModelId = new Map<string, number>();
+  for (const row of models ?? []) {
+    const modelId = String(row.id ?? "").trim();
+    if (!modelId) continue;
+    const raw = Number(row.uom_conversion_factor ?? 1);
+    factorByModelId.set(
+      modelId,
+      Number.isFinite(raw) && raw > 1 ? raw : 1,
+    );
+  }
+
+  for (const product of products ?? []) {
+    const productId = String(product.id ?? "").trim();
+    const modelId = String(product.model_id ?? "").trim();
+    if (!productId) continue;
+    factors.set(productId, factorByModelId.get(modelId) ?? 1);
+  }
+
+  return { factors, error: null };
 }
 
 /**
@@ -1220,18 +1298,38 @@ export async function saveGoodsReceiptToLedger(
     }
 
     // 3. inventory_ledger — the ONLY table allowed to move stock ("IN")
+    //    Purchase qty may be in purchasing UoM → convert to base UoM via
+    //    product_models.uom_conversion_factor before insert.
+    const ledgerProductIds = [
+      ...new Set(lines.map((line) => line.row.matchedProduct!.id)),
+    ];
+    const { factors: uomFactorByProductId, error: uomFactorError } =
+      await loadUomConversionFactorByProductId(supabaseAdmin, ledgerProductIds);
+    if (uomFactorError) {
+      await supabaseAdmin.from("documents").delete().eq("id", phase4DocumentId);
+      await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", docHeaderId);
+      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+      return { docHeaderId: null, docNo: null, error: uomFactorError };
+    }
+
     const ledgerPayload = lines.map((line) => {
       const proratedFreight =
         proratedFreightByLineKey.get(line.row.lineKey) ?? 0;
       const landedUnitCost =
         landedUnitCostByLineKey.get(line.row.lineKey) ?? 0;
+      const productId = line.row.matchedProduct!.id;
+      const converted = applyPurchaseUomConversion({
+        purchaseQty: line.qty,
+        purchaseUnitCost: landedUnitCost,
+        conversionFactor: uomFactorByProductId.get(productId) ?? 1,
+      });
       return {
-        product_id: line.row.matchedProduct!.id,
+        product_id: productId,
         doc_header_id: docHeaderId,
         trans_type: "IN",
-        qty: line.qty,
-        unit_cost: landedUnitCost,
-        notes: `รับสินค้าจากเอกสาร ${docNo} (${phase4DocNo}) — Vendor SKU: ${line.row.raw_vendor_sku} | unit_cost=${landedUnitCost.toFixed(4)} | prorated_freight=${proratedFreight.toFixed(2)}`,
+        qty: converted.ledgerQty,
+        unit_cost: converted.unitCostBase,
+        notes: `รับสินค้าจากเอกสาร ${docNo} (${phase4DocNo}) — Vendor SKU: ${line.row.raw_vendor_sku} | unit_cost_base=${converted.unitCostBase.toFixed(4)} | purchase_qty=${line.qty} | ledger_qty=${converted.ledgerQty} | uom_factor=${converted.factor} | prorated_freight=${proratedFreight.toFixed(2)}`,
       };
     });
 
@@ -1318,7 +1416,12 @@ export async function saveGoodsReceiptToLedger(
         const productId = line.row.matchedProduct!.id;
         const landedUnitCost =
           landedUnitCostByLineKey.get(line.row.lineKey) ?? line.unitCostPrice;
-        const resolved = resolveLppFromUnitCostPrice(landedUnitCost);
+        const converted = applyPurchaseUomConversion({
+          purchaseQty: line.qty,
+          purchaseUnitCost: landedUnitCost,
+          conversionFactor: uomFactorByProductId.get(productId) ?? 1,
+        });
+        const resolved = resolveLppFromUnitCostPrice(converted.unitCostBase);
         if (resolved == null) continue;
 
         const onHand = virtualQty.get(productId) ?? 0;
@@ -1326,10 +1429,10 @@ export async function saveGoodsReceiptToLedger(
         const blended = calculateMovingAverageUnitCost(
           onHand,
           currentAvg,
-          line.qty,
+          converted.ledgerQty,
           resolved,
         );
-        virtualQty.set(productId, onHand + line.qty);
+        virtualQty.set(productId, onHand + converted.ledgerQty);
         virtualCost.set(productId, blended);
         maCostByProductId.set(productId, blended);
       }
@@ -1788,15 +1891,32 @@ export async function saveManualGoodsReceipt(
       };
     }
 
+    const ledgerProductIds = [
+      ...new Set(receiptLines.map((line) => line.product_id)),
+    ];
+    const { factors: uomFactorByProductId, error: uomFactorError } =
+      await loadUomConversionFactorByProductId(supabaseAdmin, ledgerProductIds);
+    if (uomFactorError) {
+      await supabaseAdmin.from("documents").delete().eq("id", documentId);
+      await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", docHeaderId);
+      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+      return { data: null, error: uomFactorError };
+    }
+
     const ledgerPayload = receiptLines.map((line) => {
       const proratedFreight = proratedFreightByLineKey.get(line.lineKey) ?? 0;
+      const converted = applyPurchaseUomConversion({
+        purchaseQty: line.qty,
+        purchaseUnitCost: line.unit_cost,
+        conversionFactor: uomFactorByProductId.get(line.product_id) ?? 1,
+      });
       return {
         product_id: line.product_id,
         doc_header_id: docHeaderId,
         trans_type: "IN",
-        qty: line.qty,
-        unit_cost: line.unit_cost,
-        notes: `รับสินค้า Manual จากเอกสาร ${phase4DocNo} (อ้างอิง ${documentRef}) | document_id=${documentId} | unit_cost=${line.unit_cost.toFixed(4)} | prorated_freight=${proratedFreight.toFixed(2)} | SKU: ${line.sku || "-"}`,
+        qty: converted.ledgerQty,
+        unit_cost: converted.unitCostBase,
+        notes: `รับสินค้า Manual จากเอกสาร ${phase4DocNo} (อ้างอิง ${documentRef}) | document_id=${documentId} | unit_cost_base=${converted.unitCostBase.toFixed(4)} | purchase_qty=${line.qty} | ledger_qty=${converted.ledgerQty} | uom_factor=${converted.factor} | prorated_freight=${proratedFreight.toFixed(2)} | SKU: ${line.sku || "-"}`,
       };
     });
 
@@ -1858,17 +1978,22 @@ export async function saveManualGoodsReceipt(
 
     const maCostByProductId = new Map<string, number>();
     for (const line of receiptLines) {
-      const resolved = resolveLppFromUnitCostPrice(line.unit_cost);
+      const converted = applyPurchaseUomConversion({
+        purchaseQty: line.qty,
+        purchaseUnitCost: line.unit_cost,
+        conversionFactor: uomFactorByProductId.get(line.product_id) ?? 1,
+      });
+      const resolved = resolveLppFromUnitCostPrice(converted.unitCostBase);
       if (resolved == null) continue;
       const onHand = virtualQty.get(line.product_id) ?? 0;
       const currentAvg = virtualCost.get(line.product_id) ?? 0;
       const blended = calculateMovingAverageUnitCost(
         onHand,
         currentAvg,
-        line.qty,
+        converted.ledgerQty,
         resolved,
       );
-      virtualQty.set(line.product_id, onHand + line.qty);
+      virtualQty.set(line.product_id, onHand + converted.ledgerQty);
       virtualCost.set(line.product_id, blended);
       maCostByProductId.set(line.product_id, blended);
     }

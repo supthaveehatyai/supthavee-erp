@@ -31,7 +31,7 @@
 - `production_jobs` (ใบสั่งผลิต / งาน MTO)
 - `service_tracking` (ติดตามสถานะงานบริการ)
 - `technician_rates` (เรตค่าแรงช่าง)
-- `product_models` (รุ่นสินค้า — เพิ่มคอลัมน์ `base_uom_id` FK โยงไป `mst_uom`, และเพิ่ม boolean `is_raw_material`, `is_service`, `is_manufactured`)
+- `product_models` (รุ่นสินค้า — เพิ่มคอลัมน์ `base_uom_id` FK โยงไป `mst_uom`, `purchasing_uom_id` หน่วยซื้อ bulk, `uom_conversion_factor` อัตราแปลงหน่วย, และเพิ่ม boolean `is_raw_material`, `is_service`, `is_manufactured`)
 - `mst_uom` (หน่วยนับสินค้า — เช่น PCS, KGS, MTR)
 - `product_boms` (สูตรการผลิต — `finished_model_id`, `raw_material_model_id`, `quantity_required`, `waste_percent`)
 - `production_jobs` (ใบสั่งผลิต / งาน MTO — `job_no`, `ref_document_id` โยงไปเอกสาร SO, `finished_model_id`, `target_quantity`, `status`, `estimated_completion_date`, `mockup_image_url`, `remark`)

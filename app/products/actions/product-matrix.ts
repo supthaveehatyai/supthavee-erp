@@ -63,6 +63,8 @@ function validateStep1(input: SaveDraftModelInput): string | null {
     isRawMaterial: input.isRawMaterial,
     isManufactured: input.isManufactured,
     baseUomId: input.baseUomId,
+    purchasingUomId: input.purchasingUomId,
+    uomConversionFactor: input.uomConversionFactor,
   });
   if (!identity.ok) return identity.error;
   if (!isValidModelCode(identity.data.model_code)) {
@@ -78,6 +80,12 @@ function buildDraftPayload(input: SaveDraftModelInput) {
   const isService = Boolean(input.isService);
   const isRawMaterial = Boolean(input.isRawMaterial);
   const isManufactured = Boolean(input.isManufactured);
+  const needsPurchaseUom = isRawMaterial || isManufactured;
+  const conversionRaw = Number(input.uomConversionFactor ?? 1);
+  const uomConversionFactor =
+    needsPurchaseUom && Number.isFinite(conversionRaw) && conversionRaw > 0
+      ? Math.round(conversionRaw * 10000) / 10000
+      : 1;
 
   return {
     vendor_id:
@@ -96,11 +104,15 @@ function buildDraftPayload(input: SaveDraftModelInput) {
     is_raw_material: isRawMaterial,
     is_manufactured: isManufactured,
     base_uom_id: toNullableUuid(input.baseUomId ?? ""),
+    purchasing_uom_id: needsPurchaseUom
+      ? toNullableUuid(input.purchasingUomId ?? "")
+      : null,
+    uom_conversion_factor: uomConversionFactor,
   };
 }
 
 const EXISTING_MODEL_SELECT =
-  "id, model_code, name, short_name, gender, tax_type, status, vendor_id, brand_id, category_id, size_pricing_config, image_url, is_service, is_raw_material, is_manufactured, base_uom_id";
+  "id, model_code, name, short_name, gender, tax_type, status, vendor_id, brand_id, category_id, size_pricing_config, image_url, is_service, is_raw_material, is_manufactured, base_uom_id, purchasing_uom_id, uom_conversion_factor";
 
 const PRODUCT_ASSETS_BUCKET = "product_assets";
 const MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -327,6 +339,11 @@ export async function listLoadableProductModels(): Promise<{
       is_raw_material: record.is_raw_material === true,
       is_manufactured: record.is_manufactured === true,
       base_uom_id: record.base_uom_id ?? null,
+      purchasing_uom_id: record.purchasing_uom_id ?? null,
+      uom_conversion_factor:
+        record.uom_conversion_factor == null
+          ? null
+          : Number(record.uom_conversion_factor),
       brand_code: brand?.brand_code ?? null,
       brand_name: brand?.brand_name ?? null,
       category_code: category?.category_code ?? null,
@@ -807,6 +824,18 @@ export async function updateProductModel(
       baseUomId:
         formDataText(formData, "base_uom_id") ||
         formDataText(formData, "baseUomId"),
+      purchasingUomId:
+        formDataText(formData, "purchasing_uom_id") ||
+        formDataText(formData, "purchasingUomId") ||
+        null,
+      uomConversionFactor: (() => {
+        const raw =
+          formDataText(formData, "uom_conversion_factor") ||
+          formDataText(formData, "uomConversionFactor");
+        if (!raw) return 1;
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : 1;
+      })(),
       sizePrices: sizePricesOrError,
     });
 
@@ -818,6 +847,8 @@ export async function updateProductModel(
     const baseName = input.name;
     const shortName = input.shortName?.trim() || baseName;
     const taxType = normalizeTaxType(input.taxType);
+    const needsPurchaseUom =
+      input.isRawMaterial === true || input.isManufactured === true;
     const supabaseAdmin = createSupabaseServerClient();
 
     const { data: modelRow, error: modelLookupError } = await supabaseAdmin
@@ -849,6 +880,12 @@ export async function updateProductModel(
         is_raw_material: input.isRawMaterial,
         is_manufactured: input.isManufactured,
         base_uom_id: toNullableUuid(input.baseUomId),
+        purchasing_uom_id: needsPurchaseUom
+          ? toNullableUuid(input.purchasingUomId ?? "")
+          : null,
+        uom_conversion_factor: needsPurchaseUom
+          ? input.uomConversionFactor
+          : 1,
       })
       .eq("id", input.modelId);
 

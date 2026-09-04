@@ -108,6 +108,22 @@ export const productModelSchema = z
     base_uom_id: z.uuid({
       error: "ต้องเลือกหน่วยนับ (base_uom_id) เป็น UUID ที่ถูกต้อง",
     }),
+    /** หน่วยซื้อ bulk — optional; ใช้เมื่อ is_raw_material / is_manufactured */
+    purchasing_uom_id: optionalUuid,
+    /** 1 purchasing UoM = N base UoM (ทศนิยมสูงสุด 4 ตำแหน่ง, default 1) */
+    uom_conversion_factor: z.preprocess(
+      (value) => {
+        if (value == null || value === "") return 1;
+        const n = Number(value);
+        return Number.isFinite(n) ? n : value;
+      },
+      z
+        .number({ error: "อัตราแปลงหน่วยต้องเป็นตัวเลข" })
+        .positive("อัตราแปลงหน่วยต้องมากกว่า 0")
+        .max(1_000_000, "อัตราแปลงหน่วยสูงเกินไป")
+        .transform((n) => Math.round(n * 10000) / 10000)
+        .default(1),
+    ),
   })
   .superRefine((data, ctx) => {
     if (data.is_service) return;
@@ -127,20 +143,39 @@ export const productModelSchema = z
     }
   })
   .transform((data) => {
+    const needsPurchaseUom =
+      data.is_raw_material === true || data.is_manufactured === true;
+    const purchasing_uom_id = needsPurchaseUom
+      ? (data.purchasing_uom_id ?? null)
+      : null;
+    const uom_conversion_factor = needsPurchaseUom
+      ? data.uom_conversion_factor
+      : 1;
+
     if (data.is_service) {
-      return { ...data, vendor_id: null, brand_id: null };
+      return {
+        ...data,
+        vendor_id: null,
+        brand_id: null,
+        purchasing_uom_id: null,
+        uom_conversion_factor: 1,
+      };
     }
     if (data.is_manufactured) {
       return {
         ...data,
         vendor_id: null,
         brand_id: data.brand_id ?? null,
+        purchasing_uom_id,
+        uom_conversion_factor,
       };
     }
     return {
       ...data,
       vendor_id: data.vendor_id ?? null,
       brand_id: data.brand_id ?? null,
+      purchasing_uom_id,
+      uom_conversion_factor,
     };
   });
 
@@ -175,6 +210,20 @@ export const updateProductModelSchema = z
     baseUomId: z.uuid({
       error: "ต้องเลือกหน่วยนับ (base_uom_id) เป็น UUID ที่ถูกต้อง",
     }),
+    purchasingUomId: optionalUuid,
+    uomConversionFactor: z.preprocess(
+      (value) => {
+        if (value == null || value === "") return 1;
+        const n = Number(value);
+        return Number.isFinite(n) ? n : value;
+      },
+      z
+        .number({ error: "อัตราแปลงหน่วยต้องเป็นตัวเลข" })
+        .positive("อัตราแปลงหน่วยต้องมากกว่า 0")
+        .max(1_000_000, "อัตราแปลงหน่วยสูงเกินไป")
+        .transform((n) => Math.round(n * 10000) / 10000)
+        .default(1),
+    ),
     sizePrices: z
       .array(updateProductModelSizePriceSchema)
       .min(1, "ต้องระบุราคาตามไซส์อย่างน้อย 1 รายการ"),
@@ -227,6 +276,8 @@ export function parseProductModelIdentity(input: {
   isRawMaterial?: boolean;
   isManufactured?: boolean;
   baseUomId?: string | null;
+  purchasingUomId?: string | null;
+  uomConversionFactor?: number | null;
 }):
   | { ok: true; data: ProductModelSchemaOutput }
   | { ok: false; error: string } {
@@ -244,6 +295,8 @@ export function parseProductModelIdentity(input: {
     is_raw_material: Boolean(input.isRawMaterial),
     is_manufactured: Boolean(input.isManufactured),
     base_uom_id: input.baseUomId,
+    purchasing_uom_id: input.purchasingUomId,
+    uom_conversion_factor: input.uomConversionFactor ?? 1,
   });
 
   if (!result.success) {

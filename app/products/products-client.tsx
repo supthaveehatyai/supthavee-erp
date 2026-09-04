@@ -159,6 +159,10 @@ type BatchEditForm = {
   isManufactured: boolean;
   /** product_models.base_uom_id */
   baseUomId: string;
+  /** product_models.purchasing_uom_id — หน่วยซื้อ bulk */
+  purchasingUomId: string;
+  /** product_models.uom_conversion_factor */
+  uomConversionFactor: string;
   prices: Record<string, SizePrice>;
 };
 
@@ -220,6 +224,10 @@ type MatrixForm = {
   isManufactured: boolean;
   /** product_models.base_uom_id → mst_uom.uom_id */
   baseUomId: string;
+  /** product_models.purchasing_uom_id */
+  purchasingUomId: string;
+  /** product_models.uom_conversion_factor — string for controlled input */
+  uomConversionFactor: string;
   colorIds: string[];
   sizeIds: string[];
 };
@@ -540,6 +548,8 @@ function createEmptyForm(vendorId = ""): MatrixForm {
     isRawMaterial: false,
     isManufactured: false,
     baseUomId: "",
+    purchasingUomId: "",
+    uomConversionFactor: "1",
     colorIds: [],
     sizeIds: [],
   };
@@ -1661,6 +1671,13 @@ export default function ProductsClient() {
       isRawMaterial: model.is_raw_material === true,
       isManufactured: model.is_manufactured === true,
       baseUomId: model.base_uom_id ?? "",
+      purchasingUomId: model.purchasing_uom_id ?? "",
+      uomConversionFactor: String(
+        model.uom_conversion_factor != null &&
+          Number.isFinite(Number(model.uom_conversion_factor))
+          ? Number(model.uom_conversion_factor)
+          : 1,
+      ),
       colorIds: [],
       sizeIds: [],
     }));
@@ -1998,6 +2015,8 @@ export default function ProductsClient() {
       isRawMaterial: form.isRawMaterial,
       isManufactured: form.isManufactured,
       baseUomId: form.baseUomId,
+      purchasingUomId: form.purchasingUomId || null,
+      uomConversionFactor: Number(form.uomConversionFactor || "1"),
     });
     if (!identity.ok) {
       setFormError(identity.error);
@@ -2019,6 +2038,8 @@ export default function ProductsClient() {
       isRawMaterial: identity.data.is_raw_material,
       isManufactured: identity.data.is_manufactured,
       baseUomId: identity.data.base_uom_id,
+      purchasingUomId: identity.data.purchasing_uom_id,
+      uomConversionFactor: identity.data.uom_conversion_factor,
     };
 
     setIsDraftSaving(true);
@@ -2135,6 +2156,8 @@ export default function ProductsClient() {
       isRawMaterial: form.isRawMaterial,
       isManufactured: form.isManufactured,
       baseUomId: form.baseUomId,
+      purchasingUomId: form.purchasingUomId || null,
+      uomConversionFactor: Number(form.uomConversionFactor || "1"),
     });
     if (!identity.ok) {
       setFormError(identity.error);
@@ -2163,6 +2186,8 @@ export default function ProductsClient() {
         isRawMaterial: identity.data.is_raw_material,
         isManufactured: identity.data.is_manufactured,
         baseUomId: identity.data.base_uom_id,
+        purchasingUomId: identity.data.purchasing_uom_id,
+        uomConversionFactor: identity.data.uom_conversion_factor,
       },
       skus: previewRows.map((row) => ({
         sku: row.sku,
@@ -2360,6 +2385,8 @@ export default function ProductsClient() {
         let isRawMaterial = false;
         let isManufactured = false;
         let baseUomId = "";
+        let purchasingUomId = "";
+        let uomConversionFactor = "1";
         const modelId =
           group.modelId ??
           group.products.find((item) => item.model_id)?.model_id ??
@@ -2380,6 +2407,13 @@ export default function ProductsClient() {
           isRawMaterial = modelResult.existing?.is_raw_material === true;
           isManufactured = modelResult.existing?.is_manufactured === true;
           baseUomId = modelResult.existing?.base_uom_id ?? "";
+          purchasingUomId = modelResult.existing?.purchasing_uom_id ?? "";
+          uomConversionFactor = String(
+            modelResult.existing?.uom_conversion_factor != null &&
+              Number.isFinite(Number(modelResult.existing.uom_conversion_factor))
+              ? Number(modelResult.existing.uom_conversion_factor)
+              : 1,
+          );
           if (isManufactured) vendorId = "";
         } else {
           const mappedVendor = vendorByProductId[group.products[0]?.id ?? ""];
@@ -2406,6 +2440,8 @@ export default function ProductsClient() {
           isRawMaterial,
           isManufactured,
           baseUomId,
+          purchasingUomId,
+          uomConversionFactor,
           prices,
         });
         setEditError("");
@@ -2577,6 +2613,18 @@ export default function ProductsClient() {
       editForm.isManufactured ? "true" : "false",
     );
     formData.set("base_uom_id", editForm.baseUomId.trim());
+    formData.set(
+      "purchasing_uom_id",
+      editForm.isRawMaterial || editForm.isManufactured
+        ? editForm.purchasingUomId.trim()
+        : "",
+    );
+    formData.set(
+      "uom_conversion_factor",
+      editForm.isRawMaterial || editForm.isManufactured
+        ? editForm.uomConversionFactor.trim() || "1"
+        : "1",
+    );
     formData.set("sizePrices", JSON.stringify(sizePrices));
 
     const result = await updateProductModel(formData);
@@ -3345,6 +3393,61 @@ export default function ProductsClient() {
                         ))}
                       </select>
                     </label>
+                    {form.isRawMaterial || form.isManufactured ? (
+                      <>
+                        <label className="block lg:col-span-1">
+                          <span className={labelClass}>
+                            หน่วยซื้อ (Purchasing UoM)
+                          </span>
+                          <select
+                            disabled={isMasterLoading}
+                            value={form.purchasingUomId}
+                            onChange={(event) =>
+                              updateForm("purchasingUomId", event.target.value)
+                            }
+                            className={fieldClass}
+                          >
+                            <option value="">
+                              {isMasterLoading
+                                ? "กำลังโหลด..."
+                                : "เลือกหน่วยซื้อ (เช่น ม้วน)"}
+                            </option>
+                            {masterData.uoms.map((uom) => (
+                              <option key={uom.uom_id} value={uom.uom_id}>
+                                {uom.uom_code} — {uom.uom_name}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            หน่วยที่ซื้อจากซัพพลายเออร์ (bulk)
+                          </p>
+                        </label>
+                        <label className="block lg:col-span-1">
+                          <span className={labelClass}>
+                            อัตราแปลง → หน่วยฐาน
+                          </span>
+                          <input
+                            type="number"
+                            min={0.0001}
+                            step="0.0001"
+                            inputMode="decimal"
+                            disabled={isMasterLoading}
+                            value={form.uomConversionFactor}
+                            onChange={(event) =>
+                              updateForm(
+                                "uomConversionFactor",
+                                event.target.value,
+                              )
+                            }
+                            className={fieldClass}
+                            placeholder="1"
+                          />
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            1 หน่วยซื้อ = N หน่วยฐาน (ทศนิยม 4 ตำแหน่ง)
+                          </p>
+                        </label>
+                      </>
+                    ) : null}
                     <label className="block lg:col-span-2">
                       <span className={labelClass}>ประเภทภาษี (Tax Type)</span>
                       <select
@@ -4438,6 +4541,65 @@ export default function ProductsClient() {
                       ))}
                     </select>
                   </label>
+                  {editForm.isRawMaterial || editForm.isManufactured ? (
+                    <>
+                      <label className="block">
+                        <span className={labelClass}>
+                          หน่วยซื้อ (Purchasing UoM)
+                        </span>
+                        <select
+                          disabled={isEditSaving}
+                          value={editForm.purchasingUomId}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    purchasingUomId: event.target.value,
+                                  }
+                                : current,
+                            )
+                          }
+                          className={fieldClass}
+                        >
+                          <option value="">เลือกหน่วยซื้อ</option>
+                          {masterData.uoms.map((uom) => (
+                            <option key={uom.uom_id} value={uom.uom_id}>
+                              {uom.uom_code} — {uom.uom_name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className={labelClass}>
+                          อัตราแปลง → หน่วยฐาน
+                        </span>
+                        <input
+                          type="number"
+                          min={0.0001}
+                          step="0.0001"
+                          inputMode="decimal"
+                          disabled={isEditSaving}
+                          value={editForm.uomConversionFactor}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    uomConversionFactor: event.target.value,
+                                  }
+                                : current,
+                            )
+                          }
+                          className={fieldClass}
+                          placeholder="1"
+                        />
+                        <p className="mt-1 text-[11px] text-slate-400">
+                          1 หน่วยซื้อ = N หน่วยฐาน (เช่น 1 ม้วน = 50 ม.)
+                        </p>
+                      </label>
+                    </>
+                  ) : null}
                   <label className="block sm:col-span-2">
                     <span className={labelClass}>ประเภทภาษี</span>
                     <select

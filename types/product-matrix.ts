@@ -27,6 +27,10 @@ export type SaveDraftModelInput = {
   isManufactured?: boolean;
   /** product_models.base_uom_id → mst_uom.uom_id */
   baseUomId?: string | null;
+  /** หน่วยซื้อ (bulk) — แสดงเมื่อ raw / manufactured */
+  purchasingUomId?: string | null;
+  /** 1 purchasing UoM = N base UoM (เช่น 1 ม้วน = 50 เมตร) */
+  uomConversionFactor?: number | null;
 };
 
 export type ExistingProductModel = {
@@ -46,6 +50,8 @@ export type ExistingProductModel = {
   is_raw_material: boolean;
   is_manufactured: boolean;
   base_uom_id: string | null;
+  purchasing_uom_id: string | null;
+  uom_conversion_factor: number | null;
 };
 
 export type UploadProductModelImageResult = {

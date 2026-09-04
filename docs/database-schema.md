@@ -25,7 +25,7 @@
 - `parameter_change_requests` (คำขอแก้ config แบบ Maker-Checker — `param_key` FK, `status` PENDING|APPROVED|REJECTED; RLS: service_role only)
 
 ## 3. Products, Inventory & Production (สินค้า, คลัง, ผลิต)
-- `product_models` (รุ่นสินค้า - Phase 1 ของการสร้าง Matrix — มี `is_service`, `is_raw_material`, `is_manufactured` Make vs Buy, `base_uom_id`)
+- `product_models` (รุ่นสินค้า - Phase 1 ของการสร้าง Matrix — มี `is_service`, `is_raw_material`, `is_manufactured` Make vs Buy, `base_uom_id`, `purchasing_uom_id` หน่วยซื้อ bulk, `uom_conversion_factor` อัตราแปลง 1 หน่วยซื้อ → N หน่วยฐาน)
 - `products` (สินค้า SKU ย่อย - Phase 2)
 - `vendor_product_mapping` (การผูกรหัสสินค้าซัพพลายเออร์)
 - `inventory_ledger` (สมุดบัญชีคลังสินค้า - ควบคุมการเข้าออกสต็อก)
