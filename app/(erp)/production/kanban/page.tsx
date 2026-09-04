@@ -5,6 +5,7 @@ import { CreateMtoJobDialog } from "@/components/production/create-mto-job-dialo
 import { KanbanBoard } from "@/components/production/kanban-board";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export const metadata: Metadata = {
   title: "Production Kanban | งานผลิต",

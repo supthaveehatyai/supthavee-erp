@@ -1,13 +1,15 @@
-"use server";
+'use server';
 
 /**
  * Production Kanban (MTO) Server Actions.
  * Zero Client-Side Fetching — Service Role (`supabaseAdmin`) only.
  *
+ * Next.js rule: a `"use server"` file may ONLY export async functions.
+ * Types live in `@/types/production` — do NOT export type from this file.
+ *
  * Cloud schema assumptions (do NOT invent migrations here):
  * - production_jobs.finished_model_id → product_models.id
  * - production_jobs.status is VARCHAR (not ENUM)
- * Types: `@/types/production`
  */
 
 import { revalidatePath } from "next/cache";
@@ -25,8 +27,6 @@ import {
   type SearchManufacturedModelsResult,
   type UpdateJobStatusResult,
 } from "@/types/production";
-
-export const maxDuration = 60;
 
 const KANBAN_PATH = "/production/kanban";
 const POSTGRES_UNIQUE_VIOLATION = "23505";
