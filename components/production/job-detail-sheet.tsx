@@ -374,7 +374,7 @@ export function JobDetailSheet({
                   <div className="flex items-start gap-2 text-slate-600">
                     <Factory className="mt-0.5 size-4 shrink-0 text-slate-400" />
                     <span className="leading-snug">
-                      {job.details || "ไม่มีรายละเอียดเพิ่มเติม"}
+                      {job.remark || "ไม่มีรายละเอียดเพิ่มเติม"}
                     </span>
                   </div>
                   {job.service_model ? (

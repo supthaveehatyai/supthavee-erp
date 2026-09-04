@@ -67,7 +67,7 @@ type ProductionJobRow = {
   job_type: ProductionJobType;
   status: ProductionJobStatus;
   estimated_completion_date: string | null;
-  details: string | null;
+  remark: string | null;
   attachment_paths: string[] | null;
   storage_tier: StorageTier | null;
   nas_archive_url: string | null;
@@ -135,7 +135,7 @@ function mapJobCard(row: ProductionJobRow): ProductionJobCard {
     job_type: row.job_type,
     status: row.status,
     estimated_completion_date: row.estimated_completion_date,
-    details: row.details,
+    remark: row.remark,
     attachment_paths: Array.isArray(row.attachment_paths)
       ? row.attachment_paths.filter(Boolean)
       : [],
@@ -165,7 +165,7 @@ const JOB_SELECT = `
         job_type,
         status,
         estimated_completion_date,
-        details,
+        remark,
         attachment_paths,
         created_at,
         updated_at,
@@ -337,7 +337,7 @@ export async function getKanbanBoardData(): Promise<GetProductionJobsResult> {
  * สร้างใบสั่งผลิตจากเอกสารขาย (SO / TAX_INV / ABB / CS_TAX / INV_DO) พร้อมแนบรูป Mockup
  *
  * Fields: documentId | document_id, jobType | job_type,
- * description | details, targetDate | estimated_completion_date, attachments (File[])
+ * description | remark, targetDate | estimated_completion_date, attachments (File[])
  */
 export async function createProductionJob(
   formData: FormData,
@@ -350,8 +350,8 @@ export async function createProductionJob(
   )
     .trim()
     .toUpperCase();
-  const details = String(
-    formData.get("description") ?? formData.get("details") ?? "",
+  const remark = String(
+    formData.get("description") ?? formData.get("remark") ?? "",
   ).trim();
   const estimatedCompletionDate = String(
     formData.get("targetDate") ??
@@ -378,7 +378,7 @@ export async function createProductionJob(
       data: null,
     };
   }
-  if (!details) {
+  if (!remark) {
     return {
       success: false,
       error: "กรุณาระบุรายละเอียดคำสั่งทำ",
@@ -477,7 +477,7 @@ export async function createProductionJob(
           job_type: jobTypeRaw,
           status: "PLANNED",
           estimated_completion_date: estimatedCompletionDate,
-          details,
+          remark,
           attachment_paths: attachmentPaths,
           technician_id: null,
           wage_cost: 0,
@@ -796,14 +796,14 @@ export async function getJobDetails(
       row.document_id,
     );
 
-    const details: ProductionJobDetails = {
+    const jobDetails: ProductionJobDetails = {
       ...card,
       line_items: lineItems,
       service_model_id: serviceModel?.id ?? null,
       service_model: serviceModel,
     };
 
-    return { success: true, data: details };
+    return { success: true, data: jobDetails };
   } catch (err) {
     return {
       success: false,

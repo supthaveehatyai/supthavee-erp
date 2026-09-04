@@ -1726,7 +1726,7 @@ export type Database = {
         Row: {
           attachment_paths: string[]
           created_at: string | null
-          details: string | null
+          remark: string | null
           document_id: string | null
           estimated_completion_date: string | null
           id: string
@@ -1744,7 +1744,7 @@ export type Database = {
         Insert: {
           attachment_paths?: string[]
           created_at?: string | null
-          details?: string | null
+          remark?: string | null
           document_id?: string | null
           estimated_completion_date?: string | null
           id?: string
@@ -1762,7 +1762,7 @@ export type Database = {
         Update: {
           attachment_paths?: string[]
           created_at?: string | null
-          details?: string | null
+          remark?: string | null
           document_id?: string | null
           estimated_completion_date?: string | null
           id?: string

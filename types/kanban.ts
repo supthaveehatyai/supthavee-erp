@@ -32,7 +32,7 @@ export type ProductionJobCard = {
   job_type: ProductionJobType;
   status: ProductionJobStatus;
   estimated_completion_date: string | null;
-  details: string | null;
+  remark: string | null;
   /** Raw Storage URLs (CLOUD) — keep for uploads / audit */
   attachment_paths: string[];
   /** Phase 14 Tiered Storage */
@@ -130,7 +130,7 @@ export type CreateProductionJobInput = {
   document_id: string;
   job_type: string;
   estimated_completion_date: string;
-  details: string;
+  remark: string;
 };
 
 export type CreateProductionJobResult = {

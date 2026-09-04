@@ -1234,7 +1234,6 @@ export async function getProductionJobDetails(
         ref_document_id,
         mockup_image_url,
         remark,
-        details,
         attachment_paths
       `,
       )
@@ -1430,10 +1429,7 @@ export async function getProductionJobDetails(
     const mockupImageUrl =
       mockupFromCol || mockupFromAttachments || modelImage || null;
 
-    const remark =
-      String(job.remark ?? "").trim() ||
-      String(job.details ?? "").trim() ||
-      null;
+    const remark = String(job.remark ?? "").trim() || null;
 
     const detail: ProductionJobDetail = {
       id: String(job.id),
