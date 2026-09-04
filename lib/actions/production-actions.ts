@@ -140,7 +140,7 @@ async function rollbackCreatedJob(
   await supabase
     .from("production_job_materials")
     .delete()
-    .eq("production_job_id", jobId);
+    .eq("job_id", jobId);
   await supabase.from("production_jobs").delete().eq("id", jobId);
 }
 
@@ -639,7 +639,7 @@ export async function createProductionJob(
       const jobId = String(created.id);
       const materialsPayload = materialRows.map((row) => ({
         ...row,
-        production_job_id: jobId,
+        job_id: jobId,
       }));
 
       const { error: materialsError } = await supabaseAdmin
