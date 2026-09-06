@@ -14,8 +14,10 @@ import { createClient } from "@/lib/supabase/server-admin";
 import type {
   DeleteJobOperationResult,
   GetJobOperationsResult,
+  GetRoutingActivityRatesResult,
   ProductionJobOperation,
   ProductionOperationStatus,
+  RoutingActivityRate,
   UpsertJobOperationPayload,
   UpsertJobOperationResult,
 } from "@/types/production";
@@ -442,6 +444,116 @@ export async function deleteJobOperation(
     return {
       success: false,
       error: err instanceof Error ? err.message : "ลบขั้นตอนผลิตไม่สำเร็จ",
+    };
+  }
+}
+
+/**
+ * Master Data สำหรับ Routing Activity Types
+ * technician_rates × product_models (is_service = true)
+ */
+export async function getRoutingActivityRates(): Promise<GetRoutingActivityRatesResult> {
+  try {
+    const supabase = getSupabaseAdmin();
+
+    const { data: rates, error: ratesError } = await supabase
+      .from("technician_rates")
+      .select(
+        `
+        technician_id,
+        service_model_id,
+        default_wage,
+        product_models!technician_rates_service_model_id_fkey (
+          id,
+          name,
+          short_name,
+          model_code,
+          is_service
+        )
+      `,
+      )
+      .order("technician_id", { ascending: true });
+
+    if (ratesError) {
+      return {
+        success: false,
+        error: ratesError.message ?? "ดึง Rate Card ขั้นตอนผลิตไม่สำเร็จ",
+        data: [],
+      };
+    }
+
+    function unwrapOne<T extends object>(
+      value: T | T[] | null | undefined,
+    ): T | null {
+      if (!value) return null;
+      return Array.isArray(value) ? (value[0] ?? null) : value;
+    }
+
+    const data: RoutingActivityRate[] = [];
+    const seen = new Set<string>();
+
+    for (const row of rates ?? []) {
+      const technicianId = String(row.technician_id ?? "").trim();
+      const serviceModelId = String(row.service_model_id ?? "").trim();
+      if (!technicianId || !serviceModelId) continue;
+
+      const model = unwrapOne(
+        row.product_models as
+          | {
+              id?: string;
+              name?: string | null;
+              short_name?: string | null;
+              model_code?: string | null;
+              is_service?: boolean | null;
+            }
+          | {
+              id?: string;
+              name?: string | null;
+              short_name?: string | null;
+              model_code?: string | null;
+              is_service?: boolean | null;
+            }[]
+          | null,
+      );
+
+      if (model?.is_service !== true) continue;
+
+      const key = `${technicianId}:${serviceModelId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const wage = toWageCost(row.default_wage) ?? 0;
+      const serviceName =
+        String(model.name ?? "").trim() ||
+        String(model.short_name ?? "").trim() ||
+        String(model.model_code ?? "").trim() ||
+        "งานบริการ";
+
+      data.push({
+        technician_id: technicianId,
+        service_model_id: serviceModelId,
+        service_name: serviceName,
+        model_code: String(model.model_code ?? "").trim() || null,
+        default_wage: wage,
+      });
+    }
+
+    data.sort((a, b) => {
+      const byTech = a.technician_id.localeCompare(b.technician_id);
+      if (byTech !== 0) return byTech;
+      return a.service_name.localeCompare(b.service_name, "th");
+    });
+
+    return { success: true, error: null, data };
+  } catch (err) {
+    console.error("[getRoutingActivityRates]", err);
+    return {
+      success: false,
+      error:
+        err instanceof Error
+          ? err.message
+          : "ดึง Rate Card ขั้นตอนผลิตไม่สำเร็จ",
+      data: [],
     };
   }
 }

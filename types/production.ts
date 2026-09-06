@@ -345,3 +345,20 @@ export type DeleteJobOperationResult = {
   success: boolean;
   error: string | null;
 };
+
+/**
+ * Routing Activity Type — จาก technician_rates × product_models (is_service)
+ * ใช้เป็น Master Data สำหรับ dropdown ขั้นตอน In-house Routing
+ */
+export type RoutingActivityRate = {
+  technician_id: string;
+  service_model_id: string;
+  /** ชื่อขั้นตอน = ชื่องานบริการจาก product_models */
+  service_name: string;
+  model_code: string | null;
+  default_wage: number;
+};
+
+export type GetRoutingActivityRatesResult =
+  | { success: true; error: null; data: RoutingActivityRate[] }
+  | { success: false; error: string; data: RoutingActivityRate[] };

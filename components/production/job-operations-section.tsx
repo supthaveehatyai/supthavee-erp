@@ -2,21 +2,24 @@
 
 /**
  * In-house Routing — ขั้นตอนการผลิตและค่าแรง (production_job_operations)
- * แยกชัดจาก Service Assignment (document_items)
+ * Activity Types จาก Master: technician_rates × product_models (is_service)
+ * Zero Client-Side Fetching — rates ผ่าน Server Action
  */
 
-import { useCallback, useEffect, useId, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus, Save, Trash2, Workflow } from "lucide-react";
 import { toast } from "sonner";
 import {
   deleteJobOperation,
   getJobOperations,
+  getRoutingActivityRates,
   upsertJobOperation,
 } from "@/lib/actions/production/job-operations-actions";
 import type {
   ProductionJobTechnicianOption,
   ProductionOperationStatus,
+  RoutingActivityRate,
 } from "@/types/production";
 import {
   PRODUCTION_OPERATION_STATUS_LABEL,
@@ -41,9 +44,10 @@ export type JobOperationsSectionProps = {
 };
 
 type OperationDraft = {
-  /** client key — stable across edits */
   key: string;
   id: string | null;
+  /** product_models.id ของ Activity Type ที่เลือก */
+  service_model_id: string;
   operation_name: string;
   technician_id: string;
   wage_cost: string;
@@ -55,6 +59,7 @@ function emptyDraft(key: string): OperationDraft {
   return {
     key,
     id: null,
+    service_model_id: "",
     operation_name: "",
     technician_id: "",
     wage_cost: "0",
@@ -69,6 +74,31 @@ function toWageNumber(raw: string): number | null {
   return Math.round((n + Number.EPSILON) * 10000) / 10000;
 }
 
+function formatWageDefault(value: number): string {
+  const rounded = Math.round((value + Number.EPSILON) * 10000) / 10000;
+  return String(rounded);
+}
+
+function resolveServiceModelId(
+  rates: RoutingActivityRate[],
+  technicianId: string,
+  operationName: string,
+): string {
+  const techId = technicianId.trim();
+  const name = operationName.trim();
+  if (!name) return "";
+
+  const forTech = techId
+    ? rates.filter((rate) => rate.technician_id === techId)
+    : rates;
+
+  const exact = forTech.find((rate) => rate.service_name === name);
+  if (exact) return exact.service_model_id;
+
+  const any = rates.find((rate) => rate.service_name === name);
+  return any?.service_model_id ?? "";
+}
+
 export function JobOperationsSection({
   jobId,
   technicians,
@@ -78,6 +108,7 @@ export function JobOperationsSection({
   const reactId = useId();
   const draftSeqRef = useRef(0);
   const [drafts, setDrafts] = useState<OperationDraft[]>([]);
+  const [rates, setRates] = useState<RoutingActivityRate[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isSubmitting, startSubmit] = useTransition();
@@ -90,31 +121,63 @@ export function JobOperationsSection({
   const busy = isLoading || isSubmitting;
   const canEdit = !disabled && !busy;
 
+  const ratesByTechnician = useMemo(() => {
+    const map = new Map<string, RoutingActivityRate[]>();
+    for (const rate of rates) {
+      const list = map.get(rate.technician_id) ?? [];
+      list.push(rate);
+      map.set(rate.technician_id, list);
+    }
+    return map;
+  }, [rates]);
+
   const reload = useCallback(async () => {
     const id = jobId.trim();
     if (!id) return;
     setIsLoading(true);
     setLoadError(null);
     try {
-      const result = await getJobOperations(id);
-      if (!result.success) {
-        setLoadError(result.error ?? "ดึงขั้นตอนผลิตไม่สำเร็จ");
+      const [opsResult, ratesResult] = await Promise.all([
+        getJobOperations(id),
+        getRoutingActivityRates(),
+      ]);
+
+      if (!ratesResult.success) {
+        setLoadError(ratesResult.error ?? "ดึง Rate Card ขั้นตอนไม่สำเร็จ");
+        setRates([]);
+      } else {
+        setRates(ratesResult.data);
+      }
+
+      if (!opsResult.success) {
+        setLoadError(opsResult.error ?? "ดึงขั้นตอนผลิตไม่สำเร็จ");
         setDrafts([]);
         return;
       }
+
+      const loadedRates = ratesResult.success ? ratesResult.data : [];
       setDrafts(
-        result.data.map((row, index) => ({
-          key: row.id || `${reactId}-loaded-${index}`,
-          id: row.id,
-          operation_name: row.operation_name,
-          technician_id: row.technician_id ?? "",
-          wage_cost: String(
-            Number.isFinite(row.wage_cost) ? row.wage_cost : 0,
-          ),
-          status:
-            row.status === "COMPLETED" ? "COMPLETED" : ("PENDING" as const),
-          technician_bill_id: row.technician_bill_id,
-        })),
+        opsResult.data.map((row, index) => {
+          const techId = row.technician_id ?? "";
+          const serviceModelId = resolveServiceModelId(
+            loadedRates,
+            techId,
+            row.operation_name,
+          );
+          return {
+            key: row.id || `${reactId}-loaded-${index}`,
+            id: row.id,
+            service_model_id: serviceModelId,
+            operation_name: row.operation_name,
+            technician_id: techId,
+            wage_cost: String(
+              Number.isFinite(row.wage_cost) ? row.wage_cost : 0,
+            ),
+            status:
+              row.status === "COMPLETED" ? "COMPLETED" : ("PENDING" as const),
+            technician_bill_id: row.technician_bill_id,
+          };
+        }),
       );
     } finally {
       setIsLoading(false);
@@ -125,8 +188,86 @@ export function JobOperationsSection({
     void reload();
   }, [reload]);
 
+  function ratesForDraft(draft: OperationDraft): RoutingActivityRate[] {
+    const techId = draft.technician_id.trim();
+    if (!techId) return [];
+    return ratesByTechnician.get(techId) ?? [];
+  }
+
   function handleAddRow() {
     setDrafts((prev) => [...prev, emptyDraft(nextKey())]);
+  }
+
+  function handleTechnicianChange(draftKey: string, nextTechnicianId: string) {
+    setDrafts((prev) =>
+      prev.map((row) => {
+        if (row.key !== draftKey) return row;
+
+        const nextRates = ratesByTechnician.get(nextTechnicianId) ?? [];
+        const stillValid = nextRates.some(
+          (rate) =>
+            rate.service_model_id === row.service_model_id ||
+            rate.service_name === row.operation_name,
+        );
+
+        if (stillValid) {
+          const matched =
+            nextRates.find(
+              (rate) => rate.service_model_id === row.service_model_id,
+            ) ??
+            nextRates.find((rate) => rate.service_name === row.operation_name);
+          return {
+            ...row,
+            technician_id: nextTechnicianId,
+            service_model_id: matched?.service_model_id ?? row.service_model_id,
+            operation_name: matched?.service_name ?? row.operation_name,
+            wage_cost: matched
+              ? formatWageDefault(matched.default_wage)
+              : row.wage_cost,
+          };
+        }
+
+        return {
+          ...row,
+          technician_id: nextTechnicianId,
+          service_model_id: "",
+          operation_name: "",
+          wage_cost: "0",
+        };
+      }),
+    );
+  }
+
+  function handleOperationChange(draftKey: string, serviceModelId: string) {
+    setDrafts((prev) =>
+      prev.map((row) => {
+        if (row.key !== draftKey) return row;
+        if (!serviceModelId) {
+          return {
+            ...row,
+            service_model_id: "",
+            operation_name: "",
+          };
+        }
+
+        const rate = ratesForDraft(row).find(
+          (item) => item.service_model_id === serviceModelId,
+        );
+        if (!rate) {
+          return {
+            ...row,
+            service_model_id: serviceModelId,
+          };
+        }
+
+        return {
+          ...row,
+          service_model_id: rate.service_model_id,
+          operation_name: rate.service_name,
+          wage_cost: formatWageDefault(rate.default_wage),
+        };
+      }),
+    );
   }
 
   function handleRemoveRow(draft: OperationDraft) {
@@ -166,21 +307,42 @@ export function JobOperationsSection({
 
     for (const draft of drafts) {
       if (draft.technician_bill_id) continue;
-      const name = draft.operation_name.trim();
-      if (!name) {
-        toast.error("กรุณาระบุชื่อขั้นตอนทุกแถว (หรือลบแถวว่าง)");
+
+      const techId = draft.technician_id.trim();
+      if (!techId) {
+        toast.error("กรุณาเลือกช่างทุกแถว");
         return;
       }
+
+      const name = draft.operation_name.trim();
+      if (!name || !draft.service_model_id.trim()) {
+        toast.error("กรุณาเลือกขั้นตอน (Activity Type) จาก Rate Card ทุกแถว");
+        return;
+      }
+
+      const allowed = ratesForDraft(draft).some(
+        (rate) =>
+          rate.service_model_id === draft.service_model_id ||
+          rate.service_name === name,
+      );
+      if (!allowed) {
+        toast.error(
+          `ขั้นตอน "${name}" ไม่อยู่ใน Rate Card ของช่างที่เลือก`,
+        );
+        return;
+      }
+
       const wage = toWageNumber(draft.wage_cost);
       if (wage == null) {
         toast.error(`ค่าแรงของ "${name}" ต้องเป็นตัวเลข ≥ 0`);
         return;
       }
+
       payloadRows.push({
         key: draft.key,
         id: draft.id,
         operation_name: name,
-        technician_id: draft.technician_id.trim() || null,
+        technician_id: techId,
         wage_cost: wage,
         status: draft.status,
       });
@@ -212,9 +374,17 @@ export function JobOperationsSection({
           continue;
         }
 
+        const prev = nextByKey.get(row.key);
         nextByKey.set(row.key, {
           key: row.key,
           id: result.data.id,
+          service_model_id:
+            prev?.service_model_id ||
+            resolveServiceModelId(
+              rates,
+              result.data.technician_id ?? "",
+              result.data.operation_name,
+            ),
           operation_name: result.data.operation_name,
           technician_id: result.data.technician_id ?? "",
           wage_cost: String(result.data.wage_cost),
@@ -248,10 +418,10 @@ export function JobOperationsSection({
         </span>
       </div>
       <p className="text-xs leading-relaxed text-slate-500">
-        Routing ภายในโรงงาน — บันทึกลง{" "}
-        <span className="font-mono">production_job_operations</span>{" "}
-        (แยกจากตาราง Service Assignment /{" "}
-        <span className="font-mono">document_items</span>)
+        Activity Types จาก Master{" "}
+        <span className="font-mono">technician_rates</span> ×{" "}
+        <span className="font-mono">product_models</span> (is_service) —
+        เลือกช่างก่อน แล้วเลือกขั้นตอนตาม Rate Card (ค่าแรง auto-fill แก้ทับได้)
       </p>
 
       {loadError ? (
@@ -267,10 +437,10 @@ export function JobOperationsSection({
         <Table>
           <TableHeader>
             <TableRow className="bg-blue-50/90 hover:bg-blue-50/90">
-              <TableHead className="min-w-[8rem] px-2 text-xs">
-                ขั้นตอน
-              </TableHead>
               <TableHead className="min-w-[8rem] px-2 text-xs">ช่าง</TableHead>
+              <TableHead className="min-w-[9rem] px-2 text-xs">
+                ขั้นตอน (Activity)
+              </TableHead>
               <TableHead className="min-w-[5.5rem] px-2 text-right text-xs">
                 ค่าแรง
               </TableHead>
@@ -289,7 +459,7 @@ export function JobOperationsSection({
                 >
                   <span className="inline-flex items-center gap-2">
                     <Loader2 className="size-4 animate-spin" />
-                    กำลังโหลดขั้นตอน...
+                    กำลังโหลดขั้นตอน / Rate Card...
                   </span>
                 </TableCell>
               </TableRow>
@@ -306,27 +476,36 @@ export function JobOperationsSection({
               drafts.map((draft) => {
                 const billed = Boolean(draft.technician_bill_id);
                 const rowLocked = billed || busy || disabled;
+                const activityOptions = ratesForDraft(draft);
+                const hasOrphanName =
+                  Boolean(draft.operation_name.trim()) &&
+                  !activityOptions.some(
+                    (rate) =>
+                      rate.service_model_id === draft.service_model_id ||
+                      rate.service_name === draft.operation_name,
+                  );
+
                 return (
                   <TableRow key={draft.key}>
                     <TableCell className="px-2 py-2 align-top">
-                      <Input
-                        value={draft.operation_name}
-                        placeholder="เช่น งานเย็บ"
+                      <Select
+                        value={draft.technician_id}
                         disabled={rowLocked}
                         onChange={(event) =>
-                          setDrafts((prev) =>
-                            prev.map((row) =>
-                              row.key === draft.key
-                                ? {
-                                    ...row,
-                                    operation_name: event.target.value,
-                                  }
-                                : row,
-                            ),
+                          handleTechnicianChange(
+                            draft.key,
+                            event.target.value,
                           )
                         }
                         className="h-9 text-xs"
-                      />
+                      >
+                        <option value="">— เลือกช่าง —</option>
+                        {technicians.map((tech) => (
+                          <option key={tech.id} value={tech.id}>
+                            {tech.company_name}
+                          </option>
+                        ))}
+                      </Select>
                       {billed ? (
                         <p className="mt-1 text-[10px] text-emerald-700">
                           วางบิลแล้ว
@@ -335,29 +514,46 @@ export function JobOperationsSection({
                     </TableCell>
                     <TableCell className="px-2 py-2 align-top">
                       <Select
-                        value={draft.technician_id}
-                        disabled={rowLocked}
+                        value={draft.service_model_id}
+                        disabled={
+                          rowLocked || !draft.technician_id.trim()
+                        }
                         onChange={(event) =>
-                          setDrafts((prev) =>
-                            prev.map((row) =>
-                              row.key === draft.key
-                                ? {
-                                    ...row,
-                                    technician_id: event.target.value,
-                                  }
-                                : row,
-                            ),
+                          handleOperationChange(
+                            draft.key,
+                            event.target.value,
                           )
                         }
                         className="h-9 text-xs"
                       >
-                        <option value="">— ไม่ระบุ —</option>
-                        {technicians.map((tech) => (
-                          <option key={tech.id} value={tech.id}>
-                            {tech.company_name}
+                        <option value="">
+                          {draft.technician_id.trim()
+                            ? "— เลือกขั้นตอน —"
+                            : "— เลือกช่างก่อน —"}
+                        </option>
+                        {activityOptions.map((rate) => (
+                          <option
+                            key={rate.service_model_id}
+                            value={rate.service_model_id}
+                          >
+                            {rate.model_code
+                              ? `${rate.model_code} · ${rate.service_name}`
+                              : rate.service_name}
                           </option>
                         ))}
                       </Select>
+                      {hasOrphanName ? (
+                        <p className="mt-1 text-[10px] text-amber-700">
+                          ค่าเดิม &quot;{draft.operation_name}&quot; ไม่อยู่ใน Rate
+                          Card — กรุณาเลือกใหม่
+                        </p>
+                      ) : null}
+                      {draft.technician_id.trim() &&
+                      activityOptions.length === 0 ? (
+                        <p className="mt-1 text-[10px] text-amber-700">
+                          ช่างนี้ยังไม่มี Rate Card (Activity Type)
+                        </p>
+                      ) : null}
                     </TableCell>
                     <TableCell className="px-2 py-2 align-top">
                       <Input
