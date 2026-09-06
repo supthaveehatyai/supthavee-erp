@@ -1,12 +1,20 @@
 "use client";
 
 /**
- * In-house Routing — ขั้นตอนการผลิตและค่าแรง (production_job_operations)
+ * In-house Routing — SAP Yield Confirmation
+ * production_job_operations: confirmed_qty × unit_wage = wage_cost
  * Activity Types จาก Master: technician_rates × product_models (is_service)
- * Zero Client-Side Fetching — rates ผ่าน Server Action
  */
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus, Save, Trash2, Workflow } from "lucide-react";
 import { toast } from "sonner";
@@ -40,43 +48,70 @@ import {
 export type JobOperationsSectionProps = {
   jobId: string;
   technicians: ProductionJobTechnicianOption[];
+  /** production_jobs.target_quantity — default confirmed_qty */
+  targetQuantity?: number;
   disabled?: boolean;
 };
 
 type OperationDraft = {
   key: string;
   id: string | null;
-  /** product_models.id ของ Activity Type ที่เลือก */
   service_model_id: string;
   operation_name: string;
   technician_id: string;
-  wage_cost: string;
+  confirmed_qty: string;
+  unit_wage: string;
+  /** Rate Card default — ใช้ตรวจ override */
+  rate_unit_wage: number | null;
+  remark: string;
   status: ProductionOperationStatus;
   technician_bill_id: string | null;
 };
 
-function emptyDraft(key: string): OperationDraft {
+function toDecimal(raw: string): number | null {
+  const n = Number.parseFloat(String(raw ?? "").trim());
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round((n + Number.EPSILON) * 10000) / 10000;
+}
+
+function toPositiveQty(raw: string): number | null {
+  const n = toDecimal(raw);
+  if (n == null || n <= 0) return null;
+  return n;
+}
+
+function formatDecimal(value: number): string {
+  return String(Math.round((value + Number.EPSILON) * 10000) / 10000);
+}
+
+function calcTotalWage(qty: number, unit: number): number {
+  return Math.round((qty * unit + Number.EPSILON) * 10000) / 10000;
+}
+
+function isUnitWageOverridden(
+  unitWageRaw: string,
+  rateUnitWage: number | null,
+): boolean {
+  if (rateUnitWage == null) return false;
+  const current = toDecimal(unitWageRaw);
+  if (current == null) return false;
+  return Math.abs(current - rateUnitWage) > 0.00005;
+}
+
+function emptyDraft(key: string, targetQty: number): OperationDraft {
   return {
     key,
     id: null,
     service_model_id: "",
     operation_name: "",
     technician_id: "",
-    wage_cost: "0",
+    confirmed_qty: formatDecimal(targetQty > 0 ? targetQty : 1),
+    unit_wage: "0",
+    rate_unit_wage: null,
+    remark: "",
     status: "PENDING",
     technician_bill_id: null,
   };
-}
-
-function toWageNumber(raw: string): number | null {
-  const n = Number.parseFloat(String(raw ?? "").trim());
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.round((n + Number.EPSILON) * 10000) / 10000;
-}
-
-function formatWageDefault(value: number): string {
-  const rounded = Math.round((value + Number.EPSILON) * 10000) / 10000;
-  return String(rounded);
 }
 
 function resolveServiceModelId(
@@ -99,9 +134,34 @@ function resolveServiceModelId(
   return any?.service_model_id ?? "";
 }
 
+function resolveRateUnitWage(
+  rates: RoutingActivityRate[],
+  technicianId: string,
+  serviceModelId: string,
+  operationName: string,
+): number | null {
+  const techId = technicianId.trim();
+  if (!techId) return null;
+  const forTech = rates.filter((rate) => rate.technician_id === techId);
+  const byModel = forTech.find(
+    (rate) => rate.service_model_id === serviceModelId,
+  );
+  if (byModel) return byModel.default_wage;
+  const byName = forTech.find((rate) => rate.service_name === operationName);
+  return byName?.default_wage ?? null;
+}
+
+function formatMoney(value: number): string {
+  return value.toLocaleString("th-TH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  });
+}
+
 export function JobOperationsSection({
   jobId,
   technicians,
+  targetQuantity = 0,
   disabled = false,
 }: JobOperationsSectionProps) {
   const router = useRouter();
@@ -112,6 +172,12 @@ export function JobOperationsSection({
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isSubmitting, startSubmit] = useTransition();
+
+  const defaultQty = useMemo(() => {
+    const n = Number(targetQuantity);
+    if (!Number.isFinite(n) || n <= 0) return 1;
+    return Math.round((n + Number.EPSILON) * 10000) / 10000;
+  }, [targetQuantity]);
 
   const nextKey = useCallback(() => {
     draftSeqRef.current += 1;
@@ -164,15 +230,30 @@ export function JobOperationsSection({
             techId,
             row.operation_name,
           );
+          const rateWage = resolveRateUnitWage(
+            loadedRates,
+            techId,
+            serviceModelId,
+            row.operation_name,
+          );
+          const confirmed =
+            row.confirmed_qty > 0 ? row.confirmed_qty : defaultQty;
+          const unit =
+            row.unit_wage > 0
+              ? row.unit_wage
+              : (rateWage ??
+                (confirmed > 0 ? row.wage_cost / confirmed : row.wage_cost));
+
           return {
             key: row.id || `${reactId}-loaded-${index}`,
             id: row.id,
             service_model_id: serviceModelId,
             operation_name: row.operation_name,
             technician_id: techId,
-            wage_cost: String(
-              Number.isFinite(row.wage_cost) ? row.wage_cost : 0,
-            ),
+            confirmed_qty: formatDecimal(confirmed),
+            unit_wage: formatDecimal(unit),
+            rate_unit_wage: rateWage,
+            remark: row.remark ?? "",
             status:
               row.status === "COMPLETED" ? "COMPLETED" : ("PENDING" as const),
             technician_bill_id: row.technician_bill_id,
@@ -182,7 +263,7 @@ export function JobOperationsSection({
     } finally {
       setIsLoading(false);
     }
-  }, [jobId, reactId]);
+  }, [jobId, reactId, defaultQty]);
 
   useEffect(() => {
     void reload();
@@ -195,7 +276,7 @@ export function JobOperationsSection({
   }
 
   function handleAddRow() {
-    setDrafts((prev) => [...prev, emptyDraft(nextKey())]);
+    setDrafts((prev) => [...prev, emptyDraft(nextKey(), defaultQty)]);
   }
 
   function handleTechnicianChange(draftKey: string, nextTechnicianId: string) {
@@ -204,26 +285,21 @@ export function JobOperationsSection({
         if (row.key !== draftKey) return row;
 
         const nextRates = ratesByTechnician.get(nextTechnicianId) ?? [];
-        const stillValid = nextRates.some(
-          (rate) =>
-            rate.service_model_id === row.service_model_id ||
-            rate.service_name === row.operation_name,
-        );
+        const matched =
+          nextRates.find(
+            (rate) => rate.service_model_id === row.service_model_id,
+          ) ??
+          nextRates.find((rate) => rate.service_name === row.operation_name);
 
-        if (stillValid) {
-          const matched =
-            nextRates.find(
-              (rate) => rate.service_model_id === row.service_model_id,
-            ) ??
-            nextRates.find((rate) => rate.service_name === row.operation_name);
+        if (matched) {
           return {
             ...row,
             technician_id: nextTechnicianId,
-            service_model_id: matched?.service_model_id ?? row.service_model_id,
-            operation_name: matched?.service_name ?? row.operation_name,
-            wage_cost: matched
-              ? formatWageDefault(matched.default_wage)
-              : row.wage_cost,
+            service_model_id: matched.service_model_id,
+            operation_name: matched.service_name,
+            unit_wage: formatDecimal(matched.default_wage),
+            rate_unit_wage: matched.default_wage,
+            remark: "",
           };
         }
 
@@ -232,7 +308,9 @@ export function JobOperationsSection({
           technician_id: nextTechnicianId,
           service_model_id: "",
           operation_name: "",
-          wage_cost: "0",
+          unit_wage: "0",
+          rate_unit_wage: null,
+          remark: "",
         };
       }),
     );
@@ -247,6 +325,9 @@ export function JobOperationsSection({
             ...row,
             service_model_id: "",
             operation_name: "",
+            unit_wage: "0",
+            rate_unit_wage: null,
+            remark: "",
           };
         }
 
@@ -254,17 +335,16 @@ export function JobOperationsSection({
           (item) => item.service_model_id === serviceModelId,
         );
         if (!rate) {
-          return {
-            ...row,
-            service_model_id: serviceModelId,
-          };
+          return { ...row, service_model_id: serviceModelId };
         }
 
         return {
           ...row,
           service_model_id: rate.service_model_id,
           operation_name: rate.service_name,
-          wage_cost: formatWageDefault(rate.default_wage),
+          unit_wage: formatDecimal(rate.default_wage),
+          rate_unit_wage: rate.default_wage,
+          remark: "",
         };
       }),
     );
@@ -300,9 +380,13 @@ export function JobOperationsSection({
       key: string;
       id: string | null;
       operation_name: string;
-      technician_id: string | null;
+      technician_id: string;
+      confirmed_qty: number;
+      unit_wage: number;
       wage_cost: number;
+      remark: string | null;
       status: ProductionOperationStatus;
+      rate_unit_wage: number | null;
     }> = [];
 
     for (const draft of drafts) {
@@ -326,15 +410,30 @@ export function JobOperationsSection({
           rate.service_name === name,
       );
       if (!allowed) {
-        toast.error(
-          `ขั้นตอน "${name}" ไม่อยู่ใน Rate Card ของช่างที่เลือก`,
-        );
+        toast.error(`ขั้นตอน "${name}" ไม่อยู่ใน Rate Card ของช่างที่เลือก`);
         return;
       }
 
-      const wage = toWageNumber(draft.wage_cost);
-      if (wage == null) {
-        toast.error(`ค่าแรงของ "${name}" ต้องเป็นตัวเลข ≥ 0`);
+      const qty = toPositiveQty(draft.confirmed_qty);
+      if (qty == null) {
+        toast.error(`จำนวนยืนยันของ "${name}" ต้องมากกว่า 0`);
+        return;
+      }
+
+      const unit = toDecimal(draft.unit_wage);
+      if (unit == null) {
+        toast.error(`ค่าแรงต่อหน่วยของ "${name}" ต้องเป็นตัวเลข ≥ 0`);
+        return;
+      }
+
+      const overridden = isUnitWageOverridden(
+        draft.unit_wage,
+        draft.rate_unit_wage,
+      );
+      if (overridden && !draft.remark.trim()) {
+        toast.error(
+          `กรุณาระบุ Remark สำหรับ "${name}" เพราะมีการแก้ unit_wage จาก Rate Card`,
+        );
         return;
       }
 
@@ -343,8 +442,12 @@ export function JobOperationsSection({
         id: draft.id,
         operation_name: name,
         technician_id: techId,
-        wage_cost: wage,
+        confirmed_qty: qty,
+        unit_wage: unit,
+        wage_cost: calcTotalWage(qty, unit),
+        remark: draft.remark.trim() || null,
         status: draft.status,
+        rate_unit_wage: draft.rate_unit_wage,
       });
     }
 
@@ -363,7 +466,10 @@ export function JobOperationsSection({
           job_id: jobId,
           operation_name: row.operation_name,
           technician_id: row.technician_id,
+          confirmed_qty: row.confirmed_qty,
+          unit_wage: row.unit_wage,
           wage_cost: row.wage_cost,
+          remark: row.remark,
           status: row.status,
         });
 
@@ -375,19 +481,32 @@ export function JobOperationsSection({
         }
 
         const prev = nextByKey.get(row.key);
+        const serviceModelId =
+          prev?.service_model_id ||
+          resolveServiceModelId(
+            rates,
+            result.data.technician_id ?? "",
+            result.data.operation_name,
+          );
+        const rateWage =
+          prev?.rate_unit_wage ??
+          resolveRateUnitWage(
+            rates,
+            result.data.technician_id ?? "",
+            serviceModelId,
+            result.data.operation_name,
+          );
+
         nextByKey.set(row.key, {
           key: row.key,
           id: result.data.id,
-          service_model_id:
-            prev?.service_model_id ||
-            resolveServiceModelId(
-              rates,
-              result.data.technician_id ?? "",
-              result.data.operation_name,
-            ),
+          service_model_id: serviceModelId,
           operation_name: result.data.operation_name,
           technician_id: result.data.technician_id ?? "",
-          wage_cost: String(result.data.wage_cost),
+          confirmed_qty: formatDecimal(result.data.confirmed_qty),
+          unit_wage: formatDecimal(result.data.unit_wage),
+          rate_unit_wage: rateWage,
+          remark: result.data.remark ?? "",
           status:
             result.data.status === "COMPLETED" ? "COMPLETED" : "PENDING",
           technician_bill_id: result.data.technician_bill_id,
@@ -411,17 +530,16 @@ export function JobOperationsSection({
       <div className="flex items-end justify-between gap-2">
         <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
           <Workflow className="size-4 text-blue-600" aria-hidden />
-          ขั้นตอนการผลิตและค่าแรง (In-house Routing)
+          ขั้นตอนการผลิตและค่าแรง (Yield Confirmation)
         </h3>
         <span className="text-xs text-slate-400">
-          {drafts.length} ขั้นตอน
+          {drafts.length} ขั้นตอน · Target {formatDecimal(defaultQty)}
         </span>
       </div>
       <p className="text-xs leading-relaxed text-slate-500">
-        Activity Types จาก Master{" "}
-        <span className="font-mono">technician_rates</span> ×{" "}
-        <span className="font-mono">product_models</span> (is_service) —
-        เลือกช่างก่อน แล้วเลือกขั้นตอนตาม Rate Card (ค่าแรง auto-fill แก้ทับได้)
+        SAP Yield Confirmation —{" "}
+        <span className="font-mono">wage_cost = confirmed_qty × unit_wage</span>
+        · แก้ unit_wage จาก Rate Card ต้องใส่ Remark
       </p>
 
       {loadError ? (
@@ -433,18 +551,25 @@ export function JobOperationsSection({
         </div>
       ) : null}
 
-      <div className="overflow-hidden rounded-xl border border-blue-200">
+      <div className="overflow-x-auto rounded-xl border border-blue-200">
         <Table>
           <TableHeader>
             <TableRow className="bg-blue-50/90 hover:bg-blue-50/90">
-              <TableHead className="min-w-[8rem] px-2 text-xs">ช่าง</TableHead>
-              <TableHead className="min-w-[9rem] px-2 text-xs">
-                ขั้นตอน (Activity)
+              <TableHead className="min-w-[7.5rem] px-2 text-xs">ช่าง</TableHead>
+              <TableHead className="min-w-[8.5rem] px-2 text-xs">
+                ขั้นตอน
+              </TableHead>
+              <TableHead className="min-w-[5rem] px-2 text-right text-xs">
+                Qty
               </TableHead>
               <TableHead className="min-w-[5.5rem] px-2 text-right text-xs">
-                ค่าแรง
+                Unit Wage
               </TableHead>
-              <TableHead className="min-w-[6.5rem] px-2 text-xs">
+              <TableHead className="min-w-[5.5rem] px-2 text-right text-xs">
+                Total
+              </TableHead>
+              <TableHead className="min-w-[7rem] px-2 text-xs">Remark</TableHead>
+              <TableHead className="min-w-[5.5rem] px-2 text-xs">
                 สถานะ
               </TableHead>
               <TableHead className="w-10 px-1 text-xs" />
@@ -454,7 +579,7 @@ export function JobOperationsSection({
             {isLoading ? (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={8}
                   className="px-3 py-8 text-center text-sm text-slate-400"
                 >
                   <span className="inline-flex items-center gap-2">
@@ -466,7 +591,7 @@ export function JobOperationsSection({
             ) : drafts.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={8}
                   className="px-3 py-8 text-center text-sm text-slate-400"
                 >
                   ยังไม่มีขั้นตอน — กด &quot;เพิ่มขั้นตอน&quot;
@@ -477,6 +602,13 @@ export function JobOperationsSection({
                 const billed = Boolean(draft.technician_bill_id);
                 const rowLocked = billed || busy || disabled;
                 const activityOptions = ratesForDraft(draft);
+                const qty = toDecimal(draft.confirmed_qty) ?? 0;
+                const unit = toDecimal(draft.unit_wage) ?? 0;
+                const total = calcTotalWage(qty, unit);
+                const overridden = isUnitWageOverridden(
+                  draft.unit_wage,
+                  draft.rate_unit_wage,
+                );
                 const hasOrphanName =
                   Boolean(draft.operation_name.trim()) &&
                   !activityOptions.some(
@@ -515,9 +647,7 @@ export function JobOperationsSection({
                     <TableCell className="px-2 py-2 align-top">
                       <Select
                         value={draft.service_model_id}
-                        disabled={
-                          rowLocked || !draft.technician_id.trim()
-                        }
+                        disabled={rowLocked || !draft.technician_id.trim()}
                         onChange={(event) =>
                           handleOperationChange(
                             draft.key,
@@ -544,16 +674,32 @@ export function JobOperationsSection({
                       </Select>
                       {hasOrphanName ? (
                         <p className="mt-1 text-[10px] text-amber-700">
-                          ค่าเดิม &quot;{draft.operation_name}&quot; ไม่อยู่ใน Rate
-                          Card — กรุณาเลือกใหม่
+                          ค่าเดิม &quot;{draft.operation_name}&quot; — เลือกใหม่
                         </p>
                       ) : null}
-                      {draft.technician_id.trim() &&
-                      activityOptions.length === 0 ? (
-                        <p className="mt-1 text-[10px] text-amber-700">
-                          ช่างนี้ยังไม่มี Rate Card (Activity Type)
-                        </p>
-                      ) : null}
+                    </TableCell>
+                    <TableCell className="px-2 py-2 align-top">
+                      <Input
+                        type="number"
+                        min={0.0001}
+                        step="0.0001"
+                        inputMode="decimal"
+                        value={draft.confirmed_qty}
+                        disabled={rowLocked}
+                        onChange={(event) =>
+                          setDrafts((prev) =>
+                            prev.map((row) =>
+                              row.key === draft.key
+                                ? {
+                                    ...row,
+                                    confirmed_qty: event.target.value,
+                                  }
+                                : row,
+                            ),
+                          )
+                        }
+                        className="h-9 text-right text-xs tabular-nums"
+                      />
                     </TableCell>
                     <TableCell className="px-2 py-2 align-top">
                       <Input
@@ -561,18 +707,51 @@ export function JobOperationsSection({
                         min={0}
                         step="0.0001"
                         inputMode="decimal"
-                        value={draft.wage_cost}
+                        value={draft.unit_wage}
                         disabled={rowLocked}
                         onChange={(event) =>
                           setDrafts((prev) =>
                             prev.map((row) =>
                               row.key === draft.key
-                                ? { ...row, wage_cost: event.target.value }
+                                ? { ...row, unit_wage: event.target.value }
                                 : row,
                             ),
                           )
                         }
                         className="h-9 text-right text-xs tabular-nums"
+                      />
+                      {overridden ? (
+                        <p className="mt-1 text-[10px] text-amber-700">
+                          Override Rate Card
+                        </p>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="px-2 py-2 align-top text-right">
+                      <p className="pt-2 text-xs font-semibold tabular-nums text-slate-900">
+                        ฿{formatMoney(total)}
+                      </p>
+                    </TableCell>
+                    <TableCell className="px-2 py-2 align-top">
+                      <Input
+                        value={draft.remark}
+                        placeholder={
+                          overridden ? "บังคับเมื่อแก้เรต" : "หมายเหตุ"
+                        }
+                        disabled={rowLocked}
+                        onChange={(event) =>
+                          setDrafts((prev) =>
+                            prev.map((row) =>
+                              row.key === draft.key
+                                ? { ...row, remark: event.target.value }
+                                : row,
+                            ),
+                          )
+                        }
+                        className={
+                          overridden && !draft.remark.trim()
+                            ? "h-9 border-amber-300 text-xs"
+                            : "h-9 text-xs"
+                        }
                       />
                     </TableCell>
                     <TableCell className="px-2 py-2 align-top">

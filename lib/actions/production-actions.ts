@@ -10,6 +10,7 @@
  * Cloud schema assumptions (do NOT invent migrations here):
  * - production_jobs.finished_model_id → product_models.id
  * - production_jobs.status is VARCHAR (not ENUM)
+ * - Job → COMPLETED auto-confirms PENDING production_job_operations (SAP Backflush)
  */
 
 import { revalidatePath } from "next/cache";
@@ -530,7 +531,40 @@ export async function updateJobStatus(
       return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ" };
     }
 
+    // SAP Backflush / Auto-Confirmation — Job COMPLETED → ยืนยัน Routing ที่ค้าง
+    if (status === "COMPLETED") {
+      const { error: backflushError } = await supabaseAdmin
+        .from("production_job_operations")
+        .update({ status: "COMPLETED" })
+        .eq("job_id", id)
+        .eq("status", "PENDING");
+
+      if (backflushError) {
+        // ตารางอาจยังไม่มีบนบาง env — ไม่ rollback job status แต่ log ชัด
+        if (
+          backflushError.code !== POSTGRES_UNDEFINED_TABLE &&
+          backflushError.code !== POSTGRES_UNDEFINED_COLUMN
+        ) {
+          console.error(
+            "[updateJobStatus] backflush operations:",
+            backflushError.message,
+          );
+          return {
+            success: false,
+            error:
+              backflushError.message ??
+              "อัปเดตสถานะ Job สำเร็จ แต่ Auto-Confirm Routing ไม่สำเร็จ",
+          };
+        }
+        console.warn(
+          "[updateJobStatus] backflush skipped:",
+          backflushError.message,
+        );
+      }
+    }
+
     revalidatePath(KANBAN_PATH);
+    revalidatePath("/finance/billing-notes");
     return { success: true, error: null };
   } catch (err) {
     console.error("[updateJobStatus]", err);

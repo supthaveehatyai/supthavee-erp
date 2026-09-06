@@ -319,7 +319,13 @@ export type ProductionJobOperation = {
   operation_name: string;
   technician_id: string | null;
   technician_name: string | null;
+  /** ยอดยืนยัน (Yield Confirmation) */
+  confirmed_qty: number;
+  /** ค่าแรงต่อหน่วย */
+  unit_wage: number;
+  /** Total Wage = confirmed_qty × unit_wage */
   wage_cost: number;
+  remark: string | null;
   technician_bill_id: string | null;
   status: ProductionOperationStatus | string;
 };
@@ -329,7 +335,11 @@ export type UpsertJobOperationPayload = {
   job_id: string;
   operation_name: string;
   technician_id?: string | null;
-  wage_cost: number | string;
+  confirmed_qty: number | string;
+  unit_wage: number | string;
+  /** Total Wage — server จะคำนวณใหม่จาก confirmed_qty × unit_wage */
+  wage_cost?: number | string;
+  remark?: string | null;
   status?: ProductionOperationStatus | string;
 };
 

@@ -6,6 +6,7 @@
  */
 
 import { revalidatePath } from "next/cache";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server-admin";
 import {
   KANBAN_STATUSES,
@@ -588,7 +589,31 @@ export async function updateJobStatus(
       return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ" };
     }
 
+    // SAP Backflush / Auto-Confirmation — Job COMPLETED → ยืนยัน Routing ที่ค้าง
+    if (normalized === "COMPLETED") {
+      const admin = createClient() as unknown as SupabaseClient;
+      const { error: backflushError } = await admin
+        .from("production_job_operations")
+        .update({ status: "COMPLETED" })
+        .eq("job_id", id)
+        .eq("status", "PENDING");
+
+      if (backflushError) {
+        console.error(
+          "[updateJobStatus] backflush operations:",
+          backflushError.message,
+        );
+        return {
+          success: false,
+          error:
+            backflushError.message ??
+            "อัปเดตสถานะ Job สำเร็จ แต่ Auto-Confirm Routing ไม่สำเร็จ",
+        };
+      }
+    }
+
     revalidatePath("/production/kanban");
+    revalidatePath("/finance/billing-notes");
     return { success: true, error: null };
   } catch (err) {
     return {

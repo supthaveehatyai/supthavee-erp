@@ -37,6 +37,17 @@ function toWageCost(value: unknown): number | null {
   return Math.round((n + Number.EPSILON) * 10000) / 10000;
 }
 
+function toPositiveQty(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round((n + Number.EPSILON) * 10000) / 10000;
+}
+
+function calcTotalWage(confirmedQty: number, unitWage: number): number {
+  return Math.round((confirmedQty * unitWage + Number.EPSILON) * 10000) / 10000;
+}
+
 function normalizeStatus(value: unknown): ProductionOperationStatus {
   const raw = String(value ?? "PENDING").trim().toUpperCase();
   return isProductionOperationStatus(raw) ? raw : "PENDING";
@@ -48,7 +59,10 @@ function mapOperationRow(
     job_id?: string;
     operation_name?: string | null;
     technician_id?: string | null;
+    confirmed_qty?: number | string | null;
+    unit_wage?: number | string | null;
     wage_cost?: number | string | null;
+    remark?: string | null;
     technician_bill_id?: string | null;
     status?: string | null;
   },
@@ -59,7 +73,13 @@ function mapOperationRow(
   if (!id || !jobId) return null;
 
   const technicianId = String(row.technician_id ?? "").trim() || null;
-  const wage = toWageCost(row.wage_cost) ?? 0;
+  const confirmedQty = toWageCost(row.confirmed_qty) ?? 0;
+  const unitWage = toWageCost(row.unit_wage);
+  const storedTotal = toWageCost(row.wage_cost) ?? 0;
+  const wage =
+    unitWage != null && confirmedQty > 0
+      ? calcTotalWage(confirmedQty, unitWage)
+      : storedTotal;
 
   return {
     id,
@@ -69,7 +89,10 @@ function mapOperationRow(
     technician_name: technicianId
       ? (technicianNameById.get(technicianId) ?? null)
       : null,
+    confirmed_qty: confirmedQty,
+    unit_wage: unitWage ?? (confirmedQty > 0 ? storedTotal / confirmedQty : storedTotal),
     wage_cost: wage,
+    remark: String(row.remark ?? "").trim() || null,
     technician_bill_id: String(row.technician_bill_id ?? "").trim() || null,
     status: normalizeStatus(row.status),
   };
@@ -144,7 +167,10 @@ export async function getJobOperations(
         job_id,
         operation_name,
         technician_id,
+        confirmed_qty,
+        unit_wage,
         wage_cost,
+        remark,
         technician_bill_id,
         status
       `,
@@ -198,7 +224,9 @@ export async function upsertJobOperation(
     const existingId = String(payload?.id ?? "").trim() || null;
     const operationName = String(payload?.operation_name ?? "").trim();
     const technicianId = String(payload?.technician_id ?? "").trim() || null;
-    const wageCost = toWageCost(payload?.wage_cost);
+    const confirmedQty = toPositiveQty(payload?.confirmed_qty);
+    const unitWage = toWageCost(payload?.unit_wage);
+    const remark = String(payload?.remark ?? "").trim() || null;
     const status = normalizeStatus(payload?.status);
 
     if (!jobId) {
@@ -211,13 +239,22 @@ export async function upsertJobOperation(
         data: null,
       };
     }
-    if (wageCost == null) {
+    if (confirmedQty == null) {
       return {
         success: false,
-        error: "ค่าแรง (wage_cost) ต้องเป็นตัวเลข ≥ 0 (ทศนิยมได้)",
+        error: "จำนวนยืนยัน (confirmed_qty) ต้องมากกว่า 0",
         data: null,
       };
     }
+    if (unitWage == null) {
+      return {
+        success: false,
+        error: "ค่าแรงต่อหน่วย (unit_wage) ต้องเป็นตัวเลข ≥ 0",
+        data: null,
+      };
+    }
+
+    const wageCost = calcTotalWage(confirmedQty, unitWage);
 
     const supabase = getSupabaseAdmin();
 
@@ -272,6 +309,19 @@ export async function upsertJobOperation(
       }
     }
 
+    const rowPayload = {
+      operation_name: operationName,
+      technician_id: technicianId,
+      confirmed_qty: confirmedQty,
+      unit_wage: unitWage,
+      wage_cost: wageCost,
+      remark,
+      status,
+    };
+
+    const selectCols =
+      "id, job_id, operation_name, technician_id, confirmed_qty, unit_wage, wage_cost, remark, technician_bill_id, status";
+
     if (existingId) {
       const { data: existing, error: existingError } = await supabase
         .from("production_job_operations")
@@ -303,17 +353,10 @@ export async function upsertJobOperation(
 
       const { data: updated, error: updateError } = await supabase
         .from("production_job_operations")
-        .update({
-          operation_name: operationName,
-          technician_id: technicianId,
-          wage_cost: wageCost,
-          status,
-        })
+        .update(rowPayload)
         .eq("id", existingId)
         .eq("job_id", jobId)
-        .select(
-          "id, job_id, operation_name, technician_id, wage_cost, technician_bill_id, status",
-        )
+        .select(selectCols)
         .maybeSingle();
 
       if (updateError || !updated) {
@@ -345,14 +388,9 @@ export async function upsertJobOperation(
       .from("production_job_operations")
       .insert({
         job_id: jobId,
-        operation_name: operationName,
-        technician_id: technicianId,
-        wage_cost: wageCost,
-        status,
+        ...rowPayload,
       })
-      .select(
-        "id, job_id, operation_name, technician_id, wage_cost, technician_bill_id, status",
-      )
+      .select(selectCols)
       .maybeSingle();
 
     if (insertError || !inserted) {
