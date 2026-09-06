@@ -592,11 +592,13 @@ export async function updateJobStatus(
     // SAP Backflush / Auto-Confirmation — Job COMPLETED → ยืนยัน Routing ที่ค้าง
     if (normalized === "COMPLETED") {
       const admin = createClient() as unknown as SupabaseClient;
-      const { error: backflushError } = await admin
+      const { data: flushed, error: backflushError } = await admin
         .from("production_job_operations")
         .update({ status: "COMPLETED" })
         .eq("job_id", id)
-        .eq("status", "PENDING");
+        .eq("status", "PENDING")
+        .not("technician_id", "is", null)
+        .select("id");
 
       if (backflushError) {
         console.error(
@@ -610,6 +612,10 @@ export async function updateJobStatus(
             "อัปเดตสถานะ Job สำเร็จ แต่ Auto-Confirm Routing ไม่สำเร็จ",
         };
       }
+
+      console.info(
+        `[updateJobStatus] backflush confirmed ${flushed?.length ?? 0} routing operation(s) for job ${id}`,
+      );
     }
 
     revalidatePath("/production/kanban");

@@ -5,6 +5,9 @@
  * รวม 2 แหล่งค่าแรง (Accrual Basis):
  *   A) SERVICE  → document_items (งานบริการลูกค้า / is_service)
  *   B) ROUTING  → production_job_operations (In-house Routing)
+ *      เงื่อนไข: status = COMPLETED, technician_id IS NOT NULL,
+ *               technician_bill_id IS NULL, wage_cost > 0
+ *      (สถานะ COMPLETED มาจาก Auto-Confirmation / Backflush เมื่อ Job → COMPLETED)
  *
  * Zero Client-Side Fetching: supabaseAdmin (Service Role) only.
  * Types: `@/types/technician-billing`
@@ -290,7 +293,58 @@ export async function getUnbilledTechnicianJobs(
       serviceQuery = serviceQuery.eq("technician_id", technicianId);
     }
 
+    // Catch-up Backflush (Accrual): Job COMPLETED แล้วแต่ Routing ยัง PENDING
+    // — ยืนยันอัตโนมัติก่อนดึงคิววางบิล (กรณีย้าย Kanban ก่อนมี logic / failed soft-skip)
+    {
+      const { data: pendingOps } = await operationsTable(supabase)
+        .select("id, job_id")
+        .eq("status", "PENDING")
+        .not("technician_id", "is", null);
+
+      const pendingJobIds = [
+        ...new Set(
+          (pendingOps ?? [])
+            .map((row) => String(row.job_id ?? "").trim())
+            .filter(Boolean),
+        ),
+      ];
+
+      if (pendingJobIds.length > 0) {
+        const { data: completedJobs } = await supabase
+          .from("production_jobs")
+          .select("id")
+          .in("id", pendingJobIds)
+          .eq("status", BILLABLE_JOB_STATUS);
+
+        const completedIdSet = new Set(
+          (completedJobs ?? []).map((row) => String(row.id ?? "").trim()),
+        );
+        const flushIds = (pendingOps ?? [])
+          .filter((row) => completedIdSet.has(String(row.job_id ?? "").trim()))
+          .map((row) => String(row.id ?? "").trim())
+          .filter(Boolean);
+
+        if (flushIds.length > 0) {
+          const { error: catchUpError } = await operationsTable(supabase)
+            .update({ status: BILLABLE_OPERATION_STATUS })
+            .in("id", flushIds)
+            .eq("status", "PENDING");
+
+          if (catchUpError) {
+            console.warn(
+              "[getUnbilledTechnicianJobs] catch-up backflush:",
+              catchUpError.message,
+            );
+          } else {
+            revalidatePath("/finance/billing-notes");
+            revalidatePath("/production/kanban");
+          }
+        }
+      }
+    }
+
     // ── SOURCE B: In-house Routing (production_job_operations) ───────────
+    // Strict: status = COMPLETED + technician assigned + ยังไม่ผูก TB + มีค่าแรง
     let routingQuery = operationsTable(supabase)
       .select(
         `

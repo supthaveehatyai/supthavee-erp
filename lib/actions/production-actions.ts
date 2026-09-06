@@ -532,15 +532,17 @@ export async function updateJobStatus(
     }
 
     // SAP Backflush / Auto-Confirmation — Job COMPLETED → ยืนยัน Routing ที่ค้าง
+    // (เฉพาะแถวที่มีช่างแล้ว และยัง PENDING — พร้อมเข้า TB ได้ทันที)
     if (status === "COMPLETED") {
-      const { error: backflushError } = await supabaseAdmin
+      const { data: flushed, error: backflushError } = await supabaseAdmin
         .from("production_job_operations")
         .update({ status: "COMPLETED" })
         .eq("job_id", id)
-        .eq("status", "PENDING");
+        .eq("status", "PENDING")
+        .not("technician_id", "is", null)
+        .select("id");
 
       if (backflushError) {
-        // ตารางอาจยังไม่มีบนบาง env — ไม่ rollback job status แต่ log ชัด
         if (
           backflushError.code !== POSTGRES_UNDEFINED_TABLE &&
           backflushError.code !== POSTGRES_UNDEFINED_COLUMN
@@ -559,6 +561,10 @@ export async function updateJobStatus(
         console.warn(
           "[updateJobStatus] backflush skipped:",
           backflushError.message,
+        );
+      } else {
+        console.info(
+          `[updateJobStatus] backflush confirmed ${flushed?.length ?? 0} routing operation(s) for job ${id}`,
         );
       }
     }
