@@ -167,7 +167,7 @@ const JOB_SELECT = `
         ref_document_id,
         finished_model_id,
         target_quantity,
-        documents!production_jobs_ref_document_id_fkey (
+        documents (
           id,
           doc_no,
           contacts!documents_contact_id_fkey (

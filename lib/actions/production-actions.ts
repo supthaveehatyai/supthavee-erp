@@ -1296,7 +1296,7 @@ export async function getProductionJobDetails(
         ref_document_id,
         mockup_image_url,
         remark,
-        documents!production_jobs_ref_document_id_fkey (
+        documents (
           id,
           doc_no,
           doc_type
@@ -1326,7 +1326,7 @@ export async function getProductionJobDetails(
 
       if (embedded.error) {
         console.warn(
-          "[getProductionJobDetails] documents!production_jobs_ref_document_id_fkey failed, fallback:",
+          "[getProductionJobDetails] documents embed failed, fallback:",
           embedded.error.message,
         );
         const plain = await supabaseAdmin
