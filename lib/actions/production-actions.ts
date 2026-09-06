@@ -1286,10 +1286,24 @@ export async function getProductionJobDetails(
 
     const supabaseAdmin = getSupabaseAdmin();
 
-    const { data: job, error: jobError } = await supabaseAdmin
-      .from("production_jobs")
-      .select(
-        `
+    const JOB_DETAIL_SELECT_WITH_SO = `
+        id,
+        job_no,
+        status,
+        finished_model_id,
+        target_quantity,
+        estimated_completion_date,
+        ref_document_id,
+        mockup_image_url,
+        remark,
+        documents!production_jobs_ref_document_id_fkey (
+          id,
+          doc_no,
+          doc_type
+        )
+      `;
+
+    const JOB_DETAIL_SELECT_PLAIN = `
         id,
         job_no,
         status,
@@ -1299,18 +1313,40 @@ export async function getProductionJobDetails(
         ref_document_id,
         mockup_image_url,
         remark
-      `,
-      )
-      .eq("id", id)
-      .maybeSingle();
+      `;
 
-    if (jobError) {
-      return {
-        success: false,
-        error: jobError.message ?? "ดึงใบสั่งผลิตไม่สำเร็จ",
-        data: null,
-      };
+    let job: Record<string, unknown> | null = null;
+
+    {
+      const embedded = await supabaseAdmin
+        .from("production_jobs")
+        .select(JOB_DETAIL_SELECT_WITH_SO)
+        .eq("id", id)
+        .maybeSingle();
+
+      if (embedded.error) {
+        console.warn(
+          "[getProductionJobDetails] documents!production_jobs_ref_document_id_fkey failed, fallback:",
+          embedded.error.message,
+        );
+        const plain = await supabaseAdmin
+          .from("production_jobs")
+          .select(JOB_DETAIL_SELECT_PLAIN)
+          .eq("id", id)
+          .maybeSingle();
+        if (plain.error) {
+          return {
+            success: false,
+            error: plain.error.message ?? "ดึงใบสั่งผลิตไม่สำเร็จ",
+            data: null,
+          };
+        }
+        job = (plain.data as Record<string, unknown> | null) ?? null;
+      } else {
+        job = (embedded.data as Record<string, unknown> | null) ?? null;
+      }
     }
+
     if (!job) {
       return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ", data: null };
     }
@@ -1322,7 +1358,28 @@ export async function getProductionJobDetails(
       ? String(job.ref_document_id)
       : null;
 
-    const [modelRes, soRes, itemsRes, materialsRes, serviceDocItemsRes, techRes, ratesRes] =
+    function unwrapEmbeddedDoc(
+      value: unknown,
+    ): { id: string; doc_no: string | null; doc_type: string | null } | null {
+      if (!value) return null;
+      const row = Array.isArray(value) ? value[0] : value;
+      if (!row || typeof row !== "object") return null;
+      const doc = row as {
+        id?: string;
+        doc_no?: string | null;
+        doc_type?: string | null;
+      };
+      if (!doc.id) return null;
+      return {
+        id: String(doc.id),
+        doc_no: doc.doc_no == null ? null : String(doc.doc_no),
+        doc_type: doc.doc_type == null ? null : String(doc.doc_type),
+      };
+    }
+
+    let soDoc = unwrapEmbeddedDoc(job.documents);
+
+    const [modelRes, soFallbackRes, itemsRes, materialsRes, serviceDocItemsRes, techRes, ratesRes] =
       await Promise.all([
         finishedModelId
           ? supabaseAdmin
@@ -1333,7 +1390,7 @@ export async function getProductionJobDetails(
               .eq("id", finishedModelId)
               .maybeSingle()
           : Promise.resolve({ data: null, error: null }),
-        refDocumentId
+        !soDoc && refDocumentId
           ? supabaseAdmin
               .from("documents")
               .select("id, doc_no, doc_type")
@@ -1397,6 +1454,26 @@ export async function getProductionJobDetails(
           .from("technician_rates")
           .select("technician_id, service_model_id, default_wage"),
       ]);
+
+    if (!soDoc && soFallbackRes.data?.id) {
+      soDoc = {
+        id: String(soFallbackRes.data.id),
+        doc_no:
+          soFallbackRes.data.doc_no == null
+            ? null
+            : String(soFallbackRes.data.doc_no),
+        doc_type:
+          soFallbackRes.data.doc_type == null
+            ? null
+            : String(soFallbackRes.data.doc_type),
+      };
+    }
+    if (soFallbackRes.error) {
+      console.warn(
+        "[getProductionJobDetails] documents fallback:",
+        soFallbackRes.error.message,
+      );
+    }
 
     if (itemsRes.error) {
       return {
@@ -1662,7 +1739,7 @@ export async function getProductionJobDetails(
         ? String(job.estimated_completion_date)
         : null,
       ref_document_id: refDocumentId,
-      so_doc_no: soRes.data?.doc_no ? String(soRes.data.doc_no) : null,
+      so_doc_no: soDoc?.doc_no ? String(soDoc.doc_no) : null,
       mockup_image_url: mockupImageUrl,
       remark,
       items,

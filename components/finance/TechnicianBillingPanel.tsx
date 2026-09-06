@@ -54,7 +54,7 @@ const JOB_STATUS_LABEL: Record<string, string> = {
 
 const SOURCE_TYPE_LABEL: Record<string, string> = {
   SERVICE: "งานบริการ",
-  ROUTING: "Routing",
+  ROUTING: "งานผลิต",
 };
 
 export type TechnicianBillingPanelProps = {
@@ -488,7 +488,7 @@ export function TechnicianBillingPanel({
           <AlertDialogHeader>
             <AlertDialogTitle>ยืนยันสร้างใบสรุปค่าแรง</AlertDialogTitle>
             <AlertDialogDescription>
-              จะรวบยอด {rows.length} บรรทัด (SERVICE + ROUTING) ตามตัวกรองปัจจุบัน
+              จะรวบยอด {rows.length} บรรทัด (งานบริการ + งานผลิต) ตามตัวกรองปัจจุบัน
               เป็นเอกสาร TB (สรุปวางบิลช่าง)
               <span className="mt-2 block space-y-1 text-slate-600">
                 <span className="block">
