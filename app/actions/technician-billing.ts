@@ -335,9 +335,6 @@ export async function getUnbilledTechnicianJobs(
               "[getUnbilledTechnicianJobs] catch-up backflush:",
               catchUpError.message,
             );
-          } else {
-            revalidatePath("/finance/billing-notes");
-            revalidatePath("/production/kanban");
           }
         }
       }
