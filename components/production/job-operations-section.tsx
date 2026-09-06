@@ -48,7 +48,9 @@ import {
 export type JobOperationsSectionProps = {
   jobId: string;
   technicians: ProductionJobTechnicianOption[];
-  /** production_jobs.target_quantity — default confirmed_qty */
+  /** production_job_items — ใช้คำนวณ Planned Yield (Σ quantity) */
+  jobItems?: Array<{ quantity: number | string }>;
+  /** fallback เมื่อยังไม่มี job items */
   targetQuantity?: number;
   disabled?: boolean;
 };
@@ -98,14 +100,25 @@ function isUnitWageOverridden(
   return Math.abs(current - rateUnitWage) > 0.00005;
 }
 
-function emptyDraft(key: string, targetQty: number): OperationDraft {
+function isQtyVariance(
+  confirmedQtyRaw: string,
+  plannedQty: number,
+): boolean {
+  if (!(plannedQty > 0)) return false;
+  const current = toDecimal(confirmedQtyRaw);
+  if (current == null) return false;
+  return Math.abs(current - plannedQty) > 0.00005;
+}
+
+function emptyDraft(key: string, plannedQty: number): OperationDraft {
+  const qty = plannedQty > 0 ? plannedQty : 0;
   return {
     key,
     id: null,
     service_model_id: "",
     operation_name: "",
     technician_id: "",
-    confirmed_qty: formatDecimal(targetQty > 0 ? targetQty : 1),
+    confirmed_qty: qty > 0 ? formatDecimal(qty) : "",
     unit_wage: "0",
     rate_unit_wage: null,
     remark: "",
@@ -161,23 +174,35 @@ function formatMoney(value: number): string {
 export function JobOperationsSection({
   jobId,
   technicians,
+  jobItems = [],
   targetQuantity = 0,
   disabled = false,
 }: JobOperationsSectionProps) {
   const router = useRouter();
   const reactId = useId();
   const draftSeqRef = useRef(0);
+  const remarkInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [drafts, setDrafts] = useState<OperationDraft[]>([]);
   const [rates, setRates] = useState<RoutingActivityRate[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isSubmitting, startSubmit] = useTransition();
 
-  const defaultQty = useMemo(() => {
-    const n = Number(targetQuantity);
-    if (!Number.isFinite(n) || n <= 0) return 1;
-    return Math.round((n + Number.EPSILON) * 10000) / 10000;
-  }, [targetQuantity]);
+  /** Planned Yield = Σ production_job_items.quantity (fallback: target_quantity) */
+  const totalJobQty = useMemo(() => {
+    const fromItems = jobItems.reduce((sum, item) => {
+      const n = Number(item.quantity ?? 0);
+      return sum + (Number.isFinite(n) ? n : 0);
+    }, 0);
+    if (Number.isFinite(fromItems) && fromItems > 0) {
+      return Math.round((fromItems + Number.EPSILON) * 10000) / 10000;
+    }
+    const fromTarget = Number(targetQuantity);
+    if (Number.isFinite(fromTarget) && fromTarget > 0) {
+      return Math.round((fromTarget + Number.EPSILON) * 10000) / 10000;
+    }
+    return 0;
+  }, [jobItems, targetQuantity]);
 
   const nextKey = useCallback(() => {
     draftSeqRef.current += 1;
@@ -237,7 +262,7 @@ export function JobOperationsSection({
             row.operation_name,
           );
           const confirmed =
-            row.confirmed_qty > 0 ? row.confirmed_qty : defaultQty;
+            row.confirmed_qty > 0 ? row.confirmed_qty : totalJobQty;
           const unit =
             row.unit_wage > 0
               ? row.unit_wage
@@ -250,7 +275,8 @@ export function JobOperationsSection({
             service_model_id: serviceModelId,
             operation_name: row.operation_name,
             technician_id: techId,
-            confirmed_qty: formatDecimal(confirmed),
+            confirmed_qty:
+              confirmed > 0 ? formatDecimal(confirmed) : "",
             unit_wage: formatDecimal(unit),
             rate_unit_wage: rateWage,
             remark: row.remark ?? "",
@@ -263,7 +289,7 @@ export function JobOperationsSection({
     } finally {
       setIsLoading(false);
     }
-  }, [jobId, reactId, defaultQty]);
+  }, [jobId, reactId, totalJobQty]);
 
   useEffect(() => {
     void reload();
@@ -275,8 +301,20 @@ export function JobOperationsSection({
     return ratesByTechnician.get(techId) ?? [];
   }
 
+  function focusRemark(draftKey: string) {
+    window.requestAnimationFrame(() => {
+      remarkInputRefs.current[draftKey]?.focus();
+    });
+  }
+
   function handleAddRow() {
-    setDrafts((prev) => [...prev, emptyDraft(nextKey(), defaultQty)]);
+    if (!(totalJobQty > 0)) {
+      toast.error(
+        "ไม่พบยอดเป้าหมายจากรายการ SKU ของใบงาน — ตรวจสอบ production_job_items",
+      );
+      return;
+    }
+    setDrafts((prev) => [...prev, emptyDraft(nextKey(), totalJobQty)]);
   }
 
   function handleTechnicianChange(draftKey: string, nextTechnicianId: string) {
@@ -430,10 +468,21 @@ export function JobOperationsSection({
         draft.unit_wage,
         draft.rate_unit_wage,
       );
+      const qtyVariance = isQtyVariance(draft.confirmed_qty, totalJobQty);
+
+      if (qtyVariance && !draft.remark.trim()) {
+        toast.error(
+          "กรุณาระบุหมายเหตุ เนื่องจากจำนวนที่ทำได้ไม่ตรงกับเป้าหมายการผลิต",
+        );
+        focusRemark(draft.key);
+        return;
+      }
+
       if (overridden && !draft.remark.trim()) {
         toast.error(
           `กรุณาระบุ Remark สำหรับ "${name}" เพราะมีการแก้ unit_wage จาก Rate Card`,
         );
+        focusRemark(draft.key);
         return;
       }
 
@@ -533,13 +582,15 @@ export function JobOperationsSection({
           ขั้นตอนการผลิตและค่าแรง (Yield Confirmation)
         </h3>
         <span className="text-xs text-slate-400">
-          {drafts.length} ขั้นตอน · Target {formatDecimal(defaultQty)}
+          {drafts.length} ขั้นตอน · Planned Yield{" "}
+          {totalJobQty > 0 ? formatDecimal(totalJobQty) : "—"}
         </span>
       </div>
       <p className="text-xs leading-relaxed text-slate-500">
-        SAP Yield Confirmation —{" "}
+        SAP Yield Confirmation — Planned = Σ SKU ในใบงาน (
+        <span className="font-mono">production_job_items</span>) ·{" "}
         <span className="font-mono">wage_cost = confirmed_qty × unit_wage</span>
-        · แก้ unit_wage จาก Rate Card ต้องใส่ Remark
+        · ถ้า Qty ไม่ตรงเป้า หรือแก้ Rate Card ต้องใส่ Remark
       </p>
 
       {loadError ? (
@@ -609,6 +660,11 @@ export function JobOperationsSection({
                   draft.unit_wage,
                   draft.rate_unit_wage,
                 );
+                const qtyVariance = isQtyVariance(
+                  draft.confirmed_qty,
+                  totalJobQty,
+                );
+                const remarkRequired = overridden || qtyVariance;
                 const hasOrphanName =
                   Boolean(draft.operation_name.trim()) &&
                   !activityOptions.some(
@@ -698,8 +754,17 @@ export function JobOperationsSection({
                             ),
                           )
                         }
-                        className="h-9 text-right text-xs tabular-nums"
+                        className={
+                          qtyVariance
+                            ? "h-9 border-amber-300 text-right text-xs tabular-nums"
+                            : "h-9 text-right text-xs tabular-nums"
+                        }
                       />
+                      {qtyVariance ? (
+                        <p className="mt-1 text-[10px] text-amber-700">
+                          จำนวนไม่ตรงกับใบงาน บังคับระบุหมายเหตุ
+                        </p>
+                      ) : null}
                     </TableCell>
                     <TableCell className="px-2 py-2 align-top">
                       <Input
@@ -733,9 +798,14 @@ export function JobOperationsSection({
                     </TableCell>
                     <TableCell className="px-2 py-2 align-top">
                       <Input
+                        ref={(el) => {
+                          remarkInputRefs.current[draft.key] = el;
+                        }}
                         value={draft.remark}
                         placeholder={
-                          overridden ? "บังคับเมื่อแก้เรต" : "หมายเหตุ"
+                          remarkRequired
+                            ? "บังคับเมื่อ Qty/เรตต่างจากแผน"
+                            : "หมายเหตุ"
                         }
                         disabled={rowLocked}
                         onChange={(event) =>
@@ -748,7 +818,7 @@ export function JobOperationsSection({
                           )
                         }
                         className={
-                          overridden && !draft.remark.trim()
+                          remarkRequired && !draft.remark.trim()
                             ? "h-9 border-amber-300 text-xs"
                             : "h-9 text-xs"
                         }

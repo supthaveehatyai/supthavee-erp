@@ -545,6 +545,7 @@ export function ProductionJobDetailSheet({
               <JobOperationsSection
                 jobId={detail.id}
                 technicians={technicians}
+                jobItems={detail.items}
                 targetQuantity={detail.target_quantity}
                 disabled={!canEditAssignment}
               />
