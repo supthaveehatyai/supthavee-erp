@@ -16,6 +16,7 @@
 
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { requireSessionUserId } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server-admin";
 import {
   emptyProductionBoard,
@@ -533,9 +534,35 @@ export async function updateJobStatus(
       return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ" };
     }
 
-    // SAP Backflush / Auto-Confirmation — Job COMPLETED → ยืนยัน Routing ที่ค้าง
-    // (เฉพาะแถวที่มีช่างแล้ว และยัง PENDING — พร้อมเข้า TB ได้ทันที)
     if (status === "COMPLETED") {
+      const previousStatus = String(current.status ?? "").trim();
+
+      const revertJobStatus = async () => {
+        if (previousStatus && previousStatus !== "COMPLETED") {
+          await supabaseAdmin
+            .from("production_jobs")
+            .update({
+              status: previousStatus,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", id);
+        }
+      };
+
+      const owner = await requireSessionUserId();
+      if (!owner.ok) {
+        await revertJobStatus();
+        throw new Error(owner.error);
+      }
+
+      const materialResult = await executeMaterialBackflush(id, owner.userId);
+      if (!materialResult.success) {
+        await revertJobStatus();
+        throw new Error(materialResult.error);
+      }
+
+      // SAP Backflush / Auto-Confirmation — Job COMPLETED → ยืนยัน Routing ที่ค้าง
+      // (เฉพาะแถวที่มีช่างแล้ว และยัง PENDING — พร้อมเข้า TB ได้ทันที)
       const { data: flushed, error: backflushError } = await supabaseAdmin
         .from("production_job_operations")
         .update({ status: "COMPLETED" })
@@ -572,6 +599,7 @@ export async function updateJobStatus(
     }
 
     revalidatePath(KANBAN_PATH);
+    revalidatePath("/inventory/ledger");
     revalidatePath("/finance/billing-notes");
     return { success: true, error: null };
   } catch (err) {
