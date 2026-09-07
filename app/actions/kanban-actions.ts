@@ -31,6 +31,7 @@ import {
   type UpdateProductionJobAssignmentInput,
   type UpdateProductionJobAssignmentResult,
 } from "@/types/kanban";
+import { getJobOperations } from "@/lib/actions/production/job-operations-actions";
 import { resolveProductionAttachmentUrls } from "@/lib/utils/storage-tier";
 
 const PRODUCTION_ATTACHMENTS_BUCKET = "production_attachments";
@@ -119,6 +120,11 @@ function toWageCost(value: number | string | null | undefined): number {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n) || n < 0) return 0;
   return Math.round((n + Number.EPSILON) * 10000) / 10000;
+}
+
+/** ใบสั่งผลิต MTO — job_no หรือเอกสารอ้างอิงขึ้นต้น MTO- */
+function isMtoRefNo(value: string | null | undefined): boolean {
+  return /^MTO-/i.test(String(value ?? "").trim());
 }
 
 function mapJobCard(row: ProductionJobRow): ProductionJobCard {
@@ -950,9 +956,25 @@ export async function getJobDetails(
       row.ref_document_id,
     );
 
+    let routingOperations: ProductionJobDetails["routing_operations"] = [];
+    const isMtoJob =
+      isMtoRefNo(row.job_no) || isMtoRefNo(card.document_no);
+    if (isMtoJob) {
+      const opsResult = await getJobOperations(id);
+      if (opsResult.success) {
+        routingOperations = opsResult.data;
+      } else {
+        console.warn(
+          "[getJobDetails] production_job_operations:",
+          opsResult.error,
+        );
+      }
+    }
+
     const jobDetails: ProductionJobDetails = {
       ...card,
       line_items: lineItems,
+      routing_operations: routingOperations,
       service_model_id: serviceModel?.id ?? null,
       service_model: serviceModel,
     };

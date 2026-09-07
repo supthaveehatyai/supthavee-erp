@@ -35,6 +35,7 @@ import {
   type TechnicianOption,
   type TechnicianRateOption,
 } from "@/types/kanban";
+import { PRODUCTION_OPERATION_STATUS_LABEL } from "@/types/production";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import {
@@ -103,7 +104,16 @@ function formatDueDate(value: string | null): string {
 }
 
 function formatQty(value: number): string {
-  return value.toLocaleString("th-TH");
+  return value.toLocaleString("th-TH", {
+    maximumFractionDigits: 4,
+  });
+}
+
+function formatMoney(value: number): string {
+  return value.toLocaleString("th-TH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  });
 }
 
 export type JobDetailSheetProps = {
@@ -304,6 +314,8 @@ export function JobDetailSheet({
   const canEditAssignment = job && job.status !== "CANCELLED";
   const goodsItems = (job?.line_items ?? []).filter((item) => !item.is_service);
   const serviceItems = (job?.line_items ?? []).filter((item) => item.is_service);
+  const routingOps = job?.routing_operations ?? [];
+  const laborRowCount = serviceItems.length + routingOps.length;
 
   return (
     <>
@@ -530,13 +542,13 @@ export function JobDetailSheet({
                       งานบริการ (Service Products)
                     </h3>
                     <span className="text-xs text-slate-400">
-                      ({serviceItems.length})
+                      ({laborRowCount})
                     </span>
                   </div>
 
-                  {serviceItems.length === 0 ? (
+                  {laborRowCount === 0 ? (
                     <p className="rounded-lg border border-dashed border-violet-200 bg-violet-50/60 px-3 py-6 text-center text-xs text-slate-400">
-                      ไม่มีงานบริการในเอกสารต้นทาง
+                      ไม่มีงานบริการหรือขั้นตอนผลิตในใบงานนี้
                     </p>
                   ) : (
                     <div className="overflow-hidden rounded-xl border border-violet-200">
@@ -659,6 +671,50 @@ export function JobDetailSheet({
                                       ดึงเรต...
                                     </p>
                                   ) : null}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                          {routingOps.map((op) => {
+                            const statusKey = String(op.status ?? "")
+                              .trim()
+                              .toUpperCase();
+                            const statusLabel =
+                              statusKey === "COMPLETED" || statusKey === "PENDING"
+                                ? PRODUCTION_OPERATION_STATUS_LABEL[statusKey]
+                                : statusKey || "—";
+                            const billed = Boolean(op.technician_bill_id);
+                            return (
+                              <TableRow key={`routing-${op.id}`}>
+                                <TableCell className="align-top font-mono text-xs font-semibold text-slate-800">
+                                  {op.operation_name || "—"}
+                                  <span className="mt-1 block text-[10px] font-semibold text-teal-700">
+                                    งานผลิต (Routing)
+                                  </span>
+                                </TableCell>
+                                <TableCell className="align-top text-xs text-slate-700">
+                                  <p className="font-medium">{statusLabel}</p>
+                                  {op.remark ? (
+                                    <p className="mt-0.5 text-[10px] text-slate-400">
+                                      {op.remark}
+                                    </p>
+                                  ) : null}
+                                </TableCell>
+                                <TableCell className="align-top text-right text-xs font-semibold tabular-nums text-slate-800">
+                                  {formatQty(op.confirmed_qty)}
+                                </TableCell>
+                                <TableCell className="align-top text-xs text-slate-800">
+                                  <p className="font-medium">
+                                    {op.technician_name || "— ไม่ระบุ —"}
+                                  </p>
+                                  {billed ? (
+                                    <p className="mt-1 text-[10px] text-emerald-700">
+                                      วางบิลช่างแล้ว
+                                    </p>
+                                  ) : null}
+                                </TableCell>
+                                <TableCell className="align-top text-right text-xs font-semibold tabular-nums text-slate-800">
+                                  {formatMoney(op.wage_cost)}
                                 </TableCell>
                               </TableRow>
                             );

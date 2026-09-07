@@ -3,6 +3,7 @@
  */
 
 import type { Database } from "@/src/types/supabase";
+import type { ProductionJobOperation } from "@/types/production";
 import type { StorageTier } from "@/types/storage-tier";
 
 export type ProductionJobType =
@@ -102,6 +103,11 @@ export type ProductionJobServiceModel = {
 
 export type ProductionJobDetails = ProductionJobCard & {
   line_items: ProductionJobLineItem[];
+  /**
+   * In-house Routing ของใบ MTO (production_job_operations)
+   * แยกจาก document_items — ห้ามบันทึกกลับไปตารางงานบริการ
+   */
+  routing_operations: ProductionJobOperation[];
   /** งานบริการหลักจากเอกสารต้นทาง (product_models.is_service) */
   service_model_id: string | null;
   service_model: ProductionJobServiceModel | null;

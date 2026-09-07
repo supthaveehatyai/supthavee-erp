@@ -1793,7 +1793,8 @@ function pickRawMaterialSkuId(
  * Material Backflush — ตัดสต็อกวัตถุดิบ (inventory_ledger OUT)
  * เมื่อใบสั่งผลิตสถานะ COMPLETED โดยอ้างอิง BOM Snapshot ใน production_job_materials
  *
- * qty = actual_used_qty ?? planned_qty
+ * qty = actual_used_qty ?? planned_qty (ยอดรวมจาก BOM Snapshot แล้ว — ห้ามคูณ target_quantity ซ้ำ)
+ * เก็บทศนิยม 4 ตำแหน่งตาม NUMERIC(14,4) — ห้าม parseInt / Math.round / ceil / floor
  * product_id = SKU วัตถุดิบไซส์ '00' ของ raw_material_model_id
  *
  * inventory_ledger schema (Cloud): product_id, trans_type, qty, notes, unit_cost
@@ -1957,11 +1958,11 @@ export async function executeMaterialBackflush(
       const modelId = String(row.raw_material_model_id ?? "").trim();
       if (!modelId) continue;
 
-      const qty =
-        row.actual_used_qty == null
-          ? toQty(row.planned_qty)
-          : toQty(row.actual_used_qty);
-      if (qty <= 0) continue;
+      // WIP snapshot เป็นยอดรวมแล้ว — ใช้ตรง ๆ ไม่คูณจำนวน MTO ซ้ำ
+      const sourceQty =
+        row.actual_used_qty == null ? row.planned_qty : row.actual_used_qty;
+      const qty = parseFloat(Number(sourceQty).toFixed(4));
+      if (!Number.isFinite(qty) || qty <= 0) continue;
 
       const productId = skuByModelId.get(modelId);
       if (!productId) {
