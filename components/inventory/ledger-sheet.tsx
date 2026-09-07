@@ -31,7 +31,9 @@ import {
 import { cn } from "@/lib/utils";
 
 function formatQty(value: number): string {
-  return value.toLocaleString("th-TH");
+  return value.toLocaleString("th-TH", {
+    maximumFractionDigits: 4,
+  });
 }
 
 function formatTxnDate(value: string): string {

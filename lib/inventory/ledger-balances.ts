@@ -8,7 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 function toQty(value: number | string | null | undefined): number {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n)) return 0;
-  return Math.trunc(n);
+  return n;
 }
 
 function signedLedgerQty(transType: string | null | undefined, qty: number): number {

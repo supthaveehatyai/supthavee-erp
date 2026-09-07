@@ -219,7 +219,7 @@ function escapeIlikePattern(raw: string): string {
 function toQty(value: number | string | null | undefined): number {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n)) return 0;
-  return Math.trunc(n);
+  return n;
 }
 
 function normalizeTransType(value: string | null | undefined): StockTransactionType {
@@ -273,6 +273,7 @@ function documentNoFromNotes(notes: string | null | undefined): string | null {
     /จากเอกสาร\s+([A-Za-z0-9\-_/]+)/,
     /ยกเลิกเอกสาร\s+([A-Za-z0-9\-_/]+)/,
     /เอกสาร\s+([A-Za-z0-9\-_/]+)/,
+    /\b(MTO-\d{4}-\d+)\b/i,
   ];
   for (const re of patterns) {
     const m = notes.match(re);

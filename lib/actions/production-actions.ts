@@ -1793,13 +1793,12 @@ function pickRawMaterialSkuId(
  * Material Backflush — ตัดสต็อกวัตถุดิบ (inventory_ledger OUT)
  * เมื่อใบสั่งผลิตสถานะ COMPLETED โดยอ้างอิง BOM Snapshot ใน production_job_materials
  *
- * qty = actual_used_qty ?? planned_qty (ยอดรวมจาก BOM Snapshot แล้ว — ห้ามคูณ target_quantity ซ้ำ)
- * เก็บทศนิยม 4 ตำแหน่งตาม NUMERIC(14,4) — ห้าม parseInt / Math.round / ceil / floor
+ * qty = Number(actual_used_qty || planned_qty) — ยอดรวมจาก BOM Snapshot แล้ว ห้ามคูณ/ปัดเศษ
+ * เลขที่เอกสารอ้างอิง: ประทับ job_no ใน notes รูปแบบ "จากเอกสาร {job_no}"
+ *   (inventory_ledger ไม่มีคอลัมน์ document_no — Stock Card parse จาก notes)
  * product_id = SKU วัตถุดิบไซส์ '00' ของ raw_material_model_id
  *
- * inventory_ledger schema (Cloud): product_id, trans_type, qty, notes, unit_cost
- * — ไม่มี transaction_type / quantity / reference_doc_no / created_by
- * job_no และ created_by จึงประทับใน notes ตามแพทเทิร์นเอกสารขาย
+ * inventory_ledger schema (Cloud): product_id, trans_type, qty, notes, unit_cost, doc_header_id
  */
 export async function executeMaterialBackflush(
   jobId: string,
@@ -1958,10 +1957,8 @@ export async function executeMaterialBackflush(
       const modelId = String(row.raw_material_model_id ?? "").trim();
       if (!modelId) continue;
 
-      // WIP snapshot เป็นยอดรวมแล้ว — ใช้ตรง ๆ ไม่คูณจำนวน MTO ซ้ำ
-      const sourceQty =
-        row.actual_used_qty == null ? row.planned_qty : row.actual_used_qty;
-      const qty = parseFloat(Number(sourceQty).toFixed(4));
+      // WIP snapshot เป็นยอดรวมแล้ว — ใช้ตรง ๆ ไม่คูณจำนวน MTO / ไม่ปัดเป็นจำนวนเต็ม
+      const qty = Number(row.actual_used_qty || row.planned_qty);
       if (!Number.isFinite(qty) || qty <= 0) continue;
 
       const productId = skuByModelId.get(modelId);
@@ -1978,7 +1975,7 @@ export async function executeMaterialBackflush(
         qty,
         unit_cost: toCostPrice(row.cost_price_snapshot) ?? 0,
         doc_header_id: null,
-        notes: `MTO Backflush ${jobNo} | job_id=${id} | created_by=${actorId}`,
+        notes: `ตัดสต็อกจากเอกสาร ${jobNo} | job_id=${id} | created_by=${actorId}`,
       });
     }
 
