@@ -11,6 +11,7 @@
  * - production_jobs.finished_model_id → product_models.id
  * - production_jobs.status is VARCHAR (not ENUM)
  * - Job → COMPLETED auto-confirms PENDING production_job_operations (SAP Backflush)
+ * - Material Backflush posts inventory_ledger OUT from production_job_materials
  */
 
 import { revalidatePath } from "next/cache";
@@ -23,6 +24,7 @@ import {
   type CreateProductionJobFromSOResult,
   type CreateProductionJobPayload,
   type CreateProductionJobResult,
+  type ExecuteMaterialBackflushResult,
   type GetProductionJobDetailResult,
   type GetProductionJobsResult,
   type ManufacturedModelOption,
@@ -1703,6 +1705,281 @@ export async function getProductionJobDetails(
       error:
         err instanceof Error ? err.message : "ดึงรายละเอียดใบสั่งผลิตไม่สำเร็จ",
       data: null,
+    };
+  }
+}
+
+const RAW_MATERIAL_SIZE_CODE = "00";
+
+type JobMaterialBackflushRow = {
+  raw_material_model_id: string;
+  planned_qty: number | string | null;
+  actual_used_qty: number | string | null;
+  cost_price_snapshot: number | string | null;
+};
+
+type RawMaterialSkuRow = {
+  id: string;
+  model_id: string | null;
+  size: string | null;
+  sku: string | null;
+};
+
+/**
+ * เลือก SKU วัตถุดิบไซส์ '00' (N/A) ต่อรุ่น
+ * ลำดับ: size_code 00 → size_label ของ 00 → sku ลงท้าย 00 → SKU แรกของรุ่น
+ */
+function pickRawMaterialSkuId(
+  products: RawMaterialSkuRow[],
+  modelId: string,
+  sizeLabel00: string | null,
+): string | null {
+  const rows = products.filter(
+    (row) => String(row.model_id ?? "").trim() === modelId,
+  );
+  if (rows.length === 0) return null;
+
+  const bySizeCode = rows.find(
+    (row) =>
+      String(row.size ?? "").trim().toUpperCase() === RAW_MATERIAL_SIZE_CODE,
+  );
+  if (bySizeCode) return String(bySizeCode.id);
+
+  if (sizeLabel00) {
+    const label = sizeLabel00.trim().toUpperCase();
+    const byLabel = rows.find(
+      (row) => String(row.size ?? "").trim().toUpperCase() === label,
+    );
+    if (byLabel) return String(byLabel.id);
+  }
+
+  const bySkuSuffix = rows.find((row) =>
+    String(row.sku ?? "").trim().toUpperCase().endsWith(RAW_MATERIAL_SIZE_CODE),
+  );
+  if (bySkuSuffix) return String(bySkuSuffix.id);
+
+  return String(rows[0].id);
+}
+
+/**
+ * Material Backflush — ตัดสต็อกวัตถุดิบ (inventory_ledger OUT)
+ * เมื่อใบสั่งผลิตสถานะ COMPLETED โดยอ้างอิง BOM Snapshot ใน production_job_materials
+ *
+ * qty = actual_used_qty ?? planned_qty
+ * product_id = SKU วัตถุดิบไซส์ '00' ของ raw_material_model_id
+ *
+ * inventory_ledger schema (Cloud): product_id, trans_type, qty, notes, unit_cost
+ * — ไม่มี transaction_type / quantity / reference_doc_no / created_by
+ * job_no และ created_by จึงประทับใน notes ตามแพทเทิร์นเอกสารขาย
+ */
+export async function executeMaterialBackflush(
+  jobId: string,
+  userId: string,
+): Promise<ExecuteMaterialBackflushResult> {
+  try {
+    const id = jobId?.trim() ?? "";
+    const actorId = userId?.trim() ?? "";
+
+    if (!id) {
+      return { success: false, error: "ไม่พบรหัสงาน (jobId)" };
+    }
+    if (!actorId) {
+      return {
+        success: false,
+        error: "ไม่พบผู้ใช้งาน (userId) จาก Auth Session — ห้ามตัดสต็อกโดยไม่มี created_by",
+      };
+    }
+
+    const supabaseAdmin = getSupabaseAdmin();
+
+    const { data: job, error: jobError } = await supabaseAdmin
+      .from("production_jobs")
+      .select("id, job_no, status")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (jobError) {
+      return {
+        success: false,
+        error: jobError.message ?? "ตรวจสอบใบสั่งผลิตไม่สำเร็จ",
+      };
+    }
+    if (!job) {
+      return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ" };
+    }
+
+    const jobStatus = String(job.status ?? "").trim().toUpperCase();
+    if (jobStatus !== "COMPLETED") {
+      return {
+        success: false,
+        error: `ใบสั่งผลิตต้องอยู่ในสถานะ COMPLETED ก่อนตัดสต็อก (สถานะปัจจุบัน: ${jobStatus || "ว่าง"})`,
+      };
+    }
+
+    const jobNo = String(job.job_no ?? "").trim();
+    if (!jobNo) {
+      return { success: false, error: "ใบสั่งผลิตไม่มีเลขที่งาน (job_no)" };
+    }
+
+    const { data: existingLedger, error: existingError } = await supabaseAdmin
+      .from("inventory_ledger")
+      .select("id")
+      .eq("trans_type", "OUT")
+      .ilike("notes", `%job_id=${id}%`)
+      .limit(1);
+
+    if (existingError) {
+      if (
+        existingError.code !== POSTGRES_UNDEFINED_TABLE &&
+        existingError.code !== POSTGRES_UNDEFINED_COLUMN
+      ) {
+        return {
+          success: false,
+          error:
+            existingError.message ??
+            "ตรวจสอบประวัติการตัดสต็อก (inventory_ledger) ไม่สำเร็จ",
+        };
+      }
+    } else if ((existingLedger ?? []).length > 0) {
+      return { success: true, message: "Backflush successful" };
+    }
+
+    const { data: materialRows, error: materialsError } = await supabaseAdmin
+      .from("production_job_materials")
+      .select(
+        "raw_material_model_id, planned_qty, actual_used_qty, cost_price_snapshot",
+      )
+      .eq("job_id", id);
+
+    if (materialsError) {
+      return {
+        success: false,
+        error:
+          materialsError.message ??
+          "ดึงรายการวัตถุดิบจาก production_job_materials ไม่สำเร็จ",
+      };
+    }
+
+    const materials = (materialRows as JobMaterialBackflushRow[] | null) ?? [];
+    if (materials.length === 0) {
+      return { success: true, message: "Backflush successful" };
+    }
+
+    const modelIds = [
+      ...new Set(
+        materials
+          .map((row) => String(row.raw_material_model_id ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    const { data: size00, error: sizeError } = await supabaseAdmin
+      .from("mst_sizes")
+      .select("size_code, size_label")
+      .eq("size_code", RAW_MATERIAL_SIZE_CODE)
+      .maybeSingle();
+
+    if (sizeError) {
+      return {
+        success: false,
+        error: sizeError.message ?? "ดึงไซส์มาตรฐาน '00' ไม่สำเร็จ",
+      };
+    }
+
+    const sizeLabel00 = size00?.size_label
+      ? String(size00.size_label)
+      : null;
+
+    const { data: productRows, error: productsError } = await supabaseAdmin
+      .from("products")
+      .select("id, model_id, size, sku")
+      .in("model_id", modelIds)
+      .eq("is_active", true);
+
+    if (productsError) {
+      return {
+        success: false,
+        error: productsError.message ?? "ดึง SKU วัตถุดิบไม่สำเร็จ",
+      };
+    }
+
+    const products = (productRows as RawMaterialSkuRow[] | null) ?? [];
+    const skuByModelId = new Map<string, string>();
+    for (const modelId of modelIds) {
+      const productId = pickRawMaterialSkuId(products, modelId, sizeLabel00);
+      if (!productId) {
+        return {
+          success: false,
+          error: `ไม่พบ SKU วัตถุดิบไซส์ '${RAW_MATERIAL_SIZE_CODE}' สำหรับรุ่น ${modelId}`,
+        };
+      }
+      skuByModelId.set(modelId, productId);
+    }
+
+    const transactions: Array<{
+      product_id: string;
+      trans_type: "OUT";
+      qty: number;
+      unit_cost: number;
+      doc_header_id: null;
+      notes: string;
+    }> = [];
+
+    for (const row of materials) {
+      const modelId = String(row.raw_material_model_id ?? "").trim();
+      if (!modelId) continue;
+
+      const qty =
+        row.actual_used_qty == null
+          ? toQty(row.planned_qty)
+          : toQty(row.actual_used_qty);
+      if (qty <= 0) continue;
+
+      const productId = skuByModelId.get(modelId);
+      if (!productId) {
+        return {
+          success: false,
+          error: `ไม่พบ SKU วัตถุดิบไซส์ '${RAW_MATERIAL_SIZE_CODE}' สำหรับรุ่น ${modelId}`,
+        };
+      }
+
+      transactions.push({
+        product_id: productId,
+        trans_type: "OUT",
+        qty,
+        unit_cost: toCostPrice(row.cost_price_snapshot) ?? 0,
+        doc_header_id: null,
+        notes: `MTO Backflush ${jobNo} | job_id=${id} | created_by=${actorId}`,
+      });
+    }
+
+    if (transactions.length === 0) {
+      return { success: true, message: "Backflush successful" };
+    }
+
+    const { error: ledgerError } = await supabaseAdmin
+      .from("inventory_ledger")
+      .insert(transactions);
+
+    if (ledgerError) {
+      return {
+        success: false,
+        error:
+          ledgerError.message ??
+          "ตัดสต็อกวัตถุดิบ (inventory_ledger OUT) ไม่สำเร็จ",
+      };
+    }
+
+    revalidatePath(KANBAN_PATH);
+    return { success: true, message: "Backflush successful" };
+  } catch (err) {
+    console.error("[executeMaterialBackflush]", err);
+    return {
+      success: false,
+      error:
+        err instanceof Error
+          ? err.message
+          : "ตัดสต็อกวัตถุดิบ (Material Backflush) ไม่สำเร็จ",
     };
   }
 }

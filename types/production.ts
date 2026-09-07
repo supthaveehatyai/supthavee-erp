@@ -372,3 +372,8 @@ export type RoutingActivityRate = {
 export type GetRoutingActivityRatesResult =
   | { success: true; error: null; data: RoutingActivityRate[] }
   | { success: false; error: string; data: RoutingActivityRate[] };
+
+/** Material Backflush — ตัดวัตถุดิบผ่าน inventory_ledger เมื่อ MTO COMPLETED */
+export type ExecuteMaterialBackflushResult =
+  | { success: true; message: string }
+  | { success: false; error: string };
