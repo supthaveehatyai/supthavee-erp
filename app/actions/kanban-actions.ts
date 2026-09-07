@@ -154,7 +154,7 @@ function mapJobCard(row: ProductionJobRow): ProductionJobCard {
   };
 }
 
-/** คอลัมน์ตรง schema: job_no, ref_document_id, status, estimated_completion_date, mockup_image_url, remark (+ finished_model_id, target_quantity) */
+/** คอลัมน์ตรง schema — ไม่ embed documents (Decoupled Fetch / กัน PostgREST relationship error) */
 const JOB_SELECT = `
         id,
         job_no,
@@ -166,15 +166,125 @@ const JOB_SELECT = `
         updated_at,
         ref_document_id,
         finished_model_id,
-        target_quantity,
-        documents (
-          id,
-          doc_no,
-          contacts!documents_contact_id_fkey (
-            company_name
-          )
-        )
+        target_quantity
       ` as const;
+
+/**
+ * ดึง documents (+ contacts) แยกจาก production_jobs แล้ว merge กลับเข้า row.documents
+ * เพื่อให้ mapJobCard ได้ payload เดิมโดยไม่พึ่ง PostgREST join ข้ามตาราง
+ */
+async function attachDocumentsToJobRows(
+  supabase: ReturnType<typeof createClient>,
+  rows: ProductionJobRow[],
+): Promise<ProductionJobRow[]> {
+  if (rows.length === 0) return rows;
+
+  const refIds = [
+    ...new Set(
+      rows
+        .map((row) => String(row.ref_document_id ?? "").trim())
+        .filter(Boolean),
+    ),
+  ];
+
+  if (refIds.length === 0) {
+    return rows.map((row) => ({ ...row, documents: null }));
+  }
+
+  type DocRow = {
+    id: string;
+    doc_no: string | null;
+    contact_id?: string | null;
+    contacts?: ContactJoin | ContactJoin[] | null;
+  };
+
+  let docs: DocRow[] = [];
+
+  const embedded = await supabase
+    .from("documents")
+    .select(
+      `
+      id,
+      doc_no,
+      contact_id,
+      contacts!documents_contact_id_fkey (
+        company_name
+      )
+    `,
+    )
+    .in("id", refIds);
+
+  if (embedded.error) {
+    console.warn(
+      "[attachDocumentsToJobRows] documents↔contacts embed failed, fallback:",
+      embedded.error.message,
+    );
+    const plain = await supabase
+      .from("documents")
+      .select("id, doc_no, contact_id")
+      .in("id", refIds);
+
+    if (plain.error) {
+      console.warn(
+        "[attachDocumentsToJobRows] documents fetch failed:",
+        plain.error.message,
+      );
+      return rows.map((row) => ({ ...row, documents: null }));
+    }
+
+    docs = (plain.data ?? []) as DocRow[];
+
+    const contactIds = [
+      ...new Set(
+        docs
+          .map((doc) => String(doc.contact_id ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (contactIds.length > 0) {
+      const { data: contacts } = await supabase
+        .from("contacts")
+        .select("id, company_name")
+        .in("id", contactIds);
+      const contactById = new Map(
+        (contacts ?? []).map((c) => [
+          String(c.id),
+          {
+            company_name: String(c.company_name ?? "").trim() || null,
+          } satisfies ContactJoin,
+        ]),
+      );
+      docs = docs.map((doc) => {
+        const cid = String(doc.contact_id ?? "").trim();
+        return {
+          ...doc,
+          contacts: cid ? (contactById.get(cid) ?? null) : null,
+        };
+      });
+    }
+  } else {
+    docs = (embedded.data ?? []) as DocRow[];
+  }
+
+  const docById = new Map(
+    docs.map((doc) => [
+      String(doc.id),
+      {
+        id: String(doc.id),
+        doc_no: doc.doc_no,
+        contacts: doc.contacts ?? null,
+      } satisfies DocumentJoin,
+    ]),
+  );
+
+  return rows.map((row) => {
+    const refId = String(row.ref_document_id ?? "").trim();
+    return {
+      ...row,
+      documents: refId ? (docById.get(refId) ?? null) : null,
+    };
+  });
+}
 
 function collectAttachmentFiles(formData: FormData): File[] {
   const files: File[] = [];
@@ -291,9 +401,15 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
       };
     }
 
-    const flat: ProductionJobCard[] = (
-      (data as ProductionJobRow[] | null) ?? []
-    ).map(mapJobCard);
+    const withDocs = await attachDocumentsToJobRows(
+      supabase,
+      ((data as ProductionJobRow[] | null) ?? []).map((row) => ({
+        ...row,
+        documents: null,
+      })),
+    );
+
+    const flat: ProductionJobCard[] = withDocs.map(mapJobCard);
 
     // Active board only — CANCELLED jobs are hidden from columns
     const active = flat.filter((job) => job.status !== "CANCELLED");
@@ -661,7 +777,10 @@ export async function getJobDetails(
       return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ", data: null };
     }
 
-    const row = job as ProductionJobRow;
+    const [withDocs] = await attachDocumentsToJobRows(supabase, [
+      { ...(job as ProductionJobRow), documents: null },
+    ]);
+    const row = withDocs ?? ({ ...(job as ProductionJobRow), documents: null } as ProductionJobRow);
     const card = mapJobCard(row);
 
     let lineItems: ProductionJobLineItem[] = [];

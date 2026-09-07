@@ -1274,6 +1274,7 @@ export async function searchManufacturedModels(
 /**
  * รายละเอียดใบสั่งผลิตสำหรับ Slide-over (Job Details)
  * — header + production_job_items + production_job_materials
+ * Decoupled Fetch: ดึง documents แยกด้วย ref_document_id (ไม่ embed ใน production_jobs)
  */
 export async function getProductionJobDetails(
   jobId: string,
@@ -1286,24 +1287,11 @@ export async function getProductionJobDetails(
 
     const supabaseAdmin = getSupabaseAdmin();
 
-    const JOB_DETAIL_SELECT_WITH_SO = `
-        id,
-        job_no,
-        status,
-        finished_model_id,
-        target_quantity,
-        estimated_completion_date,
-        ref_document_id,
-        mockup_image_url,
-        remark,
-        documents (
-          id,
-          doc_no,
-          doc_type
-        )
-      `;
-
-    const JOB_DETAIL_SELECT_PLAIN = `
+    // Decoupled Fetch — ห้าม embed documents(...) ใน production_jobs
+    const { data: jobRow, error: jobError } = await supabaseAdmin
+      .from("production_jobs")
+      .select(
+        `
         id,
         job_no,
         status,
@@ -1313,44 +1301,23 @@ export async function getProductionJobDetails(
         ref_document_id,
         mockup_image_url,
         remark
-      `;
+      `,
+      )
+      .eq("id", id)
+      .maybeSingle();
 
-    let job: Record<string, unknown> | null = null;
-
-    {
-      const embedded = await supabaseAdmin
-        .from("production_jobs")
-        .select(JOB_DETAIL_SELECT_WITH_SO)
-        .eq("id", id)
-        .maybeSingle();
-
-      if (embedded.error) {
-        console.warn(
-          "[getProductionJobDetails] documents embed failed, fallback:",
-          embedded.error.message,
-        );
-        const plain = await supabaseAdmin
-          .from("production_jobs")
-          .select(JOB_DETAIL_SELECT_PLAIN)
-          .eq("id", id)
-          .maybeSingle();
-        if (plain.error) {
-          return {
-            success: false,
-            error: plain.error.message ?? "ดึงใบสั่งผลิตไม่สำเร็จ",
-            data: null,
-          };
-        }
-        job = (plain.data as Record<string, unknown> | null) ?? null;
-      } else {
-        job = (embedded.data as Record<string, unknown> | null) ?? null;
-      }
+    if (jobError) {
+      return {
+        success: false,
+        error: jobError.message ?? "ดึงใบสั่งผลิตไม่สำเร็จ",
+        data: null,
+      };
     }
-
-    if (!job) {
+    if (!jobRow) {
       return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ", data: null };
     }
 
+    const job = jobRow as Record<string, unknown>;
     const finishedModelId = job.finished_model_id
       ? String(job.finished_model_id)
       : null;
@@ -1358,28 +1325,7 @@ export async function getProductionJobDetails(
       ? String(job.ref_document_id)
       : null;
 
-    function unwrapEmbeddedDoc(
-      value: unknown,
-    ): { id: string; doc_no: string | null; doc_type: string | null } | null {
-      if (!value) return null;
-      const row = Array.isArray(value) ? value[0] : value;
-      if (!row || typeof row !== "object") return null;
-      const doc = row as {
-        id?: string;
-        doc_no?: string | null;
-        doc_type?: string | null;
-      };
-      if (!doc.id) return null;
-      return {
-        id: String(doc.id),
-        doc_no: doc.doc_no == null ? null : String(doc.doc_no),
-        doc_type: doc.doc_type == null ? null : String(doc.doc_type),
-      };
-    }
-
-    let soDoc = unwrapEmbeddedDoc(job.documents);
-
-    const [modelRes, soFallbackRes, itemsRes, materialsRes, serviceDocItemsRes, techRes, ratesRes] =
+    const [modelRes, soRes, itemsRes, materialsRes, serviceDocItemsRes, techRes, ratesRes] =
       await Promise.all([
         finishedModelId
           ? supabaseAdmin
@@ -1390,7 +1336,7 @@ export async function getProductionJobDetails(
               .eq("id", finishedModelId)
               .maybeSingle()
           : Promise.resolve({ data: null, error: null }),
-        !soDoc && refDocumentId
+        refDocumentId
           ? supabaseAdmin
               .from("documents")
               .select("id, doc_no, doc_type")
@@ -1455,25 +1401,25 @@ export async function getProductionJobDetails(
           .select("technician_id, service_model_id, default_wage"),
       ]);
 
-    if (!soDoc && soFallbackRes.data?.id) {
-      soDoc = {
-        id: String(soFallbackRes.data.id),
-        doc_no:
-          soFallbackRes.data.doc_no == null
-            ? null
-            : String(soFallbackRes.data.doc_no),
-        doc_type:
-          soFallbackRes.data.doc_type == null
-            ? null
-            : String(soFallbackRes.data.doc_type),
-      };
-    }
-    if (soFallbackRes.error) {
+    if (soRes.error) {
       console.warn(
-        "[getProductionJobDetails] documents fallback:",
-        soFallbackRes.error.message,
+        "[getProductionJobDetails] documents fetch:",
+        soRes.error.message,
       );
     }
+
+    const soDoc = soRes.data?.id
+      ? {
+          id: String(soRes.data.id),
+          doc_no:
+            soRes.data.doc_no == null ? null : String(soRes.data.doc_no),
+          doc_type:
+            soRes.data.doc_type == null ? null : String(soRes.data.doc_type),
+        }
+      : null;
+
+    // Merge ให้โครงสร้างใกล้เคียง embed เดิม
+    job.documents = soDoc;
 
     if (itemsRes.error) {
       return {
