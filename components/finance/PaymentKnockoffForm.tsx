@@ -652,7 +652,9 @@ export function PaymentKnockoffForm({
                 <TableHead>เลขที่บิล</TableHead>
                 <TableHead>วันที่</TableHead>
                 <TableHead className="text-right">ยอดค้าง</TableHead>
-                <TableHead className="text-right">Allocated (เงินโอน)</TableHead>
+                <TableHead className="text-right">
+                  ยอดหนี้ที่ต้องการตัด (รวมมัดจำ)
+                </TableHead>
                 <TableHead className="text-right">WHT</TableHead>
                 <TableHead className="text-right">ตัดรวม</TableHead>
                 <TableHead className="text-center">ดูบิล</TableHead>
@@ -715,6 +717,7 @@ export function PaymentKnockoffForm({
                         inputMode="decimal"
                         step="0.01"
                         min="0"
+                        placeholder="กรอกยอดหนี้รวมที่ต้องการล้าง"
                         className="ml-auto h-9 w-32 text-right"
                         value={line.allocated_amount || ""}
                         onChange={(e) =>
