@@ -1,6 +1,6 @@
 System Blueprint: Supthavee ERP SuperApp
 
-Version: 16.1 (Phase 16 Production Kanban \& BOM / Transition to Phase 17)
+Version: 16.2 (Phase 16 Production Kanban \& BOM / Transition to Phase 17)
 
 Company: บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด
 
@@ -137,8 +137,6 @@ Data Archiving (Tiered Storage): สคริปต์สำรองข้อ�
 
 Module L: Production \& Order-to-Cash (ส่วนขยาย Phase 16-17)
 
-
-
 \- Production Kanban \& MTO: ระบบติดตามงานผลิตแบบลากวาง (Zero Client-Side Fetching) แบ่งเป็น 4 สถานะ (PLANNED, IN\_PROGRESS, QA, COMPLETED)
 
 \- BOM Snapshot \& Estimated Cost: ระบบถอดสูตรการผลิต (BOM) อัตโนมัติเพื่อคำนวณวัตถุดิบที่ต้องใช้ (WIP) และดึงราคาต้นทุนล่าสุด (LPP) มาประเมินต้นทุน
@@ -146,6 +144,16 @@ Module L: Production \& Order-to-Cash (ส่วนขยาย Phase 16-17)
 \- Sales Order Driven Production: ยึดเอกสารใบสั่งขาย (SO) เป็นจุดศูนย์กลางในการเปิดงานผลิต เพื่อควบคุม Job Costing (Matching Principle) ลดความผิดพลาดในการกรอกข้อมูล
 
 \- In-house Routing \& Direct Labor: สร้างสถาปัตยกรรมแยกส่วนค่าแรงผลิตภายใน (เช่น งานเย็บ, งานรีด, งานแพ็ค) ผ่านตาราง production\_job\_operations โดยรองรับการจ่ายงานให้ช่างหลายแผนกใน 1 ใบสั่งผลิต (MTO) และทำงานประสานกับ Unified Billing Hub (TB) ทันทีที่ช่างส่งมอบงานในแต่ละขั้นตอนสำเร็จ ตามมาตรฐานการคำนวณต้นทุนสินค้าที่ผลิตสำเร็จ (COGM)
+
+\- In-house Routing \& Standard Costing: สร้างสถาปัตยกรรม `production\_job\_operations` ทำหน้าที่เป็น Routing เก็บขั้นตอนการผลิตภายใน (เย็บ, รีด, แพ็ค) โดยดึงเรตค่าแรงมาตรฐานจาก `technician\_rates`
+
+\- SAP-Style Yield Confirmation: หน้า MTO UI มีระบบดึงยอดผลิตตามแผน (Planned Yield) มาเป็นค่าเริ่มต้น และรองรับการกรอกยอดผลิตจริง (Actual Yield) พร้อมระบบ Guardrail บังคับกรอกหมายเหตุ (Variance Reason) หากยอดผลิตไม่ตรงตามเป้าหมายเพื่อเป็น Audit Trail
+
+\- Auto-Confirmation (Backflushing): เชื่อมโยงสถานะ Routing เข้ากับการ์ด Kanban เมื่อลากการ์ดไปยัง "เสร็จสิ้น (COMPLETED)" ระบบจะกวาดสถานะขั้นตอนการผลิต (PENDING) ให้เป็น COMPLETED อัตโนมัติ พร้อมส่งยอดประเมินค่าแรงรวม (Wage Cost) ทะลุเข้าสู่ระบบวางบิลช่าง (TB) ทันที
+
+\- Decoupled Fetching Architecture: ยกเลิกระบบ Join ข้ามตาราง `production\_jobs` กับ `documents` ผ่าน PostgREST โดยตรง (แก้ปัญหา Schema Cache Error) เปลี่ยนมาใช้การคิวรีแยก 2 จังหวะ (Decoupled Fetch) แล้วทำ Data Merging ฝั่ง Server แทน เพื่อความเสถียร 100%
+
+
 
 
 
