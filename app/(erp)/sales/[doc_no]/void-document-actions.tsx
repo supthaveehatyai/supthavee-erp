@@ -230,7 +230,7 @@ export default function VoidDocumentActions({
               type="button"
               variant="outline"
               disabled={isSaving}
-              onClick={closeConfirm}
+              onClick={() => closeConfirm()}
             >
               ยกเลิก
             </Button>
