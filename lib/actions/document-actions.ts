@@ -2520,23 +2520,25 @@ export async function issueCreditNoteAction(
       };
     }
 
+    const rpcPayload = {
+      p_document_id: documentId,
+      p_user_id: userId,
+    };
+    console.log("RPC_PAYLOAD:", rpcPayload);
     const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc(
       "issue_credit_note_transaction",
-      {
-        p_document_id: documentId,
-        p_user_id: userId,
-      },
+      rpcPayload,
     );
 
     if (rpcError) {
-      if (/function|does not exist|PGRST202|42883/i.test(rpcError.message)) {
-        return {
-          data: null,
-          error:
-            "ไม่พบ RPC issue_credit_note_transaction บน Supabase Cloud — กรุณาสร้างฟังก์ชันบน SQL Editor",
-        };
-      }
-      return { data: null, error: rpcError.message };
+      return {
+        data: null,
+        error:
+          "DB Error: " +
+          rpcError.message +
+          " | Details: " +
+          rpcError.details,
+      };
     }
 
     const parsed = parseIssueCreditNoteRpc(rpcData);
@@ -3401,24 +3403,26 @@ export async function voidDocumentAction(
       };
     }
 
+    const rpcPayload = {
+      p_document_id: documentId,
+      p_user_id: userId,
+      p_void_reason: voidReason,
+    };
+    console.log("RPC_PAYLOAD:", rpcPayload);
     const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc(
       "void_document_transaction",
-      {
-        p_document_id: documentId,
-        p_user_id: userId,
-        p_void_reason: voidReason,
-      },
+      rpcPayload,
     );
 
     if (rpcError) {
-      if (/function|does not exist|PGRST202|42883/i.test(rpcError.message)) {
-        return {
-          data: null,
-          error:
-            "ไม่พบ RPC void_document_transaction บน Supabase Cloud — กรุณาสร้างฟังก์ชันบน SQL Editor",
-        };
-      }
-      return { data: null, error: rpcError.message };
+      return {
+        data: null,
+        error:
+          "DB Error: " +
+          rpcError.message +
+          " | Details: " +
+          rpcError.details,
+      };
     }
 
     const parsed = parseVoidTransactionRpc(rpcData);
