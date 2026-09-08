@@ -69,3 +69,7 @@ Tech Stack หลัก: Supabase (PostgreSQL, Auth, Edge Functions, RLS), Next.
 - **Cloud-First Strictly:** ห้ามสร้างไฟล์ `.sql` สำหรับ migration ลงในเครื่อง Local เด็ดขาด (Assume Database Schema exists on Supabase Cloud) ให้สั่งงานผ่าน Supabase SQL Editor บนเบราว์เซอร์เท่านั้น
 - In-house Routing (COGM / GAAP): งานสั่งผลิตภายใน (In-house) ห้ามใช้ตาราง `document_items` ในการจ่ายงานหรือคิดค่าแรงช่างเด็ดขาด ให้บันทึกขั้นตอนการผลิต (เช่น เย็บ, แพ็ค) ลงตาราง `production_job_operations` โดยอ้างอิง `production_jobs.id` เท่านั้น เพื่อแยกบัญชีรายได้ออกจากการบันทึกต้นทุน ยอดค่าแรงจะถูกส่งไประบบวางบิลช่าง (TB) อัตโนมัติเมื่อลากการ์ด Kanban ไปสถานะ 'COMPLETED' (Auto-Confirmation / Backflushing)
 - Yield Confirmation Guardrail: ใน UI ของ Routing ต้องดึงยอด `quantity` รวมของใบสั่งผลิตมาเป็น Default เสมอ (Planned Yield) หากผู้ใช้แก้ไขจำนวน (Actual Yield) ระบบต้องบังคับให้กรอก 'หมายเหตุ' เสมอ
+
+## 8. Decimal Accuracy & Inventory (GAAP Standard)
+- **No Decimal Truncation:** สินค้าประเภทวัตถุดิบ (Raw Materials) มีหน่วยเป็นทศนิยม (KGS, MTR) ห้ามใช้คำสั่ง `parseInt()`, `Math.round()`, `Math.floor()` ในการบันทึกหรือคำนวณสต็อกเด็ดขาด
+- **Data Type Enforcement:** ตัวแปรที่เก็บจำนวนสินค้าที่เกี่ยวข้องกับวัตถุดิบและ `inventory_ledger` ต้องรองรับทศนิยม บังคับใช้ Database Type เป็น `NUMERIC(14,4)` เสมอ

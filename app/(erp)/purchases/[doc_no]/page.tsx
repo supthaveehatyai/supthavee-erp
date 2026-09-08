@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Eye, FileInput } from "lucide-react";
-import { getDocumentByNo } from "@/lib/actions/document-actions";
+import { getDocumentByNo, voidDocumentAction } from "@/lib/actions/document-actions";
 import {
   getDepositAllocationHistory,
   getDocumentAllocationsByReceiptId,
 } from "@/lib/actions/finance/allocations";
 import { PURCHASE_DOC_TYPES } from "@/lib/constants/document";
+import { VoidDocumentButton } from "@/components/shared/document/void-document-button";
 import type { DocumentDetail, DocumentStatus, DocumentType } from "@/types/document";
 import { AllocatedDocumentsTable } from "@/components/finance/AllocatedDocumentsTable";
 import { DepositAllocationHistoryTable } from "@/components/finance/DepositAllocationHistoryTable";
@@ -209,6 +210,8 @@ export default async function PurchaseDocumentDetailPage({
     doc.doc_type === "AP_REFUND"
       ? "ใบสำคัญรับเงินคืน (Refund Receipt)"
       : "ใบสำคัญปรับปรุงบัญชี - ตัดเป็นค่าใช้จ่าย (Write-off Expense)";
+  const canVoid =
+    doc.status === "ISSUED" && Number(doc.paid_amount ?? 0) === 0;
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6 print:max-w-none print:gap-0 print:p-0">
@@ -240,6 +243,23 @@ export default async function PurchaseDocumentDetailPage({
           </Link>
           {isPaymentDoc || isDepositDoc || isSettlementDoc ? (
             <PrintDocumentButton className="h-10 gap-2" />
+          ) : null}
+          {canVoid ? (
+            <VoidDocumentButton
+              documentId={doc.id}
+              docNo={doc.doc_no}
+              requireReason
+              voidAction={voidDocumentAction}
+              confirmTitle="ยืนยันยกเลิกเอกสาร"
+              confirmDescription={
+                <>
+                  คุณต้องการยกเลิกเอกสารที่ออกแล้วใช่หรือไม่?
+                  สต็อกจะถูกคืนด้วยรายการกลับ หากมี
+                  สถานะจะเปลี่ยนเป็น VOID และการกระทำนี้ไม่สามารถย้อนกลับได้
+                </>
+              }
+              confirmLabel="ยืนยันยกเลิกเอกสาร"
+            />
           ) : null}
         </div>
       </div>

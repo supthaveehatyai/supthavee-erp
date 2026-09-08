@@ -145,7 +145,9 @@ export default function SalesEditWorkspace({
   const [notes, setNotes] = useState(initialDocument.notes ?? "");
   const [isPending, startTransition] = useTransition();
   const preserveInitialPersonRef = useRef(true);
-  const isReplacement = Boolean(initialDocument.ref_document_id);
+  const isReplacement =
+    Boolean(initialDocument.ref_document_id) &&
+    initialDocument.doc_type !== "CN";
 
   useEffect(() => {
     setCustomerOptions(customers);

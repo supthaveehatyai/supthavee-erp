@@ -38,6 +38,8 @@
 - `production_job_items` (รายละเอียดไซส์สินค้าที่ต้องผลิต — `job_id`, `product_id` โยงไป SKU, `quantity`)
 - `production_job_materials` (การจัดสรรวัตถุดิบ WIP — `job_id`, `raw_material_model_id`, `uom_id`, `planned_qty`, `actual_used_qty`, `cost_price_snapshot`)
 - `production_job_operations` (ขั้นตอนการผลิตและค่าแรงช่าง In-house Routing — job_id โยงใบงานผลิต, operation_name ขั้นตอนเช่น เย็บ/แพ็ค, technician_id ช่างผู้รับผิดชอบ, wage_cost ต้นทุนค่าแรง, technician_bill_id โยงระบบ TB, status สถานะงาน)
+- `inventory_ledger` (สมุดบัญชีคลังสินค้า — คอลัมน์ `qty` ต้องเป็น `NUMERIC(14,4)`)
+- `production_job_materials` (การจัดสรรวัตถุดิบ WIP — `planned_qty` และ `actual_used_qty` ต้องเป็น `NUMERIC(14,4)`)
 
 ## 4. Documents & Financials (เอกสารและการเงิน)
 - **Document Conversion Lineage:** `QT` -> `SO` -> `INV_DO / TAX_INV / CS_TAX / ABB` -> `REC` (ห้ามข้าม SO เด็ดขาด)
@@ -46,6 +48,7 @@
 - **Period Closing:** ฟังก์ชัน `is_period_closed(doc_date)`
 - `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — มีฟิลด์ `created_by` เก็บ Auth Session UUID)
 - `document_items` (รายการสินค้าในเอกสาร — มี `technician_id`, `wage_cost`, `technician_bill_id`; Phase 17: `mockup_image_url`, `production_status`, `is_sent_to_production`)
+- `document_items` (รายการสินค้าในเอกสาร — คอลัมน์ `qty` ต้องเป็น `NUMERIC(14,4)` รองรับทศนิยมวัตถุดิบ)
 - `document_allocations` (การจัดสรรเอกสาร เช่น ตัดมัดจำ)
 - `billing_note_items` (รายการใบวางบิล)
 - `expenses` (บิลค่าใช้จ่าย / OPEX — `approval_status`, `is_installment`, `total_interest_amount`, **`status` IN ('DRAFT', 'PENDING', 'ISSUED', 'VOID', 'PAID')**)
@@ -58,6 +61,7 @@
 - `payment_allocations` (การตัดยอดหนี้ Knock-off — `expense_id`, `document_id`)
 - `payment_slips` (สลิปโอนเงิน)
 - `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — เพิ่มฟิลด์ `freight_cost` NUMERIC DEFAULT 0 สำหรับบันทึกค่าขนส่งต้นทาง เพื่อใช้คำนวณ Landed Cost รับเข้าคลัง, มีฟิลด์ `created_by` เก็บ Auth Session UUID)
+
 
 ## 5. System & Auditing (ระบบและการตรวจสอบ)
 - `audit_logs` (ประวัติการเปลี่ยนแปลงข้อมูล JSONB)

@@ -191,6 +191,26 @@ export const CASH_DOC_TYPES = ["CS_TAX", "ABB", "AP_CASH"] as const;
 export const AR_INVOICE_DOC_TYPES = ["INV_DO", "TAX_INV"] as const;
 
 /**
+ * บิลขายต้นทางที่อนุญาตให้ออกใบลดหนี้ (CN) — ห้ามเปิด CN ลอย
+ * ครอบคลุมทั้งเครดิต (INV_DO/TAX_INV) และเงินสด (CS_TAX/ABB)
+ */
+export const CREDIT_NOTE_SOURCE_DOC_TYPES = [
+  "INV_DO",
+  "TAX_INV",
+  "CS_TAX",
+  "ABB",
+] as const;
+
+export type CreditNoteSourceDocType =
+  (typeof CREDIT_NOTE_SOURCE_DOC_TYPES)[number];
+
+export const CREDIT_NOTE_SOURCE_STATUSES = [
+  "ISSUED",
+  "COMPLETED",
+  "PAID",
+] as const;
+
+/**
  * AP payables eligible for PAY knock-off.
  * AP_TAX / AP_INV = บิลตั้งหนี้ซัพพลายเออร์ · TB = สรุปวางบิลช่าง (Technician Bill).
  * BR อยู่ที่ `doc_headers` (ใบรับวางบิล) ไม่ใช่เอกสารตั้งหนี้ใน `documents`.

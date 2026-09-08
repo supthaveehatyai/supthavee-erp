@@ -70,7 +70,6 @@ const SALES_DOC_TYPES: { value: DocumentType; label: string }[] = [
   { value: "TAX_INV", label: "ใบกำกับภาษี (TAX_INV)" },
   { value: "CS_TAX", label: "ใบกำกับเงินสด (CS_TAX)" },
   { value: "REC", label: "ใบเสร็จรับเงิน (REC)" },
-  { value: "CN", label: "ใบลดหนี้ (CN)" },
 ];
 
 const ITEM_COLUMNS = [

@@ -1,15 +1,19 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Eye, FileText, Link2, Pencil } from "lucide-react";
+import { ArrowLeft, Eye, FileText, Link2, Lock, Pencil, Undo2 } from "lucide-react";
 import { getDocumentByNo } from "@/lib/actions/document-actions";
 import {
   getDepositAllocationHistory,
   getDocumentAllocationsByReceiptId,
 } from "@/lib/actions/finance/allocations";
-import type { DocumentDetail, DocumentStatus, DocumentType } from "@/types/document";
+import type { DocumentDetail, DocumentDetailItem, DocumentStatus, DocumentType } from "@/types/document";
 import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
-import { SALES_DOC_TYPES } from "@/lib/constants/document";
+import {
+  CREDIT_NOTE_SOURCE_DOC_TYPES,
+  CREDIT_NOTE_SOURCE_STATUSES,
+  SALES_DOC_TYPES,
+} from "@/lib/constants/document";
 import PrintDocumentTemplate from "@/components/sales/print-document-template";
 import PrintPaymentReceiptTemplate from "@/components/finance/PrintPaymentReceiptTemplate";
 import PrintSettlementVoucherTemplate from "@/components/finance/PrintSettlementVoucherTemplate";
@@ -36,6 +40,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import IssueDocumentButton from "./issue-document-button";
+import IssueCreditNoteButton from "./issue-credit-note-button";
 import DeleteDraftDocumentButton from "./delete-draft-document-button";
 import VoidDocumentActions from "./void-document-actions";
 import DuplicateDocumentButton from "./duplicate-document-button";
@@ -43,8 +48,8 @@ import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import ConvertDocumentDropdown from "./convert-document-dropdown";
 import { SendToProductionButton } from "@/components/production/send-to-production-button";
+import { isTemporaryDraftDocNo } from "@/lib/utils/draft-document-no";
 import type { ManufacturedSendGroup } from "@/types/production";
-import type { DocumentDetailItem } from "@/types/document";
 
 type PageProps = {
   params: Promise<{ doc_no: string }>;
@@ -307,7 +312,13 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
     slipMeta.storage_tier === "NAS" ||
     Boolean(slipUrl) ||
     Boolean(docSlipFallback);
+  const isCreditNote = doc.doc_type === "CN";
   const canIssue = doc.status === "DRAFT";
+  const canIssueCreditNote = isCreditNote && canIssue;
+  const canIssueSales = canIssue && !isCreditNote;
+  const isCreditNoteIssued =
+    isCreditNote && (doc.status === "ISSUED" || doc.status === "COMPLETED");
+  const canEditDraft = canIssue && !isCreditNoteIssued;
   const canPrint =
     isReceiptDoc ||
     isSettlementDoc ||
@@ -325,6 +336,9 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
     !isAlreadyConverted;
   const canVoid =
     doc.status === "ISSUED" && Number(doc.paid_amount ?? 0) === 0;
+  const canCreateCreditNote =
+    (CREDIT_NOTE_SOURCE_DOC_TYPES as readonly string[]).includes(doc.doc_type) &&
+    (CREDIT_NOTE_SOURCE_STATUSES as readonly string[]).includes(doc.status);
   /** MTO — SO ISSUED ที่มีสินค้า is_manufactured หรือเอกสารบริการเดิม (สกรีน/ปัก) */
   const manufacturedGroups = buildManufacturedSendGroups(
     doc.items,
@@ -349,6 +363,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   const canDuplicate =
     !isReceiptDoc &&
     !isSettlementDoc &&
+    !isCreditNote &&
     doc.doc_type !== "DEP_IN" &&
     doc.status !== "DRAFT";
   const subtotal = Number(doc.total_amount ?? doc.sub_total ?? 0);
@@ -383,9 +398,17 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                 {doc.doc_no}
               </h1>
               {statusBadge(doc.status)}
+              {isCreditNoteIssued ? (
+                <Badge className="border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-100">
+                  Form Lock
+                </Badge>
+              ) : null}
             </div>
             <p className="mt-0.5 text-sm text-slate-500">
               {doc.doc_type} · วันที่เอกสาร {formatDate(doc.doc_date)}
+              {isCreditNote && isTemporaryDraftDocNo(doc.doc_no)
+                ? " · เลขชั่วคราว — จะรันเลขจริงเมื่อ ISSUE"
+                : ""}
             </p>
           </div>
         </div>
@@ -418,7 +441,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               sourceDocType={doc.doc_type}
             />
           )}
-          {canIssue && (
+          {canEditDraft && (
             <Link
               href={`/sales/edit/${encodeURIComponent(doc.id)}`}
               className="inline-flex h-10 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-800 transition hover:bg-blue-100"
@@ -427,8 +450,11 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               {DOCUMENT_ACTIONS.EDIT}
             </Link>
           )}
-          {canIssue && (
+          {canIssueSales && (
             <IssueDocumentButton documentId={doc.id} docNo={doc.doc_no} />
+          )}
+          {canIssueCreditNote && (
+            <IssueCreditNoteButton documentId={doc.id} docNo={doc.doc_no} />
           )}
           {canIssue && (
             <DeleteDraftDocumentButton documentId={doc.id} docNo={doc.doc_no} />
@@ -436,11 +462,43 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
           {canVoid && (
             <VoidDocumentActions documentId={doc.id} docNo={doc.doc_no} />
           )}
+          {canCreateCreditNote && (
+            <Link
+              href={`/sales/cn/create?ref_doc_id=${encodeURIComponent(doc.id)}`}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 text-sm font-semibold text-rose-800 transition hover:bg-rose-100"
+            >
+              <Undo2 className="size-4" />
+              ใบลดหนี้ (CN)
+            </Link>
+          )}
         </div>
       </div>
 
       {/* Screen-only interactive / card view */}
       <div className="flex flex-col gap-4 print:hidden">
+        {isCreditNoteIssued ? (
+          <div
+            role="status"
+            className="flex flex-wrap items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900"
+          >
+            <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-white text-slate-700">
+              <Lock className="size-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold">
+                ใบลดหนี้ออกเอกสารแล้ว — Form Lock
+              </p>
+              <p className="mt-0.5 text-xs text-slate-600">
+                เลขที่เอกสารที่รันแล้ว:{" "}
+                <span className="font-mono font-semibold text-slate-900">
+                  {doc.doc_no}
+                </span>
+                {" — "}ห้ามแก้ไขรายการสินค้าและยอดเงิน
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         {primaryChild ? (
           <div
             role="status"

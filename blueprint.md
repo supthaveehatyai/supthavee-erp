@@ -1,15 +1,16 @@
 System Blueprint: Supthavee ERP SuperApp
 
-Version: 16.2 (Phase 16 Production Kanban \& BOM / Transition to Phase 17)
+Version: 18.0 (Phase 18: Exceptions & Reverse Logistics ของโปรเจกต์ Supthavee ERP)
 
 Company: บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด
 
 Document Purpose: System Requirements, Business Logic, and Database Schema for AI Assistants (Claude, Cursor, Gemini)
 
 
-
 1. System Overview (ภาพรวมระบบ)
 ระบบ ERP แบบ Web Application สถาปัตยกรรม Full-Code ที่ออกแบบมาเพื่อบริหารจัดการธุรกิจค้าปลีก-ค้าส่ง (เสื้อผ้า, ชุดกีฬา, ถ้วยรางวัล) และงานบริการสั่งทำ (งานปัก, สกรีน) ครอบคลุมการจัดการบิลซื้อ/ขาย, การแยกบัญชี VAT/Non-VAT, ระบบรับเข้าอัจฉริยะ (OCR), การจัดการสต็อกหลายหน่วยนับ, การสร้างรหัสสินค้าแบบชาญฉลาด (Product Matrix \& Auto-SKU), การวิเคราะห์กำไรต่อบิล, การจัดการเจ้าหนี้-ลูกหนี้ (AP/AR), การจัดการค่าใช้จ่าย (OPEX/Net Profit) และระบบสำรองข้อมูล (Backup/Restore)
+
+
 2. Tech Stack \& AI Integration (เทคโนโลยีที่ใช้)
 Frontend: Next.js 16.2.10 (App Router + Turbopack), React, Tailwind CSS, shadcn/ui
 Backend \& Database: Supabase (PostgreSQL, RLS) พร้อมระบบ Database Migrations ผ่าน Supabase CLI
@@ -18,9 +19,7 @@ AI Integration: Gemini Vision AI (Cascade Fallback 3.6 -> 3.5 -> 2.5) สำห�
 Development Tools: Cursor Code Editor, Claude 3.5 Sonnet / Gemini
 
 
-
 3\. User Roles (สิทธิ์การใช้งาน Dynamic RBAC)
-
 โครงสร้างสิทธิ์: ควบคุมสิทธิ์แบบ Dynamic ผ่านตาราง app\_roles (Permission Matrix: accessible\_modules) และผูกกับ auth.users ผ่าน user\_profiles (ABAC: data\_access\_scope, approval\_limit) พร้อมระบบ Auth Guard (Middleware) ฝั่ง Server
 Fast Login (PIN): บังคับใช้ระบบล็อกอินด้วยอีเมลและรหัส PIN 6 หลัก เพื่อความรวดเร็วของพนักงานหน้าสายการผลิต
 Soft Delete Policy: ห้ามลบผู้ใช้งานออกจากระบบ (Hard Delete) เพื่อรักษาความสมบูรณ์ของ Audit Trail ให้ใช้ระบบระงับสิทธิ์ (Deactivate/Reactivate) แทน
@@ -30,10 +29,8 @@ Warehouse / Production: ทำรายการรับของเข้า (
 Specialists (ช่างเฉพาะทาง): พนักงานบัญชี, ช่างสกรีน, ช่างปัก, ช่างเย็บ (แยกสิทธิ์การมองเห็น Kanban และเอกสารชัดเจน)
 
 
-
-
-
 4\. Core Modules \& Business Logic (โมดูลหลักและกฎเกณฑ์)
+
 Module A: Master Data, Products \& Smart 2-Phase Matrix (ฐานข้อมูลหลัก และการสร้างสินค้า)
 Master Data UI Rules: ช่องเลือก Vendor, Brand, Category ต้องเป็น Smart Combobox และรองรับการ "เพิ่มข้อมูลใหม่ (On-the-fly)" รวมไปถึง "Quick Edit Contact" รองรับระบบ Soft Delete (is\_active) และป้องกันการบันทึกข้อมูลซ้ำซ้อน
 Service Products (งานบริการ): รองรับสินค้าประเภทงานบริการ (is\_service = true) ซึ่งสามารถขายได้โดยไม่ต้องคำนวณหรือตัดสต็อก (Bypass Inventory Ledger) ตามมาตรฐาน ERP
@@ -50,6 +47,7 @@ Size Sort Order \& Code Structure (Fixed-2): ตาราง mst\_sizes ใช�
 สูตรการสร้าง SKU: Brand Code + Category Code (2 หลัก) + Model Code (ล็อก 6 หลัก) + Gender Code (1 หลัก) + Color Code (3 หลัก) + Size Code (2 หลัก)
 Line Item Subcontracting: รองรับการแบ่งงานบริการภายในใบสั่งผลิต (Job) เดียวกัน ให้ช่างหลายคนรับผิดชอบแยกกันเป็นรายบรรทัด (Line Item Assignment) โดยดึงเรตค่าแรงจากตาราง technician\_rates มาเป็น Default Wage และอนุญาตให้ปรับปรุงเป็น Actual Cost ได้หน้างาน
 Unified Billing Hub (Technician Billing): ระบบสรุปวางบิลช่าง (TB) ถูกรวบรวมไว้ในหน้าจอเดียวกับระบบวางบิลลูกหนี้ (BN) และเจ้าหนี้ (BR) เพื่อให้กระบวนการตั้งเจ้าหนี้ค่าแรง (Accounts Payable) สอดคล้องตามหลักการบัญชี Accrual Basis
+
 Module B: Document Flow \& Profit Analysis (ระบบเอกสารและการวิเคราะห์กำไร)
 Document Conversion Lineage (SAP-aligned):
 QT (ใบเสนอราคา) -> SO (ใบสั่งขาย) -> INV\_DO / TAX\_INV / CS\_TAX / ABB -> REC (ใบเสร็จรับเงิน)
@@ -60,6 +58,7 @@ Soft Allocation / Available to Promise (ATP):
 Available Stock = Physical Stock (Σ inventory\_ledger) − Committed Stock (Σ SO ISSUED items ที่ยังไม่ออกบิล)
 Smart Matrix Selection แสดงยอด "พร้อมขาย (ATP)" แทน Physical Stock
 Guardrail: หาก ATP ไม่เพียงพอ ห้ามบันทึกเอกสาร (bypass ได้ถ้า allow\_negative\_inventory = true)
+
 Module C: Smart Procurement \& Inventory (ระบบจัดซื้อและคลังสินค้า)
 Strict Server-Side Fetching: บังคับใช้ Server Actions ร่วมกับ Service Role Key (supabaseAdmin) 100% หลีกเลี่ยงปัญหา RLS
 Project Guardrails: บังคับใช้ไฟล์ .cursorrules ล็อกสถาปัตยกรรมโค้ด (Zero Client-Side Fetching, Document Lifecycle) อย่างเคร่งครัด
@@ -69,6 +68,7 @@ On-the-fly Vendor Mapping \& Quick Create: ตรวจสอบและ UPSERT
 Net Cost Apportionment Engine: ประมวลผลคำนวณราคาตั้ง ของแถม (FOC) และส่วนลดท้ายบิลแบบสัดส่วน (Prorate) พร้อมความละเอียดต้นทุน 4 ทศนิยม
 LPP Auto-Update: ระบบอัปเดตต้นทุนสั่งซื้อล่าสุด (Last Purchase Price) ทับใน products.cost\_price อัตโนมัติ
 Inventory Ledger: ห้ามแก้สต็อกที่ตาราง Products ตรงๆ ต้องบันทึกเข้า-ออกผ่าน inventory\_ledger เสมอ
+
 Module D: Finance, Accounting \& Billing (ระบบการเงินและบัญชี)
 Document Taxonomy (Sales vs Purchases): รหัสเอกสารแยกขาดจากกันชัดเจน
 Sales (AR): 'QT', "SO", 'INV\_DO', 'TAX\_INV', 'CS\_TAX', 'ABB', 'DEP\_IN', 'REC', 'CN', 'AR\_REFUND' (SRF), 'AR\_WRITEOFF' (SWO), 'BN' (Billing Note)
@@ -82,11 +82,13 @@ Deposit Management: ระบบรับและจ่ายเงินมั
 Approval Workflow (Maker-Checker): เอกสารที่มีผลกระทบสูง (เช่น Expense > 5,000) จะถูกตั้งค่าเป็น PENDING สถานะหลักต้องถูกล็อกเป็น DRAFT เสมอ และต้องได้รับการอนุมัติจาก Approval Center ก่อนจึงจะรันเลข ISSUED ได้ หากปฏิเสธจะคงสถานะ DRAFT พร้อมบังคับใส่เหตุผลลง approval\_logs
 Period Closing (Period Lock): ป้องกันการแก้ไขหรือเพิ่มเอกสารในงวดบัญชีที่ถูกปิดไปแล้ว ควบคุมผ่านตาราง accounting\_periods
 Fixed Asset Register: ทะเบียนสินทรัพย์ถาวรผ่าน fixed\_assets + mst\_asset\_categories (ราคาทุน, อายุใช้งาน, Soft Dispose) — เตรียมฐานสำหรับ Straight-line Depreciation
+
 Module E: Dashboard \& Audit (ระบบรายงานและความปลอดภัย)
 Executive Dashboard: หน้าจอสรุปยอดขาย (YTD) และยอดหนี้คงค้าง (AR/AP) แบบ Real-time
 System Audit Trail: ระบบบันทึกประวัติการเปลี่ยนแปลงข้อมูลสำคัญระดับ Database (JSONB Log)
 Human-Readable Parsing: รองรับระบบ Human-Readable แปลงโครงสร้าง JSONB (old\_data/new\_data) ให้อ่านง่าย เพื่อแสดงความแตกต่าง (Diff) อัตโนมัติ โดยมี Business Dictionary Mapping (เช่น net\_amount -> 'ยอดก่อนภาษี') และกรองการเปลี่ยนแปลงที่ไม่จำเป็น (False Positives) ออก
 Fixed Asset Logging: จัดการรายละเอียดการบันทึก Audit Trail ของตาราง fixed\_assets เป็นกรณีพิเศษ เพื่อแสดงข้อมูล รหัส และชื่อสินทรัพย์
+
 Module F: Inventory UI \& Production Workflow (ระบบคลังสินค้าและสายการผลิต)
 Stock Card UI: สมุดบัญชีคลังสินค้า จัดกลุ่มตาม Brand -> Model -> Color -> Size ค้นหาผ่าน URL-Driven เรียงลำดับตามน้ำหนักไซส์ (sort\_order) แสดงยอดยกมา รับเข้า จ่ายออก ผ่าน Slide-over Sheet
 Cycle Counting \& Adjustments:
@@ -97,6 +99,7 @@ Technician Routing \& Rate Card: เชื่อมโยงงานบริ�
 Production Attachment: รองรับการแนบไฟล์ภาพ Mockup โลโก้ เข้าสู่ Supabase Storage (production\_attachments) เพื่อให้ฝ่ายผลิตดูเป็นแบบอ้างอิง
 Job Details \& Cancellation: ระบบเปิดดูรายละเอียดใบงานผ่าน URL-Driven Sheet พร้อมปุ่มกดยกเลิกงาน (CANCELLED)
 Kanban Auto-Archive: ใช้ pg\_cron สร้าง Schedule Job รันทุกคืนเพื่อซ่อนการ์ดที่ 'DELIVERED' และ 'CANCELLED' ที่มีอายุเกิน 7 วันอัตโนมัติ
+
 Module G: Expense Management (ระบบจัดการค่าใช้จ่าย) - \[✅ Completed]
 Expense Records: ฟอร์มบันทึกค่าใช้จ่ายดำเนินงาน (OPEX) พร้อมระบบแนบใบเสร็จ รองรับ Late Numbering และ Document Lifecycle (DRAFT/ISSUED/VOID) มาตรฐานเดียวกับระบบหลัก
 Expense AI OCR: ระบบสแกนและอ่านบิลค่าใช้จ่ายบริษัทผ่าน Gemini Edge Function (มี Resiliency Fallback)
@@ -106,150 +109,100 @@ True Net Profit Engine: Dashboard ดึง OPEX ไปหักลบ Gross Pro
 AP Installment Engine (TFRS 16): ระบบคำนวณแบ่งจ่ายค่างวดอัตโนมัติ (Auto-Split) พร้อมระบบปัดเศษสตางค์ลงงวดสุดท้าย แยกเงินต้น (principal) และดอกเบี้ยจ่าย (interest) ออกจากกันอย่างเด็ดขาดตามมาตรฐานบัญชี
 AP Auto-Clearing (Cash Purchase): สำหรับบิลที่ไม่ผ่อนชำระ เมื่อได้รับการอนุมัติ (Approved) ระบบจะทำการตั้งหนี้และล้างหนี้โดยเปลี่ยนสถานะเอกสารเป็น PAID ทันทีอัตโนมัติ
 Installment Knock-off: การบันทึกจ่ายค่างวด จะทำการ INSERT ลงตาราง payment\_transactions และเชื่อมสะพานผ่าน payment\_allocations เพื่อตัดหนี้รายงวด (ระบบจะอัปเดตบิลหลักเป็น PAID อัตโนมัติเมื่อผ่อนครบ)
+
 Module H: Tax \& WHT Management (ระบบจัดการภาษีหัก ณ ที่จ่าย) - \[✅ Completed]
 WHT Report: หน้าต่างรายงานสรุปยอดภาษีหัก ณ ที่จ่ายประจำเดือน แยกตามประเภท (1%, 2%, 3%, 5%)
 Tax Compliance Export: ระบบตรวจสอบความถูกต้อง Master Data (Tax ID, ที่อยู่) และสร้างไฟล์ Excel แบบฟอร์ม ภ.ง.ด.3 / ภ.ง.ด.53
 50 Tawi Generation: ระบบพิมพ์หนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) เป็น PDF รองรับการแปลงตัวอักษรภาษาไทย (Thai Baht Text)
+
 Module I: Data Backup \& System Environment (ระบบสำรองและตั้งค่า) - \[✅ Completed]
 Master Data Seed: ระบบดึงข้อมูล Master Data สู่ไฟล์ seed.sql ผ่านสคริปต์ generate-seed.mjs (--column-inserts) เพื่อความเสถียรในการ Reset ฐานข้อมูล
 Disaster Recovery (Database): สคริปต์อัตโนมัติ backup-db.mjs สำหรับสำรองโครงสร้าง PostgreSQL ด้วย pg\_dump ยิงตรงผ่านพอร์ต 5432 (Pooler) และบีบอัดเป็น .sql.gz ผ่าน Node.js Streams
 Disaster Recovery (Storage): สคริปต์อัตโนมัติ backup-storage.mjs ดูดไฟล์จาก Supabase Storage โดยใช้ S3-Compatible API (AWS SDK)
 Manual Trigger \& Audit: ระบบกด Backup แบบ On-demand ผ่าน Server Actions (Zero Client-Side) คุมสิทธิ์ระดับ Admin และบันทึกประวัติลง audit\_logs อัตโนมัติ
+
 Module J: Pre-Go-Live Readiness \& System Hardening (เตรียมความพร้อมก่อนขึ้นระบบจริง) - \[✅ Completed]
 
-
-
 Module K: Post Go-Live Enterprise Enhancements (ส่วนต่อขยาย Phase 14)
-
 Physical Inventory: ระบบเอกสารยอดยกมา (STK\_OB) และระบบปรับปรุงสต็อก (STK\_ADJ) \[✅ Completed]
-
 Approval Workflow \& Period Closing: ระบบอนุมัติบิล Maker-Checker และการล็อกบัญชีรายเดือน \[✅ Completed]
-
 Fixed Asset Management (Direct Capitalization): ทะเบียนสินทรัพย์ถาวรพร้อมระบบดึงข้อมูลจากบิล AP (Asset Clearing) ผ่าน URL Search Params แบบไร้รอยต่อ \[✅ Register Completed]
-
 Fixed Asset Depreciation: คำนวณค่าเสื่อมราคาแบบเส้นตรง (Straight-line) ผูก Period Closing พร้อมระบบ Proration เฉลี่ยรายวันงวดแรก และ Ledger UI \[✅ Completed]
-
 ABAC (Attribute-Based Access Control): ยกระดับระบบสิทธิ์การเข้าถึงข้อมูลแบบละเอียดด้วย Data Access Scope (ALL/OWN), Maker-Checker Approval Limit, และระบบ Role Permission Matrix (JSONB) เพื่อแบ่งแยกหน้าที่ (SoD) \[✅ Completed]
-
 Data Archiving (Tiered Storage): สคริปต์สำรองข้อมูลภาพเย็น (Cold Data) อายุเกิน 1-5 ปี ถ่ายโอนสู่ NAS \[⏳ Roadmap]
 
-
-
 Module L: Production \& Order-to-Cash (ส่วนขยาย Phase 16-17)
-
 \- Production Kanban \& MTO: ระบบติดตามงานผลิตแบบลากวาง (Zero Client-Side Fetching) แบ่งเป็น 4 สถานะ (PLANNED, IN\_PROGRESS, QA, COMPLETED)
-
 \- BOM Snapshot \& Estimated Cost: ระบบถอดสูตรการผลิต (BOM) อัตโนมัติเพื่อคำนวณวัตถุดิบที่ต้องใช้ (WIP) และดึงราคาต้นทุนล่าสุด (LPP) มาประเมินต้นทุน
-
 \- Sales Order Driven Production: ยึดเอกสารใบสั่งขาย (SO) เป็นจุดศูนย์กลางในการเปิดงานผลิต เพื่อควบคุม Job Costing (Matching Principle) ลดความผิดพลาดในการกรอกข้อมูล
-
 \- In-house Routing \& Direct Labor: สร้างสถาปัตยกรรมแยกส่วนค่าแรงผลิตภายใน (เช่น งานเย็บ, งานรีด, งานแพ็ค) ผ่านตาราง production\_job\_operations โดยรองรับการจ่ายงานให้ช่างหลายแผนกใน 1 ใบสั่งผลิต (MTO) และทำงานประสานกับ Unified Billing Hub (TB) ทันทีที่ช่างส่งมอบงานในแต่ละขั้นตอนสำเร็จ ตามมาตรฐานการคำนวณต้นทุนสินค้าที่ผลิตสำเร็จ (COGM)
-
 \- In-house Routing \& Standard Costing: สร้างสถาปัตยกรรม `production\_job\_operations` ทำหน้าที่เป็น Routing เก็บขั้นตอนการผลิตภายใน (เย็บ, รีด, แพ็ค) โดยดึงเรตค่าแรงมาตรฐานจาก `technician\_rates`
-
 \- SAP-Style Yield Confirmation: หน้า MTO UI มีระบบดึงยอดผลิตตามแผน (Planned Yield) มาเป็นค่าเริ่มต้น และรองรับการกรอกยอดผลิตจริง (Actual Yield) พร้อมระบบ Guardrail บังคับกรอกหมายเหตุ (Variance Reason) หากยอดผลิตไม่ตรงตามเป้าหมายเพื่อเป็น Audit Trail
-
 \- Auto-Confirmation (Backflushing): เชื่อมโยงสถานะ Routing เข้ากับการ์ด Kanban เมื่อลากการ์ดไปยัง "เสร็จสิ้น (COMPLETED)" ระบบจะกวาดสถานะขั้นตอนการผลิต (PENDING) ให้เป็น COMPLETED อัตโนมัติ พร้อมส่งยอดประเมินค่าแรงรวม (Wage Cost) ทะลุเข้าสู่ระบบวางบิลช่าง (TB) ทันที
-
 \- Decoupled Fetching Architecture: ยกเลิกระบบ Join ข้ามตาราง `production\_jobs` กับ `documents` ผ่าน PostgREST โดยตรง (แก้ปัญหา Schema Cache Error) เปลี่ยนมาใช้การคิวรีแยก 2 จังหวะ (Decoupled Fetch) แล้วทำ Data Merging ฝั่ง Server แทน เพื่อความเสถียร 100%
 
-
+Module M: Exceptions & Reverse Logistics (ส่วนต่อขยาย Phase 18)
+- Inventory Reversal (คืนสต็อก): ระบบยกเลิกเอกสาร (VOID) จะต้องทำการล้างยอดบัญชีและตีกลับสต็อก (Reverse Transaction) ลง `inventory_ledger` ด้วยยอดติดลบของ Transaction เดิม
+- Credit Note (CN): ใบลดหนี้เพื่อรองรับการคืนสินค้า (รับสต็อกเข้า) หรือลดหนี้โดยไม่คืนสินค้า ปรับลดยอด AR แบบ Real-time
+- Refund & Write-off: ระบบรองรับการคืนเงินมัดจำ (`AR_REFUND`, `AP_REFUND`) และการตัดเศษหนี้สูญ (`AR_WRITEOFF`, `AP_WRITEOFF`) พร้อมผูก Allocation ป้องกันสถานะลูกหนี้คงค้าง
 
 
 
 5\. Database Schema (PostgreSQL for Supabase)
-
 CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names listed below. DO NOT invent, assume, or create new tables. If a required table is not on this list, STOP and ask the user for clarification.
-
 (Note: bank\_accounts is DEPRECATED. ALWAYS use mst\_bank\_accounts for bank data).
 
 1\. Master Data (ตารางข้อมูลหลัก)
-
-(คงข้อมูลเดิม)
+  mst_bank_accounts (สมุดบัญชีธนาคารบริษัท)
+  mst_brands (แบรนด์สินค้า)
+  mst_categories (หมวดหมู่สินค้า)
+  mst_colors (สีมาตรฐาน - ล็อก 3 ตัวอักษรพิมพ์ใหญ่)
+  mst_expense_categories (หมวดหมู่ค่าใช้จ่าย)
+  mst_asset_categories (หมวดหมู่สินทรัพย์ถาวร — category_code, useful_life_years, depreciation_rate)
+  mst_genders (เพศ/ทรงเสื้อ)
+  mst_sizes (ไซส์มาตรฐาน Global Size รวมถึงไซส์บริการ)
 
 2\. Core Entities (องค์กร, ผู้ใช้, ตั้งค่า)
-
-contacts (คู่ค้า Multi-Role: contact\_roles VARCHAR\[] เท่านั้น — ไม่ใช้ contact\_type)
-
-contact\_persons (ผู้ติดต่อภายใต้คู่ค้า)
-
-user\_profiles (โปรไฟล์พนักงาน/ผู้ใช้งาน — เพิ่ม data\_access\_scope, approval\_limit)
-
-app\_roles (สิทธิ์การใช้งาน Dynamic RBAC — เพิ่ม accessible\_modules JSONB)
-
-system\_settings (ตั้งค่าระบบบริษัท Singleton)
-
-
+  contacts (คู่ค้า Multi-Role: contact\_roles VARCHAR\[] เท่านั้น — ไม่ใช้ contact\_type)
+  contact\_persons (ผู้ติดต่อภายใต้คู่ค้า)
+  user\_profiles (โปรไฟล์พนักงาน/ผู้ใช้งาน — เพิ่ม data\_access\_scope, approval\_limit)
+  app\_roles (สิทธิ์การใช้งาน Dynamic RBAC — เพิ่ม accessible\_modules JSONB)
+  system\_settings (ตั้งค่าระบบบริษัท Singleton)
 
 3\. Products, Inventory \& Production (สินค้า, คลัง, ผลิต)
-
-mst\_categories (หมวดหมู่สินค้า — Hierarchy parent\_id, Parent 1-char, Child 2-char)
-
-mst\_uom (หน่วยนับ — uom\_code เช่น PCS, KGS, MTR)
-
-mst\_sizes (ขนาด — มี system size '00' สำหรับ N/A)
-
-product\_models (รุ่นสินค้า — เพิ่ม is\_raw\_material, is\_service แยกประเภทชัดเจน, base\_uom\_id)
-
-products (สินค้า SKU ย่อย)
-
-product\_boms (สูตรการผลิต — finished\_model\_id, raw\_material\_model\_id, quantity\_required, waste\_percent)
-
-production\_jobs (ใบสั่งผลิต / งาน MTO — job\_no, ref\_document\_id (โยง SO), finished\_model\_id, target\_quantity, status, estimated\_completion\_date, mockup\_image\_url, remark)
-
-production\_job\_items (รายละเอียดไซส์งานผลิต — job\_id, product\_id, quantity)
-
-production\_job\_materials (วัตถุดิบ WIP — job\_id, raw\_material\_model\_id, uom\_id, planned\_qty, actual\_used\_qty, cost\_price\_snapshot)
-
-
+  mst\_categories (หมวดหมู่สินค้า — Hierarchy parent\_id, Parent 1-char, Child 2-char)
+  mst\_uom (หน่วยนับ — uom\_code เช่น PCS, KGS, MTR)
+  mst\_sizes (ขนาด — มี system size '00' สำหรับ N/A)
+  product\_models (รุ่นสินค้า — เพิ่ม is\_raw\_material, is\_service แยกประเภทชัดเจน, base\_uom\_id)
+  products (สินค้า SKU ย่อย)
+  product\_boms (สูตรการผลิต — finished\_model\_id, raw\_material\_model\_id, quantity\_required, waste\_percent)
+  production\_jobs (ใบสั่งผลิต / งาน MTO — job\_no, ref\_document\_id (โยง SO), finished\_model\_id, target\_quantity, status, estimated\_completion\_date, mockup\_image\_url, remark)
+  production\_job\_items (รายละเอียดไซส์งานผลิต — job\_id, product\_id, quantity)
+  production\_job\_materials (วัตถุดิบ WIP — job\_id, raw\_material\_model\_id, uom\_id, planned\_qty, actual\_used\_qty, cost\_price\_snapshot)
 
 4\. Documents \& Financials (เอกสารและการเงิน)
-
-Document Conversion Lineage: QT -> SO -> INV\_DO / TAX\_INV / CS\_TAX / ABB -> REC (ห้ามข้าม SO เด็ดขาด)
-
-SO (ใบสั่งขาย): ใช้ยืนยันคำสั่งซื้อ, จองสต็อก (Soft Allocation / ATP), และส่งงานผลิต (MTO) โดยต้องระบุรายละเอียดไซส์และแนบรูป Mockup ได้
-
-
-
-Soft Allocation (ATP): Available Stock = Physical Stock (Σ inventory\_ledger) − Committed Stock (Σ SO ISSUED qty ที่ยังไม่ออกบิล)
-
-Inventory Adjustments: STK\_OB (ยอดยกมา · Prefix SOB-YYMM-XXXX) และ STK\_ADJ (ปรับปรุงสต็อก · Prefix SAD-YYMM-XXXX) บันทึกผ่าน inventory\_ledger และสร้าง Audit Trail เสมอ
-
-documents / doc\_headers / doc\_details (เอกสารหลัก — doc\_type รวม TB สรุปวางบิลช่าง, เพิ่ม created\_by สำหรับทำ ABAC Ownership)
-
-document\_items (รายการสินค้าในเอกสาร — งานบริการเก็บ technician\_id, wage\_cost, technician\_bill\_id เพื่อรองรับ Line Item Assignment)
-
-document\_allocations (การจัดสรรเอกสาร เช่น ตัดมัดจำ)
-
-billing\_note\_items (รายการใบวางบิล)
-
-expenses (บิลค่าใช้จ่าย / OPEX — approval\_status, is\_installment, total\_interest\_amount, status IN ('DRAFT', 'PENDING', 'ISSUED', 'VOID', 'PAID'))
-
-expense\_installments (งวดผ่อนชำระ — expense\_id, installment\_period, due\_date, principal\_amount, interest\_amount, total\_installment, is\_paid, payment\_transaction\_id)
-
-approval\_logs (Phase 14 Maker-Checker — ประวัติอนุมัติ/ปฏิเสธ)
-
-accounting\_periods (งวดบัญชีรายเดือน)
-
-fixed\_assets (ทะเบียนสินทรัพย์ถาวร — asset\_code, asset\_name, category\_id, acquisition\_date, acquisition\_cost, salvage\_value, useful\_life\_months, status, expense\_id)
-
-asset\_depreciation\_ledger (ประวัติการตัดค่าเสื่อมรายเดือน — asset\_id, period\_id, depreciation\_date, depreciation\_amount, accumulated\_depreciation, net\_book\_value)
-
-payment\_transactions (ธุรกรรมการรับ/จ่าย)
-
-payment\_allocations (การตัดยอดหนี้ Knock-off — expense\_id, document\_id)
-
-payment\_slips (สลิปโอนเงิน)
-
-
+  Document Conversion Lineage: QT -> SO -> INV\_DO / TAX\_INV / CS\_TAX / ABB -> REC (ห้ามข้าม SO เด็ดขาด)
+  SO (ใบสั่งขาย): ใช้ยืนยันคำสั่งซื้อ, จองสต็อก (Soft Allocation / ATP), และส่งงานผลิต (MTO) โดยต้องระบุรายละเอียดไซส์และแนบรูป Mockup ได้
+  Soft Allocation (ATP): Available Stock = Physical Stock (Σ inventory\_ledger) − Committed Stock (Σ SO ISSUED qty ที่ยังไม่ออกบิล)
+  Inventory Adjustments: STK\_OB (ยอดยกมา · Prefix SOB-YYMM-XXXX) และ STK\_ADJ (ปรับปรุงสต็อก · Prefix SAD-YYMM-XXXX) บันทึกผ่าน inventory\_ledger และสร้าง Audit Trail เสมอ
+  documents / doc\_headers / doc\_details (เอกสารหลัก — doc\_type รวม TB สรุปวางบิลช่าง, เพิ่ม created\_by สำหรับทำ ABAC Ownership)
+  document\_items (รายการสินค้าในเอกสาร — งานบริการเก็บ technician\_id, wage\_cost, technician\_bill\_id เพื่อรองรับ Line Item Assignment)
+  document\_allocations (การจัดสรรเอกสาร เช่น ตัดมัดจำ)
+  billing\_note\_items (รายการใบวางบิล)
+  expenses (บิลค่าใช้จ่าย / OPEX — approval\_status, is\_installment, total\_interest\_amount, status IN ('DRAFT', 'PENDING', 'ISSUED', 'VOID', 'PAID'))
+  expense\_installments (งวดผ่อนชำระ — expense\_id, installment\_period, due\_date, principal\_amount, interest\_amount, total\_installment, is\_paid, payment\_transaction\_id)
+  approval\_logs (Phase 14 Maker-Checker — ประวัติอนุมัติ/ปฏิเสธ)
+  accounting\_periods (งวดบัญชีรายเดือน)
+  fixed\_assets (ทะเบียนสินทรัพย์ถาวร — asset\_code, asset\_name, category\_id, acquisition\_date, acquisition\_cost, salvage\_value, useful\_life\_months, status, expense\_id)
+  asset\_depreciation\_ledger (ประวัติการตัดค่าเสื่อมรายเดือน — asset\_id, period\_id, depreciation\_date, depreciation\_amount, accumulated\_depreciation, net\_book\_value)
+  payment\_transactions (ธุรกรรมการรับ/จ่าย)
+  payment\_allocations (การตัดยอดหนี้ Knock-off — expense\_id, document\_id)
+  payment\_slips (สลิปโอนเงิน)
 
 5\. System \& Auditing (ระบบและการตรวจสอบ)
-
-audit\_logs (ประวัติการเปลี่ยนแปลงข้อมูล JSONB)
+  audit\_logs (ประวัติการเปลี่ยนแปลงข้อมูล JSONB)
 
 6\. Database Views (มุมมองข้อมูลสำหรับ Report)
-
-vw\_monthly\_profit\_summary (product\_cogs, wage\_cogs, cogs = เสื้อเปล่า + ค่าแรง)
-
-vw\_sales\_profit\_analysis (กำไรต่อบิล — product\_cogs + document\_items.wage\_cost = total\_cogs)
+  vw\_monthly\_profit\_summary (product\_cogs, wage\_cogs, cogs = เสื้อเปล่า + ค่าแรง)
+  vw\_sales\_profit\_analysis (กำไรต่อบิล — product\_cogs + document\_items.wage\_cost = total\_cogs)
 

@@ -11,7 +11,7 @@ import { FilePlus2, Loader2, Ban } from "lucide-react";
 import { toast } from "sonner";
 import {
   cloneDocumentToNewDraft,
-  voidDocument,
+  voidDocumentAction,
 } from "@/lib/actions/document-actions";
 import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import {
@@ -23,6 +23,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 export type VoidDocumentActionsProps = {
   documentId: string;
@@ -38,20 +40,43 @@ export default function VoidDocumentActions({
   const router = useRouter();
   const [confirmMode, setConfirmMode] = useState<ConfirmMode>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [voidReason, setVoidReason] = useState("");
+  const [reasonError, setReasonError] = useState<string | null>(null);
 
-  function closeConfirm() {
-    if (isSaving) return;
+  function closeConfirm(force = false) {
+    if (isSaving && !force) return;
     setConfirmMode(null);
+    setVoidReason("");
+    setReasonError(null);
+  }
+
+  function openConfirm(mode: ConfirmMode) {
+    if (isSaving) return;
+    setVoidReason("");
+    setReasonError(null);
+    setConfirmMode(mode);
+  }
+
+  function requireReason(): string | null {
+    const reason = voidReason.trim();
+    if (!reason) {
+      setReasonError("กรุณาระบุเหตุผลการยกเลิกเอกสาร");
+      return null;
+    }
+    setReasonError(null);
+    return reason;
   }
 
   async function handleVoidOnly() {
     if (isSaving) return;
+    const reason = requireReason();
+    if (!reason) return;
+
     setIsSaving(true);
     try {
-      const result = await voidDocument(documentId);
+      const result = await voidDocumentAction(documentId, reason);
       if (result.error || !result.data) {
         toast.error(result.error ?? "ยกเลิกเอกสารไม่สำเร็จ");
-        setConfirmMode(null);
         return;
       }
 
@@ -61,13 +86,12 @@ export default function VoidDocumentActions({
             ? ` — คืนสต็อก ${result.data.reversed_ledger_count} รายการ`
             : ""),
       );
-      setConfirmMode(null);
+      closeConfirm(true);
       router.refresh();
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "ยกเลิกเอกสารไม่สำเร็จ",
       );
-      setConfirmMode(null);
     } finally {
       setIsSaving(false);
     }
@@ -75,12 +99,14 @@ export default function VoidDocumentActions({
 
   async function handleCancelAndReplace() {
     if (isSaving) return;
+    const reason = requireReason();
+    if (!reason) return;
+
     setIsSaving(true);
     try {
-      const voidResult = await voidDocument(documentId);
+      const voidResult = await voidDocumentAction(documentId, reason);
       if (voidResult.error || !voidResult.data) {
         toast.error(voidResult.error ?? "ยกเลิกเอกสารไม่สำเร็จ");
-        setConfirmMode(null);
         return;
       }
 
@@ -90,7 +116,7 @@ export default function VoidDocumentActions({
           cloneResult.error ??
             "ยกเลิกเอกสารแล้ว แต่สร้างเอกสารร่างทดแทนไม่สำเร็จ",
         );
-        setConfirmMode(null);
+        closeConfirm(true);
         router.refresh();
         return;
       }
@@ -98,7 +124,7 @@ export default function VoidDocumentActions({
       toast.success(
         `ยกเลิก ${voidResult.data.document_no} และสร้างร่างทดแทน ${cloneResult.data.document_no}`,
       );
-      setConfirmMode(null);
+      closeConfirm(true);
       router.push(
         `/sales/${encodeURIComponent(cloneResult.data.document_no)}`,
       );
@@ -107,7 +133,6 @@ export default function VoidDocumentActions({
       toast.error(
         error instanceof Error ? error.message : "ออกเอกสารทดแทนไม่สำเร็จ",
       );
-      setConfirmMode(null);
     } finally {
       setIsSaving(false);
     }
@@ -120,10 +145,16 @@ export default function VoidDocumentActions({
         variant="destructive"
         className="h-10 gap-2"
         disabled={isSaving}
-        onClick={() => setConfirmMode("void")}
+        onClick={() => openConfirm("void")}
       >
-        <Ban className="size-4" />
-        {DOCUMENT_ACTIONS.VOID}
+        {isSaving && confirmMode === "void" ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <Ban className="size-4" />
+        )}
+        {isSaving && confirmMode === "void"
+          ? "กำลังดำเนินการ..."
+          : DOCUMENT_ACTIONS.VOID}
       </Button>
 
       <Button
@@ -131,10 +162,16 @@ export default function VoidDocumentActions({
         variant="outline"
         className="h-10 gap-2 border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100"
         disabled={isSaving}
-        onClick={() => setConfirmMode("replace")}
+        onClick={() => openConfirm("replace")}
       >
-        <FilePlus2 className="size-4" />
-        ออกเอกสารทดแทน
+        {isSaving && confirmMode === "replace" ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <FilePlus2 className="size-4" />
+        )}
+        {isSaving && confirmMode === "replace"
+          ? "กำลังดำเนินการ..."
+          : "ออกเอกสารทดแทน"}
       </Button>
 
       <AlertDialog
@@ -154,15 +191,15 @@ export default function VoidDocumentActions({
             <AlertDialogDescription>
               {confirmMode === "replace" ? (
                 <>
-                  ระบบจะยกเลิกเอกสารนี้ (สถานะ CANCELLED) คืนสต็อกถ้ามี
+                  ระบบจะยกเลิกเอกสารนี้ (สถานะ VOID) คืนสต็อกถ้ามี
                   แล้วสร้างเอกสารร่างใหม่พร้อมคัดลอกรายการสินค้า
                   การยกเลิกไม่สามารถย้อนกลับได้
                 </>
               ) : (
                 <>
                   คุณต้องการยกเลิกเอกสารที่ออกแล้วใช่หรือไม่?
-                  สต็อกจะถูกคืนด้วยรายการกลับ (OUT↔IN) หากมี
-                  การกระทำนี้ไม่สามารถย้อนกลับได้
+                  สต็อกจะถูกคืนด้วยรายการกลับ หากมี
+                  สถานะจะเปลี่ยนเป็น VOID และการกระทำนี้ไม่สามารถย้อนกลับได้
                 </>
               )}
               <span className="mt-2 block font-mono text-slate-700">
@@ -170,6 +207,24 @@ export default function VoidDocumentActions({
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="sales-void-reason">
+              เหตุผลการยกเลิก <span className="text-red-600">*</span>
+            </Label>
+            <Textarea
+              id="sales-void-reason"
+              value={voidReason}
+              disabled={isSaving}
+              placeholder="ระบุเหตุผลการยกเลิกเอกสาร..."
+              onChange={(event) => {
+                setVoidReason(event.target.value);
+                if (reasonError) setReasonError(null);
+              }}
+            />
+            {reasonError ? (
+              <p className="text-xs font-medium text-red-600">{reasonError}</p>
+            ) : null}
+          </div>
           <AlertDialogFooter>
             <Button
               type="button"
@@ -182,7 +237,7 @@ export default function VoidDocumentActions({
             <Button
               type="button"
               variant="destructive"
-              disabled={isSaving}
+              disabled={isSaving || !voidReason.trim()}
               onClick={() => {
                 if (confirmMode === "replace") {
                   void handleCancelAndReplace();

@@ -16,6 +16,7 @@ import {
   SO_CONVERT_TARGETS,
   DOCUMENT_TYPE_PREFIX,
   DOCUMENT_TYPES,
+  INVENTORY_DOC_TYPES,
   PURCHASE_DOC_TYPES,
   SALES_DOC_TYPES,
   STOCK_OUT_DOC_TYPES,
@@ -244,6 +245,13 @@ export async function createDraftDocument(
 
     if (!isDocumentType(docType)) {
       return { data: null, error: "กรุณาเลือกประเภทเอกสารให้ถูกต้อง" };
+    }
+    if (docType === "CN") {
+      return {
+        data: null,
+        error:
+          "ใบลดหนี้ต้องสร้างจากบิลขายต้นทางที่ /sales/cn/create?ref_doc_id=...",
+      };
     }
     if (!contactId) {
       return { data: null, error: "กรุณาเลือกลูกค้า / คู่ค้า" };
@@ -490,6 +498,13 @@ export async function createDocument(
 
     if (!isDocumentType(docType)) {
       return { data: null, error: "กรุณาเลือกประเภทเอกสารให้ถูกต้อง" };
+    }
+    if (docType === "CN") {
+      return {
+        data: null,
+        error:
+          "ใบลดหนี้ต้องสร้างจากบิลขายต้นทางที่ /sales/cn/create?ref_doc_id=...",
+      };
     }
     if (!contactId) {
       return { data: null, error: "กรุณาเลือกลูกค้า / คู่ค้า" };
@@ -1799,7 +1814,9 @@ export async function updateDraftDocument(
       };
     }
 
-    const isReplacement = Boolean(existing.ref_document_id);
+    const isReplacement =
+      Boolean(existing.ref_document_id) &&
+      String(existing.doc_type ?? "") !== "CN";
 
     const { data: contact, error: contactError } = await supabase
       .from("contacts")
@@ -2108,6 +2125,13 @@ export async function issueDocument(
         error: `เอกสาร ${document.doc_no} ไม่ใช่สถานะ DRAFT (ปัจจุบัน: ${document.status})`,
       };
     }
+    if (String(document.doc_type ?? "") === "CN") {
+      return {
+        data: null,
+        error:
+          "ใบลดหนี้ต้องออกเอกสารผ่าน issueCreditNoteAction (RPC issue_credit_note_transaction)",
+      };
+    }
 
     const { data: items, error: itemsError } = await supabase
       .from("document_items")
@@ -2364,6 +2388,206 @@ export async function issueDocument(
     const message =
       err instanceof Error ? err.message : "ออกเอกสาร (issueDocument) ไม่สำเร็จ";
     return { data: null, error: message };
+  }
+}
+
+function parseIssueCreditNoteRpc(rpcData: unknown): {
+  success: boolean;
+  docNo: string | null;
+  status: DocumentStatus | null;
+  ledgerCount: number;
+  error: string | null;
+} {
+  if (rpcData == null) {
+    return {
+      success: true,
+      docNo: null,
+      status: "ISSUED",
+      ledgerCount: 0,
+      error: null,
+    };
+  }
+
+  if (typeof rpcData === "string") {
+    const trimmed = rpcData.trim();
+    if (!trimmed) {
+      return {
+        success: true,
+        docNo: null,
+        status: "ISSUED",
+        ledgerCount: 0,
+        error: null,
+      };
+    }
+    try {
+      return parseIssueCreditNoteRpc(JSON.parse(trimmed) as unknown);
+    } catch {
+      return {
+        success: true,
+        docNo: trimmed,
+        status: "ISSUED",
+        ledgerCount: 0,
+        error: null,
+      };
+    }
+  }
+
+  if (typeof rpcData !== "object") {
+    return {
+      success: true,
+      docNo: null,
+      status: "ISSUED",
+      ledgerCount: 0,
+      error: null,
+    };
+  }
+
+  const payload = rpcData as Record<string, unknown>;
+  const errorRaw = payload.error ?? payload.message ?? null;
+  const error =
+    errorRaw != null && String(errorRaw).trim()
+      ? String(errorRaw).trim()
+      : null;
+  const successFlag = payload.success;
+  const success =
+    successFlag === false || successFlag === "false" ? false : error == null;
+  const statusRaw = payload.status != null ? String(payload.status) : "ISSUED";
+
+  return {
+    success,
+    docNo:
+      payload.doc_no != null
+        ? String(payload.doc_no)
+        : payload.document_no != null
+          ? String(payload.document_no)
+          : null,
+    status: statusRaw as DocumentStatus,
+    ledgerCount: Number(
+      payload.ledger_count ??
+        payload.reversed_count ??
+        payload.inventory_count ??
+        payload.posted_count ??
+        0,
+    ),
+    error,
+  };
+}
+
+/**
+ * Phase 18 — ISSUE Credit Note via Cloud RPC `issue_credit_note_transaction`.
+ * Service Role (`supabaseAdmin`) bypasses RLS. Actor from Auth Session only.
+ * Late Numbering / inventory return / AR reduction are handled inside the RPC.
+ */
+export async function issueCreditNoteAction(
+  documentId: string,
+): Promise<IssueDocumentResult> {
+  try {
+    const id = documentId?.trim() ?? "";
+    if (!id) {
+      return { data: null, error: "ไม่พบรหัสเอกสาร (document_id)" };
+    }
+
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { data: null, error: owner.error };
+    }
+
+    const supabaseAdmin = createSupabaseServerClient();
+
+    const { data: beforeDoc, error: beforeError } = await supabaseAdmin
+      .from("documents")
+      .select("id, doc_no, doc_type, status, grand_total, ref_document_id")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (beforeError) {
+      return { data: null, error: beforeError.message };
+    }
+    if (!beforeDoc) {
+      return { data: null, error: "ไม่พบเอกสารใบลดหนี้" };
+    }
+    if (String(beforeDoc.doc_type ?? "") !== "CN") {
+      return {
+        data: null,
+        error: "issueCreditNoteAction ใช้ได้เฉพาะเอกสารประเภท CN",
+      };
+    }
+    if (String(beforeDoc.status ?? "") !== "DRAFT") {
+      return {
+        data: null,
+        error: `ออกใบลดหนี้ได้เฉพาะสถานะ DRAFT (ปัจจุบัน: ${String(beforeDoc.status ?? "—")})`,
+      };
+    }
+
+    const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc(
+      "issue_credit_note_transaction",
+      {
+        p_document_id: id,
+        p_user_id: owner.userId,
+      },
+    );
+
+    if (rpcError) {
+      if (/function|does not exist|PGRST202|42883/i.test(rpcError.message)) {
+        return {
+          data: null,
+          error:
+            "ไม่พบ RPC issue_credit_note_transaction บน Supabase Cloud — กรุณาสร้างฟังก์ชันบน SQL Editor",
+        };
+      }
+      return { data: null, error: rpcError.message };
+    }
+
+    const parsed = parseIssueCreditNoteRpc(rpcData);
+    if (!parsed.success) {
+      return {
+        data: null,
+        error: parsed.error ?? "ออกใบลดหนี้ไม่สำเร็จ",
+      };
+    }
+
+    const docNo = parsed.docNo || String(beforeDoc.doc_no ?? "");
+    const nextStatus: DocumentStatus = parsed.status || "ISSUED";
+    const ledgerCount = Number.isFinite(parsed.ledgerCount)
+      ? parsed.ledgerCount
+      : 0;
+
+    revalidatePath("/sales");
+    revalidatePath(`/sales/${encodeURIComponent(String(beforeDoc.doc_no ?? ""))}`);
+    revalidatePath(`/sales/${encodeURIComponent(docNo)}`);
+
+    fireDocumentAuditLog({
+      recordId: id,
+      auditEvent: "ISSUE",
+      oldData: (beforeDoc as Record<string, unknown> | null) ?? null,
+      newData: {
+        ...(beforeDoc ?? {}),
+        id,
+        doc_no: docNo,
+        status: nextStatus,
+      },
+    });
+
+    return {
+      data: {
+        document_id: id,
+        document_no: docNo,
+        status: nextStatus,
+        ledger_count: ledgerCount,
+        successMessage:
+          `ออกใบลดหนี้ ${docNo} สำเร็จ` +
+          (ledgerCount > 0 ? ` — รับคืนสต็อก ${ledgerCount} รายการ` : ""),
+      },
+      error: null,
+    };
+  } catch (err) {
+    return {
+      data: null,
+      error:
+        err instanceof Error
+          ? err.message
+          : "ออกใบลดหนี้ (issueCreditNoteAction) ไม่สำเร็จ",
+    };
   }
 }
 
@@ -3016,6 +3240,228 @@ async function voidDocumentFallback(
     },
     error: null,
   };
+}
+
+function revalidateVoidedDocumentPaths(
+  docType: string | null | undefined,
+  docNo: string,
+): void {
+  const type = String(docType ?? "");
+  const encoded = encodeURIComponent(docNo);
+  if ((INVENTORY_DOC_TYPES as readonly string[]).includes(type)) {
+    revalidatePath("/inventory/adjustments");
+    return;
+  }
+  if ((PURCHASE_DOC_TYPES as readonly string[]).includes(type)) {
+    revalidatePath("/purchases");
+    revalidatePath(`/purchases/${encoded}`);
+    return;
+  }
+  revalidatePath("/sales");
+  revalidatePath(`/sales/${encoded}`);
+}
+
+function parseVoidTransactionRpc(rpcData: unknown): {
+  success: boolean;
+  docNo: string | null;
+  status: DocumentStatus | null;
+  reversedCount: number;
+  error: string | null;
+} {
+  if (rpcData == null) {
+    return {
+      success: true,
+      docNo: null,
+      status: "VOID",
+      reversedCount: 0,
+      error: null,
+    };
+  }
+
+  if (typeof rpcData === "string") {
+    const trimmed = rpcData.trim();
+    if (!trimmed) {
+      return {
+        success: true,
+        docNo: null,
+        status: "VOID",
+        reversedCount: 0,
+        error: null,
+      };
+    }
+    try {
+      return parseVoidTransactionRpc(JSON.parse(trimmed) as unknown);
+    } catch {
+      return {
+        success: true,
+        docNo: trimmed,
+        status: "VOID",
+        reversedCount: 0,
+        error: null,
+      };
+    }
+  }
+
+  if (typeof rpcData !== "object") {
+    return {
+      success: true,
+      docNo: null,
+      status: "VOID",
+      reversedCount: 0,
+      error: null,
+    };
+  }
+
+  const payload = rpcData as Record<string, unknown>;
+  const errorRaw = payload.error ?? payload.message ?? null;
+  const error =
+    errorRaw != null && String(errorRaw).trim()
+      ? String(errorRaw).trim()
+      : null;
+  const successFlag = payload.success;
+  const success =
+    successFlag === false || successFlag === "false"
+      ? false
+      : error == null;
+
+  const statusRaw = payload.status != null ? String(payload.status) : "VOID";
+  const status = statusRaw as DocumentStatus;
+
+  return {
+    success,
+    docNo:
+      payload.doc_no != null
+        ? String(payload.doc_no)
+        : payload.document_no != null
+          ? String(payload.document_no)
+          : null,
+    status,
+    reversedCount: Number(
+      payload.reversed_count ?? payload.reversed_ledger_count ?? 0,
+    ),
+    error,
+  };
+}
+
+/**
+ * Phase 18 — VOID via Cloud RPC `void_document_transaction`.
+ * Service Role (`supabaseAdmin`) bypasses RLS. Actor from Auth Session only.
+ */
+export async function voidDocumentAction(
+  documentId: string,
+  voidReason: string,
+): Promise<VoidDocumentResult> {
+  try {
+    const id = documentId?.trim() ?? "";
+    const reason = voidReason?.trim() ?? "";
+    if (!id) {
+      return { data: null, error: "ไม่พบรหัสเอกสาร (document_id)" };
+    }
+    if (!reason) {
+      return { data: null, error: "กรุณาระบุเหตุผลการยกเลิกเอกสาร" };
+    }
+
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { data: null, error: owner.error };
+    }
+
+    const supabaseAdmin = createSupabaseServerClient();
+
+    const { data: beforeDoc, error: beforeError } = await supabaseAdmin
+      .from("documents")
+      .select(
+        "id, doc_no, doc_type, status, grand_total, paid_amount, payment_status, void_reason, is_voided",
+      )
+      .eq("id", id)
+      .maybeSingle();
+
+    if (beforeError) {
+      return { data: null, error: beforeError.message };
+    }
+    if (!beforeDoc) {
+      return { data: null, error: "ไม่พบเอกสาร" };
+    }
+
+    const currentStatus = String(beforeDoc.status ?? "");
+    if (currentStatus !== "ISSUED") {
+      return {
+        data: null,
+        error: `ยกเลิกได้เฉพาะเอกสารสถานะ ISSUED (ปัจจุบัน: ${currentStatus || "—"})`,
+      };
+    }
+
+    const paidAmount = Number(beforeDoc.paid_amount ?? 0);
+    if (paidAmount > 0) {
+      return {
+        data: null,
+        error: "เอกสารมียอดชำระแล้ว — ต้องยกเลิกการตัดชำระ (payments) ก่อน",
+      };
+    }
+
+    const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc(
+      "void_document_transaction",
+      {
+        p_document_id: id,
+        p_user_id: owner.userId,
+        p_void_reason: reason,
+      },
+    );
+
+    if (rpcError) {
+      if (/function|does not exist|PGRST202|42883/i.test(rpcError.message)) {
+        return {
+          data: null,
+          error:
+            "ไม่พบ RPC void_document_transaction บน Supabase Cloud — กรุณาสร้างฟังก์ชันบน SQL Editor",
+        };
+      }
+      return { data: null, error: rpcError.message };
+    }
+
+    const parsed = parseVoidTransactionRpc(rpcData);
+    if (!parsed.success) {
+      return {
+        data: null,
+        error: parsed.error ?? "ยกเลิกเอกสารไม่สำเร็จ",
+      };
+    }
+
+    const docNo = parsed.docNo || String(beforeDoc.doc_no ?? "");
+    const nextStatus: DocumentStatus = parsed.status || "VOID";
+
+    revalidateVoidedDocumentPaths(String(beforeDoc.doc_type ?? ""), docNo);
+
+    fireDocumentAuditLog({
+      recordId: id,
+      auditEvent: "VOID",
+      oldData: (beforeDoc as Record<string, unknown> | null) ?? null,
+      newData: {
+        ...(beforeDoc ?? {}),
+        id,
+        doc_no: docNo,
+        status: nextStatus,
+        void_reason: reason,
+        is_voided: true,
+      },
+    });
+
+    return {
+      data: {
+        document_id: id,
+        document_no: docNo,
+        status: nextStatus,
+        reversed_ledger_count: parsed.reversedCount,
+      },
+      error: null,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "ยกเลิกเอกสาร (voidDocumentAction) ไม่สำเร็จ";
+    return { data: null, error: message };
+  }
 }
 
 /**

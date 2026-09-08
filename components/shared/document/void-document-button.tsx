@@ -22,6 +22,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 export type VoidDocumentActionResult = {
   data: { id?: string; document_no: string } | null;
@@ -31,13 +33,15 @@ export type VoidDocumentActionResult = {
 export type VoidDocumentButtonProps = {
   documentId: string;
   docNo: string;
-  /** Server Action: voidExpense / voidDocument / etc. */
-  voidAction: (id: string) => Promise<VoidDocumentActionResult>;
+  /** Server Action: voidExpense / voidDocumentAction / etc. */
+  voidAction: (id: string, reason: string) => Promise<VoidDocumentActionResult>;
   onVoided?: (data: { id?: string; document_no: string }) => void;
   confirmTitle?: string;
   confirmDescription?: ReactNode;
   confirmLabel?: string;
   disabled?: boolean;
+  /** Phase 18: force a void reason before submit (documents ISSUED). */
+  requireReason?: boolean;
 };
 
 export function VoidDocumentButton({
@@ -49,25 +53,47 @@ export function VoidDocumentButton({
   confirmDescription,
   confirmLabel = "ยืนยันยกเลิกเอกสาร",
   disabled = false,
+  requireReason = false,
 }: VoidDocumentButtonProps) {
   const router = useRouter();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [voidReason, setVoidReason] = useState("");
+  const [reasonError, setReasonError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  function resetDialog() {
+    setVoidReason("");
+    setReasonError(null);
+  }
+
+  function handleOpenChange(open: boolean) {
+    if (isPending) return;
+    setConfirmOpen(open);
+    if (!open) resetDialog();
+  }
 
   function handleConfirm() {
     if (isPending) return;
 
+    const reason = voidReason.trim();
+    if (requireReason && !reason) {
+      setReasonError("กรุณาระบุเหตุผลการยกเลิกเอกสาร");
+      return;
+    }
+
+    setReasonError(null);
+
     startTransition(async () => {
       try {
-        const result = await voidAction(documentId);
+        const result = await voidAction(documentId, reason);
         if (result.error || !result.data) {
           toast.error(result.error ?? "ยกเลิกเอกสารไม่สำเร็จ");
-          setConfirmOpen(false);
           return;
         }
 
         toast.success(`ยกเลิกเอกสาร ${result.data.document_no} แล้ว`);
         setConfirmOpen(false);
+        resetDialog();
 
         if (onVoided) {
           onVoided(result.data);
@@ -78,7 +104,6 @@ export function VoidDocumentButton({
         toast.error(
           err instanceof Error ? err.message : "ยกเลิกเอกสารไม่สำเร็จ",
         );
-        setConfirmOpen(false);
       }
     });
   }
@@ -97,13 +122,13 @@ export function VoidDocumentButton({
         ) : (
           <Ban className="size-4" />
         )}
-        {DOCUMENT_ACTIONS.VOID}
+        {isPending ? "กำลังดำเนินการ..." : DOCUMENT_ACTIONS.VOID}
         <span className="sr-only">{docNo}</span>
       </Button>
 
       <AlertDialog
         open={confirmOpen}
-        onOpenChange={setConfirmOpen}
+        onOpenChange={handleOpenChange}
         dismissible={!isPending}
       >
         <AlertDialogContent>
@@ -121,10 +146,30 @@ export function VoidDocumentButton({
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {requireReason ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="void-reason">
+                เหตุผลการยกเลิก <span className="text-red-600">*</span>
+              </Label>
+              <Textarea
+                id="void-reason"
+                value={voidReason}
+                disabled={isPending}
+                placeholder="ระบุเหตุผลการยกเลิกเอกสาร..."
+                onChange={(event) => {
+                  setVoidReason(event.target.value);
+                  if (reasonError) setReasonError(null);
+                }}
+              />
+              {reasonError ? (
+                <p className="text-xs font-medium text-red-600">{reasonError}</p>
+              ) : null}
+            </div>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isPending} />
             <AlertDialogAction
-              disabled={isPending}
+              disabled={isPending || (requireReason && !voidReason.trim())}
               className="bg-red-600 hover:bg-red-700 disabled:bg-red-400"
               onClick={(event) => {
                 event.preventDefault();

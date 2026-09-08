@@ -2213,6 +2213,18 @@ export type Database = {
       }
       get_user_access_scope: { Args: never; Returns: string }
       is_period_closed: { Args: { doc_date: string }; Returns: boolean }
+      issue_credit_note_transaction: {
+        Args: { p_document_id: string; p_user_id: string }
+        Returns: Json
+      }
+      void_document_transaction: {
+        Args: {
+          p_document_id: string
+          p_user_id: string
+          p_void_reason: string
+        }
+        Returns: Json
+      }
       void_document_with_stock_reversal: {
         Args: { p_document_id: string }
         Returns: Json
