@@ -2482,8 +2482,8 @@ export async function issueCreditNoteAction(
   documentId: string,
 ): Promise<IssueDocumentResult> {
   try {
-    const id = documentId?.trim() ?? "";
-    if (!id) {
+    documentId = documentId?.trim() ?? "";
+    if (!documentId) {
       return { data: null, error: "ไม่พบรหัสเอกสาร (document_id)" };
     }
 
@@ -2491,13 +2491,14 @@ export async function issueCreditNoteAction(
     if (!owner.ok) {
       return { data: null, error: owner.error };
     }
+    const userId = owner.userId;
 
     const supabaseAdmin = createSupabaseServerClient();
 
     const { data: beforeDoc, error: beforeError } = await supabaseAdmin
       .from("documents")
       .select("id, doc_no, doc_type, status, grand_total, ref_document_id")
-      .eq("id", id)
+      .eq("id", documentId)
       .maybeSingle();
 
     if (beforeError) {
@@ -2522,8 +2523,8 @@ export async function issueCreditNoteAction(
     const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc(
       "issue_credit_note_transaction",
       {
-        p_document_id: id,
-        p_user_id: owner.userId,
+        p_document_id: documentId,
+        p_user_id: userId,
       },
     );
 
@@ -2557,12 +2558,12 @@ export async function issueCreditNoteAction(
     revalidatePath(`/sales/${encodeURIComponent(docNo)}`);
 
     fireDocumentAuditLog({
-      recordId: id,
+      recordId: documentId,
       auditEvent: "ISSUE",
       oldData: (beforeDoc as Record<string, unknown> | null) ?? null,
       newData: {
         ...(beforeDoc ?? {}),
-        id,
+        id: documentId,
         doc_no: docNo,
         status: nextStatus,
       },
@@ -2570,7 +2571,7 @@ export async function issueCreditNoteAction(
 
     return {
       data: {
-        document_id: id,
+        document_id: documentId,
         document_no: docNo,
         status: nextStatus,
         ledger_count: ledgerCount,
@@ -3352,12 +3353,12 @@ export async function voidDocumentAction(
   voidReason: string,
 ): Promise<VoidDocumentResult> {
   try {
-    const id = documentId?.trim() ?? "";
-    const reason = voidReason?.trim() ?? "";
-    if (!id) {
+    documentId = documentId?.trim() ?? "";
+    voidReason = voidReason?.trim() ?? "";
+    if (!documentId) {
       return { data: null, error: "ไม่พบรหัสเอกสาร (document_id)" };
     }
-    if (!reason) {
+    if (!voidReason) {
       return { data: null, error: "กรุณาระบุเหตุผลการยกเลิกเอกสาร" };
     }
 
@@ -3365,6 +3366,7 @@ export async function voidDocumentAction(
     if (!owner.ok) {
       return { data: null, error: owner.error };
     }
+    const userId = owner.userId;
 
     const supabaseAdmin = createSupabaseServerClient();
 
@@ -3373,7 +3375,7 @@ export async function voidDocumentAction(
       .select(
         "id, doc_no, doc_type, status, grand_total, paid_amount, payment_status, void_reason, is_voided",
       )
-      .eq("id", id)
+      .eq("id", documentId)
       .maybeSingle();
 
     if (beforeError) {
@@ -3402,9 +3404,9 @@ export async function voidDocumentAction(
     const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc(
       "void_document_transaction",
       {
-        p_document_id: id,
-        p_user_id: owner.userId,
-        p_void_reason: reason,
+        p_document_id: documentId,
+        p_user_id: userId,
+        p_void_reason: voidReason,
       },
     );
 
@@ -3433,22 +3435,22 @@ export async function voidDocumentAction(
     revalidateVoidedDocumentPaths(String(beforeDoc.doc_type ?? ""), docNo);
 
     fireDocumentAuditLog({
-      recordId: id,
+      recordId: documentId,
       auditEvent: "VOID",
       oldData: (beforeDoc as Record<string, unknown> | null) ?? null,
       newData: {
         ...(beforeDoc ?? {}),
-        id,
+        id: documentId,
         doc_no: docNo,
         status: nextStatus,
-        void_reason: reason,
+        void_reason: voidReason,
         is_voided: true,
       },
     });
 
     return {
       data: {
-        document_id: id,
+        document_id: documentId,
         document_no: docNo,
         status: nextStatus,
         reversed_ledger_count: parsed.reversedCount,
