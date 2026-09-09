@@ -1439,6 +1439,8 @@ export async function getDocumentByNo(
         wht_amount,
         payment_status,
         notes,
+        remark,
+        void_reason,
         attachment_url,
         attached_file_url,
         wht_attachment_url,
@@ -1706,6 +1708,8 @@ export async function getDocumentByNo(
       wht_amount: Number(data.wht_amount ?? 0),
       payment_status: String(data.payment_status ?? "Pending"),
       notes,
+      remark: (data.remark as string | null) ?? null,
+      void_reason: (data.void_reason as string | null) ?? null,
       reference_no: referenceNo,
       attachment_url: (data.attachment_url as string | null) ?? null,
       attached_file_url: (data.attached_file_url as string | null) ?? null,
@@ -3375,7 +3379,7 @@ export async function voidDocumentAction(
     const { data: beforeDoc, error: beforeError } = await supabaseAdmin
       .from("documents")
       .select(
-        "id, doc_no, doc_type, status, grand_total, paid_amount, payment_status, void_reason, is_voided",
+        "id, doc_no, doc_type, status, grand_total, paid_amount, payment_status, remark, void_reason, is_voided, notes",
       )
       .eq("id", documentId)
       .maybeSingle();
@@ -3436,6 +3440,14 @@ export async function voidDocumentAction(
     const docNo = parsed.docNo || String(beforeDoc.doc_no ?? "");
     const nextStatus: DocumentStatus = parsed.status || "VOID";
 
+    const { error: remarkError } = await supabaseAdmin
+      .from("documents")
+      .update({ remark: voidReason })
+      .eq("id", documentId);
+    if (remarkError) {
+      console.error("voidDocumentAction remark stamp:", remarkError.message);
+    }
+
     revalidateVoidedDocumentPaths(String(beforeDoc.doc_type ?? ""), docNo);
 
     fireDocumentAuditLog({
@@ -3447,6 +3459,7 @@ export async function voidDocumentAction(
         id: documentId,
         doc_no: docNo,
         status: nextStatus,
+        remark: voidReason,
         void_reason: voidReason,
         is_voided: true,
       },

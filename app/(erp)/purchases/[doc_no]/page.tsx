@@ -10,6 +10,7 @@ import {
 import { PURCHASE_DOC_TYPES } from "@/lib/constants/document";
 import { VoidDocumentButton } from "@/components/shared/document/void-document-button";
 import { VoidedDocumentAlert } from "@/components/shared/document/voided-document-alert";
+import { resolveVoidRemark } from "@/lib/utils/void-remark";
 import type { DocumentDetail, DocumentStatus, DocumentType } from "@/types/document";
 import { AllocatedDocumentsTable } from "@/components/finance/AllocatedDocumentsTable";
 import { DepositAllocationHistoryTable } from "@/components/finance/DepositAllocationHistoryTable";
@@ -216,6 +217,12 @@ export default async function PurchaseDocumentDetailPage({
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6 print:max-w-none print:gap-0 print:p-0">
+      {doc.status === "VOID" ? (
+        <VoidedDocumentAlert
+          remark={resolveVoidRemark(doc.remark, doc.void_reason, doc.notes)}
+        />
+      ) : null}
+
       <div className="flex flex-wrap items-start justify-between gap-3 print:hidden">
         <div className="flex items-start gap-3">
           <div className="grid size-11 place-items-center rounded-xl bg-blue-50 text-blue-600">
@@ -266,9 +273,6 @@ export default async function PurchaseDocumentDetailPage({
       </div>
 
       <div className="flex flex-col gap-4 print:hidden">
-      {doc.status === "VOID" ? (
-        <VoidedDocumentAlert remark={doc.notes} />
-      ) : null}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="border-slate-200 shadow-sm">
           <CardHeader className="pb-3">

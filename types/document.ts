@@ -37,6 +37,8 @@ export type DocumentRow = {
   deposit_deducted: number;
   payment_status: string;
   notes: string | null;
+  /** เหตุผลการยกเลิก / หมายเหตุ — `documents.remark` */
+  remark?: string | null;
   attached_file_url: string | null;
   /** Bill image URL in `document_attachments` storage bucket. */
   attachment_url?: string | null;
@@ -336,6 +338,9 @@ export type DocumentDetail = {
   wht_amount: number;
   payment_status: string;
   notes: string | null;
+  /** เหตุผลการยกเลิก (VOID) — `documents.remark` */
+  remark: string | null;
+  void_reason?: string | null;
   /** Vendor invoice / external reference — parsed from notes when no DB column. */
   reference_no: string | null;
   attachment_url: string | null;

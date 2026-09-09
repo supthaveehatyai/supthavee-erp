@@ -273,6 +273,17 @@ function extractDocumentVoidReason(
   return "";
 }
 
+function formatDocumentVoidSummary(
+  from: unknown,
+  to: unknown,
+  reason: string,
+): string {
+  const fromLabel = formatAuditValue(from);
+  const toLabel = formatAuditValue(to);
+  const base = `ยกเลิกเอกสาร (VOID) - เปลี่ยนสถานะจาก '${fromLabel}' เป็น '${toLabel}'`;
+  return reason ? `${base} เหตุผล: ${reason}` : base;
+}
+
 function formatDocumentStatusChange(from: unknown, to: unknown): string {
   return `เปลี่ยนสถานะเอกสารจาก '${formatAuditValue(from)}' เป็น '${formatAuditValue(to)}'`;
 }
@@ -446,22 +457,16 @@ export function parseAuditChangeSummary(
 
   if (table === "documents") {
     const statusDiff = diffs.find((d) => d.key === "status");
+    const newStatus = statusDiff?.to ?? right.status;
+    if (statusDiff && isDocumentVoidStatus(newStatus)) {
+      const reason =
+        formatRemarkForAudit(right.remark) ||
+        extractDocumentVoidReason(left, right);
+      return formatDocumentVoidSummary(statusDiff.from, statusDiff.to, reason);
+    }
     if (statusDiff) {
       consumedKeys.add("status");
-      let statusPart = formatDocumentStatusChange(
-        statusDiff.from,
-        statusDiff.to,
-      );
-      if (isDocumentVoidStatus(statusDiff.to)) {
-        const reason = extractDocumentVoidReason(left, right);
-        if (reason) {
-          statusPart += ` เหตุผล: ${reason}`;
-        }
-        for (const remarkKey of DOCUMENT_REMARK_KEYS) {
-          consumedKeys.add(remarkKey);
-        }
-      }
-      parts.push(statusPart);
+      parts.push(formatDocumentStatusChange(statusDiff.from, statusDiff.to));
     }
   }
 

@@ -761,6 +761,7 @@ export type Database = {
           is_voided: boolean | null
           net_before_vat: number
           notes: string | null
+          remark: string | null
           original_file_name: string | null
           original_receipt_url: string | null
           paid_amount: number | null
@@ -808,6 +809,7 @@ export type Database = {
           is_voided?: boolean | null
           net_before_vat?: number
           notes?: string | null
+          remark?: string | null
           original_file_name?: string | null
           original_receipt_url?: string | null
           paid_amount?: number | null
@@ -855,6 +857,7 @@ export type Database = {
           is_voided?: boolean | null
           net_before_vat?: number
           notes?: string | null
+          remark?: string | null
           original_file_name?: string | null
           original_receipt_url?: string | null
           paid_amount?: number | null

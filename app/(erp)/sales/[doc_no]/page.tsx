@@ -46,6 +46,7 @@ import VoidDocumentActions from "./void-document-actions";
 import DuplicateDocumentButton from "./duplicate-document-button";
 import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
 import { VoidedDocumentAlert } from "@/components/shared/document/voided-document-alert";
+import { resolveVoidRemark } from "@/lib/utils/void-remark";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import ConvertDocumentDropdown from "./convert-document-dropdown";
 import { SendToProductionButton } from "@/components/production/send-to-production-button";
@@ -387,6 +388,12 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6 print:max-w-none print:gap-0 print:p-0">
+      {doc.status === "VOID" ? (
+        <VoidedDocumentAlert
+          remark={resolveVoidRemark(doc.remark, doc.void_reason, doc.notes)}
+        />
+      ) : null}
+
       {/* Screen-only chrome / actions */}
       <div className="flex flex-wrap items-start justify-between gap-3 print:hidden">
         <div className="flex items-start gap-3">
@@ -477,10 +484,6 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
 
       {/* Screen-only interactive / card view */}
       <div className="flex flex-col gap-4 print:hidden">
-        {doc.status === "VOID" ? (
-          <VoidedDocumentAlert remark={doc.notes} />
-        ) : null}
-
         {isCreditNoteIssued ? (
           <div
             role="status"
