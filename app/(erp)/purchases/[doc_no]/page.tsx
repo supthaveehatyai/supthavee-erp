@@ -9,6 +9,7 @@ import {
 } from "@/lib/actions/finance/allocations";
 import { PURCHASE_DOC_TYPES } from "@/lib/constants/document";
 import { VoidDocumentButton } from "@/components/shared/document/void-document-button";
+import { VoidedDocumentAlert } from "@/components/shared/document/voided-document-alert";
 import type { DocumentDetail, DocumentStatus, DocumentType } from "@/types/document";
 import { AllocatedDocumentsTable } from "@/components/finance/AllocatedDocumentsTable";
 import { DepositAllocationHistoryTable } from "@/components/finance/DepositAllocationHistoryTable";
@@ -265,6 +266,9 @@ export default async function PurchaseDocumentDetailPage({
       </div>
 
       <div className="flex flex-col gap-4 print:hidden">
+      {doc.status === "VOID" ? (
+        <VoidedDocumentAlert remark={doc.notes} />
+      ) : null}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="border-slate-200 shadow-sm">
           <CardHeader className="pb-3">

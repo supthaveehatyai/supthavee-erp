@@ -45,6 +45,7 @@ import DeleteDraftDocumentButton from "./delete-draft-document-button";
 import VoidDocumentActions from "./void-document-actions";
 import DuplicateDocumentButton from "./duplicate-document-button";
 import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
+import { VoidedDocumentAlert } from "@/components/shared/document/voided-document-alert";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import ConvertDocumentDropdown from "./convert-document-dropdown";
 import { SendToProductionButton } from "@/components/production/send-to-production-button";
@@ -476,6 +477,10 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
 
       {/* Screen-only interactive / card view */}
       <div className="flex flex-col gap-4 print:hidden">
+        {doc.status === "VOID" ? (
+          <VoidedDocumentAlert remark={doc.notes} />
+        ) : null}
+
         {isCreditNoteIssued ? (
           <div
             role="status"
@@ -531,7 +536,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
           </div>
         ) : null}
 
-        {doc.notes?.trim() ? (
+        {doc.status !== "VOID" && doc.notes?.trim() ? (
           <Card className="border-amber-200 bg-amber-50/40 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-base">หมายเหตุ / Remark</CardTitle>

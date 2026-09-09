@@ -4,6 +4,7 @@
  */
 
 import type { Json } from "@/src/types/supabase";
+import { stripVoidedRemarkPrefix } from "@/lib/utils/void-remark";
 
 export type AuditActionLike = "INSERT" | "UPDATE" | "DELETE" | string;
 
@@ -94,6 +95,8 @@ const FIELD_LABELS: Record<string, string> = {
   accessible_modules: "โมดูลที่เข้าถึงได้",
   details: "รายละเอียด",
   notes: "หมายเหตุ",
+  remark: "หมายเหตุ",
+  void_reason: "เหตุผลการยกเลิก",
   company_name: "ชื่อบริษัท",
   sku: "SKU",
   name: "ชื่อ",
@@ -104,10 +107,18 @@ const SKIP_KEYS = new Set([
   "created_at",
   "updated_at",
   "changed_at",
+  "created_by",
+  "approved_by",
+  "approved_at",
+  "voided_at",
+  "voided_by",
   "correlation_id",
   "audit_event",
   "pin_code",
 ]);
+
+/** Remark keys on documents — VOID reason may live in any of these. */
+const DOCUMENT_REMARK_KEYS = ["remark", "notes", "void_reason"] as const;
 
 const EMPTY_STRING_TOKENS = new Set(["", "—", "-", "null", "undefined"]);
 
@@ -239,9 +250,40 @@ function valuesEqual(a: unknown, b: unknown): boolean {
   }
 }
 
+function formatRemarkForAudit(value: unknown): string {
+  const raw = typeof value === "string" ? value : "";
+  const stripped = stripVoidedRemarkPrefix(raw);
+  if (!stripped) return "";
+  return stripped.length > 160 ? `${stripped.slice(0, 160)}…` : stripped;
+}
+
+function extractDocumentVoidReason(
+  oldRec: AuditDiffRecord,
+  newRec: AuditDiffRecord,
+): string {
+  for (const key of DOCUMENT_REMARK_KEYS) {
+    const next = formatRemarkForAudit(newRec[key]);
+    const prev = formatRemarkForAudit(oldRec[key]);
+    if (next && next !== prev) return next;
+  }
+  for (const key of DOCUMENT_REMARK_KEYS) {
+    const next = formatRemarkForAudit(newRec[key]);
+    if (next) return next;
+  }
+  return "";
+}
+
+function formatDocumentStatusChange(from: unknown, to: unknown): string {
+  return `เปลี่ยนสถานะเอกสารจาก '${formatAuditValue(from)}' เป็น '${formatAuditValue(to)}'`;
+}
+
 function formatChangePart(key: string, from: unknown, to: unknown): string {
   const label = fieldLabel(key);
   return `เปลี่ยน${label} จาก '${formatAuditValue(from)}' เป็น '${formatAuditValue(to)}'`;
+}
+
+function isDocumentVoidStatus(value: unknown): boolean {
+  return String(value ?? "").trim().toUpperCase() === "VOID";
 }
 
 function summarizeFixedAssetInsert(newRec: AuditDiffRecord): string | null {
@@ -378,6 +420,7 @@ export function parseAuditChangeSummary(
 
   for (const key of allKeys) {
     if (SKIP_KEYS.has(key)) continue;
+    if (table === "documents" && key === "is_voided") continue;
     const from = left[key];
     const to = right[key];
     if (valuesEqual(from, to)) continue;
@@ -389,8 +432,6 @@ export function parseAuditChangeSummary(
     });
   }
 
-  if (diffs.length === 0) return "อัปเดตข้อมูล (ไม่พบฟิลด์ที่เปลี่ยน)";
-
   diffs.sort((a, b) => {
     if (a.critical !== b.critical) return a.critical ? -1 : 1;
     const ai = (CRITICAL_FIELDS as readonly string[]).indexOf(a.key);
@@ -400,10 +441,40 @@ export function parseAuditChangeSummary(
     return aOrder - bOrder;
   });
 
-  const shown = diffs.slice(0, maxChanges);
-  const parts = shown.map((d) => formatChangePart(d.key, d.from, d.to));
+  const consumedKeys = new Set<string>();
+  const parts: string[] = [];
 
-  const remaining = diffs.length - shown.length;
+  if (table === "documents") {
+    const statusDiff = diffs.find((d) => d.key === "status");
+    if (statusDiff) {
+      consumedKeys.add("status");
+      let statusPart = formatDocumentStatusChange(
+        statusDiff.from,
+        statusDiff.to,
+      );
+      if (isDocumentVoidStatus(statusDiff.to)) {
+        const reason = extractDocumentVoidReason(left, right);
+        if (reason) {
+          statusPart += ` เหตุผล: ${reason}`;
+        }
+        for (const remarkKey of DOCUMENT_REMARK_KEYS) {
+          consumedKeys.add(remarkKey);
+        }
+      }
+      parts.push(statusPart);
+    }
+  }
+
+  const remainingDiffs = diffs.filter((d) => !consumedKeys.has(d.key));
+  if (parts.length === 0 && remainingDiffs.length === 0) {
+    return "อัปเดตข้อมูล (ไม่พบฟิลด์ที่เปลี่ยน)";
+  }
+
+  const slots = Math.max(0, maxChanges - parts.length);
+  const shown = remainingDiffs.slice(0, slots);
+  parts.push(...shown.map((d) => formatChangePart(d.key, d.from, d.to)));
+
+  const remaining = remainingDiffs.length - shown.length;
   if (remaining > 0) {
     parts.push(`และแก้ไขข้อมูลอื่นๆ อีก ${remaining} รายการ`);
   }
