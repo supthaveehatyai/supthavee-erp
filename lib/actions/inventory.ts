@@ -8,8 +8,8 @@
  * - created_at      → transaction_date
  * - qty             → quantity
  * - trans_type      → transaction_type (IN | OUT | ADJUST)
- * - document_no     → documents.doc_no (via notes document_id=)
- *                     หรือ doc_headers.doc_no / parse จาก notes
+ * - document_no     → documents.doc_no (Join inventory_ledger → documents)
+ *                     fallback: notes document_id= / parse จาก notes
  */
 
 import { createClient } from "@/lib/supabase/server-admin";
@@ -169,8 +169,11 @@ type ProductModelJoin = {
   brand_id?: string | null;
 };
 
-type DocHeaderJoin = {
+type DocumentJoin = {
+  id?: string | null;
   doc_no?: string | null;
+  /** Legacy alias — Cloud schema ใช้ doc_no */
+  document_no?: string | null;
   doc_date?: string | null;
 };
 
@@ -180,7 +183,9 @@ type LedgerRow = {
   qty: number;
   trans_type: string;
   notes: string | null;
-  doc_headers: DocHeaderJoin | DocHeaderJoin[] | null;
+  doc_header_id?: string | null;
+  document_id?: string | null;
+  documents?: DocumentJoin | DocumentJoin[] | null;
 };
 
 type ModelSkuRow = {
@@ -282,18 +287,45 @@ function documentNoFromNotes(notes: string | null | undefined): string | null {
   return null;
 }
 
+function documentNoFromJoin(join: DocumentJoin | null): string | null {
+  if (!join) return null;
+  const no = String(join.doc_no ?? join.document_no ?? "").trim();
+  return no || null;
+}
+
+function ledgerLinkedDocumentId(row: LedgerRow): string | null {
+  if (typeof row.document_id === "string" && row.document_id.trim()) {
+    return row.document_id.trim();
+  }
+  if (typeof row.doc_header_id === "string" && row.doc_header_id.trim()) {
+    return row.doc_header_id.trim();
+  }
+  const nested = unwrapJoin(row.documents);
+  if (typeof nested?.id === "string" && nested.id.trim()) {
+    return nested.id.trim();
+  }
+  return documentIdFromNotes(row.notes);
+}
+
 function resolveDocumentNo(
   row: LedgerRow,
   docNoByDocumentId: Map<string, string>,
 ): string | null {
-  const phase4Id = documentIdFromNotes(row.notes);
-  if (phase4Id) {
-    const fromDocuments = docNoByDocumentId.get(phase4Id)?.trim();
+  const fromJoin = documentNoFromJoin(unwrapJoin(row.documents));
+  if (fromJoin) return fromJoin;
+
+  const linkedId = ledgerLinkedDocumentId(row);
+  if (linkedId) {
+    const fromDocuments = docNoByDocumentId.get(linkedId)?.trim();
     if (fromDocuments) return fromDocuments;
   }
-  const header = unwrapJoin(row.doc_headers);
-  const fromHeader = header?.doc_no?.trim();
-  if (fromHeader) return fromHeader;
+
+  const phase4Id = documentIdFromNotes(row.notes);
+  if (phase4Id) {
+    const fromNotesId = docNoByDocumentId.get(phase4Id)?.trim();
+    if (fromNotesId) return fromNotesId;
+  }
+
   return documentNoFromNotes(row.notes);
 }
 
@@ -1250,33 +1282,59 @@ export async function getProductStockCard(
   }
 
   // ── Logic 3: Movements ในช่วงวันที่ ──────────────────────────────────────
-  let movementsQuery = supabase
-    .from("inventory_ledger")
-    .select(
-      `
+  // Cloud: inventory_ledger โยงเอกสารที่ตาราง documents (ไม่ใช้ doc_headers)
+  const ledgerSelectWithDocuments = `
       id,
       created_at,
       qty,
       trans_type,
       notes,
-      doc_headers (
+      doc_header_id,
+      documents (
+        id,
         doc_no,
         doc_date
       )
-    `,
-    )
-    .eq("product_id", id)
-    .order("created_at", { ascending: true })
-    .order("id", { ascending: true });
+    `;
+  const ledgerSelectBase = `
+      id,
+      created_at,
+      qty,
+      trans_type,
+      notes,
+      doc_header_id
+    `;
 
-  if (startBound) {
-    movementsQuery = movementsQuery.gte("created_at", startBound);
-  }
-  if (endExclusive) {
-    movementsQuery = movementsQuery.lt("created_at", endExclusive);
-  }
+  const runLedgerQuery = async (selectSql: string) => {
+    let query = supabase
+      .from("inventory_ledger")
+      .select(selectSql)
+      .eq("product_id", id)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true });
 
-  const { data: ledgerRows, error: ledgerError } = await movementsQuery;
+    if (startBound) {
+      query = query.gte("created_at", startBound);
+    }
+    if (endExclusive) {
+      query = query.lt("created_at", endExclusive);
+    }
+
+    return query;
+  };
+
+  let { data: ledgerRows, error: ledgerError } = await runLedgerQuery(
+    ledgerSelectWithDocuments,
+  );
+
+  if (
+    ledgerError &&
+    /could not find a relationship/i.test(ledgerError.message)
+  ) {
+    const fallback = await runLedgerQuery(ledgerSelectBase);
+    ledgerRows = fallback.data;
+    ledgerError = fallback.error;
+  }
 
   if (ledgerError) {
     return {
@@ -1287,11 +1345,14 @@ export async function getProductStockCard(
 
   const rawMovements = (ledgerRows as LedgerRow[] | null) ?? [];
 
-  // Enrich document_no จากตาราง documents (Phase 4) เมื่อ notes มี document_id=
+  // Enrich document_no จากตาราง documents เมื่อ Join ไม่ครบ หรือมีแค่ UUID ใน notes / doc_header_id
   const documentIds = [
     ...new Set(
       rawMovements
-        .map((row) => documentIdFromNotes(row.notes))
+        .flatMap((row) => [
+          ledgerLinkedDocumentId(row),
+          documentIdFromNotes(row.notes),
+        ])
         .filter((value): value is string => Boolean(value)),
     ),
   ];
