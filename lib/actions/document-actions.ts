@@ -82,6 +82,7 @@ import type {
   UpdateDraftDocumentInput,
   UpdateDraftDocumentResult,
   UploadDocumentImageResult,
+  VoidDocumentActionInput,
   VoidDocumentResult,
 } from "@/types/document";
 
@@ -3350,17 +3351,78 @@ function parseVoidTransactionRpc(rpcData: unknown): {
   };
 }
 
+function readVoidText(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value !== "string" && typeof value !== "number") return "";
+  const text = String(value).trim();
+  if (!text || text.toLowerCase() === "null" || text.toLowerCase() === "undefined") {
+    return "";
+  }
+  return text;
+}
+
+function resolveVoidActionPayload(
+  input: VoidDocumentActionInput | FormData | string | unknown,
+  maybeReason?: string,
+): { documentId: string; voidReason: string } {
+  if (typeof FormData !== "undefined" && input instanceof FormData) {
+    return {
+      documentId: readVoidText(
+        input.get("documentId") ?? input.get("document_id"),
+      ),
+      voidReason: readVoidText(
+        input.get("voidReason") ??
+          input.get("p_void_reason") ??
+          input.get("reason") ??
+          input.get("remark"),
+      ),
+    };
+  }
+
+  if (Array.isArray(input)) {
+    return resolveVoidActionPayload(
+      input[0],
+      readVoidText(input[1]) || maybeReason,
+    );
+  }
+
+  if (input && typeof input === "object") {
+    const rec = input as Record<string, unknown>;
+    return {
+      documentId: readVoidText(
+        rec.documentId ?? rec.document_id ?? rec.id,
+      ),
+      voidReason: readVoidText(
+        rec.voidReason ??
+          rec.p_void_reason ??
+          rec.reason ??
+          rec.remark ??
+          maybeReason,
+      ),
+    };
+  }
+
+  return {
+    documentId: readVoidText(input),
+    voidReason: readVoidText(maybeReason),
+  };
+}
+
 /**
  * Phase 18 — VOID via Cloud RPC `void_document_transaction`.
  * Service Role (`supabaseAdmin`) bypasses RLS. Actor from Auth Session only.
+ *
+ * Call with a single object `{ documentId, voidReason }` from Client Components.
+ * (Next.js Server Actions can drop a second positional string argument.)
  */
 export async function voidDocumentAction(
-  documentId: string,
-  voidReason: string,
+  input: VoidDocumentActionInput | FormData | string,
+  maybeReason?: string,
 ): Promise<VoidDocumentResult> {
   try {
-    documentId = documentId?.trim() ?? "";
-    voidReason = voidReason?.trim() ?? "";
+    const resolved = resolveVoidActionPayload(input, maybeReason);
+    const documentId = resolved.documentId;
+    const voidReason = resolved.voidReason;
     if (!documentId) {
       return { data: null, error: "ไม่พบรหัสเอกสาร (document_id)" };
     }

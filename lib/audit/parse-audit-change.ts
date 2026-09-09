@@ -278,10 +278,10 @@ function formatDocumentVoidSummary(
   to: unknown,
   reason: string,
 ): string {
-  const fromLabel = formatAuditValue(from);
-  const toLabel = formatAuditValue(to);
-  const base = `ยกเลิกเอกสาร (VOID) - เปลี่ยนสถานะจาก '${fromLabel}' เป็น '${toLabel}'`;
-  return reason ? `${base} เหตุผล: ${reason}` : base;
+  const fromLabel = auditDisplayText(from) || "ISSUED";
+  const toLabel = auditDisplayText(to) || "VOID";
+  const base = `ยกเลิกเอกสาร (VOID) เปลี่ยนสถานะจาก ${fromLabel} เป็น ${toLabel}`;
+  return reason ? `${base} สาเหตุ: ${reason}` : base;
 }
 
 function formatDocumentStatusChange(from: unknown, to: unknown): string {
@@ -295,6 +295,66 @@ function formatChangePart(key: string, from: unknown, to: unknown): string {
 
 function isDocumentVoidStatus(value: unknown): boolean {
   return String(value ?? "").trim().toUpperCase() === "VOID";
+}
+
+function auditDisplayText(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string" || typeof value === "number") {
+    const text = String(value).trim();
+    if (
+      !text ||
+      text.toLowerCase() === "null" ||
+      text.toLowerCase() === "undefined" ||
+      text === "—"
+    ) {
+      return "";
+    }
+    return text;
+  }
+  return "";
+}
+
+function extractDocumentNo(
+  newRec: AuditDiffRecord | null,
+  oldRec: AuditDiffRecord | null,
+): string {
+  for (const rec of [newRec, oldRec]) {
+    if (!rec) continue;
+    const no =
+      auditDisplayText(rec.doc_no) ||
+      auditDisplayText(rec.document_no) ||
+      auditDisplayText(rec.documentNo);
+    if (no) return no;
+  }
+  return "";
+}
+
+function sanitizeAuditSummary(text: string): string {
+  return text
+    .replace(/\bundefined\b/gi, "")
+    .replace(/\bnull\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+:/g, ":")
+    .trim();
+}
+
+function finalizeAuditSummary(
+  summary: string,
+  oldRec: AuditDiffRecord | null,
+  newRec: AuditDiffRecord | null,
+  table: string,
+): string {
+  const text = sanitizeAuditSummary(summary);
+  if (!text) return "อัปเดตข้อมูล";
+  const skipPrefix =
+    table === "system" ||
+    table === "system_backup" ||
+    table === "audit_logs";
+  const docNo = skipPrefix ? "" : extractDocumentNo(newRec, oldRec);
+  if (docNo && !text.includes(`เอกสาร ${docNo}`)) {
+    return sanitizeAuditSummary(`เอกสาร ${docNo}: ${text}`);
+  }
+  return text;
 }
 
 function summarizeFixedAssetInsert(newRec: AuditDiffRecord): string | null {
@@ -327,17 +387,21 @@ export function parseAuditChangeSummary(
   const newRec = toRecord(newData);
   const normalized = String(action).toUpperCase();
   const table = String(tableName ?? "").trim();
+  const finish = (text: string) =>
+    finalizeAuditSummary(text, oldRec, newRec, table);
 
   if (normalized === "INSERT") {
-    if (!newRec) return "สร้างรายการใหม่";
+    if (!newRec) return finish("สร้างรายการใหม่");
 
     if (table === "fixed_assets") {
       const fixedAssetSummary = summarizeFixedAssetInsert(newRec);
       if (fixedAssetSummary) {
         const eventLabel = formatAuditEventLabel(newRec.audit_event);
-        return eventLabel
-          ? `${eventLabel} · ${fixedAssetSummary}`
-          : fixedAssetSummary;
+        return finish(
+          eventLabel
+            ? `${eventLabel} · ${fixedAssetSummary}`
+            : fixedAssetSummary,
+        );
       }
     }
 
@@ -352,7 +416,7 @@ export function parseAuditChangeSummary(
         newRec.status === "Requested Manual Backup via Dashboard" ||
         newRec.action === "MANUAL_BACKUP_REQUEST"
       ) {
-        return "ผู้ใช้กดปุ่มร้องขอการทำ Manual Backup จากระบบ Cloud";
+        return finish("ผู้ใช้กดปุ่มร้องขอการทำ Manual Backup จากระบบ Cloud");
       }
 
       const status =
@@ -362,12 +426,12 @@ export function parseAuditChangeSummary(
           typeof newRec.error === "string"
             ? formatAuditValue(newRec.error)
             : "—";
-        return `Manual Backup ล้มเหลว · ${errMsg}`;
+        return finish(`Manual Backup ล้มเหลว · ${errMsg}`);
       }
       if (status === "REQUESTED") {
-        return "ผู้ใช้กดปุ่มร้องขอการทำ Manual Backup จากระบบ Cloud";
+        return finish("ผู้ใช้กดปุ่มร้องขอการทำ Manual Backup จากระบบ Cloud");
       }
-      return "Manual Backup สำเร็จ (Database + Storage)";
+      return finish("Manual Backup สำเร็จ (Database + Storage)");
     }
 
     const eventLabel = formatAuditEventLabel(newRec.audit_event);
@@ -383,11 +447,11 @@ export function parseAuditChangeSummary(
       highlights.length > 0
         ? `สร้างรายการใหม่ · ${highlights.join(", ")}`
         : "สร้างรายการใหม่";
-    return eventLabel ? `${eventLabel} · ${body}` : body;
+    return finish(eventLabel ? `${eventLabel} · ${body}` : body);
   }
 
   if (normalized === "DELETE") {
-    if (!oldRec) return "ลบรายการ";
+    if (!oldRec) return finish("ลบรายการ");
     const highlights: string[] = [];
     for (const key of CRITICAL_FIELDS) {
       if (oldRec[key] === undefined || oldRec[key] === null) continue;
@@ -396,13 +460,15 @@ export function parseAuditChangeSummary(
       );
       if (highlights.length >= 3) break;
     }
-    return highlights.length > 0
-      ? `ลบรายการ · ${highlights.join(", ")}`
-      : "ลบรายการ";
+    return finish(
+      highlights.length > 0
+        ? `ลบรายการ · ${highlights.join(", ")}`
+        : "ลบรายการ",
+    );
   }
 
   // UPDATE
-  if (!oldRec && !newRec) return "อัปเดตข้อมูล";
+  if (!oldRec && !newRec) return finish("อัปเดตข้อมูล");
   if (!oldRec && newRec) {
     return parseAuditChangeSummary(
       "INSERT",
@@ -457,12 +523,20 @@ export function parseAuditChangeSummary(
 
   if (table === "documents") {
     const statusDiff = diffs.find((d) => d.key === "status");
-    const newStatus = statusDiff?.to ?? right.status;
-    if (statusDiff && isDocumentVoidStatus(newStatus)) {
+    if (
+      isDocumentVoidStatus(right.status) &&
+      !isDocumentVoidStatus(left.status)
+    ) {
       const reason =
         formatRemarkForAudit(right.remark) ||
         extractDocumentVoidReason(left, right);
-      return formatDocumentVoidSummary(statusDiff.from, statusDiff.to, reason);
+      return finish(
+        formatDocumentVoidSummary(
+          statusDiff?.from ?? left.status,
+          statusDiff?.to ?? right.status,
+          reason,
+        ),
+      );
     }
     if (statusDiff) {
       consumedKeys.add("status");
@@ -472,7 +546,7 @@ export function parseAuditChangeSummary(
 
   const remainingDiffs = diffs.filter((d) => !consumedKeys.has(d.key));
   if (parts.length === 0 && remainingDiffs.length === 0) {
-    return "อัปเดตข้อมูล (ไม่พบฟิลด์ที่เปลี่ยน)";
+    return finish("อัปเดตข้อมูล (ไม่พบฟิลด์ที่เปลี่ยน)");
   }
 
   const slots = Math.max(0, maxChanges - parts.length);
@@ -488,5 +562,5 @@ export function parseAuditChangeSummary(
     right.audit_event ?? left.audit_event,
   );
   const body = parts.join(" · ");
-  return eventLabel ? `${eventLabel} · ${body}` : body;
+  return finish(eventLabel ? `${eventLabel} · ${body}` : body);
 }

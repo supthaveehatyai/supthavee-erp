@@ -30,11 +30,19 @@ export type VoidDocumentActionResult = {
   error: string | null;
 };
 
+export type VoidDocumentPayload = {
+  documentId: string;
+  voidReason: string;
+};
+
 export type VoidDocumentButtonProps = {
   documentId: string;
   docNo: string;
-  /** Server Action: voidExpense / voidDocumentAction / etc. */
-  voidAction: (id: string, reason: string) => Promise<VoidDocumentActionResult>;
+  /** Server Action: voidExpense `(id)` or voidDocumentAction `({ documentId, voidReason })`. */
+  voidAction: (
+    documentIdOrPayload: string | VoidDocumentPayload,
+    reason?: string,
+  ) => Promise<VoidDocumentActionResult>;
   onVoided?: (data: { id?: string; document_no: string }) => void;
   confirmTitle?: string;
   confirmDescription?: ReactNode;
@@ -75,7 +83,13 @@ export function VoidDocumentButton({
   function handleConfirm() {
     if (isPending) return;
 
-    const reason = voidReason.trim();
+    const typedReason =
+      typeof document !== "undefined"
+        ? (
+            document.getElementById("void-reason") as HTMLTextAreaElement | null
+          )?.value ?? voidReason
+        : voidReason;
+    const reason = typedReason.trim();
     if (requireReason && !reason) {
       setReasonError("กรุณาระบุเหตุผลการยกเลิกเอกสาร");
       return;
@@ -85,7 +99,12 @@ export function VoidDocumentButton({
 
     startTransition(async () => {
       try {
-        const result = await voidAction(documentId, reason);
+        const result = requireReason
+          ? await voidAction({
+              documentId,
+              voidReason: reason,
+            })
+          : await voidAction(documentId, reason);
         if (result.error || !result.data) {
           toast.error(result.error ?? "ยกเลิกเอกสารไม่สำเร็จ");
           return;
@@ -153,6 +172,7 @@ export function VoidDocumentButton({
               </Label>
               <Textarea
                 id="void-reason"
+                name="voidReason"
                 value={voidReason}
                 disabled={isPending}
                 placeholder="ระบุเหตุผลการยกเลิกเอกสาร..."

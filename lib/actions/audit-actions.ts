@@ -171,7 +171,10 @@ export async function getRecentAuditLogs(): Promise<GetRecentAuditLogsResult> {
       );
       if (changedByName && isActionToken(changedByName)) {
         const token = changedByName.toUpperCase();
-        if (!change_summary.includes(token)) {
+        const alreadyDescribed =
+          change_summary.includes(token) ||
+          change_summary.includes("ยกเลิกเอกสาร (VOID)");
+        if (!alreadyDescribed) {
           change_summary = `${token} · ${change_summary}`;
         }
       }

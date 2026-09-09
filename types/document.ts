@@ -388,6 +388,12 @@ export type VoidDocumentResult = {
   error: string | null;
 };
 
+/** Single serializable payload for VOID — Next.js Server Actions drop extra args. */
+export type VoidDocumentActionInput = {
+  documentId: string;
+  voidReason: string;
+};
+
 export type CloneDocumentToNewDraftResult = {
   data: {
     document_id: string;

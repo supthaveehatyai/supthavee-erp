@@ -58,7 +58,13 @@ export default function VoidDocumentActions({
   }
 
   function requireReason(): string | null {
-    const reason = voidReason.trim();
+    const typedReason =
+      typeof document !== "undefined"
+        ? (
+            document.getElementById("sales-void-reason") as HTMLTextAreaElement | null
+          )?.value ?? voidReason
+        : voidReason;
+    const reason = typedReason.trim();
     if (!reason) {
       setReasonError("กรุณาระบุเหตุผลการยกเลิกเอกสาร");
       return null;
@@ -74,7 +80,10 @@ export default function VoidDocumentActions({
 
     setIsSaving(true);
     try {
-      const result = await voidDocumentAction(documentId, reason);
+      const result = await voidDocumentAction({
+        documentId,
+        voidReason: reason,
+      });
       if (result.error || !result.data) {
         toast.error(result.error ?? "ยกเลิกเอกสารไม่สำเร็จ");
         return;
@@ -104,7 +113,10 @@ export default function VoidDocumentActions({
 
     setIsSaving(true);
     try {
-      const voidResult = await voidDocumentAction(documentId, reason);
+      const voidResult = await voidDocumentAction({
+        documentId,
+        voidReason: reason,
+      });
       if (voidResult.error || !voidResult.data) {
         toast.error(voidResult.error ?? "ยกเลิกเอกสารไม่สำเร็จ");
         return;
@@ -213,6 +225,7 @@ export default function VoidDocumentActions({
             </Label>
             <Textarea
               id="sales-void-reason"
+              name="voidReason"
               value={voidReason}
               disabled={isSaving}
               placeholder="ระบุเหตุผลการยกเลิกเอกสาร..."
