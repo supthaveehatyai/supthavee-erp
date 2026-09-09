@@ -47,7 +47,7 @@
 - `document_items` (รายการสินค้าในเอกสาร — งานบริการเก็บ `technician_id`, `wage_cost`, `technician_bill_id`; MTO ใช้ `production_status` = NONE / IN_PRODUCTION / COMPLETED; Phase 17: `mockup_image_url` รูป Mockup รายบรรทัดใน bucket `production_attachments`, `is_sent_to_production` BOOLEAN หลังกดส่งงานผลิต)
 - `document_allocations` (การจัดสรรเอกสาร เช่น ตัดมัดจำ)
 - `billing_note_items` (รายการใบวางบิล)
-- `expenses` (บิลค่าใช้จ่าย / OPEX — มี `approval_status`, `approved_by`, `approved_at`, `is_installment`, `total_interest_amount`)
+- `expenses` (บิลค่าใช้จ่าย / OPEX — มี `approval_status`, `approved_by`, `approved_at`, `is_installment`, `total_interest_amount`, `remark` TEXT เหตุผลการยกเลิกเมื่อ `status = VOID`)
 - `expense_installments` (งวดผ่อนชำระ — `expense_id`, `installment_period`, `due_date`, `principal_amount`, `interest_amount`, `total_installment`, `is_paid`)
 - `approval_logs` (Phase 14 Maker-Checker — ประวัติอนุมัติ/ปฏิเสธ: `document_id`, `expense_id`, `action`, `actor_id`, `comments`, `created_at` — RLS: service_role only)
 - `accounting_periods` (งวดบัญชีรายเดือน — Period Closing: `period_year`, `period_month`, `is_closed`, `closed_at`, `closed_by`)

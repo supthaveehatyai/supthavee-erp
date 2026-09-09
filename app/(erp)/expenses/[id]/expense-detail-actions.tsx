@@ -264,7 +264,18 @@ export function ExpenseDetailActions({
         <VoidDocumentButton
           documentId={expenseId}
           docNo={documentNo}
-          voidAction={voidExpense}
+          requireReason
+          voidAction={(payload, reason) =>
+            voidExpense(
+              typeof payload === "string"
+                ? payload
+                : {
+                    documentId: payload.documentId,
+                    voidReason: payload.voidReason,
+                  },
+              typeof payload === "string" ? reason : payload.voidReason,
+            )
+          }
           confirmTitle="ยืนยันยกเลิกเอกสาร"
           confirmDescription={
             <>

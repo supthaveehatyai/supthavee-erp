@@ -117,6 +117,14 @@ export type MutateExpenseResult = {
   successMessage?: string;
 };
 
+/** VOID button payload — matches `VoidDocumentPayload` (documentId + voidReason). */
+export type VoidExpenseActionInput = {
+  documentId?: string;
+  id?: string;
+  voidReason?: string;
+  reason?: string;
+};
+
 export type ExpenseVendorOption = {
   id: string;
   company_name: string;

@@ -51,6 +51,7 @@ import type {
   UpdateDraftExpenseInput,
   UpdateDraftExpenseResult,
   UploadExpenseReceiptResult,
+  VoidExpenseActionInput,
 } from "@/types/expense";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
 import { settleExpenseCashPurchase } from "@/lib/actions/finance/expense-cash-settlement";
@@ -2029,13 +2030,55 @@ export async function deleteDraftExpense(
   }
 }
 
+function readVoidExpenseText(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value !== "string" && typeof value !== "number") return "";
+  const text = String(value).trim();
+  if (
+    !text ||
+    text.toLowerCase() === "null" ||
+    text.toLowerCase() === "undefined"
+  ) {
+    return "";
+  }
+  return text;
+}
+
+function resolveVoidExpensePayload(
+  input: string | VoidExpenseActionInput,
+  maybeReason?: string,
+): { expenseId: string; voidReason: string } {
+  if (input && typeof input === "object") {
+    const rec = input as Record<string, unknown>;
+    return {
+      expenseId: readVoidExpenseText(
+        rec.documentId ?? rec.id ?? rec.expenseId,
+      ),
+      voidReason: readVoidExpenseText(
+        rec.voidReason ?? rec.reason ?? rec.remark ?? maybeReason,
+      ),
+    };
+  }
+  return {
+    expenseId: readVoidExpenseText(input),
+    voidReason: readVoidExpenseText(maybeReason),
+  };
+}
+
 /**
  * Void an ISSUED expense → VOID (row retained for audit).
  * DRAFT documents must use `deleteDraftExpense` (hard delete) instead.
+ *
+ * Accepts `(id, reason?)` or `{ documentId, voidReason }` from VoidDocumentButton.
  */
-export async function voidExpense(id: string): Promise<MutateExpenseResult> {
+export async function voidExpense(
+  input: string | VoidExpenseActionInput,
+  reason?: string,
+): Promise<MutateExpenseResult> {
   try {
-    const expenseId = id?.trim() ?? "";
+    const resolved = resolveVoidExpensePayload(input, reason);
+    const expenseId = resolved.expenseId;
+    const voidReason = resolved.voidReason;
     if (!expenseId) {
       return { data: null, error: "ไม่พบรหัสเอกสารค่าใช้จ่าย" };
     }
@@ -2063,12 +2106,21 @@ export async function voidExpense(id: string): Promise<MutateExpenseResult> {
     }
 
     const nowIso = new Date().toISOString();
+    const updatePayload: {
+      status: string;
+      updated_at: string;
+      remark?: string;
+    } = {
+      status: "VOID",
+      updated_at: nowIso,
+    };
+    if (voidReason) {
+      updatePayload.remark = voidReason;
+    }
+
     const { data: updated, error: updateError } = await supabaseAdmin
       .from("expenses")
-      .update({
-        status: "VOID",
-        updated_at: nowIso,
-      })
+      .update(updatePayload)
       .eq("id", expenseId)
       .eq("status", "ISSUED")
       .select(EXPENSE_ROW_SELECT)
@@ -2089,7 +2141,11 @@ export async function voidExpense(id: string): Promise<MutateExpenseResult> {
       recordId: expenseId,
       auditEvent: "VOID",
       oldData: before as Record<string, unknown>,
-      newData: { ...mapped, status: "VOID" },
+      newData: {
+        ...mapped,
+        status: "VOID",
+        remark: voidReason || mapped.remark,
+      },
     });
 
     revalidateExpenseCaches(expenseId);
