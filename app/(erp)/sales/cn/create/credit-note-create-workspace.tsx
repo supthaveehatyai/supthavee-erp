@@ -44,6 +44,7 @@ export type CreditNoteCreateWorkspaceProps = {
 
 type LineDraft = {
   source_item_id: string;
+  selected: boolean;
   qty: string;
   unit_price: string;
   return_to_inventory: boolean;
@@ -98,6 +99,7 @@ export default function CreditNoteCreateWorkspace({
   const [lines, setLines] = useState<LineDraft[]>(() =>
     source.items.map((item) => ({
       source_item_id: item.source_item_id,
+      selected: true,
       qty: item.remaining_qty > 0 ? formatQty(item.remaining_qty) : "0",
       unit_price: formatUnitPrice(item.unit_price),
       return_to_inventory: !item.is_service,
@@ -112,7 +114,7 @@ export default function CreditNoteCreateWorkspace({
   const lineTotals = useMemo(() => {
     return lines.map((line) => {
       const origin = itemById.get(line.source_item_id);
-      if (!origin) return 0;
+      if (!origin || !line.selected) return 0;
       const qty = parseQtyInput(line.qty);
       const unitPrice = line.return_to_inventory
         ? origin.unit_price
@@ -145,10 +147,18 @@ export default function CreditNoteCreateWorkspace({
   }, [lineTotals, source]);
 
   const hasPositiveQty = lineTotals.some((value) => value > 0);
+  const allSelected =
+    lines.length > 0 && lines.every((line) => line.selected);
   const exceedsGrand = qtyExceedsLimit(
     billSummary.grand_total,
     source.remaining_grand_total,
   );
+
+  function toggleAllSelected(checked: boolean) {
+    setLines((current) =>
+      current.map((line) => ({ ...line, selected: checked })),
+    );
+  }
 
   function updateLine(sourceItemId: string, patch: Partial<LineDraft>) {
     setLines((current) =>
@@ -179,6 +189,7 @@ export default function CreditNoteCreateWorkspace({
     }
 
     const items = lines
+      .filter((line) => line.selected)
       .map((line) => {
         const origin = itemById.get(line.source_item_id);
         const returnToInventory = origin?.is_service
@@ -194,6 +205,11 @@ export default function CreditNoteCreateWorkspace({
         };
       })
       .filter((line) => line.qty > 0);
+
+    if (items.length === 0) {
+      toast.error("กรุณาเลือกรายการลดหนี้อย่างน้อย 1 รายการ");
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -315,14 +331,26 @@ export default function CreditNoteCreateWorkspace({
         <CardHeader className="pb-3">
           <CardTitle className="text-base">รายการลดหนี้</CardTitle>
           <CardDescription>
-            รับคืนสต็อกจะล็อคราคาขายเดิมจากบิลต้นทาง ·
-            ปิดสวิตช์รับคืนจึงแก้ราคา/หน่วยได้กรณีชดเชยราคา (Price Adjustment)
+            ติ๊กเฉพาะบรรทัดที่ลดหนี้จริง — บรรทัดที่ไม่เลือกจะไม่ถูกบันทึก ·
+            รับคืนสต็อกล็อคราคาขายเดิมจากบิลต้นทาง
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow className="bg-slate-50">
+                <TableHead className="w-12">
+                  <input
+                    type="checkbox"
+                    aria-label="เลือกลดหนี้ทั้งหมด"
+                    className="size-4 rounded border-slate-300 accent-blue-600"
+                    checked={allSelected}
+                    disabled={isSubmitting || source.items.length === 0}
+                    onChange={(event) =>
+                      toggleAllSelected(event.target.checked)
+                    }
+                  />
+                </TableHead>
                 <TableHead>สินค้า</TableHead>
                 <TableHead className="text-right">ต้นทาง</TableHead>
                 <TableHead className="text-right">คงเหลือ</TableHead>
@@ -342,24 +370,43 @@ export default function CreditNoteCreateWorkspace({
             <TableBody>
               {source.items.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-8 text-center text-slate-500">
+                  <TableCell colSpan={8} className="py-8 text-center text-slate-500">
                     บิลต้นทางไม่มีรายการสินค้า
                   </TableCell>
                 </TableRow>
               ) : (
                 source.items.map((item, index) => {
                   const draft = lines[index];
+                  const selected = Boolean(draft?.selected);
                   const qty = parseQtyInput(draft?.qty ?? "0");
-                  const over = qtyExceedsLimit(qty, item.remaining_qty);
+                  const over = selected && qtyExceedsLimit(qty, item.remaining_qty);
                   const lineTotal = lineTotals[index] ?? 0;
                   const isReturnToInventory = Boolean(
                     draft?.return_to_inventory && !item.is_service,
                   );
                   const unitPriceLocked = isReturnToInventory;
+                  const rowDisabled = !selected || isSubmitting;
                   const returnDisabled =
-                    isSubmitting || item.is_service || item.remaining_qty <= 0;
+                    rowDisabled || item.is_service || item.remaining_qty <= 0;
                   return (
-                    <TableRow key={item.source_item_id}>
+                    <TableRow
+                      key={item.source_item_id}
+                      className={selected ? undefined : "opacity-50"}
+                    >
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          aria-label={`เลือกลดหนี้ ${item.sku ?? item.description}`}
+                          className="size-4 rounded border-slate-300 accent-blue-600"
+                          checked={selected}
+                          disabled={isSubmitting}
+                          onChange={(event) =>
+                            updateLine(item.source_item_id, {
+                              selected: event.target.checked,
+                            })
+                          }
+                        />
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-start gap-3">
                           <LineItemProductThumb
@@ -394,7 +441,7 @@ export default function CreditNoteCreateWorkspace({
                           min={0}
                           step="any"
                           className="h-9 text-right"
-                          disabled={isSubmitting || item.remaining_qty <= 0}
+                          disabled={rowDisabled || item.remaining_qty <= 0}
                           value={draft?.qty ?? "0"}
                           onChange={(event) =>
                             updateLine(item.source_item_id, {
@@ -416,7 +463,7 @@ export default function CreditNoteCreateWorkspace({
                           step="0.01"
                           className="h-9 text-right"
                           disabled={
-                            isSubmitting ||
+                            rowDisabled ||
                             item.remaining_qty <= 0 ||
                             unitPriceLocked
                           }
