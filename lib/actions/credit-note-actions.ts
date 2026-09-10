@@ -435,6 +435,7 @@ export async function createCreditNoteAction(
     const selected: {
       source: CreditNoteSourceItem;
       qty: number;
+      unitPrice: number;
       returnToInventory: boolean;
     }[] = [];
 
@@ -457,9 +458,20 @@ export async function createCreditNoteAction(
         };
       }
 
+      const requestedPrice =
+        line.unit_price == null ? origin.unit_price : Number(line.unit_price);
+      if (!Number.isFinite(requestedPrice) || requestedPrice < 0) {
+        return {
+          data: null,
+          error: `รายการ ${origin.sku ?? origin.description}: ราคา/หน่วยไม่ถูกต้อง`,
+        };
+      }
+      const unitPrice = roundMoney(requestedPrice);
+
       selected.push({
         source: origin,
         qty,
+        unitPrice,
         returnToInventory: origin.is_service
           ? false
           : Boolean(line.return_to_inventory),
@@ -480,7 +492,7 @@ export async function createCreditNoteAction(
         row.qty,
       );
       const lineTotal = roundMoney(
-        row.qty * row.source.unit_price - discountAmount,
+        row.qty * row.unitPrice - discountAmount,
       );
       return {
         product_id: row.source.product_id,
@@ -491,7 +503,7 @@ export async function createCreditNoteAction(
         }),
         qty: row.qty,
         uom_used: row.source.uom_used,
-        unit_price: row.source.unit_price,
+        unit_price: row.unitPrice,
         unit_cost_price: row.source.unit_cost_price,
         discount_text: null,
         discount_amount: discountAmount,

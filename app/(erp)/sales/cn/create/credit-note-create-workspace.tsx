@@ -45,6 +45,7 @@ export type CreditNoteCreateWorkspaceProps = {
 type LineDraft = {
   source_item_id: string;
   qty: string;
+  unit_price: string;
   return_to_inventory: boolean;
 };
 
@@ -68,6 +69,17 @@ function parseQtyInput(raw: string): number {
   return parsed;
 }
 
+function formatUnitPrice(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return "0";
+  return (Math.round(value * 100) / 100).toFixed(2);
+}
+
+function parseUnitPriceInput(raw: string): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.round(parsed * 100) / 100;
+}
+
 function todayIsoDate(): string {
   const now = new Date();
   const year = now.getFullYear();
@@ -87,6 +99,7 @@ export default function CreditNoteCreateWorkspace({
     source.items.map((item) => ({
       source_item_id: item.source_item_id,
       qty: item.remaining_qty > 0 ? formatQty(item.remaining_qty) : "0",
+      unit_price: formatUnitPrice(item.unit_price),
       return_to_inventory: !item.is_service,
     })),
   );
@@ -101,13 +114,13 @@ export default function CreditNoteCreateWorkspace({
       const origin = itemById.get(line.source_item_id);
       if (!origin) return 0;
       const qty = parseQtyInput(line.qty);
+      const unitPrice = parseUnitPriceInput(line.unit_price);
       if (qty <= 0 || origin.source_qty <= 0) return 0;
       const discount =
         origin.discount_amount > 0
           ? origin.discount_amount * (qty / origin.source_qty)
           : 0;
-      return Math.round(Math.max(0, qty * origin.unit_price - discount) * 100) /
-        100;
+      return Math.round(Math.max(0, qty * unitPrice - discount) * 100) / 100;
     });
   }, [lines, itemById]);
 
@@ -158,6 +171,7 @@ export default function CreditNoteCreateWorkspace({
       .map((line) => ({
         source_item_id: line.source_item_id,
         qty: parseQtyInput(line.qty),
+        unit_price: parseUnitPriceInput(line.unit_price),
         return_to_inventory: line.return_to_inventory,
       }))
       .filter((line) => line.qty > 0);
@@ -282,7 +296,8 @@ export default function CreditNoteCreateWorkspace({
         <CardHeader className="pb-3">
           <CardTitle className="text-base">รายการลดหนี้</CardTitle>
           <CardDescription>
-            จำนวนต้องไม่เกินยอดคงเหลือของแต่ละบรรทัดในบิลต้นทาง
+            จำนวนต้องไม่เกินยอดคงเหลือของแต่ละบรรทัดในบิลต้นทาง ·
+            แก้ราคา/หน่วยได้เมื่อชดเชยราคา (Price Adjustment)
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -293,7 +308,12 @@ export default function CreditNoteCreateWorkspace({
                 <TableHead className="text-right">ต้นทาง</TableHead>
                 <TableHead className="text-right">คงเหลือ</TableHead>
                 <TableHead className="w-32 text-right">จำนวนลดหนี้</TableHead>
-                <TableHead className="text-right">ราคา/หน่วย</TableHead>
+                <TableHead className="w-36 text-right">
+                  <span className="block">ราคา/หน่วย</span>
+                  <span className="mt-0.5 block text-[11px] font-normal text-slate-400">
+                    (ยอดที่ต้องการลดหนี้)
+                  </span>
+                </TableHead>
                 <TableHead className="text-right">รวม</TableHead>
                 <TableHead className="min-w-[11rem]">
                   รับคืนสินค้าลงสต็อกหรือไม่?
@@ -365,8 +385,22 @@ export default function CreditNoteCreateWorkspace({
                           </p>
                         ) : null}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm">
-                        {formatMoney(item.unit_price)}
+                      <TableCell>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          step="0.01"
+                          className="h-9 text-right"
+                          disabled={isSubmitting || item.remaining_qty <= 0}
+                          value={draft?.unit_price ?? formatUnitPrice(item.unit_price)}
+                          aria-label="ราคา/หน่วย (ยอดที่ต้องการลดหนี้)"
+                          onChange={(event) =>
+                            updateLine(item.source_item_id, {
+                              unit_price: event.target.value,
+                            })
+                          }
+                        />
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm font-semibold">
                         {formatMoney(lineTotal)}

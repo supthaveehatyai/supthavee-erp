@@ -51,6 +51,8 @@ export type GetCreditNoteSourceResult = {
 export type CreateCreditNoteItemInput = {
   source_item_id: string;
   qty: number;
+  /** ยอดลดหนี้ต่อหน่วย — default เป็นราคาบิลต้นทาง */
+  unit_price?: number;
   return_to_inventory: boolean;
 };
 
