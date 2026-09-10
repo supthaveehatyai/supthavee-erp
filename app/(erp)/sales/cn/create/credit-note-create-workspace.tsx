@@ -114,7 +114,9 @@ export default function CreditNoteCreateWorkspace({
       const origin = itemById.get(line.source_item_id);
       if (!origin) return 0;
       const qty = parseQtyInput(line.qty);
-      const unitPrice = parseUnitPriceInput(line.unit_price);
+      const unitPrice = line.return_to_inventory
+        ? origin.unit_price
+        : parseUnitPriceInput(line.unit_price);
       if (qty <= 0 || origin.source_qty <= 0) return 0;
       const discount =
         origin.discount_amount > 0
@@ -150,9 +152,18 @@ export default function CreditNoteCreateWorkspace({
 
   function updateLine(sourceItemId: string, patch: Partial<LineDraft>) {
     setLines((current) =>
-      current.map((line) =>
-        line.source_item_id === sourceItemId ? { ...line, ...patch } : line,
-      ),
+      current.map((line) => {
+        if (line.source_item_id !== sourceItemId) return line;
+        const origin = itemById.get(sourceItemId);
+        const next: LineDraft = { ...line, ...patch };
+        if (origin?.is_service) {
+          next.return_to_inventory = false;
+        }
+        if (next.return_to_inventory && origin) {
+          next.unit_price = formatUnitPrice(origin.unit_price);
+        }
+        return next;
+      }),
     );
   }
 
@@ -168,12 +179,20 @@ export default function CreditNoteCreateWorkspace({
     }
 
     const items = lines
-      .map((line) => ({
-        source_item_id: line.source_item_id,
-        qty: parseQtyInput(line.qty),
-        unit_price: parseUnitPriceInput(line.unit_price),
-        return_to_inventory: line.return_to_inventory,
-      }))
+      .map((line) => {
+        const origin = itemById.get(line.source_item_id);
+        const returnToInventory = origin?.is_service
+          ? false
+          : Boolean(line.return_to_inventory);
+        return {
+          source_item_id: line.source_item_id,
+          qty: parseQtyInput(line.qty),
+          unit_price: returnToInventory
+            ? origin?.unit_price ?? parseUnitPriceInput(line.unit_price)
+            : parseUnitPriceInput(line.unit_price),
+          return_to_inventory: returnToInventory,
+        };
+      })
       .filter((line) => line.qty > 0);
 
     setIsSubmitting(true);
@@ -296,8 +315,8 @@ export default function CreditNoteCreateWorkspace({
         <CardHeader className="pb-3">
           <CardTitle className="text-base">รายการลดหนี้</CardTitle>
           <CardDescription>
-            จำนวนต้องไม่เกินยอดคงเหลือของแต่ละบรรทัดในบิลต้นทาง ·
-            แก้ราคา/หน่วยได้เมื่อชดเชยราคา (Price Adjustment)
+            รับคืนสต็อกจะล็อคราคาขายเดิมจากบิลต้นทาง ·
+            ปิดสวิตช์รับคืนจึงแก้ราคา/หน่วยได้กรณีชดเชยราคา (Price Adjustment)
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -333,6 +352,10 @@ export default function CreditNoteCreateWorkspace({
                   const qty = parseQtyInput(draft?.qty ?? "0");
                   const over = qtyExceedsLimit(qty, item.remaining_qty);
                   const lineTotal = lineTotals[index] ?? 0;
+                  const isReturnToInventory = Boolean(
+                    draft?.return_to_inventory && !item.is_service,
+                  );
+                  const unitPriceLocked = isReturnToInventory;
                   const returnDisabled =
                     isSubmitting || item.is_service || item.remaining_qty <= 0;
                   return (
@@ -392,8 +415,17 @@ export default function CreditNoteCreateWorkspace({
                           min={0}
                           step="0.01"
                           className="h-9 text-right"
-                          disabled={isSubmitting || item.remaining_qty <= 0}
-                          value={draft?.unit_price ?? formatUnitPrice(item.unit_price)}
+                          disabled={
+                            isSubmitting ||
+                            item.remaining_qty <= 0 ||
+                            unitPriceLocked
+                          }
+                          value={
+                            unitPriceLocked
+                              ? formatUnitPrice(item.unit_price)
+                              : (draft?.unit_price ??
+                                formatUnitPrice(item.unit_price))
+                          }
                           aria-label="ราคา/หน่วย (ยอดที่ต้องการลดหนี้)"
                           onChange={(event) =>
                             updateLine(item.source_item_id, {
@@ -401,6 +433,11 @@ export default function CreditNoteCreateWorkspace({
                             })
                           }
                         />
+                        {unitPriceLocked ? (
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            ล็อคราคาบิลต้นทาง
+                          </p>
+                        ) : null}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm font-semibold">
                         {formatMoney(lineTotal)}
@@ -408,11 +445,16 @@ export default function CreditNoteCreateWorkspace({
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Switch
-                            checked={Boolean(draft?.return_to_inventory)}
+                            checked={
+                              !item.is_service &&
+                              Boolean(draft?.return_to_inventory)
+                            }
                             disabled={returnDisabled}
                             onCheckedChange={(checked) =>
                               updateLine(item.source_item_id, {
-                                return_to_inventory: checked,
+                                return_to_inventory: item.is_service
+                                  ? false
+                                  : checked,
                               })
                             }
                             aria-label="รับคืนสินค้าลงสต็อกหรือไม่ (Return to Inventory)"

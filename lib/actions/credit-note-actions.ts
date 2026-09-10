@@ -458,6 +458,9 @@ export async function createCreditNoteAction(
         };
       }
 
+      const returnToInventory = origin.is_service
+        ? false
+        : Boolean(line.return_to_inventory);
       const requestedPrice =
         line.unit_price == null ? origin.unit_price : Number(line.unit_price);
       if (!Number.isFinite(requestedPrice) || requestedPrice < 0) {
@@ -466,15 +469,15 @@ export async function createCreditNoteAction(
           error: `รายการ ${origin.sku ?? origin.description}: ราคา/หน่วยไม่ถูกต้อง`,
         };
       }
-      const unitPrice = roundMoney(requestedPrice);
+      const unitPrice = roundMoney(
+        returnToInventory ? origin.unit_price : requestedPrice,
+      );
 
       selected.push({
         source: origin,
         qty,
         unitPrice,
-        returnToInventory: origin.is_service
-          ? false
-          : Boolean(line.return_to_inventory),
+        returnToInventory,
       });
     }
 
