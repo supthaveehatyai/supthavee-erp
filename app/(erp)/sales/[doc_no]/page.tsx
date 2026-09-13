@@ -47,6 +47,7 @@ import DuplicateDocumentButton from "./duplicate-document-button";
 import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
 import { VoidedDocumentAlert } from "@/components/shared/document/voided-document-alert";
 import { resolveVoidRemark } from "@/lib/utils/void-remark";
+import { displayDocumentItemDescription, stripCreditNoteLineMeta } from "@/lib/utils/credit-note-line";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import ConvertDocumentDropdown from "./convert-document-dropdown";
 import { SendToProductionButton } from "@/components/production/send-to-production-button";
@@ -126,7 +127,7 @@ function buildManufacturedSendGroups(
       model_code: item.model_code?.trim() || "—",
       model_name:
         item.product_name?.trim() ||
-        item.description?.trim() ||
+        stripCreditNoteLineMeta(item.description) ||
         item.model_code?.trim() ||
         "สินค้าผลิตเอง",
       mockup_image_url:
@@ -896,7 +897,10 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                           </TableCell>
                           <TableCell className="max-w-[18rem] px-4 text-sm text-slate-700">
                             <span className="line-clamp-2">
-                              {item.description || item.product_name || "—"}
+                              {displayDocumentItemDescription(
+                                item.description,
+                                item.product_name,
+                              )}
                             </span>
                             {item.is_manufactured
                               ? productionStatusBadge(

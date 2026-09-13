@@ -20,6 +20,7 @@ import {
   calculateDocumentSummary,
   type VatCalculationType,
 } from "@/lib/utils/document-summary";
+import { displayDocumentItemDescription } from "@/lib/utils/credit-note-line";
 import type {
   ContactPersonOption,
   CustomerOption,
@@ -573,7 +574,7 @@ export default function SalesEditWorkspace({
                         {row.sku}
                       </TableCell>
                       <TableCell className="max-w-[14rem] px-3 text-sm">
-                        {row.description}
+                        {displayDocumentItemDescription(row.description)}
                       </TableCell>
                       <TableCell className="px-3">
                         {isReplacement ? (

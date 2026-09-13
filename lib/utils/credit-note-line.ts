@@ -9,6 +9,9 @@
 const CN_LINE_META_RE =
   /^\[#CN src=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) ret=([01])\]\s*/i;
 
+/** Fallback สำหรับ token ที่รูปแบบไม่ตรง parse โครงสร้าง — ห้ามโชว์บน UI */
+const CN_META_LOOSE_RE = /\[#CN[^\]]*\]/gi;
+
 export type CreditNoteLineMeta = {
   sourceItemId: string;
   returnToInventory: boolean;
@@ -32,8 +35,20 @@ export function stripCreditNoteLineMeta(
   raw: string | null | undefined,
 ): string {
   const parsed = parseCreditNoteLineMeta(raw);
-  if (parsed) return parsed.description;
-  return String(raw ?? "").trim();
+  const text = parsed ? parsed.description : String(raw ?? "");
+  return text.replace(CN_META_LOOSE_RE, "").trim();
+}
+
+/** ชื่อสินค้าสำหรับแสดงผล — ไม่โชว์รหัสระบบ [#CN …] */
+export function displayDocumentItemDescription(
+  description?: string | null,
+  productName?: string | null,
+): string {
+  return (
+    stripCreditNoteLineMeta(description) ||
+    String(productName ?? "").trim() ||
+    "—"
+  );
 }
 
 export function encodeCreditNoteLineDescription(params: {

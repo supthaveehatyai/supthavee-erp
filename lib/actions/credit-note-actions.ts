@@ -28,6 +28,7 @@ import {
   remainingQty,
   stripCreditNoteLineMeta,
 } from "@/lib/utils/credit-note-line";
+import { creditNoteRemarkSchema } from "@/lib/validations/credit-note";
 import type {
   CreateCreditNoteInput,
   CreateCreditNoteResult,
@@ -385,10 +386,18 @@ export async function createCreditNoteAction(
 ): Promise<CreateCreditNoteResult> {
   try {
     const refId = payload?.ref_document_id?.trim() ?? "";
-    const notes =
-      typeof payload?.notes === "string"
-        ? payload.notes.trim() || null
-        : null;
+    const remarkParsed = creditNoteRemarkSchema.safeParse(
+      payload?.notes ?? payload?.remark ?? "",
+    );
+    if (!remarkParsed.success) {
+      return {
+        data: null,
+        error:
+          remarkParsed.error.issues[0]?.message ??
+          "กรุณาระบุเหตุผลการลดหนี้",
+      };
+    }
+    const notes = remarkParsed.data;
     const incoming = Array.isArray(payload?.items) ? payload.items : [];
     const docDate =
       typeof payload?.doc_date === "string" &&

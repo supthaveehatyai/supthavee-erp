@@ -4,6 +4,7 @@ import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
 import type { DocumentDetail, DocumentType } from "@/types/document";
 import type { PrintPaperSize, PrintVatType } from "@/types/print-document";
 import { cn } from "@/lib/utils";
+import { displayDocumentItemDescription } from "@/lib/utils/credit-note-line";
 
 const DOC_TYPE_LABELS: Record<DocumentType, string> = {
   QT: "ใบเสนอราคา (Quotation)",
@@ -193,7 +194,10 @@ export default async function PrintDocumentTemplate({
                       {item.sku ?? "—"}
                     </td>
                     <td className="max-w-[12rem] py-1.5 pr-2 text-neutral-800">
-                      {item.description || item.product_name || "—"}
+                      {displayDocumentItemDescription(
+                        item.description,
+                        item.product_name,
+                      )}
                     </td>
                     <td className="py-1.5 pr-2 text-right tabular-nums text-neutral-800">
                       {item.qty}

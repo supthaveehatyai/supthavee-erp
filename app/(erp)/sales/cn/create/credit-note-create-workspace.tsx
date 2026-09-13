@@ -14,7 +14,11 @@ import { createCreditNoteAction } from "@/lib/actions/credit-note-actions";
 import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
 import { calculateDocumentSummary } from "@/lib/utils/document-summary";
-import { qtyExceedsLimit } from "@/lib/utils/credit-note-line";
+import {
+  displayDocumentItemDescription,
+  qtyExceedsLimit,
+} from "@/lib/utils/credit-note-line";
+import { createCreditNoteFormSchema } from "@/lib/validations/credit-note";
 import type { CreditNoteSourceDocument } from "@/types/credit-note";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import { Button } from "@/components/ui/button";
@@ -95,6 +99,7 @@ export default function CreditNoteCreateWorkspace({
   const router = useRouter();
   const [docDate, setDocDate] = useState(todayIsoDate);
   const [notes, setNotes] = useState("");
+  const [notesError, setNotesError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lines, setLines] = useState<LineDraft[]>(() =>
     source.items.map((item) => ({
@@ -211,12 +216,26 @@ export default function CreditNoteCreateWorkspace({
       return;
     }
 
+    const remarkParsed = createCreditNoteFormSchema.safeParse({
+      remark: notes,
+    });
+    if (!remarkParsed.success) {
+      const message =
+        remarkParsed.error.issues[0]?.message ??
+        "กรุณาระบุเหตุผลการลดหนี้";
+      setNotesError(message);
+      toast.error(message);
+      return;
+    }
+
+    setNotesError(null);
     setIsSubmitting(true);
     try {
       const result = await createCreditNoteAction({
         ref_document_id: source.id,
         doc_date: docDate,
-        notes,
+        notes: remarkParsed.data.remark,
+        remark: remarkParsed.data.remark,
         items,
       });
       if (result.error || !result.data) {
@@ -314,14 +333,25 @@ export default function CreditNoteCreateWorkspace({
               />
             </div>
             <div className="sm:col-span-2">
-              <Label htmlFor="cn-notes">หมายเหตุ / เหตุผลการลดหนี้</Label>
+              <Label htmlFor="cn-notes">
+                เหตุผลการลดหนี้ <span className="text-red-500">*</span>
+              </Label>
               <Textarea
                 id="cn-notes"
                 value={notes}
                 disabled={isSubmitting}
+                required
+                aria-required="true"
+                aria-invalid={Boolean(notesError)}
                 placeholder="เช่น สินค้าชำรุด, คืนของ, ปรับราคา"
-                onChange={(event) => setNotes(event.target.value)}
+                onChange={(event) => {
+                  setNotes(event.target.value);
+                  if (notesError) setNotesError(null);
+                }}
               />
+              {notesError ? (
+                <p className="mt-1 text-sm text-red-600">{notesError}</p>
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -396,7 +426,7 @@ export default function CreditNoteCreateWorkspace({
                       <TableCell>
                         <input
                           type="checkbox"
-                          aria-label={`เลือกลดหนี้ ${item.sku ?? item.description}`}
+                          aria-label={`เลือกลดหนี้ ${item.sku ?? displayDocumentItemDescription(item.description)}`}
                           className="size-4 rounded border-slate-300 accent-blue-600"
                           checked={selected}
                           disabled={isSubmitting}
@@ -411,14 +441,14 @@ export default function CreditNoteCreateWorkspace({
                         <div className="flex items-start gap-3">
                           <LineItemProductThumb
                             imageUrl={item.image_url}
-                            alt={item.description}
+                            alt={displayDocumentItemDescription(item.description)}
                           />
                           <div className="min-w-0">
                             <p className="font-mono text-xs text-slate-500">
                               {item.sku ?? "—"}
                             </p>
                             <p className="text-sm font-medium text-slate-900">
-                              {item.description}
+                              {displayDocumentItemDescription(item.description)}
                             </p>
                             {item.is_service ? (
                               <p className="mt-0.5 text-xs text-amber-700">

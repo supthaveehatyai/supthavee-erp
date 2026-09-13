@@ -11,6 +11,7 @@ import { PURCHASE_DOC_TYPES } from "@/lib/constants/document";
 import { VoidDocumentButton } from "@/components/shared/document/void-document-button";
 import { VoidedDocumentAlert } from "@/components/shared/document/voided-document-alert";
 import { resolveVoidRemark } from "@/lib/utils/void-remark";
+import { displayDocumentItemDescription } from "@/lib/utils/credit-note-line";
 import type { DocumentDetail, DocumentStatus, DocumentType } from "@/types/document";
 import { AllocatedDocumentsTable } from "@/components/finance/AllocatedDocumentsTable";
 import { DepositAllocationHistoryTable } from "@/components/finance/DepositAllocationHistoryTable";
@@ -604,7 +605,10 @@ export default async function PurchaseDocumentDetailPage({
                       <TableRow key={item.id}>
                         <TableCell>
                           <div className="font-medium text-slate-900">
-                            {item.description || item.product_name || "—"}
+                            {displayDocumentItemDescription(
+                              item.description,
+                              item.product_name,
+                            )}
                           </div>
                           {item.sku ? (
                             <div className="font-mono text-xs text-slate-400">

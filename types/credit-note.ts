@@ -59,7 +59,10 @@ export type CreateCreditNoteItemInput = {
 export type CreateCreditNoteInput = {
   ref_document_id: string;
   doc_date?: string | null;
+  /** เหตุผลการลดหนี้ — บันทึกลง `documents.notes` */
   notes?: string | null;
+  /** alias ของ notes สำหรับ Zod / ฟอร์ม */
+  remark?: string | null;
   items: CreateCreditNoteItemInput[];
 };
 
