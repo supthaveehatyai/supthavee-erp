@@ -191,6 +191,26 @@ export const CASH_DOC_TYPES = ["CS_TAX", "ABB", "AP_CASH"] as const;
 export const AR_INVOICE_DOC_TYPES = ["INV_DO", "TAX_INV"] as const;
 
 /**
+ * บิลขายที่ตัดหนี้ด้วยเงิน/มัดจำได้บนหน้า REC
+ * (BN ดึงแยกผ่าน billing notes — ไม่ปนในรายการบิลค้าง)
+ */
+export const AR_REC_INVOICE_DOC_TYPES = [
+  "INV_DO",
+  "TAX_INV",
+  "CS_TAX",
+] as const;
+
+/**
+ * Open items บนฟอร์มสร้างใบเสร็จรับเงิน (REC):
+ * บิลค้างชำระ + ใบลดหนี้ (CN) ที่ยังใช้ไม่หมด
+ * ยอดคงเหลือคำนวณเป็นบวกเสมอ (ห้ามคูณ -1 ที่ DB)
+ */
+export const AR_OUTSTANDING_DOC_TYPES = [
+  ...AR_REC_INVOICE_DOC_TYPES,
+  "CN",
+] as const;
+
+/**
  * บิลขายต้นทางที่อนุญาตให้ออกใบลดหนี้ (CN) — ห้ามเปิด CN ลอย
  * ครอบคลุมทั้งเครดิต (INV_DO/TAX_INV) และเงินสด (CS_TAX/ABB)
  */

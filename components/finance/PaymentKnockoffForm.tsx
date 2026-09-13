@@ -17,9 +17,22 @@ import {
   checkedDepositIdsFromAmounts,
   redistributeCheckedDeposits,
 } from "@/lib/utils/deposit-apply";
+import { formatThaiDate } from "@/lib/utils/date-formatter";
 import { compressImage } from "@/lib/utils/image-compression";
+import {
+  formatSignedCreditMoney,
+  isCreditNoteDocType,
+  splitRecAllocationTotals,
+  summarizeRecPayment,
+} from "@/lib/utils/rec-payment-summary";
+import {
+  NET_CASH_NEGATIVE_MESSAGE,
+  recNetCashGuardSchema,
+} from "@/lib/validations/payment-knockoff";
 import type { BankAccount } from "@/types/bank-account";
 import type { AvailableDeposit, UnpaidInvoice } from "@/types/payment";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,7 +44,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Wand2, CheckCircle2, Eye, FileUp, HandCoins, Loader2 } from "lucide-react";
+import {
+  Wand2,
+  CheckCircle2,
+  Eye,
+  FileUp,
+  HandCoins,
+  Loader2,
+  AlertCircle,
+} from "lucide-react";
 
 export type PaymentKnockoffFormProps = {
   invoices: UnpaidInvoice[];
@@ -136,12 +157,26 @@ export function PaymentKnockoffForm({
         contact_id: row.contact_id || contactId,
       }));
 
-      if (mapped.length === 0) {
+      const creditNotes = initialInvoices.filter((row) =>
+        isCreditNoteDocType(row.doc_type),
+      );
+      const mappedIds = new Set(mapped.map((row) => row.id));
+      const merged = [
+        ...mapped,
+        ...creditNotes.filter((row) => !mappedIds.has(row.id)),
+      ];
+
+      if (mapped.length === 0 && creditNotes.length === 0) {
         toast.message("ใบวางบิลนี้ไม่มีบิลค้างชำระแล้ว");
       } else {
-        toast.success(`โหลด ${mapped.length} บิลจากใบวางบิลแล้ว`);
+        toast.success(
+          `โหลด ${mapped.length} บิลจากใบวางบิลแล้ว` +
+            (creditNotes.length > 0
+              ? ` · คงใบลดหนี้ ${creditNotes.length} ใบ`
+              : ""),
+        );
       }
-      applyInvoiceList(mapped);
+      applyInvoiceList(merged);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "โหลดบิลจากใบวางบิลไม่สำเร็จ";
@@ -157,16 +192,6 @@ export function PaymentKnockoffForm({
   const wht = roundMoney(Number(whtAmount) || 0);
   const poolTotal = roundMoney(cash + wht);
 
-  const sumAllocated = useMemo(
-    () => roundMoney(lines.reduce((s, l) => s + l.allocated_amount, 0)),
-    [lines],
-  );
-  const sumWht = useMemo(
-    () => roundMoney(lines.reduce((s, l) => s + l.wht_amount, 0)),
-    [lines],
-  );
-  const sumApplied = roundMoney(sumAllocated + sumWht);
-
   const depositTotal = useMemo(
     () =>
       roundMoney(
@@ -178,7 +203,26 @@ export function PaymentKnockoffForm({
     [availableDeposits, depositAmounts],
   );
 
-  const netPaymentAmount = roundMoney(Math.max(0, sumAllocated - depositTotal));
+  const recSummary = useMemo(() => {
+    const split = splitRecAllocationTotals(lines, invoices);
+    return summarizeRecPayment({
+      totalInvoices: split.totalInvoices,
+      totalCnApplied: split.totalCnApplied,
+      depositApplied: depositTotal,
+      whtAmount: wht,
+    });
+  }, [lines, invoices, depositTotal, wht]);
+
+  const netCashGuard = recNetCashGuardSchema.safeParse(recSummary);
+  const netCashNegative = recSummary.netCash < 0;
+  const netCashMessage = netCashNegative
+    ? (netCashGuard.error?.issues[0]?.message ?? NET_CASH_NEGATIVE_MESSAGE)
+    : null;
+  const canSubmit =
+    recSummary.totalInvoices > 0 &&
+    recSummary.netCash >= 0 &&
+    netCashGuard.success;
+  const netPaymentAmount = recSummary.netCash;
 
   const allocationsJson = useMemo(() => JSON.stringify(lines), [lines]);
   const depositsJson = useMemo(
@@ -194,9 +238,40 @@ export function PaymentKnockoffForm({
     [availableDeposits, depositAmounts],
   );
 
-  function syncNetCash(nextAllocated: number, nextDepositTotal: number) {
-    const net = roundMoney(Math.max(0, nextAllocated - nextDepositTotal));
-    setAmount(net > 0 ? String(net) : net === 0 && nextAllocated > 0 ? "0" : "");
+  function buildSummary(
+    nextLines: LineState[],
+    nextDepositTotal: number,
+    docs: UnpaidInvoice[] = invoices,
+  ) {
+    const split = splitRecAllocationTotals(nextLines, docs);
+    return summarizeRecPayment({
+      totalInvoices: split.totalInvoices,
+      totalCnApplied: split.totalCnApplied,
+      depositApplied: nextDepositTotal,
+      whtAmount: wht,
+    });
+  }
+
+  function syncNetCashFromSummary(summary: {
+    totalInvoices: number;
+    totalCnApplied: number;
+    netCash: number;
+  }) {
+    const hasActivity =
+      summary.totalInvoices > 0 || summary.totalCnApplied > 0;
+    if (summary.netCash > 0) {
+      setAmount(String(summary.netCash));
+      return;
+    }
+    if (summary.netCash === 0 && hasActivity) {
+      setAmount("0");
+      return;
+    }
+    if (summary.netCash < 0 && hasActivity) {
+      setAmount("0");
+      return;
+    }
+    setAmount("");
   }
 
   function currentDepositTotal(next: Record<string, string>): number {
@@ -208,15 +283,15 @@ export function PaymentKnockoffForm({
     );
   }
 
-  /** Auto-fill checked deposits = min(invoiceTotal leftover FIFO, remaining). */
+  /** Auto-fill checked deposits against leftover after CN (invoices − CN). */
   function syncDepositsToInvoiceTotal(
-    invoiceTotal: number,
+    leftoverAfterCn: number,
     baseAmounts: Record<string, string>,
     checkedIds: string[],
   ): Record<string, string> {
     if (checkedIds.length === 0) return {};
     return redistributeCheckedDeposits(
-      invoiceTotal,
+      leftoverAfterCn,
       availableDeposits,
       checkedIds,
     );
@@ -226,50 +301,74 @@ export function PaymentKnockoffForm({
     nextLines: LineState[],
     baseDepositAmounts: Record<string, string> = depositAmounts,
   ) {
-    const nextAllocated = roundMoney(
-      nextLines.reduce((sum, line) => sum + line.allocated_amount, 0),
+    const split = splitRecAllocationTotals(nextLines, invoices);
+    const leftoverAfterCn = roundMoney(
+      Math.max(0, split.totalInvoices - split.totalCnApplied),
     );
     const checkedIds = checkedDepositIdsFromAmounts(baseDepositAmounts);
     const nextDeposits = syncDepositsToInvoiceTotal(
-      nextAllocated,
+      leftoverAfterCn,
       baseDepositAmounts,
       checkedIds,
     );
+    const nextDepositTotal = currentDepositTotal(nextDeposits);
     setLines(nextLines);
     setDepositAmounts(nextDeposits);
-    syncNetCash(nextAllocated, currentDepositTotal(nextDeposits));
+    syncNetCashFromSummary(
+      summarizeRecPayment({
+        totalInvoices: split.totalInvoices,
+        totalCnApplied: split.totalCnApplied,
+        depositApplied: nextDepositTotal,
+        whtAmount: wht,
+      }),
+    );
   }
 
   function handleAutoAllocate() {
-    if (poolTotal <= 0 && depositTotal <= 0) {
-      toast.error("กรุณาระบุยอดเงินโอนจริง และ/หรือ ยอด WHT ก่อน Auto-Allocate");
+    const cnPool = recSummary.totalCnApplied;
+    if (poolTotal <= 0 && depositTotal <= 0 && cnPool <= 0) {
+      toast.error(
+        "กรุณาระบุยอดเงินโอนจริง ยอด WHT ใบลดหนี้ หรือมัดจำ ก่อน Auto-Allocate",
+      );
       return;
     }
 
-    const sorted = [...invoices].sort((a, b) => {
+    const salesInvoices = invoices.filter(
+      (inv) => !isCreditNoteDocType(inv.doc_type),
+    );
+    const sorted = [...salesInvoices].sort((a, b) => {
       const da = a.document_date || "";
       const db = b.document_date || "";
       if (da !== db) return da.localeCompare(db);
       return a.display_doc_no.localeCompare(b.display_doc_no);
     });
 
-    // Allocate cash+deposit pool against invoices (FIFO), WHT separate
     const fifo = allocateFifo(
       sorted.map((inv) => ({
         id: inv.id,
         remaining_balance: inv.remaining_balance,
       })),
-      roundMoney(cash + depositTotal),
+      roundMoney(cash + depositTotal + cnPool),
       wht,
     );
 
     const byId = new Map(fifo.map((row) => [row.invoice_id, row]));
     const next = invoices.map((inv) => {
+      if (isCreditNoteDocType(inv.doc_type)) {
+        const existing = lines.find((line) => line.invoice_id === inv.id);
+        return {
+          invoice_id: inv.id,
+          allocated_amount: existing?.allocated_amount ?? 0,
+          wht_amount: 0,
+        };
+      }
       const row = byId.get(inv.id);
+      const cashPart = row?.allocated_amount ?? 0;
+      const whtPart = row?.wht_amount ?? 0;
       return {
         invoice_id: inv.id,
-        allocated_amount: row?.allocated_amount ?? 0,
-        wht_amount: row?.wht_amount ?? 0,
+        allocated_amount: roundMoney(cashPart + whtPart),
+        wht_amount: whtPart,
       };
     });
     applyInvoiceTotalAndDeposits(next);
@@ -281,24 +380,23 @@ export function PaymentKnockoffForm({
     field: "allocated_amount" | "wht_amount",
     raw: string,
   ) {
+    const invoice = invoices.find((inv) => inv.id === invoiceId);
+    const isCn = invoice ? isCreditNoteDocType(invoice.doc_type) : false;
+    if (isCn && field === "wht_amount") return;
+
     const value = roundMoney(Math.max(0, Number(raw) || 0));
     const next = lines.map((line) =>
-      line.invoice_id === invoiceId ? { ...line, [field]: value } : line,
+      line.invoice_id === invoiceId
+        ? { ...line, [field]: value, ...(isCn ? { wht_amount: 0 } : {}) }
+        : line,
     );
-    if (field === "allocated_amount") {
-      applyInvoiceTotalAndDeposits(next);
-      return;
-    }
-    setLines(next);
-    const nextAllocated = roundMoney(
-      next.reduce((sum, line) => sum + line.allocated_amount, 0),
-    );
-    syncNetCash(nextAllocated, depositTotal);
+    applyInvoiceTotalAndDeposits(next);
   }
 
   function handleRowCheck(invoiceId: string, checked: boolean) {
     const invoice = invoices.find((inv) => inv.id === invoiceId);
     if (!invoice) return;
+    const isCn = isCreditNoteDocType(invoice.doc_type);
     const next = lines.map((line) => {
       if (line.invoice_id !== invoiceId) return line;
       if (!checked) {
@@ -307,6 +405,7 @@ export function PaymentKnockoffForm({
       return {
         ...line,
         allocated_amount: roundMoney(invoice.remaining_balance),
+        wht_amount: isCn ? 0 : line.wht_amount,
       };
     });
     applyInvoiceTotalAndDeposits(next);
@@ -318,8 +417,13 @@ export function PaymentKnockoffForm({
       setAmount("");
       setWhtAmount("");
       // Keep deposits checked but recalc against 0 invoice total
+      const leftoverAfterCn = 0;
       const checkedIds = checkedDepositIdsFromAmounts(depositAmounts);
-      const nextDeposits = syncDepositsToInvoiceTotal(0, depositAmounts, checkedIds);
+      const nextDeposits = syncDepositsToInvoiceTotal(
+        leftoverAfterCn,
+        depositAmounts,
+        checkedIds,
+      );
       setDepositAmounts(nextDeposits);
       return;
     }
@@ -340,28 +444,38 @@ export function PaymentKnockoffForm({
       ? Array.from(new Set([...prevChecked, depositId]))
       : prevChecked.filter((id) => id !== depositId);
 
+    const leftoverAfterCn = roundMoney(
+      Math.max(0, recSummary.totalInvoices - recSummary.totalCnApplied),
+    );
     const next = syncDepositsToInvoiceTotal(
-      sumAllocated,
+      leftoverAfterCn,
       depositAmounts,
       nextChecked,
     );
     setDepositAmounts(next);
-    syncNetCash(sumAllocated, currentDepositTotal(next));
+    syncNetCashFromSummary(
+      buildSummary(lines, currentDepositTotal(next)),
+    );
   }
 
   function handleDepositSelectAll(checked: boolean) {
     if (!checked) {
       setDepositAmounts({});
-      syncNetCash(sumAllocated, 0);
+      syncNetCashFromSummary(buildSummary(lines, 0));
       return;
     }
+    const leftoverAfterCn = roundMoney(
+      Math.max(0, recSummary.totalInvoices - recSummary.totalCnApplied),
+    );
     const next = redistributeCheckedDeposits(
-      sumAllocated,
+      leftoverAfterCn,
       availableDeposits,
       availableDeposits.map((d) => d.id),
     );
     setDepositAmounts(next);
-    syncNetCash(sumAllocated, currentDepositTotal(next));
+    syncNetCashFromSummary(
+      buildSummary(lines, currentDepositTotal(next)),
+    );
   }
 
   const selectedCount = useMemo(
@@ -423,8 +537,12 @@ export function PaymentKnockoffForm({
 
   async function handleSubmit(formData: FormData) {
     if (isSubmitting) return;
-    if (sumApplied <= 0) {
-      toast.error("ห้ามบันทึก — ผลรวมยอดตัดหนี้ต้องมากกว่า 0");
+    if (recSummary.totalInvoices <= 0) {
+      toast.error("กรุณาเลือกบิลขายที่ต้องการตัดยอดอย่างน้อย 1 รายการ");
+      return;
+    }
+    if (!netCashGuard.success || recSummary.netCash < 0) {
+      toast.error(netCashMessage ?? NET_CASH_NEGATIVE_MESSAGE);
       return;
     }
 
@@ -536,7 +654,7 @@ export function PaymentKnockoffForm({
               onChange={(e) => setAmount(e.target.value)}
             />
             <p className="text-xs text-slate-500">
-              คำนวณอัตโนมัติ = บิลที่เลือก − มัดจำที่เลือก (฿
+              คำนวณอัตโนมัติ = บิลขาย − ใบลดหนี้ − มัดจำ − WHT (฿
               {netPaymentAmount.toLocaleString("th-TH", {
                 minimumFractionDigits: 2,
               })}
@@ -555,7 +673,19 @@ export function PaymentKnockoffForm({
               min="0"
               placeholder="0.00"
               value={whtAmount}
-              onChange={(e) => setWhtAmount(e.target.value)}
+              onChange={(e) => {
+                setWhtAmount(e.target.value);
+                const nextWht = roundMoney(Number(e.target.value) || 0);
+                const split = splitRecAllocationTotals(lines, invoices);
+                syncNetCashFromSummary(
+                  summarizeRecPayment({
+                    totalInvoices: split.totalInvoices,
+                    totalCnApplied: split.totalCnApplied,
+                    depositApplied: depositTotal,
+                    whtAmount: nextWht,
+                  }),
+                );
+              }}
             />
           </div>
 
@@ -576,25 +706,23 @@ export function PaymentKnockoffForm({
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
           <div className="flex flex-wrap gap-4 text-slate-600">
             <span>
-              บิลที่ตัด:{" "}
+              ยอดหนี้รวม:{" "}
               <strong className="text-slate-900">
-                {sumAllocated.toLocaleString("th-TH", {
+                {recSummary.totalInvoices.toLocaleString("th-TH", {
                   minimumFractionDigits: 2,
                 })}
+              </strong>
+            </span>
+            <span>
+              ใบลดหนี้ที่ใช้:{" "}
+              <strong className="text-destructive">
+                {formatSignedCreditMoney(recSummary.totalCnApplied)}
               </strong>
             </span>
             <span>
               มัดจำใช้:{" "}
               <strong className="text-emerald-700">
-                {depositTotal.toLocaleString("th-TH", {
-                  minimumFractionDigits: 2,
-                })}
-              </strong>
-            </span>
-            <span>
-              ยอดรับจริง:{" "}
-              <strong className="text-blue-800">
-                {netPaymentAmount.toLocaleString("th-TH", {
+                {recSummary.depositApplied.toLocaleString("th-TH", {
                   minimumFractionDigits: 2,
                 })}
               </strong>
@@ -602,22 +730,19 @@ export function PaymentKnockoffForm({
             <span>
               WHT:{" "}
               <strong className="text-slate-900">
-                {sumWht.toLocaleString("th-TH", {
+                {recSummary.whtAmount.toLocaleString("th-TH", {
                   minimumFractionDigits: 2,
                 })}
               </strong>
             </span>
             <span>
-              ตัดรวม:{" "}
+              ยอดโอนจริง:{" "}
               <strong
                 className={
-                  Math.abs(sumApplied - roundMoney(cash + depositTotal + wht)) >
-                  0.02
-                    ? "text-amber-700"
-                    : "text-emerald-700"
+                  netCashNegative ? "text-destructive" : "text-blue-800"
                 }
               >
-                {sumApplied.toLocaleString("th-TH", {
+                {netPaymentAmount.toLocaleString("th-TH", {
                   minimumFractionDigits: 2,
                 })}
               </strong>
@@ -667,6 +792,7 @@ export function PaymentKnockoffForm({
                   allocated_amount: 0,
                   wht_amount: 0,
                 };
+                const isCn = isCreditNoteDocType(inv.doc_type);
                 const applied = roundMoney(
                   line.allocated_amount + line.wht_amount,
                 );
@@ -676,7 +802,13 @@ export function PaymentKnockoffForm({
                 return (
                   <TableRow
                     key={inv.id}
-                    className={isChecked ? "bg-blue-50/40" : undefined}
+                    className={
+                      isChecked
+                        ? isCn
+                          ? "bg-red-50/50"
+                          : "bg-blue-50/40"
+                        : undefined
+                    }
                   >
                     <TableCell className="text-center">
                       <input
@@ -690,26 +822,39 @@ export function PaymentKnockoffForm({
                       />
                     </TableCell>
                     <TableCell>
-                      <a
-                        href={docHref}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-medium text-blue-700 underline-offset-2 hover:underline"
-                      >
-                        {inv.display_doc_no}
-                      </a>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <a
+                          href={docHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-blue-700 underline-offset-2 hover:underline"
+                        >
+                          {inv.display_doc_no}
+                        </a>
+                        {isCn ? (
+                          <Badge className="bg-red-100 text-destructive">
+                            CN
+                          </Badge>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell>
                       {inv.document_date
-                        ? new Date(inv.document_date).toLocaleDateString(
-                            "th-TH",
-                          )
+                        ? formatThaiDate(inv.document_date, "short")
                         : "—"}
                     </TableCell>
-                    <TableCell className="text-right font-semibold text-red-600">
-                      {inv.remaining_balance.toLocaleString("th-TH", {
-                        minimumFractionDigits: 2,
-                      })}
+                    <TableCell
+                      className={
+                        isCn
+                          ? "text-right font-semibold text-destructive"
+                          : "text-right font-semibold text-red-600"
+                      }
+                    >
+                      {isCn
+                        ? formatSignedCreditMoney(inv.remaining_balance)
+                        : inv.remaining_balance.toLocaleString("th-TH", {
+                            minimumFractionDigits: 2,
+                          })}
                     </TableCell>
                     <TableCell className="text-right">
                       <Input
@@ -717,8 +862,14 @@ export function PaymentKnockoffForm({
                         inputMode="decimal"
                         step="0.01"
                         min="0"
-                        placeholder="กรอกยอดหนี้รวมที่ต้องการล้าง"
-                        className="ml-auto h-9 w-32 text-right"
+                        placeholder={
+                          isCn ? "ยอดเครดิตที่ใช้" : "กรอกยอดหนี้รวมที่ต้องการล้าง"
+                        }
+                        className={
+                          isCn
+                            ? "ml-auto h-9 w-32 text-right text-destructive"
+                            : "ml-auto h-9 w-32 text-right"
+                        }
                         value={line.allocated_amount || ""}
                         onChange={(e) =>
                           updateLine(
@@ -735,17 +886,26 @@ export function PaymentKnockoffForm({
                         inputMode="decimal"
                         step="0.01"
                         min="0"
-                        className="ml-auto h-9 w-28 text-right"
-                        value={line.wht_amount || ""}
+                        disabled={isCn}
+                        className="ml-auto h-9 w-28 text-right disabled:bg-slate-50"
+                        value={isCn ? "" : line.wht_amount || ""}
                         onChange={(e) =>
                           updateLine(inv.id, "wht_amount", e.target.value)
                         }
                       />
                     </TableCell>
-                    <TableCell className="text-right font-medium text-slate-900">
-                      {applied.toLocaleString("th-TH", {
-                        minimumFractionDigits: 2,
-                      })}
+                    <TableCell
+                      className={
+                        isCn
+                          ? "text-right font-medium text-destructive"
+                          : "text-right font-medium text-slate-900"
+                      }
+                    >
+                      {isCn
+                        ? formatSignedCreditMoney(applied)
+                        : applied.toLocaleString("th-TH", {
+                            minimumFractionDigits: 2,
+                          })}
                     </TableCell>
                     <TableCell className="text-center">
                       <a
@@ -767,14 +927,19 @@ export function PaymentKnockoffForm({
 
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-blue-200 bg-blue-50/60 px-4 py-3 text-sm">
           <span className="text-slate-600">
-            เลือกแล้ว {selectedCount}/{invoices.length} บิล
-            {allSelected ? " · เลือกทั้งหมด" : ""} · ยอดตัดบิล = ยอดรับจริง + มัดจำ
+            เลือกแล้ว {selectedCount}/{invoices.length} รายการ
+            {allSelected ? " · เลือกทั้งหมด" : ""} · ยอดโอนจริง = บิลขาย −
+            ใบลดหนี้ − มัดจำ − WHT
           </span>
           <span className="text-slate-700">
-            ตัดรวม:{" "}
-            <strong className="text-lg text-blue-800">
+            Net Cash:{" "}
+            <strong
+              className={
+                netCashNegative ? "text-lg text-destructive" : "text-lg text-blue-800"
+              }
+            >
               ฿
-              {sumApplied.toLocaleString("th-TH", {
+              {netPaymentAmount.toLocaleString("th-TH", {
                 minimumFractionDigits: 2,
               })}
             </strong>
@@ -887,9 +1052,8 @@ export function PaymentKnockoffForm({
                                 [dep.id]: e.target.value,
                               };
                               setDepositAmounts(next);
-                              syncNetCash(
-                                sumAllocated,
-                                currentDepositTotal(next),
+                              syncNetCashFromSummary(
+                                buildSummary(lines, currentDepositTotal(next)),
                               );
                             }}
                           />
@@ -1012,12 +1176,20 @@ export function PaymentKnockoffForm({
           </div>
         </div>
 
+        {netCashNegative ? (
+          <Alert variant="destructive">
+            <AlertCircle className="mb-1 h-4 w-4" />
+            <AlertTitle>ไม่สามารถบันทึกได้</AlertTitle>
+            <AlertDescription>{netCashMessage}</AlertDescription>
+          </Alert>
+        ) : null}
+
         <div className="flex justify-end border-t border-slate-100 pt-4">
           <Button
             type="submit"
             size="lg"
-            disabled={isSubmitting || sumApplied <= 0}
-            className="h-12 gap-2 bg-blue-600 px-8 text-base font-semibold shadow-md hover:bg-blue-700"
+            disabled={isSubmitting || !canSubmit}
+            className="h-12 gap-2 bg-blue-600 px-8 text-base font-semibold shadow-md hover:bg-blue-700 disabled:opacity-50"
           >
             <CheckCircle2 className="h-5 w-5" />
             {isSubmitting

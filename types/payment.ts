@@ -30,6 +30,11 @@ export type UnpaidInvoice = {
   payment_status: string;
   net_amount_calc: number;
   paid_amount: number;
+  /**
+   * Face-value remaining = grand_total − paid_amount.
+   * Always unsigned (positive). Credit notes (CN) keep the same sign —
+   * never multiplied by -1 at query / DB level.
+   */
   remaining_balance: number;
   contact_id: string;
 };

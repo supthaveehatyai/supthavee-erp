@@ -77,6 +77,9 @@ const FIELD_LABELS: Record<string, string> = {
   net_amount: "ยอดก่อนภาษี",
   net_before_vat: "ยอดก่อน VAT",
   paid_amount: "ยอดชำระแล้ว",
+  cn_applied: "ใช้ใบลดหนี้หักลดหนี้",
+  cn_applied_amount: "ยอดใบลดหนี้ที่ใช้",
+  net_cash: "ยอดรับชำระจริง",
   wht_rate: "อัตราภาษีหัก ณ ที่จ่าย",
   qty: "จำนวน",
   quantity: "จำนวน",
@@ -136,6 +139,7 @@ function formatAuditEventLabel(event: unknown): string | null {
     DUPLICATE: "คัดลอกเอกสาร (DUPLICATE)",
     CLONE: "โคลนเป็นร่างใหม่ (CLONE)",
     DISPOSE: "จำหน่ายสินทรัพย์ (DISPOSE)",
+    CN_KNOCKOFF: "ใช้ใบลดหนี้หักลดหนี้ (CN Knock-off)",
   };
   return labels[token] ?? token;
 }
@@ -403,6 +407,28 @@ export function parseAuditChangeSummary(
             : fixedAssetSummary,
         );
       }
+    }
+
+    if (
+      newRec.audit_event === "CN_KNOCKOFF" ||
+      newRec.cn_applied === true
+    ) {
+      const recNo = String(newRec.doc_no ?? "").trim();
+      const cnNos = Array.isArray(newRec.cn_doc_nos)
+        ? newRec.cn_doc_nos
+            .map((value) => String(value ?? "").trim())
+            .filter(Boolean)
+            .join(", ")
+        : String(newRec.cn_doc_nos ?? "").trim();
+      const cnAmount = formatAuditValue(newRec.cn_applied_amount);
+      const eventLabel = formatAuditEventLabel("CN_KNOCKOFF");
+      const detail =
+        recNo.length > 0
+          ? `สร้างใบเสร็จรับเงิน ${recNo} และใช้ใบลดหนี้หักลดหนี้${
+              cnNos ? ` (${cnNos})` : ""
+            } จำนวน ${cnAmount} บาท`
+          : `ใช้ใบลดหนี้หักลดหนี้${cnNos ? ` (${cnNos})` : ""} จำนวน ${cnAmount} บาท`;
+      return finish(eventLabel ? `${eventLabel} · ${detail}` : detail);
     }
 
     // Phase 9 — Manual Backup request (Cloud → audit only)

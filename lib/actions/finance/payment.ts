@@ -1,17 +1,26 @@
 "use server";
 
 /**
- * Phase 5 — Receive Payment Server Actions.
- * Zero Client-Side Fetching: Service Role via `createSupabaseServerClient` only.
+ * Phase 5 / 18 — Receive Payment Server Actions.
+ * Zero Client-Side Fetching: Service Role (`supabaseAdmin`) only.
  */
 
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
 import { requireSessionUserId } from "@/lib/auth/current-user";
+import {
+  AR_OUTSTANDING_DOC_TYPES,
+  AR_REC_INVOICE_DOC_TYPES,
+} from "@/lib/constants/document";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { syncBillingNotesAfterInvoicePayment } from "@/lib/actions/finance/billing-note-status";
 import { roundMoney } from "@/lib/utils/payment-fifo";
+import {
+  isCreditNoteDocType,
+  summarizeRecPayment,
+} from "@/lib/utils/rec-payment-summary";
+import { NET_CASH_NEGATIVE_MESSAGE } from "@/lib/validations/payment-knockoff";
 import {
   isOverdue,
   resolveDueDate,
@@ -26,9 +35,11 @@ import type {
   UnpaidInvoice,
 } from "@/types/payment";
 import { getAvailableDepositsForContact } from "@/lib/actions/finance/available-deposits";
+import { logAuditTrail } from "@/lib/supabase/auditService";
 
 const OPEN_PAYMENT_STATUSES = ["UNPAID", "PARTIAL", "Pending"] as const;
-const AR_DOC_TYPES = ["INV_DO", "TAX_INV"] as const;
+/** Lifecycle status for open AR items on the REC form (invoices + CN). */
+const AR_OUTSTANDING_STATUS = "ISSUED" as const;
 const DOCUMENT_ATTACHMENTS_BUCKET = "document_attachments";
 const CASH_ACCOUNT_SENTINEL = "CASH";
 const ALLOWED_SLIP_MIME_TYPES = new Set([
@@ -81,6 +92,17 @@ function toMoney(value: number | string | null | undefined): number {
 }
 
 /**
+ * Remaining face value on `documents` — always unsigned.
+ * CN credit stays positive; UI/knock-off decides the sign later.
+ */
+function resolveRemainingAmount(
+  grandTotal: number,
+  paidAmount: number,
+): number {
+  return roundMoney(grandTotal - paidAmount);
+}
+
+/**
  * Outstanding AR summary by customer (Server-calculated overdue + oldest invoice).
  */
 export async function getOutstandingSummary(): Promise<DebtorOption[]> {
@@ -93,10 +115,10 @@ export async function getOutstandingSummary(): Promise<DebtorOption[]> {
  */
 export async function getDebtorsList(): Promise<DebtorOption[]> {
   try {
-    const supabase = createSupabaseServerClient();
+    const supabaseAdmin = createSupabaseServerClient();
     const today = todayIsoDate();
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("documents")
       .select(
         `
@@ -114,8 +136,8 @@ export async function getDebtorsList(): Promise<DebtorOption[]> {
       `,
       )
       .in("payment_status", [...OPEN_PAYMENT_STATUSES])
-      .in("doc_type", [...AR_DOC_TYPES])
-      .in("status", ["ISSUED", "COMPLETED"])
+      .in("doc_type", [...AR_REC_INVOICE_DOC_TYPES])
+      .eq("status", AR_OUTSTANDING_STATUS)
       .or("is_voided.is.null,is_voided.eq.false");
 
     if (error) {
@@ -140,7 +162,7 @@ export async function getDebtorsList(): Promise<DebtorOption[]> {
       if (!contactId) continue;
 
       const grand = toMoney(doc.grand_total ?? doc.total_amount);
-      const remaining = roundMoney(grand - toMoney(doc.paid_amount));
+      const remaining = resolveRemainingAmount(grand, toMoney(doc.paid_amount));
       if (remaining <= 0) continue;
 
       const docDate = doc.doc_date ? String(doc.doc_date) : "";
@@ -191,7 +213,7 @@ export async function getDebtorsList(): Promise<DebtorOption[]> {
   }
 }
 
-/** Unpaid invoices + available DEP_IN for one customer (`contact_id` from URL). */
+/** Unpaid invoices + unused CN + available DEP_IN for one customer (`contact_id` from URL). */
 export async function getUnpaidInvoicesByCustomer(
   contactId: string,
 ): Promise<CustomerPaymentContext> {
@@ -201,8 +223,8 @@ export async function getUnpaidInvoicesByCustomer(
   }
 
   try {
-    const supabase = createSupabaseServerClient();
-    const { data, error } = await supabase
+    const supabaseAdmin = createSupabaseServerClient();
+    const { data, error } = await supabaseAdmin
       .from("documents")
       .select(
         `
@@ -219,8 +241,8 @@ export async function getUnpaidInvoicesByCustomer(
       )
       .eq("contact_id", trimmed)
       .in("payment_status", [...OPEN_PAYMENT_STATUSES])
-      .in("doc_type", [...AR_DOC_TYPES])
-      .in("status", ["ISSUED", "COMPLETED"])
+      .in("doc_type", [...AR_OUTSTANDING_DOC_TYPES])
+      .eq("status", AR_OUTSTANDING_STATUS)
       .or("is_voided.is.null,is_voided.eq.false")
       .order("doc_date", { ascending: true });
 
@@ -233,7 +255,7 @@ export async function getUnpaidInvoicesByCustomer(
       .map((doc) => {
         const netAmount = toMoney(doc.grand_total ?? doc.total_amount);
         const paidAmount = toMoney(doc.paid_amount);
-        const remaining = netAmount - paidAmount;
+        const remaining = resolveRemainingAmount(netAmount, paidAmount);
 
         return {
           id: doc.id,
@@ -252,7 +274,7 @@ export async function getUnpaidInvoicesByCustomer(
     const availableDeposits = await getAvailableDepositsForContact(
       trimmed,
       "DEP_IN",
-      supabase,
+      supabaseAdmin,
     );
 
     return { invoices, availableDeposits };
@@ -312,6 +334,13 @@ function resolvePaymentStatus(
   if (newPaidAmount <= MONEY_EPS) return "UNPAID";
   if (newPaidAmount >= roundMoney(grandTotal) - MONEY_EPS) return "PAID";
   return "PARTIAL";
+}
+
+/** Lifecycle status: fully settled documents leave ISSUED → PAID. */
+function resolveSettledDocumentStatus(
+  paymentStatus: "UNPAID" | "PARTIAL" | "PAID",
+): "ISSUED" | "PAID" {
+  return paymentStatus === "PAID" ? "PAID" : "ISSUED";
 }
 
 async function uploadArPaymentSlip(
@@ -455,52 +484,11 @@ export async function processPaymentKnockoff(
       };
     }
 
-    const sumAllocated = roundMoney(
-      activeAllocations.reduce((sum, row) => sum + row.allocated_amount, 0),
-    );
-    const sumWht = roundMoney(
-      activeAllocations.reduce((sum, row) => sum + row.wht_amount, 0),
-    );
-
-    // Net cash = invoice cash − deposits (floored at 0)
-    const expectedNetCash = roundMoney(Math.max(0, sumAllocated - depositTotal));
-
-    if (depositTotal > sumAllocated + MONEY_EPS) {
-      return {
-        success: false,
-        error: `ยอดมัดจำที่ใช้ (${depositTotal.toFixed(2)}) เกินยอดตัดหนี้ (${sumAllocated.toFixed(2)})`,
-      };
-    }
-    if (Math.abs(sumAllocated - (cashAmount + depositTotal)) > MONEY_EPS) {
-      return {
-        success: false,
-        error: `ยอดตัดหนี้ (${sumAllocated.toFixed(2)}) ต้องเท่ากับ ยอดโอน (${cashAmount.toFixed(2)}) + มัดจำ (${depositTotal.toFixed(2)})`,
-      };
-    }
-    if (Math.abs(cashAmount - expectedNetCash) > MONEY_EPS) {
-      return {
-        success: false,
-        error: `ยอดรับชำระจริงต้องเป็น ${expectedNetCash.toFixed(2)} (บิล − มัดจำ)`,
-      };
-    }
-    if (Math.abs(sumWht - headerWht) > MONEY_EPS) {
-      return {
-        success: false,
-        error: `ยอด WHT รวมในบิล (${sumWht.toFixed(2)}) ไม่ตรงกับยอด WHT ส่วนหัว (${headerWht.toFixed(2)})`,
-      };
-    }
-    if (cashAmount <= 0 && headerWht <= 0 && depositTotal <= 0) {
-      return {
-        success: false,
-        error: "กรุณาระบุยอดเงินโอน มัดจำ หรือ WHT",
-      };
-    }
-
     const invoiceIds = activeAllocations.map((row) => row.invoice_id);
     const { data: invoices, error: invoicesError } = await supabase
       .from("documents")
       .select(
-        "id, contact_id, grand_total, total_amount, paid_amount, payment_status, doc_type, status, is_voided",
+        "id, contact_id, grand_total, total_amount, paid_amount, payment_status, doc_type, status, is_voided, doc_no",
       )
       .in("id", invoiceIds);
 
@@ -514,6 +502,9 @@ export async function processPaymentKnockoff(
     const invoiceMap = new Map(
       (invoices ?? []).map((row) => [row.id as string, row]),
     );
+
+    const invoiceAllocations: typeof activeAllocations = [];
+    const cnAllocations: typeof activeAllocations = [];
 
     for (const alloc of activeAllocations) {
       const invoice = invoiceMap.get(alloc.invoice_id);
@@ -538,9 +529,21 @@ export async function processPaymentKnockoff(
           error: "ตัดยอดได้เฉพาะบิลที่ออกแล้ว (ISSUED)",
         };
       }
+
+      if (isCreditNoteDocType(String(invoice.doc_type ?? ""))) {
+        if (alloc.wht_amount > MONEY_EPS) {
+          return {
+            success: false,
+            error: "ใบลดหนี้ (CN) ไม่สามารถระบุ WHT ได้",
+          };
+        }
+        cnAllocations.push(alloc);
+        continue;
+      }
+
       if (
-        !AR_DOC_TYPES.includes(
-          invoice.doc_type as (typeof AR_DOC_TYPES)[number],
+        !AR_REC_INVOICE_DOC_TYPES.includes(
+          invoice.doc_type as (typeof AR_REC_INVOICE_DOC_TYPES)[number],
         )
       ) {
         return {
@@ -548,17 +551,133 @@ export async function processPaymentKnockoff(
           error: `ประเภทเอกสารไม่รองรับการตัดหนี้: ${invoice.doc_type}`,
         };
       }
+      invoiceAllocations.push(alloc);
+    }
 
+    if (invoiceAllocations.length === 0) {
+      return {
+        success: false,
+        error: "กรุณาเลือกบิลขายที่ต้องการตัดยอดอย่างน้อย 1 รายการ",
+      };
+    }
+
+    const sumAllocated = roundMoney(
+      invoiceAllocations.reduce((sum, row) => sum + row.allocated_amount, 0),
+    );
+    const sumWht = roundMoney(
+      invoiceAllocations.reduce((sum, row) => sum + row.wht_amount, 0),
+    );
+    const cnTotal = roundMoney(
+      cnAllocations.reduce((sum, row) => sum + row.allocated_amount, 0),
+    );
+    const recSummary = summarizeRecPayment({
+      totalInvoices: sumAllocated,
+      totalCnApplied: cnTotal,
+      depositApplied: depositTotal,
+      whtAmount: headerWht,
+    });
+
+    if (recSummary.netCash < -MONEY_EPS) {
+      return { success: false, error: NET_CASH_NEGATIVE_MESSAGE };
+    }
+
+    const expectedNetCash = roundMoney(Math.max(0, recSummary.netCash));
+
+    if (depositTotal > sumAllocated + MONEY_EPS) {
+      return {
+        success: false,
+        error: `ยอดมัดจำที่ใช้ (${depositTotal.toFixed(2)}) เกินยอดตัดหนี้ (${sumAllocated.toFixed(2)})`,
+      };
+    }
+    if (cnTotal > sumAllocated + MONEY_EPS) {
+      return { success: false, error: NET_CASH_NEGATIVE_MESSAGE };
+    }
+    if (
+      Math.abs(
+        sumAllocated -
+          (cashAmount + depositTotal + cnTotal + headerWht),
+      ) > MONEY_EPS
+    ) {
+      return {
+        success: false,
+        error: `ยอดตัดหนี้ (${sumAllocated.toFixed(2)}) ต้องเท่ากับ ยอดโอน (${cashAmount.toFixed(2)}) + มัดจำ (${depositTotal.toFixed(2)}) + ใบลดหนี้ (${cnTotal.toFixed(2)}) + WHT (${headerWht.toFixed(2)})`,
+      };
+    }
+    if (Math.abs(cashAmount - expectedNetCash) > MONEY_EPS) {
+      return {
+        success: false,
+        error: `ยอดรับชำระจริงต้องเป็น ${expectedNetCash.toFixed(2)} (บิล − ใบลดหนี้ − มัดจำ − WHT)`,
+      };
+    }
+    if (Math.abs(sumWht - headerWht) > MONEY_EPS) {
+      return {
+        success: false,
+        error: `ยอด WHT รวมในบิล (${sumWht.toFixed(2)}) ไม่ตรงกับยอด WHT ส่วนหัว (${headerWht.toFixed(2)})`,
+      };
+    }
+    if (
+      cashAmount <= 0 &&
+      headerWht <= 0 &&
+      depositTotal <= 0 &&
+      cnTotal <= 0
+    ) {
+      return {
+        success: false,
+        error: "กรุณาระบุยอดเงินโอน มัดจำ ใบลดหนี้ หรือ WHT",
+      };
+    }
+
+    for (const alloc of invoiceAllocations) {
+      const invoice = invoiceMap.get(alloc.invoice_id)!;
       const grandTotal = toMoney(invoice.grand_total ?? invoice.total_amount);
       const paidAmount = toMoney(invoice.paid_amount);
       const remaining = roundMoney(grandTotal - paidAmount);
-      const apply = roundMoney(alloc.allocated_amount + alloc.wht_amount);
+      const apply = roundMoney(alloc.allocated_amount);
 
       if (apply > remaining + MONEY_EPS) {
         return {
           success: false,
           error: `ยอดตัดหนี้เกินยอดค้างของบิล (เหลือ ${remaining.toFixed(2)})`,
         };
+      }
+    }
+
+    if (cnAllocations.length > 0) {
+      const cnIds = cnAllocations.map((row) => row.invoice_id);
+      const { data: priorCnAllocs } = await supabase
+        .from("document_allocations")
+        .select("invoice_doc_id, allocated_amount")
+        .in("invoice_doc_id", cnIds);
+
+      const usedByCn = new Map<string, number>();
+      for (const row of priorCnAllocs ?? []) {
+        const id = String(row.invoice_doc_id);
+        usedByCn.set(
+          id,
+          roundMoney(
+            (usedByCn.get(id) ?? 0) + toMoney(row.allocated_amount),
+          ),
+        );
+      }
+
+      for (const alloc of cnAllocations) {
+        const creditNote = invoiceMap.get(alloc.invoice_id)!;
+        const grand = toMoney(
+          creditNote.grand_total ?? creditNote.total_amount,
+        );
+        const used = roundMoney(
+          Math.max(
+            usedByCn.get(alloc.invoice_id) ?? 0,
+            toMoney(creditNote.paid_amount),
+          ),
+        );
+        const remaining = roundMoney(grand - used);
+        if (alloc.allocated_amount > remaining + MONEY_EPS) {
+          return {
+            success: false,
+            error: `ยอดใบลดหนี้เกินคงเหลือ (เหลือ ${remaining.toFixed(2)})`,
+          };
+        }
       }
     }
 
@@ -657,8 +776,8 @@ export async function processPaymentKnockoff(
       slipStoragePath = uploaded.path;
     }
 
-    const receiptGrandTotal = roundMoney(sumAllocated + headerWht);
-    const netCashAmount = roundMoney(sumAllocated - depositTotal);
+    const receiptGrandTotal = recSummary.totalInvoices;
+    const netCashAmount = expectedNetCash;
     const nowIso = new Date().toISOString();
     const paymentDateIso = `${paymentDate}T00:00:00.000Z`;
 
@@ -668,8 +787,8 @@ export async function processPaymentKnockoff(
     }
 
     // 1) REC receipt document
-    // grand_total = มูลค่าบิลที่ตัดยอด (ไม่หักมัดจำ) — มัดจำเป็น payment method
-    // cash fields (sub_total / total_amount / paid_amount) = เงินรับจริงหลังหักมัดจำ
+    // grand_total = Total Invoices (ยอดหนี้เต็มที่ต้องการล้าง) — Phase 5
+    // ไม่ใช่ Net Cash: มัดจำ / CN / WHT อยู่ที่ sub_total, paid_amount, allocations
     const { data: receipt, error: receiptError } = await supabase
       .from("documents")
       .insert({
@@ -698,7 +817,7 @@ export async function processPaymentKnockoff(
           slipFile instanceof File && slipFile.size > 0
             ? slipFile.name.slice(0, 255)
             : null,
-        notes: `AR Knock-off | invoices=${sumAllocated} | cash=${netCashAmount} | deposit=${depositTotal} | wht=${headerWht}${referenceNo ? ` | ref=${referenceNo}` : ""}`,
+        notes: `AR Knock-off | invoices=${sumAllocated} | cash=${netCashAmount} | cn=${cnTotal} | deposit=${depositTotal} | wht=${headerWht}${referenceNo ? ` | ref=${referenceNo}` : ""}`,
         created_by: owner.userId,
         updated_at: nowIso,
       })
@@ -748,15 +867,23 @@ export async function processPaymentKnockoff(
       };
     }
 
-    // 3) document_allocations — invoices + deposits
+    // 3) document_allocations — invoices + CN + deposits
     const allocationRows = [
-      ...activeAllocations.map((row) => ({
+      ...invoiceAllocations.map((row) => ({
         receipt_doc_id: receiptDocId,
         invoice_doc_id: row.invoice_id,
         allocated_amount: row.allocated_amount,
         wht_amount: row.wht_amount,
         adjustment_amount: 0,
         adjustment_reason: null as string | null,
+      })),
+      ...cnAllocations.map((row) => ({
+        receipt_doc_id: receiptDocId,
+        invoice_doc_id: row.invoice_id,
+        allocated_amount: row.allocated_amount,
+        wht_amount: 0,
+        adjustment_amount: 0,
+        adjustment_reason: "CN_APPLY",
       })),
       ...depositAllocations.map((row) => ({
         receipt_doc_id: receiptDocId,
@@ -791,16 +918,14 @@ export async function processPaymentKnockoff(
 
     // 4) Update source invoices (paid_amount + payment_status + lifecycle status)
     const touchedInvoiceIds: string[] = [];
-    for (const alloc of activeAllocations) {
+    for (const alloc of invoiceAllocations) {
       const invoice = invoiceMap.get(alloc.invoice_id)!;
       const grandTotal = toMoney(invoice.grand_total ?? invoice.total_amount);
       const prevPaid = toMoney(invoice.paid_amount);
-      const apply = roundMoney(alloc.allocated_amount + alloc.wht_amount);
+      const apply = roundMoney(alloc.allocated_amount);
       const newPaid = roundMoney(prevPaid + apply);
       const nextPaymentStatus = resolvePaymentStatus(grandTotal, newPaid);
-      // document_status ENUM has no PARTIAL — COMPLETED only when fully paid.
-      const nextDocStatus =
-        nextPaymentStatus === "PAID" ? "COMPLETED" : "ISSUED";
+      const nextDocStatus = resolveSettledDocumentStatus(nextPaymentStatus);
 
       const { error: updateError } = await supabase
         .from("documents")
@@ -880,6 +1005,117 @@ export async function processPaymentKnockoff(
           .eq("doc_no", depositRow.doc_no)
           .eq("doc_type", "DEP_IN");
       }
+    }
+
+    // 6) Update paid_amount on applied CN docs (full use → status PAID)
+    const appliedCnDocs: Array<{
+      id: string;
+      doc_no: string;
+      allocated_amount: number;
+      previous_status: string;
+      next_status: "ISSUED" | "PAID";
+      next_payment_status: "UNPAID" | "PARTIAL" | "PAID";
+    }> = [];
+
+    for (const alloc of cnAllocations) {
+      const creditNote = invoiceMap.get(alloc.invoice_id)!;
+      const grandTotal = toMoney(
+        creditNote.grand_total ?? creditNote.total_amount,
+      );
+      const prevPaid = toMoney(creditNote.paid_amount);
+      const newPaid = roundMoney(prevPaid + alloc.allocated_amount);
+      const nextPaymentStatus = resolvePaymentStatus(grandTotal, newPaid);
+      const nextDocStatus = resolveSettledDocumentStatus(nextPaymentStatus);
+      const cnDocNo = String(creditNote.doc_no ?? "").trim() || alloc.invoice_id;
+
+      const { error: cnUpdateError } = await supabase
+        .from("documents")
+        .update({
+          paid_amount: newPaid,
+          payment_status: nextPaymentStatus,
+          status: nextDocStatus,
+          updated_at: nowIso,
+        })
+        .eq("id", alloc.invoice_id);
+
+      if (cnUpdateError) {
+        return {
+          success: false,
+          error: `บันทึกใบเสร็จ ${receiptDocNo} แล้ว แต่อัปเดตใบลดหนี้ไม่สำเร็จ: ${cnUpdateError.message}`,
+          receipt_doc_no: receiptDocNo,
+        };
+      }
+
+      appliedCnDocs.push({
+        id: alloc.invoice_id,
+        doc_no: cnDocNo,
+        allocated_amount: alloc.allocated_amount,
+        previous_status: String(creditNote.status ?? "ISSUED"),
+        next_status: nextDocStatus,
+        next_payment_status: nextPaymentStatus,
+      });
+
+      const cnAudit = await logAuditTrail(
+        "documents",
+        alloc.invoice_id,
+        "UPDATE",
+        {
+          id: alloc.invoice_id,
+          doc_no: cnDocNo,
+          doc_type: "CN",
+          status: creditNote.status ?? "ISSUED",
+          payment_status: creditNote.payment_status ?? "UNPAID",
+          paid_amount: prevPaid,
+        },
+        {
+          audit_event: "CN_KNOCKOFF",
+          id: alloc.invoice_id,
+          doc_no: cnDocNo,
+          doc_type: "CN",
+          status: nextDocStatus,
+          payment_status: nextPaymentStatus,
+          paid_amount: newPaid,
+          allocated_amount: alloc.allocated_amount,
+          applied_on_receipt: receiptDocNo,
+        },
+      );
+      if (!cnAudit.success) {
+        console.error(
+          "[processPaymentKnockoff][audit CN]",
+          cnAudit.error,
+        );
+      }
+    }
+
+    const recAudit = await logAuditTrail(
+      "documents",
+      receiptDocId,
+      "INSERT",
+      null,
+      {
+        audit_event: cnTotal > 0 ? "CN_KNOCKOFF" : "CREATE",
+        id: receiptDocId,
+        doc_no: receiptDocNo,
+        doc_type: "REC",
+        status: "ISSUED",
+        grand_total: receiptGrandTotal,
+        net_cash: netCashAmount,
+        cn_applied: cnTotal > 0,
+        cn_applied_amount: cnTotal,
+        cn_doc_nos: appliedCnDocs.map((row) => row.doc_no),
+        deposit_applied: depositTotal,
+        wht_amount: headerWht,
+        invoice_count: invoiceAllocations.length,
+        summary:
+          cnTotal > 0
+            ? `ใบเสร็จ ${receiptDocNo} ใช้ใบลดหนี้หักลดหนี้ ${appliedCnDocs
+                .map((row) => row.doc_no)
+                .join(", ")} จำนวน ${cnTotal.toFixed(2)} บาท`
+            : `สร้างใบเสร็จรับเงิน ${receiptDocNo}`,
+      },
+    );
+    if (!recAudit.success) {
+      console.error("[processPaymentKnockoff][audit REC]", recAudit.error);
     }
 
     revalidatePath("/finance/payments");
