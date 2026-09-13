@@ -540,12 +540,32 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
           </div>
         ) : null}
 
-        {doc.status !== "VOID" && doc.notes?.trim() ? (
+        {doc.status !== "VOID" && isCreditNote && doc.remark?.trim() ? (
           <Card className="border-amber-200 bg-amber-50/40 shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">หมายเหตุ / Remark</CardTitle>
+              <CardTitle className="text-base">เหตุผลการลดหนี้</CardTitle>
               <CardDescription>
-                แสดงบนเอกสารพิมพ์สำหรับผู้ตรวจสอบ
+                เหตุผลทางธุรกิจของการออกใบลดหนี้
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="whitespace-pre-wrap text-sm text-slate-800">
+                {doc.remark.trim()}
+              </p>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {doc.status !== "VOID" && doc.notes?.trim() ? (
+          <Card className="border-slate-200 bg-slate-50/60 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">
+                {isCreditNote ? "อ้างอิงเอกสารต้นทาง" : "หมายเหตุ / Remark"}
+              </CardTitle>
+              <CardDescription>
+                {isCreditNote
+                  ? "ประวัติอ้างอิงบิลขายต้นทาง"
+                  : "แสดงบนเอกสารพิมพ์สำหรับผู้ตรวจสอบ"}
               </CardDescription>
             </CardHeader>
             <CardContent>

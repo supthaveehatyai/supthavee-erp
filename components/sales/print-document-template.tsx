@@ -219,10 +219,23 @@ export default async function PrintDocumentTemplate({
         )}
       </section>
 
+      {doc.doc_type === "CN" &&
+      doc.status !== "VOID" &&
+      doc.remark?.trim() ? (
+        <section className="mt-3 rounded-md border border-neutral-300 bg-neutral-50 px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+            เหตุผลการลดหนี้
+          </p>
+          <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-neutral-800">
+            {doc.remark.trim()}
+          </p>
+        </section>
+      ) : null}
+
       {doc.notes?.trim() ? (
         <section className="mt-3 rounded-md border border-neutral-300 bg-neutral-50 px-3 py-2">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
-            หมายเหตุ / Remark
+            {doc.doc_type === "CN" ? "อ้างอิงเอกสารต้นทาง" : "หมายเหตุ / Remark"}
           </p>
           <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-neutral-800">
             {doc.notes.trim()}

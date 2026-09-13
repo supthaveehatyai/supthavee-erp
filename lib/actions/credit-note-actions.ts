@@ -397,7 +397,7 @@ export async function createCreditNoteAction(
           "กรุณาระบุเหตุผลการลดหนี้",
       };
     }
-    const notes = remarkParsed.data;
+    const userRemark = remarkParsed.data;
     const incoming = Array.isArray(payload?.items) ? payload.items : [];
     const docDate =
       typeof payload?.doc_date === "string" &&
@@ -549,6 +549,7 @@ export async function createCreditNoteAction(
     const documentNo = generateDraftDocumentNo();
     const nowIso = new Date().toISOString();
     const draftStatus: DocumentStatus = "DRAFT";
+    const systemNotes = "แปลงจาก " + source.doc_no;
 
     const { data: document, error: documentError } = await supabaseAdmin
       .from("documents")
@@ -571,7 +572,8 @@ export async function createCreditNoteAction(
         net_before_vat: summary.net_before_vat,
         vat_amount: summary.vat_amount,
         discount_text: discountText,
-        notes,
+        notes: systemNotes,
+        remark: userRemark,
         payment_status: resolveInitialPaymentStatus("CN"),
         created_by: owner.userId,
         updated_at: nowIso,
@@ -579,10 +581,13 @@ export async function createCreditNoteAction(
       .select("id, doc_no")
       .single();
 
-    if (documentError || !document) {
+    if (documentError) {
+      return { data: null, error: documentError.message };
+    }
+    if (!document) {
       return {
         data: null,
-        error: documentError?.message ?? "บันทึกใบลดหนี้ร่างไม่สำเร็จ",
+        error: "บันทึกใบลดหนี้ร่างไม่สำเร็จ",
       };
     }
 

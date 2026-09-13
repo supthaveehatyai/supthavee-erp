@@ -4,6 +4,8 @@ import { ArrowLeft } from "lucide-react";
 import { getCreditNoteSourceAction } from "@/lib/actions/credit-note-actions";
 import CreditNoteCreateWorkspace from "./credit-note-create-workspace";
 
+export const maxDuration = 60;
+
 export const metadata: Metadata = {
   title: "สร้างใบลดหนี้ | Credit Note",
   description:

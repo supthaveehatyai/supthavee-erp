@@ -338,7 +338,10 @@ export type DocumentDetail = {
   wht_amount: number;
   payment_status: string;
   notes: string | null;
-  /** เหตุผลการยกเลิก (VOID) — `documents.remark` */
+  /**
+   * `documents.remark` — CN ใช้เก็บเหตุผลการลดหนี้
+   * เมื่อ `status = VOID` จะถูกประทับเหตุผลการยกเลิกทับ
+   */
   remark: string | null;
   void_reason?: string | null;
   /** Vendor invoice / external reference — parsed from notes when no DB column. */
