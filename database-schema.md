@@ -62,6 +62,10 @@
 - `payment_slips` (สลิปโอนเงิน)
 - `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — เพิ่มฟิลด์ `freight_cost` NUMERIC DEFAULT 0 สำหรับบันทึกค่าขนส่งต้นทาง เพื่อใช้คำนวณ Landed Cost รับเข้าคลัง, มีฟิลด์ `created_by` เก็บ Auth Session UUID)
 
+- **Data Dictionary (`documents` table):**
+  - `notes` (TEXT): เก็บ "ประวัติการแปลงเอกสาร (System Document Tracking/Lineage)" สร้างโดยระบบอัตโนมัติ เช่น 'แปลงจาก SO-XXXX'
+  - `remark` (TEXT): เก็บ "เหตุผลพิเศษที่ผู้ใช้ระบุ (Human Exception Reason)" บังคับกรอกสำหรับระบบ VOID และ Credit Note เท่านั้น
+
 
 ## 5. System & Auditing (ระบบและการตรวจสอบ)
 - `audit_logs` (ประวัติการเปลี่ยนแปลงข้อมูล JSONB)

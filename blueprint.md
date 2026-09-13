@@ -142,11 +142,11 @@ Module L: Production \& Order-to-Cash (ส่วนขยาย Phase 16-17)
 \- Decoupled Fetching Architecture: ยกเลิกระบบ Join ข้ามตาราง `production\_jobs` กับ `documents` ผ่าน PostgREST โดยตรง (แก้ปัญหา Schema Cache Error) เปลี่ยนมาใช้การคิวรีแยก 2 จังหวะ (Decoupled Fetch) แล้วทำ Data Merging ฝั่ง Server แทน เพื่อความเสถียร 100%
 
 Module M: Exceptions & Reverse Logistics (ส่วนต่อขยาย Phase 18)
-- Inventory Reversal (คืนสต็อก): ระบบยกเลิกเอกสาร (VOID) จะต้องทำการล้างยอดบัญชีและตีกลับสต็อก (Reverse Transaction) ลง `inventory_ledger` ด้วยยอดติดลบของ Transaction เดิม
-- Credit Note (CN): ใบลดหนี้เพื่อรองรับการคืนสินค้า (รับสต็อกเข้า) หรือลดหนี้โดยไม่คืนสินค้า ปรับลดยอด AR แบบ Real-time
+- Inventory Reversal (คืนสต็อก): ระบบยกเลิกเอกสาร (VOID) จะตรวจสอบ Guardrail สถานะ ISSUED และอ่านข้อมูลจาก document_items เป็น Source of Truth เพื่อตีกลับสต็อก (Reverse Transaction) ลง `inventory_ledger` ด้วยทรานแซกชัน IN พร้อมบังคับระบุ `remark`
+- Credit Note (CN): ใบลดหนี้แบบ Selective Line Items ผู้ใช้ต้องระบุ Checklist เฉพาะสินค้าที่ต้องการลดหนี้ รองรับ 2 โหมด:
+  1. Return Goods (รับคืนสินค้า): บังคับล็อกราคาเดิม (Original Price) และสร้าง Transaction IN กลับเข้าคลัง
+  2. Price Adjustment (ชดเชยราคา): ปลดล็อกช่องราคาให้แก้ไขส่วนลดได้ โดยไม่มีผลกระทบต่อ `inventory_ledger`
 - Refund & Write-off: ระบบรองรับการคืนเงินมัดจำ (`AR_REFUND`, `AP_REFUND`) และการตัดเศษหนี้สูญ (`AR_WRITEOFF`, `AP_WRITEOFF`) พร้อมผูก Allocation ป้องกันสถานะลูกหนี้คงค้าง
-
-
 
 5\. Database Schema (PostgreSQL for Supabase)
 CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names listed below. DO NOT invent, assume, or create new tables. If a required table is not on this list, STOP and ask the user for clarification.
