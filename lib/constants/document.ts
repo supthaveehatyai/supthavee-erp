@@ -201,6 +201,16 @@ export const AR_REC_INVOICE_DOC_TYPES = [
 ] as const;
 
 /**
+ * บิลขายที่อนุญาตให้ตัดหนี้สูญ (AR Write-off)
+ * BN อยู่ที่ `doc_headers` — ใช้เป็นตัวกรองบิล ไม่ใช่เป้าหมาย allocation
+ */
+export const AR_WRITEOFF_SOURCE_DOC_TYPES = AR_REC_INVOICE_DOC_TYPES;
+
+export function isArWriteoffSourceDocType(docType: string): boolean {
+  return (AR_WRITEOFF_SOURCE_DOC_TYPES as readonly string[]).includes(docType);
+}
+
+/**
  * Open items บนฟอร์มสร้างใบเสร็จรับเงิน (REC):
  * บิลค้างชำระ + ใบลดหนี้ (CN) ที่ยังใช้ไม่หมด
  * ยอดคงเหลือคำนวณเป็นบวกเสมอ (ห้ามคูณ -1 ที่ DB)
