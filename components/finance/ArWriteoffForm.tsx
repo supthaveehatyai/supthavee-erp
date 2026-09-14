@@ -20,7 +20,6 @@ import {
 } from "@/lib/validations/ar-writeoff";
 import type { OpenBillingNoteOption } from "@/types/billing";
 import type { DebtorOption, UnpaidInvoice } from "@/types/payment";
-import { OutstandingPartyCombobox } from "@/components/finance/OutstandingPartyCombobox";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -152,6 +151,79 @@ function compareInvoices(
   });
 }
 
+type OutstandingSortKey = "name" | "amount" | "oldest_date";
+type OutstandingSortConfig = {
+  key: OutstandingSortKey;
+  direction: SortDirection;
+};
+
+const DEFAULT_OUTSTANDING_SORT: OutstandingSortConfig = {
+  key: "amount",
+  direction: "desc",
+};
+
+const OUTSTANDING_SORT_PRESETS: Array<{
+  value: `${OutstandingSortKey}-${SortDirection}`;
+  label: string;
+}> = [
+  { value: "amount-desc", label: "เรียงตามยอดหนี้สูงสุด" },
+  { value: "amount-asc", label: "เรียงตามยอดหนี้ต่ำสุด" },
+  { value: "oldest_date-asc", label: "เรียงตามบิลเก่าสุด" },
+  { value: "oldest_date-desc", label: "เรียงตามบิลใหม่สุด" },
+  { value: "name-asc", label: "เรียงตามชื่อลูกค้า (ก–ฮ)" },
+  { value: "name-desc", label: "เรียงตามชื่อลูกค้า (ฮ–ก)" },
+];
+
+function parseOutstandingSortPreset(value: string): OutstandingSortConfig {
+  const [key, direction] = value.split("-") as [
+    OutstandingSortKey,
+    SortDirection,
+  ];
+  if (
+    (key === "name" || key === "amount" || key === "oldest_date") &&
+    (direction === "asc" || direction === "desc")
+  ) {
+    return { key, direction };
+  }
+  return DEFAULT_OUTSTANDING_SORT;
+}
+
+function defaultOutstandingDirectionForKey(
+  key: OutstandingSortKey,
+): SortDirection {
+  if (key === "amount") return "desc";
+  return "asc";
+}
+
+function compareDebtors(
+  a: DebtorOption,
+  b: DebtorOption,
+  config: OutstandingSortConfig,
+): number {
+  const dir = config.direction === "asc" ? 1 : -1;
+
+  if (config.key === "name") {
+    return a.name.localeCompare(b.name, "th", { sensitivity: "base" }) * dir;
+  }
+
+  if (config.key === "amount") {
+    const diff = a.outstanding_total - b.outstanding_total;
+    if (diff !== 0) return diff * dir;
+    return a.name.localeCompare(b.name, "th", { sensitivity: "base" });
+  }
+
+  const aDate = a.oldest_invoice_date?.trim() ?? "";
+  const bDate = b.oldest_invoice_date?.trim() ?? "";
+  if (!aDate && !bDate) {
+    return a.name.localeCompare(b.name, "th", { sensitivity: "base" });
+  }
+  if (!aDate) return 1;
+  if (!bDate) return -1;
+  const dateDiff = aDate.localeCompare(bDate);
+  if (dateDiff !== 0) return dateDiff * dir;
+  return a.name.localeCompare(b.name, "th", { sensitivity: "base" });
+}
+
 function SortArrow({
   active,
   direction,
@@ -186,6 +258,8 @@ export function ArWriteoffForm({
   );
   const [sortConfig, setSortConfig] =
     useState<InvoiceSortConfig>(DEFAULT_SORT);
+  const [outstandingSortConfig, setOutstandingSortConfig] =
+    useState<OutstandingSortConfig>(DEFAULT_OUTSTANDING_SORT);
 
   useEffect(() => {
     setInvoices(initialInvoices);
@@ -264,10 +338,31 @@ export function ArWriteoffForm({
     debtors.find((d) => d.id === selectedContactId) ?? null;
   const remarkTrimmed = remark.trim();
 
+  const summaryGrandTotal = useMemo(
+    () => debtors.reduce((sum, row) => sum + row.outstanding_total, 0),
+    [debtors],
+  );
+
+  const sortedDebtors = useMemo(
+    () =>
+      [...debtors].sort((a, b) =>
+        compareDebtors(a, b, outstandingSortConfig),
+      ),
+    [debtors, outstandingSortConfig],
+  );
+
   const sortedInvoices = useMemo(
     () => [...invoices].sort((a, b) => compareInvoices(a, b, sortConfig)),
     [invoices, sortConfig],
   );
+
+  function handleOutstandingSort(key: OutstandingSortKey) {
+    setOutstandingSortConfig((prev) =>
+      prev.key === key
+        ? { key, direction: prev.direction === "asc" ? "desc" : "asc" }
+        : { key, direction: defaultOutstandingDirectionForKey(key) },
+    );
+  }
 
   function handleSort(key: InvoiceSortKey) {
     setSortConfig((prev) =>
@@ -362,39 +457,232 @@ export function ArWriteoffForm({
 
   return (
     <div className="flex flex-col gap-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>1. เลือกผู้ติดต่อ (ลูกหนี้)</CardTitle>
-          <CardDescription>
-            แสดงเฉพาะลูกหนี้ที่ยอดค้าง &gt; 0 · ผูกสถานะกับ URL (`?contact_id=`)
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="max-w-xl space-y-2">
-            <Label>ลูกหนี้ที่มียอดค้างชำระ</Label>
-            <OutstandingPartyCombobox
-              options={debtors}
-              value={selectedContactId}
-              onChange={handleCustomerChange}
-              disabled={isSubmitting}
-              accent="blue"
-              placeholder="ค้นหาลูกค้าที่มียอดค้างชำระ..."
-              searchPlaceholder="พิมพ์ชื่อลูกค้า..."
-              emptyMessage="ไม่มีลูกหนี้ค้างชำระในขณะนี้"
-            />
-          </div>
-        </CardContent>
-      </Card>
-
       {!selectedContactId ? (
-        <Card className="border-dashed">
-          <CardContent className="py-12 text-center text-slate-500">
-            กรุณาเลือกลูกหนี้เพื่อโหลดเอกสารค้างชำระ (INV_DO / TAX_INV / CS_TAX /
-            BN)
+        <Card className="border-blue-200 shadow-sm">
+          <CardHeader className="bg-blue-50/50">
+            <CardTitle className="flex items-center gap-2">
+              <FileMinus2 className="h-5 w-5 text-blue-600" />
+              1. เลือกผู้ติดต่อ — ตารางสรุปยอดหนี้รายตัว
+            </CardTitle>
+            <CardDescription>
+              จัดกลุ่มบิลค้างชำระ (INV_DO / TAX_INV / CS_TAX) ตามลูกค้า · ใบวางบิล
+              (BN) ใช้กรองรายการหลังเลือก · รวมยอดค้าง{" "}
+              <strong className="text-blue-800">
+                ฿{formatMoney(summaryGrandTotal)}
+              </strong>{" "}
+              จาก {debtors.length} ราย
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-6">
+            {debtors.length === 0 ? (
+              <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 py-10 text-center text-slate-500">
+                ไม่มีข้อมูลลูกหนี้ค้างชำระในระบบ
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <Label
+                    htmlFor="writeoff-outstanding-sort"
+                    className="text-xs font-medium text-slate-500"
+                  >
+                    เรียงลำดับด่วน
+                  </Label>
+                  <select
+                    id="writeoff-outstanding-sort"
+                    className="h-9 min-w-[220px] rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    value={`${outstandingSortConfig.key}-${outstandingSortConfig.direction}`}
+                    onChange={(e) =>
+                      setOutstandingSortConfig(
+                        parseOutstandingSortPreset(e.target.value),
+                      )
+                    }
+                  >
+                    {OUTSTANDING_SORT_PRESETS.map((preset) => (
+                      <option key={preset.value} value={preset.value}>
+                        {preset.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="overflow-hidden rounded-md border border-slate-200">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50">
+                        <TableHead
+                          aria-sort={
+                            outstandingSortConfig.key === "name"
+                              ? outstandingSortConfig.direction === "asc"
+                                ? "ascending"
+                                : "descending"
+                              : "none"
+                          }
+                        >
+                          <button
+                            type="button"
+                            className={cn(
+                              "inline-flex items-center gap-1.5 font-semibold uppercase tracking-wide",
+                              outstandingSortConfig.key === "name"
+                                ? "text-blue-700"
+                                : "text-slate-400 hover:text-slate-600",
+                            )}
+                            onClick={() => handleOutstandingSort("name")}
+                          >
+                            ชื่อลูกค้า
+                            <SortArrow
+                              active={outstandingSortConfig.key === "name"}
+                              direction={outstandingSortConfig.direction}
+                            />
+                          </button>
+                        </TableHead>
+                        <TableHead className="text-center">
+                          จำนวนบิลค้าง
+                        </TableHead>
+                        <TableHead
+                          className="text-right"
+                          aria-sort={
+                            outstandingSortConfig.key === "amount"
+                              ? outstandingSortConfig.direction === "asc"
+                                ? "ascending"
+                                : "descending"
+                              : "none"
+                          }
+                        >
+                          <button
+                            type="button"
+                            className={cn(
+                              "ml-auto inline-flex items-center gap-1.5 font-semibold uppercase tracking-wide",
+                              outstandingSortConfig.key === "amount"
+                                ? "text-blue-700"
+                                : "text-slate-400 hover:text-slate-600",
+                            )}
+                            onClick={() => handleOutstandingSort("amount")}
+                          >
+                            ยอดหนี้รวม
+                            <SortArrow
+                              active={outstandingSortConfig.key === "amount"}
+                              direction={outstandingSortConfig.direction}
+                            />
+                          </button>
+                        </TableHead>
+                        <TableHead
+                          aria-sort={
+                            outstandingSortConfig.key === "oldest_date"
+                              ? outstandingSortConfig.direction === "asc"
+                                ? "ascending"
+                                : "descending"
+                              : "none"
+                          }
+                        >
+                          <button
+                            type="button"
+                            className={cn(
+                              "inline-flex items-center gap-1.5 font-semibold uppercase tracking-wide",
+                              outstandingSortConfig.key === "oldest_date"
+                                ? "text-blue-700"
+                                : "text-slate-400 hover:text-slate-600",
+                            )}
+                            onClick={() => handleOutstandingSort("oldest_date")}
+                          >
+                            บิลเก่าสุด
+                            <SortArrow
+                              active={
+                                outstandingSortConfig.key === "oldest_date"
+                              }
+                              direction={outstandingSortConfig.direction}
+                            />
+                          </button>
+                        </TableHead>
+                        <TableHead className="text-center">จัดการ</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {sortedDebtors.map((debtor) => (
+                        <TableRow key={debtor.id}>
+                          <TableCell className="font-medium text-slate-900">
+                            {debtor.name}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Badge variant="slate">
+                              {debtor.invoice_count} บิล
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right font-bold text-red-600">
+                            {formatMoney(debtor.outstanding_total)}
+                          </TableCell>
+                          <TableCell className="text-slate-600">
+                            {debtor.oldest_invoice_date
+                              ? formatThaiDate(
+                                  debtor.oldest_invoice_date,
+                                  "short",
+                                )
+                              : "—"}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="gap-1.5"
+                              onClick={() => handleCustomerChange(debtor.id)}
+                            >
+                              เลือก
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       ) : (
         <>
+          <Card className="border-blue-200 shadow-sm">
+            <CardHeader className="bg-blue-50/50">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <CardTitle>1. ผู้ติดต่อที่กำลังตัดหนี้</CardTitle>
+                  <CardDescription>
+                    เลือกแล้วผ่าน URL (`?contact_id=`) · กดกลับไปหน้าสรุปเพื่อเปลี่ยนลูกค้า
+                  </CardDescription>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={isSubmitting}
+                  onClick={() => handleCustomerChange("")}
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  เปลี่ยนลูกค้า / กลับไปหน้าสรุป
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  ลูกหนี้
+                </p>
+                <p className="mt-1 text-lg font-semibold text-slate-900">
+                  {selectedDebtor?.name ?? "ลูกค้าที่เลือก"}
+                </p>
+                {selectedDebtor ? (
+                  <p className="mt-1 text-sm text-slate-600">
+                    {selectedDebtor.invoice_count} บิลค้าง · ยอดหนี้รวม{" "}
+                    <span className="font-semibold text-red-600">
+                      ฿{formatMoney(selectedDebtor.outstanding_total)}
+                    </span>
+                    {selectedDebtor.oldest_invoice_date
+                      ? ` · บิลเก่าสุด ${formatThaiDate(selectedDebtor.oldest_invoice_date, "short")}`
+                      : ""}
+                  </p>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>2. เหตุผลการตัดหนี้ (Remark)</CardTitle>
@@ -423,26 +711,13 @@ export function ArWriteoffForm({
 
           <Card className="border-blue-200 shadow-sm">
             <CardHeader className="bg-blue-50/50">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <CardTitle>3. เอกสารค้างชำระ (Outstanding Invoices)</CardTitle>
-                  <CardDescription>
-                    {selectedDebtor
-                      ? `ลูกค้า: ${selectedDebtor.name} · กรอกยอดที่ต้องการตัดหนี้ในแต่ละบิล`
-                      : "กรอกยอดที่ต้องการตัดหนี้ในแต่ละบิล"}
-                  </CardDescription>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  disabled={isSubmitting}
-                  onClick={() => handleCustomerChange("")}
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                  เปลี่ยนลูกค้า
-                </Button>
+              <div className="space-y-1">
+                <CardTitle>3. เอกสารค้างชำระ (Outstanding Invoices)</CardTitle>
+                <CardDescription>
+                  {selectedDebtor
+                    ? `ลูกค้า: ${selectedDebtor.name} · กรอกยอดที่ต้องการตัดหนี้ในแต่ละบิล`
+                    : "กรอกยอดที่ต้องการตัดหนี้ในแต่ละบิล"}
+                </CardDescription>
               </div>
             </CardHeader>
             <CardContent className="space-y-4 pt-6">
