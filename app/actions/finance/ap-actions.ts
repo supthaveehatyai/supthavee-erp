@@ -30,6 +30,10 @@ import type {
 } from "@/types/ap-payment";
 import { AP_PAYABLE_DOC_TYPES } from "@/lib/constants/document";
 import { getAvailableDepositsForContact } from "@/lib/actions/finance/available-deposits";
+import {
+  loadInvoiceAllocationSummaries,
+  resolveAllocatedAmount,
+} from "@/lib/finance/invoice-allocation-summary";
 
 const OPEN_PAYMENT_STATUSES = ["UNPAID", "PARTIAL", "Pending"] as const;
 const MONEY_EPS = 0.02;
@@ -272,13 +276,24 @@ export async function getOutstandingAP(
       return { invoices: [], availableDeposits: [] };
     }
 
-    const invoices = ((data ?? []) as ApDocRow[])
+    const rows = (data ?? []) as ApDocRow[];
+    const allocationSummaries = await loadInvoiceAllocationSummaries(
+      supabaseAdmin,
+      rows.map((row) => row.id),
+    );
+
+    const invoices = rows
       .map((doc) => {
         const grandTotal = roundMoney(
           toMoney(doc.grand_total ?? doc.total_amount),
         );
         const paidAmount = roundMoney(toMoney(doc.paid_amount));
-        const remaining = roundMoney(grandTotal - paidAmount);
+        const summary = allocationSummaries.get(doc.id);
+        const allocatedAmount = resolveAllocatedAmount(
+          summary?.allocated_amount ?? 0,
+          paidAmount,
+        );
+        const remaining = roundMoney(grandTotal - allocatedAmount);
         return {
           id: doc.id,
           contact_id: doc.contact_id?.trim() || trimmed,
@@ -287,6 +302,8 @@ export async function getOutstandingAP(
           document_date: doc.doc_date ? String(doc.doc_date) : "",
           grand_total: grandTotal,
           paid_amount: paidAmount,
+          allocated_amount: allocatedAmount,
+          allocation_source_doc_nos: summary?.source_doc_nos ?? [],
           remaining_balance: remaining,
           payment_status: String(doc.payment_status ?? "UNPAID"),
           doc_type: doc.doc_type ?? "",

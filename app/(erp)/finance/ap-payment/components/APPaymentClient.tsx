@@ -24,6 +24,7 @@ import {
 } from "@/lib/utils/deposit-apply";
 import { compressImage } from "@/lib/utils/image-compression";
 import { OutstandingPartyCombobox } from "@/components/finance/OutstandingPartyCombobox";
+import { AllocatedAmountCell } from "@/components/finance/AllocatedAmountCell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -169,6 +170,10 @@ export function APPaymentClient({
         document_date: row.doc_date,
         grand_total: row.grand_total,
         paid_amount: row.paid_amount,
+        allocated_amount: roundMoney(
+          Math.max(0, row.grand_total - row.outstanding),
+        ),
+        allocation_source_doc_nos: [],
         remaining_balance: row.outstanding,
         payment_status: row.payment_status,
         doc_type: row.doc_type,
@@ -665,7 +670,15 @@ export function APPaymentClient({
                         <TableHead>วันที่เอกสาร</TableHead>
                         <TableHead>เลขที่เอกสาร</TableHead>
                         <TableHead>ประเภท</TableHead>
-                        <TableHead className="text-right">ยอดค้างสุทธิ</TableHead>
+                        <TableHead className="text-right">
+                          ยอดบิลเต็ม (Gross)
+                        </TableHead>
+                        <TableHead className="text-right">
+                          ตัด/ลดหนี้แล้ว (Allocated)
+                        </TableHead>
+                        <TableHead className="text-right">
+                          ยอดค้างสุทธิ (Outstanding)
+                        </TableHead>
                         <TableHead className="text-center">สถานะ</TableHead>
                         <TableHead className="min-w-[150px] text-right">
                           ยอดที่ต้องการจ่าย
@@ -722,7 +735,17 @@ export function APPaymentClient({
                                 {docTypeBadgeLabel(inv.doc_type)}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-right font-semibold text-red-600">
+                            <TableCell className="text-right tabular-nums text-slate-600">
+                              {formatMoney(inv.grand_total)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <AllocatedAmountCell
+                                allocatedAmount={inv.allocated_amount ?? 0}
+                                sourceDocNos={inv.allocation_source_doc_nos}
+                                formatMoney={formatMoney}
+                              />
+                            </TableCell>
+                            <TableCell className="text-right font-semibold tabular-nums text-red-600">
                               {formatMoney(inv.remaining_balance)}
                             </TableCell>
                             <TableCell className="text-center">
@@ -747,8 +770,8 @@ export function APPaymentClient({
                                 }
                                 className={
                                   overLimit
-                                    ? "text-right border-red-300 focus-visible:ring-red-200"
-                                    : "text-right"
+                                    ? "text-right tabular-nums border-red-300 focus-visible:ring-red-200"
+                                    : "text-right tabular-nums"
                                 }
                               />
                               {overLimit ? (

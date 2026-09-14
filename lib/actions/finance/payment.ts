@@ -35,6 +35,10 @@ import type {
   UnpaidInvoice,
 } from "@/types/payment";
 import { getAvailableDepositsForContact } from "@/lib/actions/finance/available-deposits";
+import {
+  loadInvoiceAllocationSummaries,
+  resolveAllocatedAmount,
+} from "@/lib/finance/invoice-allocation-summary";
 import { logAuditTrail } from "@/lib/supabase/auditService";
 
 const OPEN_PAYMENT_STATUSES = ["UNPAID", "PARTIAL", "Pending"] as const;
@@ -251,11 +255,24 @@ export async function getUnpaidInvoicesByCustomer(
       return { invoices: [], availableDeposits: [] };
     }
 
-    const invoices = ((data ?? []) as InvoiceDocRow[])
+    const rows = (data ?? []) as InvoiceDocRow[];
+    const allocationSummaries = await loadInvoiceAllocationSummaries(
+      supabaseAdmin,
+      rows.map((row) => row.id),
+    );
+
+    const invoices = rows
       .map((doc) => {
-        const netAmount = toMoney(doc.grand_total ?? doc.total_amount);
-        const paidAmount = toMoney(doc.paid_amount);
-        const remaining = resolveRemainingAmount(netAmount, paidAmount);
+        const grandTotal = roundMoney(
+          toMoney(doc.grand_total ?? doc.total_amount),
+        );
+        const paidAmount = roundMoney(toMoney(doc.paid_amount));
+        const summary = allocationSummaries.get(doc.id);
+        const allocatedAmount = resolveAllocatedAmount(
+          summary?.allocated_amount ?? 0,
+          paidAmount,
+        );
+        const remaining = roundMoney(grandTotal - allocatedAmount);
 
         return {
           id: doc.id,
@@ -263,8 +280,11 @@ export async function getUnpaidInvoicesByCustomer(
           document_date: doc.doc_date ? String(doc.doc_date) : "",
           doc_type: doc.doc_type ?? "",
           payment_status: String(doc.payment_status ?? "UNPAID"),
-          net_amount_calc: netAmount,
+          grand_total: grandTotal,
+          net_amount_calc: grandTotal,
           paid_amount: paidAmount,
+          allocated_amount: allocatedAmount,
+          allocation_source_doc_nos: summary?.source_doc_nos ?? [],
           remaining_balance: remaining,
           contact_id: doc.contact_id ?? trimmed,
         } satisfies UnpaidInvoice;

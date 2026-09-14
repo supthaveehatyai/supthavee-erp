@@ -16,6 +16,7 @@ import type {
 } from "@/types/payment";
 import type { OpenBillingNoteOption } from "@/types/billing";
 import { OutstandingPartyCombobox } from "@/components/finance/OutstandingPartyCombobox";
+import { AllocatedAmountCell } from "@/components/finance/AllocatedAmountCell";
 import { PaymentKnockoffForm } from "@/components/finance/PaymentKnockoffForm";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -451,8 +452,15 @@ export function ARPaymentClient({
                       <TableRow className="bg-slate-50">
                         <TableHead>เลขที่เอกสาร</TableHead>
                         <TableHead>วันที่</TableHead>
-                        <TableHead className="text-right">มูลค่าบิลเต็ม</TableHead>
-                        <TableHead className="text-right">ยอดค้างสุทธิ</TableHead>
+                        <TableHead className="text-right">
+                          ยอดบิลเต็ม (Gross)
+                        </TableHead>
+                        <TableHead className="text-right">
+                          ตัด/ลดหนี้แล้ว (Allocated)
+                        </TableHead>
+                        <TableHead className="text-right">
+                          ยอดค้างสุทธิ (Outstanding)
+                        </TableHead>
                         <TableHead className="text-center">สถานะ</TableHead>
                         <TableHead className="text-center">ดูบิล</TableHead>
                       </TableRow>
@@ -475,10 +483,17 @@ export function ARPaymentClient({
                               ? formatThaiDate(inv.document_date, "short")
                               : "—"}
                           </TableCell>
-                          <TableCell className="text-right text-slate-500">
-                            {formatMoney(inv.net_amount_calc)}
+                          <TableCell className="text-right tabular-nums text-slate-600">
+                            {formatMoney(inv.grand_total ?? inv.net_amount_calc)}
                           </TableCell>
-                          <TableCell className="text-right font-bold text-red-600">
+                          <TableCell className="text-right">
+                            <AllocatedAmountCell
+                              allocatedAmount={inv.allocated_amount ?? 0}
+                              sourceDocNos={inv.allocation_source_doc_nos}
+                              formatMoney={formatMoney}
+                            />
+                          </TableCell>
+                          <TableCell className="text-right font-bold tabular-nums text-red-600">
                             {formatMoney(inv.remaining_balance)}
                           </TableCell>
                           <TableCell className="text-center">

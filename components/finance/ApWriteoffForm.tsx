@@ -123,8 +123,13 @@ export function ApWriteoffForm({
           document_date: row.doc_date,
           doc_type: row.doc_type,
           payment_status: row.payment_status,
+          grand_total: row.grand_total,
           net_amount_calc: row.grand_total,
           paid_amount: row.paid_amount,
+          allocated_amount: roundMoney(
+            Math.max(0, row.grand_total - row.outstanding),
+          ),
+          allocation_source_doc_nos: [],
           remaining_balance: row.outstanding,
           contact_id: row.contact_id || selectedContactId,
         }));

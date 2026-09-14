@@ -31,6 +31,7 @@ import {
 } from "@/lib/validations/payment-knockoff";
 import type { BankAccount } from "@/types/bank-account";
 import type { AvailableDeposit, UnpaidInvoice } from "@/types/payment";
+import { AllocatedAmountCell } from "@/components/finance/AllocatedAmountCell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -151,8 +152,13 @@ export function PaymentKnockoffForm({
         document_date: row.doc_date,
         doc_type: row.doc_type,
         payment_status: row.payment_status,
+        grand_total: row.grand_total,
         net_amount_calc: row.grand_total,
         paid_amount: row.paid_amount,
+        allocated_amount: roundMoney(
+          Math.max(0, row.grand_total - row.outstanding),
+        ),
+        allocation_source_doc_nos: [],
         remaining_balance: row.outstanding,
         contact_id: row.contact_id || contactId,
       }));
@@ -776,7 +782,11 @@ export function PaymentKnockoffForm({
                 </TableHead>
                 <TableHead>เลขที่บิล</TableHead>
                 <TableHead>วันที่</TableHead>
-                <TableHead className="text-right">ยอดค้าง</TableHead>
+                <TableHead className="text-right">ยอดบิลเต็ม (Gross)</TableHead>
+                <TableHead className="text-right">
+                  ตัด/ลดหนี้แล้ว (Allocated)
+                </TableHead>
+                <TableHead className="text-right">ยอดค้างสุทธิ (Outstanding)</TableHead>
                 <TableHead className="text-right">
                   ยอดหนี้ที่ต้องการตัด (รวมมัดจำ)
                 </TableHead>
@@ -843,11 +853,32 @@ export function PaymentKnockoffForm({
                         ? formatThaiDate(inv.document_date, "short")
                         : "—"}
                     </TableCell>
+                    <TableCell className="text-right tabular-nums text-slate-600">
+                      {isCn
+                        ? formatSignedCreditMoney(inv.grand_total ?? inv.net_amount_calc)
+                        : (inv.grand_total ?? inv.net_amount_calc).toLocaleString(
+                            "th-TH",
+                            {
+                              minimumFractionDigits: 2,
+                            },
+                          )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <AllocatedAmountCell
+                        allocatedAmount={inv.allocated_amount ?? 0}
+                        sourceDocNos={inv.allocation_source_doc_nos}
+                        formatMoney={(value) =>
+                          value.toLocaleString("th-TH", {
+                            minimumFractionDigits: 2,
+                          })
+                        }
+                      />
+                    </TableCell>
                     <TableCell
                       className={
                         isCn
-                          ? "text-right font-semibold text-destructive"
-                          : "text-right font-semibold text-red-600"
+                          ? "text-right font-semibold tabular-nums text-destructive"
+                          : "text-right font-semibold tabular-nums text-red-600"
                       }
                     >
                       {isCn
@@ -897,8 +928,8 @@ export function PaymentKnockoffForm({
                     <TableCell
                       className={
                         isCn
-                          ? "text-right font-medium text-destructive"
-                          : "text-right font-medium text-slate-900"
+                          ? "text-right font-medium tabular-nums text-destructive"
+                          : "text-right font-medium tabular-nums text-slate-900"
                       }
                     >
                       {isCn

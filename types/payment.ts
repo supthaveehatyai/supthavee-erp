@@ -28,10 +28,17 @@ export type UnpaidInvoice = {
   document_date: string;
   doc_type: string;
   payment_status: string;
+  /** ยอดบิลเต็ม (Gross) — `documents.grand_total` */
+  grand_total: number;
+  /** @deprecated ใช้ `grand_total` — คงไว้เพื่อความเข้ากันได้กับฟอร์มเดิม */
   net_amount_calc: number;
   paid_amount: number;
+  /** Σ `document_allocations.allocated_amount` ของบิลนี้ */
+  allocated_amount: number;
+  /** เลขที่เอกสารที่ตัดหนี้ (receipt_doc_id → documents.doc_no) */
+  allocation_source_doc_nos: string[];
   /**
-   * Face-value remaining = grand_total − paid_amount.
+   * ยอดค้างสุทธิ = grand_total − allocated_amount.
    * Always unsigned (positive). Credit notes (CN) keep the same sign —
    * never multiplied by -1 at query / DB level.
    */

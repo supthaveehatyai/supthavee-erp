@@ -33,6 +33,10 @@ export type OutstandingApInvoice = {
   document_date: string;
   grand_total: number;
   paid_amount: number;
+  /** Σ `document_allocations.allocated_amount` ของบิลนี้ */
+  allocated_amount: number;
+  /** เลขที่เอกสารที่ตัดหนี้ (receipt_doc_id → documents.doc_no) */
+  allocation_source_doc_nos: string[];
   remaining_balance: number;
   payment_status: string;
   doc_type: string;

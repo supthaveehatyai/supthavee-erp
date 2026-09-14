@@ -78,8 +78,11 @@ export async function getUnpaidApInvoicesByVendor(
       document_date: row.doc_date,
       doc_type: row.doc_type,
       payment_status: row.payment_status,
+      grand_total: row.grand_total,
       net_amount_calc: row.grand_total,
       paid_amount: row.allocated_amount,
+      allocated_amount: row.allocated_amount,
+      allocation_source_doc_nos: [],
       remaining_balance: row.remaining_balance,
       contact_id: row.contact_id,
     }));
