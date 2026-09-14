@@ -44,11 +44,15 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import {
   AlertCircle,
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
+  ArrowUpDown,
   Eye,
   FileMinus2,
   Loader2,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export type ArWriteoffFormProps = {
   debtors: DebtorOption[];
@@ -74,6 +78,97 @@ function parseAmount(raw: string): number {
   return roundMoney(n);
 }
 
+type InvoiceSortKey = "doc_no" | "doc_date" | "remaining_amount";
+type SortDirection = "asc" | "desc";
+type InvoiceSortConfig = {
+  key: InvoiceSortKey;
+  direction: SortDirection;
+};
+
+const DEFAULT_SORT: InvoiceSortConfig = {
+  key: "doc_date",
+  direction: "asc",
+};
+
+const SORT_PRESETS: Array<{
+  value: `${InvoiceSortKey}-${SortDirection}`;
+  label: string;
+}> = [
+  { value: "doc_date-asc", label: "เรียงตามบิลเก่าสุด" },
+  { value: "remaining_amount-desc", label: "เรียงตามยอดคงเหลือสูงสุด" },
+  { value: "doc_no-asc", label: "เรียงตามเลขที่เอกสาร" },
+];
+
+function parseSortPreset(value: string): InvoiceSortConfig {
+  const [key, direction] = value.split("-") as [InvoiceSortKey, SortDirection];
+  if (
+    (key === "doc_no" || key === "doc_date" || key === "remaining_amount") &&
+    (direction === "asc" || direction === "desc")
+  ) {
+    return { key, direction };
+  }
+  return DEFAULT_SORT;
+}
+
+function defaultDirectionForKey(key: InvoiceSortKey): SortDirection {
+  if (key === "remaining_amount") return "desc";
+  return "asc";
+}
+
+function compareInvoices(
+  a: UnpaidInvoice,
+  b: UnpaidInvoice,
+  config: InvoiceSortConfig,
+): number {
+  const dir = config.direction === "asc" ? 1 : -1;
+
+  if (config.key === "doc_no") {
+    const cmp = a.display_doc_no.localeCompare(b.display_doc_no, "th", {
+      numeric: true,
+      sensitivity: "base",
+    });
+    if (cmp !== 0) return cmp * dir;
+  } else if (config.key === "remaining_amount") {
+    const diff = a.remaining_balance - b.remaining_balance;
+    if (diff !== 0) return diff * dir;
+  } else {
+    const aDate = a.document_date?.trim() ?? "";
+    const bDate = b.document_date?.trim() ?? "";
+    if (!aDate && !bDate) {
+      return a.display_doc_no.localeCompare(b.display_doc_no, "th", {
+        numeric: true,
+        sensitivity: "base",
+      });
+    }
+    if (!aDate) return 1;
+    if (!bDate) return -1;
+    const dateDiff = aDate.localeCompare(bDate);
+    if (dateDiff !== 0) return dateDiff * dir;
+  }
+
+  return a.display_doc_no.localeCompare(b.display_doc_no, "th", {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function SortArrow({
+  active,
+  direction,
+}: {
+  active: boolean;
+  direction: SortDirection;
+}) {
+  if (!active) {
+    return <ArrowUpDown className="h-3.5 w-3.5 text-slate-300" />;
+  }
+  return direction === "asc" ? (
+    <ArrowUp className="h-3.5 w-3.5 text-blue-600" />
+  ) : (
+    <ArrowDown className="h-3.5 w-3.5 text-blue-600" />
+  );
+}
+
 export function ArWriteoffForm({
   debtors,
   invoices: initialInvoices,
@@ -89,6 +184,8 @@ export function ArWriteoffForm({
   const [amounts, setAmounts] = useState<Record<string, string>>(() =>
     emptyAmounts(initialInvoices),
   );
+  const [sortConfig, setSortConfig] =
+    useState<InvoiceSortConfig>(DEFAULT_SORT);
 
   useEffect(() => {
     setInvoices(initialInvoices);
@@ -166,6 +263,19 @@ export function ArWriteoffForm({
   const selectedDebtor =
     debtors.find((d) => d.id === selectedContactId) ?? null;
   const remarkTrimmed = remark.trim();
+
+  const sortedInvoices = useMemo(
+    () => [...invoices].sort((a, b) => compareInvoices(a, b, sortConfig)),
+    [invoices, sortConfig],
+  );
+
+  function handleSort(key: InvoiceSortKey) {
+    setSortConfig((prev) =>
+      prev.key === key
+        ? { key, direction: prev.direction === "asc" ? "desc" : "asc" }
+        : { key, direction: defaultDirectionForKey(key) },
+    );
+  }
 
   const lineErrors = useMemo(() => {
     const errors: Record<string, string> = {};
@@ -382,14 +492,114 @@ export function ArWriteoffForm({
                     </Alert>
                   ) : null}
 
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Label
+                      htmlFor="writeoff-invoice-sort"
+                      className="text-xs font-medium text-slate-500"
+                    >
+                      เรียงลำดับด่วน
+                    </Label>
+                    <select
+                      id="writeoff-invoice-sort"
+                      className="h-9 min-w-[220px] rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                      value={`${sortConfig.key}-${sortConfig.direction}`}
+                      disabled={isSubmitting}
+                      onChange={(e) =>
+                        setSortConfig(parseSortPreset(e.target.value))
+                      }
+                    >
+                      {SORT_PRESETS.map((preset) => (
+                        <option key={preset.value} value={preset.value}>
+                          {preset.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   <div className="overflow-hidden rounded-md border border-slate-200">
                     <Table>
                       <TableHeader>
                         <TableRow className="bg-slate-50">
-                          <TableHead>เลขที่เอกสาร</TableHead>
-                          <TableHead>วันที่</TableHead>
+                          <TableHead
+                            aria-sort={
+                              sortConfig.key === "doc_no"
+                                ? sortConfig.direction === "asc"
+                                  ? "ascending"
+                                  : "descending"
+                                : "none"
+                            }
+                          >
+                            <button
+                              type="button"
+                              className={cn(
+                                "inline-flex items-center gap-1.5 font-semibold uppercase tracking-wide",
+                                sortConfig.key === "doc_no"
+                                  ? "text-blue-700"
+                                  : "text-slate-400 hover:text-slate-600",
+                              )}
+                              onClick={() => handleSort("doc_no")}
+                            >
+                              เลขที่เอกสาร
+                              <SortArrow
+                                active={sortConfig.key === "doc_no"}
+                                direction={sortConfig.direction}
+                              />
+                            </button>
+                          </TableHead>
+                          <TableHead
+                            aria-sort={
+                              sortConfig.key === "doc_date"
+                                ? sortConfig.direction === "asc"
+                                  ? "ascending"
+                                  : "descending"
+                                : "none"
+                            }
+                          >
+                            <button
+                              type="button"
+                              className={cn(
+                                "inline-flex items-center gap-1.5 font-semibold uppercase tracking-wide",
+                                sortConfig.key === "doc_date"
+                                  ? "text-blue-700"
+                                  : "text-slate-400 hover:text-slate-600",
+                              )}
+                              onClick={() => handleSort("doc_date")}
+                            >
+                              วันที่
+                              <SortArrow
+                                active={sortConfig.key === "doc_date"}
+                                direction={sortConfig.direction}
+                              />
+                            </button>
+                          </TableHead>
                           <TableHead className="text-right">มูลค่าบิล</TableHead>
-                          <TableHead className="text-right">ยอดคงเหลือ</TableHead>
+                          <TableHead
+                            className="text-right"
+                            aria-sort={
+                              sortConfig.key === "remaining_amount"
+                                ? sortConfig.direction === "asc"
+                                  ? "ascending"
+                                  : "descending"
+                                : "none"
+                            }
+                          >
+                            <button
+                              type="button"
+                              className={cn(
+                                "ml-auto inline-flex items-center gap-1.5 font-semibold uppercase tracking-wide",
+                                sortConfig.key === "remaining_amount"
+                                  ? "text-blue-700"
+                                  : "text-slate-400 hover:text-slate-600",
+                              )}
+                              onClick={() => handleSort("remaining_amount")}
+                            >
+                              ยอดคงเหลือ
+                              <SortArrow
+                                active={sortConfig.key === "remaining_amount"}
+                                direction={sortConfig.direction}
+                              />
+                            </button>
+                          </TableHead>
                           <TableHead className="text-right">
                             ยอดที่ต้องการตัดหนี้
                           </TableHead>
@@ -397,7 +607,7 @@ export function ArWriteoffForm({
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {invoices.map((inv) => {
+                        {sortedInvoices.map((inv) => {
                           const raw = amounts[inv.id] ?? "";
                           const amount = parseAmount(raw);
                           const hasError = Boolean(lineErrors[inv.id]);
