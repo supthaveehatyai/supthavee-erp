@@ -6,6 +6,7 @@
  */
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   CheckCircle2,
@@ -22,6 +23,7 @@ import type {
   PendingApprovalItem,
   PendingApprovalsPayload,
 } from "@/types/approval";
+import { buildPreviewDocHref } from "@/components/finance/DocumentPreviewSheet";
 import { buildViewExpenseHref } from "./expense-approval-review-sheet";
 import {
   AlertDialog,
@@ -140,6 +142,12 @@ function PendingApprovalTable({
           const qs = params.toString();
           router.replace(qs ? `${pathname}?${qs}` : pathname);
         }
+        if (targetType === "DOCUMENT" && searchParams.get("preview_doc_id")) {
+          const params = new URLSearchParams(searchParams.toString());
+          params.delete("preview_doc_id");
+          const qs = params.toString();
+          router.replace(qs ? `${pathname}?${qs}` : pathname);
+        }
         router.refresh();
       } catch (err) {
         toast.error(
@@ -188,7 +196,9 @@ function PendingApprovalTable({
                 className={
                   targetType === "EXPENSE"
                     ? "cursor-pointer hover:bg-slate-50"
-                    : undefined
+                    : searchParams.get("preview_doc_id") === item.id
+                      ? "bg-blue-50/70"
+                      : undefined
                 }
                 onClick={() => {
                   if (targetType === "EXPENSE") openExpenseReview(item);
@@ -231,6 +241,19 @@ function PendingApprovalTable({
                 </TableCell>
                 <TableCell onClick={(event) => event.stopPropagation()}>
                   <div className="flex flex-wrap items-center justify-center gap-2">
+                    {targetType === "DOCUMENT" ? (
+                      <Link
+                        href={buildPreviewDocHref(
+                          pathname,
+                          searchParams.toString(),
+                          item.id,
+                        )}
+                        className="inline-flex h-8 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                      >
+                        <Eye className="size-3.5" />
+                        ดูรายละเอียด
+                      </Link>
+                    ) : null}
                     <Button
                       type="button"
                       size="sm"
@@ -340,6 +363,9 @@ export function ApprovalCenterPanel({
     if (next !== "expenses") {
       params.delete("view_expense");
     }
+    if (next !== "documents") {
+      params.delete("preview_doc_id");
+    }
     router.replace(`${pathname}?${params.toString()}`);
   }
 
@@ -386,7 +412,8 @@ export function ApprovalCenterPanel({
             <CardHeader className="pb-3">
               <CardTitle className="text-base">เอกสารระบบ (Documents)</CardTitle>
               <CardDescription>
-                รายการจากตาราง documents ที่ approval_status = PENDING
+                รายการจากตาราง documents ที่ approval_status = PENDING ·
+                กดดูรายละเอียดก่อนอนุมัติ
               </CardDescription>
             </CardHeader>
             <CardContent>

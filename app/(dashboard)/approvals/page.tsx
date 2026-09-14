@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { getPendingApprovals } from "@/app/actions/approval";
+import { DocumentPreviewSheet } from "@/components/finance/DocumentPreviewSheet";
 import type { ApprovalTab } from "@/types/approval";
 import { ApprovalCenterPanel } from "./approval-center-panel";
+import { DocumentPreviewContent } from "./document-preview-content";
 import { ExpenseApprovalReviewContent } from "./expense-approval-review-content";
 import { ExpenseApprovalReviewSheet } from "./expense-approval-review-sheet";
 
@@ -18,6 +20,7 @@ type PageProps = {
   searchParams: Promise<{
     tab?: string;
     view_expense?: string;
+    preview_doc_id?: string;
   }>;
 };
 
@@ -37,6 +40,7 @@ async function ApprovalCenterContent({ searchParams }: PageProps) {
   const params = await searchParams;
   const tab = resolveTab(params.tab);
   const viewExpenseId = params.view_expense?.trim() || null;
+  const previewDocId = params.preview_doc_id?.trim() || null;
   const result = await getPendingApprovals();
 
   if (!result.success) {
@@ -50,6 +54,19 @@ async function ApprovalCenterContent({ searchParams }: PageProps) {
   return (
     <>
       <ApprovalCenterPanel data={result.data} initialTab={tab} />
+      <DocumentPreviewSheet previewDocId={previewDocId}>
+        {previewDocId ? (
+          <Suspense
+            fallback={
+              <div className="px-6 py-8 text-sm text-slate-500">
+                กำลังโหลดรายละเอียดเอกสาร...
+              </div>
+            }
+          >
+            <DocumentPreviewContent documentId={previewDocId} />
+          </Suspense>
+        ) : null}
+      </DocumentPreviewSheet>
       <ExpenseApprovalReviewSheet expenseId={viewExpenseId}>
         {viewExpenseId ? (
           <Suspense
