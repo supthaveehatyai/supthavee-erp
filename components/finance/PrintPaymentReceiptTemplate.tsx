@@ -5,6 +5,14 @@ import type { DocumentDetail } from "@/types/document";
 import type { DocumentAllocationRow } from "@/types/document-allocation";
 import type { PrintVatType } from "@/types/print-document";
 import { cn } from "@/lib/utils";
+import {
+  formatSignedCreditMoney,
+  isAllocationCreditDocType,
+  isCreditNoteDocType,
+  signedAllocationAmount,
+  sumSignedAllocations,
+} from "@/lib/utils/rec-payment-summary";
+import { roundMoney } from "@/lib/utils/payment-fifo";
 
 function formatMoney(value: number): string {
   return value.toLocaleString("th-TH", {
@@ -17,9 +25,15 @@ function isDepositAllocation(docType: string): boolean {
   return docType === "DEP_IN" || docType === "DEP_OUT";
 }
 
-function signedAllocatedAmount(row: DocumentAllocationRow): number {
-  const amount = Number(row.allocated_amount ?? 0);
-  return isDepositAllocation(row.target_doc_type) ? -amount : amount;
+function formatAllocatedAmount(row: DocumentAllocationRow): string {
+  const signed = signedAllocationAmount(
+    Number(row.allocated_amount ?? 0),
+    row.target_doc_type,
+  );
+  if (isAllocationCreditDocType(row.target_doc_type)) {
+    return formatSignedCreditMoney(signed);
+  }
+  return formatMoney(signed);
 }
 
 function normalizePrintVatType(value: string | null | undefined): PrintVatType {
@@ -56,19 +70,28 @@ export default async function PrintPaymentReceiptTemplate({
       : "ใบจ่ายชำระหนี้ (Payment Voucher)";
 
   const invoiceSum = allocations
-    .filter((row) => !isDepositAllocation(row.target_doc_type))
+    .filter((row) => !isAllocationCreditDocType(row.target_doc_type))
     .reduce((sum, row) => sum + Number(row.allocated_amount ?? 0), 0);
   const depositSum = allocations
     .filter((row) => isDepositAllocation(row.target_doc_type))
     .reduce((sum, row) => sum + Number(row.allocated_amount ?? 0), 0);
-  const netFromAllocations = allocations.reduce(
-    (sum, row) => sum + signedAllocatedAmount(row),
-    0,
-  );
+  const cnSum = allocations
+    .filter((row) => isCreditNoteDocType(row.target_doc_type))
+    .reduce((sum, row) => sum + Number(row.allocated_amount ?? 0), 0);
+  const netFromAllocations = sumSignedAllocations(allocations);
   const allocatedWht = allocations.reduce(
     (sum, row) => sum + Number(row.wht_amount ?? 0),
     0,
   );
+  const creditDiscount = roundMoney(depositSum + cnSum);
+  const discountLabel =
+    cnSum > 0 && depositSum > 0
+      ? "ใบลดหนี้ / มัดจำ"
+      : cnSum > 0
+        ? "ใบลดหนี้"
+        : depositSum > 0
+          ? "หักมัดจำ"
+          : null;
 
   const vatType = normalizePrintVatType(doc.vat_type);
   const vatRate = Number(doc.vat_rate ?? doc.tax_rate ?? 7);
@@ -124,7 +147,13 @@ export default async function PrintPaymentReceiptTemplate({
             ) : (
               allocations.map((row, index) => {
                 const isDeposit = isDepositAllocation(row.target_doc_type);
-                const signed = signedAllocatedAmount(row);
+                const isCn = isCreditNoteDocType(row.target_doc_type);
+                const isCredit = isAllocationCreditDocType(row.target_doc_type);
+                const docNoLabel = isCn
+                  ? `(หัก) ใบลดหนี้ ${row.target_doc_no}`
+                  : isDeposit
+                    ? `(หัก) มัดจำ ${row.target_doc_no}`
+                    : row.target_doc_no;
                 return (
                   <tr
                     key={row.id}
@@ -134,9 +163,7 @@ export default async function PrintPaymentReceiptTemplate({
                       {index + 1}
                     </td>
                     <td className="py-1.5 pr-2 font-mono text-[11px] font-medium text-neutral-800">
-                      {isDeposit
-                        ? `(หัก) มัดจำ ${row.target_doc_no}`
-                        : row.target_doc_no}
+                      {docNoLabel}
                       {row.target_doc_type ? (
                         <span className="ml-1 text-[10px] text-neutral-400">
                           ({row.target_doc_type === "EXPENSE"
@@ -150,14 +177,12 @@ export default async function PrintPaymentReceiptTemplate({
                     </td>
                     <td
                       className={
-                        isDeposit
+                        isCredit
                           ? "py-1.5 pr-2 text-right tabular-nums text-neutral-700"
                           : "py-1.5 pr-2 text-right tabular-nums text-neutral-900"
                       }
                     >
-                      {isDeposit
-                        ? `(${formatMoney(Math.abs(signed))})`
-                        : formatMoney(signed)}
+                      {formatAllocatedAmount(row)}
                     </td>
                     <td className="py-1.5 text-right tabular-nums text-neutral-700">
                       {formatMoney(row.wht_amount)}
@@ -183,6 +208,22 @@ export default async function PrintPaymentReceiptTemplate({
                   {formatMoney(allocatedWht)}
                 </td>
               </tr>
+              {cnSum > 0 ? (
+                <tr>
+                  <td
+                    colSpan={3}
+                    className="py-1.5 pr-2 text-right text-neutral-600"
+                  >
+                    หักใบลดหนี้
+                  </td>
+                  <td className="py-1.5 pr-2 text-right tabular-nums text-neutral-800">
+                    {formatSignedCreditMoney(cnSum)}
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums text-neutral-500">
+                    —
+                  </td>
+                </tr>
+              ) : null}
               {depositSum > 0 ? (
                 <tr>
                   <td
@@ -192,7 +233,7 @@ export default async function PrintPaymentReceiptTemplate({
                     หักมัดจำ
                   </td>
                   <td className="py-1.5 pr-2 text-right tabular-nums text-neutral-800">
-                    ({formatMoney(depositSum)})
+                    {formatSignedCreditMoney(depositSum)}
                   </td>
                   <td className="py-1.5 text-right tabular-nums text-neutral-500">
                     —
@@ -221,8 +262,8 @@ export default async function PrintPaymentReceiptTemplate({
       <DocumentPrintSummary
         className="mt-4"
         subtotal={invoiceSettlement}
-        discountAmount={depositSum}
-        discountText={depositSum > 0 ? "หักมัดจำ" : null}
+        discountAmount={creditDiscount}
+        discountText={discountLabel}
         vatType={vatType}
         vatRate={vatRate}
         grandTotal={netFromAllocations}

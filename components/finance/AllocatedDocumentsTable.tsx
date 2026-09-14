@@ -12,6 +12,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  formatSignedCreditMoney,
+  isAllocationCreditDocType,
+  isCreditNoteDocType,
+  signedAllocationAmount,
+  sumSignedAllocations,
+} from "@/lib/utils/rec-payment-summary";
+import { roundMoney } from "@/lib/utils/payment-fifo";
 
 function formatMoney(value: number): string {
   return value.toLocaleString("th-TH", {
@@ -28,10 +36,15 @@ function isExpenseAllocation(row: DocumentAllocationRow): boolean {
   return row.target_doc_type === "EXPENSE" || Boolean(row.expense_id);
 }
 
-/** Signed display amount: invoices positive, deposits negative. */
-function signedAllocatedAmount(row: DocumentAllocationRow): number {
-  const amount = Number(row.allocated_amount ?? 0);
-  return isDepositAllocation(row.target_doc_type) ? -amount : amount;
+function formatAllocatedAmount(row: DocumentAllocationRow): string {
+  const signed = signedAllocationAmount(
+    Number(row.allocated_amount ?? 0),
+    row.target_doc_type,
+  );
+  if (isAllocationCreditDocType(row.target_doc_type)) {
+    return formatSignedCreditMoney(signed);
+  }
+  return formatMoney(signed);
 }
 
 export type AllocatedDocumentsTableProps = {
@@ -45,7 +58,8 @@ export type AllocatedDocumentsTableProps = {
 
 /**
  * Allocated invoices under PAY / REC.
- * Deposit rows render as deductions (negative) so totals are not double-counted.
+ * CN / DEP_IN / DEP_OUT render as GAAP deductions (leading minus).
+ * Footer = INV/TAX/CS/BN − CN − DEP (= Net Cash on the summary card when WHT = 0).
  * Status column uses client toggle → Server Action updateReceiptStatus.
  */
 export function AllocatedDocumentsTable({
@@ -75,14 +89,11 @@ export function AllocatedDocumentsTable({
     );
   }
 
-  const netTotal = rows.reduce(
-    (sum, row) => sum + signedAllocatedAmount(row),
-    0,
+  const totalWht = roundMoney(
+    rows.reduce((sum, row) => sum + Number(row.wht_amount ?? 0), 0),
   );
-  const totalWht = rows.reduce(
-    (sum, row) => sum + Number(row.wht_amount ?? 0),
-    0,
-  );
+  /** INV/TAX/CS/BN − CN − DEP (= Net Cash when WHT = 0). */
+  const netTotal = sumSignedAllocations(rows);
 
   return (
     <div className="overflow-x-auto">
@@ -99,8 +110,9 @@ export function AllocatedDocumentsTable({
         <TableBody>
           {rows.map((row) => {
             const isDeposit = isDepositAllocation(row.target_doc_type);
+            const isCn = isCreditNoteDocType(row.target_doc_type);
+            const isCredit = isAllocationCreditDocType(row.target_doc_type);
             const isExpense = isExpenseAllocation(row);
-            const signed = signedAllocatedAmount(row);
             const expenseHref = row.expense_id
               ? `/expenses/${encodeURIComponent(row.expense_id)}`
               : `/expenses`;
@@ -117,23 +129,35 @@ export function AllocatedDocumentsTable({
               ? expenseHref
               : `${hrefBase}/${encodeURIComponent(row.target_doc_no)}`;
 
+            const docNoLabel = isCn
+              ? `(หัก) ใบลดหนี้ ${row.target_doc_no}`
+              : isDeposit
+                ? `(หัก) มัดจำ ${row.target_doc_no}`
+                : row.target_doc_no;
+
             return (
               <TableRow
                 key={row.id}
-                className={isDeposit ? "bg-emerald-50/40" : undefined}
+                className={
+                  isCn
+                    ? "bg-red-50/40"
+                    : isDeposit
+                      ? "bg-emerald-50/40"
+                      : undefined
+                }
               >
                 <TableCell>
                   <Link
                     href={href}
                     className={
-                      isDeposit
-                        ? "font-mono text-sm font-semibold text-emerald-800 underline-offset-2 hover:underline"
-                        : "font-mono text-sm font-semibold text-blue-700 underline-offset-2 hover:underline"
+                      isCn
+                        ? "font-mono text-sm font-semibold text-destructive underline-offset-2 hover:underline"
+                        : isDeposit
+                          ? "font-mono text-sm font-semibold text-emerald-800 underline-offset-2 hover:underline"
+                          : "font-mono text-sm font-semibold text-blue-700 underline-offset-2 hover:underline"
                     }
                   >
-                    {isDeposit
-                      ? `(หัก) มัดจำ ${row.target_doc_no}`
-                      : row.target_doc_no}
+                    {docNoLabel}
                   </Link>
                   {row.target_doc_type ? (
                     <span className="ml-1.5 text-xs text-slate-400">
@@ -146,20 +170,20 @@ export function AllocatedDocumentsTable({
                 </TableCell>
                 <TableCell
                   className={
-                    isDeposit
-                      ? "text-right font-semibold tabular-nums text-emerald-700"
-                      : "text-right font-semibold tabular-nums text-slate-900"
+                    isCn
+                      ? "text-right font-semibold tabular-nums text-destructive"
+                      : isDeposit
+                        ? "text-right font-semibold tabular-nums text-emerald-700"
+                        : "text-right font-semibold tabular-nums text-slate-900"
                   }
                 >
-                  {isDeposit
-                    ? `(${formatMoney(Math.abs(signed))})`
-                    : formatMoney(signed)}
+                  {formatAllocatedAmount(row)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums text-slate-700">
                   {row.wht_amount > 0 ? formatMoney(row.wht_amount) : "—"}
                 </TableCell>
                 <TableCell className="text-center">
-                  {isDeposit || isExpense ? (
+                  {isCredit || isExpense ? (
                     <span className="text-xs text-slate-400">—</span>
                   ) : (
                     <OriginalReceiptStatusToggle

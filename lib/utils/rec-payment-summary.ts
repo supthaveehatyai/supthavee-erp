@@ -6,7 +6,49 @@
 import { roundMoney } from "@/lib/utils/payment-fifo";
 
 export function isCreditNoteDocType(docType: string): boolean {
-  return docType === "CN";
+  return String(docType ?? "").trim().toUpperCase() === "CN";
+}
+
+/** Contra docs: reduce Net Cash (GAAP) — stored unsigned in DB. */
+const ALLOCATION_CREDIT_DOC_TYPES = new Set(["CN", "DEP_IN", "DEP_OUT"]);
+
+export function isAllocationCreditDocType(
+  docType: string | null | undefined,
+): boolean {
+  return ALLOCATION_CREDIT_DOC_TYPES.has(
+    String(docType ?? "").trim().toUpperCase(),
+  );
+}
+
+/**
+ * Signed knock-off amount for Detail / Print tables.
+ * Sales / AP / BN / EXPENSE add; CN and deposits subtract.
+ */
+export function signedAllocationAmount(
+  amount: number,
+  docType: string | null | undefined,
+): number {
+  const abs = Math.abs(Number(amount) || 0);
+  return isAllocationCreditDocType(docType) ? -abs : abs;
+}
+
+export function sumSignedAllocations(
+  rows: Array<{
+    target_doc_type?: string | null;
+    allocated_amount?: number | null;
+  }>,
+): number {
+  return roundMoney(
+    rows.reduce(
+      (sum, row) =>
+        sum +
+        signedAllocationAmount(
+          Number(row.allocated_amount ?? 0),
+          row.target_doc_type,
+        ),
+      0,
+    ),
+  );
 }
 
 export type RecPaymentLineInput = {
