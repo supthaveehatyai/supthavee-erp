@@ -6,7 +6,7 @@
  * Knock-off persist via PaymentKnockoffForm Server Action.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { BankAccount } from "@/types/bank-account";
 import type {
@@ -35,7 +35,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, Eye, Wallet } from "lucide-react";
+import { formatThaiDate } from "@/lib/utils/date-formatter";
+import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, Eye, Wallet } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export type ARPaymentClientProps = {
   debtors: DebtorOption[];
@@ -53,13 +55,101 @@ function formatMoney(value: number): string {
   });
 }
 
-function formatDate(value: string): string {
-  if (!value) return "—";
-  return new Date(value).toLocaleDateString("th-TH");
-}
-
 function salesDocumentHref(docNo: string): string {
   return `/sales/${encodeURIComponent(docNo)}`;
+}
+
+type OutstandingSortKey = "name" | "amount" | "oldest_date";
+type SortDirection = "asc" | "desc";
+type OutstandingSortConfig = {
+  key: OutstandingSortKey;
+  direction: SortDirection;
+};
+
+const DEFAULT_SORT: OutstandingSortConfig = {
+  key: "amount",
+  direction: "desc",
+};
+
+const SORT_PRESETS: Array<{
+  value: `${OutstandingSortKey}-${SortDirection}`;
+  label: string;
+}> = [
+  { value: "amount-desc", label: "เรียงตามยอดหนี้สูงสุด" },
+  { value: "amount-asc", label: "เรียงตามยอดหนี้ต่ำสุด" },
+  { value: "oldest_date-asc", label: "เรียงตามบิลเก่าสุด" },
+  { value: "oldest_date-desc", label: "เรียงตามบิลใหม่สุด" },
+  { value: "name-asc", label: "เรียงตามชื่อลูกค้า (ก–ฮ)" },
+  { value: "name-desc", label: "เรียงตามชื่อลูกค้า (ฮ–ก)" },
+];
+
+function parseSortPreset(
+  value: string,
+): OutstandingSortConfig {
+  const [key, direction] = value.split("-") as [
+    OutstandingSortKey,
+    SortDirection,
+  ];
+  if (
+    (key === "name" || key === "amount" || key === "oldest_date") &&
+    (direction === "asc" || direction === "desc")
+  ) {
+    return { key, direction };
+  }
+  return DEFAULT_SORT;
+}
+
+function defaultDirectionForKey(key: OutstandingSortKey): SortDirection {
+  if (key === "amount") return "desc";
+  return "asc";
+}
+
+function compareDebtors(
+  a: DebtorOption,
+  b: DebtorOption,
+  config: OutstandingSortConfig,
+): number {
+  const dir = config.direction === "asc" ? 1 : -1;
+
+  if (config.key === "name") {
+    return (
+      a.name.localeCompare(b.name, "th", { sensitivity: "base" }) * dir
+    );
+  }
+
+  if (config.key === "amount") {
+    const diff = a.outstanding_total - b.outstanding_total;
+    if (diff !== 0) return diff * dir;
+    return a.name.localeCompare(b.name, "th", { sensitivity: "base" });
+  }
+
+  const aDate = a.oldest_invoice_date?.trim() ?? "";
+  const bDate = b.oldest_invoice_date?.trim() ?? "";
+  if (!aDate && !bDate) {
+    return a.name.localeCompare(b.name, "th", { sensitivity: "base" });
+  }
+  if (!aDate) return 1;
+  if (!bDate) return -1;
+  const dateDiff = aDate.localeCompare(bDate);
+  if (dateDiff !== 0) return dateDiff * dir;
+  return a.name.localeCompare(b.name, "th", { sensitivity: "base" });
+}
+
+function SortArrow({
+  active,
+  direction,
+}: {
+  active: boolean;
+  direction: SortDirection;
+}) {
+  if (!active) {
+    return <ArrowUpDown className="h-3.5 w-3.5 text-slate-300" />;
+  }
+  return direction === "asc" ? (
+    <ArrowUp className="h-3.5 w-3.5 text-blue-600" />
+  ) : (
+    <ArrowDown className="h-3.5 w-3.5 text-blue-600" />
+  );
 }
 
 export function ARPaymentClient({
@@ -71,11 +161,27 @@ export function ARPaymentClient({
   billingNotes = [],
 }: ARPaymentClientProps) {
   const router = useRouter();
+  const [sortConfig, setSortConfig] =
+    useState<OutstandingSortConfig>(DEFAULT_SORT);
 
   const summaryGrandTotal = useMemo(
     () => debtors.reduce((sum, row) => sum + row.outstanding_total, 0),
     [debtors],
   );
+
+  const sortedDebtors = useMemo(
+    () =>
+      [...debtors].sort((a, b) => compareDebtors(a, b, sortConfig)),
+    [debtors, sortConfig],
+  );
+
+  function handleSort(key: OutstandingSortKey) {
+    setSortConfig((prev) =>
+      prev.key === key
+        ? { key, direction: prev.direction === "asc" ? "desc" : "asc" }
+        : { key, direction: defaultDirectionForKey(key) },
+    );
+  }
 
   function handleCustomerChange(contactId: string) {
     if (!contactId) {
@@ -147,58 +253,163 @@ export function ARPaymentClient({
                 ไม่มีข้อมูลลูกหนี้ค้างชำระในระบบ
               </div>
             ) : (
-              <div className="overflow-hidden rounded-md border border-slate-200">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-slate-50">
-                      <TableHead>ชื่อลูกค้า</TableHead>
-                      <TableHead className="text-center">จำนวนบิลค้าง</TableHead>
-                      <TableHead className="text-right">ยอดหนี้รวม</TableHead>
-                      <TableHead className="text-right">
-                        ยอดเกินกำหนด
-                      </TableHead>
-                      <TableHead>บิลเก่าสุด</TableHead>
-                      <TableHead className="text-center">จัดการ</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {debtors.map((debtor) => (
-                      <TableRow key={debtor.id}>
-                        <TableCell className="font-medium text-slate-900">
-                          {debtor.name}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Badge variant="slate">{debtor.invoice_count} บิล</Badge>
-                        </TableCell>
-                        <TableCell className="text-right font-bold text-red-600">
-                          {formatMoney(debtor.outstanding_total)}
-                        </TableCell>
-                        <TableCell
-                          className={
-                            debtor.overdue_amount > 0
-                              ? "text-right font-semibold text-red-600"
-                              : "text-right text-slate-400"
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <Label
+                    htmlFor="outstanding-sort-preset"
+                    className="text-xs font-medium text-slate-500"
+                  >
+                    เรียงลำดับด่วน
+                  </Label>
+                  <select
+                    id="outstanding-sort-preset"
+                    className="h-9 min-w-[220px] rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    value={`${sortConfig.key}-${sortConfig.direction}`}
+                    onChange={(e) =>
+                      setSortConfig(parseSortPreset(e.target.value))
+                    }
+                  >
+                    {SORT_PRESETS.map((preset) => (
+                      <option key={preset.value} value={preset.value}>
+                        {preset.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="overflow-hidden rounded-md border border-slate-200">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50">
+                        <TableHead
+                          aria-sort={
+                            sortConfig.key === "name"
+                              ? sortConfig.direction === "asc"
+                                ? "ascending"
+                                : "descending"
+                              : "none"
                           }
                         >
-                          {formatMoney(debtor.overdue_amount)}
-                        </TableCell>
-                        <TableCell className="text-slate-600">
-                          {formatDate(debtor.oldest_invoice_date ?? "")}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Button
+                          <button
                             type="button"
-                            size="sm"
-                            className="gap-1.5"
-                            onClick={() => handleCustomerChange(debtor.id)}
+                            className={cn(
+                              "inline-flex items-center gap-1.5 font-semibold uppercase tracking-wide",
+                              sortConfig.key === "name"
+                                ? "text-blue-700"
+                                : "text-slate-400 hover:text-slate-600",
+                            )}
+                            onClick={() => handleSort("name")}
                           >
-                            รับชำระเงิน
-                          </Button>
-                        </TableCell>
+                            ชื่อลูกค้า
+                            <SortArrow
+                              active={sortConfig.key === "name"}
+                              direction={sortConfig.direction}
+                            />
+                          </button>
+                        </TableHead>
+                        <TableHead className="text-center">จำนวนบิลค้าง</TableHead>
+                        <TableHead
+                          className="text-right"
+                          aria-sort={
+                            sortConfig.key === "amount"
+                              ? sortConfig.direction === "asc"
+                                ? "ascending"
+                                : "descending"
+                              : "none"
+                          }
+                        >
+                          <button
+                            type="button"
+                            className={cn(
+                              "ml-auto inline-flex items-center gap-1.5 font-semibold uppercase tracking-wide",
+                              sortConfig.key === "amount"
+                                ? "text-blue-700"
+                                : "text-slate-400 hover:text-slate-600",
+                            )}
+                            onClick={() => handleSort("amount")}
+                          >
+                            ยอดหนี้รวม
+                            <SortArrow
+                              active={sortConfig.key === "amount"}
+                              direction={sortConfig.direction}
+                            />
+                          </button>
+                        </TableHead>
+                        <TableHead className="text-right">
+                          ยอดเกินกำหนด
+                        </TableHead>
+                        <TableHead
+                          aria-sort={
+                            sortConfig.key === "oldest_date"
+                              ? sortConfig.direction === "asc"
+                                ? "ascending"
+                                : "descending"
+                              : "none"
+                          }
+                        >
+                          <button
+                            type="button"
+                            className={cn(
+                              "inline-flex items-center gap-1.5 font-semibold uppercase tracking-wide",
+                              sortConfig.key === "oldest_date"
+                                ? "text-blue-700"
+                                : "text-slate-400 hover:text-slate-600",
+                            )}
+                            onClick={() => handleSort("oldest_date")}
+                          >
+                            บิลเก่าสุด
+                            <SortArrow
+                              active={sortConfig.key === "oldest_date"}
+                              direction={sortConfig.direction}
+                            />
+                          </button>
+                        </TableHead>
+                        <TableHead className="text-center">จัดการ</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {sortedDebtors.map((debtor) => (
+                        <TableRow key={debtor.id}>
+                          <TableCell className="font-medium text-slate-900">
+                            {debtor.name}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Badge variant="slate">{debtor.invoice_count} บิล</Badge>
+                          </TableCell>
+                          <TableCell className="text-right font-bold text-red-600">
+                            {formatMoney(debtor.outstanding_total)}
+                          </TableCell>
+                          <TableCell
+                            className={
+                              debtor.overdue_amount > 0
+                                ? "text-right font-semibold text-red-600"
+                                : "text-right text-slate-400"
+                            }
+                          >
+                            {formatMoney(debtor.overdue_amount)}
+                          </TableCell>
+                          <TableCell className="text-slate-600">
+                            {debtor.oldest_invoice_date
+                              ? formatThaiDate(
+                                  debtor.oldest_invoice_date,
+                                  "short",
+                                )
+                              : "—"}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="gap-1.5"
+                              onClick={() => handleCustomerChange(debtor.id)}
+                            >
+                              รับชำระเงิน
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
             )}
           </CardContent>
@@ -260,7 +471,9 @@ export function ARPaymentClient({
                             </a>
                           </TableCell>
                           <TableCell>
-                            {formatDate(inv.document_date)}
+                            {inv.document_date
+                              ? formatThaiDate(inv.document_date, "short")
+                              : "—"}
                           </TableCell>
                           <TableCell className="text-right text-slate-500">
                             {formatMoney(inv.net_amount_calc)}

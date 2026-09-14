@@ -133,6 +133,25 @@ export const SETTLEMENT_DOC_TYPES = [
 ] as const;
 
 /**
+ * เอกสารการเงินที่ไม่มีรายการสินค้า (ไม่ใช้ `document_items`)
+ * ใช้ `document_allocations` หรือเป็นเอกสารหัวอย่างเดียว
+ */
+export const FINANCE_HEADER_ONLY_DOC_TYPES = [
+  "AR_WRITEOFF",
+  "AP_WRITEOFF",
+  "AR_REFUND",
+  "AP_REFUND",
+  "DEP_IN",
+  "DEP_OUT",
+] as const;
+
+export function isFinanceHeaderOnlyDocType(docType: string): boolean {
+  return (FINANCE_HEADER_ONLY_DOC_TYPES as readonly string[]).includes(
+    docType,
+  );
+}
+
+/**
  * Smart Goods Receipt / Manual Receipt — vendor bill types only.
  */
 export const GOODS_RECEIPT_DOC_TYPES = [

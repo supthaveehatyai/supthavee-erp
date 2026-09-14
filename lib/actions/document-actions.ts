@@ -20,6 +20,7 @@ import {
   PURCHASE_DOC_TYPES,
   SALES_DOC_TYPES,
   STOCK_OUT_DOC_TYPES,
+  isFinanceHeaderOnlyDocType,
   resolveInitialPaymentStatus,
   resolveIssuedDocumentStatus,
 } from "@/lib/constants/document";
@@ -2138,6 +2139,9 @@ export async function issueDocument(
       };
     }
 
+    const docType = document.doc_type as DocumentType;
+    const skipLineItems = isFinanceHeaderOnlyDocType(docType);
+
     const { data: items, error: itemsError } = await supabase
       .from("document_items")
       .select("id, product_id, qty, description")
@@ -2149,14 +2153,31 @@ export async function issueDocument(
     }
 
     const lineItems = items ?? [];
-    if (lineItems.length === 0) {
+    if (!skipLineItems && lineItems.length === 0) {
       return {
         data: null,
         error: "เอกสารไม่มีรายการสินค้า — ไม่สามารถออกเอกสารได้",
       };
     }
 
-    const docType = document.doc_type as DocumentType;
+    if (docType === "AR_WRITEOFF") {
+      const { count, error: allocError } = await supabase
+        .from("document_allocations")
+        .select("id", { count: "exact", head: true })
+        .eq("receipt_doc_id", id);
+
+      if (allocError) {
+        return { data: null, error: allocError.message };
+      }
+      if (!count || count < 1) {
+        return {
+          data: null,
+          error:
+            "ใบตัดหนี้สูญต้องมีรายการบิลที่ตัดชำระอย่างน้อย 1 รายการ",
+        };
+      }
+    }
+
     const documentApproval = approvalStatusFields(docType);
     const pendingApproval = isPendingApprovalStatus(
       documentApproval.approval_status,
