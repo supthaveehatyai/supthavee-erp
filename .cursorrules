@@ -45,6 +45,7 @@ Tech Stack หลัก: Supabase (PostgreSQL, Auth, Edge Functions, RLS), Next.
   1. การสร้าง CN ต้องเลือกเฉพาะ Line Items ที่ลดหนี้จริง (Checkbox) ห้ามส่ง Payload สินค้าที่ยอดลดหนี้เป็น 0 เข้าระบบเด็ดขาด 
   2. ต้องมี Validation บังคับกรอกช่อง `remark` เสมอก่อนบันทึก DRAFT ใบลดหนี้ หรือกดยกเลิกเอกสาร (VOID) 
   3. UI ต้องซ่อน Tracking Metadata ของระบบ (เช่น `[#CN src=...]`) ออกจาก `description` ของสินค้าเสมอ
+- **Financial Document Items Bypass:** เอกสารทางการเงินกลุ่มข้อยกเว้น (`AR_WRITEOFF`, `AP_WRITEOFF`, `AR_REFUND`, `AP_REFUND`, `DEP_IN`, `DEP_OUT`) ไม่ต้องตรวจสอบ `document_items.length === 0` ตอนออกเอกสาร (Issue Document) เนื่องจากเป็นการผูกหนี้ผ่าน `document_allocations`
 
 ## 3. Data Integrity & Taxonomy
 - **Color Code:** `mst_colors` ต้องล็อกเป็นอักษรภาษาอังกฤษพิมพ์ใหญ่ 3 ตัวอักษร
@@ -66,6 +67,8 @@ Tech Stack หลัก: Supabase (PostgreSQL, Auth, Edge Functions, RLS), Next.
 ## 6. Server / Client Boundary (CRITICAL)
 - **No Event Handlers in Server Components:** ห้ามใส่ `onClick` หรือ Client Hooks (เช่น `useState`, `useRouter`) ลงในไฟล์ที่เป็น Server Component (`page.tsx` ที่ไม่มี `'use client'`) เด็ดขาด หากต้องการทำ Navigation ให้ใช้ `<Link href...>` ของ Next.js เสมอ
 - **Component Isolation:** Components ที่ต้องการใช้ React Context หรือ Event Handlers ต้องแยกเป็นไฟล์ต่างหากและประกาศ `'use client'`
+- **Strict "use server" Exports:** ไฟล์ Server Action (ที่มี 'use server' ด้านบนสุด) อนุญาตให้ `export async function` เท่านั้น ห้าม `export const` (เช่น ตัวแปรค่าคงที่ หรือ `maxDuration`) เด็ดขาด เพื่อป้องกัน Vercel/Turbopack Build Error ให้ย้าย `maxDuration` ไปตั้งค่าที่หน้า UI (page.tsx) แทน
+
 
 ## 7. Manufacturing & Order-to-Cash (MTO/SO Standards)
 - **Sales Order Driven Production:** ใบสั่งผลิต (MTO / production_jobs) ควรถูกสร้างขึ้นโดยอัตโนมัติจากการกดยืนยัน (ส่งงานผลิต) ที่เอกสารใบสั่งขาย (SO) เท่านั้น เพื่อเชื่อมโยง `ref_document_id` และรักษาหลักการ Job Costing

@@ -2160,7 +2160,7 @@ export async function issueDocument(
       };
     }
 
-    if (docType === "AR_WRITEOFF") {
+    if (docType === "AR_WRITEOFF" || docType === "AP_WRITEOFF") {
       const { count, error: allocError } = await supabase
         .from("document_allocations")
         .select("id", { count: "exact", head: true })

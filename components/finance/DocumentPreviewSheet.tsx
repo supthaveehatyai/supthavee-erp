@@ -36,7 +36,7 @@ export function DocumentPreviewSheet({
     const params = new URLSearchParams(searchParams.toString());
     params.delete(PREVIEW_DOC_PARAM);
     const qs = params.toString();
-    router.push(qs ? `${pathname}?${qs}` : "/approvals");
+    router.push(qs ? `${pathname}?${qs}` : pathname);
   }
 
   return (

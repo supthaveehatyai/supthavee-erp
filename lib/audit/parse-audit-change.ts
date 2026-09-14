@@ -141,6 +141,7 @@ function formatAuditEventLabel(event: unknown): string | null {
     DISPOSE: "จำหน่ายสินทรัพย์ (DISPOSE)",
     CN_KNOCKOFF: "ใช้ใบลดหนี้หักลดหนี้ (CN Knock-off)",
     AR_WRITEOFF: "ตัดหนี้สูญลูกหนี้ (AR Write-off)",
+    AP_WRITEOFF: "ตัดหนี้สูญเจ้าหนี้ (AP Write-off)",
   };
   return labels[token] ?? token;
 }

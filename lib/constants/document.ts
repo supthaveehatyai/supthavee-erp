@@ -266,6 +266,21 @@ export const CREDIT_NOTE_SOURCE_STATUSES = [
  */
 export const AP_PAYABLE_DOC_TYPES = ["AP_TAX", "AP_INV", "TB"] as const;
 
+/**
+ * บิลซื้อที่อนุญาตให้ตัดหนี้สูญ / ตัดเศษบัญชี (AP Write-off)
+ * BR อยู่ที่ `doc_headers` — ใช้เป็นตัวกรองบิล ไม่ใช่เป้าหมาย allocation
+ * ไม่รวม TB (สรุปวางบิลช่าง) — ตัดหนี้สูญเฉพาะบิลตั้งหนี้ซื้อ
+ */
+export const AP_WRITEOFF_SOURCE_DOC_TYPES = [
+  "AP_INV",
+  "AP_TAX",
+  "AP_CASH",
+] as const;
+
+export function isApWriteoffSourceDocType(docType: string): boolean {
+  return (AP_WRITEOFF_SOURCE_DOC_TYPES as readonly string[]).includes(docType);
+}
+
 export type FinancePaymentStatus = "UNPAID" | "PARTIAL" | "PAID";
 
 /**

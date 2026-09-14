@@ -1,6 +1,6 @@
 System Blueprint: Supthavee ERP SuperApp
 
-Version: 18.0 (Phase 18: Exceptions & Reverse Logistics ของโปรเจกต์ Supthavee ERP)
+Version: 18.2 (Phase 18: Exceptions & Reverse Logistics ของโปรเจกต์ Supthavee ERP)
 
 Company: บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด
 
@@ -147,6 +147,9 @@ Module M: Exceptions & Reverse Logistics (ส่วนต่อขยาย Phas
   1. Return Goods (รับคืนสินค้า): บังคับล็อกราคาเดิม (Original Price) และสร้าง Transaction IN กลับเข้าคลัง
   2. Price Adjustment (ชดเชยราคา): ปลดล็อกช่องราคาให้แก้ไขส่วนลดได้ โดยไม่มีผลกระทบต่อ `inventory_ledger`
 - Refund & Write-off: ระบบรองรับการคืนเงินมัดจำ (`AR_REFUND`, `AP_REFUND`) และการตัดเศษหนี้สูญ (`AR_WRITEOFF`, `AP_WRITEOFF`) พร้อมผูก Allocation ป้องกันสถานะลูกหนี้คงค้าง
+- CN Knock-off: นำใบลดหนี้มาตัดยอดใน REC ผ่านตาราง document_allocations
+- Write-off (ตัดเศษบัญชี): AR_WRITEOFF (ลูกหนี้) และ AP_WRITEOFF (เจ้าหนี้) บันทึกปัดเศษหรือหนี้สูญ เปลี่ยนสถานะบิลหลักเป็น PAID โดยไม่มีกระแสเงินสด พร้อมบังคับระบุ Remark และต้องผ่าน Approval Center
+- Approval Control: ผู้บริหารสามารถดู Document Preview แบบ Slide-over เพื่อตรวจสอบ Remark ก่อนอนุมัติได้
 
 5\. Database Schema (PostgreSQL for Supabase)
 CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names listed below. DO NOT invent, assume, or create new tables. If a required table is not on this list, STOP and ask the user for clarification.

@@ -270,11 +270,11 @@ export function ArWriteoffForm({
 
   function handleCustomerChange(contactId: string) {
     if (!contactId) {
-      router.push("/finance/ar-writeoff");
+      router.push("/finance/ar-writeoff/create");
       return;
     }
     router.push(
-      `/finance/ar-writeoff?contact_id=${encodeURIComponent(contactId)}`,
+      `/finance/ar-writeoff/create?contact_id=${encodeURIComponent(contactId)}`,
     );
   }
 
