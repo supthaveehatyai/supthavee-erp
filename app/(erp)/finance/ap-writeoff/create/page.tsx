@@ -79,7 +79,7 @@ function toUnpaidInvoice(row: OutstandingApDocument): UnpaidInvoice {
     net_amount_calc: row.grand_total,
     paid_amount: row.allocated_amount,
     allocated_amount: row.allocated_amount,
-    allocation_source_doc_nos: [],
+    allocation_sources: [],
     remaining_balance: row.remaining_balance,
     contact_id: row.contact_id,
   };

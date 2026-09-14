@@ -2,11 +2,12 @@
 
 /**
  * Allocated amount cell for AR/AP knock-off tables.
- * Info tooltip appears only when allocated > 0.
+ * Info tooltip lists each source document (CN / PWO / REC / PAY).
  */
 
 import { Info } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
+import type { InvoiceAllocationSource } from "@/types/payment";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_ALLOCATED_HINT =
@@ -14,24 +15,21 @@ const DEFAULT_ALLOCATED_HINT =
 
 export type AllocatedAmountCellProps = {
   allocatedAmount: number;
-  sourceDocNos?: string[];
+  sources?: InvoiceAllocationSource[];
   formatMoney: (value: number) => string;
   className?: string;
 };
 
 export function AllocatedAmountCell({
   allocatedAmount,
-  sourceDocNos = [],
+  sources = [],
   formatMoney,
   className,
 }: AllocatedAmountCellProps) {
   const amount = Number.isFinite(allocatedAmount) ? allocatedAmount : 0;
-  const uniqueDocs = [
-    ...new Set(sourceDocNos.map((no) => no.trim()).filter(Boolean)),
-  ];
-  const tooltip = uniqueDocs.length
-    ? `${DEFAULT_ALLOCATED_HINT}\nเอกสารที่ตัดหนี้: ${uniqueDocs.join(", ")}`
-    : DEFAULT_ALLOCATED_HINT;
+  const lines = sources.filter(
+    (row) => row.doc_no?.trim() && Number(row.amount) > 0,
+  );
 
   return (
     <span
@@ -44,7 +42,20 @@ export function AllocatedAmountCell({
       {amount > 0.02 ? (
         <Tooltip
           content={
-            <span className="whitespace-pre-wrap">{tooltip}</span>
+            <span className="flex flex-col gap-1">
+              <span>{DEFAULT_ALLOCATED_HINT}</span>
+              {lines.length > 0 ? (
+                <span className="flex flex-col gap-0.5 border-t border-white/20 pt-1">
+                  {lines.map((row, index) => (
+                    <span key={`${row.doc_no}-${row.doc_type}-${index}`}>
+                      {row.doc_no}
+                      {row.doc_type ? ` (${row.doc_type})` : ""} —{" "}
+                      {formatMoney(row.amount)} บาท
+                    </span>
+                  ))}
+                </span>
+              ) : null}
+            </span>
           }
         >
           <button

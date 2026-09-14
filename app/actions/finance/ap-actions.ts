@@ -31,8 +31,11 @@ import type {
 import { AP_PAYABLE_DOC_TYPES } from "@/lib/constants/document";
 import { getAvailableDepositsForContact } from "@/lib/actions/finance/available-deposits";
 import {
-  loadInvoiceAllocationSummaries,
+  OUTSTANDING_ALLOCATION_EMBED,
+  mapAllocationSources,
   resolveAllocatedAmount,
+  sumAllocationSources,
+  type NestedAllocationRow,
 } from "@/lib/finance/invoice-allocation-summary";
 
 const OPEN_PAYMENT_STATUSES = ["UNPAID", "PARTIAL", "Pending"] as const;
@@ -91,6 +94,7 @@ type ApDocRow = {
   payment_status: string | null;
   doc_type: string | null;
   contacts?: ContactJoin | ContactJoin[] | null;
+  allocations?: NestedAllocationRow[] | NestedAllocationRow | null;
 };
 
 type SummaryBucket = {
@@ -261,7 +265,8 @@ export async function getOutstandingAP(
         total_amount,
         paid_amount,
         payment_status,
-        doc_type
+        doc_type,
+        ${OUTSTANDING_ALLOCATION_EMBED}
       `,
       )
       .eq("contact_id", trimmed)
@@ -277,20 +282,15 @@ export async function getOutstandingAP(
     }
 
     const rows = (data ?? []) as ApDocRow[];
-    const allocationSummaries = await loadInvoiceAllocationSummaries(
-      supabaseAdmin,
-      rows.map((row) => row.id),
-    );
-
     const invoices = rows
       .map((doc) => {
         const grandTotal = roundMoney(
           toMoney(doc.grand_total ?? doc.total_amount),
         );
         const paidAmount = roundMoney(toMoney(doc.paid_amount));
-        const summary = allocationSummaries.get(doc.id);
+        const allocationSources = mapAllocationSources(doc.allocations);
         const allocatedAmount = resolveAllocatedAmount(
-          summary?.allocated_amount ?? 0,
+          sumAllocationSources(allocationSources),
           paidAmount,
         );
         const remaining = roundMoney(grandTotal - allocatedAmount);
@@ -303,7 +303,7 @@ export async function getOutstandingAP(
           grand_total: grandTotal,
           paid_amount: paidAmount,
           allocated_amount: allocatedAmount,
-          allocation_source_doc_nos: summary?.source_doc_nos ?? [],
+          allocation_sources: allocationSources,
           remaining_balance: remaining,
           payment_status: String(doc.payment_status ?? "UNPAID"),
           doc_type: doc.doc_type ?? "",

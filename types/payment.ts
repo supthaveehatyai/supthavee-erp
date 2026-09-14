@@ -22,6 +22,12 @@ export type DebtorOption = {
   oldest_invoice_date: string | null;
 };
 
+export type InvoiceAllocationSource = {
+  doc_no: string;
+  amount: number;
+  doc_type: string;
+};
+
 export type UnpaidInvoice = {
   id: string;
   display_doc_no: string;
@@ -35,8 +41,8 @@ export type UnpaidInvoice = {
   paid_amount: number;
   /** Σ `document_allocations.allocated_amount` ของบิลนี้ */
   allocated_amount: number;
-  /** เลขที่เอกสารที่ตัดหนี้ (receipt_doc_id → documents.doc_no) */
-  allocation_source_doc_nos: string[];
+  /** รายการเอกสารที่ตัดหนี้ (REC / CN / PWO / PAY) */
+  allocation_sources: InvoiceAllocationSource[];
   /**
    * ยอดค้างสุทธิ = grand_total − allocated_amount.
    * Always unsigned (positive). Credit notes (CN) keep the same sign —

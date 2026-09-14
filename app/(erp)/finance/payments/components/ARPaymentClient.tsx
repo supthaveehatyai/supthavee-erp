@@ -489,7 +489,7 @@ export function ARPaymentClient({
                           <TableCell className="text-right">
                             <AllocatedAmountCell
                               allocatedAmount={inv.allocated_amount ?? 0}
-                              sourceDocNos={inv.allocation_source_doc_nos}
+                              sources={inv.allocation_sources}
                               formatMoney={formatMoney}
                             />
                           </TableCell>

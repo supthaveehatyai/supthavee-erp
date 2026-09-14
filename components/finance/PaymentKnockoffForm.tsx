@@ -146,6 +146,9 @@ export function PaymentKnockoffForm({
         return;
       }
 
+      const sourcesByInvoiceId = new Map(
+        initialInvoices.map((inv) => [inv.id, inv.allocation_sources] as const),
+      );
       const mapped: UnpaidInvoice[] = result.data.map((row) => ({
         id: row.id,
         display_doc_no: row.doc_no,
@@ -158,7 +161,7 @@ export function PaymentKnockoffForm({
         allocated_amount: roundMoney(
           Math.max(0, row.grand_total - row.outstanding),
         ),
-        allocation_source_doc_nos: [],
+        allocation_sources: sourcesByInvoiceId.get(row.id) ?? [],
         remaining_balance: row.outstanding,
         contact_id: row.contact_id || contactId,
       }));
@@ -866,7 +869,7 @@ export function PaymentKnockoffForm({
                     <TableCell className="text-right">
                       <AllocatedAmountCell
                         allocatedAmount={inv.allocated_amount ?? 0}
-                        sourceDocNos={inv.allocation_source_doc_nos}
+                        sources={inv.allocation_sources}
                         formatMoney={(value) =>
                           value.toLocaleString("th-TH", {
                             minimumFractionDigits: 2,

@@ -129,7 +129,7 @@ export function ApWriteoffForm({
           allocated_amount: roundMoney(
             Math.max(0, row.grand_total - row.outstanding),
           ),
-          allocation_source_doc_nos: [],
+          allocation_sources: [],
           remaining_balance: row.outstanding,
           contact_id: row.contact_id || selectedContactId,
         }));

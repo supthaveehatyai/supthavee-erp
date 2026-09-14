@@ -36,8 +36,11 @@ import type {
 } from "@/types/payment";
 import { getAvailableDepositsForContact } from "@/lib/actions/finance/available-deposits";
 import {
-  loadInvoiceAllocationSummaries,
+  OUTSTANDING_ALLOCATION_EMBED,
+  mapAllocationSources,
   resolveAllocatedAmount,
+  sumAllocationSources,
+  type NestedAllocationRow,
 } from "@/lib/finance/invoice-allocation-summary";
 import { logAuditTrail } from "@/lib/supabase/auditService";
 
@@ -81,6 +84,7 @@ type InvoiceDocRow = {
   total_amount: number | string | null;
   paid_amount: number | string | null;
   contact_id: string | null;
+  allocations?: NestedAllocationRow[] | NestedAllocationRow | null;
 };
 
 function unwrapContact(
@@ -240,7 +244,8 @@ export async function getUnpaidInvoicesByCustomer(
         grand_total,
         total_amount,
         paid_amount,
-        contact_id
+        contact_id,
+        ${OUTSTANDING_ALLOCATION_EMBED}
       `,
       )
       .eq("contact_id", trimmed)
@@ -256,20 +261,15 @@ export async function getUnpaidInvoicesByCustomer(
     }
 
     const rows = (data ?? []) as InvoiceDocRow[];
-    const allocationSummaries = await loadInvoiceAllocationSummaries(
-      supabaseAdmin,
-      rows.map((row) => row.id),
-    );
-
     const invoices = rows
       .map((doc) => {
         const grandTotal = roundMoney(
           toMoney(doc.grand_total ?? doc.total_amount),
         );
         const paidAmount = roundMoney(toMoney(doc.paid_amount));
-        const summary = allocationSummaries.get(doc.id);
+        const allocationSources = mapAllocationSources(doc.allocations);
         const allocatedAmount = resolveAllocatedAmount(
-          summary?.allocated_amount ?? 0,
+          sumAllocationSources(allocationSources),
           paidAmount,
         );
         const remaining = roundMoney(grandTotal - allocatedAmount);
@@ -284,7 +284,7 @@ export async function getUnpaidInvoicesByCustomer(
           net_amount_calc: grandTotal,
           paid_amount: paidAmount,
           allocated_amount: allocatedAmount,
-          allocation_source_doc_nos: summary?.source_doc_nos ?? [],
+          allocation_sources: allocationSources,
           remaining_balance: remaining,
           contact_id: doc.contact_id ?? trimmed,
         } satisfies UnpaidInvoice;

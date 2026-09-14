@@ -1,0 +1,782 @@
+"use server";
+
+/**
+ * Refund Management — คืนเงินมัดจำ (AR_REFUND / AP_REFUND).
+ * Zero Client-Side Fetching: Service Role via `createSupabaseServerClient()`.
+ *
+ * Schema mapping (do not invent columns):
+ * - Header → `documents` (`doc_type` = AR_REFUND | AP_REFUND)
+ * - ไม่บันทึก `document_items` (FINANCE_HEADER_ONLY)
+ * - Link  → `document_allocations`
+ *     receipt_doc_id  = ใบ Refund
+ *     invoice_doc_id  = บิลมัดจำต้นทาง (DEP_IN / DEP_OUT)
+ *       หมายเหตุ: ตารางนี้ไม่มีคอลัมน์ `document_id` — ใช้ `invoice_doc_id`
+ * - ยอดคงเหลือมัดจำ = documents.grand_total − Σ allocated_amount
+ *   (`documents` ไม่มีคอลัมน์ allocated_amount)
+ */
+
+import { revalidatePath } from "next/cache";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { exceedsApprovalLimit } from "@/lib/approval/approval-rules";
+import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
+import { requireSessionUserId } from "@/lib/auth/current-user";
+import { logAuditTrail } from "@/lib/supabase/auditService";
+import { createSupabaseServerClient } from "@/lib/supabase-server";
+import { generateDraftDocumentNo } from "@/lib/utils/draft-document-no";
+import {
+  calculateDocumentSummary,
+  isVatCalculationType,
+  type VatCalculationType,
+} from "@/lib/utils/document-summary";
+import { todayIsoDate } from "@/lib/utils/outstanding-summary";
+import { roundMoney } from "@/lib/utils/payment-fifo";
+import { createRefundDocumentSchema } from "@/lib/validations/refund";
+import type {
+  CreateRefundDocumentPayload,
+  CreateRefundDocumentResult,
+  GetAvailableDepositsResult,
+  RefundDocType,
+  RefundableDeposit,
+  RefundSide,
+} from "@/types/refund";
+
+const MONEY_EPS = 0.02;
+const DEFAULT_VAT_RATE = 7;
+const REFUND_ADJUSTMENT_REASON = "REFUND";
+
+const DEPOSIT_ALLOCATION_EMBED = `
+  allocations:document_allocations!document_allocations_invoice_doc_id_fkey (
+    allocated_amount
+  )
+`;
+
+type NestedAllocationRow = {
+  allocated_amount?: number | string | null;
+};
+
+type DepositDocRow = {
+  id: string;
+  doc_no: string | null;
+  doc_date: string | null;
+  doc_type: string | null;
+  contact_id: string | null;
+  grand_total: number | string | null;
+  deposit_deducted: number | string | null;
+  vat_type: string | null;
+  vat_rate: number | string | null;
+  status: string | null;
+  is_voided: boolean | null;
+  allocations?: NestedAllocationRow[] | NestedAllocationRow | null;
+};
+
+function toMoney(value: number | string | null | undefined): number {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function firstZodMessage(error: {
+  issues: Array<{ message: string }>;
+}): string {
+  return error.issues[0]?.message ?? "ข้อมูลไม่ถูกต้อง";
+}
+
+function resolveDepositDocType(side: RefundSide): "DEP_IN" | "DEP_OUT" {
+  return side === "AR" ? "DEP_IN" : "DEP_OUT";
+}
+
+function resolveRefundDocType(side: RefundSide): RefundDocType {
+  return side === "AR" ? "AR_REFUND" : "AP_REFUND";
+}
+
+function normalizeVatType(raw: string | null | undefined): VatCalculationType {
+  const value = String(raw ?? "NONE").trim();
+  return isVatCalculationType(value) ? value : "NONE";
+}
+
+function normalizeVatRate(
+  raw: number | string | null | undefined,
+  vatType: VatCalculationType,
+): number {
+  if (vatType === "NONE") return 0;
+  const n = Number(raw ?? DEFAULT_VAT_RATE);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_VAT_RATE;
+  return n;
+}
+
+function unwrapAllocations(
+  rows: NestedAllocationRow[] | NestedAllocationRow | null | undefined,
+): NestedAllocationRow[] {
+  if (rows == null) return [];
+  return Array.isArray(rows) ? rows : [rows];
+}
+
+function sumAllocatedAmount(
+  rows: NestedAllocationRow[] | NestedAllocationRow | null | undefined,
+  depositDeducted: number,
+): number {
+  const fromAlloc = roundMoney(
+    unwrapAllocations(rows).reduce(
+      (sum, row) => sum + toMoney(row.allocated_amount),
+      0,
+    ),
+  );
+  return roundMoney(Math.max(fromAlloc, depositDeducted));
+}
+
+/**
+ * ยอดคืนเงิน = grand_total ของใบ Refund
+ * สืบทอด vat_type / vat_rate จากมัดจำต้นทาง แล้วถอด VAT จากยอดรวมอัตโนมัติ
+ * (ยอดคงเหลือมัดจำเป็นยอดรวมภาษีแล้ว — ใช้สูตร INCLUSIVE ในการแยกฐาน)
+ */
+function inheritVatFromDeposit(params: {
+  refundGrand: number;
+  vatType: VatCalculationType;
+  vatRate: number;
+}): {
+  net_before_vat: number;
+  vat_amount: number;
+  grand_total: number;
+  vat_type: VatCalculationType;
+  vat_rate: number;
+} {
+  const { refundGrand, vatType, vatRate } = params;
+  if (vatType === "NONE" || vatRate <= 0) {
+    return {
+      net_before_vat: refundGrand,
+      vat_amount: 0,
+      grand_total: refundGrand,
+      vat_type: "NONE",
+      vat_rate: 0,
+    };
+  }
+
+  const summary = calculateDocumentSummary({
+    lineTotals: [refundGrand],
+    discountText: null,
+    vatType: "INCLUSIVE",
+    vatRate,
+  });
+
+  return {
+    net_before_vat: summary.net_before_vat,
+    vat_amount: summary.vat_amount,
+    grand_total: refundGrand,
+    vat_type: vatType,
+    vat_rate: vatRate,
+  };
+}
+
+function mapRefundableDeposit(
+  row: DepositDocRow,
+  contactId: string,
+  expectedDocType: "DEP_IN" | "DEP_OUT",
+): RefundableDeposit | null {
+  if (row.is_voided === true) return null;
+  const vatType = normalizeVatType(row.vat_type);
+  const allocatedAmount = sumAllocatedAmount(
+    row.allocations,
+    toMoney(row.deposit_deducted),
+  );
+  const grandTotal = roundMoney(toMoney(row.grand_total));
+  const remaining = roundMoney(grandTotal - allocatedAmount);
+  if (remaining <= MONEY_EPS) return null;
+
+  return {
+    id: String(row.id),
+    doc_no: row.doc_no?.trim() || "ไม่ระบุ",
+    document_date: row.doc_date ? String(row.doc_date) : "",
+    doc_type: expectedDocType,
+    contact_id: row.contact_id?.trim() || contactId,
+    grand_total: grandTotal,
+    allocated_amount: allocatedAmount,
+    remaining_balance: remaining,
+    vat_type: vatType,
+    vat_rate: normalizeVatRate(row.vat_rate, vatType),
+  };
+}
+
+async function loadAllocatedMap(
+  supabaseAdmin: SupabaseClient,
+  depositIds: string[],
+): Promise<Map<string, number>> {
+  const totals = new Map<string, number>();
+  if (depositIds.length === 0) return totals;
+
+  const { data, error } = await supabaseAdmin
+    .from("document_allocations")
+    .select("invoice_doc_id, allocated_amount")
+    .in("invoice_doc_id", depositIds);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  for (const row of data ?? []) {
+    const id = String(row.invoice_doc_id ?? "").trim();
+    if (!id) continue;
+    totals.set(
+      id,
+      roundMoney((totals.get(id) ?? 0) + toMoney(row.allocated_amount)),
+    );
+  }
+  return totals;
+}
+
+async function loadMakerApprovalLimit(
+  supabaseAdmin: SupabaseClient,
+  actorId: string,
+): Promise<{ ok: true; approvalLimit: number } | { ok: false; error: string }> {
+  const { data: profile, error } = await supabaseAdmin
+    .from("user_profiles")
+    .select("id, approval_limit")
+    .eq("id", actorId)
+    .maybeSingle();
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  if (!profile) {
+    return { ok: false, error: "ไม่พบโปรไฟล์ผู้ใช้งาน" };
+  }
+
+  const limit = Number(profile.approval_limit ?? 0);
+  return {
+    ok: true,
+    approvalLimit: Number.isFinite(limit) && limit >= 0 ? limit : 0,
+  };
+}
+
+async function rollbackRefund(
+  supabaseAdmin: SupabaseClient,
+  refundId: string,
+  depositId: string | null,
+  previousDepositDeducted: number | null,
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  if (depositId && previousDepositDeducted != null) {
+    await supabaseAdmin
+      .from("documents")
+      .update({
+        deposit_deducted: previousDepositDeducted,
+        updated_at: nowIso,
+      })
+      .eq("id", depositId);
+  }
+  await supabaseAdmin
+    .from("document_allocations")
+    .delete()
+    .eq("receipt_doc_id", refundId);
+  await supabaseAdmin.from("documents").delete().eq("id", refundId);
+}
+
+/**
+ * มัดจำคงเหลือของคู่ค้า สำหรับฟอร์มคืนเงิน
+ * AR → DEP_IN · AP → DEP_OUT · status = ISSUED · remaining > 0
+ */
+export async function getAvailableDeposits(
+  type: RefundSide,
+  contactId: string,
+): Promise<GetAvailableDepositsResult> {
+  try {
+    if (type !== "AR" && type !== "AP") {
+      return {
+        success: false,
+        data: [],
+        error: "ประเภทการคืนเงินต้องเป็น AR หรือ AP",
+      };
+    }
+
+    const trimmed = contactId?.trim() ?? "";
+    if (!trimmed) {
+      return { success: false, data: [], error: "ต้องระบุรหัสคู่ค้า" };
+    }
+
+    const supabaseAdmin = createSupabaseServerClient();
+    const depositDocType = resolveDepositDocType(type);
+    const selectWithAlloc = `
+        id,
+        doc_no,
+        doc_date,
+        doc_type,
+        contact_id,
+        grand_total,
+        deposit_deducted,
+        vat_type,
+        vat_rate,
+        status,
+        is_voided,
+        ${DEPOSIT_ALLOCATION_EMBED}
+      `;
+
+    let { data, error } = await supabaseAdmin
+      .from("documents")
+      .select(selectWithAlloc)
+      .eq("contact_id", trimmed)
+      .eq("doc_type", depositDocType)
+      .eq("status", "ISSUED")
+      .or("is_voided.is.null,is_voided.eq.false")
+      .order("doc_date", { ascending: true });
+
+    let rows = (data ?? []) as DepositDocRow[];
+
+    if (error) {
+      const fallback = await supabaseAdmin
+        .from("documents")
+        .select(
+          `
+          id,
+          doc_no,
+          doc_date,
+          doc_type,
+          contact_id,
+          grand_total,
+          deposit_deducted,
+          vat_type,
+          vat_rate,
+          status,
+          is_voided
+        `,
+        )
+        .eq("contact_id", trimmed)
+        .eq("doc_type", depositDocType)
+        .eq("status", "ISSUED")
+        .or("is_voided.is.null,is_voided.eq.false")
+        .order("doc_date", { ascending: true });
+
+      if (fallback.error) {
+        return { success: false, data: [], error: fallback.error.message };
+      }
+
+      rows = (fallback.data ?? []) as DepositDocRow[];
+      const allocatedMap = await loadAllocatedMap(
+        supabaseAdmin,
+        rows.map((row) => String(row.id)),
+      );
+      rows = rows.map((row) => ({
+        ...row,
+        allocations: [
+          { allocated_amount: allocatedMap.get(String(row.id)) ?? 0 },
+        ],
+      }));
+    }
+
+    const deposits = rows
+      .map((row) => mapRefundableDeposit(row, trimmed, depositDocType))
+      .filter((row): row is RefundableDeposit => row != null);
+
+    return { success: true, data: deposits, error: null };
+  } catch (err) {
+    return {
+      success: false,
+      data: [],
+      error:
+        err instanceof Error ? err.message : "ดึงรายการมัดจำคงเหลือไม่สำเร็จ",
+    };
+  }
+}
+
+/**
+ * สร้างใบคืนเงินมัดจำ (Late Numbering + ABAC approval_limit)
+ * ไม่บันทึก document_items — ผูกมัดจำผ่าน document_allocations เท่านั้น
+ */
+export async function createRefundDocument(
+  payload: CreateRefundDocumentPayload | unknown,
+): Promise<CreateRefundDocumentResult> {
+  const parsed = createRefundDocumentSchema.safeParse(payload);
+  if (!parsed.success) {
+    return { success: false, error: firstZodMessage(parsed.error), data: null };
+  }
+
+  const side = parsed.data.type;
+  const contactId = parsed.data.contact_id;
+  const depositId = parsed.data.deposit_id;
+  const requestAmount = roundMoney(parsed.data.amount);
+  const remark = parsed.data.remark?.trim() || null;
+  const docDate =
+    parsed.data.document_date &&
+    /^\d{4}-\d{2}-\d{2}$/.test(parsed.data.document_date)
+      ? parsed.data.document_date
+      : todayIsoDate();
+
+  const owner = await requireSessionUserId();
+  if (!owner.ok) {
+    return { success: false, error: owner.error, data: null };
+  }
+
+  const supabaseAdmin = createSupabaseServerClient();
+  const refundDocType = resolveRefundDocType(side);
+  const expectedDepositType = resolveDepositDocType(side);
+  const expectedRole = side === "AR" ? "Customer" : "Vendor";
+
+  let refundId: string | null = null;
+  let previousDepositDeducted: number | null = null;
+
+  try {
+    const { data: periodClosed, error: periodError } = await supabaseAdmin.rpc(
+      "is_period_closed",
+      { doc_date: docDate },
+    );
+    if (periodError) {
+      return { success: false, error: periodError.message, data: null };
+    }
+    if (periodClosed === true) {
+      return {
+        success: false,
+        error: "งวดบัญชีของวันที่เอกสารนี้ถูกปิดแล้ว ไม่สามารถคืนเงินมัดจำได้",
+        data: null,
+      };
+    }
+
+    const limitResult = await loadMakerApprovalLimit(
+      supabaseAdmin,
+      owner.userId,
+    );
+    if (!limitResult.ok) {
+      return { success: false, error: limitResult.error, data: null };
+    }
+
+    const { data: contact, error: contactError } = await supabaseAdmin
+      .from("contacts")
+      .select("id, contact_roles, is_active")
+      .eq("id", contactId)
+      .maybeSingle();
+
+    if (contactError) {
+      return { success: false, error: contactError.message, data: null };
+    }
+    if (!contact) {
+      return { success: false, error: "ไม่พบข้อมูลคู่ค้า", data: null };
+    }
+    if (contact.is_active === false) {
+      return {
+        success: false,
+        error: "คู่ค้ารายนี้ถูกปิดการใช้งานแล้ว",
+        data: null,
+      };
+    }
+    const roles = Array.isArray(contact.contact_roles)
+      ? contact.contact_roles
+      : [];
+    if (!roles.includes(expectedRole)) {
+      return {
+        success: false,
+        error:
+          side === "AR"
+            ? "AR_REFUND ต้องเลือกลูกค้า (Customer)"
+            : "AP_REFUND ต้องเลือกซัพพลายเออร์ (Vendor)",
+        data: null,
+      };
+    }
+
+    const { data: deposit, error: depositError } = await supabaseAdmin
+      .from("documents")
+      .select(
+        `
+        id,
+        doc_no,
+        doc_type,
+        doc_date,
+        contact_id,
+        grand_total,
+        deposit_deducted,
+        vat_type,
+        vat_rate,
+        status,
+        is_voided,
+        ${DEPOSIT_ALLOCATION_EMBED}
+      `,
+      )
+      .eq("id", depositId)
+      .maybeSingle();
+
+    let depositRow = (deposit ?? null) as DepositDocRow | null;
+
+    if (depositError) {
+      const fallback = await supabaseAdmin
+        .from("documents")
+        .select(
+          `
+          id,
+          doc_no,
+          doc_type,
+          doc_date,
+          contact_id,
+          grand_total,
+          deposit_deducted,
+          vat_type,
+          vat_rate,
+          status,
+          is_voided
+        `,
+        )
+        .eq("id", depositId)
+        .maybeSingle();
+
+      if (fallback.error || !fallback.data) {
+        return {
+          success: false,
+          error: fallback.error?.message ?? "ไม่พบเอกสารมัดจำต้นทาง",
+          data: null,
+        };
+      }
+
+      const allocatedMap = await loadAllocatedMap(supabaseAdmin, [depositId]);
+      depositRow = {
+        ...(fallback.data as DepositDocRow),
+        allocations: [
+          { allocated_amount: allocatedMap.get(depositId) ?? 0 },
+        ],
+      };
+    }
+
+    if (!depositRow) {
+      return { success: false, error: "ไม่พบเอกสารมัดจำต้นทาง", data: null };
+    }
+    if (depositRow.is_voided === true || depositRow.status === "VOID") {
+      return {
+        success: false,
+        error: "เอกสารมัดจำถูกยกเลิกแล้ว",
+        data: null,
+      };
+    }
+    if (depositRow.doc_type !== expectedDepositType) {
+      return {
+        success: false,
+        error:
+          side === "AR"
+            ? "AR_REFUND ต้องอ้างอิงมัดจำรับ (DEP_IN) เท่านั้น"
+            : "AP_REFUND ต้องอ้างอิงมัดจำจ่าย (DEP_OUT) เท่านั้น",
+        data: null,
+      };
+    }
+    if (depositRow.status !== "ISSUED") {
+      return {
+        success: false,
+        error: `มัดจำ ${depositRow.doc_no ?? depositId} ต้องเป็นสถานะ ISSUED`,
+        data: null,
+      };
+    }
+    if ((depositRow.contact_id?.trim() || "") !== contactId) {
+      return {
+        success: false,
+        error: "เอกสารมัดจำไม่ได้อยู่ภายใต้คู่ค้าที่เลือก",
+        data: null,
+      };
+    }
+
+    const vatType = normalizeVatType(depositRow.vat_type);
+    const vatRate = normalizeVatRate(depositRow.vat_rate, vatType);
+    const previousDeducted = roundMoney(toMoney(depositRow.deposit_deducted));
+    previousDepositDeducted = previousDeducted;
+    const allocatedAmount = sumAllocatedAmount(
+      depositRow.allocations,
+      previousDeducted,
+    );
+    const grandTotal = roundMoney(toMoney(depositRow.grand_total));
+    const remaining = roundMoney(Math.max(0, grandTotal - allocatedAmount));
+
+    if (remaining <= MONEY_EPS) {
+      return {
+        success: false,
+        error: "มัดจำใบนี้ไม่มียอดคงเหลือแล้ว",
+        data: null,
+      };
+    }
+    if (requestAmount > remaining + MONEY_EPS) {
+      return {
+        success: false,
+        error: `ยอดคืนเงิน (${requestAmount.toFixed(2)}) เกินยอดคงเหลือ (${remaining.toFixed(2)})`,
+        data: null,
+      };
+    }
+
+    const applyAmount = roundMoney(Math.min(requestAmount, remaining));
+    const vat = inheritVatFromDeposit({
+      refundGrand: applyAmount,
+      vatType,
+      vatRate,
+    });
+
+    const exceedsLimit = exceedsApprovalLimit(
+      vat.grand_total,
+      limitResult.approvalLimit,
+    );
+    const pendingApproval = exceedsLimit;
+    const documentNo = generateDraftDocumentNo();
+    const nowIso = new Date().toISOString();
+    const depositDocNo = depositRow.doc_no?.trim() || depositId;
+    const notesParts = [
+      `คืนเงินมัดจำจาก ${depositDocNo}`,
+      `amount=${vat.grand_total.toFixed(2)}`,
+      `vat=${vat.vat_type}@${vat.vat_rate}%`,
+      `net=${vat.net_before_vat.toFixed(2)}`,
+      `vat_amt=${vat.vat_amount.toFixed(2)}`,
+      remark ? `remark=${remark}` : null,
+    ].filter(Boolean);
+
+    const { data: refundDoc, error: insertError } = await supabaseAdmin
+      .from("documents")
+      .insert({
+        doc_no: documentNo,
+        doc_type: refundDocType,
+        status: "DRAFT",
+        doc_date: docDate,
+        contact_id: contactId,
+        ref_document_id: depositId,
+        sub_total: vat.net_before_vat,
+        discount_amount: 0,
+        tax_rate: vat.vat_rate,
+        tax_amount: vat.vat_amount,
+        wht_rate: 0,
+        wht_amount: 0,
+        grand_total: vat.grand_total,
+        total_amount: vat.net_before_vat,
+        net_before_vat: vat.net_before_vat,
+        vat_amount: vat.vat_amount,
+        vat_rate: vat.vat_rate,
+        vat_type: vat.vat_type,
+        deposit_deducted: 0,
+        paid_amount: 0,
+        payment_status: "UNPAID",
+        remark,
+        notes: notesParts.join(" | "),
+        created_by: owner.userId,
+        approval_status: pendingApproval ? "PENDING" : "APPROVED",
+        approved_by: null,
+        approved_at: null,
+        updated_at: nowIso,
+      })
+      .select("id, doc_no")
+      .single();
+
+    if (insertError || !refundDoc?.id) {
+      return {
+        success: false,
+        error: insertError?.message ?? "บันทึกใบคืนเงินมัดจำไม่สำเร็จ",
+        data: null,
+      };
+    }
+
+    refundId = String(refundDoc.id);
+    const refundDocNo = String(refundDoc.doc_no ?? documentNo);
+
+    const { error: allocError } = await supabaseAdmin
+      .from("document_allocations")
+      .insert({
+        receipt_doc_id: refundId,
+        invoice_doc_id: depositId,
+        allocated_amount: applyAmount,
+        wht_amount: 0,
+        adjustment_amount: 0,
+        adjustment_reason: remark
+          ? `${REFUND_ADJUSTMENT_REASON}: ${remark}`
+          : REFUND_ADJUSTMENT_REASON,
+      });
+
+    if (allocError) {
+      await supabaseAdmin.from("documents").delete().eq("id", refundId);
+      refundId = null;
+      return {
+        success: false,
+        error: allocError.message ?? "บันทึก document_allocations ไม่สำเร็จ",
+        data: null,
+      };
+    }
+
+    const newDeducted = roundMoney(allocatedAmount + applyAmount);
+    const { error: updateError } = await supabaseAdmin
+      .from("documents")
+      .update({
+        deposit_deducted: newDeducted,
+        updated_at: nowIso,
+      })
+      .eq("id", depositId);
+
+    if (updateError) {
+      await rollbackRefund(
+        supabaseAdmin,
+        refundId,
+        depositId,
+        previousDepositDeducted,
+      );
+      refundId = null;
+      return {
+        success: false,
+        error: `อัปเดตยอดมัดจำไม่สำเร็จ: ${updateError.message}`,
+        data: null,
+      };
+    }
+
+    const refundAudit = await logAuditTrail(
+      "documents",
+      refundId,
+      "INSERT",
+      null,
+      {
+        audit_event: refundDocType,
+        id: refundId,
+        doc_no: refundDocNo,
+        doc_type: refundDocType,
+        status: "DRAFT",
+        contact_id: contactId,
+        deposit_id: depositId,
+        deposit_doc_no: depositDocNo,
+        grand_total: vat.grand_total,
+        net_before_vat: vat.net_before_vat,
+        vat_amount: vat.vat_amount,
+        vat_type: vat.vat_type,
+        vat_rate: vat.vat_rate,
+        approval_limit: limitResult.approvalLimit,
+        exceeds_approval_limit: exceedsLimit,
+        summary: `สร้างใบคืนเงินมัดจำ ${refundDocNo} จำนวน ${vat.grand_total.toFixed(2)} บาท`,
+      },
+    );
+    if (!refundAudit.success) {
+      console.error("[createRefundDocument][audit]", refundAudit.error);
+    }
+
+    revalidatePath("/finance/deposits");
+    revalidatePath("/sales");
+    revalidatePath("/purchases");
+    if (side === "AR") {
+      revalidatePath("/finance/payments");
+      if (depositDocNo) revalidatePath(`/sales/${depositDocNo}`);
+    } else {
+      revalidatePath("/finance/ap-payment");
+      if (depositDocNo) revalidatePath(`/purchases/${depositDocNo}`);
+    }
+    revalidateApprovalCenterIfPending(pendingApproval);
+
+    return {
+      success: true,
+      error: null,
+      data: {
+        document_id: refundId,
+        document_no: refundDocNo,
+        doc_type: refundDocType,
+        grand_total: vat.grand_total,
+        net_before_vat: vat.net_before_vat,
+        vat_amount: vat.vat_amount,
+        vat_type: vat.vat_type,
+        vat_rate: vat.vat_rate,
+        pending_approval: pendingApproval,
+        approval_limit: limitResult.approvalLimit,
+      },
+    };
+  } catch (err) {
+    if (refundId) {
+      await rollbackRefund(
+        supabaseAdmin,
+        refundId,
+        depositId,
+        previousDepositDeducted,
+      );
+    }
+    return {
+      success: false,
+      error:
+        err instanceof Error ? err.message : "บันทึกใบคืนเงินมัดจำไม่สำเร็จ",
+      data: null,
+    };
+  }
+}

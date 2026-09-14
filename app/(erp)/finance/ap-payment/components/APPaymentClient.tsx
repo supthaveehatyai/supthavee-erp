@@ -162,6 +162,9 @@ export function APPaymentClient({
         return;
       }
 
+      const sourcesByInvoiceId = new Map(
+        initialInvoices.map((inv) => [inv.id, inv.allocation_sources] as const),
+      );
       const mapped: OutstandingApInvoice[] = result.data.map((row) => ({
         id: row.id,
         contact_id: row.contact_id || selectedVendorId,
@@ -173,7 +176,7 @@ export function APPaymentClient({
         allocated_amount: roundMoney(
           Math.max(0, row.grand_total - row.outstanding),
         ),
-        allocation_source_doc_nos: [],
+        allocation_sources: sourcesByInvoiceId.get(row.id) ?? [],
         remaining_balance: row.outstanding,
         payment_status: row.payment_status,
         doc_type: row.doc_type,
@@ -741,7 +744,7 @@ export function APPaymentClient({
                             <TableCell className="text-right">
                               <AllocatedAmountCell
                                 allocatedAmount={inv.allocated_amount ?? 0}
-                                sourceDocNos={inv.allocation_source_doc_nos}
+                                sources={inv.allocation_sources}
                                 formatMoney={formatMoney}
                               />
                             </TableCell>

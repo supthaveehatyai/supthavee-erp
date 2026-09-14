@@ -7,8 +7,9 @@ import type {
   AvailableDeposit,
   DepositAllocationInput,
 } from "@/types/available-deposit";
+import type { InvoiceAllocationSource } from "@/types/payment";
 
-export type { AvailableDeposit, DepositAllocationInput };
+export type { AvailableDeposit, DepositAllocationInput, InvoiceAllocationSource };
 
 export type ApVendorOption = {
   id: string;
@@ -35,8 +36,8 @@ export type OutstandingApInvoice = {
   paid_amount: number;
   /** Σ `document_allocations.allocated_amount` ของบิลนี้ */
   allocated_amount: number;
-  /** เลขที่เอกสารที่ตัดหนี้ (receipt_doc_id → documents.doc_no) */
-  allocation_source_doc_nos: string[];
+  /** รายการเอกสารที่ตัดหนี้ (PAY / PWO / CN) */
+  allocation_sources: InvoiceAllocationSource[];
   remaining_balance: number;
   payment_status: string;
   doc_type: string;
