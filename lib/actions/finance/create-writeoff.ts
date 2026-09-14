@@ -29,8 +29,6 @@ import { roundMoney } from "@/lib/utils/payment-fifo";
 import { createArWriteoffSchema } from "@/lib/validations/ar-writeoff";
 import type { CreateArWriteoffResult } from "@/types/ar-writeoff";
 
-export const maxDuration = 60;
-
 const MONEY_EPS = 0.02;
 const WRITEOFF_DOC_TYPE = "AR_WRITEOFF" as const;
 const WRITEOFF_ADJUSTMENT_REASON = "AR_WRITEOFF";
@@ -108,7 +106,7 @@ async function rollbackWriteoff(
  * บันทึกใบสำคัญตัดหนี้สูญ (AR_WRITEOFF) แบบ Late Numbering (DRAFT)
  * และตัดยอดบิลขายปลายทางผ่าน `document_allocations`
  */
-export async function createWriteoff(
+export async function createWriteOff(
   payload: unknown,
 ): Promise<CreateArWriteoffResult> {
   const parsed = createArWriteoffSchema.safeParse(payload);
@@ -465,11 +463,4 @@ export async function createWriteoff(
           : "บันทึกใบสำคัญตัดหนี้สูญไม่สำเร็จ",
     };
   }
-}
-
-/** Alias — UI / form calls `createWriteOff`. */
-export async function createWriteOff(
-  payload: unknown,
-): Promise<CreateArWriteoffResult> {
-  return createWriteoff(payload);
 }
