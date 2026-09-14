@@ -262,6 +262,7 @@ export default function ManualReceiptWorkspace({
         vatType,
         discountText: discountText.trim() || null,
         freightCost: freightCostNormalized,
+        status: "ISSUED",
         lines: lines.map((line) => ({
           product_id: line.product_id,
           qty: line.qty,
