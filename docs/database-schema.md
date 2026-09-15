@@ -19,7 +19,7 @@
 - `contacts` (คู่ค้า Multi-Role: `contact_roles` VARCHAR[] เท่านั้น — ไม่ใช้ `contact_type`)
 - `contact_persons` (ผู้ติดต่อภายใต้คู่ค้า)
 - `user_profiles` (โปรไฟล์พนักงาน/ผู้ใช้งาน — `data_access_scope` IN ('ALL','OWN'), `approval_limit`)
-- `app_roles` (สิทธิ์การใช้งาน Dynamic RBAC — `accessible_modules` JSONB: sales, purchases, inventory, finance, settings)
+- `app_roles` (สิทธิ์การใช้งาน Dynamic RBAC — `accessible_modules` JSONB: sales, purchases, inventory, finance, settings; Phase 20 Report Center: หน้า `/finance/tax-reports` และ API `/api/finance/export-tax` อนุญาตเฉพาะ `role_code` ในกลุ่ม admin / finance / manager / accountant และบล็อกบทบาทหน้างาน sales / store / warehouse / ช่าง แม้โมดูล finance จะเป็น true)
 - `system_settings` (ตั้งค่าระบบบริษัท Singleton)
 - `system_parameters` (ค่า config ปัจจุบัน — `param_key` PK, `param_value` JSONB, `data_type`; RLS: authenticated SELECT, write ผ่าน service_role)
 - `parameter_change_requests` (คำขอแก้ config แบบ Maker-Checker — `param_key` FK, `status` PENDING|APPROVED|REJECTED; RLS: service_role only)

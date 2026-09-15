@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { FileSpreadsheet } from "lucide-react";
 import {
   Card,
@@ -16,6 +17,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { canAccessReportCenter } from "@/lib/auth/module-access";
 import {
   FINANCE_REPORT_TYPE_OPTIONS,
   isFinanceReportType,
@@ -90,6 +93,14 @@ async function queryReportPreview(input: {
 }
 
 export default async function TaxReportsPage({ searchParams }: PageProps) {
+  const actor = await getCurrentAuthUser();
+  if (!actor) {
+    redirect("/login?next=/finance/tax-reports");
+  }
+  if (!canAccessReportCenter(actor.accessibleModules, actor.roleCode)) {
+    redirect("/dashboard?error=unauthorized");
+  }
+
   const params = (await searchParams) ?? {};
   const now = new Date();
   const fallbackYear = now.getFullYear();

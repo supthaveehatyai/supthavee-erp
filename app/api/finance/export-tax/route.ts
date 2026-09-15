@@ -1,12 +1,12 @@
 /**
  * Report Center Excel export
  * GET /api/finance/export-tax?year=&month=&reportType=OUTPUT_TAX|INPUT_TAX|INV_DO|EXP|PAY
- * Service Role data load — Zero Client-Side Fetching.
+ * Phase 20 — Zero Trust: Session + canAccessReportCenter ก่อนดึงข้อมูล
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
-import { canAccessPath } from "@/lib/auth/module-access";
+import { canAccessReportCenter } from "@/lib/auth/module-access";
 import {
   isDocumentRegisterReportType,
   isFinanceReportType,
@@ -31,19 +31,10 @@ export async function GET(request: NextRequest) {
   try {
     const user = await getCurrentAuthUser();
     if (!user) {
-      return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
+      return new Response("Unauthorized", { status: 401 });
     }
-    if (
-      !canAccessPath(
-        "/finance/tax-reports",
-        user.accessibleModules,
-        user.roleCode,
-      )
-    ) {
-      return NextResponse.json(
-        { error: "ไม่มีสิทธิ์ดาวน์โหลดรายงาน" },
-        { status: 403 },
-      );
+    if (!canAccessReportCenter(user.accessibleModules, user.roleCode)) {
+      return new Response("Unauthorized", { status: 403 });
     }
 
     const { searchParams } = request.nextUrl;

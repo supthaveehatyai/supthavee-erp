@@ -23,6 +23,8 @@ type NavigationItem = {
   href: string;
   /** ถ้ากำหนด จะโชว์เฉพาะเมื่อโมดูลนี้เป็น true (ไม่ตาม path ของ href) */
   requiresModule?: ErpModuleKey;
+  /** Phase 20 — ศูนย์รายงาน: เฉพาะ Admin / Finance / Manager / Accountant */
+  requiresReportCenter?: boolean;
 };
 
 type NavigationGroup = {
@@ -76,7 +78,11 @@ const navigationGroups: NavigationGroup[] = [
       { label: "ระบบวางบิล", href: "/finance/billing-notes" },
       { label: "ค่าใช้จ่าย (Expenses)", href: "/expenses" },
       { label: "รายงานหัก ณ ที่จ่าย (WHT)", href: "/tax/wht-report" },
-      { label: "ศูนย์รายงาน (Report Center)", href: "/finance/tax-reports" },
+      {
+        label: "ศูนย์รายงาน (Report Center)",
+        href: "/finance/tax-reports",
+        requiresReportCenter: true,
+      },
       { label: "สมุดบัญชีธนาคาร", href: "/finance/bank-accounts" },
       { label: "เจ้าหนี้ / ลูกหนี้", href: "/finance/ap-ar" },
       { label: "ปิดงบรายเดือน (Period Lock)", href: "/accounting-periods" },
@@ -215,6 +221,7 @@ function SidebarContent({
           accessibleModules,
           roleCode,
           item.requiresModule,
+          item.requiresReportCenter,
         ),
       ),
     }))

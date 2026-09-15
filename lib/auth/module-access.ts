@@ -165,6 +165,67 @@ export function canAccessCustomerDeposits(
   return granted.sales === true || granted.finance === true;
 }
 
+export const REPORT_CENTER_PATH = "/finance/tax-reports";
+
+/**
+ * Phase 20 — บทบาทที่เปิด Report Center ได้โดยตรง
+ * (admin / finance / manager ตามโจทย์ + accountant ตาม seed บัญชีภาษี)
+ */
+export const REPORT_CENTER_ALLOWED_ROLES = [
+  "admin",
+  "finance",
+  "manager",
+  "accountant",
+] as const;
+
+/** พนักงานหน้างาน — ห้ามเข้าถึงทะเบียนภาษี/เอกสารการเงินเด็ดขาด */
+export const REPORT_CENTER_DENIED_ROLES = [
+  "sales",
+  "store",
+  "cashier",
+  "warehouse",
+  "screen_printer",
+  "embroiderer",
+  "seamstress",
+] as const;
+
+export function isReportCenterPath(pathname: string): boolean {
+  const path = normalizePathname(pathname);
+  return (
+    path === REPORT_CENTER_PATH || path.startsWith(`${REPORT_CENTER_PATH}/`)
+  );
+}
+
+function normalizeRoleCode(roleCode: string | null | undefined): string {
+  return String(roleCode ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Report Center gate — Zero Trust
+ * 1) บล็อกบทบาทหน้างาน (Sales / Store / Warehouse / ช่าง) แม้ finance module = true
+ * 2) อนุญาต admin / finance / manager / accountant
+ * 3) บทบาทอื่นต้องมี `app_roles.accessible_modules.finance === true`
+ */
+export function canAccessReportCenter(
+  modules: AccessibleModules | null | undefined,
+  roleCode?: string | null,
+): boolean {
+  if (isAdminRoleCode(roleCode)) return true;
+
+  const role = normalizeRoleCode(roleCode);
+  if (!role) return false;
+  if ((REPORT_CENTER_DENIED_ROLES as readonly string[]).includes(role)) {
+    return false;
+  }
+  if ((REPORT_CENTER_ALLOWED_ROLES as readonly string[]).includes(role)) {
+    return true;
+  }
+
+  return parseAccessibleModules(modules, roleCode).finance === true;
+}
+
 export function resolveModuleForPath(pathname: string): ErpModuleKey | null {
   const path = normalizePathname(pathname);
   for (const key of ERP_MODULE_KEYS) {
@@ -196,6 +257,9 @@ export function canAccessPath(
   if (isAdminRoleCode(roleCode)) return true;
 
   const granted = parseAccessibleModules(modules, roleCode);
+  if (isReportCenterPath(path)) {
+    return canAccessReportCenter(granted, roleCode);
+  }
   if (isCustomerDepositPath(path) && canAccessCustomerDeposits(granted, roleCode)) {
     return true;
   }
@@ -212,8 +276,12 @@ export function canSeeNavItem(
   modules: AccessibleModules | null | undefined,
   roleCode?: string | null,
   requiresModule?: ErpModuleKey | null,
+  requiresReportCenter?: boolean,
 ): boolean {
   if (isAdminRoleCode(roleCode)) return true;
+  if (requiresReportCenter || isReportCenterPath(href)) {
+    return canAccessReportCenter(modules, roleCode);
+  }
   if (requiresModule) {
     return parseAccessibleModules(modules, roleCode)[requiresModule] === true;
   }
