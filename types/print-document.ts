@@ -59,6 +59,11 @@ export type DocumentPrintSummaryProps = {
   /** ข้อความส่วนลด เช่น "10%" — แสดงประกอบบรรทัดส่วนลด */
   discountText?: string | null;
   className?: string;
+  /**
+   * เมื่อเป็น AR_REFUND / AP_REFUND ให้ถอดฐานภาษีจากยอดสุทธิ (Grand)
+   * ตาม vat_type / vat_rate ที่สืบทอดจากมัดจำต้นทาง
+   */
+  docType?: string | null;
 };
 
 export type PrintLayoutProps = {

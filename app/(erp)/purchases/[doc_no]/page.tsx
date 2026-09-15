@@ -7,7 +7,16 @@ import {
   getDepositAllocationHistory,
   getDocumentAllocationsByReceiptId,
 } from "@/lib/actions/finance/allocations";
-import { PURCHASE_DOC_TYPES } from "@/lib/constants/document";
+import {
+  getDocumentTypeLabel,
+  isRefundDocType,
+  PURCHASE_DOC_TYPES,
+} from "@/lib/constants/document";
+import { computePrintVatBreakdown } from "@/components/shared/print/DocumentPrintSummary";
+import {
+  loadSourceDepositVat,
+  resolveRefundInheritedVat,
+} from "@/lib/finance/refund-print-vat";
 import { VoidDocumentButton } from "@/components/shared/document/void-document-button";
 import { VoidedDocumentAlert } from "@/components/shared/document/voided-document-alert";
 import { resolveVoidRemark } from "@/lib/utils/void-remark";
@@ -177,6 +186,32 @@ export default async function PurchaseDocumentDetailPage({
     : { data: [], error: null };
 
   const grandTotal = Number(doc.grand_total ?? 0);
+  const isRefundDoc = isRefundDocType(doc.doc_type);
+  const refundSourceVat = isRefundDoc
+    ? await loadSourceDepositVat([
+        ...allocationsResult.data.map((row) => row.invoice_doc_id),
+        doc.ref_document_id,
+      ])
+    : null;
+  const inheritedRefundVat = isRefundDoc
+    ? resolveRefundInheritedVat({
+        vatType: doc.vat_type,
+        vatRate: doc.vat_rate,
+        taxRate: doc.tax_rate,
+        sourceVatType: refundSourceVat?.vatType,
+        sourceVatRate: refundSourceVat?.vatRate,
+      })
+    : null;
+  const refundVatBreakdown = inheritedRefundVat
+    ? computePrintVatBreakdown({
+        subtotal: grandTotal,
+        discountAmount: 0,
+        vatType: inheritedRefundVat.vatType,
+        vatRate: inheritedRefundVat.vatRate,
+        grandTotal,
+        extractFromGrand: true,
+      })
+    : null;
   const whtAmount = Number(doc.wht_amount ?? 0);
   const whtRate = Number(doc.wht_rate ?? 0);
   const wageGross = Number(
@@ -189,12 +224,18 @@ export default async function PurchaseDocumentDetailPage({
   );
   const depositUsed = Math.max(depositDeducted, depositUsedFromHistory);
   const depositAvailable = Math.max(0, grandTotal - depositUsed);
-  const subTotal = Number(
-    doc.net_before_vat ?? doc.total_amount ?? doc.sub_total ?? 0,
-  );
-  const vatAmount = Number(doc.vat_amount ?? doc.tax_amount ?? 0);
-  const vatRate = Number(doc.vat_rate ?? doc.tax_rate ?? 0);
-  const vatType = doc.vat_type ?? "NONE";
+  const subTotal = refundVatBreakdown
+    ? refundVatBreakdown.baseAmount
+    : Number(doc.net_before_vat ?? doc.total_amount ?? doc.sub_total ?? 0);
+  const vatAmount = refundVatBreakdown
+    ? refundVatBreakdown.vatAmount
+    : Number(doc.vat_amount ?? doc.tax_amount ?? 0);
+  const vatRate = inheritedRefundVat
+    ? inheritedRefundVat.vatRate
+    : Number(doc.vat_rate ?? doc.tax_rate ?? 0);
+  const vatType = inheritedRefundVat
+    ? inheritedRefundVat.vatType
+    : (doc.vat_type ?? "NONE");
   const vatTypeLabel =
     vatType === "NONE"
       ? "Non-VAT"
@@ -209,10 +250,7 @@ export default async function PurchaseDocumentDetailPage({
     slipMeta.storage_tier === "NAS" ||
     Boolean(slipUrl) ||
     Boolean(resolveSlipUrl(doc));
-  const settlementTitle =
-    doc.doc_type === "AP_REFUND"
-      ? "ใบสำคัญรับเงินคืน (Refund Receipt)"
-      : "ใบสำคัญปรับปรุงบัญชี - ตัดเป็นค่าใช้จ่าย (Write-off Expense)";
+  const settlementTitle = getDocumentTypeLabel(doc.doc_type);
   const canVoid =
     doc.status === "ISSUED" && Number(doc.paid_amount ?? 0) === 0;
 
@@ -237,7 +275,8 @@ export default async function PurchaseDocumentDetailPage({
               {statusBadge(doc.status)}
             </div>
             <p className="mt-0.5 text-sm text-slate-500">
-              {doc.doc_type} · วันที่เอกสาร {formatDate(doc.doc_date)}
+              {isSettlementDoc ? settlementTitle : doc.doc_type} · วันที่เอกสาร{" "}
+              {formatDate(doc.doc_date)}
             </p>
           </div>
         </div>
@@ -353,7 +392,11 @@ export default async function PurchaseDocumentDetailPage({
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3 text-slate-600">
-                  <span>ยอดก่อนภาษี (Net Total)</span>
+                  <span>
+                    {isRefundDoc
+                      ? "มูลค่าก่อนภาษี (Vatable)"
+                      : "ยอดก่อนภาษี (Net Total)"}
+                  </span>
                   <span className="tabular-nums font-medium text-slate-800">
                     {formatMoney(subTotal)}
                   </span>

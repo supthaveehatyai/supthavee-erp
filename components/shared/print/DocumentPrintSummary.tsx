@@ -1,4 +1,5 @@
 import { numberToThaiBaht } from "@/lib/utils/thai-baht-text";
+import { isRefundDocType } from "@/lib/constants/document";
 import type {
   DocumentPrintSummaryProps,
   PrintVatType,
@@ -28,6 +29,7 @@ function normalizeVatType(value: string | undefined): PrintVatType {
  * - INCLUSIVE: Base = grandTotal × 100 / (100 + rate), VAT = grand − Base
  * - EXCLUSIVE: Base = subtotal − discount, VAT = Base × rate / 100
  * - NONE: Base = subtotal − discount, VAT = 0
+ * - extractFromGrand: บังคับถอดฐานจากยอดสุทธิ (ใช้กับ Refund ที่ inherit VAT)
  */
 export function computePrintVatBreakdown(input: {
   subtotal: number;
@@ -35,6 +37,7 @@ export function computePrintVatBreakdown(input: {
   vatType: PrintVatType;
   vatRate: number;
   grandTotal: number;
+  extractFromGrand?: boolean;
 }): { baseAmount: number; vatAmount: number; afterDiscount: number } {
   const subtotal = round2(input.subtotal);
   const discountAmount = round2(Math.max(0, input.discountAmount));
@@ -48,7 +51,7 @@ export function computePrintVatBreakdown(input: {
     return { baseAmount: afterDiscount, vatAmount: 0, afterDiscount };
   }
 
-  if (vatType === "INCLUSIVE") {
+  if (input.extractFromGrand || vatType === "INCLUSIVE") {
     const baseAmount = round2((grandTotal * 100) / (100 + vatRate));
     const vatAmount = round2(grandTotal - baseAmount);
     return { baseAmount, vatAmount, afterDiscount };
@@ -109,8 +112,10 @@ export function DocumentPrintSummary({
   withholdingTaxAmount,
   discountText,
   className,
+  docType,
 }: DocumentPrintSummaryProps) {
   const vatType = normalizeVatType(vatTypeProp);
+  const extractFromGrand = isRefundDocType(String(docType ?? ""));
   const safeFreight = round2(Math.max(0, Number(freightCost ?? 0)));
   const safeSubtotal = round2(subtotal);
   const linesSubtotal =
@@ -118,34 +123,45 @@ export function DocumentPrintSummary({
   const safeDiscount = round2(Math.max(0, discountAmount));
   const safeGrand = round2(grandTotal);
   const safeWht = round2(Math.max(0, Number(withholdingTaxAmount ?? 0)));
+  const safeVatRate =
+    vatType === "NONE"
+      ? 0
+      : Number.isFinite(vatRate) && vatRate > 0
+        ? vatRate
+        : 7;
 
   const { baseAmount, vatAmount, afterDiscount } = computePrintVatBreakdown({
-    subtotal: safeSubtotal,
-    discountAmount: safeDiscount,
+    subtotal: extractFromGrand ? safeGrand : safeSubtotal,
+    discountAmount: extractFromGrand ? 0 : safeDiscount,
     vatType,
-    vatRate,
+    vatRate: safeVatRate,
     grandTotal: safeGrand,
+    extractFromGrand,
   });
 
-  const showLinesSubtotal = safeFreight > 0 && linesSubtotal !== 0;
-  const showFreight = safeFreight > 0;
-  const showSubtotal = !showLinesSubtotal && safeSubtotal !== 0;
-  const showCombinedSubtotal = showFreight && safeSubtotal !== 0;
-  const showDiscount = safeDiscount > 0;
-  const showAfterDiscount = showDiscount && afterDiscount !== safeSubtotal;
+  const showLinesSubtotal =
+    !extractFromGrand && safeFreight > 0 && linesSubtotal !== 0;
+  const showFreight = !extractFromGrand && safeFreight > 0;
+  const showSubtotal =
+    !extractFromGrand && !showLinesSubtotal && safeSubtotal !== 0;
+  const showCombinedSubtotal =
+    !extractFromGrand && showFreight && safeSubtotal !== 0;
+  const showDiscount = !extractFromGrand && safeDiscount > 0;
+  const showAfterDiscount =
+    !extractFromGrand && showDiscount && afterDiscount !== safeSubtotal;
   const showVat = vatType !== "NONE" && vatAmount > 0;
   const showBaseBeforeVat =
-    showVat && vatType === "INCLUSIVE" && baseAmount > 0;
+    showVat && (vatType === "INCLUSIVE" || extractFromGrand) && baseAmount > 0;
   const showWht = safeWht > 0;
   const netPayable = showWht ? round2(safeGrand - safeWht) : safeGrand;
   const thaiBahtText = numberToThaiBaht(safeGrand);
 
   const vatLabel =
     vatType === "INCLUSIVE"
-      ? `ภาษีมูลค่าเพิ่ม ${vatRate}% (Inclusive)`
+      ? `ภาษีมูลค่าเพิ่ม ${safeVatRate}% (Inclusive)`
       : vatType === "EXCLUSIVE"
-        ? `ภาษีมูลค่าเพิ่ม ${vatRate}% (Exclusive)`
-        : `ภาษีมูลค่าเพิ่ม ${vatRate}%`;
+        ? `ภาษีมูลค่าเพิ่ม ${safeVatRate}% (Exclusive)`
+        : `ภาษีมูลค่าเพิ่ม ${safeVatRate}%`;
 
   return (
     <div
@@ -192,7 +208,11 @@ export function DocumentPrintSummary({
 
         {showBaseBeforeVat ? (
           <SummaryRow
-            label="มูลค่าสินค้า/บริการ (ก่อน VAT)"
+            label={
+              extractFromGrand
+                ? "มูลค่าก่อนภาษี (Vatable)"
+                : "มูลค่าสินค้า/บริการ (ก่อน VAT)"
+            }
             value={formatMoney(baseAmount)}
           />
         ) : null}

@@ -6,9 +6,13 @@ import Link from "next/link";
 import { PrintLayout } from "@/components/shared/print/PrintLayout";
 import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
 import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
+import { getDocumentTypeLabel, isRefundDocType } from "@/lib/constants/document";
+import {
+  loadSourceDepositVat,
+  resolveRefundInheritedVat,
+} from "@/lib/finance/refund-print-vat";
 import type { DocumentDetail } from "@/types/document";
 import type { DocumentAllocationRow } from "@/types/document-allocation";
-import type { PrintVatType } from "@/types/print-document";
 import { cn } from "@/lib/utils";
 
 export type PrintSettlementVoucherTemplateProps = {
@@ -45,42 +49,18 @@ function extractRemark(notes: string | null | undefined): string | null {
   return cleaned || null;
 }
 
-function normalizePrintVatType(value: string | null | undefined): PrintVatType {
-  if (value === "INCLUSIVE" || value === "EXCLUSIVE" || value === "NONE") {
-    return value;
-  }
-  return "NONE";
-}
-
 export default async function PrintSettlementVoucherTemplate({
   document: doc,
   allocations,
   detailBasePath,
   className,
 }: PrintSettlementVoucherTemplateProps) {
-  const isRefund =
-    doc.doc_type === "AR_REFUND" ||
-    doc.doc_type === "AP_REFUND" ||
-    doc.doc_type === "REFUND";
-  const isWriteOff =
-    doc.doc_type === "AR_WRITEOFF" ||
-    doc.doc_type === "AP_WRITEOFF" ||
-    doc.doc_type === "WRITE_OFF";
+  const isRefund = isRefundDocType(doc.doc_type);
   const isPurchasesSide =
     detailBasePath === "/purchases" ||
     doc.doc_type === "AP_REFUND" ||
     doc.doc_type === "AP_WRITEOFF";
-  const title = isPurchasesSide
-    ? isRefund
-      ? "ใบสำคัญรับเงินคืน (Refund Receipt)"
-      : isWriteOff
-        ? "ใบสำคัญปรับปรุงบัญชี - ตัดเป็นค่าใช้จ่าย (Write-off Expense)"
-        : "ใบสำคัญปรับปรุงบัญชี"
-    : isRefund
-      ? "ใบสำคัญจ่ายเงินคืน (Refund Payment)"
-      : isWriteOff
-        ? "ใบสำคัญปรับปรุงบัญชี - รับรู้รายได้ (Write-off Income)"
-        : "ใบสำคัญปรับปรุงบัญชี";
+  const title = getDocumentTypeLabel(doc.doc_type);
   const partyLabel = isPurchasesSide
     ? "ซัพพลายเออร์ / Vendor"
     : "ลูกค้า / Customer";
@@ -89,8 +69,29 @@ export default async function PrintSettlementVoucherTemplate({
     doc.total_amount ?? doc.sub_total ?? doc.net_before_vat ?? grandTotal,
   );
   const discountAmount = Number(doc.discount_amount ?? 0);
-  const vatRate = Number(doc.vat_rate ?? doc.tax_rate ?? 0);
-  const vatType = normalizePrintVatType(doc.vat_type);
+  const sourceVat = isRefund
+    ? await loadSourceDepositVat([
+        ...allocations.map((row) => row.invoice_doc_id),
+        doc.ref_document_id,
+      ])
+    : null;
+  const inheritedVat = resolveRefundInheritedVat({
+    vatType: doc.vat_type,
+    vatRate: doc.vat_rate,
+    taxRate: doc.tax_rate,
+    sourceVatType: sourceVat?.vatType,
+    sourceVatRate: sourceVat?.vatRate,
+  });
+  const vatType = isRefund
+    ? inheritedVat.vatType
+    : doc.vat_type === "INCLUSIVE" ||
+        doc.vat_type === "EXCLUSIVE" ||
+        doc.vat_type === "NONE"
+      ? doc.vat_type
+      : "NONE";
+  const vatRate = isRefund
+    ? inheritedVat.vatRate
+    : Number(doc.vat_rate ?? doc.tax_rate ?? 0);
   const remark = extractRemark(doc.notes);
   const paperSize = await getDocumentPrintPaperSize(doc.doc_type);
 
@@ -178,8 +179,9 @@ export default async function PrintSettlementVoucherTemplate({
         subtotal={subtotal}
         discountAmount={discountAmount}
         vatType={vatType}
-        vatRate={vatRate || 7}
+        vatRate={vatRate}
         grandTotal={grandTotal}
+        docType={doc.doc_type}
       />
     </PrintLayout>
   );

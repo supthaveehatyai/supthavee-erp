@@ -30,12 +30,17 @@ import {
 } from "@/lib/utils/document-summary";
 import { todayIsoDate } from "@/lib/utils/outstanding-summary";
 import { roundMoney } from "@/lib/utils/payment-fifo";
-import { createRefundDocumentSchema } from "@/lib/validations/refund";
+import {
+  CASH_ACCOUNT_SENTINEL,
+  createRefundDocumentSchema,
+} from "@/lib/validations/refund";
 import type {
   CreateRefundDocumentPayload,
   CreateRefundDocumentResult,
   GetAvailableDepositsResult,
+  GetRefundPartiesResult,
   RefundDocType,
+  RefundPartyOption,
   RefundableDeposit,
   RefundSide,
 } from "@/types/refund";
@@ -43,6 +48,15 @@ import type {
 const MONEY_EPS = 0.02;
 const DEFAULT_VAT_RATE = 7;
 const REFUND_ADJUSTMENT_REASON = "REFUND";
+const DOCUMENT_ATTACHMENTS_BUCKET = "document_attachments";
+const ALLOWED_SLIP_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+]);
 
 const DEPOSIT_ALLOCATION_EMBED = `
   allocations:document_allocations!document_allocations_invoice_doc_id_fkey (
@@ -52,6 +66,11 @@ const DEPOSIT_ALLOCATION_EMBED = `
 
 type NestedAllocationRow = {
   allocated_amount?: number | string | null;
+};
+
+type ContactJoin = {
+  id?: string;
+  company_name?: string | null;
 };
 
 type DepositDocRow = {
@@ -67,11 +86,121 @@ type DepositDocRow = {
   status: string | null;
   is_voided: boolean | null;
   allocations?: NestedAllocationRow[] | NestedAllocationRow | null;
+  contacts?: ContactJoin | ContactJoin[] | null;
 };
 
 function toMoney(value: number | string | null | undefined): number {
   const n = Number(value ?? 0);
   return Number.isFinite(n) ? n : 0;
+}
+
+function unwrapContact(
+  value: ContactJoin | ContactJoin[] | null | undefined,
+): ContactJoin | null {
+  if (value == null) return null;
+  return Array.isArray(value) ? (value[0] ?? null) : value;
+}
+
+function coerceCreatePayload(raw: unknown): {
+  fields: unknown;
+  slipFile: File | null;
+} {
+  if (raw instanceof FormData) {
+    const slip = raw.get("slip_file");
+    return {
+      fields: {
+        type: String(raw.get("type") ?? "").trim(),
+        contact_id: String(raw.get("contact_id") ?? "").trim(),
+        deposit_id: String(raw.get("deposit_id") ?? "").trim(),
+        amount: raw.get("amount"),
+        remark: String(raw.get("remark") ?? "").trim() || null,
+        document_date: String(raw.get("document_date") ?? "").trim() || null,
+        bank_account_id: String(raw.get("bank_account_id") ?? "").trim(),
+      },
+      slipFile: slip instanceof File && slip.size > 0 ? slip : null,
+    };
+  }
+
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    const slip = obj.slip_file;
+    return {
+      fields: {
+        type: obj.type,
+        contact_id: obj.contact_id,
+        deposit_id: obj.deposit_id,
+        amount: obj.amount,
+        remark: obj.remark,
+        document_date: obj.document_date,
+        bank_account_id: obj.bank_account_id,
+      },
+      slipFile: slip instanceof File && slip.size > 0 ? slip : null,
+    };
+  }
+
+  return { fields: raw, slipFile: null };
+}
+
+async function uploadRefundSlip(
+  supabase: SupabaseClient,
+  file: File,
+): Promise<{ url: string; path: string } | { error: string }> {
+  const mimeType = (file.type || "").toLowerCase();
+  if (mimeType && !ALLOWED_SLIP_MIME_TYPES.has(mimeType)) {
+    return {
+      error: `ประเภทไฟล์ไม่รองรับ (${mimeType || "unknown"}) — ใช้ JPG/PNG/WEBP/GIF/PDF`,
+    };
+  }
+
+  const maxBytes = 10 * 1024 * 1024;
+  if (file.size > maxBytes) {
+    return { error: "ไฟล์สลิปใหญ่เกิน 10MB" };
+  }
+
+  const now = new Date();
+  const yyyy = String(now.getUTCFullYear());
+  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const safeName = file.name
+    .replace(/[^\w.\-ก-๙]+/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, 120);
+  const extFromName = safeName.includes(".")
+    ? safeName.slice(safeName.lastIndexOf("."))
+    : mimeType === "application/pdf"
+      ? ".pdf"
+      : mimeType === "image/png"
+        ? ".png"
+        : mimeType === "image/webp"
+          ? ".webp"
+          : mimeType === "image/gif"
+            ? ".gif"
+            : ".jpg";
+  const objectPath = `refunds/${yyyy}/${mm}/${crypto.randomUUID()}${extFromName}`;
+  const buffer = Buffer.from(await file.arrayBuffer());
+
+  const { error: uploadError } = await supabase.storage
+    .from(DOCUMENT_ATTACHMENTS_BUCKET)
+    .upload(objectPath, buffer, {
+      contentType: mimeType || "application/octet-stream",
+      upsert: false,
+    });
+
+  if (uploadError) {
+    return {
+      error: uploadError.message ?? "อัปโหลดสลิปขึ้น Storage ไม่สำเร็จ",
+    };
+  }
+
+  const { data: publicData } = supabase.storage
+    .from(DOCUMENT_ATTACHMENTS_BUCKET)
+    .getPublicUrl(objectPath);
+
+  const url = publicData?.publicUrl?.trim();
+  if (!url) {
+    return { error: "อัปโหลดสลิปสำเร็จ แต่สร้าง URL ไม่ได้" };
+  }
+
+  return { url, path: objectPath };
 }
 
 function firstZodMessage(error: {
@@ -251,6 +380,7 @@ async function rollbackRefund(
   refundId: string,
   depositId: string | null,
   previousDepositDeducted: number | null,
+  slipStoragePath?: string | null,
 ): Promise<void> {
   const nowIso = new Date().toISOString();
   if (depositId && previousDepositDeducted != null) {
@@ -263,10 +393,19 @@ async function rollbackRefund(
       .eq("id", depositId);
   }
   await supabaseAdmin
+    .from("payment_transactions")
+    .delete()
+    .eq("document_id", refundId);
+  await supabaseAdmin
     .from("document_allocations")
     .delete()
     .eq("receipt_doc_id", refundId);
   await supabaseAdmin.from("documents").delete().eq("id", refundId);
+  if (slipStoragePath) {
+    await supabaseAdmin.storage
+      .from(DOCUMENT_ATTACHMENTS_BUCKET)
+      .remove([slipStoragePath]);
+  }
 }
 
 /**
@@ -376,13 +515,157 @@ export async function getAvailableDeposits(
 }
 
 /**
+ * คู่ค้าที่มียอดมัดจำคงเหลือ สำหรับ Smart Combobox (Zero Client-Side Fetching)
+ */
+export async function getRefundParties(
+  type: RefundSide,
+): Promise<GetRefundPartiesResult> {
+  try {
+    if (type !== "AR" && type !== "AP") {
+      return {
+        success: false,
+        data: [],
+        error: "ประเภทการคืนเงินต้องเป็น AR หรือ AP",
+      };
+    }
+
+    const supabaseAdmin = createSupabaseServerClient();
+    const depositDocType = resolveDepositDocType(type);
+    const { data, error } = await supabaseAdmin
+      .from("documents")
+      .select(
+        `
+        id,
+        doc_no,
+        doc_date,
+        doc_type,
+        contact_id,
+        grand_total,
+        deposit_deducted,
+        vat_type,
+        vat_rate,
+        status,
+        is_voided,
+        contacts:contact_id (
+          id,
+          company_name
+        ),
+        ${DEPOSIT_ALLOCATION_EMBED}
+      `,
+      )
+      .eq("doc_type", depositDocType)
+      .eq("status", "ISSUED")
+      .or("is_voided.is.null,is_voided.eq.false")
+      .order("doc_date", { ascending: true });
+
+    let rows = (data ?? []) as DepositDocRow[];
+    if (error) {
+      const fallback = await supabaseAdmin
+        .from("documents")
+        .select(
+          `
+          id,
+          doc_no,
+          doc_date,
+          doc_type,
+          contact_id,
+          grand_total,
+          deposit_deducted,
+          vat_type,
+          vat_rate,
+          status,
+          is_voided,
+          contacts:contact_id (
+            id,
+            company_name
+          )
+        `,
+        )
+        .eq("doc_type", depositDocType)
+        .eq("status", "ISSUED")
+        .or("is_voided.is.null,is_voided.eq.false");
+
+      if (fallback.error) {
+        return { success: false, data: [], error: fallback.error.message };
+      }
+      rows = (fallback.data ?? []) as DepositDocRow[];
+      const allocatedMap = await loadAllocatedMap(
+        supabaseAdmin,
+        rows.map((row) => String(row.id)),
+      );
+      rows = rows.map((row) => ({
+        ...row,
+        allocations: [
+          { allocated_amount: allocatedMap.get(String(row.id)) ?? 0 },
+        ],
+      }));
+    }
+
+    const grouped = new Map<
+      string,
+      { name: string; outstanding_total: number; invoice_count: number }
+    >();
+
+    for (const row of rows) {
+      const mapped = mapRefundableDeposit(
+        row,
+        row.contact_id?.trim() || "",
+        depositDocType,
+      );
+      if (!mapped) continue;
+      const contact = unwrapContact(row.contacts);
+      const contactId = mapped.contact_id || contact?.id?.trim() || "";
+      if (!contactId) continue;
+      const existing = grouped.get(contactId);
+      const name =
+        contact?.company_name?.trim() ||
+        existing?.name ||
+        (type === "AR" ? "ไม่ระบุลูกค้า" : "ไม่ระบุซัพพลายเออร์");
+      if (!existing) {
+        grouped.set(contactId, {
+          name,
+          outstanding_total: mapped.remaining_balance,
+          invoice_count: 1,
+        });
+      } else {
+        existing.outstanding_total = roundMoney(
+          existing.outstanding_total + mapped.remaining_balance,
+        );
+        existing.invoice_count += 1;
+        if (!existing.name && name) existing.name = name;
+      }
+    }
+
+    const parties: RefundPartyOption[] = [...grouped.entries()]
+      .map(([id, row]) => ({
+        id,
+        name: row.name,
+        outstanding_total: row.outstanding_total,
+        invoice_count: row.invoice_count,
+      }))
+      .filter((row) => row.outstanding_total > MONEY_EPS)
+      .sort((a, b) => b.outstanding_total - a.outstanding_total);
+
+    return { success: true, data: parties, error: null };
+  } catch (err) {
+    return {
+      success: false,
+      data: [],
+      error:
+        err instanceof Error ? err.message : "ดึงรายชื่อคู่ค้ามัดจำคงเหลือไม่สำเร็จ",
+    };
+  }
+}
+
+/**
  * สร้างใบคืนเงินมัดจำ (Late Numbering + ABAC approval_limit)
  * ไม่บันทึก document_items — ผูกมัดจำผ่าน document_allocations เท่านั้น
  */
 export async function createRefundDocument(
-  payload: CreateRefundDocumentPayload | unknown,
+  payload: CreateRefundDocumentPayload | FormData | unknown,
 ): Promise<CreateRefundDocumentResult> {
-  const parsed = createRefundDocumentSchema.safeParse(payload);
+  const coerced = coerceCreatePayload(payload);
+  const parsed = createRefundDocumentSchema.safeParse(coerced.fields);
   if (!parsed.success) {
     return { success: false, error: firstZodMessage(parsed.error), data: null };
   }
@@ -397,6 +680,9 @@ export async function createRefundDocument(
     /^\d{4}-\d{2}-\d{2}$/.test(parsed.data.document_date)
       ? parsed.data.document_date
       : todayIsoDate();
+  const bankAccountRaw = parsed.data.bank_account_id.trim();
+  const isCash = bankAccountRaw === CASH_ACCOUNT_SENTINEL;
+  const slipFile = coerced.slipFile;
 
   const owner = await requireSessionUserId();
   if (!owner.ok) {
@@ -410,6 +696,7 @@ export async function createRefundDocument(
 
   let refundId: string | null = null;
   let previousDepositDeducted: number | null = null;
+  let slipStoragePath: string | null = null;
 
   try {
     const { data: periodClosed, error: periodError } = await supabaseAdmin.rpc(
@@ -466,6 +753,34 @@ export async function createRefundDocument(
             : "AP_REFUND ต้องเลือกซัพพลายเออร์ (Vendor)",
         data: null,
       };
+    }
+
+    let bankAccountId: string | null = null;
+    if (!isCash) {
+      const { data: bank, error: bankError } = await supabaseAdmin
+        .from("mst_bank_accounts")
+        .select("id, is_active")
+        .eq("id", bankAccountRaw)
+        .maybeSingle();
+
+      if (bankError) {
+        return { success: false, error: bankError.message, data: null };
+      }
+      if (!bank) {
+        return {
+          success: false,
+          error: "ไม่พบบัญชีธนาคารที่เลือก",
+          data: null,
+        };
+      }
+      if (bank.is_active === false) {
+        return {
+          success: false,
+          error: "บัญชีธนาคารนี้ถูกปิดการใช้งานแล้ว",
+          data: null,
+        };
+      }
+      bankAccountId = String(bank.id);
     }
 
     const { data: deposit, error: depositError } = await supabaseAdmin
@@ -597,6 +912,18 @@ export async function createRefundDocument(
       vatRate,
     });
 
+    let slipUrl: string | null = null;
+    let originalFileName: string | null = null;
+    if (slipFile) {
+      const uploaded = await uploadRefundSlip(supabaseAdmin, slipFile);
+      if ("error" in uploaded) {
+        return { success: false, error: uploaded.error, data: null };
+      }
+      slipUrl = uploaded.url;
+      slipStoragePath = uploaded.path;
+      originalFileName = slipFile.name.slice(0, 255);
+    }
+
     const exceedsLimit = exceedsApprovalLimit(
       vat.grand_total,
       limitResult.approvalLimit,
@@ -640,6 +967,9 @@ export async function createRefundDocument(
         payment_status: "UNPAID",
         remark,
         notes: notesParts.join(" | "),
+        attachment_url: slipUrl,
+        attached_file_url: slipUrl,
+        original_file_name: originalFileName,
         created_by: owner.userId,
         approval_status: pendingApproval ? "PENDING" : "APPROVED",
         approved_by: null,
@@ -650,6 +980,11 @@ export async function createRefundDocument(
       .single();
 
     if (insertError || !refundDoc?.id) {
+      if (slipStoragePath) {
+        await supabaseAdmin.storage
+          .from(DOCUMENT_ATTACHMENTS_BUCKET)
+          .remove([slipStoragePath]);
+      }
       return {
         success: false,
         error: insertError?.message ?? "บันทึกใบคืนเงินมัดจำไม่สำเร็จ",
@@ -674,7 +1009,13 @@ export async function createRefundDocument(
       });
 
     if (allocError) {
-      await supabaseAdmin.from("documents").delete().eq("id", refundId);
+      await rollbackRefund(
+        supabaseAdmin,
+        refundId,
+        null,
+        null,
+        slipStoragePath,
+      );
       refundId = null;
       return {
         success: false,
@@ -698,11 +1039,41 @@ export async function createRefundDocument(
         refundId,
         depositId,
         previousDepositDeducted,
+        slipStoragePath,
       );
       refundId = null;
       return {
         success: false,
         error: `อัปเดตยอดมัดจำไม่สำเร็จ: ${updateError.message}`,
+        data: null,
+      };
+    }
+
+    const { error: txError } = await supabaseAdmin
+      .from("payment_transactions")
+      .insert({
+        document_id: refundId,
+        payment_method: isCash ? "CASH" : "BANK_TRANSFER",
+        bank_account_id: bankAccountId,
+        amount: applyAmount,
+        payment_date: docDate,
+        attachment_url: slipUrl,
+        is_reconciled: false,
+        is_voided: false,
+      });
+
+    if (txError) {
+      await rollbackRefund(
+        supabaseAdmin,
+        refundId,
+        depositId,
+        previousDepositDeducted,
+        slipStoragePath,
+      );
+      refundId = null;
+      return {
+        success: false,
+        error: txError.message ?? "บันทึก payment_transactions ไม่สำเร็จ",
         data: null,
       };
     }
@@ -728,6 +1099,8 @@ export async function createRefundDocument(
         vat_rate: vat.vat_rate,
         approval_limit: limitResult.approvalLimit,
         exceeds_approval_limit: exceedsLimit,
+        bank_account_id: bankAccountId,
+        payment_method: isCash ? "CASH" : "BANK_TRANSFER",
         summary: `สร้างใบคืนเงินมัดจำ ${refundDocNo} จำนวน ${vat.grand_total.toFixed(2)} บาท`,
       },
     );
@@ -736,6 +1109,7 @@ export async function createRefundDocument(
     }
 
     revalidatePath("/finance/deposits");
+    revalidatePath("/finance/refunds/create");
     revalidatePath("/sales");
     revalidatePath("/purchases");
     if (side === "AR") {
@@ -770,6 +1144,7 @@ export async function createRefundDocument(
         refundId,
         depositId,
         previousDepositDeducted,
+        slipStoragePath,
       );
     }
     return {

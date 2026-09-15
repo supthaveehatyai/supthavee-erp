@@ -13,10 +13,17 @@ import {
   CREDIT_NOTE_SOURCE_DOC_TYPES,
   CREDIT_NOTE_SOURCE_STATUSES,
   SALES_DOC_TYPES,
+  getDocumentTypeLabel,
+  isRefundDocType,
 } from "@/lib/constants/document";
 import PrintDocumentTemplate from "@/components/sales/print-document-template";
 import PrintPaymentReceiptTemplate from "@/components/finance/PrintPaymentReceiptTemplate";
 import PrintSettlementVoucherTemplate from "@/components/finance/PrintSettlementVoucherTemplate";
+import { computePrintVatBreakdown } from "@/components/shared/print/DocumentPrintSummary";
+import {
+  loadSourceDepositVat,
+  resolveRefundInheritedVat,
+} from "@/lib/finance/refund-print-vat";
 import { AllocatedDocumentsTable } from "@/components/finance/AllocatedDocumentsTable";
 import { DepositAllocationHistoryTable } from "@/components/finance/DepositAllocationHistoryTable";
 import { DepositBalanceActions } from "@/components/finance/DepositBalanceActions";
@@ -371,10 +378,53 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
     doc.status !== "DRAFT";
   const subtotal = Number(doc.total_amount ?? doc.sub_total ?? 0);
   const discountAmount = Number(doc.discount_amount ?? 0);
-  const netBeforeVat = Number(doc.net_before_vat ?? subtotal - discountAmount);
-  const vatAmount = Number(doc.vat_amount ?? doc.tax_amount ?? 0);
-  const vatRate = Number(doc.vat_rate ?? doc.tax_rate ?? 7);
   const grandTotal = Number(doc.grand_total ?? 0);
+  const isRefundDoc = isRefundDocType(doc.doc_type);
+  const refundSourceVat = isRefundDoc
+    ? await loadSourceDepositVat([
+        ...allocationsResult.data.map((row) => row.invoice_doc_id),
+        doc.ref_document_id,
+      ])
+    : null;
+  const inheritedRefundVat = isRefundDoc
+    ? resolveRefundInheritedVat({
+        vatType: doc.vat_type,
+        vatRate: doc.vat_rate,
+        taxRate: doc.tax_rate,
+        sourceVatType: refundSourceVat?.vatType,
+        sourceVatRate: refundSourceVat?.vatRate,
+      })
+    : null;
+  const refundVatBreakdown = inheritedRefundVat
+    ? computePrintVatBreakdown({
+        subtotal: grandTotal,
+        discountAmount: 0,
+        vatType: inheritedRefundVat.vatType,
+        vatRate: inheritedRefundVat.vatRate,
+        grandTotal,
+        extractFromGrand: true,
+      })
+    : null;
+  const netBeforeVat = refundVatBreakdown
+    ? refundVatBreakdown.baseAmount
+    : Number(doc.net_before_vat ?? subtotal - discountAmount);
+  const vatAmount = refundVatBreakdown
+    ? refundVatBreakdown.vatAmount
+    : Number(doc.vat_amount ?? doc.tax_amount ?? 0);
+  const vatRate = inheritedRefundVat
+    ? inheritedRefundVat.vatRate
+    : Number(doc.vat_rate ?? doc.tax_rate ?? 7);
+  const vatTypeCode = inheritedRefundVat
+    ? inheritedRefundVat.vatType
+    : (doc.vat_type ?? "NONE");
+  const vatTypeLabel =
+    vatTypeCode === "INCLUSIVE"
+      ? "Inclusive"
+      : vatTypeCode === "EXCLUSIVE"
+        ? "Exclusive"
+        : vatTypeCode === "NONE"
+          ? "Non-VAT"
+          : String(vatTypeCode);
   const depositDeducted = Number(doc.deposit_deducted ?? 0);
   const depositUsedFromHistory = depositHistoryResult.data.reduce(
     (sum, row) => sum + row.allocated_amount,
@@ -382,10 +432,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   );
   const depositUsed = Math.max(depositDeducted, depositUsedFromHistory);
   const depositAvailable = Math.max(0, grandTotal - depositUsed);
-  const settlementTitle =
-    doc.doc_type === "AR_REFUND"
-      ? "ใบสำคัญจ่ายเงินคืน (Refund Payment)"
-      : "ใบสำคัญปรับปรุงบัญชี - รับรู้รายได้ (Write-off Income)";
+  const settlementTitle = getDocumentTypeLabel(doc.doc_type);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6 print:max-w-none print:gap-0 print:p-0">
@@ -414,7 +461,10 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               ) : null}
             </div>
             <p className="mt-0.5 text-sm text-slate-500">
-              {doc.doc_type} · วันที่เอกสาร {formatDate(doc.doc_date)}
+              {isSettlementDoc
+                ? settlementTitle
+                : doc.doc_type}{" "}
+              · วันที่เอกสาร {formatDate(doc.doc_date)}
               {isCreditNote && isTemporaryDraftDocNo(doc.doc_no)
                 ? " · เลขชั่วคราว — จะรันเลขจริงเมื่อ ISSUE"
                 : ""}
@@ -637,7 +687,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                   : isDepositDoc
                     ? `เอกสารมัดจำรับ · VAT ${doc.vat_type ?? "NONE"} · สถานะ ${doc.payment_status}`
                     : isSettlementDoc
-                      ? `${settlementTitle} · VAT ${doc.vat_type ?? "NONE"}`
+                      ? `${settlementTitle} · VAT ${vatTypeLabel}`
                       : `VAT ${doc.vat_type ?? "—"} · อัตรา ${vatRate}%`}
               </CardDescription>
             </CardHeader>
@@ -671,12 +721,16 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                     value={extractSettlementRemark(doc.notes)}
                   />
                   <SummaryRow
-                    label="ยอดก่อนภาษี (Net Total)"
+                    label={
+                      isRefundDoc
+                        ? "มูลค่าก่อนภาษี (Vatable)"
+                        : "ยอดก่อนภาษี (Net Total)"
+                    }
                     value={`${formatMoney(netBeforeVat)} ฿`}
                   />
-                  {(doc.vat_type && doc.vat_type !== "NONE") || vatAmount > 0 ? (
+                  {(vatTypeCode !== "NONE" && vatRate > 0) || vatAmount > 0 ? (
                     <SummaryRow
-                      label={`ภาษีมูลค่าเพิ่ม ${vatRate}% (${doc.vat_type ?? "—"})`}
+                      label={`ภาษีมูลค่าเพิ่ม ${vatRate}% (${vatTypeLabel})`}
                       value={`${formatMoney(vatAmount)} ฿`}
                     />
                   ) : (

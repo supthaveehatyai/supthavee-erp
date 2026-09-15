@@ -61,6 +61,7 @@ const navigationGroups: NavigationGroup[] = [
       { label: "ตัดหนี้สูญ (AP Write-off)", href: "/finance/ap-writeoff" },
       { label: "จ่ายชำระหนี้ซัพพลายเออร์", href: "/finance/ap-payment" },
       { label: "รับ/จ่าย เงินมัดจำ", href: "/finance/deposits" },
+      { label: "คืนเงินมัดจำ (Refund)", href: "/finance/refunds/create" },
       { label: "ระบบวางบิล", href: "/finance/billing-notes" },
       { label: "ค่าใช้จ่าย (Expenses)", href: "/expenses" },
       { label: "รายงานหัก ณ ที่จ่าย (WHT)", href: "/tax/wht-report" },

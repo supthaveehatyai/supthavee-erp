@@ -189,13 +189,21 @@ export default async function DepositsPage({ searchParams }: PageProps) {
             สถานะแท็บควบคุมผ่าน URL Search Params
           </p>
         </div>
-        <Link
-          href={`/finance/deposits/create?type=${tab}`}
-          className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-        >
-          <Plus className="size-4" />
-          สร้างเอกสารมัดจำ
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href={`/finance/deposits/create?type=${tab}`}
+            className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+          >
+            <Plus className="size-4" />
+            สร้างเอกสารมัดจำ
+          </Link>
+          <Link
+            href={`/finance/refunds/create?type=${tab === "DEP_IN" ? "AR" : "AP"}`}
+            className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+          >
+            คืนเงินมัดจำ
+          </Link>
+        </div>
       </div>
 
       {/* URL-driven tabs — Server Component safe (no client tab state) */}

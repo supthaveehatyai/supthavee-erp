@@ -132,6 +132,27 @@ export const SETTLEMENT_DOC_TYPES = [
   "WRITE_OFF",
 ] as const;
 
+export const REFUND_DOC_TYPES = ["AR_REFUND", "AP_REFUND", "REFUND"] as const;
+
+export function isRefundDocType(docType: string): boolean {
+  return (REFUND_DOC_TYPES as readonly string[]).includes(docType);
+}
+
+/** ชื่อเอกสารภาษาไทยสำหรับ Header / Print Engine */
+const DOCUMENT_TYPE_TH_LABELS: Record<string, string> = {
+  AR_REFUND: "ใบสำคัญจ่ายเงินคืน (Refund Payment)",
+  AP_REFUND: "ใบสำคัญรับเงินคืน (Refund Receipt)",
+  AR_WRITEOFF: "ใบสำคัญปรับปรุงบัญชี - รับรู้รายได้ (Write-off Income)",
+  AP_WRITEOFF: "ใบสำคัญปรับปรุงบัญชี - ตัดเป็นค่าใช้จ่าย (Write-off Expense)",
+  REFUND: "ใบสำคัญคืนเงิน (Refund)",
+  WRITE_OFF: "ใบสำคัญตัดเศษ (Write-off)",
+};
+
+export function getDocumentTypeLabel(docType: string): string {
+  const key = String(docType ?? "").trim();
+  return DOCUMENT_TYPE_TH_LABELS[key] ?? key;
+}
+
 /**
  * เอกสารการเงินที่ไม่มีรายการสินค้า (ไม่ใช้ `document_items`)
  * ใช้ `document_allocations` หรือเป็นเอกสารหัวอย่างเดียว

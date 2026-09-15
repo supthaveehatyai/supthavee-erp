@@ -41,6 +41,8 @@ export type OutstandingPartyComboboxProps = {
   searchPlaceholder?: string;
   /** Accent for focus ring — AR blue / AP orange */
   accent?: "blue" | "orange";
+  amountLabel?: string;
+  countLabel?: string;
 };
 
 function formatMoney(value: number): string {
@@ -50,8 +52,11 @@ function formatMoney(value: number): string {
   });
 }
 
-export function formatOutstandingLabel(option: OutstandingPartyOption): string {
-  return `${option.name} - ค้างชำระ ${formatMoney(option.outstanding_total)} บาท`;
+export function formatOutstandingLabel(
+  option: OutstandingPartyOption,
+  amountLabel = "ค้างชำระ",
+): string {
+  return `${option.name} - ${amountLabel} ${formatMoney(option.outstanding_total)} บาท`;
 }
 
 export function OutstandingPartyCombobox({
@@ -64,6 +69,8 @@ export function OutstandingPartyCombobox({
   emptyMessage = "ไม่พบรายชื่อที่มียอดค้างชำระ",
   searchPlaceholder = "พิมพ์ชื่อเพื่อค้นหา...",
   accent = "blue",
+  amountLabel = "ค้างชำระ",
+  countLabel = "บิล",
 }: OutstandingPartyComboboxProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -117,7 +124,7 @@ export function OutstandingPartyCombobox({
             {isLoading
               ? "กำลังโหลด..."
               : selected
-                ? formatOutstandingLabel(selected)
+                ? formatOutstandingLabel(selected, amountLabel)
                 : placeholder}
           </span>
           {isLoading ? (
@@ -159,7 +166,7 @@ export function OutstandingPartyCombobox({
                         {item.name}
                       </p>
                       <p className="text-xs text-slate-500">
-                        {item.invoice_count} บิล · ค้างชำระ{" "}
+                        {item.invoice_count} {countLabel} · {amountLabel}{" "}
                         <span className="font-semibold text-red-600">
                           {formatMoney(item.outstanding_total)} บาท
                         </span>

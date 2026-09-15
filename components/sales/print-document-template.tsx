@@ -1,6 +1,7 @@
 import { PrintLayout } from "@/components/shared/print/PrintLayout";
 import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
 import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
+import { getDocumentTypeLabel } from "@/lib/constants/document";
 import type { DocumentDetail, DocumentType } from "@/types/document";
 import type { PrintPaperSize, PrintVatType } from "@/types/print-document";
 import { cn } from "@/lib/utils";
@@ -78,7 +79,11 @@ export default async function PrintDocumentTemplate({
   const vatType = normalizePrintVatType(doc.vat_type);
   const hasVat = vatType !== "NONE" && vatType !== undefined;
   const grandTotal = Number(doc.grand_total ?? 0);
-  const docTypeLabel = DOC_TYPE_LABELS[doc.doc_type] ?? doc.doc_type;
+  const sharedTypeLabel = getDocumentTypeLabel(doc.doc_type);
+  const docTypeLabel =
+    sharedTypeLabel !== doc.doc_type
+      ? sharedTypeLabel
+      : (DOC_TYPE_LABELS[doc.doc_type] ?? doc.doc_type);
   const partyLabel =
     doc.doc_type === "DEP_OUT" ||
     doc.doc_type === "PO" ||
@@ -251,6 +256,7 @@ export default async function PrintDocumentTemplate({
         vatType={vatType}
         vatRate={vatRate}
         grandTotal={grandTotal}
+        docType={doc.doc_type}
         discountText={doc.discount_text}
         withholdingTaxAmount={
           doc.doc_type === "PAY" || doc.doc_type === "REC"
