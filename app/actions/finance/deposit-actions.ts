@@ -18,7 +18,9 @@ import {
   resolveInitialPaymentStatus,
   resolveIssuedDocumentStatus,
 } from "@/lib/constants/document";
+import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
+import { generateDraftDocumentNo } from "@/lib/utils/draft-document-no";
 import {
   calculateDocumentSummary,
   isVatCalculationType,
@@ -26,12 +28,7 @@ import {
 } from "@/lib/utils/document-summary";
 import { todayIsoDate } from "@/lib/utils/outstanding-summary";
 import { roundMoney } from "@/lib/utils/payment-fifo";
-import {
-  approvalStatusFields,
-  buildIssueSuccessMessage,
-  isPendingApprovalStatus,
-} from "@/lib/approval/approval-rules";
-import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
+import type { Json } from "@/src/types/supabase";
 import type {
   CreateDepositDocumentResult,
   DepositBalanceActionType,
@@ -41,6 +38,8 @@ import type {
   ManageDepositBalanceResult,
 } from "@/types/deposit";
 import type { DocumentType } from "@/types/document";
+
+const PENDING_DEPOSIT_BALANCE_MESSAGE = "เอกสารเข้าสู่ระบบรออนุมัติแล้ว";
 
 const DEFAULT_DEPOSIT_VAT_RATE = 7;
 
@@ -613,25 +612,140 @@ export async function createDepositDocument(
   }
 }
 
+function toAuditJson(
+  value: Record<string, unknown> | null | undefined,
+): Json | null {
+  if (value == null) return null;
+  try {
+    return JSON.parse(JSON.stringify(value)) as Json;
+  } catch {
+    return null;
+  }
+}
+
+async function loadMakerApprovalLimit(
+  supabaseAdmin: SupabaseClient,
+  actorId: string,
+): Promise<{ ok: true; approvalLimit: number } | { ok: false; error: string }> {
+  const userId = actorId.trim();
+  if (!userId) {
+    return { ok: false, error: "ไม่พบรหัสผู้ใช้จาก Auth Session" };
+  }
+
+  const { data: profile, error } = await supabaseAdmin
+    .from("user_profiles")
+    .select("id, approval_limit")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) {
+    return { ok: false, error: `ดึง approval_limit ไม่สำเร็จ: ${error.message}` };
+  }
+  if (!profile) {
+    return { ok: false, error: "ไม่พบโปรไฟล์ผู้ใช้งานใน user_profiles" };
+  }
+
+  const raw = Number(profile.approval_limit ?? 0);
+  const approvalLimit = Number.isFinite(raw) && raw >= 0 ? raw : 0;
+  return { ok: true, approvalLimit };
+}
+
+async function writeDocumentsAuditLog(
+  supabaseAdmin: SupabaseClient,
+  params: {
+    actorUserId: string;
+    actorName?: string | null;
+    recordId: string;
+    action: "INSERT" | "UPDATE";
+    oldData?: Record<string, unknown> | null;
+    newData: Record<string, unknown>;
+  },
+): Promise<{ error: string | null }> {
+  const recordId = params.recordId.trim();
+  const actorUserId = params.actorUserId.trim();
+  if (!recordId) return { error: "record_id is required" };
+  if (!actorUserId) {
+    return { error: "ไม่พบ user จาก Auth Session สำหรับ audit_logs" };
+  }
+
+  const newData = toAuditJson(params.newData);
+  if (newData == null) {
+    return { error: "new_data ของ audit_logs ไม่สามารถแปลงเป็น JSON ได้" };
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("audit_logs")
+    .insert({
+      table_name: "documents",
+      record_id: recordId,
+      action: params.action,
+      old_data: toAuditJson(params.oldData ?? null),
+      new_data: newData,
+      changed_by: actorUserId,
+      changed_by_name: params.actorName?.trim()?.slice(0, 100) || null,
+    })
+    .select("id")
+    .single();
+
+  if (error || !data?.id) {
+    const message =
+      error?.message || "insert audit_logs สำเร็จแต่ไม่คืน id";
+    console.error("[manageDepositBalance][audit_logs]", message);
+    return { error: message };
+  }
+
+  return { error: null };
+}
+
+async function rollbackDepositBalance(
+  supabaseAdmin: SupabaseClient,
+  params: {
+    stubDocId: string | null;
+    stubHeaderId: string | null;
+    depositId: string | null;
+    previousDepositDeducted: number | null;
+    slipStoragePath?: string | null;
+  },
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  if (params.depositId && params.previousDepositDeducted != null) {
+    await supabaseAdmin
+      .from("documents")
+      .update({
+        deposit_deducted: params.previousDepositDeducted,
+        updated_at: nowIso,
+      })
+      .eq("id", params.depositId);
+  }
+  if (params.stubDocId) {
+    await supabaseAdmin
+      .from("document_allocations")
+      .delete()
+      .eq("receipt_doc_id", params.stubDocId);
+    await supabaseAdmin
+      .from("audit_logs")
+      .delete()
+      .eq("table_name", "documents")
+      .eq("record_id", params.stubDocId);
+    await supabaseAdmin.from("documents").delete().eq("id", params.stubDocId);
+  }
+  if (params.stubHeaderId) {
+    await supabaseAdmin.from("doc_headers").delete().eq("id", params.stubHeaderId);
+  }
+  if (params.slipStoragePath) {
+    await supabaseAdmin.storage
+      .from(DOCUMENT_ATTACHMENTS_BUCKET)
+      .remove([params.slipStoragePath]);
+  }
+}
+
 /**
- * Refund or Write-off remaining deposit balance as an official document.
+ * Quick Action: คืนเงินมัดจำ / ตัดเศษ จากหน้ารายละเอียดใบมัดจำ
+ * Maker-Checker ตาม `user_profiles.approval_limit` + Late Numbering + บังคับ `audit_logs`
  *
- * Accepts `FormData`:
- *   - document_id (deposit id)
- *   - action_type: REFUND | WRITE_OFF
- *   - amount
- *   - remark (optional)
- *   - slip_file (optional File — recommended for REFUND)
- *
- * Flow:
- *   1) Upload slip → Storage (same utility as DEP create / REC/PAY)
- *   2) RPC generate_document_no via generateDocumentNumber
- *   3) Insert `documents` + mirror `doc_headers` (official header)
- *   4) Insert `document_allocations`:
- *        invoice_doc_id  = deposit (source / ref)
- *        receipt_doc_id  = REFUND|WRITE_OFF (allocated / new)
- *        adjustment_reason = REFUND | WRITE_OFF (+ remark)
- *   5) Update deposit.deposit_deducted
+ * Allocations:
+ *   invoice_doc_id  = ใบมัดจำต้นทาง (DEP_IN / DEP_OUT)
+ *   receipt_doc_id  = ใบ REFUND / WRITE_OFF ที่สร้างใหม่
  */
 export async function manageDepositBalance(
   formData: FormData,
@@ -640,8 +754,21 @@ export async function manageDepositBalance(
   let stubDocId: string | null = null;
   let stubHeaderId: string | null = null;
   let slipStoragePath: string | null = null;
+  let depositIdForRollback: string | null = null;
+  let previousDepositDeducted: number | null = null;
 
   try {
+    const actor = await getCurrentAuthUser();
+    if (!actor?.userId) {
+      throw new Error("กรุณาเข้าสู่ระบบก่อนทำรายการ");
+    }
+
+    const limitResult = await loadMakerApprovalLimit(supabase, actor.userId);
+    if (!limitResult.ok) {
+      throw new Error(limitResult.error);
+    }
+    const userProfile = { approval_limit: limitResult.approvalLimit };
+
     const depositId = String(formData.get("document_id") ?? "").trim();
     const actionTypeRaw = String(formData.get("action_type") ?? "")
       .trim()
@@ -668,6 +795,21 @@ export async function manageDepositBalance(
       return { success: false, error: "ยอดเงินต้องมากกว่า 0" };
     }
 
+    const today = todayIsoDate();
+    const { data: periodClosed, error: periodError } = await supabase.rpc(
+      "is_period_closed",
+      { doc_date: today },
+    );
+    if (periodError) {
+      return { success: false, error: periodError.message };
+    }
+    if (periodClosed === true) {
+      return {
+        success: false,
+        error: "งวดบัญชีของวันนี้ถูกปิดแล้ว ไม่สามารถคืนเงิน/ตัดเศษมัดจำได้",
+      };
+    }
+
     const { data: deposit, error: depositError } = await supabase
       .from("documents")
       .select(
@@ -692,13 +834,34 @@ export async function manageDepositBalance(
     if (depositError || !deposit) {
       return { success: false, error: "ไม่พบเอกสารมัดจำ" };
     }
-    if (deposit.is_voided === true) {
+    if (deposit.is_voided === true || deposit.status === "VOID") {
       return { success: false, error: "เอกสารมัดจำถูกยกเลิกแล้ว" };
     }
     if (deposit.doc_type !== "DEP_IN" && deposit.doc_type !== "DEP_OUT") {
       return {
         success: false,
         error: "เอกสารนี้ไม่ใช่มัดจำ (DEP_IN / DEP_OUT)",
+      };
+    }
+    if (deposit.status !== "ISSUED") {
+      return {
+        success: false,
+        error: `มัดจำ ${deposit.doc_no ?? depositId} ต้องเป็นสถานะ ISSUED`,
+      };
+    }
+    if (!canAccessCustomerDeposits(actor.accessibleModules, actor.roleCode)) {
+      return {
+        success: false,
+        error: "Forbidden: ไม่มีสิทธิ์ทำรายการเงินมัดจำ",
+      };
+    }
+    if (
+      deposit.doc_type === "DEP_OUT" &&
+      !canAccessVendorDeposits(actor.accessibleModules, actor.roleCode)
+    ) {
+      return {
+        success: false,
+        error: "Forbidden: ไม่มีสิทธิ์คืนเงิน/ตัดเศษมัดจำซัพพลายเออร์ (DEP_OUT)",
       };
     }
 
@@ -732,6 +895,8 @@ export async function manageDepositBalance(
       ),
     );
     const usedFromField = roundMoney(Number(deposit.deposit_deducted ?? 0));
+    previousDepositDeducted = usedFromField;
+    depositIdForRollback = depositId;
     const usedAmount = roundMoney(Math.max(usedFromAlloc, usedFromField));
     const grandTotal = roundMoney(Number(deposit.grand_total ?? 0));
     const remaining = roundMoney(Math.max(0, grandTotal - usedAmount));
@@ -759,9 +924,9 @@ export async function manageDepositBalance(
     }
 
     const applyAmount = roundMoney(Math.min(requestAmount, remaining));
-    // User amount = grand_total of settlement; inherit VAT mode from source deposit.
-    // Extract net/vat from grand (same INCLUSIVE extract formula) so EXCLUSIVE
-    // deposits whose remaining is already VAT-inclusive still split correctly.
+    const requiresApproval =
+      applyAmount > (userProfile.approval_limit || 0);
+
     const settlementVatRate =
       sourceVatType === "NONE" ? 0 : sourceVatRate;
     const vatSummary = calculateDocumentSummary({
@@ -790,32 +955,35 @@ export async function manageDepositBalance(
         error: "ไม่สามารถกำหนดประเภทเอกสาร AR/AP จากมัดจำต้นทางได้",
       };
     }
-    const today = todayIsoDate();
 
-    // Running number via existing RPC helper (architecture untouched)
-    const numberResult = await generateDocumentNumber(stubDocType, today);
-    if (!numberResult.data) {
-      if (slipStoragePath) {
-        await supabase.storage
-          .from(DOCUMENT_ATTACHMENTS_BUCKET)
-          .remove([slipStoragePath]);
+    let stubDocNo = generateDraftDocumentNo();
+    if (!requiresApproval) {
+      const numberResult = await generateDocumentNumber(stubDocType, today);
+      if (numberResult.error || !numberResult.data) {
+        if (slipStoragePath) {
+          await supabase.storage
+            .from(DOCUMENT_ATTACHMENTS_BUCKET)
+            .remove([slipStoragePath]);
+        }
+        return {
+          success: false,
+          error: numberResult.error ?? "สร้างเลขที่เอกสารไม่สำเร็จ",
+        };
       }
-      return {
-        success: false,
-        error: numberResult.error ?? "สร้างเลขที่เอกสารไม่สำเร็จ",
-      };
+      stubDocNo = numberResult.data;
     }
-    const stubDocNo = numberResult.data;
+
+    const headerStatus = requiresApproval ? "DRAFT" : "ISSUED";
+    const approvalStatus = requiresApproval ? "PENDING" : "APPROVED";
+    const issuedPaid = !requiresApproval;
     const nowIso = new Date().toISOString();
-    const documentApproval = approvalStatusFields(stubDocType);
-    const pendingApproval = isPendingApprovalStatus(
-      documentApproval.approval_status,
-    );
     const actionLabel =
       actionType === "REFUND" ? "คืนเงินมัดจำ" : "ตัดเศษบัญชีมัดจำ";
     const notesParts = [
       `${actionLabel} จาก ${deposit.doc_no ?? depositId}`,
       `amount=${settlementGrand.toFixed(2)}`,
+      `approval_limit=${userProfile.approval_limit.toFixed(2)}`,
+      `requires_approval=${requiresApproval ? "true" : "false"}`,
       `vat=${sourceVatType}@${storedVatRate}%`,
       `net=${settlementNet.toFixed(2)}`,
       `vat_amt=${settlementVat.toFixed(2)}`,
@@ -824,18 +992,12 @@ export async function manageDepositBalance(
       slipUrl ? "slip=attached" : null,
     ].filter(Boolean);
 
-    const owner = await requireSessionUserId();
-    if (!owner.ok) {
-      return { success: false, error: owner.error };
-    }
-
-    // 1) Primary ledger — official documents row (VAT inherited from deposit)
     const { data: stubDoc, error: stubError } = await supabase
       .from("documents")
       .insert({
         doc_no: stubDocNo,
         doc_type: stubDocType,
-        status: "ISSUED",
+        status: headerStatus,
         doc_date: today,
         contact_id: deposit.contact_id,
         ref_document_id: depositId,
@@ -852,22 +1014,23 @@ export async function manageDepositBalance(
         vat_rate: storedVatRate,
         vat_type: sourceVatType,
         deposit_deducted: 0,
-        paid_amount: settlementGrand,
-        payment_status: "PAID",
+        paid_amount: issuedPaid ? settlementGrand : 0,
+        payment_status: issuedPaid ? "PAID" : "UNPAID",
+        remark: remarkClean,
         attachment_url: slipUrl,
         attached_file_url: slipUrl,
         original_file_name: originalFileName,
         notes: notesParts.join(" | "),
-        approval_status: documentApproval.approval_status,
-        approved_by: documentApproval.approved_by,
-        approved_at: documentApproval.approved_at,
-        created_by: owner.userId,
+        created_by: actor.userId,
+        approval_status: approvalStatus,
+        approved_by: requiresApproval ? null : actor.userId,
+        approved_at: requiresApproval ? null : nowIso,
         updated_at: nowIso,
       })
-      .select("id, doc_no")
+      .select("*")
       .single();
 
-    if (stubError || !stubDoc) {
+    if (stubError || !stubDoc?.id) {
       if (slipStoragePath) {
         await supabase.storage
           .from(DOCUMENT_ATTACHMENTS_BUCKET)
@@ -878,10 +1041,9 @@ export async function manageDepositBalance(
         error: stubError?.message ?? `สร้างเอกสาร ${stubDocType} ไม่สำเร็จ`,
       };
     }
-    stubDocId = stubDoc.id as string;
+    stubDocId = String(stubDoc.id);
+    stubDocNo = String(stubDoc.doc_no ?? stubDocNo);
 
-    // 2) Official header mirror — doc_headers
-    //    (sub_total = net, tax_* = VAT; no vat_type column on legacy table)
     const { data: stubHeader, error: headerError } = await supabase
       .from("doc_headers")
       .insert({
@@ -895,7 +1057,7 @@ export async function manageDepositBalance(
         tax_amount: settlementVat,
         grand_total: settlementGrand,
         deposit_deducted: 0,
-        payment_status: "PAID",
+        payment_status: issuedPaid ? "PAID" : "UNPAID",
         ref_doc_id: null,
         attached_file_url: slipUrl,
         original_file_name: originalFileName,
@@ -904,12 +1066,14 @@ export async function manageDepositBalance(
       .single();
 
     if (headerError || !stubHeader) {
-      await supabase.from("documents").delete().eq("id", stubDocId);
-      if (slipStoragePath) {
-        await supabase.storage
-          .from(DOCUMENT_ATTACHMENTS_BUCKET)
-          .remove([slipStoragePath]);
-      }
+      await rollbackDepositBalance(supabase, {
+        stubDocId,
+        stubHeaderId: null,
+        depositId: null,
+        previousDepositDeducted: null,
+        slipStoragePath,
+      });
+      stubDocId = null;
       return {
         success: false,
         error:
@@ -917,9 +1081,8 @@ export async function manageDepositBalance(
           `บันทึกหัวเอกสาร ${stubDocType} (doc_headers) ไม่สำเร็จ`,
       };
     }
-    stubHeaderId = stubHeader.id as string;
+    stubHeaderId = String(stubHeader.id);
 
-    // 3) Allocations — deposit (invoice) ← AR/AP settlement (receipt)
     const adjustmentReason = remarkClean
       ? `${actionType}: ${remarkClean}`
       : actionType;
@@ -936,18 +1099,54 @@ export async function manageDepositBalance(
       });
 
     if (allocInsertError) {
-      await supabase.from("doc_headers").delete().eq("id", stubHeaderId);
-      await supabase.from("documents").delete().eq("id", stubDocId);
-      if (slipStoragePath) {
-        await supabase.storage
-          .from(DOCUMENT_ATTACHMENTS_BUCKET)
-          .remove([slipStoragePath]);
-      }
+      await rollbackDepositBalance(supabase, {
+        stubDocId,
+        stubHeaderId,
+        depositId: null,
+        previousDepositDeducted: null,
+        slipStoragePath,
+      });
+      stubDocId = null;
+      stubHeaderId = null;
       return {
         success: false,
         error:
           allocInsertError.message ??
           "บันทึก document_allocations ไม่สำเร็จ",
+      };
+    }
+
+    const documentData: Record<string, unknown> = {
+      ...(stubDoc as Record<string, unknown>),
+      user_id: actor.userId,
+      approval_limit: userProfile.approval_limit,
+      requires_approval: requiresApproval,
+      deposit_id: depositId,
+      deposit_doc_no: deposit.doc_no,
+      action_type: actionType,
+    };
+
+    const insertAudit = await writeDocumentsAuditLog(supabase, {
+      actorUserId: actor.userId,
+      actorName: actor.displayName,
+      recordId: stubDocId,
+      action: "INSERT",
+      oldData: null,
+      newData: documentData,
+    });
+    if (insertAudit.error) {
+      await rollbackDepositBalance(supabase, {
+        stubDocId,
+        stubHeaderId,
+        depositId: null,
+        previousDepositDeducted: null,
+        slipStoragePath,
+      });
+      stubDocId = null;
+      stubHeaderId = null;
+      return {
+        success: false,
+        error: `บันทึก audit_logs ไม่สำเร็จ: ${insertAudit.error}`,
       };
     }
 
@@ -961,10 +1160,18 @@ export async function manageDepositBalance(
       .eq("id", depositId);
 
     if (updateError) {
+      await rollbackDepositBalance(supabase, {
+        stubDocId,
+        stubHeaderId,
+        depositId,
+        previousDepositDeducted,
+        slipStoragePath,
+      });
+      stubDocId = null;
+      stubHeaderId = null;
       return {
         success: false,
-        error: `บันทึก ${stubDocNo} แล้ว แต่อัปเดตยอดมัดจำไม่สำเร็จ: ${updateError.message}`,
-        action_doc_no: stubDocNo,
+        error: `อัปเดตยอดมัดจำไม่สำเร็จ: ${updateError.message}`,
       };
     }
 
@@ -975,30 +1182,27 @@ export async function manageDepositBalance(
       revalidatePath(`/sales/${deposit.doc_no}`);
       revalidatePath(`/purchases/${deposit.doc_no}`);
     }
-
-    revalidateApprovalCenterIfPending(pendingApproval);
+    revalidatePath(`/sales/${stubDocNo}`);
+    revalidatePath(`/purchases/${stubDocNo}`);
+    revalidateApprovalCenterIfPending(requiresApproval);
 
     return {
       success: true,
       error: null,
       action_doc_no: stubDocNo,
-      pending_approval: pendingApproval,
-      successMessage: pendingApproval
-        ? buildIssueSuccessMessage(stubDocNo, true)
-        : undefined,
+      pending_approval: requiresApproval,
+      successMessage: requiresApproval
+        ? PENDING_DEPOSIT_BALANCE_MESSAGE
+        : `ทำรายการสำเร็จ — ${stubDocNo}`,
     };
   } catch (err) {
-    if (stubHeaderId) {
-      await supabase.from("doc_headers").delete().eq("id", stubHeaderId);
-    }
-    if (stubDocId) {
-      await supabase.from("documents").delete().eq("id", stubDocId);
-    }
-    if (slipStoragePath) {
-      await supabase.storage
-        .from(DOCUMENT_ATTACHMENTS_BUCKET)
-        .remove([slipStoragePath]);
-    }
+    await rollbackDepositBalance(supabase, {
+      stubDocId,
+      stubHeaderId,
+      depositId: depositIdForRollback,
+      previousDepositDeducted,
+      slipStoragePath,
+    });
     const message =
       err instanceof Error ? err.message : "ทำรายการมัดจำไม่สำเร็จ";
     return { success: false, error: message };
