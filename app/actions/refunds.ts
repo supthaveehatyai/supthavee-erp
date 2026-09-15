@@ -19,12 +19,12 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { exceedsApprovalLimit } from "@/lib/approval/approval-rules";
 import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
-import { requireSessionUserId } from "@/lib/auth/current-user";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
 import { resolveIssuedDocumentStatus } from "@/lib/constants/document";
-import { logAuditTrail } from "@/lib/supabase/auditService";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { generateDraftDocumentNo } from "@/lib/utils/draft-document-no";
+import type { Json } from "@/src/types/supabase";
 import type { DocumentType } from "@/types/document";
 import {
   calculateDocumentSummary,
@@ -411,6 +411,62 @@ async function rollbackRefund(
   }
 }
 
+function toAuditJson(
+  value: Record<string, unknown> | null | undefined,
+): Json | null {
+  if (value == null) return null;
+  try {
+    return JSON.parse(JSON.stringify(value)) as Json;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * บันทึก `audit_logs` สำหรับตาราง `documents`
+ * คอลัมน์ผู้ใช้ใน schema คือ `changed_by` (ไม่มี `user_id`) — ใส่ Auth Session ปัจจุบันเสมอ
+ */
+async function writeDocumentsAuditLog(
+  supabaseAdmin: SupabaseClient,
+  params: {
+    actorUserId: string;
+    actorName?: string | null;
+    recordId: string;
+    action: "INSERT" | "UPDATE";
+    oldData?: Record<string, unknown> | null;
+    newData: Record<string, unknown>;
+  },
+): Promise<{ error: string | null }> {
+  const recordId = params.recordId.trim();
+  const actorUserId = params.actorUserId.trim();
+  if (!recordId) return { error: "record_id is required" };
+  if (!actorUserId) {
+    return { error: "ไม่พบ user จาก Auth Session สำหรับ audit_logs" };
+  }
+
+  const newData = toAuditJson(params.newData);
+  if (newData == null) {
+    return { error: "new_data ของ audit_logs ไม่สามารถแปลงเป็น JSON ได้" };
+  }
+
+  const { error } = await supabaseAdmin.from("audit_logs").insert({
+    table_name: "documents",
+    record_id: recordId,
+    action: params.action,
+    old_data: toAuditJson(params.oldData ?? null),
+    new_data: newData,
+    changed_by: actorUserId,
+    changed_by_name: params.actorName?.trim()?.slice(0, 100) || null,
+  });
+
+  if (error) {
+    console.error("[createRefundDocument][audit_logs]", error.message);
+    return { error: error.message };
+  }
+
+  return { error: null };
+}
+
 /**
  * มัดจำคงเหลือของคู่ค้า สำหรับฟอร์มคืนเงิน
  * AR → DEP_IN · AP → DEP_OUT · status = ISSUED · remaining > 0
@@ -689,9 +745,13 @@ export async function createRefundDocument(
   const isCash = bankAccountRaw === CASH_ACCOUNT_SENTINEL;
   const slipFile = coerced.slipFile;
 
-  const owner = await requireSessionUserId();
-  if (!owner.ok) {
-    return { success: false, error: owner.error, data: null };
+  const actor = await getCurrentAuthUser();
+  if (!actor?.userId) {
+    return {
+      success: false,
+      error: "กรุณาเข้าสู่ระบบก่อนบันทึกเอกสาร",
+      data: null,
+    };
   }
 
   const supabaseAdmin = createSupabaseServerClient();
@@ -721,7 +781,7 @@ export async function createRefundDocument(
 
     const limitResult = await loadMakerApprovalLimit(
       supabaseAdmin,
-      owner.userId,
+      actor.userId,
     );
     if (!limitResult.ok) {
       return { success: false, error: limitResult.error, data: null };
@@ -1000,13 +1060,13 @@ export async function createRefundDocument(
         attachment_url: slipUrl,
         attached_file_url: slipUrl,
         original_file_name: originalFileName,
-        created_by: owner.userId,
+        created_by: actor.userId,
         approval_status: pendingApproval ? "PENDING" : "APPROVED",
-        approved_by: pendingApproval ? null : owner.userId,
+        approved_by: pendingApproval ? null : actor.userId,
         approved_at: pendingApproval ? null : nowIso,
         updated_at: nowIso,
       })
-      .select("id, doc_no")
+      .select("*")
       .single();
 
     if (insertError || !refundDoc?.id) {
@@ -1024,10 +1084,25 @@ export async function createRefundDocument(
 
     refundId = String(refundDoc.id);
     const refundDocNo = String(refundDoc.doc_no ?? documentNo);
+    const refundDocPayload: Record<string, unknown> = {
+      ...(refundDoc as Record<string, unknown>),
+      audit_event: refundDocType,
+      deposit_id: depositId,
+      deposit_doc_no: depositDocNo,
+      bank_account_id: bankAccountId,
+      payment_method: isCash ? "CASH" : "BANK_TRANSFER",
+      summary: `สร้างใบคืนเงินมัดจำ ${refundDocNo} จำนวน ${vat.grand_total.toFixed(2)} บาท`,
+    };
+    const newDeducted = roundMoney(allocatedAmount + applyAmount);
+    const depositOldPayload: Record<string, unknown> = {
+      id: depositId,
+      doc_no: depositDocNo,
+      doc_type: depositRow.doc_type,
+      deposit_deducted: previousDeducted,
+    };
 
-    const { error: allocError } = await supabaseAdmin
-      .from("document_allocations")
-      .insert({
+    const [allocResult, txResult, insertAudit] = await Promise.all([
+      supabaseAdmin.from("document_allocations").insert({
         receipt_doc_id: refundId,
         invoice_doc_id: depositId,
         allocated_amount: applyAmount,
@@ -1036,9 +1111,32 @@ export async function createRefundDocument(
         adjustment_reason: remark
           ? `${REFUND_ADJUSTMENT_REASON}: ${remark}`
           : REFUND_ADJUSTMENT_REASON,
-      });
+      }),
+      supabaseAdmin.from("payment_transactions").insert({
+        document_id: refundId,
+        payment_method: isCash ? "CASH" : "BANK_TRANSFER",
+        bank_account_id: bankAccountId,
+        amount: applyAmount,
+        payment_date: docDate,
+        attachment_url: slipUrl,
+        is_reconciled: false,
+        is_voided: false,
+      }),
+      writeDocumentsAuditLog(supabaseAdmin, {
+        actorUserId: actor.userId,
+        actorName: actor.displayName,
+        recordId: refundId,
+        action: "INSERT",
+        oldData: null,
+        newData: refundDocPayload,
+      }),
+    ]);
 
-    if (allocError) {
+    const relatedError =
+      allocResult.error?.message ??
+      txResult.error?.message ??
+      insertAudit.error;
+    if (relatedError) {
       await rollbackRefund(
         supabaseAdmin,
         refundId,
@@ -1049,12 +1147,11 @@ export async function createRefundDocument(
       refundId = null;
       return {
         success: false,
-        error: allocError.message ?? "บันทึก document_allocations ไม่สำเร็จ",
+        error: relatedError,
         data: null,
       };
     }
 
-    const newDeducted = roundMoney(allocatedAmount + applyAmount);
     const { error: updateError } = await supabaseAdmin
       .from("documents")
       .update({
@@ -1079,20 +1176,21 @@ export async function createRefundDocument(
       };
     }
 
-    const { error: txError } = await supabaseAdmin
-      .from("payment_transactions")
-      .insert({
-        document_id: refundId,
-        payment_method: isCash ? "CASH" : "BANK_TRANSFER",
-        bank_account_id: bankAccountId,
-        amount: applyAmount,
-        payment_date: docDate,
-        attachment_url: slipUrl,
-        is_reconciled: false,
-        is_voided: false,
-      });
-
-    if (txError) {
+    const depositAudit = await writeDocumentsAuditLog(supabaseAdmin, {
+      actorUserId: actor.userId,
+      actorName: actor.displayName,
+      recordId: depositId,
+      action: "UPDATE",
+      oldData: depositOldPayload,
+      newData: {
+        ...depositOldPayload,
+        deposit_deducted: newDeducted,
+        audit_event: refundDocType,
+        refund_doc_id: refundId,
+        refund_doc_no: refundDocNo,
+      },
+    });
+    if (depositAudit.error) {
       await rollbackRefund(
         supabaseAdmin,
         refundId,
@@ -1103,39 +1201,9 @@ export async function createRefundDocument(
       refundId = null;
       return {
         success: false,
-        error: txError.message ?? "บันทึก payment_transactions ไม่สำเร็จ",
+        error: `บันทึก audit_logs ไม่สำเร็จ: ${depositAudit.error}`,
         data: null,
       };
-    }
-
-    const refundAudit = await logAuditTrail(
-      "documents",
-      refundId,
-      "INSERT",
-      null,
-      {
-        audit_event: refundDocType,
-        id: refundId,
-        doc_no: refundDocNo,
-        doc_type: refundDocType,
-        status: headerStatus,
-        contact_id: contactId,
-        deposit_id: depositId,
-        deposit_doc_no: depositDocNo,
-        grand_total: vat.grand_total,
-        net_before_vat: vat.net_before_vat,
-        vat_amount: vat.vat_amount,
-        vat_type: vat.vat_type,
-        vat_rate: vat.vat_rate,
-        approval_limit: limitResult.approvalLimit,
-        exceeds_approval_limit: exceedsLimit,
-        bank_account_id: bankAccountId,
-        payment_method: isCash ? "CASH" : "BANK_TRANSFER",
-        summary: `สร้างใบคืนเงินมัดจำ ${refundDocNo} จำนวน ${vat.grand_total.toFixed(2)} บาท`,
-      },
-    );
-    if (!refundAudit.success) {
-      console.error("[createRefundDocument][audit]", refundAudit.error);
     }
 
     revalidatePath("/finance/deposits");

@@ -142,6 +142,8 @@ function formatAuditEventLabel(event: unknown): string | null {
     CN_KNOCKOFF: "ใช้ใบลดหนี้หักลดหนี้ (CN Knock-off)",
     AR_WRITEOFF: "ตัดหนี้สูญลูกหนี้ (AR Write-off)",
     AP_WRITEOFF: "ตัดหนี้สูญเจ้าหนี้ (AP Write-off)",
+    AR_REFUND: "คืนเงินมัดจำลูกค้า (AR Refund)",
+    AP_REFUND: "คืนเงินมัดจำซัพพลายเออร์ (AP Refund)",
   };
   return labels[token] ?? token;
 }
