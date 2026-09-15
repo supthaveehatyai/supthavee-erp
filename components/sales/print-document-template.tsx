@@ -99,6 +99,19 @@ export default async function PrintDocumentTemplate({
   const resolvedPaperSize =
     paperSize ?? (await getDocumentPrintPaperSize(doc.doc_type));
   const compact = resolvedPaperSize !== "A4";
+  const buyerName = doc.ecommerce_buyer_name?.trim() || "";
+  const printCustomer = doc.contact
+    ? {
+        ...doc.contact,
+        company_name: buyerName || doc.contact.company_name,
+      }
+    : buyerName
+      ? { company_name: buyerName }
+      : null;
+  const printReferenceNo =
+    [doc.ecommerce_order_no?.trim(), doc.tracking_no?.trim()]
+      .filter(Boolean)
+      .join(" · ") || doc.reference_no;
 
   return (
     <PrintLayout
@@ -107,9 +120,9 @@ export default async function PrintDocumentTemplate({
       date={doc.doc_date}
       dueDate={doc.due_date}
       status={doc.status}
-      referenceNo={doc.reference_no}
+      referenceNo={printReferenceNo}
       partyLabel={partyLabel}
-      customerData={doc.contact}
+      customerData={printCustomer}
       paperSize={resolvedPaperSize}
       documentId="sales-print-document"
       className={cn("mt-2 print:mt-0", className)}

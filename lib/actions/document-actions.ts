@@ -21,6 +21,7 @@ import {
   SALES_DOC_TYPES,
   STOCK_OUT_DOC_TYPES,
   isFinanceHeaderOnlyDocType,
+  isSalesChannel,
   isSalesTradingDocType,
   resolveInitialPaymentStatus,
   resolveIssuedDocumentStatus,
@@ -50,6 +51,10 @@ import {
   isPendingApprovalStatus,
 } from "@/lib/approval/approval-rules";
 import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
+import {
+  ecommerceFieldsFromSource,
+  parseSalesDocumentEcommerce,
+} from "@/lib/validations/sales-document";
 import type {
   CompleteDocumentInput,
   CompleteDocumentResult,
@@ -260,6 +265,16 @@ export async function createDraftDocument(
       return { data: null, error: "กรุณาเลือกลูกค้า / คู่ค้า" };
     }
 
+    const ecommerce = parseSalesDocumentEcommerce({
+      sales_channel: payload.sales_channel,
+      ecommerce_order_no: payload.ecommerce_order_no,
+      ecommerce_buyer_name: payload.ecommerce_buyer_name,
+      tracking_no: payload.tracking_no,
+    });
+    if (!ecommerce.ok) {
+      return { data: null, error: ecommerce.error };
+    }
+
     for (const [index, item] of items.entries()) {
       if (!item.product_id?.trim()) {
         return { data: null, error: `รายการที่ ${index + 1}: ไม่มี product_id` };
@@ -424,6 +439,10 @@ export async function createDraftDocument(
         vat_amount: summary.vat_amount,
         discount_text: discountText,
         payment_status: resolveInitialPaymentStatus(docType),
+        sales_channel: ecommerce.data.sales_channel,
+        ecommerce_order_no: ecommerce.data.ecommerce_order_no,
+        ecommerce_buyer_name: ecommerce.data.ecommerce_buyer_name,
+        tracking_no: ecommerce.data.tracking_no,
         created_by: owner.userId,
         updated_at: nowIso,
       })
@@ -513,6 +532,16 @@ export async function createDocument(
       return { data: null, error: "กรุณาเลือกลูกค้า / คู่ค้า" };
     }
 
+    const ecommerce = parseSalesDocumentEcommerce({
+      sales_channel: input.sales_channel,
+      ecommerce_order_no: input.ecommerce_order_no,
+      ecommerce_buyer_name: input.ecommerce_buyer_name,
+      tracking_no: input.tracking_no,
+    });
+    if (!ecommerce.ok) {
+      return { data: null, error: ecommerce.error };
+    }
+
     const supabase = createSupabaseServerClient();
 
     const { data: contact, error: contactError } = await supabase
@@ -562,6 +591,10 @@ export async function createDocument(
       contact_id: contactId,
       contact_person_id: contactPersonId,
       payment_status: resolveInitialPaymentStatus(docType),
+      sales_channel: ecommerce.data.sales_channel,
+      ecommerce_order_no: ecommerce.data.ecommerce_order_no,
+      ecommerce_buyer_name: ecommerce.data.ecommerce_buyer_name,
+      tracking_no: ecommerce.data.tracking_no,
       created_by: owner.userId,
       updated_at: nowIso,
     };
@@ -1448,6 +1481,10 @@ export async function getDocumentByNo(
         attached_file_url,
         wht_attachment_url,
         original_receipt_url,
+        sales_channel,
+        ecommerce_order_no,
+        ecommerce_buyer_name,
+        tracking_no,
         created_at,
         updated_at,
         contacts:contact_id (
@@ -1707,6 +1744,14 @@ export async function getDocumentByNo(
         data.net_before_vat == null ? null : Number(data.net_before_vat),
       vat_amount:
         data.vat_amount == null ? null : Number(data.vat_amount),
+      sales_channel: (() => {
+        const channelRaw = String(data.sales_channel ?? "");
+        return isSalesChannel(channelRaw) ? channelRaw : null;
+      })(),
+      ecommerce_order_no: (data.ecommerce_order_no as string | null) ?? null,
+      ecommerce_buyer_name:
+        (data.ecommerce_buyer_name as string | null) ?? null,
+      tracking_no: (data.tracking_no as string | null) ?? null,
       wht_rate: Number(data.wht_rate ?? 0),
       wht_amount: Number(data.wht_amount ?? 0),
       payment_status: String(data.payment_status ?? "Pending"),
@@ -1800,6 +1845,16 @@ export async function updateDraftDocument(
       return { data: null, error: "กรุณาเลือกลูกค้า / คู่ค้า" };
     }
 
+    const ecommerce = parseSalesDocumentEcommerce({
+      sales_channel: payload.sales_channel,
+      ecommerce_order_no: payload.ecommerce_order_no,
+      ecommerce_buyer_name: payload.ecommerce_buyer_name,
+      tracking_no: payload.tracking_no,
+    });
+    if (!ecommerce.ok) {
+      return { data: null, error: ecommerce.error };
+    }
+
     const supabase = createSupabaseServerClient();
 
     const { data: existing, error: existingError } = await supabase
@@ -1868,6 +1923,10 @@ export async function updateDraftDocument(
           contact_id: contactId,
           contact_person_id: contactPersonId,
           notes,
+          sales_channel: ecommerce.data.sales_channel,
+          ecommerce_order_no: ecommerce.data.ecommerce_order_no,
+          ecommerce_buyer_name: ecommerce.data.ecommerce_buyer_name,
+          tracking_no: ecommerce.data.tracking_no,
           updated_at: nowIso,
         })
         .eq("id", documentId)
@@ -2012,6 +2071,10 @@ export async function updateDraftDocument(
         vat_amount: summary.vat_amount,
         discount_text: discountText,
         notes,
+        sales_channel: ecommerce.data.sales_channel,
+        ecommerce_order_no: ecommerce.data.ecommerce_order_no,
+        ecommerce_buyer_name: ecommerce.data.ecommerce_buyer_name,
+        tracking_no: ecommerce.data.tracking_no,
         updated_at: nowIso,
       })
       .eq("id", documentId)
@@ -2906,6 +2969,10 @@ export async function convertDocument(
         net_before_vat,
         vat_amount,
         notes,
+        sales_channel,
+        ecommerce_order_no,
+        ecommerce_buyer_name,
+        tracking_no,
         document_items!document_items_document_id_fkey (
           product_id,
           description,
@@ -3022,6 +3089,8 @@ export async function convertDocument(
       return { data: null, error: owner.error };
     }
 
+    const ecommerce = ecommerceFieldsFromSource(source);
+
     const { data: created, error: createError } = await supabase
       .from("documents")
       .insert({
@@ -3051,6 +3120,10 @@ export async function convertDocument(
         vat_amount: Number(source.vat_amount ?? source.tax_amount ?? 0),
         payment_status: resolveInitialPaymentStatus(targetDocType),
         notes,
+        sales_channel: ecommerce.sales_channel,
+        ecommerce_order_no: ecommerce.ecommerce_order_no,
+        ecommerce_buyer_name: ecommerce.ecommerce_buyer_name,
+        tracking_no: ecommerce.tracking_no,
         created_by: owner.userId,
         updated_at: nowIso,
       })
@@ -3693,6 +3766,10 @@ export async function cloneDocumentToNewDraft(
         net_before_vat,
         vat_amount,
         notes,
+        sales_channel,
+        ecommerce_order_no,
+        ecommerce_buyer_name,
+        tracking_no,
         document_items!document_items_document_id_fkey (
           product_id,
           description,
@@ -3745,6 +3822,8 @@ export async function cloneDocumentToNewDraft(
       return { data: null, error: owner.error };
     }
 
+    const ecommerce = ecommerceFieldsFromSource(source);
+
     const { data: created, error: createError } = await supabase
       .from("documents")
       .insert({
@@ -3774,6 +3853,10 @@ export async function cloneDocumentToNewDraft(
         paid_amount: 0,
         payment_status: resolveInitialPaymentStatus(docType),
         notes,
+        sales_channel: ecommerce.sales_channel,
+        ecommerce_order_no: ecommerce.ecommerce_order_no,
+        ecommerce_buyer_name: ecommerce.ecommerce_buyer_name,
+        tracking_no: ecommerce.tracking_no,
         created_by: owner.userId,
         updated_at: nowIso,
       })
@@ -3892,6 +3975,10 @@ export async function duplicateDocument(
         total_amount,
         net_before_vat,
         vat_amount,
+        sales_channel,
+        ecommerce_order_no,
+        ecommerce_buyer_name,
+        tracking_no,
         document_items!document_items_document_id_fkey (
           product_id,
           description,
@@ -3935,6 +4022,8 @@ export async function duplicateDocument(
       return { data: null, error: owner.error };
     }
 
+    const ecommerce = ecommerceFieldsFromSource(source);
+
     const { data: created, error: createError } = await supabase
       .from("documents")
       .insert({
@@ -3965,6 +4054,10 @@ export async function duplicateDocument(
         paid_amount: 0,
         payment_status: resolveInitialPaymentStatus(docType),
         notes: `คัดลอกจาก ${source.doc_no}`,
+        sales_channel: ecommerce.sales_channel,
+        ecommerce_order_no: ecommerce.ecommerce_order_no,
+        ecommerce_buyer_name: ecommerce.ecommerce_buyer_name,
+        tracking_no: ecommerce.tracking_no,
         created_by: owner.userId,
         updated_at: nowIso,
       })

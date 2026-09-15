@@ -12,9 +12,12 @@ import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import {
   CREDIT_NOTE_SOURCE_DOC_TYPES,
   CREDIT_NOTE_SOURCE_STATUSES,
+  SALES_CHANNEL_LABELS,
   SALES_DOC_TYPES,
   getDocumentTypeLabel,
+  isEcommercePlatformChannel,
   isRefundDocType,
+  isSalesChannel,
 } from "@/lib/constants/document";
 import PrintDocumentTemplate from "@/components/sales/print-document-template";
 import PrintPaymentReceiptTemplate from "@/components/finance/PrintPaymentReceiptTemplate";
@@ -675,6 +678,27 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                   </p>
                 </div>
               )}
+              {isSalesChannel(doc.sales_channel) ? (
+                <div className="mt-3 rounded-lg border border-violet-100 bg-violet-50/70 px-3 py-2">
+                  <p className="text-xs font-semibold text-violet-700">
+                    ช่องทางขาย
+                  </p>
+                  <p className="font-medium text-slate-800">
+                    {SALES_CHANNEL_LABELS[doc.sales_channel]}
+                  </p>
+                  {isEcommercePlatformChannel(doc.sales_channel) ? (
+                    <div className="mt-1 space-y-0.5 text-xs text-slate-600">
+                      <p>
+                        ผู้ซื้อ: {doc.ecommerce_buyer_name?.trim() || "—"}
+                      </p>
+                      <p>
+                        เลขคำสั่งซื้อ: {doc.ecommerce_order_no?.trim() || "—"}
+                      </p>
+                      <p>เลขพัสดุ: {doc.tracking_no?.trim() || "—"}</p>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 

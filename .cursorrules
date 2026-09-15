@@ -80,3 +80,7 @@ Tech Stack หลัก: Supabase (PostgreSQL, Auth, Edge Functions, RLS), Next.
 ## 8. Decimal Accuracy & Inventory (GAAP Standard)
 - **No Decimal Truncation:** สินค้าประเภทวัตถุดิบ (Raw Materials) มีหน่วยเป็นทศนิยม (KGS, MTR) ห้ามใช้คำสั่ง `parseInt()`, `Math.round()`, `Math.floor()` ในการบันทึกหรือคำนวณสต็อกเด็ดขาด
 - **Data Type Enforcement:** ตัวแปรที่เก็บจำนวนสินค้าที่เกี่ยวข้องกับวัตถุดิบและ `inventory_ledger` ต้องรองรับทศนิยม บังคับใช้ Database Type เป็น `NUMERIC(14,4)` เสมอ
+
+## 9. E-Commerce & Omnichannel Standards (TFRS 15)
+- **One-Time Customer (SAP CPD):** ห้ามออกแบบระบบให้สร้าง `contacts` ใหม่สำหรับลูกค้ารายย่อยบนแพลตฟอร์ม (Shopee, Lazada) เด็ดขาด ให้ใช้ Contact ID กลาง (เช่น 'ลูกค้า Shopee') และนำชื่อลูกค้าจริงไปเก็บไว้ที่ฟิลด์ `ecommerce_buyer_name` ในตาราง `documents` แทน
+- **Gross Revenue Recognition:** การบันทึกยอดขายจากแพลตฟอร์มออนไลน์ ต้องบันทึกด้วย "ยอดขายเต็มจำนวน (Gross Amount)" เสมอ ห้ามนำค่าธรรมเนียมแพลตฟอร์มมาหักลบในบิลขาย (ค่าธรรมเนียมให้แยกบันทึกเป็นบิล Expenses ทีหลัง)

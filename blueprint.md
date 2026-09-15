@@ -59,6 +59,11 @@ Available Stock = Physical Stock (Σ inventory\_ledger) − Committed Stock (Σ 
 Smart Matrix Selection แสดงยอด "พร้อมขาย (ATP)" แทน Physical Stock
 Guardrail: หาก ATP ไม่เพียงพอ ห้ามบันทึกเอกสาร (bypass ได้ถ้า allow\_negative\_inventory = true)
 
+E-Commerce & Omnichannel Integration (Phase 19):
+รองรับการขายผ่านแพลตฟอร์มภายนอก (Shopee, Lazada, TikTok) โดยใช้สถาปัตยกรรม One-Time Customer (SAP CPD) ป้องกันปัญหา Master Data Bloat พร้อมฟิลด์รับรองข้อมูล Metadata (sales_channel, ecommerce_order_no, buyer_name, tracking_no) ฝังในระดับ Document Header และล็อกมาตรฐานการบันทึกรายได้แบบ Gross Amount
+Enterprise Tax Ledger (Phase 19):
+เครื่องยนต์สร้างรายงานภาษีซื้อ (Input Tax) และภาษีขาย (Output Tax) รูปแบบ Spreadsheet (Excel) ที่จัดเรียงคอลัมน์ถูกต้องตามฟอร์แมตของกรมสรรพากร 100% โดยดึงข้อมูลจากเอกสารสถานะ ISSUED/PAID ตามวันที่ใบกำกับภาษี (Tax Invoice Date)
+
 Module C: Smart Procurement \& Inventory (ระบบจัดซื้อและคลังสินค้า)
 Strict Server-Side Fetching: บังคับใช้ Server Actions ร่วมกับ Service Role Key (supabaseAdmin) 100% หลีกเลี่ยงปัญหา RLS
 Project Guardrails: บังคับใช้ไฟล์ .cursorrules ล็อกสถาปัตยกรรมโค้ด (Zero Client-Side Fetching, Document Lifecycle) อย่างเคร่งครัด

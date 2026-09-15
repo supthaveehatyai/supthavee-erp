@@ -54,7 +54,12 @@ import type { Contact } from "@/app/contacts/contacts";
 import QuickEditContactButton from "@/components/contacts/QuickEditContactButton";
 import ContactPersonCombobox from "../../create/contact-person-combobox";
 import CustomerCombobox from "../../create/customer-combobox";
+import SalesChannelFields, {
+  salesChannelFieldsFromDocument,
+  type SalesChannelFieldsValue,
+} from "@/components/sales/sales-channel-fields";
 import { cn } from "@/lib/utils";
+import { parseSalesDocumentEcommerce } from "@/lib/validations/sales-document";
 
 const DEFAULT_VAT_RATE = 7;
 
@@ -144,6 +149,10 @@ export default function SalesEditWorkspace({
       : "EXCLUSIVE",
   );
   const [notes, setNotes] = useState(initialDocument.notes ?? "");
+  const [salesChannelFields, setSalesChannelFields] =
+    useState<SalesChannelFieldsValue>(() =>
+      salesChannelFieldsFromDocument(initialDocument),
+    );
   const [isPending, startTransition] = useTransition();
   const preserveInitialPersonRef = useRef(true);
   const isReplacement =
@@ -307,6 +316,12 @@ export default function SalesEditWorkspace({
       }
     }
 
+    const ecommerce = parseSalesDocumentEcommerce(salesChannelFields);
+    if (!ecommerce.ok) {
+      toast.error(ecommerce.error);
+      return;
+    }
+
     startTransition(async () => {
       const result = await updateDraftDocument({
         document_id: initialDocument.id,
@@ -322,6 +337,10 @@ export default function SalesEditWorkspace({
         net_before_vat: billSummary.net_before_vat,
         vat_amount: billSummary.vat_amount,
         grand_total: billSummary.grand_total,
+        sales_channel: ecommerce.data.sales_channel,
+        ecommerce_order_no: ecommerce.data.ecommerce_order_no,
+        ecommerce_buyer_name: ecommerce.data.ecommerce_buyer_name,
+        tracking_no: ecommerce.data.tracking_no,
         items: isReplacement
           ? undefined
           : lineItems.map((row, index) => ({
@@ -487,6 +506,12 @@ export default function SalesEditWorkspace({
               placeholder='เช่น 10% หรือ 500'
             />
           </div>
+          <SalesChannelFields
+            value={salesChannelFields}
+            onChange={setSalesChannelFields}
+            disabled={isPending}
+            platformClassName="sm:col-span-2 lg:col-span-3"
+          />
           <div className="space-y-1.5 sm:col-span-2 lg:col-span-3">
             <Label htmlFor="notes">หมายเหตุ / Remark</Label>
             <textarea

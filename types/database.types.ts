@@ -755,6 +755,8 @@ export type Database = {
           doc_no: string
           doc_type: Database["public"]["Enums"]["document_type"]
           due_date: string | null
+          ecommerce_buyer_name: string | null
+          ecommerce_order_no: string | null
           freight_cost: number | null
           grand_total: number
           id: string
@@ -770,11 +772,13 @@ export type Database = {
           ref_document_id: string | null
           reference_no: string | null
           rounding_difference: number | null
+          sales_channel: string | null
           status: Database["public"]["Enums"]["document_status"]
           sub_total: number
           tax_amount: number
           tax_rate: number
           total_amount: number
+          tracking_no: string | null
           updated_at: string
           vat_amount: number
           vat_rate: number
@@ -803,6 +807,8 @@ export type Database = {
           doc_no: string
           doc_type: Database["public"]["Enums"]["document_type"]
           due_date?: string | null
+          ecommerce_buyer_name?: string | null
+          ecommerce_order_no?: string | null
           freight_cost?: number | null
           grand_total?: number
           id?: string
@@ -818,11 +824,13 @@ export type Database = {
           ref_document_id?: string | null
           reference_no?: string | null
           rounding_difference?: number | null
+          sales_channel?: string | null
           status?: Database["public"]["Enums"]["document_status"]
           sub_total?: number
           tax_amount?: number
           tax_rate?: number
           total_amount?: number
+          tracking_no?: string | null
           updated_at?: string
           vat_amount?: number
           vat_rate?: number
@@ -851,6 +859,8 @@ export type Database = {
           doc_no?: string
           doc_type?: Database["public"]["Enums"]["document_type"]
           due_date?: string | null
+          ecommerce_buyer_name?: string | null
+          ecommerce_order_no?: string | null
           freight_cost?: number | null
           grand_total?: number
           id?: string
@@ -866,11 +876,13 @@ export type Database = {
           ref_document_id?: string | null
           reference_no?: string | null
           rounding_difference?: number | null
+          sales_channel?: string | null
           status?: Database["public"]["Enums"]["document_status"]
           sub_total?: number
           tax_amount?: number
           tax_rate?: number
           total_amount?: number
+          tracking_no?: string | null
           updated_at?: string
           vat_amount?: number
           vat_rate?: number

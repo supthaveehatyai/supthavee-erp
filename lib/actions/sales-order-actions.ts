@@ -138,6 +138,10 @@ export async function saveSalesOrderDraft(
       net_before_vat: payload.net_before_vat,
       vat_amount: payload.vat_amount,
       grand_total: payload.grand_total,
+      sales_channel: payload.sales_channel,
+      ecommerce_order_no: payload.ecommerce_order_no,
+      ecommerce_buyer_name: payload.ecommerce_buyer_name,
+      tracking_no: payload.tracking_no,
     };
 
     const saved = documentId

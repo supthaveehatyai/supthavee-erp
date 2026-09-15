@@ -48,6 +48,51 @@ export const DOCUMENT_STATUSES = [
   "VOID",
 ] as const;
 
+/** Phase 19 — ช่องทางขาย (documents.sales_channel). NULL บนเอกสารเก่า = ถือเป็น STORE */
+export const SALES_CHANNELS = [
+  "SHOPEE",
+  "LAZADA",
+  "TIKTOK",
+  "STORE",
+  "DIRECT",
+] as const;
+
+export type SalesChannelCode = (typeof SALES_CHANNELS)[number];
+
+/** แพลตฟอร์ม E-Commerce ที่ต้องกรอก metadata One-Time Customer */
+export const ECOMMERCE_PLATFORM_CHANNELS = [
+  "SHOPEE",
+  "LAZADA",
+  "TIKTOK",
+] as const;
+
+export type EcommercePlatformChannel =
+  (typeof ECOMMERCE_PLATFORM_CHANNELS)[number];
+
+export const DEFAULT_SALES_CHANNEL: SalesChannelCode = "STORE";
+
+export const SALES_CHANNEL_LABELS: Record<SalesChannelCode, string> = {
+  SHOPEE: "Shopee",
+  LAZADA: "Lazada",
+  TIKTOK: "TikTok Shop",
+  STORE: "หน้าร้าน",
+  DIRECT: "ขายตรง / B2B",
+};
+
+export function isSalesChannel(
+  value: string | null | undefined,
+): value is SalesChannelCode {
+  return (SALES_CHANNELS as readonly string[]).includes(value ?? "");
+}
+
+export function isEcommercePlatformChannel(
+  value: string | null | undefined,
+): value is EcommercePlatformChannel {
+  return (ECOMMERCE_PLATFORM_CHANNELS as readonly string[]).includes(
+    value ?? "",
+  );
+}
+
 /** Running-number prefix per type → `{PREFIX}-{YYMM}-{XXXX}`. */
 export const DOCUMENT_TYPE_PREFIX = {
   QT: "QT",
@@ -250,6 +295,38 @@ export const CREDIT_DOC_TYPES = [
 
 /** Cash / settled-on-issue documents. */
 export const CASH_DOC_TYPES = ["CS_TAX", "ABB", "AP_CASH"] as const;
+
+/**
+ * Phase 19 — ภาษีขาย (ภ.พ.30 Output Tax)
+ * ใบกำกับภาษีขาย / ใบกำกับเงินสด / ใบเสร็จอย่างย่อ
+ */
+export const OUTPUT_TAX_DOC_TYPES = ["TAX_INV", "CS_TAX", "ABB"] as const;
+
+/** DRAFT ไม่เข้าสมุดภาษี — VOID ยังต้องโชว์แถวแต่ยอดเป็น 0 */
+export const OUTPUT_TAX_STATUSES = [
+  "ISSUED",
+  "PAID",
+  "COMPLETED",
+  "VOID",
+] as const;
+
+/**
+ * Phase 19 — ภาษีซื้อ (ภ.พ.30 Input Tax)
+ * ใบกำกับภาษีซื้อจากซัพพลายเออร์
+ */
+export const INPUT_TAX_DOC_TYPES = ["AP_TAX"] as const;
+
+export const INPUT_TAX_STATUSES = ["ISSUED", "PAID"] as const;
+
+export const VAT_LEDGER_REPORT_TYPES = ["OUTPUT_TAX", "INPUT_TAX"] as const;
+
+export type VatLedgerReportType = (typeof VAT_LEDGER_REPORT_TYPES)[number];
+
+export function isVatLedgerReportType(
+  value: string,
+): value is VatLedgerReportType {
+  return (VAT_LEDGER_REPORT_TYPES as readonly string[]).includes(value);
+}
 
 /** Sales AR invoice types (customer receivables). */
 export const AR_INVOICE_DOC_TYPES = ["INV_DO", "TAX_INV"] as const;

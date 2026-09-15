@@ -6,11 +6,13 @@
 import {
   DOCUMENT_STATUSES,
   DOCUMENT_TYPES,
+  SALES_CHANNELS,
 } from "@/lib/constants/document";
 import type { VatCalculationType } from "@/lib/utils/document-summary";
 
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
+export type SalesChannel = (typeof SALES_CHANNELS)[number];
 export type { VatCalculationType };
 
 export type DocumentRow = {
@@ -49,6 +51,14 @@ export type DocumentRow = {
   net_before_vat?: number;
   vat_amount?: number;
   discount_text?: string | null;
+  /** Phase 19 — ช่องทางขาย; NULL = ลูกค้า B2B ปกติ */
+  sales_channel?: SalesChannel | null;
+  /** เลขที่คำสั่งซื้อจากแพลตฟอร์ม E-Commerce */
+  ecommerce_order_no?: string | null;
+  /** ชื่อ-นามสกุลจริงของผู้ซื้อบนแพลตฟอร์ม (One-Time Customer) */
+  ecommerce_buyer_name?: string | null;
+  /** เลขพัสดุ / Tracking Number */
+  tracking_no?: string | null;
 };
 
 export type CustomerOption = {
@@ -71,6 +81,11 @@ export type CreateDocumentInput = {
   contact_id: string;
   /** Optional — ผู้ติดต่อของลูกค้าที่เลือก */
   contact_person_id?: string | null;
+  /** Phase 19 — ช่องทางขาย (default STORE) */
+  sales_channel?: SalesChannel | null;
+  ecommerce_order_no?: string | null;
+  ecommerce_buyer_name?: string | null;
+  tracking_no?: string | null;
 };
 
 export type CreateDocumentResult = {
@@ -111,6 +126,11 @@ export type CreateDraftDocumentInput = {
   net_before_vat?: number;
   vat_amount?: number;
   grand_total?: number;
+  /** Phase 19 — One-Time Customer (default sales_channel = STORE) */
+  sales_channel?: SalesChannel | null;
+  ecommerce_order_no?: string | null;
+  ecommerce_buyer_name?: string | null;
+  tracking_no?: string | null;
 };
 
 export type CreateDraftDocumentResult = {
@@ -137,6 +157,11 @@ export type UpdateDraftDocumentInput = {
   net_before_vat?: number;
   vat_amount?: number;
   grand_total?: number;
+  /** Phase 19 — One-Time Customer (default sales_channel = STORE) */
+  sales_channel?: SalesChannel | null;
+  ecommerce_order_no?: string | null;
+  ecommerce_buyer_name?: string | null;
+  tracking_no?: string | null;
 };
 
 export type UpdateDraftDocumentResult = {
@@ -334,6 +359,11 @@ export type DocumentDetail = {
   vat_amount: number | null;
   /** Inbound freight (ค่าขนส่งต้นทาง) — included in sub_total before VAT. */
   freight_cost?: number | null;
+  /** Phase 19 — ช่องทางขาย; NULL = ลูกค้า B2B ปกติ */
+  sales_channel?: SalesChannel | null;
+  ecommerce_order_no?: string | null;
+  ecommerce_buyer_name?: string | null;
+  tracking_no?: string | null;
   wht_rate: number;
   wht_amount: number;
   payment_status: string;

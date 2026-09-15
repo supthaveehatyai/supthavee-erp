@@ -23,6 +23,7 @@ import {
   isSalesTradingDocType,
   type SalesTradingDocType,
 } from "@/lib/constants/document";
+import { parseSalesDocumentEcommerce } from "@/lib/validations/sales-document";
 import {
   calculateDocumentSummary,
   type VatCalculationType,
@@ -59,6 +60,10 @@ import type { Contact } from "@/app/contacts/contacts";
 import QuickEditContactButton from "@/components/contacts/QuickEditContactButton";
 import ContactPersonCombobox from "./contact-person-combobox";
 import CustomerCombobox from "./customer-combobox";
+import SalesChannelFields, {
+  INITIAL_SALES_CHANNEL_FIELDS,
+  type SalesChannelFieldsValue,
+} from "@/components/sales/sales-channel-fields";
 
 const INITIAL_DOC_TYPE: SalesTradingDocType = DEFAULT_SALES_CREATE_DOC_TYPE;
 const INITIAL_VAT_TYPE: VatCalculationType = "EXCLUSIVE";
@@ -145,6 +150,8 @@ export default function SalesCreateWorkspace({
   const [lineItems, setLineItems] = useState<SalesLineItem[]>([]);
   const [discountText, setDiscountText] = useState("");
   const [vatType, setVatType] = useState<VatCalculationType>(INITIAL_VAT_TYPE);
+  const [salesChannelFields, setSalesChannelFields] =
+    useState<SalesChannelFieldsValue>(INITIAL_SALES_CHANNEL_FIELDS);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -232,6 +239,7 @@ export default function SalesCreateWorkspace({
     setLineItems([]);
     setDiscountText("");
     setVatType(INITIAL_VAT_TYPE);
+    setSalesChannelFields(INITIAL_SALES_CHANNEL_FIELDS);
   }
 
   function handleDocTypeChange(next: string) {
@@ -337,6 +345,12 @@ export default function SalesCreateWorkspace({
       return;
     }
 
+    const ecommerce = parseSalesDocumentEcommerce(salesChannelFields);
+    if (!ecommerce.ok) {
+      toast.error(ecommerce.error);
+      return;
+    }
+
     startTransition(async () => {
       const result = await createDraftDocument({
         doc_type: docType,
@@ -351,6 +365,10 @@ export default function SalesCreateWorkspace({
         net_before_vat: billSummary.net_before_vat,
         vat_amount: billSummary.vat_amount,
         grand_total: billSummary.grand_total,
+        sales_channel: ecommerce.data.sales_channel,
+        ecommerce_order_no: ecommerce.data.ecommerce_order_no,
+        ecommerce_buyer_name: ecommerce.data.ecommerce_buyer_name,
+        tracking_no: ecommerce.data.tracking_no,
         items: lineItems.map((row, index) => ({
           product_id: row.product_id,
           description: row.description,
@@ -493,6 +511,16 @@ export default function SalesCreateWorkspace({
                 }
               />
             </div>
+
+            <SalesChannelFields
+              value={salesChannelFields}
+              onChange={(next) => {
+                clearLastSavedArtifact();
+                setSalesChannelFields(next);
+              }}
+              disabled={isPending}
+              platformClassName="sm:col-span-2 lg:col-span-4"
+            />
 
             <div className="flex items-end">
               <Button

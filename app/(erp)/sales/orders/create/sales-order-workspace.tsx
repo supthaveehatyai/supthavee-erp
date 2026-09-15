@@ -31,6 +31,7 @@ import {
 } from "@/lib/utils/document-summary";
 import { compressImage } from "@/lib/utils/image-compression";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
+import { parseSalesDocumentEcommerce } from "@/lib/validations/sales-document";
 import type {
   ContactPersonOption,
   DocumentDetail,
@@ -78,6 +79,10 @@ import type { Contact } from "@/app/contacts/contacts";
 import QuickEditContactButton from "@/components/contacts/QuickEditContactButton";
 import ContactPersonCombobox from "@/app/(erp)/sales/create/contact-person-combobox";
 import CustomerCombobox from "@/app/(erp)/sales/create/customer-combobox";
+import SalesChannelFields, {
+  salesChannelFieldsFromDocument,
+  type SalesChannelFieldsValue,
+} from "@/components/sales/sales-channel-fields";
 
 const DEFAULT_VAT_RATE = 7;
 const INITIAL_VAT_TYPE: VatCalculationType = "EXCLUSIVE";
@@ -191,6 +196,10 @@ export default function SalesOrderWorkspace({
   const [vatType] = useState<VatCalculationType>(
     document?.vat_type ?? INITIAL_VAT_TYPE,
   );
+  const [salesChannelFields, setSalesChannelFields] =
+    useState<SalesChannelFieldsValue>(() =>
+      salesChannelFieldsFromDocument(document),
+    );
 
   useEffect(() => {
     setCustomerOptions(customers);
@@ -338,6 +347,12 @@ export default function SalesOrderWorkspace({
       return null;
     }
 
+    const ecommerce = parseSalesDocumentEcommerce(salesChannelFields);
+    if (!ecommerce.ok) {
+      toast.error(ecommerce.error);
+      return null;
+    }
+
     return {
       document_id: documentId || null,
       contact_id: contactId,
@@ -353,6 +368,10 @@ export default function SalesOrderWorkspace({
       net_before_vat: billSummary.net_before_vat,
       vat_amount: billSummary.vat_amount,
       grand_total: billSummary.grand_total,
+      sales_channel: ecommerce.data.sales_channel,
+      ecommerce_order_no: ecommerce.data.ecommerce_order_no,
+      ecommerce_buyer_name: ecommerce.data.ecommerce_buyer_name,
+      tracking_no: ecommerce.data.tracking_no,
       items: lineItems.map((row, index) => ({
         product_id: row.product_id,
         description: row.description,
@@ -547,6 +566,12 @@ export default function SalesOrderWorkspace({
               แสดงผล: {formatThaiDate(docDate, "long")}
             </p>
           </div>
+          <SalesChannelFields
+            value={salesChannelFields}
+            onChange={setSalesChannelFields}
+            disabled={isBusy}
+            platformClassName="sm:col-span-2"
+          />
           <div className="sm:col-span-2">
             <Label htmlFor="so-notes">หมายเหตุ / รายละเอียดงานผลิต</Label>
             <Textarea

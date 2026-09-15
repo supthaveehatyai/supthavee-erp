@@ -48,6 +48,11 @@ export type SaveSalesOrderDraftInput = {
   net_before_vat?: number;
   vat_amount?: number;
   grand_total?: number;
+  /** Phase 19 — One-Time Customer */
+  sales_channel?: string | null;
+  ecommerce_order_no?: string | null;
+  ecommerce_buyer_name?: string | null;
+  tracking_no?: string | null;
 };
 
 export type SaveSalesOrderDraftResult = {
