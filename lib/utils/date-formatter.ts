@@ -94,3 +94,31 @@ export function formatThaiDate(
   if (!day || !month || !year) return "—";
   return `${day}/${month}/${year}`;
 }
+
+/**
+ * Timestamp for Excel export filenames — `YYMMDDHHmmss` (Asia/Bangkok).
+ * Native Intl only — ไม่เพิ่ม date-fns / dayjs
+ */
+export function formatExportTimestamp(date: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Bangkok",
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const read = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+
+  const yy = read("year").slice(-2).padStart(2, "0");
+  const mm = read("month").padStart(2, "0");
+  const dd = read("day").padStart(2, "0");
+  const hh = read("hour").padStart(2, "0");
+  const mi = read("minute").padStart(2, "0");
+  const ss = read("second").padStart(2, "0");
+  return `${yy}${mm}${dd}${hh}${mi}${ss}`;
+}

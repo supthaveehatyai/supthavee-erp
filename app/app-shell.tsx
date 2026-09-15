@@ -76,7 +76,7 @@ const navigationGroups: NavigationGroup[] = [
       { label: "ระบบวางบิล", href: "/finance/billing-notes" },
       { label: "ค่าใช้จ่าย (Expenses)", href: "/expenses" },
       { label: "รายงานหัก ณ ที่จ่าย (WHT)", href: "/tax/wht-report" },
-      { label: "รายงานภาษีซื้อ-ภาษีขาย", href: "/finance/tax-reports" },
+      { label: "ศูนย์รายงาน (Report Center)", href: "/finance/tax-reports" },
       { label: "สมุดบัญชีธนาคาร", href: "/finance/bank-accounts" },
       { label: "เจ้าหนี้ / ลูกหนี้", href: "/finance/ap-ar" },
       { label: "ปิดงบรายเดือน (Period Lock)", href: "/accounting-periods" },

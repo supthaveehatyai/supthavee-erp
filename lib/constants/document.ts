@@ -397,6 +397,72 @@ export function isVatLedgerReportType(
   return (VAT_LEDGER_REPORT_TYPES as readonly string[]).includes(value);
 }
 
+/**
+ * Report Center — ภาษีซื้อ/ขาย + ทะเบียนเอกสาร
+ * INV_DO = ใบส่งของ, EXP = ค่าใช้จ่าย (ตาราง expenses), PAY = ใบสำคัญจ่าย (documents)
+ */
+export const DOCUMENT_REGISTER_REPORT_TYPES = [
+  "INV_DO",
+  "EXP",
+  "PAY",
+] as const;
+
+export type DocumentRegisterReportType =
+  (typeof DOCUMENT_REGISTER_REPORT_TYPES)[number];
+
+export const FINANCE_REPORT_TYPES = [
+  ...VAT_LEDGER_REPORT_TYPES,
+  ...DOCUMENT_REGISTER_REPORT_TYPES,
+] as const;
+
+export type FinanceReportType = (typeof FINANCE_REPORT_TYPES)[number];
+
+export const FINANCE_REPORT_TYPE_OPTIONS: ReadonlyArray<{
+  value: FinanceReportType;
+  label: string;
+}> = [
+  { value: "OUTPUT_TAX", label: "ภาษีขาย" },
+  { value: "INPUT_TAX", label: "ภาษีซื้อ" },
+  { value: "INV_DO", label: "ทะเบียนใบส่งของ (INV_DO)" },
+  { value: "EXP", label: "ทะเบียนค่าใช้จ่าย (EXP)" },
+  { value: "PAY", label: "ทะเบียนใบสำคัญจ่าย (PAY)" },
+];
+
+export const DOCUMENT_REGISTER_STATUSES = [
+  "ISSUED",
+  "PAID",
+  "COMPLETED",
+  "VOID",
+] as const;
+
+/** ค่าใช้จ่ายที่ออกเอกสารแล้ว — ไม่ดึง DRAFT / PENDING */
+export const EXPENSE_REGISTER_STATUSES = ["ISSUED", "PAID", "VOID"] as const;
+
+export const DOCUMENT_STATUS_TH_LABELS: Record<string, string> = {
+  DRAFT: "ร่าง",
+  PENDING: "รออนุมัติ",
+  ISSUED: "ออกเอกสาร",
+  PAID: "ชำระแล้ว",
+  COMPLETED: "เสร็จสิ้น",
+  VOID: "ยกเลิก",
+  CANCELLED: "ยกเลิก",
+};
+
+export function isDocumentRegisterReportType(
+  value: string,
+): value is DocumentRegisterReportType {
+  return (DOCUMENT_REGISTER_REPORT_TYPES as readonly string[]).includes(value);
+}
+
+export function isFinanceReportType(value: string): value is FinanceReportType {
+  return (FINANCE_REPORT_TYPES as readonly string[]).includes(value);
+}
+
+export function getDocumentStatusLabel(status: string): string {
+  const key = String(status ?? "").trim().toUpperCase();
+  return DOCUMENT_STATUS_TH_LABELS[key] ?? (key || "—");
+}
+
 /** Sales AR invoice types (customer receivables). */
 export const AR_INVOICE_DOC_TYPES = ["INV_DO", "TAX_INV"] as const;
 

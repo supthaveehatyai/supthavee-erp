@@ -215,6 +215,7 @@ function mapDocumentRow(
     goods_amount: goodsAmount,
     vat_amount: vatAmount,
     grand_total: grandTotal,
+    status: trimText(row.status).toUpperCase(),
     remark: isVoid ? "ยกเลิก" : "",
     is_void: isVoid,
   };

@@ -23,6 +23,7 @@ export type VatLedgerLine = {
   goods_amount: number;
   vat_amount: number;
   grand_total: number;
+  status: string;
   remark: string;
   is_void: boolean;
 };

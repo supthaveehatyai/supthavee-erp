@@ -1,10 +1,11 @@
 /**
- * Phase 19 — VAT Ledger Excel workbook (ภ.พ.30 layout).
+ * Report Center — Document Register Excel + timestamped filenames.
  * exceljs only — no UI / no Supabase.
  */
 
 import ExcelJS from "exceljs";
-import type { VatLedgerReport } from "@/types/tax-ledger";
+import type { FinanceReportType } from "@/lib/constants/document";
+import type { DocumentRegisterReport } from "@/types/finance-report";
 
 const HEADER_FILL: ExcelJS.FillPattern = {
   type: "pattern",
@@ -38,8 +39,21 @@ function applyHeaderCell(
   cell.alignment = { vertical: "middle", horizontal: "left" };
 }
 
-export async function buildVatLedgerWorkbook(
-  report: VatLedgerReport,
+export function financeReportFilename(
+  reportType: FinanceReportType,
+  timestamp: string,
+): string {
+  if (reportType === "OUTPUT_TAX") {
+    return `VAT_OUTPUT_TAX_${timestamp}.xlsx`;
+  }
+  if (reportType === "INPUT_TAX") {
+    return `VAT_INPUT_TAX_${timestamp}.xlsx`;
+  }
+  return `REGISTER_${reportType}_${timestamp}.xlsx`;
+}
+
+export async function buildDocumentRegisterWorkbook(
+  report: DocumentRegisterReport,
 ): Promise<ExcelJS.Buffer> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Supthavee ERP";
@@ -66,48 +80,38 @@ export async function buildVatLedgerWorkbook(
 
   sheet.columns = [
     { key: "seq", width: 8 },
-    { key: "invoice_date", width: 16 },
-    { key: "invoice_no", width: 20 },
+    { key: "doc_date", width: 16 },
+    { key: "doc_no", width: 22 },
     { key: "party_name", width: 36 },
-    { key: "tax_id", width: 20 },
-    { key: "branch_office", width: 18 },
-    { key: "goods_amount", width: 16 },
-    { key: "vat_amount", width: 16 },
+    { key: "net_before_vat", width: 16 },
+    { key: "vat_amount", width: 14 },
     { key: "grand_total", width: 16 },
-    { key: "remark", width: 12 },
+    { key: "status", width: 14 },
   ];
 
-  sheet.mergeCells("A1:J1");
-  sheet.mergeCells("A2:J2");
-  sheet.mergeCells("A3:J3");
+  sheet.mergeCells("A1:H1");
+  sheet.mergeCells("A2:H2");
+  sheet.mergeCells("A3:H3");
 
-  const taxIdSuffix = report.company.tax_id
-    ? `  ·  เลขประจำตัวผู้เสียภาษี ${report.company.tax_id}`
-    : "";
-  applyHeaderCell(sheet.getCell("A1"), `${report.company.company_name}${taxIdSuffix}`, {
-    size: 16,
-  });
+  applyHeaderCell(sheet.getCell("A1"), report.company_name, { size: 16 });
   applyHeaderCell(sheet.getCell("A2"), report.title, { size: 14 });
-  applyHeaderCell(
-    sheet.getCell("A3"),
-    `ประจำเดือน ${report.periodLabel}`,
-    { size: 12, bold: false },
-  );
+  applyHeaderCell(sheet.getCell("A3"), `ประจำเดือน ${report.periodLabel}`, {
+    size: 12,
+    bold: false,
+  });
   sheet.getRow(1).height = 24;
   sheet.getRow(2).height = 20;
   sheet.getRow(3).height = 18;
 
   const columnTitles = [
     "ลำดับ",
-    "วันที่ใบกำกับภาษี",
-    "เลขที่ใบกำกับภาษี",
+    "วันที่",
+    "เลขเอกสาร",
     report.partyColumnLabel,
-    "เลขประจำตัวผู้เสียภาษี",
-    "สำนักงานใหญ่/สาขา",
-    "มูลค่าสินค้า",
-    "จำนวนเงินภาษี",
-    "รวมเงิน",
-    "หมายเหตุ",
+    "ยอดก่อนภาษี",
+    "ภาษี",
+    "ยอดสุทธิ",
+    "สถานะ",
   ];
 
   const headerRow = sheet.getRow(HEADER_ROW);
@@ -117,7 +121,11 @@ export async function buildVatLedgerWorkbook(
     cell.value = title;
     cell.font = { name: "Calibri", bold: true, color: { argb: "FFFFFFFF" } };
     cell.fill = HEADER_FILL;
-    cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+    cell.alignment = {
+      vertical: "middle",
+      horizontal: "center",
+      wrapText: true,
+    };
     cell.border = {
       top: { style: "thin", color: { argb: "FFCBD5E1" } },
       left: { style: "thin", color: { argb: "FFCBD5E1" } },
@@ -130,25 +138,23 @@ export async function buildVatLedgerWorkbook(
   report.rows.forEach((line, index) => {
     const excelRow = sheet.getRow(dataStartRow + index);
     excelRow.getCell("seq").value = line.seq;
-    excelRow.getCell("invoice_date").value = line.invoice_date;
-    excelRow.getCell("invoice_no").value = line.invoice_no;
+    excelRow.getCell("doc_date").value = line.doc_date;
+    excelRow.getCell("doc_no").value = line.doc_no;
     excelRow.getCell("party_name").value = line.party_name;
-    excelRow.getCell("tax_id").value = line.tax_id;
-    excelRow.getCell("branch_office").value = line.branch_office;
-    excelRow.getCell("goods_amount").value = line.goods_amount;
+    excelRow.getCell("net_before_vat").value = line.net_before_vat;
     excelRow.getCell("vat_amount").value = line.vat_amount;
     excelRow.getCell("grand_total").value = line.grand_total;
-    excelRow.getCell("remark").value = line.remark;
+    excelRow.getCell("status").value = line.status_label;
     excelRow.alignment = { vertical: "middle" };
-    excelRow.getCell("tax_id").numFmt = "@";
-    excelRow.getCell("goods_amount").numFmt = MONEY_FORMAT;
+    excelRow.getCell("net_before_vat").numFmt = MONEY_FORMAT;
     excelRow.getCell("vat_amount").numFmt = MONEY_FORMAT;
     excelRow.getCell("grand_total").numFmt = MONEY_FORMAT;
-    excelRow.getCell("goods_amount").alignment = { horizontal: "right" };
+    excelRow.getCell("seq").alignment = { horizontal: "center" };
+    excelRow.getCell("doc_date").alignment = { horizontal: "center" };
+    excelRow.getCell("net_before_vat").alignment = { horizontal: "right" };
     excelRow.getCell("vat_amount").alignment = { horizontal: "right" };
     excelRow.getCell("grand_total").alignment = { horizontal: "right" };
-    excelRow.getCell("seq").alignment = { horizontal: "center" };
-    excelRow.getCell("invoice_date").alignment = { horizontal: "center" };
+    excelRow.getCell("status").alignment = { horizontal: "center" };
     if (line.is_void) {
       excelRow.font = VOID_FONT;
     }
@@ -156,19 +162,18 @@ export async function buildVatLedgerWorkbook(
 
   const totalRow = sheet.getRow(dataStartRow + report.rows.length);
   totalRow.getCell("party_name").value = "รวมทั้งสิ้น";
-  totalRow.getCell("goods_amount").value = report.totals.goods_amount;
+  totalRow.getCell("net_before_vat").value = report.totals.net_before_vat;
   totalRow.getCell("vat_amount").value = report.totals.vat_amount;
   totalRow.getCell("grand_total").value = report.totals.grand_total;
-  totalRow.font = { name: "Calibri", bold: true };
-  for (let col = 1; col <= 10; col += 1) {
+  for (let col = 1; col <= 8; col += 1) {
     totalRow.getCell(col).fill = TOTAL_FILL;
     totalRow.getCell(col).font = { name: "Calibri", bold: true };
   }
-  totalRow.getCell("goods_amount").numFmt = MONEY_FORMAT;
+  totalRow.getCell("net_before_vat").numFmt = MONEY_FORMAT;
   totalRow.getCell("vat_amount").numFmt = MONEY_FORMAT;
   totalRow.getCell("grand_total").numFmt = MONEY_FORMAT;
   totalRow.getCell("party_name").alignment = { horizontal: "right" };
-  totalRow.getCell("goods_amount").alignment = { horizontal: "right" };
+  totalRow.getCell("net_before_vat").alignment = { horizontal: "right" };
   totalRow.getCell("vat_amount").alignment = { horizontal: "right" };
   totalRow.getCell("grand_total").alignment = { horizontal: "right" };
 
