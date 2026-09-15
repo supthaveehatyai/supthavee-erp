@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { HandCoins, Plus, Wallet } from "lucide-react";
 import { getDepositDocuments } from "@/app/actions/finance/deposit-actions";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { canAccessVendorDeposits } from "@/lib/auth/module-access";
 import type { DepositDocument, DepositTab } from "@/types/deposit";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -162,8 +165,18 @@ function DepositTable({
 
 export default async function DepositsPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const tab = resolveTab(params.tab);
   const search = params.search?.trim() || undefined;
+  const actor = await getCurrentAuthUser();
+  const canUseDepOut = canAccessVendorDeposits(
+    actor?.accessibleModules,
+    actor?.roleCode,
+  );
+
+  if (!canUseDepOut && params.tab === "DEP_OUT") {
+    redirect(buildTabHref("DEP_IN", search));
+  }
+
+  const tab: DepositTab = canUseDepOut ? resolveTab(params.tab) : "DEP_IN";
 
   const { data, error } = await getDepositDocuments(tab, search);
 
@@ -185,8 +198,9 @@ export default async function DepositsPage({ searchParams }: PageProps) {
             เงินมัดจำ (Deposit Management)
           </h1>
           <p className="text-slate-500">
-            รับเงินมัดจำลูกค้า (DEP_IN) และจ่ายมัดจำซัพพลายเออร์ (DEP_OUT) —
-            สถานะแท็บควบคุมผ่าน URL Search Params
+            {canUseDepOut
+              ? "รับเงินมัดจำลูกค้า (DEP_IN) และจ่ายมัดจำซัพพลายเออร์ (DEP_OUT) — สถานะแท็บควบคุมผ่าน URL Search Params"
+              : "รับเงินมัดจำลูกค้า (DEP_IN) — พนักงานขายสามารถบันทึกมัดจำรับได้โดยไม่ต้องมีสิทธิ์ Finance"}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -197,12 +211,14 @@ export default async function DepositsPage({ searchParams }: PageProps) {
             <Plus className="size-4" />
             สร้างเอกสารมัดจำ
           </Link>
-          <Link
-            href={`/finance/refunds/create?type=${tab === "DEP_IN" ? "AR" : "AP"}`}
-            className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
-          >
-            คืนเงินมัดจำ
-          </Link>
+          {canUseDepOut ? (
+            <Link
+              href={`/finance/refunds/create?type=${tab === "DEP_IN" ? "AR" : "AP"}`}
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+            >
+              คืนเงินมัดจำ
+            </Link>
+          ) : null}
         </div>
       </div>
 
@@ -224,19 +240,21 @@ export default async function DepositsPage({ searchParams }: PageProps) {
         >
           รับเงินมัดจำลูกค้า (DEP_IN)
         </Link>
-        <Link
-          role="tab"
-          aria-selected={tab === "DEP_OUT"}
-          href={buildTabHref("DEP_OUT", search)}
-          className={cn(
-            "inline-flex flex-1 items-center justify-center whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-semibold transition",
-            tab === "DEP_OUT"
-              ? "bg-white text-slate-900 shadow-sm"
-              : "text-slate-600 hover:text-slate-900",
-          )}
-        >
-          จ่ายเงินมัดจำซัพพลายเออร์ (DEP_OUT)
-        </Link>
+        {canUseDepOut ? (
+          <Link
+            role="tab"
+            aria-selected={tab === "DEP_OUT"}
+            href={buildTabHref("DEP_OUT", search)}
+            className={cn(
+              "inline-flex flex-1 items-center justify-center whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-semibold transition",
+              tab === "DEP_OUT"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-600 hover:text-slate-900",
+            )}
+          >
+            จ่ายเงินมัดจำซัพพลายเออร์ (DEP_OUT)
+          </Link>
+        ) : null}
       </div>
 
       {error ? (

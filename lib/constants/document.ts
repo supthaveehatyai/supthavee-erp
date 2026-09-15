@@ -102,6 +102,30 @@ export const SALES_DOC_TYPES = [
 ] as const;
 
 /**
+ * ฟอร์มเปิดบิลขาย (`/sales/create`) — เฉพาะ Trading & Services
+ * ห้ามผสมเอกสารการเงิน (DEP_IN, REC, CN, AR_REFUND, …)
+ */
+export const SALES_TRADING_DOC_TYPES = [
+  "QT",
+  "SO",
+  "INV_DO",
+  "TAX_INV",
+  "CS_TAX",
+  "ABB",
+] as const;
+
+export type SalesTradingDocType = (typeof SALES_TRADING_DOC_TYPES)[number];
+
+/** Default ของฟอร์มเปิดบิลขาย */
+export const DEFAULT_SALES_CREATE_DOC_TYPE: SalesTradingDocType = "INV_DO";
+
+export function isSalesTradingDocType(
+  docType: string,
+): docType is SalesTradingDocType {
+  return (SALES_TRADING_DOC_TYPES as readonly string[]).includes(docType);
+}
+
+/**
  * Purchases Document List — strict allow-list.
  */
 export const PURCHASE_DOC_TYPES = [

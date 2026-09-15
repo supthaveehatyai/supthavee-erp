@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { HandCoins } from "lucide-react";
 import { DepositCreateForm } from "./deposit-create-form";
 import type { DepositTab } from "@/types/deposit";
 import { listActiveCustomers } from "@/lib/actions/document-actions";
 import { getActiveVendors } from "@/lib/actions/mapping";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { canAccessVendorDeposits } from "@/lib/auth/module-access";
 import { todayIsoDate } from "@/lib/utils/outstanding-summary";
 
 export const metadata: Metadata = {
@@ -25,7 +28,19 @@ function resolveDocType(raw: string | undefined): DepositTab {
 
 export default async function CreateDepositPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const docType = resolveDocType(params.type);
+  const actor = await getCurrentAuthUser();
+  const canUseDepOut = canAccessVendorDeposits(
+    actor?.accessibleModules,
+    actor?.roleCode,
+  );
+
+  if (!canUseDepOut && params.type === "DEP_OUT") {
+    redirect("/finance/deposits/create?type=DEP_IN");
+  }
+
+  const docType: DepositTab = canUseDepOut
+    ? resolveDocType(params.type)
+    : "DEP_IN";
 
   const [customersResult, vendorsResult] = await Promise.all([
     listActiveCustomers(),

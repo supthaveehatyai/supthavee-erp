@@ -12,7 +12,8 @@
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
-import { requireSessionUserId } from "@/lib/auth/current-user";
+import { getCurrentAuthUser, requireSessionUserId } from "@/lib/auth/current-user";
+import { canAccessCustomerDeposits, canAccessVendorDeposits } from "@/lib/auth/module-access";
 import {
   resolveInitialPaymentStatus,
   resolveIssuedDocumentStatus,
@@ -127,6 +128,23 @@ export async function getDepositDocuments(
   try {
     if (tab !== "DEP_IN" && tab !== "DEP_OUT") {
       return { data: [], error: `แท็บไม่ถูกต้อง: ${String(tab)}` };
+    }
+
+    const actor = await getCurrentAuthUser();
+    if (!canAccessCustomerDeposits(actor?.accessibleModules, actor?.roleCode)) {
+      return {
+        data: [],
+        error: "Forbidden: ไม่มีสิทธิ์เข้าถึงเอกสารเงินมัดจำ",
+      };
+    }
+    if (
+      tab === "DEP_OUT" &&
+      !canAccessVendorDeposits(actor?.accessibleModules, actor?.roleCode)
+    ) {
+      return {
+        data: [],
+        error: "Forbidden: ไม่มีสิทธิ์ดูจ่ายเงินมัดจำซัพพลายเออร์ (DEP_OUT)",
+      };
     }
 
     const supabase = createSupabaseServerClient();
@@ -364,6 +382,22 @@ export async function createDepositDocument(
       };
     }
     const docType: DepositTab = docTypeRaw;
+    const actor = await getCurrentAuthUser();
+    if (!canAccessCustomerDeposits(actor?.accessibleModules, actor?.roleCode)) {
+      return {
+        success: false,
+        error: "Forbidden: ไม่มีสิทธิ์บันทึกเงินมัดจำ",
+      };
+    }
+    if (docType === "DEP_OUT") {
+      if (!canAccessVendorDeposits(actor?.accessibleModules, actor?.roleCode)) {
+        return {
+          success: false,
+          error:
+            "Forbidden: พนักงานขายสามารถสร้างได้เฉพาะรับเงินมัดจำลูกค้า (DEP_IN)",
+        };
+      }
+    }
 
     const documentDate = /^\d{4}-\d{2}-\d{2}$/.test(documentDateRaw)
       ? documentDateRaw

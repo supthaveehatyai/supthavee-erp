@@ -21,6 +21,7 @@ import {
   SALES_DOC_TYPES,
   STOCK_OUT_DOC_TYPES,
   isFinanceHeaderOnlyDocType,
+  isSalesTradingDocType,
   resolveInitialPaymentStatus,
   resolveIssuedDocumentStatus,
 } from "@/lib/constants/document";
@@ -248,11 +249,11 @@ export async function createDraftDocument(
     if (!isDocumentType(docType)) {
       return { data: null, error: "กรุณาเลือกประเภทเอกสารให้ถูกต้อง" };
     }
-    if (docType === "CN") {
+    if (!isSalesTradingDocType(docType)) {
       return {
         data: null,
         error:
-          "ใบลดหนี้ต้องสร้างจากบิลขายต้นทางที่ /sales/cn/create?ref_doc_id=...",
+          "หน้าเปิดบิลขายรองรับเฉพาะ QT, SO, INV_DO, TAX_INV, CS_TAX, ABB — เอกสารการเงินต้องสร้างจากเมนูการเงิน",
       };
     }
     if (!contactId) {

@@ -131,8 +131,42 @@ function matchesPrefix(pathname: string, prefix: string): boolean {
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
 }
 
+/** Strip query/hash so nav hrefs like `/finance/deposits?tab=DEP_IN` match. */
+export function normalizePathname(pathname: string): string {
+  const raw = pathname.trim() || "/";
+  const withoutHash = raw.split("#")[0] ?? raw;
+  const withoutQuery = withoutHash.split("?")[0] ?? withoutHash;
+  if (!withoutQuery) return "/";
+  return withoutQuery.length > 1 && withoutQuery.endsWith("/")
+    ? withoutQuery.slice(0, -1)
+    : withoutQuery;
+}
+
+/** รับเงินมัดจำลูกค้า (DEP_IN) — Sales ใช้ได้แม้ไม่มีโมดูล finance */
+export function isCustomerDepositPath(pathname: string): boolean {
+  const path = normalizePathname(pathname);
+  return path === "/finance/deposits" || path.startsWith("/finance/deposits/");
+}
+
+export function canAccessVendorDeposits(
+  modules: AccessibleModules | null | undefined,
+  roleCode?: string | null,
+): boolean {
+  if (isAdminRoleCode(roleCode)) return true;
+  return parseAccessibleModules(modules, roleCode).finance === true;
+}
+
+export function canAccessCustomerDeposits(
+  modules: AccessibleModules | null | undefined,
+  roleCode?: string | null,
+): boolean {
+  if (isAdminRoleCode(roleCode)) return true;
+  const granted = parseAccessibleModules(modules, roleCode);
+  return granted.sales === true || granted.finance === true;
+}
+
 export function resolveModuleForPath(pathname: string): ErpModuleKey | null {
-  const path = pathname.trim() || "/";
+  const path = normalizePathname(pathname);
   for (const key of ERP_MODULE_KEYS) {
     if (MODULE_PATH_PREFIXES[key].some((prefix) => matchesPrefix(path, prefix))) {
       return key;
@@ -142,7 +176,7 @@ export function resolveModuleForPath(pathname: string): ErpModuleKey | null {
 }
 
 export function isUngatedPath(pathname: string): boolean {
-  const path = pathname.trim() || "/";
+  const path = normalizePathname(pathname);
   if (path === "/") return true;
   return PUBLIC_OR_UNGATED_PREFIXES.some((prefix) => matchesPrefix(path, prefix));
 }
@@ -150,19 +184,38 @@ export function isUngatedPath(pathname: string): boolean {
 /**
  * Auth Guard: deny when the URL belongs to a module that is false
  * on the current role's `accessible_modules`.
+ * ข้อยกเว้น: `/finance/deposits*` เปิดได้เมื่อ sales หรือ finance เป็น true
  */
 export function canAccessPath(
   pathname: string,
   modules: AccessibleModules | null | undefined,
   roleCode?: string | null,
 ): boolean {
-  const path = pathname.trim() || "/";
+  const path = normalizePathname(pathname);
   if (isUngatedPath(path)) return true;
   if (isAdminRoleCode(roleCode)) return true;
+
+  const granted = parseAccessibleModules(modules, roleCode);
+  if (isCustomerDepositPath(path) && canAccessCustomerDeposits(granted, roleCode)) {
+    return true;
+  }
 
   const moduleKey = resolveModuleForPath(path);
   if (!moduleKey) return true;
 
-  const granted = parseAccessibleModules(modules, roleCode);
   return granted[moduleKey] === true;
+}
+
+/** Nav visibility — `requiresModule` บังคับโมดูลโดยไม่ตาม path */
+export function canSeeNavItem(
+  href: string,
+  modules: AccessibleModules | null | undefined,
+  roleCode?: string | null,
+  requiresModule?: ErpModuleKey | null,
+): boolean {
+  if (isAdminRoleCode(roleCode)) return true;
+  if (requiresModule) {
+    return parseAccessibleModules(modules, roleCode)[requiresModule] === true;
+  }
+  return canAccessPath(href, modules, roleCode);
 }

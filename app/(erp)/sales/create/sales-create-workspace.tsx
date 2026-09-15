@@ -19,13 +19,17 @@ import {
 import { VAT_OPTIONS } from "@/lib/constants/accounting";
 import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import {
+  DEFAULT_SALES_CREATE_DOC_TYPE,
+  isSalesTradingDocType,
+  type SalesTradingDocType,
+} from "@/lib/constants/document";
+import {
   calculateDocumentSummary,
   type VatCalculationType,
 } from "@/lib/utils/document-summary";
 import type {
   ContactPersonOption,
   CustomerOption,
-  DocumentType,
   SalesLineItem,
   SalesProductSearchItem,
 } from "@/types/document";
@@ -56,20 +60,20 @@ import QuickEditContactButton from "@/components/contacts/QuickEditContactButton
 import ContactPersonCombobox from "./contact-person-combobox";
 import CustomerCombobox from "./customer-combobox";
 
-const INITIAL_DOC_TYPE: DocumentType = "QT";
+const INITIAL_DOC_TYPE: SalesTradingDocType = DEFAULT_SALES_CREATE_DOC_TYPE;
 const INITIAL_VAT_TYPE: VatCalculationType = "EXCLUSIVE";
 const DEFAULT_VAT_RATE = 7;
 
-
-const SALES_DOC_TYPES: { value: DocumentType; label: string }[] = [
+const SALES_TRADING_DOC_TYPE_OPTIONS: {
+  value: SalesTradingDocType;
+  label: string;
+}[] = [
   { value: "QT", label: "ใบเสนอราคา (QT)" },
   { value: "SO", label: "ใบสั่งขาย (SO)" },
-  { value: "ABB", label: "ใบเสร็จอย่างย่อ (ABB)" },
-  { value: "DEP_IN", label: "ใบมัดจำรับ (DEP_IN)" },
   { value: "INV_DO", label: "ใบส่งของ / แจ้งหนี้ (INV_DO)" },
   { value: "TAX_INV", label: "ใบกำกับภาษี (TAX_INV)" },
   { value: "CS_TAX", label: "ใบกำกับเงินสด (CS_TAX)" },
-  { value: "REC", label: "ใบเสร็จรับเงิน (REC)" },
+  { value: "ABB", label: "ใบเสร็จอย่างย่อ (ABB)" },
 ];
 
 const ITEM_COLUMNS = [
@@ -129,7 +133,7 @@ export default function SalesCreateWorkspace({
   customersError = null,
 }: SalesCreateWorkspaceProps) {
   const router = useRouter();
-  const [docType, setDocType] = useState<DocumentType>(INITIAL_DOC_TYPE);
+  const [docType, setDocType] = useState<SalesTradingDocType>(INITIAL_DOC_TYPE);
   const [contactId, setContactId] = useState("");
   const [contactPersonId, setContactPersonId] = useState("");
   const [customerOptions, setCustomerOptions] = useState(customers);
@@ -230,7 +234,8 @@ export default function SalesCreateWorkspace({
     setVatType(INITIAL_VAT_TYPE);
   }
 
-  function handleDocTypeChange(next: DocumentType) {
+  function handleDocTypeChange(next: string) {
+    if (!isSalesTradingDocType(next)) return;
     clearLastSavedArtifact();
     setDocType(next);
   }
@@ -325,6 +330,10 @@ export default function SalesCreateWorkspace({
     }
     if (lineItems.some((row) => row.qty <= 0)) {
       toast.error("จำนวนสินค้าต้องมากกว่า 0");
+      return;
+    }
+    if (!isSalesTradingDocType(docType)) {
+      toast.error("กรุณาเลือกประเภทเอกสารขายให้ถูกต้อง");
       return;
     }
 
@@ -433,13 +442,11 @@ export default function SalesCreateWorkspace({
                 id="doc-type"
                 name="doc_type"
                 value={docType}
-                onChange={(event) =>
-                  handleDocTypeChange(event.target.value as DocumentType)
-                }
+                onChange={(event) => handleDocTypeChange(event.target.value)}
                 disabled={isPending}
                 className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none ring-offset-white focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {SALES_DOC_TYPES.map((option) => (
+                {SALES_TRADING_DOC_TYPE_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>

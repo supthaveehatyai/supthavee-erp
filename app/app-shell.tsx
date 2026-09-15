@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { SignOutButton } from "@/components/auth/sign-out-button";
-import { canAccessPath, isAuthPath } from "@/lib/auth/module-access";
-import type { AccessibleModules } from "@/types/rbac";
+import { canAccessPath, canSeeNavItem, isAuthPath, normalizePathname } from "@/lib/auth/module-access";
+import type { AccessibleModules, ErpModuleKey } from "@/types/rbac";
 
 type IconName =
   | "dashboard"
@@ -21,6 +21,8 @@ type IconName =
 type NavigationItem = {
   label: string;
   href: string;
+  /** ถ้ากำหนด จะโชว์เฉพาะเมื่อโมดูลนี้เป็น true (ไม่ตาม path ของ href) */
+  requiresModule?: ErpModuleKey;
 };
 
 type NavigationGroup = {
@@ -44,6 +46,11 @@ const navigationGroups: NavigationGroup[] = [
     items: [
       { label: "เอกสารขาย", href: "/sales" },
       { label: "เปิดบิลขาย", href: "/sales/create" },
+      {
+        label: "รับเงินมัดจำลูกค้า",
+        href: "/finance/deposits?tab=DEP_IN",
+        requiresModule: "sales",
+      },
       { label: "ใบสั่งขาย (SO)", href: "/sales/orders" },
       { label: "เอกสารซื้อ", href: "/purchases" },
       { label: "วิเคราะห์กำไร", href: "/profit-analysis" },
@@ -60,7 +67,11 @@ const navigationGroups: NavigationGroup[] = [
       { label: "ตัดหนี้สูญ (AR Write-off)", href: "/finance/ar-writeoff/create" },
       { label: "ตัดหนี้สูญ (AP Write-off)", href: "/finance/ap-writeoff" },
       { label: "จ่ายชำระหนี้ซัพพลายเออร์", href: "/finance/ap-payment" },
-      { label: "รับ/จ่าย เงินมัดจำ", href: "/finance/deposits" },
+      {
+        label: "รับ/จ่าย เงินมัดจำ",
+        href: "/finance/deposits",
+        requiresModule: "finance",
+      },
       { label: "คืนเงินมัดจำ (Refund)", href: "/finance/refunds/create" },
       { label: "ระบบวางบิล", href: "/finance/billing-notes" },
       { label: "ค่าใช้จ่าย (Expenses)", href: "/expenses" },
@@ -198,7 +209,12 @@ function SidebarContent({
     .map((group) => ({
       ...group,
       items: group.items.filter((item) =>
-        canAccessPath(item.href, accessibleModules, roleCode),
+        canSeeNavItem(
+          item.href,
+          accessibleModules,
+          roleCode,
+          item.requiresModule,
+        ),
       ),
     }))
     .filter((group) => group.items.length > 0);
@@ -249,9 +265,10 @@ function SidebarContent({
               </div>
               <div className="mt-1 space-y-0.5 border-l border-blue-400/25 pl-3 ml-[21px]">
                 {group.items.map((item) => {
+                  const itemPath = normalizePathname(item.href);
                   const isActive =
-                    pathname === item.href ||
-                    pathname.startsWith(`${item.href}/`);
+                    pathname === itemPath ||
+                    pathname.startsWith(`${itemPath}/`);
 
                   return (
                     <Link
