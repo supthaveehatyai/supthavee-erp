@@ -17,11 +17,9 @@
 
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { exceedsApprovalLimit } from "@/lib/approval/approval-rules";
 import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { generateDocumentNumber } from "@/lib/actions/document-actions";
-import { resolveIssuedDocumentStatus } from "@/lib/constants/document";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { generateDraftDocumentNo } from "@/lib/utils/draft-document-no";
 import type { Json } from "@/src/types/supabase";
@@ -358,24 +356,27 @@ async function loadMakerApprovalLimit(
   supabaseAdmin: SupabaseClient,
   actorId: string,
 ): Promise<{ ok: true; approvalLimit: number } | { ok: false; error: string }> {
+  const userId = actorId.trim();
+  if (!userId) {
+    return { ok: false, error: "ไม่พบรหัสผู้ใช้จาก Auth Session" };
+  }
+
   const { data: profile, error } = await supabaseAdmin
     .from("user_profiles")
     .select("id, approval_limit")
-    .eq("id", actorId)
+    .eq("id", userId)
     .maybeSingle();
 
   if (error) {
-    return { ok: false, error: error.message };
+    return { ok: false, error: `ดึง approval_limit ไม่สำเร็จ: ${error.message}` };
   }
   if (!profile) {
-    return { ok: false, error: "ไม่พบโปรไฟล์ผู้ใช้งาน" };
+    return { ok: false, error: "ไม่พบโปรไฟล์ผู้ใช้งานใน user_profiles" };
   }
 
-  const limit = Number(profile.approval_limit ?? 0);
-  return {
-    ok: true,
-    approvalLimit: Number.isFinite(limit) && limit >= 0 ? limit : 0,
-  };
+  const raw = Number(profile.approval_limit ?? 0);
+  const approvalLimit = Number.isFinite(raw) && raw >= 0 ? raw : 0;
+  return { ok: true, approvalLimit };
 }
 
 async function rollbackRefund(
@@ -403,6 +404,11 @@ async function rollbackRefund(
     .from("document_allocations")
     .delete()
     .eq("receipt_doc_id", refundId);
+  await supabaseAdmin
+    .from("audit_logs")
+    .delete()
+    .eq("table_name", "documents")
+    .eq("record_id", refundId);
   await supabaseAdmin.from("documents").delete().eq("id", refundId);
   if (slipStoragePath) {
     await supabaseAdmin.storage
@@ -449,19 +455,25 @@ async function writeDocumentsAuditLog(
     return { error: "new_data ของ audit_logs ไม่สามารถแปลงเป็น JSON ได้" };
   }
 
-  const { error } = await supabaseAdmin.from("audit_logs").insert({
-    table_name: "documents",
-    record_id: recordId,
-    action: params.action,
-    old_data: toAuditJson(params.oldData ?? null),
-    new_data: newData,
-    changed_by: actorUserId,
-    changed_by_name: params.actorName?.trim()?.slice(0, 100) || null,
-  });
+  const { data, error } = await supabaseAdmin
+    .from("audit_logs")
+    .insert({
+      table_name: "documents",
+      record_id: recordId,
+      action: params.action,
+      old_data: toAuditJson(params.oldData ?? null),
+      new_data: newData,
+      changed_by: actorUserId,
+      changed_by_name: params.actorName?.trim()?.slice(0, 100) || null,
+    })
+    .select("id")
+    .single();
 
-  if (error) {
-    console.error("[createRefundDocument][audit_logs]", error.message);
-    return { error: error.message };
+  if (error || !data?.id) {
+    const message =
+      error?.message || "insert audit_logs สำเร็จแต่ไม่คืน id";
+    console.error("[createRefundDocument][audit_logs]", message);
+    return { error: message };
   }
 
   return { error: null };
@@ -718,8 +730,9 @@ export async function getRefundParties(
 
 /**
  * สร้างใบคืนเงินมัดจำ (Late Numbering + ABAC approval_limit)
- * - ยอด > approval_limit → DRAFT + PENDING (เลขชั่วคราว)
- * - ยอดไม่เกินวงเงิน (รวม Admin ลิมิต 999,999,999.00) → ISSUED + เลขจริง SRF/PRF
+ * - grand_total > user_profiles.approval_limit → DRAFT + PENDING (เลขชั่วคราว DRAFT-*)
+ * - ไม่เกินวงเงิน → ISSUED + APPROVED + เลขจริง SRF/PRF
+ * - หลัง insert documents + document_allocations ต้องเขียน audit_logs เสมอ
  * ไม่บันทึก document_items — ผูกมัดจำผ่าน document_allocations เท่านั้น
  */
 export async function createRefundDocument(
@@ -989,13 +1002,12 @@ export async function createRefundDocument(
       originalFileName = slipFile.name.slice(0, 255);
     }
 
-    const exceedsLimit = exceedsApprovalLimit(
-      vat.grand_total,
-      limitResult.approvalLimit,
-    );
-    const pendingApproval = exceedsLimit;
+    const refundGrandTotal = roundMoney(vat.grand_total);
+    const approvalLimit = limitResult.approvalLimit;
+    const requiresApproval = refundGrandTotal > approvalLimit;
+
     let documentNo = generateDraftDocumentNo();
-    if (!pendingApproval) {
+    if (!requiresApproval) {
       const numberResult = await generateDocumentNumber(
         refundDocType as DocumentType,
         docDate,
@@ -1016,15 +1028,17 @@ export async function createRefundDocument(
       }
       documentNo = numberResult.data;
     }
-    const headerStatus = pendingApproval
-      ? "DRAFT"
-      : resolveIssuedDocumentStatus(refundDocType);
+
+    const headerStatus = requiresApproval ? "DRAFT" : "ISSUED";
+    const approvalStatus = requiresApproval ? "PENDING" : "APPROVED";
     const nowIso = new Date().toISOString();
-    const issuedPaid = !pendingApproval;
+    const issuedPaid = !requiresApproval;
     const depositDocNo = depositRow.doc_no?.trim() || depositId;
     const notesParts = [
       `คืนเงินมัดจำจาก ${depositDocNo}`,
-      `amount=${vat.grand_total.toFixed(2)}`,
+      `amount=${refundGrandTotal.toFixed(2)}`,
+      `approval_limit=${approvalLimit.toFixed(2)}`,
+      `requires_approval=${requiresApproval ? "true" : "false"}`,
       `vat=${vat.vat_type}@${vat.vat_rate}%`,
       `net=${vat.net_before_vat.toFixed(2)}`,
       `vat_amt=${vat.vat_amount.toFixed(2)}`,
@@ -1061,9 +1075,9 @@ export async function createRefundDocument(
         attached_file_url: slipUrl,
         original_file_name: originalFileName,
         created_by: actor.userId,
-        approval_status: pendingApproval ? "PENDING" : "APPROVED",
-        approved_by: pendingApproval ? null : actor.userId,
-        approved_at: pendingApproval ? null : nowIso,
+        approval_status: approvalStatus,
+        approved_by: requiresApproval ? null : actor.userId,
+        approved_at: requiresApproval ? null : nowIso,
         updated_at: nowIso,
       })
       .select("*")
@@ -1084,14 +1098,15 @@ export async function createRefundDocument(
 
     refundId = String(refundDoc.id);
     const refundDocNo = String(refundDoc.doc_no ?? documentNo);
-    const refundDocPayload: Record<string, unknown> = {
+    const documentData: Record<string, unknown> = {
       ...(refundDoc as Record<string, unknown>),
-      audit_event: refundDocType,
+      user_id: actor.userId,
+      approval_limit: approvalLimit,
+      requires_approval: requiresApproval,
       deposit_id: depositId,
       deposit_doc_no: depositDocNo,
       bank_account_id: bankAccountId,
       payment_method: isCash ? "CASH" : "BANK_TRANSFER",
-      summary: `สร้างใบคืนเงินมัดจำ ${refundDocNo} จำนวน ${vat.grand_total.toFixed(2)} บาท`,
     };
     const newDeducted = roundMoney(allocatedAmount + applyAmount);
     const depositOldPayload: Record<string, unknown> = {
@@ -1101,8 +1116,9 @@ export async function createRefundDocument(
       deposit_deducted: previousDeducted,
     };
 
-    const [allocResult, txResult, insertAudit] = await Promise.all([
-      supabaseAdmin.from("document_allocations").insert({
+    const { error: allocError } = await supabaseAdmin
+      .from("document_allocations")
+      .insert({
         receipt_doc_id: refundId,
         invoice_doc_id: depositId,
         allocated_amount: applyAmount,
@@ -1111,32 +1127,9 @@ export async function createRefundDocument(
         adjustment_reason: remark
           ? `${REFUND_ADJUSTMENT_REASON}: ${remark}`
           : REFUND_ADJUSTMENT_REASON,
-      }),
-      supabaseAdmin.from("payment_transactions").insert({
-        document_id: refundId,
-        payment_method: isCash ? "CASH" : "BANK_TRANSFER",
-        bank_account_id: bankAccountId,
-        amount: applyAmount,
-        payment_date: docDate,
-        attachment_url: slipUrl,
-        is_reconciled: false,
-        is_voided: false,
-      }),
-      writeDocumentsAuditLog(supabaseAdmin, {
-        actorUserId: actor.userId,
-        actorName: actor.displayName,
-        recordId: refundId,
-        action: "INSERT",
-        oldData: null,
-        newData: refundDocPayload,
-      }),
-    ]);
+      });
 
-    const relatedError =
-      allocResult.error?.message ??
-      txResult.error?.message ??
-      insertAudit.error;
-    if (relatedError) {
+    if (allocError) {
       await rollbackRefund(
         supabaseAdmin,
         refundId,
@@ -1147,7 +1140,60 @@ export async function createRefundDocument(
       refundId = null;
       return {
         success: false,
-        error: relatedError,
+        error: allocError.message ?? "บันทึก document_allocations ไม่สำเร็จ",
+        data: null,
+      };
+    }
+
+    const insertAudit = await writeDocumentsAuditLog(supabaseAdmin, {
+      actorUserId: actor.userId,
+      actorName: actor.displayName,
+      recordId: refundId,
+      action: "INSERT",
+      oldData: null,
+      newData: documentData,
+    });
+    if (insertAudit.error) {
+      await rollbackRefund(
+        supabaseAdmin,
+        refundId,
+        null,
+        null,
+        slipStoragePath,
+      );
+      refundId = null;
+      return {
+        success: false,
+        error: `บันทึก audit_logs ไม่สำเร็จ: ${insertAudit.error}`,
+        data: null,
+      };
+    }
+
+    const { error: txError } = await supabaseAdmin
+      .from("payment_transactions")
+      .insert({
+        document_id: refundId,
+        payment_method: isCash ? "CASH" : "BANK_TRANSFER",
+        bank_account_id: bankAccountId,
+        amount: applyAmount,
+        payment_date: docDate,
+        attachment_url: slipUrl,
+        is_reconciled: false,
+        is_voided: false,
+      });
+
+    if (txError) {
+      await rollbackRefund(
+        supabaseAdmin,
+        refundId,
+        null,
+        null,
+        slipStoragePath,
+      );
+      refundId = null;
+      return {
+        success: false,
+        error: txError.message ?? "บันทึก payment_transactions ไม่สำเร็จ",
         data: null,
       };
     }
@@ -1219,7 +1265,7 @@ export async function createRefundDocument(
       if (depositDocNo) revalidatePath(`/purchases/${depositDocNo}`);
       revalidatePath(`/purchases/${refundDocNo}`);
     }
-    revalidateApprovalCenterIfPending(pendingApproval);
+    revalidateApprovalCenterIfPending(requiresApproval);
 
     return {
       success: true,
@@ -1233,8 +1279,8 @@ export async function createRefundDocument(
         vat_amount: vat.vat_amount,
         vat_type: vat.vat_type,
         vat_rate: vat.vat_rate,
-        pending_approval: pendingApproval,
-        approval_limit: limitResult.approvalLimit,
+        pending_approval: requiresApproval,
+        approval_limit: approvalLimit,
       },
     };
   } catch (err) {
