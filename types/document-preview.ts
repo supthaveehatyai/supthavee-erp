@@ -31,6 +31,8 @@ export type DocumentPreview = {
   notes: string | null;
   contact_name: string | null;
   detail_href: string;
+  attachment_url?: string | null;
+  attached_file_url?: string | null;
   items: DocumentPreviewLineItem[];
   allocations: DocumentPreviewAllocation[];
 };

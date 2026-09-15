@@ -79,6 +79,8 @@ export async function getDocumentPreview(
         grand_total,
         remark,
         notes,
+        attachment_url,
+        attached_file_url,
         contacts!documents_contact_id_fkey (
           company_name
         )
@@ -141,6 +143,12 @@ export async function getDocumentPreview(
         notes: header.notes ? String(header.notes) : null,
         contact_name: contact?.company_name?.trim() || null,
         detail_href: resolveDocumentDetailHref(docNo, docType),
+        attachment_url: header.attachment_url
+          ? String(header.attachment_url)
+          : null,
+        attached_file_url: header.attached_file_url
+          ? String(header.attached_file_url)
+          : null,
         items: (itemsResult.data ?? []).map((row) => ({
           id: String(row.id),
           description: row.description ? String(row.description) : null,

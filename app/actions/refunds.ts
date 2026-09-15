@@ -20,9 +20,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { exceedsApprovalLimit } from "@/lib/approval/approval-rules";
 import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
 import { requireSessionUserId } from "@/lib/auth/current-user";
+import { generateDocumentNumber } from "@/lib/actions/document-actions";
+import { resolveIssuedDocumentStatus } from "@/lib/constants/document";
 import { logAuditTrail } from "@/lib/supabase/auditService";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { generateDraftDocumentNo } from "@/lib/utils/draft-document-no";
+import type { DocumentType } from "@/types/document";
 import {
   calculateDocumentSummary,
   isVatCalculationType,
@@ -659,6 +662,8 @@ export async function getRefundParties(
 
 /**
  * สร้างใบคืนเงินมัดจำ (Late Numbering + ABAC approval_limit)
+ * - ยอด > approval_limit → DRAFT + PENDING (เลขชั่วคราว)
+ * - ยอดไม่เกินวงเงิน (รวม Admin ลิมิต 999,999,999.00) → ISSUED + เลขจริง SRF/PRF
  * ไม่บันทึก document_items — ผูกมัดจำผ่าน document_allocations เท่านั้น
  */
 export async function createRefundDocument(
@@ -929,8 +934,33 @@ export async function createRefundDocument(
       limitResult.approvalLimit,
     );
     const pendingApproval = exceedsLimit;
-    const documentNo = generateDraftDocumentNo();
+    let documentNo = generateDraftDocumentNo();
+    if (!pendingApproval) {
+      const numberResult = await generateDocumentNumber(
+        refundDocType as DocumentType,
+        docDate,
+      );
+      if (numberResult.error || !numberResult.data) {
+        if (slipStoragePath) {
+          await supabaseAdmin.storage
+            .from(DOCUMENT_ATTACHMENTS_BUCKET)
+            .remove([slipStoragePath]);
+        }
+        return {
+          success: false,
+          error:
+            numberResult.error ??
+            "สร้างเลขที่เอกสารคืนเงิน (SRF / PRF) ไม่สำเร็จ",
+          data: null,
+        };
+      }
+      documentNo = numberResult.data;
+    }
+    const headerStatus = pendingApproval
+      ? "DRAFT"
+      : resolveIssuedDocumentStatus(refundDocType);
     const nowIso = new Date().toISOString();
+    const issuedPaid = !pendingApproval;
     const depositDocNo = depositRow.doc_no?.trim() || depositId;
     const notesParts = [
       `คืนเงินมัดจำจาก ${depositDocNo}`,
@@ -946,7 +976,7 @@ export async function createRefundDocument(
       .insert({
         doc_no: documentNo,
         doc_type: refundDocType,
-        status: "DRAFT",
+        status: headerStatus,
         doc_date: docDate,
         contact_id: contactId,
         ref_document_id: depositId,
@@ -963,8 +993,8 @@ export async function createRefundDocument(
         vat_rate: vat.vat_rate,
         vat_type: vat.vat_type,
         deposit_deducted: 0,
-        paid_amount: 0,
-        payment_status: "UNPAID",
+        paid_amount: issuedPaid ? vat.grand_total : 0,
+        payment_status: issuedPaid ? "PAID" : "UNPAID",
         remark,
         notes: notesParts.join(" | "),
         attachment_url: slipUrl,
@@ -972,8 +1002,8 @@ export async function createRefundDocument(
         original_file_name: originalFileName,
         created_by: owner.userId,
         approval_status: pendingApproval ? "PENDING" : "APPROVED",
-        approved_by: null,
-        approved_at: null,
+        approved_by: pendingApproval ? null : owner.userId,
+        approved_at: pendingApproval ? null : nowIso,
         updated_at: nowIso,
       })
       .select("id, doc_no")
@@ -1088,7 +1118,7 @@ export async function createRefundDocument(
         id: refundId,
         doc_no: refundDocNo,
         doc_type: refundDocType,
-        status: "DRAFT",
+        status: headerStatus,
         contact_id: contactId,
         deposit_id: depositId,
         deposit_doc_no: depositDocNo,
@@ -1115,9 +1145,11 @@ export async function createRefundDocument(
     if (side === "AR") {
       revalidatePath("/finance/payments");
       if (depositDocNo) revalidatePath(`/sales/${depositDocNo}`);
+      revalidatePath(`/sales/${refundDocNo}`);
     } else {
       revalidatePath("/finance/ap-payment");
       if (depositDocNo) revalidatePath(`/purchases/${depositDocNo}`);
+      revalidatePath(`/purchases/${refundDocNo}`);
     }
     revalidateApprovalCenterIfPending(pendingApproval);
 

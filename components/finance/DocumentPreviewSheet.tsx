@@ -53,7 +53,7 @@ export function DocumentPreviewSheet({
             รายละเอียดเอกสาร
           </SheetTitle>
           <SheetDescription>
-            Read-only — ตรวจสอบยอดเงินและหมายเหตุก่อนอนุมัติหรือปฏิเสธ
+            Read-only — ตรวจสอบยอดเงิน คืนเงินมัดจำ หมายเหตุ และสลิปโอนเงินก่อนอนุมัติหรือปฏิเสธ
           </SheetDescription>
         </SheetHeader>
         {children}

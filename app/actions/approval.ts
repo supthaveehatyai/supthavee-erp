@@ -17,12 +17,14 @@ import { generateDocumentNumber } from "@/lib/actions/document-actions";
 import {
   PURCHASE_DOC_TYPES,
   INVENTORY_DOC_TYPES,
+  isRefundDocType,
   resolveIssuedDocumentStatus,
 } from "@/lib/constants/document";
 import {
   APPROVAL_LIMIT_EXCEEDED_MESSAGE,
   exceedsApprovalLimit,
 } from "@/lib/approval/approval-rules";
+import { reverseRefundSettlementOnReject } from "@/lib/finance/refund-settlement";
 import { isTemporaryDraftDocNo } from "@/lib/utils/draft-document-no";
 import { settleExpenseCashPurchase } from "@/lib/actions/finance/expense-cash-settlement";
 import type { Database } from "@/src/types/supabase";
@@ -233,6 +235,7 @@ function revalidateApprovalCaches(paths: string[] = []) {
 
 /**
  * ดึงรายการ documents / expenses ที่รออนุมัติ (approval_status = PENDING)
+ * รวมทุก doc_type ที่ PENDING — รวม AR_REFUND / AP_REFUND โดยไม่กรองประเภท
  */
 export async function getPendingApprovals(): Promise<GetPendingApprovalsResult> {
   try {
@@ -249,7 +252,7 @@ export async function getPendingApprovals(): Promise<GetPendingApprovalsResult> 
     const [documentsResult, expensesResult] = await Promise.all([
       supabaseAdmin
         .from("documents")
-        .select("id, doc_no, doc_date, doc_type, grand_total")
+        .select("id, doc_no, doc_date, doc_type, grand_total, created_by")
         .eq("approval_status", "PENDING")
         .order("doc_date", { ascending: false }),
       supabaseAdmin
@@ -272,6 +275,12 @@ export async function getPendingApprovals(): Promise<GetPendingApprovalsResult> 
     const creatorByDocId = await resolveDocumentCreators(
       documentRows.map((row) => row.id),
     );
+    for (const row of documentRows) {
+      const fromHeader = String(row.created_by ?? "").trim();
+      if (fromHeader && !creatorByDocId.has(row.id)) {
+        creatorByDocId.set(row.id, fromHeader);
+      }
+    }
 
     const userIds = [
       ...new Set([
@@ -464,6 +473,12 @@ export async function processApproval(
           ...(isTemporaryDraftDocNo(String(existing.doc_no ?? ""))
             ? { doc_date: existing.doc_date ?? issueDate }
             : {}),
+          ...(isRefundDocType(docType)
+            ? {
+                payment_status: "PAID" as const,
+                paid_amount: toMoney(existing.grand_total),
+              }
+            : {}),
         };
 
         const { error: updateError } = await supabaseAdmin
@@ -511,6 +526,14 @@ export async function processApproval(
         revalidateExtra.push(
           resolveDocumentDetailHref(officialDocNo, docType),
         );
+        if (isRefundDocType(docType)) {
+          revalidateExtra.push(
+            "/finance/deposits",
+            "/finance/refunds/create",
+            "/sales",
+            "/purchases",
+          );
+        }
       } else {
         const { error: updateError } = await supabaseAdmin
           .from("documents")
@@ -525,6 +548,26 @@ export async function processApproval(
 
         if (updateError) {
           return { success: false, error: updateError.message };
+        }
+
+        if (isRefundDocType(docType)) {
+          const reverse = await reverseRefundSettlementOnReject(
+            supabaseAdmin,
+            trimmedId,
+          );
+          if (reverse.error) {
+            return {
+              success: false,
+              error: `ปฏิเสธเอกสารแล้ว แต่คืนยอดมัดจำไม่สำเร็จ: ${reverse.error}`,
+            };
+          }
+          revalidateExtra.push(
+            "/finance/deposits",
+            "/finance/refunds/create",
+            "/sales",
+            "/purchases",
+            resolveDocumentDetailHref(String(existing.doc_no), docType),
+          );
         }
       }
     } else if (type === "EXPENSE") {

@@ -1,7 +1,14 @@
 import Link from "next/link";
+import { Eye } from "lucide-react";
 import { getDocumentPreview } from "@/lib/actions/document-preview";
-import { isFinanceHeaderOnlyDocType } from "@/lib/constants/document";
+import { getPaymentTransactionStorageMetaByDocumentId } from "@/app/actions/payment-slips";
+import {
+  getDocumentTypeLabel,
+  isFinanceHeaderOnlyDocType,
+  isRefundDocType,
+} from "@/lib/constants/document";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
+import { AttachmentSheetViewer } from "@/components/shared/attachment-sheet-viewer";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -17,6 +24,34 @@ function formatMoney(value: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+function extractPreviewRemark(
+  remark: string | null | undefined,
+  notes: string | null | undefined,
+): string {
+  const headerRemark = String(remark ?? "").trim();
+  if (headerRemark) return headerRemark;
+
+  const raw = String(notes ?? "").trim();
+  if (!raw) return "";
+  const match = raw.match(/remark=([^|]+)/i);
+  const fromFlag = match?.[1]?.trim() ?? "";
+  if (fromFlag) return fromFlag;
+  return raw
+    .split("|")
+    .map((part) => part.trim())
+    .filter(
+      (part) =>
+        part &&
+        !/^amount=/i.test(part) &&
+        !/^vat=/i.test(part) &&
+        !/^net=/i.test(part) &&
+        !/^vat_amt=/i.test(part) &&
+        !/^slip=/i.test(part) &&
+        !/จาก\s+(DIN|DOUT|DEP)/i.test(part),
+    )
+    .join(" · ");
 }
 
 function Field({
@@ -57,7 +92,19 @@ export async function DocumentPreviewContent({
 
   const doc = result.data;
   const isFinanceDoc = isFinanceHeaderOnlyDocType(doc.doc_type);
-  const remarkText = doc.remark?.trim() || "";
+  const isRefund = isRefundDocType(doc.doc_type);
+  const typeLabel = getDocumentTypeLabel(doc.doc_type);
+  const remarkText = extractPreviewRemark(doc.remark, doc.notes);
+  const slipFallback = doc.attachment_url || doc.attached_file_url || null;
+  const slipMeta = isRefund
+    ? await getPaymentTransactionStorageMetaByDocumentId(doc.id, slipFallback)
+    : null;
+  const slipUrl = slipMeta?.display_url ?? slipFallback ?? "";
+  const showSlipViewer =
+    Boolean(isRefund) &&
+    (slipMeta?.storage_tier === "NAS" ||
+      Boolean(slipUrl) ||
+      Boolean(slipFallback));
 
   return (
     <div className="flex flex-col gap-6 px-6 pb-8 pt-2">
@@ -65,6 +112,9 @@ export async function DocumentPreviewContent({
         <Badge variant="slate" className="font-mono">
           {doc.doc_type}
         </Badge>
+        {typeLabel !== doc.doc_type ? (
+          <Badge variant="slate">{typeLabel}</Badge>
+        ) : null}
         <Badge variant="slate">{doc.status}</Badge>
         <Badge
           variant={doc.approval_status === "PENDING" ? "amber" : "emerald"}
@@ -72,6 +122,10 @@ export async function DocumentPreviewContent({
           {doc.approval_status}
         </Badge>
       </div>
+
+      {isRefund ? (
+        <p className="text-sm font-semibold text-slate-800">{typeLabel}</p>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="เลขที่เอกสาร">
@@ -81,7 +135,7 @@ export async function DocumentPreviewContent({
           {doc.doc_date ? formatThaiDate(doc.doc_date, "short") : "—"}
         </Field>
         <Field label="คู่ค้า">{doc.contact_name || "—"}</Field>
-        <Field label="ยอดเงิน (Grand Total)">
+        <Field label={isRefund ? "ยอดเงินคืน (Refund Amount)" : "ยอดเงิน (Grand Total)"}>
           <span className="text-base font-semibold tabular-nums text-blue-700">
             {formatMoney(doc.grand_total)} ฿
           </span>
@@ -97,10 +151,39 @@ export async function DocumentPreviewContent({
         </p>
       </div>
 
+      {isRefund && showSlipViewer && slipMeta ? (
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            สลิปโอนเงิน
+          </p>
+          <AttachmentSheetViewer
+            fileUrl={slipUrl}
+            storageTier={slipMeta.storage_tier}
+            nasPath={slipMeta.nas_path}
+            title={`สลิปโอนเงิน · ${doc.doc_no}`}
+            trigger={
+              <button
+                type="button"
+                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 text-sm font-semibold text-sky-800 transition hover:bg-sky-100"
+              >
+                <Eye className="size-4" />
+                ดูสลิปโอนเงิน
+              </button>
+            }
+          />
+        </div>
+      ) : isRefund ? (
+        <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+          ไม่มีสลิปโอนเงินแนบกับเอกสารนี้
+        </p>
+      ) : null}
+
       {doc.allocations.length > 0 ? (
         <div className="space-y-2">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-            รายการเอกสารที่ถูกตัดหนี้
+            {isRefund
+              ? "เอกสารมัดจำต้นทาง (Source Deposit)"
+              : "รายการเอกสารที่ถูกตัดหนี้"}
           </p>
           <div className="overflow-hidden rounded-md border border-slate-200">
             <Table>
@@ -108,7 +191,9 @@ export async function DocumentPreviewContent({
                 <TableRow className="bg-slate-50">
                   <TableHead>เลขที่เอกสาร</TableHead>
                   <TableHead>ประเภท</TableHead>
-                  <TableHead className="text-right">ยอดที่ตัด</TableHead>
+                  <TableHead className="text-right">
+                    {isRefund ? "ยอดคืนเงิน" : "ยอดที่ตัด"}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -131,7 +216,9 @@ export async function DocumentPreviewContent({
         </div>
       ) : isFinanceDoc ? (
         <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-          ไม่พบรายการเอกสารที่ตัดหนี้
+          {isRefund
+            ? "ไม่พบเอกสารมัดจำต้นทางจาก document_allocations"
+            : "ไม่พบรายการเอกสารที่ตัดหนี้"}
         </p>
       ) : null}
 

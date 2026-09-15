@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { processApproval } from "@/app/actions/approval";
+import { getDocumentTypeLabel } from "@/lib/constants/document";
 import type {
   ApprovalTab,
   ApprovalTargetType,
@@ -224,9 +225,16 @@ function PendingApprovalTable({
                       </p>
                     )}
                     {item.doc_type ? (
-                      <Badge variant="slate" className="font-mono text-[10px]">
-                        {item.doc_type}
-                      </Badge>
+                      <div className="flex flex-col gap-0.5">
+                        <Badge variant="slate" className="w-fit font-mono text-[10px]">
+                          {item.doc_type}
+                        </Badge>
+                        {getDocumentTypeLabel(item.doc_type) !== item.doc_type ? (
+                          <p className="text-[11px] leading-snug text-slate-500">
+                            {getDocumentTypeLabel(item.doc_type)}
+                          </p>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
                 </TableCell>
