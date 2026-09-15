@@ -59,6 +59,8 @@ export type DocumentRow = {
   ecommerce_buyer_name?: string | null;
   /** เลขพัสดุ / Tracking Number */
   tracking_no?: string | null;
+  /** ที่อยู่ One-Time Customer (แทนที่อยู่ Master เมื่อมีค่า) */
+  one_time_address?: string | null;
 };
 
 export type CustomerOption = {
@@ -78,7 +80,8 @@ export type ContactPersonOption = {
 
 export type CreateDocumentInput = {
   doc_type: DocumentType;
-  contact_id: string;
+  /** Optional — Server Auto-assign Dummy CPD เมื่อเป็น E-Commerce / Walk-in Cash */
+  contact_id?: string | null;
   /** Optional — ผู้ติดต่อของลูกค้าที่เลือก */
   contact_person_id?: string | null;
   /** Phase 19 — ช่องทางขาย (default STORE) */
@@ -86,6 +89,7 @@ export type CreateDocumentInput = {
   ecommerce_order_no?: string | null;
   ecommerce_buyer_name?: string | null;
   tracking_no?: string | null;
+  one_time_address?: string | null;
 };
 
 export type CreateDocumentResult = {
@@ -111,7 +115,8 @@ export type CreateDraftDocumentItemInput = {
 
 export type CreateDraftDocumentInput = {
   doc_type: DocumentType;
-  contact_id: string;
+  /** Optional — Server Auto-assign Dummy CPD เมื่อเป็น E-Commerce / Walk-in Cash */
+  contact_id?: string | null;
   contact_person_id?: string | null;
   /** Optional ISO date `YYYY-MM-DD` — defaults to today. */
   doc_date?: string | null;
@@ -131,6 +136,7 @@ export type CreateDraftDocumentInput = {
   ecommerce_order_no?: string | null;
   ecommerce_buyer_name?: string | null;
   tracking_no?: string | null;
+  one_time_address?: string | null;
 };
 
 export type CreateDraftDocumentResult = {
@@ -143,7 +149,8 @@ export type CreateDraftDocumentResult = {
 
 export type UpdateDraftDocumentInput = {
   document_id: string;
-  contact_id: string;
+  /** Optional — Server Auto-assign Dummy CPD เมื่อเป็น E-Commerce / Walk-in Cash */
+  contact_id?: string | null;
   contact_person_id?: string | null;
   doc_date?: string | null;
   items?: CreateDraftDocumentItemInput[];
@@ -162,6 +169,7 @@ export type UpdateDraftDocumentInput = {
   ecommerce_order_no?: string | null;
   ecommerce_buyer_name?: string | null;
   tracking_no?: string | null;
+  one_time_address?: string | null;
 };
 
 export type UpdateDraftDocumentResult = {
@@ -364,6 +372,7 @@ export type DocumentDetail = {
   ecommerce_order_no?: string | null;
   ecommerce_buyer_name?: string | null;
   tracking_no?: string | null;
+  one_time_address?: string | null;
   wht_rate: number;
   wht_amount: number;
   payment_status: string;

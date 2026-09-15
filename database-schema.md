@@ -48,7 +48,7 @@
 - **Period Closing:** ฟังก์ชัน `is_period_closed(doc_date)`
 - `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — มีฟิลด์ `created_by` เก็บ Auth Session UUID)
 - `document_items` (รายการสินค้าในเอกสาร — มี `technician_id`, `wage_cost`, `technician_bill_id`; Phase 17: `mockup_image_url`, `production_status`, `is_sent_to_production`)
-- `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — เพิ่ม Metadata สำหรับ E-commerce: `sales_channel` VARCHAR(50) [เช่น SHOPEE, LAZADA, TIKTOK, STORE, DIRECT], `ecommerce_order_no` VARCHAR(100), `ecommerce_buyer_name` VARCHAR(255), และ `tracking_no` VARCHAR(100) เพื่อรองรับระบบ One-Time Customer)
+- `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — เพิ่ม Metadata สำหรับ E-commerce: `sales_channel` VARCHAR(50) [เช่น SHOPEE, LAZADA, TIKTOK, STORE, DIRECT], `ecommerce_order_no` VARCHAR(100), `ecommerce_buyer_name` VARCHAR(255), `tracking_no` VARCHAR(100), `one_time_address` TEXT เพื่อรองรับระบบ One-Time Customer)
 - `document_items` (รายการสินค้าในเอกสาร — คอลัมน์ `qty` ต้องเป็น `NUMERIC(14,4)` รองรับทศนิยมวัตถุดิบ)
 - `document_allocations` (การจัดสรรเอกสาร เช่น ตัดมัดจำ)
 - `billing_note_items` (รายการใบวางบิล)

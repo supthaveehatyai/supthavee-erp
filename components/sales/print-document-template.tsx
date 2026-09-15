@@ -100,13 +100,18 @@ export default async function PrintDocumentTemplate({
     paperSize ?? (await getDocumentPrintPaperSize(doc.doc_type));
   const compact = resolvedPaperSize !== "A4";
   const buyerName = doc.ecommerce_buyer_name?.trim() || "";
+  const oneTimeAddress = doc.one_time_address?.trim() || "";
   const printCustomer = doc.contact
     ? {
         ...doc.contact,
         company_name: buyerName || doc.contact.company_name,
+        address: oneTimeAddress || doc.contact.address,
       }
-    : buyerName
-      ? { company_name: buyerName }
+    : buyerName || oneTimeAddress
+      ? {
+          company_name: buyerName || "ลูกค้าขาจร",
+          address: oneTimeAddress || null,
+        }
       : null;
   const printReferenceNo =
     [doc.ecommerce_order_no?.trim(), doc.tracking_no?.trim()]

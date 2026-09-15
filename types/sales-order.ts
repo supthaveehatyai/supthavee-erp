@@ -33,7 +33,8 @@ export type SalesOrderLineItem = {
 
 export type SaveSalesOrderDraftInput = {
   document_id?: string | null;
-  contact_id: string;
+  /** Optional — Server Auto-assign Dummy CPD เมื่อเป็น E-Commerce */
+  contact_id?: string | null;
   contact_person_id?: string | null;
   /** YYYY-MM-DD */
   doc_date: string;
@@ -54,6 +55,7 @@ export type SaveSalesOrderDraftInput = {
   ecommerce_order_no?: string | null;
   ecommerce_buyer_name?: string | null;
   tracking_no?: string | null;
+  one_time_address?: string | null;
 };
 
 export type SaveSalesOrderDraftResult = {

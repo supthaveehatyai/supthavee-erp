@@ -18,6 +18,7 @@ import {
   updateDraftDocument,
 } from "@/lib/actions/document-actions";
 import { createProductionJobFromSO } from "@/lib/actions/production-actions";
+import { parseSalesDocumentDraftHeader } from "@/lib/validations/sales-document";
 import type {
   GetSalesOrdersResult,
   SaveSalesOrderDraftInput,
@@ -107,16 +108,25 @@ export async function saveSalesOrderDraft(
   payload: SaveSalesOrderDraftInput,
 ): Promise<SaveSalesOrderDraftResult> {
   try {
-    const contactId = String(payload?.contact_id ?? "").trim();
     const items = toDraftItems(payload);
     const mockupImageUrl =
       String(payload?.mockup_image_url ?? "").trim() || null;
     const notes = String(payload?.notes ?? "").trim() || null;
     const documentId = String(payload?.document_id ?? "").trim() || null;
 
-    if (!contactId) {
-      return { success: false, error: "กรุณาเลือกลูกค้า", data: null };
+    const headerParsed = parseSalesDocumentDraftHeader({
+      doc_type: "SO",
+      contact_id: payload.contact_id,
+      sales_channel: payload.sales_channel,
+      ecommerce_order_no: payload.ecommerce_order_no,
+      ecommerce_buyer_name: payload.ecommerce_buyer_name,
+      tracking_no: payload.tracking_no,
+      one_time_address: payload.one_time_address,
+    });
+    if (!headerParsed.ok) {
+      return { success: false, error: headerParsed.error, data: null };
     }
+
     if (items.length === 0) {
       return {
         success: false,
@@ -126,7 +136,7 @@ export async function saveSalesOrderDraft(
     }
 
     const header = {
-      contact_id: contactId,
+      contact_id: headerParsed.data.contact_id,
       contact_person_id: payload.contact_person_id?.trim() || null,
       doc_date: payload.doc_date,
       items,
@@ -138,10 +148,11 @@ export async function saveSalesOrderDraft(
       net_before_vat: payload.net_before_vat,
       vat_amount: payload.vat_amount,
       grand_total: payload.grand_total,
-      sales_channel: payload.sales_channel as SalesChannel | null,
-      ecommerce_order_no: payload.ecommerce_order_no,
-      ecommerce_buyer_name: payload.ecommerce_buyer_name,
-      tracking_no: payload.tracking_no,
+      sales_channel: headerParsed.data.sales_channel as SalesChannel,
+      ecommerce_order_no: headerParsed.data.ecommerce_order_no,
+      ecommerce_buyer_name: headerParsed.data.ecommerce_buyer_name,
+      tracking_no: headerParsed.data.tracking_no,
+      one_time_address: headerParsed.data.one_time_address,
     };
 
     const saved = documentId

@@ -686,15 +686,26 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                   <p className="font-medium text-slate-800">
                     {SALES_CHANNEL_LABELS[doc.sales_channel]}
                   </p>
-                  {isEcommercePlatformChannel(doc.sales_channel) ? (
+                  {(isEcommercePlatformChannel(doc.sales_channel) ||
+                  doc.ecommerce_buyer_name?.trim() ||
+                  doc.one_time_address?.trim()) ? (
                     <div className="mt-1 space-y-0.5 text-xs text-slate-600">
                       <p>
                         ผู้ซื้อ: {doc.ecommerce_buyer_name?.trim() || "—"}
                       </p>
-                      <p>
-                        เลขคำสั่งซื้อ: {doc.ecommerce_order_no?.trim() || "—"}
-                      </p>
-                      <p>เลขพัสดุ: {doc.tracking_no?.trim() || "—"}</p>
+                      {isEcommercePlatformChannel(doc.sales_channel) ? (
+                        <>
+                          <p>
+                            เลขคำสั่งซื้อ: {doc.ecommerce_order_no?.trim() || "—"}
+                          </p>
+                          <p>เลขพัสดุ: {doc.tracking_no?.trim() || "—"}</p>
+                        </>
+                      ) : null}
+                      {doc.one_time_address?.trim() ? (
+                        <p className="whitespace-pre-wrap">
+                          ที่อยู่: {doc.one_time_address.trim()}
+                        </p>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>

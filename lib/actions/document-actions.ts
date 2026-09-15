@@ -51,9 +51,10 @@ import {
   isPendingApprovalStatus,
 } from "@/lib/approval/approval-rules";
 import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
+import { resolveOneTimeCustomerContactId } from "@/lib/sales/resolve-one-time-contact";
 import {
   ecommerceFieldsFromSource,
-  parseSalesDocumentEcommerce,
+  parseSalesDocumentDraftHeader,
 } from "@/lib/validations/sales-document";
 import type {
   CompleteDocumentInput,
@@ -83,6 +84,7 @@ import type {
   DuplicateDocumentResult,
   IssueDocumentResult,
   PurchaseDocumentListItem,
+  SalesChannel,
   SalesDocumentListItem,
   SalesProductSearchItem,
   SearchProductsForSalesResult,
@@ -232,6 +234,72 @@ export async function generateDocumentNumber(
 }
 
 /**
+ * Phase 19 CPD — resolve Dummy Contact then verify Master Data + contact person.
+ * Internal helper (not exported — `"use server"` files may only export async fns for the public API;
+ * this stays module-private).
+ */
+async function resolveValidatedSalesContact(input: {
+  contactId?: string | null;
+  contactPersonId?: string | null;
+  docType: string;
+  salesChannel: SalesChannel;
+}): Promise<
+  | { ok: true; contactId: string; contactPersonId: string | null }
+  | { ok: false; error: string }
+> {
+  const resolved = await resolveOneTimeCustomerContactId({
+    contactId: input.contactId,
+    salesChannel: input.salesChannel,
+    docType: input.docType,
+  });
+  if (!resolved.ok) return resolved;
+
+  const supabase = createSupabaseServerClient();
+  const { data: contact, error: contactError } = await supabase
+    .from("contacts")
+    .select("id")
+    .eq("id", resolved.contactId)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (contactError) {
+    return { ok: false, error: contactError.message };
+  }
+  if (!contact) {
+    return { ok: false, error: "ไม่พบคู่ค้าที่เลือก หรือถูกปิดใช้งาน" };
+  }
+
+  const contactPersonId = resolved.assignedDummy
+    ? null
+    : input.contactPersonId?.trim() || null;
+
+  if (contactPersonId) {
+    const { data: person, error: personError } = await supabase
+      .from("contact_persons")
+      .select("id, contact_id")
+      .eq("id", contactPersonId)
+      .eq("contact_id", resolved.contactId)
+      .maybeSingle();
+
+    if (personError) {
+      return { ok: false, error: personError.message };
+    }
+    if (!person) {
+      return {
+        ok: false,
+        error: "ผู้ติดต่อที่เลือกไม่ตรงกับลูกค้ารายนี้",
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    contactId: resolved.contactId,
+    contactPersonId,
+  };
+}
+
+/**
  * Create a DRAFT document header + optional line items.
  * Late Numbering: uses temporary `DRAFT-YYYYMMDDHHmmss` — official running
  * number from `generate_document_no` is assigned only in `issueDocument`.
@@ -242,8 +310,6 @@ export async function createDraftDocument(
 ): Promise<CreateDraftDocumentResult> {
   try {
     const docType = payload?.doc_type?.trim() as DocumentType;
-    const contactId = payload?.contact_id?.trim() ?? "";
-    const contactPersonId = payload?.contact_person_id?.trim() || null;
     const items = Array.isArray(payload?.items) ? payload.items : [];
     const docDate =
       typeof payload?.doc_date === "string" &&
@@ -261,19 +327,32 @@ export async function createDraftDocument(
           "หน้าเปิดบิลขายรองรับเฉพาะ QT, SO, INV_DO, TAX_INV, CS_TAX, ABB — เอกสารการเงินต้องสร้างจากเมนูการเงิน",
       };
     }
-    if (!contactId) {
-      return { data: null, error: "กรุณาเลือกลูกค้า / คู่ค้า" };
-    }
 
-    const ecommerce = parseSalesDocumentEcommerce({
+    const header = parseSalesDocumentDraftHeader({
+      doc_type: docType,
+      contact_id: payload.contact_id,
       sales_channel: payload.sales_channel,
       ecommerce_order_no: payload.ecommerce_order_no,
       ecommerce_buyer_name: payload.ecommerce_buyer_name,
       tracking_no: payload.tracking_no,
+      one_time_address: payload.one_time_address,
     });
-    if (!ecommerce.ok) {
-      return { data: null, error: ecommerce.error };
+    if (!header.ok) {
+      return { data: null, error: header.error };
     }
+
+    const salesChannel = header.data.sales_channel as SalesChannel;
+    const resolvedContact = await resolveValidatedSalesContact({
+      contactId: header.data.contact_id,
+      contactPersonId: payload.contact_person_id,
+      docType,
+      salesChannel,
+    });
+    if (!resolvedContact.ok) {
+      return { data: null, error: resolvedContact.error };
+    }
+    const contactId = resolvedContact.contactId;
+    const contactPersonId = resolvedContact.contactPersonId;
 
     for (const [index, item] of items.entries()) {
       if (!item.product_id?.trim()) {
@@ -300,39 +379,6 @@ export async function createDraftDocument(
       return { data: null, error: owner.error };
     }
     const supabase = createSupabaseServerClient();
-
-    const { data: contact, error: contactError } = await supabase
-      .from("contacts")
-      .select("id")
-      .eq("id", contactId)
-      .eq("is_active", true)
-      .maybeSingle();
-
-    if (contactError) {
-      return { data: null, error: contactError.message };
-    }
-    if (!contact) {
-      return { data: null, error: "ไม่พบคู่ค้าที่เลือก หรือถูกปิดใช้งาน" };
-    }
-
-    if (contactPersonId) {
-      const { data: person, error: personError } = await supabase
-        .from("contact_persons")
-        .select("id, contact_id")
-        .eq("id", contactPersonId)
-        .eq("contact_id", contactId)
-        .maybeSingle();
-
-      if (personError) {
-        return { data: null, error: personError.message };
-      }
-      if (!person) {
-        return {
-          data: null,
-          error: "ผู้ติดต่อที่เลือกไม่ตรงกับลูกค้ารายนี้",
-        };
-      }
-    }
 
     const productIds = [
       ...new Set(items.map((item) => item.product_id.trim()).filter(Boolean)),
@@ -439,10 +485,11 @@ export async function createDraftDocument(
         vat_amount: summary.vat_amount,
         discount_text: discountText,
         payment_status: resolveInitialPaymentStatus(docType),
-        sales_channel: ecommerce.data.sales_channel,
-        ecommerce_order_no: ecommerce.data.ecommerce_order_no,
-        ecommerce_buyer_name: ecommerce.data.ecommerce_buyer_name,
-        tracking_no: ecommerce.data.tracking_no,
+        sales_channel: salesChannel,
+        ecommerce_order_no: header.data.ecommerce_order_no,
+        ecommerce_buyer_name: header.data.ecommerce_buyer_name,
+        tracking_no: header.data.tracking_no,
+        one_time_address: header.data.one_time_address,
         created_by: owner.userId,
         updated_at: nowIso,
       })
@@ -515,8 +562,6 @@ export async function createDocument(
 ): Promise<CreateDocumentResult> {
   try {
     const docType = input.doc_type?.trim() as DocumentType;
-    const contactId = input.contact_id?.trim() ?? "";
-    const contactPersonId = input.contact_person_id?.trim() || null;
 
     if (!isDocumentType(docType)) {
       return { data: null, error: "กรุณาเลือกประเภทเอกสารให้ถูกต้อง" };
@@ -528,54 +573,34 @@ export async function createDocument(
           "ใบลดหนี้ต้องสร้างจากบิลขายต้นทางที่ /sales/cn/create?ref_doc_id=...",
       };
     }
-    if (!contactId) {
-      return { data: null, error: "กรุณาเลือกลูกค้า / คู่ค้า" };
-    }
 
-    const ecommerce = parseSalesDocumentEcommerce({
+    const header = parseSalesDocumentDraftHeader({
+      doc_type: docType,
+      contact_id: input.contact_id,
       sales_channel: input.sales_channel,
       ecommerce_order_no: input.ecommerce_order_no,
       ecommerce_buyer_name: input.ecommerce_buyer_name,
       tracking_no: input.tracking_no,
+      one_time_address: input.one_time_address,
     });
-    if (!ecommerce.ok) {
-      return { data: null, error: ecommerce.error };
+    if (!header.ok) {
+      return { data: null, error: header.error };
     }
+
+    const salesChannel = header.data.sales_channel as SalesChannel;
+    const resolvedContact = await resolveValidatedSalesContact({
+      contactId: header.data.contact_id,
+      contactPersonId: input.contact_person_id,
+      docType,
+      salesChannel,
+    });
+    if (!resolvedContact.ok) {
+      return { data: null, error: resolvedContact.error };
+    }
+    const contactId = resolvedContact.contactId;
+    const contactPersonId = resolvedContact.contactPersonId;
 
     const supabase = createSupabaseServerClient();
-
-    const { data: contact, error: contactError } = await supabase
-      .from("contacts")
-      .select("id")
-      .eq("id", contactId)
-      .eq("is_active", true)
-      .maybeSingle();
-
-    if (contactError) {
-      return { data: null, error: contactError.message };
-    }
-    if (!contact) {
-      return { data: null, error: "ไม่พบคู่ค้าที่เลือก หรือถูกปิดใช้งาน" };
-    }
-
-    if (contactPersonId) {
-      const { data: person, error: personError } = await supabase
-        .from("contact_persons")
-        .select("id, contact_id")
-        .eq("id", contactPersonId)
-        .eq("contact_id", contactId)
-        .maybeSingle();
-
-      if (personError) {
-        return { data: null, error: personError.message };
-      }
-      if (!person) {
-        return {
-          data: null,
-          error: "ผู้ติดต่อที่เลือกไม่ตรงกับลูกค้ารายนี้",
-        };
-      }
-    }
 
     const nowIso = new Date().toISOString();
     const draftStatus: DocumentStatus = "DRAFT";
@@ -591,10 +616,11 @@ export async function createDocument(
       contact_id: contactId,
       contact_person_id: contactPersonId,
       payment_status: resolveInitialPaymentStatus(docType),
-      sales_channel: ecommerce.data.sales_channel,
-      ecommerce_order_no: ecommerce.data.ecommerce_order_no,
-      ecommerce_buyer_name: ecommerce.data.ecommerce_buyer_name,
-      tracking_no: ecommerce.data.tracking_no,
+      sales_channel: salesChannel,
+      ecommerce_order_no: header.data.ecommerce_order_no,
+      ecommerce_buyer_name: header.data.ecommerce_buyer_name,
+      tracking_no: header.data.tracking_no,
+      one_time_address: header.data.one_time_address,
       created_by: owner.userId,
       updated_at: nowIso,
     };
@@ -1485,6 +1511,7 @@ export async function getDocumentByNo(
         ecommerce_order_no,
         ecommerce_buyer_name,
         tracking_no,
+        one_time_address,
         created_at,
         updated_at,
         contacts:contact_id (
@@ -1752,6 +1779,7 @@ export async function getDocumentByNo(
       ecommerce_buyer_name:
         (data.ecommerce_buyer_name as string | null) ?? null,
       tracking_no: (data.tracking_no as string | null) ?? null,
+      one_time_address: (data.one_time_address as string | null) ?? null,
       wht_rate: Number(data.wht_rate ?? 0),
       wht_amount: Number(data.wht_amount ?? 0),
       payment_status: String(data.payment_status ?? "Pending"),
@@ -1827,8 +1855,6 @@ export async function updateDraftDocument(
 ): Promise<UpdateDraftDocumentResult> {
   try {
     const documentId = payload?.document_id?.trim() ?? "";
-    const contactId = payload?.contact_id?.trim() ?? "";
-    const contactPersonId = payload?.contact_person_id?.trim() || null;
     const items = Array.isArray(payload?.items) ? payload.items : [];
     const docDate =
       typeof payload?.doc_date === "string" &&
@@ -1840,19 +1866,6 @@ export async function updateDraftDocument(
 
     if (!documentId) {
       return { data: null, error: "ไม่พบรหัสเอกสาร" };
-    }
-    if (!contactId) {
-      return { data: null, error: "กรุณาเลือกลูกค้า / คู่ค้า" };
-    }
-
-    const ecommerce = parseSalesDocumentEcommerce({
-      sales_channel: payload.sales_channel,
-      ecommerce_order_no: payload.ecommerce_order_no,
-      ecommerce_buyer_name: payload.ecommerce_buyer_name,
-      tracking_no: payload.tracking_no,
-    });
-    if (!ecommerce.ok) {
-      return { data: null, error: ecommerce.error };
     }
 
     const supabase = createSupabaseServerClient();
@@ -1876,42 +1889,35 @@ export async function updateDraftDocument(
       };
     }
 
+    const header = parseSalesDocumentDraftHeader({
+      doc_type: String(existing.doc_type ?? ""),
+      contact_id: payload.contact_id,
+      sales_channel: payload.sales_channel,
+      ecommerce_order_no: payload.ecommerce_order_no,
+      ecommerce_buyer_name: payload.ecommerce_buyer_name,
+      tracking_no: payload.tracking_no,
+      one_time_address: payload.one_time_address,
+    });
+    if (!header.ok) {
+      return { data: null, error: header.error };
+    }
+
+    const salesChannel = header.data.sales_channel as SalesChannel;
+    const resolvedContact = await resolveValidatedSalesContact({
+      contactId: header.data.contact_id,
+      contactPersonId: payload.contact_person_id,
+      docType: String(existing.doc_type ?? ""),
+      salesChannel,
+    });
+    if (!resolvedContact.ok) {
+      return { data: null, error: resolvedContact.error };
+    }
+    const contactId = resolvedContact.contactId;
+    const contactPersonId = resolvedContact.contactPersonId;
+
     const isReplacement =
       Boolean(existing.ref_document_id) &&
       String(existing.doc_type ?? "") !== "CN";
-
-    const { data: contact, error: contactError } = await supabase
-      .from("contacts")
-      .select("id")
-      .eq("id", contactId)
-      .eq("is_active", true)
-      .maybeSingle();
-
-    if (contactError) {
-      return { data: null, error: contactError.message };
-    }
-    if (!contact) {
-      return { data: null, error: "ไม่พบคู่ค้าที่เลือก หรือถูกปิดใช้งาน" };
-    }
-
-    if (contactPersonId) {
-      const { data: person, error: personError } = await supabase
-        .from("contact_persons")
-        .select("id")
-        .eq("id", contactPersonId)
-        .eq("contact_id", contactId)
-        .maybeSingle();
-
-      if (personError) {
-        return { data: null, error: personError.message };
-      }
-      if (!person) {
-        return {
-          data: null,
-          error: "ผู้ติดต่อที่เลือกไม่ตรงกับลูกค้ารายนี้",
-        };
-      }
-    }
 
     const nowIso = new Date().toISOString();
 
@@ -1923,10 +1929,11 @@ export async function updateDraftDocument(
           contact_id: contactId,
           contact_person_id: contactPersonId,
           notes,
-          sales_channel: ecommerce.data.sales_channel,
-          ecommerce_order_no: ecommerce.data.ecommerce_order_no,
-          ecommerce_buyer_name: ecommerce.data.ecommerce_buyer_name,
-          tracking_no: ecommerce.data.tracking_no,
+          sales_channel: salesChannel,
+          ecommerce_order_no: header.data.ecommerce_order_no,
+          ecommerce_buyer_name: header.data.ecommerce_buyer_name,
+          tracking_no: header.data.tracking_no,
+          one_time_address: header.data.one_time_address,
           updated_at: nowIso,
         })
         .eq("id", documentId)
@@ -2071,10 +2078,11 @@ export async function updateDraftDocument(
         vat_amount: summary.vat_amount,
         discount_text: discountText,
         notes,
-        sales_channel: ecommerce.data.sales_channel,
-        ecommerce_order_no: ecommerce.data.ecommerce_order_no,
-        ecommerce_buyer_name: ecommerce.data.ecommerce_buyer_name,
-        tracking_no: ecommerce.data.tracking_no,
+        sales_channel: salesChannel,
+        ecommerce_order_no: header.data.ecommerce_order_no,
+        ecommerce_buyer_name: header.data.ecommerce_buyer_name,
+        tracking_no: header.data.tracking_no,
+        one_time_address: header.data.one_time_address,
         updated_at: nowIso,
       })
       .eq("id", documentId)
@@ -2973,6 +2981,7 @@ export async function convertDocument(
         ecommerce_order_no,
         ecommerce_buyer_name,
         tracking_no,
+        one_time_address,
         document_items!document_items_document_id_fkey (
           product_id,
           description,
@@ -3124,6 +3133,7 @@ export async function convertDocument(
         ecommerce_order_no: ecommerce.ecommerce_order_no,
         ecommerce_buyer_name: ecommerce.ecommerce_buyer_name,
         tracking_no: ecommerce.tracking_no,
+        one_time_address: ecommerce.one_time_address,
         created_by: owner.userId,
         updated_at: nowIso,
       })
@@ -3770,6 +3780,7 @@ export async function cloneDocumentToNewDraft(
         ecommerce_order_no,
         ecommerce_buyer_name,
         tracking_no,
+        one_time_address,
         document_items!document_items_document_id_fkey (
           product_id,
           description,
@@ -3857,6 +3868,7 @@ export async function cloneDocumentToNewDraft(
         ecommerce_order_no: ecommerce.ecommerce_order_no,
         ecommerce_buyer_name: ecommerce.ecommerce_buyer_name,
         tracking_no: ecommerce.tracking_no,
+        one_time_address: ecommerce.one_time_address,
         created_by: owner.userId,
         updated_at: nowIso,
       })
@@ -3979,6 +3991,7 @@ export async function duplicateDocument(
         ecommerce_order_no,
         ecommerce_buyer_name,
         tracking_no,
+        one_time_address,
         document_items!document_items_document_id_fkey (
           product_id,
           description,
@@ -4058,6 +4071,7 @@ export async function duplicateDocument(
         ecommerce_order_no: ecommerce.ecommerce_order_no,
         ecommerce_buyer_name: ecommerce.ecommerce_buyer_name,
         tracking_no: ecommerce.tracking_no,
+        one_time_address: ecommerce.one_time_address,
         created_by: owner.userId,
         updated_at: nowIso,
       })

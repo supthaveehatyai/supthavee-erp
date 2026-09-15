@@ -20,10 +20,13 @@ import { VAT_OPTIONS } from "@/lib/constants/accounting";
 import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import {
   DEFAULT_SALES_CREATE_DOC_TYPE,
+  isSalesContactRequired,
   isSalesTradingDocType,
+  shouldHideSalesContactPicker,
+  shouldShowWalkInOptionalFields,
   type SalesTradingDocType,
 } from "@/lib/constants/document";
-import { parseSalesDocumentEcommerce } from "@/lib/validations/sales-document";
+import { parseSalesDocumentDraftHeader } from "@/lib/validations/sales-document";
 import {
   calculateDocumentSummary,
   type VatCalculationType,
@@ -154,9 +157,28 @@ export default function SalesCreateWorkspace({
     useState<SalesChannelFieldsValue>(INITIAL_SALES_CHANNEL_FIELDS);
   const [isPending, startTransition] = useTransition();
 
+  const hideContactPicker = shouldHideSalesContactPicker({
+    docType,
+    salesChannel: salesChannelFields.sales_channel,
+  });
+  const contactRequired = isSalesContactRequired({
+    docType,
+    salesChannel: salesChannelFields.sales_channel,
+  });
+  const walkInOptional = shouldShowWalkInOptionalFields({
+    docType,
+    salesChannel: salesChannelFields.sales_channel,
+  });
+
   useEffect(() => {
     setCustomerOptions(customers);
   }, [customers]);
+
+  useEffect(() => {
+    if (!hideContactPicker) return;
+    setContactId("");
+    setContactPersonId("");
+  }, [hideContactPicker]);
 
   const billSummary = useMemo(
     () =>
@@ -328,7 +350,7 @@ export default function SalesCreateWorkspace({
   }
 
   function handleCreateDraft() {
-    if (!contactId) {
+    if (contactRequired && !contactId) {
       toast.error("กรุณาเลือกลูกค้าก่อนสร้างเอกสาร");
       return;
     }
@@ -345,17 +367,21 @@ export default function SalesCreateWorkspace({
       return;
     }
 
-    const ecommerce = parseSalesDocumentEcommerce(salesChannelFields);
-    if (!ecommerce.ok) {
-      toast.error(ecommerce.error);
+    const header = parseSalesDocumentDraftHeader({
+      doc_type: docType,
+      contact_id: hideContactPicker ? null : contactId,
+      ...salesChannelFields,
+    });
+    if (!header.ok) {
+      toast.error(header.error);
       return;
     }
 
     startTransition(async () => {
       const result = await createDraftDocument({
         doc_type: docType,
-        contact_id: contactId,
-        contact_person_id: contactPersonId || null,
+        contact_id: hideContactPicker ? null : contactId,
+        contact_person_id: hideContactPicker ? null : contactPersonId || null,
         doc_date: new Date().toISOString().slice(0, 10),
         discount_text: discountText.trim() || null,
         vat_type: vatType,
@@ -365,10 +391,11 @@ export default function SalesCreateWorkspace({
         net_before_vat: billSummary.net_before_vat,
         vat_amount: billSummary.vat_amount,
         grand_total: billSummary.grand_total,
-        sales_channel: ecommerce.data.sales_channel,
-        ecommerce_order_no: ecommerce.data.ecommerce_order_no,
-        ecommerce_buyer_name: ecommerce.data.ecommerce_buyer_name,
-        tracking_no: ecommerce.data.tracking_no,
+        sales_channel: header.data.sales_channel,
+        ecommerce_order_no: header.data.ecommerce_order_no,
+        ecommerce_buyer_name: header.data.ecommerce_buyer_name,
+        tracking_no: header.data.tracking_no,
+        one_time_address: header.data.one_time_address,
         items: lineItems.map((row, index) => ({
           product_id: row.product_id,
           description: row.description,
@@ -472,8 +499,25 @@ export default function SalesCreateWorkspace({
               </select>
             </div>
 
+            {hideContactPicker ? (
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label>ลูกค้า</Label>
+                <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  ระบบใช้บัญชีลูกค้ากลาง (One-Time Customer / CPD) อัตโนมัติ
+                  — ไม่ต้องค้นหา Contact Master
+                </p>
+              </div>
+            ) : (
+              <>
             <div className="space-y-1.5">
-              <Label>ลูกค้า (contact_id)</Label>
+              <Label>
+                ลูกค้า{" "}
+                {walkInOptional ? (
+                  <span className="font-normal text-slate-500">(ไม่บังคับ)</span>
+                ) : (
+                  "(contact_id)"
+                )}
+              </Label>
               <div className="flex gap-2">
                 <div className="min-w-0 flex-1">
                   <CustomerCombobox
@@ -511,6 +555,8 @@ export default function SalesCreateWorkspace({
                 }
               />
             </div>
+              </>
+            )}
 
             <SalesChannelFields
               value={salesChannelFields}
@@ -519,6 +565,7 @@ export default function SalesCreateWorkspace({
                 setSalesChannelFields(next);
               }}
               disabled={isPending}
+              docType={docType}
               platformClassName="sm:col-span-2 lg:col-span-4"
             />
 
@@ -526,7 +573,9 @@ export default function SalesCreateWorkspace({
               <Button
                 type="submit"
                 disabled={
-                  isPending || !contactId || lineItems.length === 0
+                  isPending ||
+                  lineItems.length === 0 ||
+                  (contactRequired && !contactId)
                 }
                 className="h-10 w-full gap-2"
               >

@@ -25,13 +25,14 @@ import {
   uploadSalesOrderMockup,
 } from "@/lib/actions/sales-order-actions";
 import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
+import { shouldHideSalesContactPicker } from "@/lib/constants/document";
+import { parseSalesDocumentDraftHeader } from "@/lib/validations/sales-document";
 import {
   calculateDocumentSummary,
   type VatCalculationType,
 } from "@/lib/utils/document-summary";
 import { compressImage } from "@/lib/utils/image-compression";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
-import { parseSalesDocumentEcommerce } from "@/lib/validations/sales-document";
 import type {
   ContactPersonOption,
   DocumentDetail,
@@ -201,9 +202,20 @@ export default function SalesOrderWorkspace({
       salesChannelFieldsFromDocument(document),
     );
 
+  const hideContactPicker = shouldHideSalesContactPicker({
+    docType: "SO",
+    salesChannel: salesChannelFields.sales_channel,
+  });
+
   useEffect(() => {
     setCustomerOptions(customers);
   }, [customers]);
+
+  useEffect(() => {
+    if (!hideContactPicker) return;
+    setContactId("");
+    setContactPersonId("");
+  }, [hideContactPicker]);
 
   const billSummary = useMemo(
     () =>
@@ -330,7 +342,7 @@ export default function SalesOrderWorkspace({
   }
 
   function buildPayload(): SaveSalesOrderDraftInput | null {
-    if (!contactId) {
+    if (!hideContactPicker && !contactId) {
       toast.error("กรุณาเลือกลูกค้า");
       return null;
     }
@@ -347,16 +359,20 @@ export default function SalesOrderWorkspace({
       return null;
     }
 
-    const ecommerce = parseSalesDocumentEcommerce(salesChannelFields);
-    if (!ecommerce.ok) {
-      toast.error(ecommerce.error);
+    const header = parseSalesDocumentDraftHeader({
+      doc_type: "SO",
+      contact_id: hideContactPicker ? null : contactId,
+      ...salesChannelFields,
+    });
+    if (!header.ok) {
+      toast.error(header.error);
       return null;
     }
 
     return {
       document_id: documentId || null,
-      contact_id: contactId,
-      contact_person_id: contactPersonId || null,
+      contact_id: hideContactPicker ? null : contactId,
+      contact_person_id: hideContactPicker ? null : contactPersonId || null,
       doc_date: docDate,
       notes: notes.trim() || null,
       mockup_image_url: mockupUrl.trim() || null,
@@ -368,10 +384,11 @@ export default function SalesOrderWorkspace({
       net_before_vat: billSummary.net_before_vat,
       vat_amount: billSummary.vat_amount,
       grand_total: billSummary.grand_total,
-      sales_channel: ecommerce.data.sales_channel,
-      ecommerce_order_no: ecommerce.data.ecommerce_order_no,
-      ecommerce_buyer_name: ecommerce.data.ecommerce_buyer_name,
-      tracking_no: ecommerce.data.tracking_no,
+      sales_channel: header.data.sales_channel,
+      ecommerce_order_no: header.data.ecommerce_order_no,
+      ecommerce_buyer_name: header.data.ecommerce_buyer_name,
+      tracking_no: header.data.tracking_no,
+      one_time_address: header.data.one_time_address,
       items: lineItems.map((row, index) => ({
         product_id: row.product_id,
         description: row.description,
@@ -526,6 +543,12 @@ export default function SalesOrderWorkspace({
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <Label htmlFor="so-customer">ลูกค้า</Label>
+            {hideContactPicker ? (
+              <p className="mt-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                ระบบใช้บัญชีลูกค้ากลาง (One-Time Customer / CPD) อัตโนมัติ
+                ตามช่องทางแพลตฟอร์ม
+              </p>
+            ) : (
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
                 <CustomerCombobox
@@ -542,7 +565,9 @@ export default function SalesOrderWorkspace({
                 />
               ) : null}
             </div>
+            )}
           </div>
+          {hideContactPicker ? null : (
           <div>
             <Label htmlFor="so-person">ผู้ติดต่อ</Label>
             <ContactPersonCombobox
@@ -553,6 +578,7 @@ export default function SalesOrderWorkspace({
               isLoading={isPersonsLoading}
             />
           </div>
+          )}
           <div>
             <Label htmlFor="so-date">วันที่เอกสาร</Label>
             <Input
@@ -570,6 +596,7 @@ export default function SalesOrderWorkspace({
             value={salesChannelFields}
             onChange={setSalesChannelFields}
             disabled={isBusy}
+            docType="SO"
             platformClassName="sm:col-span-2"
           />
           <div className="sm:col-span-2">

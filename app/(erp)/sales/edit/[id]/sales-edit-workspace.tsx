@@ -17,6 +17,12 @@ import {
 import { VAT_OPTIONS } from "@/lib/constants/accounting";
 import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import {
+  isSalesContactRequired,
+  shouldHideSalesContactPicker,
+  shouldShowWalkInOptionalFields,
+} from "@/lib/constants/document";
+import { parseSalesDocumentDraftHeader } from "@/lib/validations/sales-document";
+import {
   calculateDocumentSummary,
   type VatCalculationType,
 } from "@/lib/utils/document-summary";
@@ -59,7 +65,6 @@ import SalesChannelFields, {
   type SalesChannelFieldsValue,
 } from "@/components/sales/sales-channel-fields";
 import { cn } from "@/lib/utils";
-import { parseSalesDocumentEcommerce } from "@/lib/validations/sales-document";
 
 const DEFAULT_VAT_RATE = 7;
 
@@ -158,10 +163,29 @@ export default function SalesEditWorkspace({
   const isReplacement =
     Boolean(initialDocument.ref_document_id) &&
     initialDocument.doc_type !== "CN";
+  const hideContactPicker = shouldHideSalesContactPicker({
+    docType: initialDocument.doc_type,
+    salesChannel: salesChannelFields.sales_channel,
+  });
+  const contactRequired = isSalesContactRequired({
+    docType: initialDocument.doc_type,
+    salesChannel: salesChannelFields.sales_channel,
+  });
+  const walkInOptional = shouldShowWalkInOptionalFields({
+    docType: initialDocument.doc_type,
+    salesChannel: salesChannelFields.sales_channel,
+  });
 
   useEffect(() => {
     setCustomerOptions(customers);
   }, [customers]);
+
+  useEffect(() => {
+    if (!hideContactPicker) return;
+    preserveInitialPersonRef.current = false;
+    setContactId("");
+    setContactPersonId("");
+  }, [hideContactPicker]);
 
   const billSummary = useMemo(
     () =>
@@ -301,7 +325,7 @@ export default function SalesEditWorkspace({
   }
 
   function handleSave() {
-    if (!contactId) {
+    if (contactRequired && !contactId) {
       toast.error("กรุณาเลือกลูกค้าก่อนบันทึก");
       return;
     }
@@ -316,17 +340,21 @@ export default function SalesEditWorkspace({
       }
     }
 
-    const ecommerce = parseSalesDocumentEcommerce(salesChannelFields);
-    if (!ecommerce.ok) {
-      toast.error(ecommerce.error);
+    const header = parseSalesDocumentDraftHeader({
+      doc_type: initialDocument.doc_type,
+      contact_id: hideContactPicker ? null : contactId,
+      ...salesChannelFields,
+    });
+    if (!header.ok) {
+      toast.error(header.error);
       return;
     }
 
     startTransition(async () => {
       const result = await updateDraftDocument({
         document_id: initialDocument.id,
-        contact_id: contactId,
-        contact_person_id: contactPersonId || null,
+        contact_id: hideContactPicker ? null : contactId,
+        contact_person_id: hideContactPicker ? null : contactPersonId || null,
         doc_date: initialDocument.doc_date || new Date().toISOString().slice(0, 10),
         discount_text: discountText.trim() || null,
         vat_type: vatType,
@@ -337,10 +365,11 @@ export default function SalesEditWorkspace({
         net_before_vat: billSummary.net_before_vat,
         vat_amount: billSummary.vat_amount,
         grand_total: billSummary.grand_total,
-        sales_channel: ecommerce.data.sales_channel,
-        ecommerce_order_no: ecommerce.data.ecommerce_order_no,
-        ecommerce_buyer_name: ecommerce.data.ecommerce_buyer_name,
-        tracking_no: ecommerce.data.tracking_no,
+        sales_channel: header.data.sales_channel,
+        ecommerce_order_no: header.data.ecommerce_order_no,
+        ecommerce_buyer_name: header.data.ecommerce_buyer_name,
+        tracking_no: header.data.tracking_no,
+        one_time_address: header.data.one_time_address,
         items: isReplacement
           ? undefined
           : lineItems.map((row, index) => ({
@@ -440,7 +469,17 @@ export default function SalesEditWorkspace({
             <Input value={initialDocument.doc_no} disabled readOnly />
           </div>
           <div className="space-y-1.5">
-            <Label>ลูกค้า</Label>
+            <Label>
+              ลูกค้า{" "}
+              {walkInOptional ? (
+                <span className="font-normal text-slate-500">(ไม่บังคับ)</span>
+              ) : null}
+            </Label>
+            {hideContactPicker ? (
+              <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                ระบบใช้บัญชีลูกค้ากลาง (One-Time Customer / CPD) อัตโนมัติ
+              </p>
+            ) : (
             <div className="flex gap-2">
               <div className="min-w-0 flex-1">
                 <CustomerCombobox
@@ -459,7 +498,9 @@ export default function SalesEditWorkspace({
                 onSaved={handleContactMasterSaved}
               />
             </div>
+            )}
           </div>
+          {hideContactPicker ? null : (
           <div className="space-y-1.5">
             <Label>ผู้ติดต่อ</Label>
             <ContactPersonCombobox
@@ -478,6 +519,7 @@ export default function SalesEditWorkspace({
               }
             />
           </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="vat-type">ประเภท VAT</Label>
             <select
@@ -510,6 +552,7 @@ export default function SalesEditWorkspace({
             value={salesChannelFields}
             onChange={setSalesChannelFields}
             disabled={isPending}
+            docType={initialDocument.doc_type}
             platformClassName="sm:col-span-2 lg:col-span-3"
           />
           <div className="space-y-1.5 sm:col-span-2 lg:col-span-3">
@@ -702,7 +745,7 @@ export default function SalesEditWorkspace({
               type="button"
               disabled={
                 isPending ||
-                !contactId ||
+                (contactRequired && !contactId) ||
                 (!isReplacement && lineItems.length === 0)
               }
               className="h-10 gap-2"

@@ -107,6 +107,7 @@ const FIELD_LABELS: Record<string, string> = {
   ecommerce_order_no: "เลขที่คำสั่งซื้อ E-Commerce",
   ecommerce_buyer_name: "ชื่อผู้ซื้อบนแพลตฟอร์ม",
   tracking_no: "เลขพัสดุ",
+  one_time_address: "ที่อยู่ One-Time Customer",
 };
 
 const SKIP_KEYS = new Set([

@@ -71,6 +71,27 @@ export type EcommercePlatformChannel =
 
 export const DEFAULT_SALES_CHANNEL: SalesChannelCode = "STORE";
 
+/**
+ * Phase 19 — Dummy Contact UUIDs (SAP CPD One-Time Customer)
+ * ใช้ตอน `contact_id` ว่าง: แพลตฟอร์ม / ขายเงินสดหน้าร้าน
+ */
+export const SYSTEM_CONTACTS = {
+  CASH_STORE: "6c2459c1-360d-4e55-a2df-6ef6c5c9973d",
+  SHOPEE: "4e98486a-9ac6-4f73-b05d-165c93160007",
+  LAZADA: "d52576b5-6a1a-41e7-87b4-9c62594f16aa",
+} as const;
+
+export type SystemContactKey = keyof typeof SYSTEM_CONTACTS;
+
+export function resolveSystemDummyContactId(
+  salesChannel: string | null | undefined,
+): string | null {
+  if (salesChannel === "SHOPEE") return SYSTEM_CONTACTS.SHOPEE;
+  if (salesChannel === "LAZADA") return SYSTEM_CONTACTS.LAZADA;
+  if (salesChannel === "STORE") return SYSTEM_CONTACTS.CASH_STORE;
+  return null;
+}
+
 export const SALES_CHANNEL_LABELS: Record<SalesChannelCode, string> = {
   SHOPEE: "Shopee",
   LAZADA: "Lazada",
@@ -91,6 +112,54 @@ export function isEcommercePlatformChannel(
   return (ECOMMERCE_PLATFORM_CHANNELS as readonly string[]).includes(
     value ?? "",
   );
+}
+
+/** เอกสารเงินสดหน้าร้านที่ใช้ Dummy Contact (SAP CPD) เมื่อไม่ระบุลูกค้า */
+export const WALK_IN_CASH_DOC_TYPES = ["ABB", "CS_TAX"] as const;
+
+export function isWalkInCashDocType(docType: string): boolean {
+  return (WALK_IN_CASH_DOC_TYPES as readonly string[]).includes(docType);
+}
+
+/**
+ * เอกสารที่ใช้บัญชีลูกค้ากลาง (One-Time Customer / CPD)
+ * — แพลตฟอร์ม E-Commerce หรือใบเงินสดหน้าร้าน (ABB / CS_TAX)
+ */
+export function usesOneTimeCustomer(
+  docType: string,
+  salesChannel: string | null | undefined,
+): boolean {
+  if (isEcommercePlatformChannel(salesChannel)) return true;
+  return isWalkInCashDocType(docType);
+}
+
+/** UI: ซ่อนช่องค้นหาลูกค้าเฉพาะช่องทาง E-Commerce */
+export function shouldHideSalesContactPicker(input: {
+  docType: string;
+  salesChannel: string | null | undefined;
+}): boolean {
+  return isEcommercePlatformChannel(input.salesChannel);
+}
+
+/** STORE + ABB/CS_TAX — ช่องลูกค้าไม่บังคับ และแสดงฟิลด์ขาจร */
+export function shouldShowWalkInOptionalFields(input: {
+  docType: string;
+  salesChannel: string | null | undefined;
+}): boolean {
+  const channel = isSalesChannel(input.salesChannel)
+    ? input.salesChannel
+    : DEFAULT_SALES_CHANNEL;
+  return channel === "STORE" && isWalkInCashDocType(input.docType);
+}
+
+/** บังคับเลือกลูกค้าจริง — ไม่ใช่ E-Commerce และไม่ใช่เงินสดหน้าร้าน */
+export function isSalesContactRequired(input: {
+  docType: string;
+  salesChannel: string | null | undefined;
+}): boolean {
+  if (shouldHideSalesContactPicker(input)) return false;
+  if (shouldShowWalkInOptionalFields(input)) return false;
+  return true;
 }
 
 /** Running-number prefix per type → `{PREFIX}-{YYMM}-{XXXX}`. */

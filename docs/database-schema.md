@@ -43,7 +43,7 @@
 - **Soft Allocation (ATP):** `Available Stock = Physical Stock (Σ inventory_ledger) − Committed Stock (Σ SO ISSUED qty ที่ยังไม่ออกบิล)`
 - **Inventory Adjustments:** `STK_OB` (ยอดยกมา · Prefix **SOB-YYMM-XXXX**) และ `STK_ADJ` (ปรับปรุงสต็อก · Prefix **SAD-YYMM-XXXX**) บันทึกผ่าน `inventory_ledger` และสร้าง Audit Trail เสมอ
 - **Period Closing:** ฟังก์ชัน `is_period_closed(doc_date)` — หากงวดถูกปิด (`accounting_periods.is_closed = true`) ห้าม INSERT/UPDATE/DELETE เอกสารและค่าใช้จ่ายในเดือนนั้น
-- `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — `doc_type` รวม `TB` สรุปวางบิลช่าง; มี `approval_status`, `approved_by`, `approved_at`, `created_by`, `remark` TEXT เหตุผลการยกเลิกเมื่อ `status = VOID`; Phase 19 One-Time Customer: `sales_channel` VARCHAR(50) เช่น SHOPEE/LAZADA/TIKTOK/STORE/DIRECT, `ecommerce_order_no` VARCHAR(100), `ecommerce_buyer_name` VARCHAR(255), `tracking_no` VARCHAR(100) — ทั้งสี่คอลัมน์เป็น NULL ได้เพื่อไม่กระทบเอกสาร B2B เดิม)
+- `documents` / `doc_headers` / `doc_details` (เอกสารหลัก — `doc_type` รวม `TB` สรุปวางบิลช่าง; มี `approval_status`, `approved_by`, `approved_at`, `created_by`, `remark` TEXT เหตุผลการยกเลิกเมื่อ `status = VOID`; Phase 19 One-Time Customer: `sales_channel` VARCHAR(50) เช่น SHOPEE/LAZADA/TIKTOK/STORE/DIRECT, `ecommerce_order_no` VARCHAR(100), `ecommerce_buyer_name` VARCHAR(255), `tracking_no` VARCHAR(100), `one_time_address` TEXT — คอลัมน์เหล่านี้เป็น NULL ได้เพื่อไม่กระทบเอกสาร B2B เดิม)
 - `document_items` (รายการสินค้าในเอกสาร — งานบริการเก็บ `technician_id`, `wage_cost`, `technician_bill_id`; MTO ใช้ `production_status` = NONE / IN_PRODUCTION / COMPLETED; Phase 17: `mockup_image_url` รูป Mockup รายบรรทัดใน bucket `production_attachments`, `is_sent_to_production` BOOLEAN หลังกดส่งงานผลิต)
 - `document_allocations` (การจัดสรรเอกสาร เช่น ตัดมัดจำ)
 - `billing_note_items` (รายการใบวางบิล)
@@ -64,3 +64,4 @@
 - `vw_monthly_profit_summary` (`product_cogs`, `wage_cogs`, `cogs` = เสื้อเปล่า + ค่าแรง)
 - `vw_sales_profit_analysis` (กำไรต่อบิล — `product_cogs` + `document_items.wage_cost` = `total_cogs`)
 - **Phase 19 VAT Ledger:** รายงานภาษีขายดึงจาก `documents` ที่ `doc_type` IN (`TAX_INV`, `CS_TAX`, `ABB`) และรายงานภาษีซื้อจาก `AP_TAX` (สถานะ ISSUED/PAID) — ไม่มีตารางแยก ใช้ `contacts.tax_id` / `contacts.branch_code` และ `ecommerce_buyer_name` เมื่อเป็นลูกค้าแพลตฟอร์ม
+- **Phase 19 CPD One-Time Customer:** บิล E-Commerce (`SHOPEE`/`LAZADA`/`TIKTOK`) หรือเงินสดหน้าร้าน (`ABB`/`CS_TAX`) ที่ไม่ระบุ `contact_id` ให้ stamp Dummy Contact จาก `SYSTEM_CONTACTS` (`CASH_STORE` / `SHOPEE` / `LAZADA`) — ไม่สร้าง Contact ใหม่; `TAX_INV` + `STORE` บังคับ Master Data จริง; พิมพ์บิลใช้ `ecommerce_buyer_name` / `one_time_address` แทนชื่อและที่อยู่จาก Master เมื่อมีค่า
