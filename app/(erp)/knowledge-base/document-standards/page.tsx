@@ -1,5 +1,14 @@
 import type { Metadata } from "next";
-import { BookOpen, GitBranch, Scale, ShoppingCart, Store } from "lucide-react";
+import {
+  BookOpen,
+  FileSpreadsheet,
+  GitBranch,
+  Globe,
+  Scale,
+  ShoppingCart,
+  Store,
+  Undo2,
+} from "lucide-react";
 import { getSystemSettings } from "@/lib/actions/settings";
 import { resolvePrintPaperSize } from "@/lib/constants/print-paper-size";
 import { DOCUMENT_TYPE_PREFIX } from "@/lib/constants/document";
@@ -25,7 +34,7 @@ import { DocumentPaperSizeSelect } from "./document-paper-size-select";
 export const metadata: Metadata = {
   title: "มาตรฐานเอกสาร | Knowledge Base",
   description:
-    "คู่มือ Document Taxonomy และ Lineage ฝั่งขาย (Sales/AR) และฝั่งซื้อ (Purchases/AP) สำหรับพนักงานอ้างอิง SOP",
+    "คู่มือ Document Taxonomy และ Lineage ฝั่งขาย/ซื้อ จนถึง Phase 19 — One-Time Customer (CPD), Reverse Logistics และ Report Center",
 };
 
 type DocRow = {
@@ -149,22 +158,22 @@ const SALES_DOCS: DocRow[] = [
   {
     code: "AR_REFUND",
     nameTh: "ใบสำคัญจ่ายเงินคืน",
-    nameEn: "AR Refund",
-    role: "คืนเงินมัดจำ / ยอดเหลือให้ลูกค้า",
+    nameEn: "AR Refund (SRF)",
+    role: "จ่ายเงินคืนลูกค้า เช่น คืนมัดจำ DEP_IN",
     stock: "ไม่ตัดสต็อก",
-    payment: "ตัดยอดมัดจำ DEP_IN",
+    payment: "มีกระแสเงินสดออก",
     paper: "A4",
-    legalNote: "ใบสำคัญจ่ายเงินคืน (Refund Payment)",
+    legalNote: "Prefix SRF · ใบสำคัญจ่ายเงินคืน (Refund Payment)",
   },
   {
     code: "AR_WRITEOFF",
-    nameTh: "ตัดยอดเป็นรายได้",
-    nameEn: "AR Write-off",
-    role: "ตัดเศษมัดจำรับรู้รายได้",
+    nameTh: "ใบสำคัญตัดหนี้สูญ / ตัดเศษลูกหนี้",
+    nameEn: "AR Write-off (SWO)",
+    role: "ปิดยอดลูกหนี้เป็น PAID โดยไม่มีกระแสเงินสด",
     stock: "ไม่ตัดสต็อก",
-    payment: "ปิดยอดมัดจำ",
+    payment: "PAID (ไม่มีเงินสด)",
     paper: "A4",
-    legalNote: "ใบสำคัญปรับปรุงบัญชี — รับรู้รายได้",
+    legalNote: "Prefix SWO · ตัดหนี้สูญ / ตัดเศษบัญชีลูกหนี้",
   },
 ];
 
@@ -242,22 +251,22 @@ const PURCHASE_DOCS: DocRow[] = [
   {
     code: "AP_REFUND",
     nameTh: "ใบสำคัญรับเงินคืน",
-    nameEn: "AP Refund",
-    role: "รับคืนมัดจำจากซัพพลายเออร์",
+    nameEn: "AP Refund (PRF)",
+    role: "รับเงินคืนจาก Vendor เช่น ได้รับมัดจำคืน",
     stock: "ไม่รับเข้า",
-    payment: "ตัดยอดมัดจำ DEP_OUT",
+    payment: "มีกระแสเงินสดเข้า",
     paper: "A4",
-    legalNote: "ใบสำคัญรับเงินคืน (Refund Receipt)",
+    legalNote: "Prefix PRF · ใบสำคัญรับเงินคืน (Refund Receipt)",
   },
   {
     code: "AP_WRITEOFF",
-    nameTh: "ตัดยอดเป็นค่าใช้จ่าย",
-    nameEn: "AP Write-off",
-    role: "ตัดเศษมัดจำเป็นค่าใช้จ่าย",
+    nameTh: "ใบสำคัญตัดเศษบัญชีเจ้าหนี้",
+    nameEn: "AP Write-off (PWO)",
+    role: "ปิดยอดเจ้าหนี้โดยไม่มีกระแสเงินสด",
     stock: "ไม่รับเข้า",
-    payment: "ปิดยอดมัดจำ",
+    payment: "PAID (ไม่มีเงินสด)",
     paper: "A4",
-    legalNote: "ใบสำคัญปรับปรุงบัญชี — ตัดเป็นค่าใช้จ่าย",
+    legalNote: "Prefix PWO · ตัดเศษบัญชีเจ้าหนี้",
   },
 ];
 
@@ -278,9 +287,9 @@ const SALES_FLOWS: FlowStep[] = [
     note: "รับมัดจำก่อน → สร้าง SO จองสต็อก → ออกบิลขาย → ใช้ยอดมัดจำหักตอน REC",
   },
   {
-    title: "คืนมัดจำ / ตัดเศษ",
-    path: "DEP_IN → AR_REFUND หรือ AR_WRITEOFF",
-    note: "คืนเงินลูกค้าด้วย AR_REFUND หรือรับรู้รายได้ด้วย AR_WRITEOFF",
+    title: "คืนมัดจำ / ตัดหนี้สูญ (Reverse Logistics)",
+    path: "DEP_IN / บิลค้าง → AR_REFUND (SRF) หรือ AR_WRITEOFF (SWO)",
+    note: "มีเงินคืนลูกค้าใช้ SRF — ปิดยอดลูกหนี้โดยไม่มีเงินสดใช้ SWO (สถานะ PAID)",
   },
 ];
 
@@ -301,9 +310,9 @@ const PURCHASE_FLOWS: FlowStep[] = [
     note: "จ่ายมัดจำให้ Vendor แล้วนำยอดคงเหลือมาหักตอน PAY",
   },
   {
-    title: "รับคืนมัดจำ / ตัดเศษ",
-    path: "DEP_OUT → AP_REFUND หรือ AP_WRITEOFF",
-    note: "รับเงินคืนด้วย AP_REFUND หรือตัดเป็นค่าใช้จ่ายด้วย AP_WRITEOFF",
+    title: "รับคืนมัดจำ / ตัดเศษเจ้าหนี้ (Reverse Logistics)",
+    path: "DEP_OUT / บิลค้าง → AP_REFUND (PRF) หรือ AP_WRITEOFF (PWO)",
+    note: "ได้รับเงินคืนจาก Vendor ใช้ PRF — ปิดยอดเจ้าหนี้โดยไม่มีเงินสดใช้ PWO",
   },
 ];
 
@@ -405,7 +414,8 @@ export default async function DocumentStandardsPage() {
           </h1>
         </div>
         <p className="max-w-3xl text-sm text-slate-500 md:text-base">
-          SOP อ้างอิง Document Taxonomy และ Lineage ของ Supthavee ERP —
+          SOP อ้างอิง Document Taxonomy และ Lineage ของ Supthavee ERP จนถึง
+          Phase 19 (Omnichannel / CPD, Reverse Logistics, Report Center) —
           ตั้งค่าขนาดกระดาษพิมพ์ได้ต่อประเภทเอกสาร (บันทึกลง{" "}
           <span className="font-mono text-xs">system_settings.document_print_settings</span>
           ) และใช้เป็นคู่มือพนักงานฝ่ายขาย การเงิน และจัดซื้อ
@@ -449,6 +459,57 @@ export default async function DocumentStandardsPage() {
               เอกสารที่ยืนยันแล้วห้ามลบ ใช้ยกเลิก (Void) และคืนสต็อกอัตโนมัติเมื่อจำเป็น
             </p>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-violet-200 bg-violet-50/30 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base text-violet-950">
+            <Globe className="size-4" />
+            ระบบลูกค้า E-Commerce และลูกค้าขาจร (One-Time Customer / SAP CPD)
+          </CardTitle>
+          <CardDescription className="text-violet-900/80">
+            Phase 19 — ห้ามสร้าง Contact ใหม่สำหรับลูกค้าแพลตฟอร์มและเงินสดหน้าร้าน
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm text-violet-950/90">
+          <p>
+            เอกสารขายที่มาจาก{" "}
+            <span className="font-semibold">Shopee, Lazada, TikTok</span> หรือ
+            ลูกค้าเงินสดหน้าร้าน ระบบใช้บัญชีลูกค้าระบบกลาง (Dummy Contact) อัตโนมัติ
+            เพื่อป้องกัน Master Data ขยะ — ไม่สร้างคู่ค้าใน{" "}
+            <span className="font-mono text-xs">contacts</span> รายใหม่
+          </p>
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-lg border border-violet-200/80 bg-white/80 p-3">
+              <p className="font-semibold text-violet-900">บัญชีกลาง (Dummy)</p>
+              <p className="mt-1 text-violet-900/75">
+                ระบบ stamp Contact ID ตามช่องทาง เช่น ลูกค้า Shopee / Lazada /
+                เงินสดหน้าร้าน — พนักงานไม่ต้องค้นหาหรือสร้างชื่อใน Master
+              </p>
+            </div>
+            <div className="rounded-lg border border-violet-200/80 bg-white/80 p-3">
+              <p className="font-semibold text-violet-900">ข้อมูลฝังในบิล</p>
+              <p className="mt-1 text-violet-900/75">
+                ชื่อผู้ซื้อจริง, เลขคำสั่งซื้อแพลตฟอร์ม และเลขพัสดุ เก็บที่หัวเอกสาร
+                โดยตรง ไม่ไปปนในทะเบียนคู่ค้า
+              </p>
+            </div>
+            <div className="rounded-lg border border-violet-200/80 bg-white/80 p-3">
+              <p className="font-semibold text-violet-900">ฟิลด์บน Document Header</p>
+              <ul className="mt-1 space-y-1 font-mono text-[11px] text-violet-800">
+                <li>ecommerce_buyer_name</li>
+                <li>ecommerce_order_no</li>
+                <li>tracking_no · one_time_address</li>
+                <li>sales_channel (SHOPEE / LAZADA / TIKTOK / STORE)</li>
+              </ul>
+            </div>
+          </div>
+          <p className="rounded-lg border border-violet-200/70 bg-white/70 px-3 py-2 text-violet-900/80">
+            พิมพ์บิลใช้ชื่อและที่อยู่จาก Header เหล่านี้ก่อน Master Data —
+            ใบกำกับภาษีเต็มรูปแบบ (<span className="font-mono">TAX_INV</span> +
+            ช่องทาง STORE) ยังบังคับเลือกคู่ค้าจริงตามกฎหมาย
+          </p>
         </CardContent>
       </Card>
 
@@ -496,6 +557,10 @@ export default async function DocumentStandardsPage() {
               <li>
                 <span className="font-mono font-semibold">REC</span> =
                 ใบเสร็จรับเงินตัดชำระลูกหนี้ แนบสลิปโอนเงินเป็นหลักฐาน
+              </li>
+              <li>
+                ลูกค้า Shopee / Lazada / เงินสดหน้าร้าน ใช้ Dummy Contact +
+                ชื่อจริงที่หัวบิล (CPD) ไม่สร้าง Master Data ใหม่
               </li>
             </ul>
           </div>
@@ -555,6 +620,121 @@ export default async function DocumentStandardsPage() {
         </CardContent>
       </Card>
 
+      <Card className="border-rose-200 bg-rose-50/30 shadow-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg text-rose-950">
+            <Undo2 className="size-5 text-rose-700" />
+            ใบสำคัญรับ/จ่ายเงินคืน และตัดหนี้สูญ (Reverse Logistics)
+          </CardTitle>
+          <CardDescription className="text-rose-900/75">
+            แยกกระแสเงินสด (Refund) ออกจากการปิดยอดบัญชีโดยไม่มีเงินสด (Write-off)
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 md:grid-cols-2">
+            {[
+              {
+                code: "AR_REFUND",
+                prefix: "SRF",
+                title: "ใบสำคัญจ่ายเงินคืน",
+                example: "เช่น คืนมัดจำให้ลูกค้า",
+                cash: "มีเงินสดจ่ายออก",
+              },
+              {
+                code: "AP_REFUND",
+                prefix: "PRF",
+                title: "ใบสำคัญรับเงินคืน",
+                example: "เช่น ได้รับมัดจำคืนจาก Vendor",
+                cash: "มีเงินสดรับเข้า",
+              },
+              {
+                code: "AR_WRITEOFF",
+                prefix: "SWO",
+                title: "ใบสำคัญตัดหนี้สูญ / ตัดเศษบัญชีลูกหนี้",
+                example: "ปิดยอดเป็น PAID โดยไม่มีกระแสเงินสด",
+                cash: "ไม่มีเงินสด",
+              },
+              {
+                code: "AP_WRITEOFF",
+                prefix: "PWO",
+                title: "ใบสำคัญตัดเศษบัญชีเจ้าหนี้",
+                example: "ปิดยอดเจ้าหนี้โดยไม่จ่ายเงินเพิ่ม",
+                cash: "ไม่มีเงินสด",
+              },
+            ].map((item) => (
+              <div
+                key={item.code}
+                className="rounded-xl border border-rose-200/80 bg-white/80 p-4"
+              >
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <Badge className="border-rose-200 bg-rose-50 font-mono text-rose-800 hover:bg-rose-50">
+                    {item.code}
+                  </Badge>
+                  <Badge className="border-slate-200 bg-slate-50 font-mono text-slate-700 hover:bg-slate-50">
+                    {item.prefix}
+                  </Badge>
+                </div>
+                <p className="font-semibold text-slate-900">{item.title}</p>
+                <p className="mt-1 text-sm text-slate-600">{item.example}</p>
+                <p className="mt-2 text-xs font-medium text-rose-800">
+                  {item.cash}
+                </p>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-emerald-200 bg-emerald-50/30 shadow-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg text-emerald-950">
+            <FileSpreadsheet className="size-5 text-emerald-700" />
+            ศูนย์รายงานและสมุดรายวัน (Report Center & Tax Ledger)
+          </CardTitle>
+          <CardDescription className="text-emerald-900/75">
+            หน้า{" "}
+            <span className="font-mono text-xs">/finance/tax-reports</span> —
+            พรีวิวตารางแล้ว Export Excel (สิทธิ์ Admin / การเงิน / บัญชี)
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-emerald-200/80 bg-white/80 p-4 text-sm">
+            <p className="font-mono text-xs font-semibold text-emerald-800">
+              OUTPUT_TAX
+            </p>
+            <p className="mt-1 font-semibold text-slate-900">รายงานภาษีขาย</p>
+            <p className="mt-2 text-slate-600">
+              ดึงจากเอกสาร{" "}
+              <span className="font-mono text-xs">TAX_INV, CS_TAX, ABB</span>{" "}
+              ที่สถานะ ISSUED และแสดงบิล VOID (ยอด 0 บาท) เพื่อป้องกันเลขกำกับภาษีแหว่ง
+            </p>
+          </div>
+          <div className="rounded-xl border border-emerald-200/80 bg-white/80 p-4 text-sm">
+            <p className="font-mono text-xs font-semibold text-emerald-800">
+              INPUT_TAX
+            </p>
+            <p className="mt-1 font-semibold text-slate-900">รายงานภาษีซื้อ</p>
+            <p className="mt-2 text-slate-600">
+              ดึงจากเอกสาร{" "}
+              <span className="font-mono text-xs">AP_TAX</span> ที่สถานะ ISSUED /
+              PAID สำหรับยื่นภาษีซื้อตามงวดบัญชี
+            </p>
+          </div>
+          <div className="rounded-xl border border-emerald-200/80 bg-white/80 p-4 text-sm">
+            <p className="font-mono text-xs font-semibold text-emerald-800">
+              INV_DO · EXP · PAY
+            </p>
+            <p className="mt-1 font-semibold text-slate-900">
+              ทะเบียนเอกสาร (Document Register)
+            </p>
+            <p className="mt-2 text-slate-600">
+              Export Excel ทะเบียนคุมบิลใบส่งของ (INV_DO), บิลค่าใช้จ่าย (EXP)
+              และใบสำคัญจ่าย (PAY) เพื่อการ Audit ภายใน
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card className="border-slate-200 shadow-sm">
         <CardHeader>
           <CardTitle className="text-base">Quick Map — รหัสที่พบบ่อย</CardTitle>
@@ -576,6 +756,11 @@ export default async function DocumentStandardsPage() {
               ["รับของตั้งหนี้ (Non-VAT)", "AP_INV"],
               ["รับวางบิลเจ้าหนี้", "BR"],
               ["จ่ายชำระ / ตัดหนี้เจ้าหนี้", "PAY"],
+              ["จ่ายเงินคืนลูกค้า", "AR_REFUND / SRF"],
+              ["รับเงินคืนจาก Vendor", "AP_REFUND / PRF"],
+              ["ตัดหนี้สูญลูกหนี้", "AR_WRITEOFF / SWO"],
+              ["ตัดเศษเจ้าหนี้", "AP_WRITEOFF / PWO"],
+              ["สมุดภาษีขาย / ภาษีซื้อ", "OUTPUT_TAX / INPUT_TAX"],
             ].map(([label, code]) => (
               <div
                 key={code}
