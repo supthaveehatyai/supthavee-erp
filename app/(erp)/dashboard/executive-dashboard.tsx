@@ -16,7 +16,9 @@ import {
   TrendingUp,
 } from "lucide-react";
 import type { RecentAuditLog } from "@/types/audit";
+import type { SalesByChannelDatum } from "@/types/dashboard";
 import { AuditTrailTable } from "@/components/dashboard/audit-trail-table";
+import { SalesByChannelChart } from "@/components/dashboard/sales-by-channel-chart";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -45,6 +47,8 @@ export type ExecutiveKpis = {
 
 export type ExecutiveDashboardProps = {
   kpis: ExecutiveKpis;
+  salesByChannel: SalesByChannelDatum[];
+  salesByChannelError?: string | null;
   auditLogs: RecentAuditLog[];
   auditError?: string | null;
 };
@@ -134,7 +138,15 @@ function buildKpiCards(kpis: ExecutiveKpis): KpiCard[] {
   ];
 }
 
-function BusinessOverviewTab({ kpis }: { kpis: ExecutiveKpis }) {
+function BusinessOverviewTab({
+  kpis,
+  salesByChannel,
+  salesByChannelError,
+}: {
+  kpis: ExecutiveKpis;
+  salesByChannel: SalesByChannelDatum[];
+  salesByChannelError?: string | null;
+}) {
   const cards = buildKpiCards(kpis);
   const kpiErrors = [
     kpis.ytdSales.error,
@@ -194,6 +206,11 @@ function BusinessOverviewTab({ kpis }: { kpis: ExecutiveKpis }) {
         ))}
       </div>
 
+      <SalesByChannelChart
+        data={salesByChannel}
+        error={salesByChannelError}
+      />
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -248,6 +265,8 @@ function AuditTrailTab({
 
 export function ExecutiveDashboard({
   kpis,
+  salesByChannel,
+  salesByChannelError,
   auditLogs,
   auditError,
 }: ExecutiveDashboardProps) {
@@ -259,7 +278,11 @@ export function ExecutiveDashboard({
       </TabsList>
 
       <TabsContent value="overview">
-        <BusinessOverviewTab kpis={kpis} />
+        <BusinessOverviewTab
+          kpis={kpis}
+          salesByChannel={salesByChannel}
+          salesByChannelError={salesByChannelError}
+        />
       </TabsContent>
 
       <TabsContent value="audit">

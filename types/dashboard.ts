@@ -27,3 +27,15 @@ export type ProfitabilityKpiResult = {
   netProfit: number;
   error: string | null;
 };
+
+/** Phase 19 — Omnichannel Analytics (Sales by Channel) */
+export type SalesByChannelDatum = {
+  channel: string;
+  name: string;
+  value: number;
+};
+
+export type GetSalesByChannelResult = {
+  data: SalesByChannelDatum[];
+  error: string | null;
+};

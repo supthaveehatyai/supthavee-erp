@@ -7,10 +7,15 @@ import {
   getYTDExpenses,
   getYTDSales,
 } from "@/app/actions/dashboard";
+import { getSalesByChannel } from "@/lib/actions/dashboard-actions";
 import { ManualBackupButton } from "@/components/dashboard/manual-backup-button";
 import { getRecentAuditLogs } from "@/lib/actions/audit-actions";
 import type { GetRecentAuditLogsResult } from "@/types/audit";
-import type { KpiMoneyResult, ProfitabilityKpiResult } from "@/types/dashboard";
+import type {
+  GetSalesByChannelResult,
+  KpiMoneyResult,
+  ProfitabilityKpiResult,
+} from "@/types/dashboard";
 import { ExecutiveDashboard } from "./executive-dashboard";
 
 export const dynamic = "force-dynamic";
@@ -96,6 +101,32 @@ function unwrapAudit(
   return { data: [], error: message };
 }
 
+function unwrapSalesByChannel(
+  settled: PromiseSettledResult<GetSalesByChannelResult>,
+): GetSalesByChannelResult {
+  if (settled.status === "fulfilled") {
+    return settled.value;
+  }
+
+  const reason = settled.reason;
+  const message =
+    reason instanceof Error
+      ? reason.message
+      : typeof reason === "string"
+        ? reason
+        : "Failed to load sales by channel";
+
+  return { data: [], error: message };
+}
+
+function currentYearBounds(): { from: string; to: string } {
+  const year = new Date().getFullYear();
+  return {
+    from: `${year}-01-01`,
+    to: `${year}-12-31`,
+  };
+}
+
 /**
  * Convert Server Action KPI result → display props.
  * - success (incl. zero): Thai Baht string
@@ -120,16 +151,25 @@ function toDisplayKpi(result: KpiMoneyResult): DisplayKpi {
 }
 
 export default async function ExecutiveDashboardPage() {
+  const { from, to } = currentYearBounds();
   // allSettled — no unhandled rejections even if a Server Action throws
-  const [ytdSettled, arSettled, apSettled, opexSettled, profitSettled, auditSettled] =
-    await Promise.allSettled([
-      getYTDSales(),
-      getPendingAR(),
-      getPendingAP(),
-      getYTDExpenses(),
-      getTrueNetProfit(),
-      getRecentAuditLogs(),
-    ]);
+  const [
+    ytdSettled,
+    arSettled,
+    apSettled,
+    opexSettled,
+    profitSettled,
+    auditSettled,
+    channelSettled,
+  ] = await Promise.allSettled([
+    getYTDSales(),
+    getPendingAR(),
+    getPendingAP(),
+    getYTDExpenses(),
+    getTrueNetProfit(),
+    getRecentAuditLogs(),
+    getSalesByChannel(from, to),
+  ]);
 
   const ytdSales = toDisplayKpi(
     unwrapKpi(ytdSettled, "Failed to load YTD sales"),
@@ -144,6 +184,7 @@ export default async function ExecutiveDashboardPage() {
     unwrapKpi(opexSettled, "Failed to load YTD expenses"),
   );
   const auditResult = unwrapAudit(auditSettled);
+  const channelResult = unwrapSalesByChannel(channelSettled);
   const profit = unwrapProfit(profitSettled, "Failed to calculate true net profit");
 
   const netProfit: DisplayKpi = profit.error
@@ -177,6 +218,8 @@ export default async function ExecutiveDashboardPage() {
           totalExpenses,
           netProfit,
         }}
+        salesByChannel={channelResult.data}
+        salesByChannelError={channelResult.error}
         auditLogs={auditResult.data}
         auditError={auditResult.error}
       />
