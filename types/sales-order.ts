@@ -8,6 +8,7 @@ import type {
   CustomerOption,
   DocumentDetail,
   DocumentStatus,
+  SalesChannel,
   SalesDocumentListItem,
   VatCalculationType,
 } from "@/types/document";
@@ -49,7 +50,7 @@ export type SaveSalesOrderDraftInput = {
   vat_amount?: number;
   grand_total?: number;
   /** Phase 19 — One-Time Customer */
-  sales_channel?: string | null;
+  sales_channel?: SalesChannel | null;
   ecommerce_order_no?: string | null;
   ecommerce_buyer_name?: string | null;
   tracking_no?: string | null;

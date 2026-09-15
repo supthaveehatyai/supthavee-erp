@@ -26,7 +26,7 @@ import type {
   SendSalesOrderToProductionResult,
   UploadSalesOrderMockupResult,
 } from "@/types/sales-order";
-import type { DocumentStatus } from "@/types/document";
+import type { DocumentStatus, SalesChannel } from "@/types/document";
 
 const PRODUCTION_ATTACHMENTS_BUCKET = "production_attachments";
 const MAX_MOCKUP_BYTES = 10 * 1024 * 1024;
@@ -138,7 +138,7 @@ export async function saveSalesOrderDraft(
       net_before_vat: payload.net_before_vat,
       vat_amount: payload.vat_amount,
       grand_total: payload.grand_total,
-      sales_channel: payload.sales_channel,
+      sales_channel: payload.sales_channel as SalesChannel | null,
       ecommerce_order_no: payload.ecommerce_order_no,
       ecommerce_buyer_name: payload.ecommerce_buyer_name,
       tracking_no: payload.tracking_no,
