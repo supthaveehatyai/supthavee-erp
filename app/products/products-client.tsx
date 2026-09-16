@@ -46,11 +46,22 @@ import {
   overwriteDraftProductModel,
   updateProductModel,
 } from "./actions/product-matrix";
+import { deleteProductModel } from "@/lib/actions/product-actions";
 import type {
   ExistingProductModel,
   LoadableProductModel,
   SaveDraftModelInput,
 } from "@/types/product-matrix";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   buildProductSku,
   formatGenderOption,
@@ -802,7 +813,8 @@ function Icon({
     | "check"
     | "chevron"
     | "edit"
-    | "ban";
+    | "ban"
+    | "trash";
   className?: string;
 }) {
   const paths = {
@@ -853,6 +865,14 @@ function Icon({
       <>
         <circle cx="12" cy="12" r="9" />
         <path d="m5.5 5.5 13 13" />
+      </>
+    ),
+    trash: (
+      <>
+        <path d="M4 7h16" />
+        <path d="M10 11v6M14 11v6" />
+        <path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12" />
+        <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
       </>
     ),
   };
@@ -1001,6 +1021,9 @@ export default function ProductsClient() {
   );
   const [isDeactivating, setIsDeactivating] = useState(false);
   const [deactivateError, setDeactivateError] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<ProductGroup | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   const [editTarget, setEditTarget] = useState<ProductGroup | null>(null);
   const [editForm, setEditForm] = useState<BatchEditForm | null>(null);
@@ -2330,6 +2353,45 @@ export default function ProductsClient() {
     setDeactivateError("");
   }
 
+  function openDeleteDialog(group: ProductGroup) {
+    setDeleteError("");
+    setDeleteTarget(group);
+  }
+
+  function closeDeleteDialog() {
+    if (isDeleting) return;
+    setDeleteTarget(null);
+    setDeleteError("");
+  }
+
+  async function confirmDeleteProductModel() {
+    if (!deleteTarget) return;
+    const modelId =
+      deleteTarget.modelId ??
+      deleteTarget.products.find((item) => item.model_id)?.model_id ??
+      "";
+    if (!modelId) {
+      setDeleteError("ไม่พบรหัสรุ่นสินค้า (model_id) — ไม่สามารถลบได้");
+      return;
+    }
+
+    setIsDeleting(true);
+    setDeleteError("");
+    try {
+      const result = await deleteProductModel(modelId);
+      if (!result.success) {
+        setDeleteError(result.error);
+        toast.error(result.error);
+        return;
+      }
+      toast.success(`ลบสินค้ารุ่น ${deleteTarget.title} แล้ว`);
+      setDeleteTarget(null);
+      await loadProducts();
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   async function confirmDeactivateGroup() {
     if (!deactivateTarget) return;
     setIsDeactivating(true);
@@ -2988,6 +3050,18 @@ export default function ProductsClient() {
                             >
                               <Icon name="ban" className="size-3.5" />
                               ปิดการใช้งาน
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openDeleteDialog(group);
+                              }}
+                              disabled={isDeleting}
+                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-300 bg-red-600 px-2.5 text-[11px] font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Icon name="trash" className="size-3.5" />
+                              ลบ
                             </button>
                           </div>
                         </td>
@@ -4338,6 +4412,53 @@ export default function ProductsClient() {
           </div>
         </div>
       )}
+
+      <AlertDialog
+        open={Boolean(deleteTarget)}
+        dismissible={!isDeleting}
+        onOpenChange={(open) => {
+          if (!open) closeDeleteDialog();
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>ลบสินค้ารุ่น</AlertDialogTitle>
+            <AlertDialogDescription>
+              คุณต้องการลบสินค้ารุ่นนี้ใช่หรือไม่? ระบบจะทำการลบ SKU ย่อยทั้งหมดภายใต้รุ่นนี้
+              และไม่สามารถกู้คืนได้
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteTarget ? (
+            <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3">
+              <p className="text-sm font-semibold text-slate-800">
+                {deleteTarget.title}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                จะลบ {deleteTarget.products.length.toLocaleString("th-TH")} SKU
+                ภายใต้รุ่นนี้
+              </p>
+            </div>
+          ) : null}
+          {deleteError ? (
+            <p
+              role="alert"
+              className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700"
+            >
+              {deleteError}
+            </p>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>ยกเลิก</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700 disabled:bg-red-300"
+              onClick={() => void confirmDeleteProductModel()}
+            >
+              {isDeleting ? "กำลังลบ..." : "ยืนยันลบ"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {editTarget && editForm && (
         <div

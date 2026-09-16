@@ -122,3 +122,7 @@ export type UpdateProductModelResult = {
   updatedSkuCount?: number;
   error?: string;
 };
+
+export type DeleteProductModelResult =
+  | { success: true }
+  | { success: false; error: string };
