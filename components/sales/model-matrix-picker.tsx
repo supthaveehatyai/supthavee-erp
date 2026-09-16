@@ -1,13 +1,13 @@
 "use client";
 
 /**
- * Model-First Matrix Selection — ค้นหารุ่น → Dialog แจกแจง SKU (สี/ไซส์/สต็อก)
- * แล้วกรอกจำนวนหลายบรรทัดก่อน Add to Bill
+ * Model-First Matrix Selection — ค้นหารุ่น → Dialog จัดกลุ่ม SKU ตามสี (Accordion)
+ * กรอกจำนวนรายไซส์ แล้ว Add to Bill
  *
  * Zero Client-Side Fetching: searchProductModels + getModelMatrixForSale เท่านั้น
  */
 
-import { useEffect, useId, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import {
   ChevronsUpDown,
   Loader2,
@@ -26,6 +26,13 @@ import type {
 import type { SalesProductSearchItem } from "@/types/document";
 import { cn } from "@/lib/utils";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -88,6 +95,54 @@ function formatStock(value: number): string {
   return value.toLocaleString("th-TH", {
     maximumFractionDigits: 4,
   });
+}
+
+type ColorSkuGroup = {
+  key: string;
+  color_code: string;
+  color_name: string;
+  skus: ModelMatrixSkuRow[];
+};
+
+function colorGroupLabel(group: ColorSkuGroup): string {
+  const name = group.color_name.trim() || group.color_code.trim() || "ไม่ระบุสี";
+  return name.startsWith("สี") ? name : `สี${name}`;
+}
+
+function groupSkusByColor(skus: ModelMatrixSkuRow[]): ColorSkuGroup[] {
+  const groups = new Map<string, ColorSkuGroup>();
+
+  for (const sku of skus) {
+    const colorName = sku.color_name?.trim() || "";
+    const colorCode = sku.color_code?.trim() || "";
+    const key = colorCode || colorName || "UNSET";
+    const existing = groups.get(key);
+    if (existing) {
+      existing.skus.push(sku);
+      continue;
+    }
+    groups.set(key, {
+      key,
+      color_code: colorCode,
+      color_name: colorName || colorCode || "ไม่ระบุสี",
+      skus: [sku],
+    });
+  }
+
+  const sorted = Array.from(groups.values()).sort((left, right) =>
+    left.color_name.localeCompare(right.color_name, "th"),
+  );
+
+  for (const group of sorted) {
+    group.skus.sort((left, right) => {
+      if (left.sort_order !== right.sort_order) {
+        return left.sort_order - right.sort_order;
+      }
+      return left.size_label.localeCompare(right.size_label, "th");
+    });
+  }
+
+  return sorted;
 }
 
 function skuDisplayName(sku: ModelMatrixSkuRow, modelName: string): string {
@@ -270,6 +325,18 @@ export default function ModelMatrixPicker({
       }).length
     : 0;
 
+  const colorGroups = useMemo(
+    () => (matrix ? groupSkusByColor(matrix.skus) : []),
+    [matrix],
+  );
+
+  function filledCountInGroup(group: ColorSkuGroup): number {
+    return group.skus.filter((sku) => {
+      const qty = Number.parseFloat(qtyByProductId[sku.product_id] ?? "");
+      return Number.isFinite(qty) && qty > 0;
+    }).length;
+  }
+
   return (
     <div className={cn("space-y-1.5", className)}>
       <Popover
@@ -425,7 +492,7 @@ export default function ModelMatrixPicker({
             <DialogDescription>
               {matrix?.is_service
                 ? "งานบริการ — ไม่เช็คสต็อกคงเหลือ สามารถเพิ่มลงบิลได้แม้สต็อกเป็น 0"
-                : "กรอกจำนวนที่ต้องการขายในแต่ละ SKU แล้วกดเพิ่มรายการลงบิล"}
+                : "จัดกลุ่มตามสี — เปิดแต่ละสีเพื่อกรอกจำนวนตามไซส์ แล้วกดเพิ่มรายการลงบิล"}
             </DialogDescription>
           </DialogHeader>
 
@@ -453,92 +520,127 @@ export default function ModelMatrixPicker({
             !matrixError &&
             matrix &&
             matrix.skus.length > 0 ? (
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
-                      <TableHead className="px-3 text-xs font-semibold text-slate-500">
-                        SKU
-                      </TableHead>
-                      <TableHead className="px-3 text-xs font-semibold text-slate-500">
-                        สี
-                      </TableHead>
-                      <TableHead className="px-3 text-xs font-semibold text-slate-500">
-                        ไซส์
-                      </TableHead>
-                      <TableHead className="px-3 text-right text-xs font-semibold text-slate-500">
-                        พร้อมขาย (ATP)
-                      </TableHead>
-                      <TableHead className="px-3 text-right text-xs font-semibold text-slate-500">
-                        ราคา/หน่วย
-                      </TableHead>
-                      <TableHead className="w-28 px-3 text-xs font-semibold text-slate-500">
-                        จำนวน
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {matrix.skus.map((sku) => {
-                      const isService = matrix.is_service || sku.is_service;
-                      const atp = sku.available_stock;
-                      const stockLow = !isService && atp <= 0;
-                      return (
-                        <TableRow key={sku.product_id}>
-                          <TableCell className="px-3 font-mono text-xs font-semibold text-slate-800">
-                            {sku.sku}
-                          </TableCell>
-                          <TableCell className="px-3 text-sm text-slate-700">
-                            {sku.color_name || "—"}
-                            {sku.color_code ? (
-                              <span className="ml-1 font-mono text-[10px] text-slate-400">
-                                ({sku.color_code})
-                              </span>
-                            ) : null}
-                          </TableCell>
-                          <TableCell className="px-3 text-sm text-slate-700">
-                            {sku.size_label || "—"}
-                          </TableCell>
-                          <TableCell
-                            className={cn(
-                              "px-3 text-right text-sm tabular-nums",
-                              isService
-                                ? "font-semibold text-violet-700"
-                                : stockLow
-                                  ? "font-semibold text-amber-600"
-                                  : "text-slate-700",
-                            )}
-                          >
-                            {isService ? (
-                              "บริการ (ไม่ตัดสต็อก)"
-                            ) : (
-                              <span title={`คงเหลือ ${formatStock(sku.stock_balance)} / จอง SO ${formatStock(sku.committed_qty)}`}>
-                                {formatStock(atp)}
-                              </span>
-                            )}
-                          </TableCell>
-                          <TableCell className="px-3 text-right text-sm tabular-nums text-slate-700">
-                            {formatMoney(sku.unit_price)}
-                          </TableCell>
-                          <TableCell className="px-3">
-                            <Input
-                              type="number"
-                              min={0}
-                              step="any"
-                              inputMode="decimal"
-                              placeholder="0"
-                              value={qtyByProductId[sku.product_id] ?? ""}
-                              onChange={(event) =>
-                                setQty(sku.product_id, event.target.value)
-                              }
-                              className="h-9 text-right tabular-nums"
-                            />
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
+              <Accordion
+                key={matrix.model_id}
+                type="multiple"
+                defaultValue={colorGroups[0] ? [colorGroups[0].key] : []}
+                className="overflow-hidden rounded-xl border border-slate-200 bg-white"
+              >
+                {colorGroups.map((group) => {
+                  const filled = filledCountInGroup(group);
+                  return (
+                    <AccordionItem
+                      key={group.key}
+                      value={group.key}
+                      className="border-slate-200 px-4"
+                    >
+                      <AccordionTrigger className="py-3.5">
+                        <span className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="font-semibold text-slate-900">
+                            {colorGroupLabel(group)} - {group.skus.length} SKUs
+                          </span>
+                          {group.color_code &&
+                          group.color_code !== group.color_name ? (
+                            <span className="font-mono text-[11px] font-normal text-slate-400">
+                              {group.color_code}
+                            </span>
+                          ) : null}
+                          {filled > 0 ? (
+                            <Badge className="border-blue-100 bg-blue-50 font-normal text-blue-700 hover:bg-blue-50">
+                              กรอกแล้ว {filled}
+                            </Badge>
+                          ) : null}
+                        </span>
+                      </AccordionTrigger>
+                      <AccordionContent className="pb-4">
+                        <div className="overflow-x-auto rounded-lg border border-slate-100">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                                <TableHead className="px-3 text-xs font-semibold text-slate-500">
+                                  ไซส์
+                                </TableHead>
+                                <TableHead className="px-3 text-xs font-semibold text-slate-500">
+                                  SKU
+                                </TableHead>
+                                <TableHead className="px-3 text-right text-xs font-semibold text-slate-500">
+                                  พร้อมขาย (ATP)
+                                </TableHead>
+                                <TableHead className="px-3 text-right text-xs font-semibold text-slate-500">
+                                  ราคา/หน่วย
+                                </TableHead>
+                                <TableHead className="w-28 px-3 text-xs font-semibold text-slate-500">
+                                  จำนวน
+                                </TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {group.skus.map((sku) => {
+                                const isService =
+                                  matrix.is_service || sku.is_service;
+                                const atp = sku.available_stock;
+                                const stockLow = !isService && atp <= 0;
+                                return (
+                                  <TableRow key={sku.product_id}>
+                                    <TableCell className="px-3 text-sm font-medium text-slate-800">
+                                      {sku.size_label || "—"}
+                                    </TableCell>
+                                    <TableCell className="px-3 font-mono text-xs text-slate-600">
+                                      {sku.sku}
+                                    </TableCell>
+                                    <TableCell
+                                      className={cn(
+                                        "px-3 text-right text-sm tabular-nums",
+                                        isService
+                                          ? "font-semibold text-violet-700"
+                                          : stockLow
+                                            ? "font-semibold text-amber-600"
+                                            : "text-slate-700",
+                                      )}
+                                    >
+                                      {isService ? (
+                                        "บริการ (ไม่ตัดสต็อก)"
+                                      ) : (
+                                        <span
+                                          title={`คงเหลือ ${formatStock(sku.stock_balance)} / จอง SO ${formatStock(sku.committed_qty)}`}
+                                        >
+                                          {formatStock(atp)}
+                                        </span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="px-3 text-right text-sm tabular-nums text-slate-700">
+                                      {formatMoney(sku.unit_price)}
+                                    </TableCell>
+                                    <TableCell className="px-3">
+                                      <Input
+                                        type="number"
+                                        min={0}
+                                        step="any"
+                                        inputMode="decimal"
+                                        placeholder="0"
+                                        value={
+                                          qtyByProductId[sku.product_id] ?? ""
+                                        }
+                                        onChange={(event) =>
+                                          setQty(
+                                            sku.product_id,
+                                            event.target.value,
+                                          )
+                                        }
+                                        className="h-9 text-right tabular-nums"
+                                      />
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  );
+                })}
+              </Accordion>
             ) : null}
           </div>
 

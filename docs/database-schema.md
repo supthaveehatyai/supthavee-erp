@@ -13,7 +13,7 @@
 - `mst_wht_rates` (อัตราหัก ณ ที่จ่ายมาตรฐาน — `wht_name`, `wht_rate`, `is_active`; RLS: authenticated SELECT)
 - `mst_asset_categories` (หมวดหมู่สินทรัพย์ถาวร — `category_code`, `useful_life_years`, `depreciation_rate`)
 - `mst_genders` (เพศ/ทรงเสื้อ)
-- `mst_sizes` (ไซส์มาตรฐาน Global Size รวมถึงไซส์บริการ)
+- `mst_sizes` (ไซส์มาตรฐาน Global Size รวมถึงไซส์บริการ — `size_code` สูงสุด 2 ตัวอักษร, `size_label`, `sort_order` Gap of 10, `is_active` Soft Delete; จัดการผ่านหน้า Admin `/settings/master-data/sizes`)
 
 ## 2. Core Entities (องค์กร, ผู้ใช้, ตั้งค่า)
 - `contacts` (คู่ค้า Multi-Role: `contact_roles` VARCHAR[] เท่านั้น — ไม่ใช้ `contact_type`)

@@ -349,6 +349,19 @@ function SidebarContent({
               <Icon name="sliders" className="size-[18px]" />
               ตั้งค่าระบบ
             </Link>
+            <Link
+              href="/settings/master-data/sizes"
+              onNavigate={closeMenu}
+              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition ${
+                pathname === "/settings/master-data/sizes" ||
+                pathname.startsWith("/settings/master-data/sizes/")
+                  ? "bg-white/15 font-medium text-white"
+                  : "text-blue-200 hover:bg-white/10 hover:text-white"
+              }`}
+            >
+              <Icon name="database" className="size-[18px]" />
+              จัดการไซส์ (Sizes)
+            </Link>
           </>
         ) : null}
       </div>
