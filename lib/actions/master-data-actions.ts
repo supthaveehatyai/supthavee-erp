@@ -44,10 +44,11 @@ const SIZES_PATH = "/settings/master-data/sizes";
 const SIZE_COLUMNS =
   "id, brand_id, size_code, size_label, sort_order, is_active";
 const CATEGORY_COLUMNS =
-  "id, category_code, category_name, parent_id, is_active, parent:mst_categories!mst_categories_parent_id_fkey ( category_code, category_name )";
+  "*, parent:mst_categories!parent_id(id, category_code, category_name)";
 const POSTGRES_UNIQUE_VIOLATION = "23505";
 
 type CategoryParentJoin = {
+  id?: string | null;
   category_code: string | null;
   category_name: string | null;
 } | null;
