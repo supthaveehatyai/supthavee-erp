@@ -96,8 +96,8 @@ export const SALES_CHANNEL_LABELS: Record<SalesChannelCode, string> = {
   SHOPEE: "Shopee",
   LAZADA: "Lazada",
   TIKTOK: "TikTok Shop",
-  STORE: "หน้าร้าน",
-  DIRECT: "ขายตรง / B2B",
+  STORE: "ขายปลีก",
+  DIRECT: "ขายส่ง",
 };
 
 export function isSalesChannel(
@@ -230,8 +230,8 @@ export const SALES_TRADING_DOC_TYPES = [
 
 export type SalesTradingDocType = (typeof SALES_TRADING_DOC_TYPES)[number];
 
-/** Default ของฟอร์มเปิดบิลขาย */
-export const DEFAULT_SALES_CREATE_DOC_TYPE: SalesTradingDocType = "INV_DO";
+/** Default ของฟอร์มเปิดบิลขาย — ใบเสนอราคา */
+export const DEFAULT_SALES_CREATE_DOC_TYPE: SalesTradingDocType = "QT";
 
 export function isSalesTradingDocType(
   docType: string,
