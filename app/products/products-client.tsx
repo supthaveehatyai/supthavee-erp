@@ -5,6 +5,10 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import {
+  buildSizeSortIndex,
+  compareSizesBySortOrder,
+} from "@/lib/master/size-sort";
+import {
   ProductModelPreviewSheet,
   buildPreviewModelHref,
 } from "@/components/products/ProductModelPreviewSheet";
@@ -13,6 +17,7 @@ import {
   getGenders,
   getGlobalSizes,
   getMasterDataForMatrix,
+  getSizeSortCatalog,
   getSizesByBrand,
   getUoms,
   getVendorMappingsByProductIds,
@@ -490,12 +495,27 @@ const SERVICE_CUSTOM_SIZE_SORT_MIN = 900;
 const SERVICE_CUSTOM_SIZE_GROUP_TITLE =
   "ขนาดงานบริการและงานสั่งทำ (Service/Custom Sizes)";
 
-function getSizeSortWeight(sizeLabel: string | null | undefined): number {
+function getSizeSortWeight(
+  sizeLabel: string | null | undefined,
+  index?: Map<string, number>,
+): number {
   const key = (sizeLabel ?? "").trim().toUpperCase();
-  return SIZE_SORT_ORDER[key] ?? 99;
+  if (!key) return 9999;
+  const catalogWeight = index?.get(key);
+  if (catalogWeight !== undefined) return catalogWeight;
+  return SIZE_SORT_ORDER[key] ?? 9999;
 }
 
-function compareSizeLabels(left: string, right: string): number {
+function compareSizeLabels(
+  left: string,
+  right: string,
+  index?: Map<string, number>,
+): number {
+  if (index && index.size > 0) {
+    return compareSizesBySortOrder(left, right, index, (key) =>
+      SIZE_SORT_ORDER[key] ?? 9999,
+    );
+  }
   const weightDiff = getSizeSortWeight(left) - getSizeSortWeight(right);
   if (weightDiff !== 0) return weightDiff;
   return left.localeCompare(right, "th", { numeric: true, sensitivity: "base" });
@@ -708,7 +728,10 @@ function getProductGroupTitle(product: Product): string {
   );
 }
 
-function buildColorSubGroups(groupProducts: Product[]): ColorSubGroup[] {
+function buildColorSubGroups(
+  groupProducts: Product[],
+  sizeSortIndex?: Map<string, number>,
+): ColorSubGroup[] {
   const map = new Map<string, Product[]>();
   for (const product of groupProducts) {
     const color = product.color?.trim() || "ไม่ระบุสี";
@@ -725,10 +748,12 @@ function buildColorSubGroups(groupProducts: Product[]): ColorSubGroup[] {
             .map((item) => item.size)
             .filter((value): value is string => Boolean(value)),
         ),
-      ].sort(compareSizeLabels);
+      ].sort((left, right) =>
+        compareSizeLabels(left, right, sizeSortIndex),
+      );
 
       const sortedProducts = [...products].sort((left, right) =>
-        compareSizeLabels(left.size || "", right.size || ""),
+        compareSizeLabels(left.size || "", right.size || "", sizeSortIndex),
       );
 
       return {
@@ -744,7 +769,10 @@ function buildColorSubGroups(groupProducts: Product[]): ColorSubGroup[] {
     );
 }
 
-function buildGroupedProducts(list: Product[]): ProductGroup[] {
+function buildGroupedProducts(
+  list: Product[],
+  sizeSortIndex?: Map<string, number>,
+): ProductGroup[] {
   const map = new Map<string, Product[]>();
   for (const product of list) {
     const key = getProductGroupKey(product);
@@ -756,11 +784,27 @@ function buildGroupedProducts(list: Product[]): ProductGroup[] {
   return Array.from(map.entries())
     .map(([key, groupProducts]) => {
       const first = groupProducts[0];
-      const colorGroups = buildColorSubGroups(groupProducts);
+      const colorGroups = buildColorSubGroups(groupProducts, sizeSortIndex);
       const colors = colorGroups.map((group) => group.color);
       const sizes = [
         ...new Set(colorGroups.flatMap((group) => group.sizes)),
-      ];
+      ].sort((left, right) =>
+        compareSizeLabels(left, right, sizeSortIndex),
+      );
+
+      const sortedProducts = [...groupProducts].sort((left, right) => {
+        const colorCmp = (left.color || "").localeCompare(
+          right.color || "",
+          "th",
+          { sensitivity: "base" },
+        );
+        if (colorCmp !== 0) return colorCmp;
+        return compareSizeLabels(
+          left.size || "",
+          right.size || "",
+          sizeSortIndex,
+        );
+      });
 
       return {
         key,
@@ -771,7 +815,7 @@ function buildGroupedProducts(list: Product[]): ProductGroup[] {
         taxType: first.tax_type,
         modelId:
           groupProducts.find((item) => item.model_id)?.model_id ?? null,
-        products: groupProducts,
+        products: sortedProducts,
         activeCount: groupProducts.filter((item) => item.is_active).length,
         colors,
         sizes,
@@ -996,6 +1040,9 @@ export default function ProductsClient() {
   const [isSizeLoading, setIsSizeLoading] = useState(false);
   /** Global Size catalog for the standard-size grid (SELECT only). */
   const [globalSizeCatalog, setGlobalSizeCatalog] = useState<Size[]>([]);
+  const [sizeSortCatalog, setSizeSortCatalog] = useState<
+    { size_code: string; size_label: string; sort_order: number }[]
+  >([]);
   const [isGlobalSizeLoading, setIsGlobalSizeLoading] = useState(false);
   /** Inline panel: standard size selection grid (no create modal). */
   const [isStandardSizePanelOpen, setIsStandardSizePanelOpen] = useState(false);
@@ -1078,13 +1125,18 @@ export default function ProductsClient() {
     // Brands (mst_brands) + vendor mapping (vendor_product_mapping → contacts)
     // go through Server Actions — Service Role Key bypasses RLS entirely.
     const productIds = nextProducts.map((item) => item.id);
-    const [brandsResult, mappingsResult] = await Promise.all([
+    const [brandsResult, mappingsResult, sizeSortResult] = await Promise.all([
       getBrands(),
       getVendorMappingsByProductIds(productIds),
+      getSizeSortCatalog(),
     ]);
 
     if (!brandsResult.error) {
       setListBrands(brandsResult.data);
+    }
+
+    if (!sizeSortResult.error) {
+      setSizeSortCatalog(sizeSortResult.data);
     }
 
     if (!mappingsResult.error) {
@@ -1433,9 +1485,14 @@ export default function ProductsClient() {
     });
   }, [products, search, vendorByProductId, listBrands]);
 
+  const sizeSortIndex = useMemo(
+    () => buildSizeSortIndex(sizeSortCatalog),
+    [sizeSortCatalog],
+  );
+
   const productGroups = useMemo(
-    () => buildGroupedProducts(filteredProducts),
-    [filteredProducts],
+    () => buildGroupedProducts(filteredProducts, sizeSortIndex),
+    [filteredProducts, sizeSortIndex],
   );
 
   const editSizeLabels = useMemo(() => {
@@ -1446,8 +1503,10 @@ export default function ProductsClient() {
           .map((product) => product.size)
           .filter((value): value is string => Boolean(value)),
       ),
-    ];
-  }, [editTarget]);
+    ].sort((left, right) =>
+      compareSizeLabels(left, right, sizeSortIndex),
+    );
+  }, [editTarget, sizeSortIndex]);
 
   const { kids: kidsSizes, adults: adultSizes, serviceCustom: serviceCustomSizes } =
     useMemo(() => partitionGlobalSizes(globalSizeCatalog), [globalSizeCatalog]);

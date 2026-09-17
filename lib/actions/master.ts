@@ -356,6 +356,48 @@ export async function getGlobalSizes(): Promise<GetSizesResult> {
   }
 }
 
+export type SizeSortCatalogRow = {
+  size_code: string;
+  size_label: string;
+  sort_order: number;
+};
+
+export type GetSizeSortCatalogResult = {
+  data: SizeSortCatalogRow[];
+  error: string | null;
+};
+
+/**
+ * แคตตาล็อกเรียงไซส์ทั้งระบบ (`mst_sizes.sort_order` ASC)
+ * ใช้แมป products.size (label/code) — รวม Inactive เพื่อให้ SKU เก่าเรียงถูก
+ */
+export async function getSizeSortCatalog(): Promise<GetSizeSortCatalogResult> {
+  noStore();
+  try {
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data, error } = await supabaseAdmin
+      .from("mst_sizes")
+      .select("size_code, size_label, sort_order")
+      .order("sort_order", { ascending: true })
+      .order("size_code", { ascending: true });
+
+    if (error) return { data: [], error: error.message };
+
+    return {
+      data: ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+        size_code: String(row.size_code ?? "").trim().toUpperCase(),
+        size_label: String(row.size_label ?? "").trim(),
+        sort_order: Number(row.sort_order ?? 9999),
+      })),
+      error: null,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "โหลดลำดับไซส์ไม่สำเร็จ";
+    return { data: [], error: message };
+  }
+}
+
 /** Active + inactive sizes for a brand — reference table shown inside the "Add New Size" modal. */
 export async function getAllSizesByBrand(brandId: string): Promise<GetSizesResult> {
   const trimmedBrandId = brandId?.trim() ?? "";

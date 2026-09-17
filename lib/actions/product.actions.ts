@@ -259,11 +259,6 @@ export async function getModelMatrixForSale(
           .filter(Boolean),
       ),
     ];
-    const sizeKeys = [
-      ...new Set(
-        products.map((row) => row.size?.trim() ?? "").filter(Boolean),
-      ),
-    ];
 
     type SizeMetaRow = {
       size_label: string;
@@ -271,7 +266,7 @@ export async function getModelMatrixForSale(
       sort_order: number | null;
     };
 
-    const [colorsResult, sizesByLabel, sizesByCode] = await Promise.all([
+    const [colorsResult, sizesCatalog] = await Promise.all([
       colorCodes.length > 0
         ? supabase
             .from("mst_colors")
@@ -281,28 +276,18 @@ export async function getModelMatrixForSale(
             data: [] as { color_code: string; color_name: string }[],
             error: null,
           }),
-      sizeKeys.length > 0
-        ? supabase
-            .from("mst_sizes")
-            .select("size_label, size_code, sort_order")
-            .in("size_label", sizeKeys)
-        : Promise.resolve({ data: [] as SizeMetaRow[], error: null }),
-      sizeKeys.length > 0
-        ? supabase
-            .from("mst_sizes")
-            .select("size_label, size_code, sort_order")
-            .in("size_code", sizeKeys)
-        : Promise.resolve({ data: [] as SizeMetaRow[], error: null }),
+      supabase
+        .from("mst_sizes")
+        .select("size_label, size_code, sort_order")
+        .order("sort_order", { ascending: true })
+        .order("size_code", { ascending: true }),
     ]);
 
     if (colorsResult.error) {
       return { success: false, error: colorsResult.error.message, data: null };
     }
-    if (sizesByLabel.error) {
-      return { success: false, error: sizesByLabel.error.message, data: null };
-    }
-    if (sizesByCode.error) {
-      return { success: false, error: sizesByCode.error.message, data: null };
+    if (sizesCatalog.error) {
+      return { success: false, error: sizesCatalog.error.message, data: null };
     }
 
     const colorNameByCode = new Map(
@@ -316,10 +301,7 @@ export async function getModelMatrixForSale(
       string,
       { code: string; label: string; sortOrder: number }
     >();
-    for (const row of [
-      ...((sizesByLabel.data ?? []) as SizeMetaRow[]),
-      ...((sizesByCode.data ?? []) as SizeMetaRow[]),
-    ]) {
+    for (const row of (sizesCatalog.data ?? []) as SizeMetaRow[]) {
       const meta = {
         code: String(row.size_code),
         label: String(row.size_label),
@@ -327,8 +309,12 @@ export async function getModelMatrixForSale(
       };
       const labelKey = String(row.size_label).trim().toUpperCase();
       const codeKey = String(row.size_code).trim().toUpperCase();
-      if (labelKey) sizeMetaByKey.set(labelKey, meta);
-      if (codeKey) sizeMetaByKey.set(codeKey, meta);
+      if (labelKey && !sizeMetaByKey.has(labelKey)) {
+        sizeMetaByKey.set(labelKey, meta);
+      }
+      if (codeKey && !sizeMetaByKey.has(codeKey)) {
+        sizeMetaByKey.set(codeKey, meta);
+      }
     }
 
     // ── Soft Allocation: committed qty from SO (ISSUED) ──
