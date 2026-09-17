@@ -1049,6 +1049,10 @@ export default function ProductsClient() {
   const [pendingDraftPayload, setPendingDraftPayload] =
     useState<SaveDraftModelInput | null>(null);
   const [sizePricing, setSizePricing] = useState<SizePricingRow[]>([]);
+  const [bulkDiscountType, setBulkDiscountType] = useState<
+    Exclude<DiscountType, "NET">
+  >("PERCENT");
+  const [bulkDiscountValue, setBulkDiscountValue] = useState("");
   const [shortNameTouched, setShortNameTouched] = useState(false);
   const [productNameTouched, setProductNameTouched] = useState(false);
 
@@ -2035,6 +2039,33 @@ export default function ProductsClient() {
         }
 
         return withCalculatedCost(next);
+      });
+    });
+  }
+
+  function applyDiscountToAll() {
+    if (form.isRawMaterial || form.sizeIds.length === 0) return;
+
+    const discountType = bulkDiscountType;
+    const discountValue = bulkDiscountValue.trim();
+
+    setSizePricing((current) => {
+      const byId = new Map(current.map((row) => [row.sizeId, row]));
+
+      return form.sizeIds.flatMap((sizeId) => {
+        const size = resolveSizeForPricing(sizeId, sizes, globalSizeCatalog);
+        const existing = byId.get(sizeId);
+        const base =
+          existing ?? (size ? createEmptySizePricing(size) : null);
+        if (!base) return [];
+
+        return [
+          withCalculatedCost({
+            ...base,
+            discountType,
+            discountValue,
+          }),
+        ];
       });
     });
   }
@@ -4051,6 +4082,64 @@ export default function ProductsClient() {
                     </div>
                   ) : (
                     <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      {!form.isRawMaterial ? (
+                        <div className="flex flex-wrap items-end gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+                          <p className="pb-2 text-xs font-semibold text-slate-700 sm:pb-0 sm:self-center">
+                            ตั้งค่าส่วนลดด่วน (Bulk Apply):
+                          </p>
+                          <label className="block min-w-[7.5rem]">
+                            <span className="mb-1 block text-[11px] font-medium text-slate-500">
+                              ประเภทส่วนลด
+                            </span>
+                            <select
+                              aria-label="ประเภทส่วนลดด่วนสำหรับทุกไซส์"
+                              value={bulkDiscountType}
+                              onChange={(event) =>
+                                setBulkDiscountType(
+                                  event.target.value as Exclude<
+                                    DiscountType,
+                                    "NET"
+                                  >,
+                                )
+                              }
+                              className={fieldClass}
+                            >
+                              <option value="PERCENT">%</option>
+                              <option value="THB">THB</option>
+                            </select>
+                          </label>
+                          <label className="block min-w-[8.5rem] flex-1 sm:max-w-[12rem]">
+                            <span className="mb-1 block text-[11px] font-medium text-slate-500">
+                              ค่าส่วนลด
+                            </span>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                inputMode="decimal"
+                                aria-label="ค่าส่วนลดด่วนสำหรับทุกไซส์"
+                                value={bulkDiscountValue}
+                                onChange={(event) =>
+                                  setBulkDiscountValue(event.target.value)
+                                }
+                                placeholder="0"
+                                className={`${fieldClass} pr-10 text-right tabular-nums`}
+                              />
+                              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-slate-400">
+                                {bulkDiscountType === "PERCENT" ? "%" : "฿"}
+                              </span>
+                            </div>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={applyDiscountToAll}
+                            className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                          >
+                            นำไปใช้กับทุกไซส์ (Apply to All)
+                          </button>
+                        </div>
+                      ) : null}
                       <table className="w-full min-w-[860px]">
                         <thead className="bg-slate-50">
                           <tr>
