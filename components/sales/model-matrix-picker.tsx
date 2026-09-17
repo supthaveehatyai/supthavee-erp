@@ -145,13 +145,40 @@ function groupSkusByColor(skus: ModelMatrixSkuRow[]): ColorSkuGroup[] {
   return sorted;
 }
 
-function skuDisplayName(sku: ModelMatrixSkuRow, modelName: string): string {
-  const parts = [
-    sku.name?.trim() || modelName,
-    sku.color_name?.trim(),
-    sku.size_label?.trim(),
-  ].filter(Boolean);
-  return parts.join(" · ") || sku.sku;
+function isPlaceholderMeta(value: string | null | undefined): boolean {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed || trimmed === "—" || trimmed === "-") return true;
+  const upper = trimmed.toUpperCase();
+  return upper === "N/A" || upper === "00";
+}
+
+/**
+ * ชื่อเต็มมาตรฐาน ERP: รุ่น + สี + ไซส์
+ * วัตถุดิบ / บริการ แสดงชื่ออย่างเดียว (ไซส์ 00 และสีว่างไม่ปะปน)
+ */
+function formatSkuFullName(
+  sku: ModelMatrixSkuRow,
+  modelName: string,
+  options?: { isService?: boolean; isRawMaterial?: boolean },
+): string {
+  const name = (sku.name?.trim() || modelName).trim();
+  if (options?.isService || options?.isRawMaterial) {
+    return name || sku.sku;
+  }
+
+  const parts = [name];
+  const color = sku.color_name?.trim();
+  if (color && !isPlaceholderMeta(color)) parts.push(color);
+  const size = sku.size_label?.trim();
+  if (
+    size &&
+    !isPlaceholderMeta(size) &&
+    !isPlaceholderMeta(sku.size_code)
+  ) {
+    parts.push(size);
+  }
+
+  return parts.filter(Boolean).join(" ") || sku.sku;
 }
 
 function toBillItem(
@@ -164,7 +191,10 @@ function toBillItem(
     sku: sku.sku,
     unit_price: sku.unit_price,
     cost_price: sku.cost_price,
-    display_name: skuDisplayName(sku, matrix.model_name),
+    display_name: formatSkuFullName(sku, matrix.model_name, {
+      isService: matrix.is_service || sku.is_service,
+      isRawMaterial: matrix.is_raw_material,
+    }),
     model_name: matrix.model_name,
     color_name: sku.color_name || null,
     size_label: sku.size_label || null,
@@ -561,7 +591,7 @@ export default function ModelMatrixPicker({
                                   ไซส์
                                 </TableHead>
                                 <TableHead className="px-3 text-xs font-semibold text-slate-500">
-                                  SKU
+                                  รายละเอียดสินค้า
                                 </TableHead>
                                 <TableHead className="px-3 text-right text-xs font-semibold text-slate-500">
                                   พร้อมขาย (ATP)
@@ -580,13 +610,28 @@ export default function ModelMatrixPicker({
                                   matrix.is_service || sku.is_service;
                                 const atp = sku.available_stock;
                                 const stockLow = !isService && atp <= 0;
+                                const fullName = formatSkuFullName(
+                                  sku,
+                                  matrix.model_name,
+                                  {
+                                    isService,
+                                    isRawMaterial: matrix.is_raw_material,
+                                  },
+                                );
                                 return (
                                   <TableRow key={sku.product_id}>
                                     <TableCell className="px-3 text-sm font-medium text-slate-800">
                                       {sku.size_label || "—"}
                                     </TableCell>
-                                    <TableCell className="px-3 font-mono text-xs text-slate-600">
-                                      {sku.sku}
+                                    <TableCell className="px-3">
+                                      <div className="flex min-w-0 flex-col">
+                                        <span className="font-medium text-sm text-slate-800">
+                                          {fullName}
+                                        </span>
+                                        <span className="text-xs text-muted-foreground font-mono text-slate-500">
+                                          {sku.sku}
+                                        </span>
+                                      </div>
                                     </TableCell>
                                     <TableCell
                                       className={cn(

@@ -181,7 +181,7 @@ export async function getModelMatrixForSale(
 
     const { data: model, error: modelError } = await supabase
       .from("product_models")
-      .select("id, model_code, name, short_name, image_url, is_service, is_manufactured")
+      .select("id, model_code, name, short_name, image_url, is_service, is_raw_material, is_manufactured")
       .eq("id", id)
       .maybeSingle();
 
@@ -193,6 +193,7 @@ export async function getModelMatrixForSale(
     }
 
     const isService = Boolean(model.is_service);
+    const isRawMaterial = Boolean(model.is_raw_material);
     const isManufactured = Boolean(model.is_manufactured);
 
     const empty: ModelMatrixForSale = {
@@ -201,6 +202,7 @@ export async function getModelMatrixForSale(
       model_name: model.name || model.short_name || model.model_code,
       image_url: model.image_url,
       is_service: isService,
+      is_raw_material: isRawMaterial,
       is_manufactured: isManufactured,
       skus: [],
     };
@@ -376,6 +378,7 @@ export async function getModelMatrixForSale(
         model_name: model.name || model.short_name || model.model_code,
         image_url: model.image_url,
         is_service: isService,
+        is_raw_material: isRawMaterial,
         is_manufactured: isManufactured,
         skus,
       },

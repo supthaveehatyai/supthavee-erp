@@ -60,6 +60,8 @@ export type ModelMatrixForSale = {
   image_url: string | null;
   /** true = รุ่นงานบริการ — Bypass เช็คสต็อกใน UI */
   is_service: boolean;
+  /** product_models.is_raw_material — วัตถุดิบ (ไม่ขายในบิลขาย) */
+  is_raw_material: boolean;
   /** product_models.is_manufactured — สินค้าผลิตเอง (MTO) */
   is_manufactured: boolean;
   /** SKUs เรียง color_name แล้วตาม size sort_order */
