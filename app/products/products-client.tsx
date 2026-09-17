@@ -1049,9 +1049,8 @@ export default function ProductsClient() {
   const [pendingDraftPayload, setPendingDraftPayload] =
     useState<SaveDraftModelInput | null>(null);
   const [sizePricing, setSizePricing] = useState<SizePricingRow[]>([]);
-  const [bulkDiscountType, setBulkDiscountType] = useState<
-    Exclude<DiscountType, "NET">
-  >("PERCENT");
+  const [bulkDiscountType, setBulkDiscountType] =
+    useState<DiscountType>("PERCENT");
   const [bulkDiscountValue, setBulkDiscountValue] = useState("");
   const [shortNameTouched, setShortNameTouched] = useState(false);
   const [productNameTouched, setProductNameTouched] = useState(false);
@@ -2058,6 +2057,17 @@ export default function ProductsClient() {
         const base =
           existing ?? (size ? createEmptySizePricing(size) : null);
         if (!base) return [];
+
+        if (discountType === "NET") {
+          return [
+            {
+              ...base,
+              discountType: "NET" as const,
+              discountValue,
+              costPrice: discountValue,
+            },
+          ];
+        }
 
         return [
           withCalculatedCost({
@@ -4096,21 +4106,21 @@ export default function ProductsClient() {
                               value={bulkDiscountType}
                               onChange={(event) =>
                                 setBulkDiscountType(
-                                  event.target.value as Exclude<
-                                    DiscountType,
-                                    "NET"
-                                  >,
+                                  event.target.value as DiscountType,
                                 )
                               }
                               className={fieldClass}
                             >
                               <option value="PERCENT">%</option>
                               <option value="THB">THB</option>
+                              <option value="NET">ราคาเน็ต</option>
                             </select>
                           </label>
                           <label className="block min-w-[8.5rem] flex-1 sm:max-w-[12rem]">
                             <span className="mb-1 block text-[11px] font-medium text-slate-500">
-                              ค่าส่วนลด
+                              {bulkDiscountType === "NET"
+                                ? "ราคาเน็ต (ต้นทุน)"
+                                : "ค่าส่วนลด"}
                             </span>
                             <div className="relative">
                               <input
@@ -4118,7 +4128,11 @@ export default function ProductsClient() {
                                 min="0"
                                 step="0.01"
                                 inputMode="decimal"
-                                aria-label="ค่าส่วนลดด่วนสำหรับทุกไซส์"
+                                aria-label={
+                                  bulkDiscountType === "NET"
+                                    ? "ราคาเน็ตด่วนสำหรับทุกไซส์"
+                                    : "ค่าส่วนลดด่วนสำหรับทุกไซส์"
+                                }
                                 value={bulkDiscountValue}
                                 onChange={(event) =>
                                   setBulkDiscountValue(event.target.value)
@@ -4127,7 +4141,11 @@ export default function ProductsClient() {
                                 className={`${fieldClass} pr-10 text-right tabular-nums`}
                               />
                               <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-slate-400">
-                                {bulkDiscountType === "PERCENT" ? "%" : "฿"}
+                                {bulkDiscountType === "PERCENT"
+                                  ? "%"
+                                  : bulkDiscountType === "THB"
+                                    ? "฿"
+                                    : "฿"}
                               </span>
                             </div>
                           </label>
