@@ -271,16 +271,19 @@ export default function SizeFormDialog({
               required
               type="number"
               min={0}
-              step={10}
+              step={1}
               value={sortOrder}
               onChange={(event) => {
                 setSortOrder(event.target.value);
                 setFormError("");
               }}
-              placeholder="เช่น 40 (Gap of 10)"
+              placeholder="เช่น 40 หรือ 1055"
               disabled={isSaving}
               className="tabular-nums"
             />
+            <p className="mt-1 text-[11px] text-slate-400">
+              จำนวนเต็มใดก็ได้ — แนะนำเว้นช่องว่างไว้เพื่อแทรกไซส์กลางภายหลัง
+            </p>
           </div>
 
           {formError ? (

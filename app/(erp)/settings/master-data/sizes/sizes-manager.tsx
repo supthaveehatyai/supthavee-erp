@@ -314,10 +314,10 @@ export function SizesManager({ sizes }: { sizes: MasterSizeRow[] }) {
                   required
                   type="number"
                   min={0}
-                  step={10}
+                  step={1}
                   value={form.sort_order}
                   disabled={isSubmitting}
-                  placeholder="เช่น 10, 20, 30"
+                  placeholder="เช่น 10, 25, 1055"
                   className="tabular-nums"
                   onChange={(event) => {
                     setForm((current) => ({
@@ -327,6 +327,9 @@ export function SizesManager({ sizes }: { sizes: MasterSizeRow[] }) {
                     setFormError(null);
                   }}
                 />
+                <p className="mt-1 text-[11px] text-slate-400">
+                  จำนวนเต็มใดก็ได้ — แนะนำเว้นช่องว่างไว้เพื่อแทรกไซส์กลางภายหลัง
+                </p>
               </div>
 
               {formError ? (
