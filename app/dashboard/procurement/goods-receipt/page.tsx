@@ -3,6 +3,7 @@ import { getActiveVendors } from "@/lib/actions/mapping";
 import GoodsReceiptUI from "./GoodsReceiptUI";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export const metadata: Metadata = {
   title: "Smart Goods Receipt | รับสินค้าอัจฉริยะ",

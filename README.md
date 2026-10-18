@@ -84,6 +84,6 @@ supabase secrets set GEMINI_API_KEY=your_google_ai_studio_key
 supabase functions deploy process-receipt-ocr
 ```
 
-Gemini model id is read from `system_parameters.GEMINI_MODEL_VERSION` (Settings → Maker-Checker). If the row is missing, OCR falls back to `gemini-1.5-flash`.
+`parseReceiptOcr` calls Gemini from the Next.js server. Set `GEMINI_API_KEY` in `.env.development` (and Vercel). The model id is `system_parameters.GEMINI_MODEL_VERSION`. If that id is missing or returns 404, OCR picks a live flash model from `https://generativelanguage.googleapis.com/v1beta/models`.
 
 `SUPABASE_URL` and `SUPABASE_ANON_KEY` are injected automatically by the Edge runtime.

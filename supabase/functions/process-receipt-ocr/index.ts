@@ -12,14 +12,12 @@
 //
 // Deploy: supabase functions deploy process-receipt-ocr
 // Secret:  supabase secrets set GEMINI_API_KEY=...
-// Model:   system_parameters.GEMINI_MODEL_VERSION (jsonb), fallback gemini-1.5-flash
-// Retry only on 503/429 for the selected model.
+// Model:   system_parameters.GEMINI_MODEL_VERSION, then Google models API on 404.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // Deno / Supabase Edge: use npm: specifiers (do NOT use bare `@supabase/...` or esm.sh)
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { GoogleGenerativeAI } from "npm:@google/generative-ai";
-import { loadGeminiModelVersion } from "../_shared/gemini-model.ts";
+import { generateGeminiContent, loadGeminiModelVersion } from "../_shared/gemini-model.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -46,86 +44,6 @@ function getErrorMessage(error: unknown): string {
   } catch {
     return String(error);
   }
-}
-
-function getErrorStatus(error: unknown): number | undefined {
-  if (error == null || typeof error !== "object") {
-    // Fall through to message parse below for non-objects
-  } else {
-    const record = error as Record<string, unknown>;
-    const direct = record.status ?? record.statusCode;
-    if (typeof direct === "number") return direct;
-
-    const nested = record.error;
-    if (nested != null && typeof nested === "object") {
-      const nestedRecord = nested as Record<string, unknown>;
-      const nestedStatus = nestedRecord.status ?? nestedRecord.code;
-      if (typeof nestedStatus === "number") return nestedStatus;
-    }
-  }
-
-  const message = getErrorMessage(error);
-  const match = message.match(/\b(400|404|429|503)\b/);
-  if (match) return Number(match[1]);
-  return undefined;
-}
-
-type GenerativePart =
-  | string
-  | { inlineData: { mimeType: string; data: string } };
-
-/**
- * Retry the selected Gemini model on 503/429 only.
- * Preserves JSON responseMimeType for OCR parsing.
- */
-async function generateWithRetry(
-  genAI: GoogleGenerativeAI,
-  modelName: string,
-  prompt: string,
-  imageParts: GenerativePart[],
-): Promise<string> {
-  console.log(`[OCR Engine] Attempting with model: ${modelName}`);
-  const model = genAI.getGenerativeModel({
-    model: modelName,
-    generationConfig: {
-      temperature: 0.1,
-      responseMimeType: "application/json",
-    },
-  });
-
-  let lastError: unknown = null;
-
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const result = await model.generateContent([prompt, ...imageParts]);
-      const text = result.response.text();
-      if (!text?.trim()) {
-        throw new Error("Gemini returned empty response");
-      }
-      console.log(`[OCR Engine] Success with model: ${modelName}`);
-      return text;
-    } catch (error: unknown) {
-      lastError = error;
-      const status = getErrorStatus(error);
-
-      if ((status === 503 || status === 429) && attempt < 3) {
-        const delayMs = attempt * 1500;
-        console.warn(
-          `[OCR Engine] Model ${modelName} hit ${status}. Retrying in ${delayMs}ms... (Attempt ${attempt}/3)`,
-        );
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-        continue;
-      }
-
-      throw new Error(
-        `Gemini model ${modelName} failed: ${getErrorMessage(error)}`,
-      );
-    }
-  }
-
-  throw new Error(
-    `Gemini model ${modelName} failed: ${getErrorMessage(lastError) || "Service Unavailable"}`,
-  );
 }
 
 /** Result of parsing Gemini's response — header fields + flattened line items. */
@@ -399,12 +317,10 @@ serve(async (req: Request) => {
     }
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
-    // 3. Initialize GoogleGenerativeAI explicitly
     const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
     if (!geminiApiKey) {
       throw new Error("Missing GEMINI_API_KEY secret on this Edge Function");
     }
-    const genAI = new GoogleGenerativeAI(geminiApiKey);
 
     // 4. Vendor OCR pattern config — AI Pattern Memorization per vendor
     const { data: vendor, error: vendorError } = await supabaseAdmin
@@ -420,16 +336,21 @@ serve(async (req: Request) => {
       );
     }
 
-    // 5. Gemini Vision — model from system_parameters, flatten Size Matrix
     const geminiModel = await loadGeminiModelVersion(supabaseAdmin);
     const systemPrompt = buildOcrSystemPrompt(
       vendor.company_name ?? vendorId,
       vendor.ocr_pattern_config,
     );
 
-    const rawText = await generateWithRetry(genAI, geminiModel, systemPrompt, [
-      { inlineData: { mimeType, data: imageBase64 } },
-    ]);
+    const generated = await generateGeminiContent({
+      apiKey: geminiApiKey,
+      preferredModel: geminiModel,
+      parts: [
+        { text: systemPrompt },
+        { inlineData: { mimeType, data: imageBase64 } },
+      ],
+    });
+    const rawText = generated.text;
 
     const extraction = parseOcrExtractionJson(rawText);
 

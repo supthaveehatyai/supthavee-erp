@@ -362,6 +362,10 @@ export default function GoodsReceiptUI({
         return;
       }
 
+      if (parsed.modelNotice) {
+        toast.warning(parsed.modelNotice);
+      }
+
       setRows(applyApportionedTotals(matched.data, ""));
       setBillDiscountText("");
       setVatTotalsManual(false);

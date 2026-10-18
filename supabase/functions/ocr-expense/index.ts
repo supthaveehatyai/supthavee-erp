@@ -8,14 +8,12 @@
 //
 // Deploy: supabase functions deploy ocr-expense
 // Secret:  supabase secrets set GEMINI_API_KEY=...
-// Model:   system_parameters.GEMINI_MODEL_VERSION (jsonb), fallback gemini-1.5-flash
-// - 503 / 429 → retry up to 3× with exponential backoff on the selected model
+// Model:   system_parameters.GEMINI_MODEL_VERSION, then Google models API on 404.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { GoogleGenerativeAI } from "npm:@google/generative-ai";
 import {
-  DEFAULT_GEMINI_MODEL,
+  generateGeminiContent,
   loadGeminiModelVersion,
 } from "../_shared/gemini-model.ts";
 
@@ -78,86 +76,6 @@ function getErrorMessage(error: unknown): string {
   } catch {
     return String(error);
   }
-}
-
-function getErrorStatus(error: unknown): number | undefined {
-  if (error != null && typeof error === "object") {
-    const record = error as Record<string, unknown>;
-    const direct = record.status ?? record.statusCode;
-    if (typeof direct === "number") return direct;
-
-    const nested = record.error;
-    if (nested != null && typeof nested === "object") {
-      const nestedRecord = nested as Record<string, unknown>;
-      const nestedStatus = nestedRecord.status ?? nestedRecord.code;
-      if (typeof nestedStatus === "number") return nestedStatus;
-    }
-  }
-
-  const message = getErrorMessage(error);
-  const match = message.match(/\b(400|401|403|404|429|503)\b/);
-  if (match) return Number(match[1]);
-  return undefined;
-}
-
-type GenerativePart =
-  | string
-  | { inlineData: { mimeType: string; data: string } };
-
-/**
- * Retry the selected Gemini model on 503/429 only.
- * Preserves JSON responseMimeType for OPEX schema parsing.
- */
-async function generateWithRetry(
-  genAI: GoogleGenerativeAI,
-  modelName: string,
-  prompt: string,
-  imageParts: GenerativePart[],
-): Promise<string> {
-  console.log(`[ocr-expense] Attempting with model: ${modelName}`);
-  const model = genAI.getGenerativeModel({
-    model: modelName,
-    generationConfig: {
-      temperature: 0.1,
-      responseMimeType: "application/json",
-    },
-  });
-
-  let lastError: unknown = null;
-
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const result = await model.generateContent([prompt, ...imageParts]);
-      const text = result.response.text();
-      if (!text?.trim()) {
-        throw new Error("Gemini returned empty response");
-      }
-      console.log(`[ocr-expense] Success with model: ${modelName}`);
-      return text;
-    } catch (error: unknown) {
-      lastError = error;
-      const status = getErrorStatus(error);
-
-      if ((status === 503 || status === 429) && attempt < 3) {
-        const delayMs = attempt * 1500;
-        console.warn(
-          `[ocr-expense] Model ${modelName} hit ${status}. Retrying in ${delayMs}ms... (Attempt ${attempt}/3)`,
-        );
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-        continue;
-      }
-
-      throw httpError(
-        `Gemini model ${modelName} failed: ${getErrorMessage(error)}`,
-        502,
-      );
-    }
-  }
-
-  throw httpError(
-    `Gemini model ${modelName} failed: ${getErrorMessage(lastError) || "Service Unavailable"}`,
-    502,
-  );
 }
 
 function createServiceRoleClient() {
@@ -435,17 +353,19 @@ serve(async (req: Request) => {
       throw httpError("Missing GEMINI_API_KEY secret on this Edge Function", 500);
     }
 
-    const genAI = new GoogleGenerativeAI(geminiApiKey);
     const paramClient = createServiceRoleClient();
     const geminiModel = paramClient
       ? await loadGeminiModelVersion(paramClient)
-      : DEFAULT_GEMINI_MODEL;
-    const rawText = await generateWithRetry(
-      genAI,
-      geminiModel,
-      buildOpexSystemPrompt(),
-      [{ inlineData: { mimeType, data: imageBase64 } }],
-    );
+      : "";
+    const generated = await generateGeminiContent({
+      apiKey: geminiApiKey,
+      preferredModel: geminiModel,
+      parts: [
+        { text: buildOpexSystemPrompt() },
+        { inlineData: { mimeType, data: imageBase64 } },
+      ],
+    });
+    const rawText = generated.text;
 
     const data = parseExpenseOcrJson(rawText);
     return jsonResponse({ data });

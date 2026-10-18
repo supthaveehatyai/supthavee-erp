@@ -13,14 +13,12 @@
 //
 // Deploy: supabase functions deploy gemini-ocr-receipt
 // Secret:  supabase secrets set GEMINI_API_KEY=...
-// Model:   system_parameters.GEMINI_MODEL_VERSION (jsonb), fallback gemini-1.5-flash
+// Model:   system_parameters.GEMINI_MODEL_VERSION, then Google models API on 404.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-// Deno / Supabase Edge: use npm: specifiers (do NOT use bare `@google/...` or esm.sh)
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { GoogleGenerativeAI } from "npm:@google/generative-ai";
 import {
-  DEFAULT_GEMINI_MODEL,
+  generateGeminiContent,
   loadGeminiModelVersion,
 } from "../_shared/gemini-model.ts";
 
@@ -144,14 +142,11 @@ serve(async (req: Request) => {
       throw new Error("ocrPatternConfig ต้องเป็น object");
     }
 
-    // 2. Initialize GoogleGenerativeAI explicitly
     const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
     if (!geminiApiKey) {
       throw new Error("Missing GEMINI_API_KEY secret on this Edge Function");
     }
-    const genAI = new GoogleGenerativeAI(geminiApiKey);
 
-    // 3. Gemini Vision — flatten the Size Matrix into OcrReceiptItem[]
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const geminiModel =
@@ -159,14 +154,7 @@ serve(async (req: Request) => {
         ? await loadGeminiModelVersion(
             createClient(supabaseUrl, serviceRoleKey),
           )
-        : DEFAULT_GEMINI_MODEL;
-    const model = genAI.getGenerativeModel({
-      model: geminiModel,
-      generationConfig: {
-        temperature: 0.1,
-        responseMimeType: "application/json",
-      },
-    });
+        : "";
 
     const systemPrompt = buildOcrSystemPrompt(ocrPatternConfig);
 
@@ -175,12 +163,15 @@ serve(async (req: Request) => {
       ? base64Image.slice(base64Image.indexOf(",") + 1)
       : base64Image;
 
-    const result = await model.generateContent([
-      systemPrompt,
-      { inlineData: { mimeType, data: inlineData } },
-    ]);
-
-    const rawText = result.response.text();
+    const generated = await generateGeminiContent({
+      apiKey: geminiApiKey,
+      preferredModel: geminiModel,
+      parts: [
+        { text: systemPrompt },
+        { inlineData: { mimeType, data: inlineData } },
+      ],
+    });
+    const rawText = generated.text;
     if (!rawText?.trim()) {
       throw new Error("Gemini ไม่ได้ตอบข้อมูลใดๆ กลับมา (empty response)");
     }

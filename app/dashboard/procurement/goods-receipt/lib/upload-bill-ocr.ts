@@ -1,9 +1,9 @@
 /**
- * Phase 3 — Smart Goods Receipt
- * Client utility: bill image → Base64 → POST `process-receipt-ocr` → review rows
+ * Smart Goods Receipt upload helper.
+ * OCR runs in `parseReceiptOcr` (Next.js Server Action), not the Edge Function.
  */
 
-import { supabase } from "@/lib/supabase";
+import { parseReceiptOcr } from "@/lib/actions/receipt";
 import type { OcrVerificationItem } from "@/app/dashboard/procurement/goods-receipt/types";
 
 const MAX_BILL_BYTES = 8 * 1024 * 1024;
@@ -21,13 +21,6 @@ export type ProcessReceiptOcrMeta = {
   vendor_name: string | null;
   model: string;
   line_count: number;
-};
-
-type EdgeFunctionResponse = {
-  success: boolean;
-  data?: ProcessReceiptOcrLine[];
-  error?: string;
-  meta?: ProcessReceiptOcrMeta;
 };
 
 export type UploadBillOcrInput = {
@@ -121,8 +114,7 @@ function validateUpload(file: File, vendorId: string): string | null {
 }
 
 /**
- * POST payload to Supabase Edge Function `process-receipt-ocr`.
- * Body: `{ imageBase64, vendor_id, mimeType? }`
+ * Rebuild a File from Base64 and run `parseReceiptOcr` on the Next.js server.
  */
 export async function postProcessReceiptOcr(input: {
   vendorId: string;
@@ -133,37 +125,36 @@ export async function postProcessReceiptOcr(input: {
   meta: ProcessReceiptOcrMeta | null;
   error: string | null;
 }> {
-  const { data, error } = await supabase.functions.invoke(
-    "process-receipt-ocr",
-    {
-      body: {
-        vendor_id: input.vendorId,
-        imageBase64: input.imageBase64,
-        mimeType: input.mimeType,
-      },
-    },
+  const mimeType = input.mimeType || "image/jpeg";
+  const binary = Uint8Array.from(atob(input.imageBase64), (char) =>
+    char.charCodeAt(0),
   );
+  const file = new File([binary], "bill", { type: mimeType });
+  const formData = new FormData();
+  formData.append("vendorId", input.vendorId);
+  formData.append("file", file);
 
-  if (error) {
-    return {
-      lines: [],
-      meta: null,
-      error: error.message || "POST process-receipt-ocr ไม่สำเร็จ",
-    };
+  const parsed = await parseReceiptOcr(formData);
+  if (parsed.error) {
+    return { lines: [], meta: null, error: parsed.error };
   }
 
-  const payload = data as EdgeFunctionResponse | null;
-  if (!payload?.success || !Array.isArray(payload.data)) {
-    return {
-      lines: [],
-      meta: null,
-      error: payload?.error ?? "OCR ไม่สำเร็จ — ไม่มีข้อมูลรายการ",
-    };
-  }
+  const lines: ProcessReceiptOcrLine[] = parsed.data.map((line) => ({
+    raw_vendor_sku: line.raw_vendor_sku,
+    description: line.raw_description ?? undefined,
+    qty: line.qty,
+    unit_price: line.unit_price,
+    discount_text: line.discount_text,
+  }));
 
   return {
-    lines: payload.data,
-    meta: payload.meta ?? null,
+    lines,
+    meta: {
+      vendor_id: input.vendorId,
+      vendor_name: null,
+      model: parsed.modelUsed ?? "",
+      line_count: lines.length,
+    },
     error: null,
   };
 }
@@ -172,7 +163,7 @@ export async function postProcessReceiptOcr(input: {
  * End-to-end API utility for Smart Goods Receipt upload flow:
  * 1. Validate `vendor_id` + file
  * 2. Convert bill image → Base64
- * 3. POST to Edge Function `process-receipt-ocr`
+ * 3. Server Action `parseReceiptOcr` (Gemini + Google model discovery)
  * 4. Map returned JSON array → Shadcn review table rows
  */
 export async function uploadBillAndProcessOcr(

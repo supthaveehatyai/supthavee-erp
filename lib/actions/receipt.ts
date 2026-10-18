@@ -8,16 +8,16 @@
  * on-the-fly mapping) goes through these Server Actions using the
  * service-role admin client, same convention as `lib/actions/mapping.ts`.
  *
- * Architecture: `parseReceiptOcr` does NOT call Gemini directly from Node.
- * It converts the uploaded `File` to Base64 natively, then securely invokes
- * the `process-receipt-ocr` Supabase Edge Function (via the admin client's
- * `functions.invoke`, so `SUPABASE_SERVICE_ROLE_KEY` — not a browser
- * session — authorizes the call). The Edge Function (Deno) is the only
- * place that talks to the Gemini API — see
- * `supabase/functions/process-receipt-ocr/index.ts`.
+ * Architecture: `parseReceiptOcr` calls Gemini from this Server Action
+ * (GEMINI_API_KEY). The model id is `system_parameters.GEMINI_MODEL_VERSION`.
+ * If that id returns 404, the action discovers a live flash model from
+ * Google's models API. It does not invoke the Edge Function, so a stale
+ * deployed function cannot force a retired model id.
  */
 
 import { revalidatePath } from "next/cache";
+import { cleanGeminiModelId } from "@/lib/ai/gemini-client";
+import { runGoodsReceiptOcr } from "@/lib/ai/goods-receipt-ocr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   DOCUMENT_TYPE_PREFIX,
@@ -157,37 +157,11 @@ function normalizeVendorSku(sku: string): string {
   return (sku ?? "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
-/**
- * `supabase.functions.invoke()` reports a non-2xx response as a generic
- * `FunctionsHttpError` ("Edge Function returned a non-2xx status code") and
- * discards the body. The actual Thai/English message we care about lives in
- * `error.context` — the raw `Response` — as `{ error: string }` JSON. Try to
- * read it; fall back to the generic message if the body isn't JSON.
- */
-async function extractEdgeFunctionErrorMessage(error: unknown): Promise<string> {
-  const fallback =
-    error instanceof Error
-      ? error.message
-      : "เรียก Edge Function process-receipt-ocr ไม่สำเร็จ";
-
-  const context = (error as { context?: unknown })?.context;
-  if (context instanceof Response) {
-    try {
-      const body = (await context.clone().json()) as { error?: string } | null;
-      if (body?.error) return body.error;
-    } catch {
-      // Body wasn't JSON (e.g. Deno crash page) — keep the generic message.
-    }
-  }
-
-  return fallback;
-}
-
 /* -------------------------------------------------------------------------- */
 /* Shared types                                                               */
 /* -------------------------------------------------------------------------- */
 
-/** One raw line as returned by the `process-receipt-ocr` Edge Function. */
+/** One raw OCR line from Gemini. */
 export type RawOcrLine = {
   raw_vendor_sku: string;
   raw_description?: string | null;
@@ -287,7 +261,7 @@ async function rollbackManualGoodsReceipt(
 }
 
 /* -------------------------------------------------------------------------- */
-/* parseReceiptOcr (invokes process-receipt-ocr Edge Function)               */
+/* parseReceiptOcr (Gemini on the Next.js server)                           */
 /* -------------------------------------------------------------------------- */
 
 export type ParseReceiptOcrResult = {
@@ -300,6 +274,10 @@ export type ParseReceiptOcrResult = {
   docType: GoodsReceiptDocType;
   /** AI-classified VAT mode — defaults to NONE when missing/invalid. */
   vatType: VatCalculationType;
+  /** Model id that actually produced this OCR result. */
+  modelUsed: string | null;
+  /** Set when the configured model 404'd and a live Google model was used. */
+  modelNotice: string | null;
   error: string | null;
 };
 
@@ -312,6 +290,8 @@ function emptyParseReceiptOcrResult(
     documentDate: null,
     docType: "AP_TAX",
     vatType: "NONE",
+    modelUsed: null,
+    modelNotice: null,
     error,
   };
 }
@@ -365,26 +345,9 @@ function normalizeOcrVatType(value: unknown): VatCalculationType {
 }
 
 /**
- * Real Vision AI OCR — this Server Action never talks to Gemini itself. It
- * converts the uploaded `File` to Base64 and securely invokes the
- * `process-receipt-ocr` Supabase Edge Function, which owns the Gemini call.
- *
- * `FormData` (not a raw Base64 string) is required as the argument — Next.js
- * Server Actions serialize plain-object/array arguments through React's
- * Flight protocol, and a multi-MB Base64 string blows past its array
- * nesting / chunking limits ("Maximum array nesting exceeded"). `FormData`
- * (like `File`) is a special type Next.js streams natively without that
- * limit; the Base64 conversion happens here, server-side, from the `File`.
- *
- * Flow:
- * 1. Extract `vendorId` + `file` from the FormData.
- * 2. Convert `file` → Base64 (server-side, via `arrayBuffer()`).
- * 3. Invoke `process-receipt-ocr` with the service-role admin client, so
- *    `SUPABASE_SERVICE_ROLE_KEY` (never a browser session) authorizes the
- *    call and the Gemini API key stays inside the Edge Function's own env.
- * 4. Return the Edge Function's `data` (line items) + `document_number`
- *    (the header invoice number, extracted using the vendor's
- *    `ocr_pattern_config.invoice_no_hint` when configured).
+ * Real Vision AI OCR. `FormData` is required — a multi-MB Base64 string
+ * blows past the Server Action Flight limit. Base64 conversion happens
+ * here, then Gemini is called directly (not via the Edge Function).
  */
 export async function parseReceiptOcr(
   formData: FormData,
@@ -401,50 +364,59 @@ export async function parseReceiptOcr(
     return emptyParseReceiptOcrResult("ไม่พบไฟล์รูปบิล กรุณาอัปโหลดไฟล์ก่อน");
   }
 
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) {
+    return emptyParseReceiptOcrResult(
+      "ไม่พบ GEMINI_API_KEY บนเซิร์ฟเวอร์ Next.js — ใส่ใน .env.development แล้วรีสตาร์ท",
+    );
+  }
+
   try {
     const supabaseAdmin = createSupabaseAdminClient();
-
-    // File → Base64 (server-side only, native Node.js Buffer)
     const buffer = Buffer.from(await file.arrayBuffer());
     const imageBase64 = buffer.toString("base64");
 
-    const { data, error } = await supabaseAdmin.functions.invoke(
-      "process-receipt-ocr",
-      {
-        body: { vendorId, imageBase64, mimeType: file.type },
-      },
-    );
+    const { data: vendor, error: vendorError } = await supabaseAdmin
+      .from("contacts")
+      .select("company_name, ocr_pattern_config")
+      .eq("id", vendorId)
+      .contains("contact_roles", ["Vendor"])
+      .single();
 
-    if (error) {
-      // supabase-js only gives a generic "non-2xx status code" message here —
-      // the Edge Function always returns a JSON `{ error }` body, so unwrap
-      // it from `error.context` (the raw Response) to surface the real cause.
+    if (vendorError || !vendor) {
       return emptyParseReceiptOcrResult(
-        await extractEdgeFunctionErrorMessage(error),
+        vendorError?.message ??
+          "ไม่พบข้อมูลผู้จำหน่ายสำหรับอ่าน ocr_pattern_config",
       );
     }
 
-    const payload = data as {
-      data?: RawOcrLine[];
-      document_number?: string | null;
-      document_date?: string | null;
-      doc_type?: string | null;
-      vat_type?: string | null;
-      error?: string;
-    } | null;
+    const { data: paramRow, error: paramError } = await supabaseAdmin
+      .from("system_parameters")
+      .select("param_value")
+      .eq("param_key", "GEMINI_MODEL_VERSION")
+      .maybeSingle();
 
-    if (!Array.isArray(payload?.data)) {
-      return emptyParseReceiptOcrResult(
-        payload?.error ?? "Edge Function ไม่คืนข้อมูลรายการ OCR กลับมา",
-      );
+    if (paramError) {
+      console.warn("[parseReceiptOcr] GEMINI_MODEL_VERSION:", paramError.message);
     }
+
+    const extraction = await runGoodsReceiptOcr({
+      apiKey,
+      preferredModel: cleanGeminiModelId(paramRow?.param_value),
+      vendorName: vendor.company_name || vendorId,
+      ocrPatternConfig: vendor.ocr_pattern_config,
+      imageBase64,
+      mimeType: file.type || "image/jpeg",
+    });
 
     return {
-      data: payload.data,
-      documentNumber: payload.document_number?.trim() || null,
-      documentDate: payload.document_date?.trim() || null,
-      docType: normalizeGoodsReceiptDocType(payload.doc_type),
-      vatType: normalizeOcrVatType(payload.vat_type),
+      data: extraction.items,
+      documentNumber: extraction.document_number,
+      documentDate: extraction.document_date,
+      docType: normalizeGoodsReceiptDocType(extraction.doc_type),
+      vatType: normalizeOcrVatType(extraction.vat_type),
+      modelUsed: extraction.modelUsed,
+      modelNotice: extraction.modelNotice,
       error: null,
     };
   } catch (err) {

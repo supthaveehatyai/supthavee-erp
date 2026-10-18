@@ -4,7 +4,9 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, LockKeyhole, Save } from "lucide-react";
 import { toast } from "sonner";
+import { listAvailableGeminiModels } from "@/lib/actions/gemini-model-actions";
 import { requestParameterChange } from "@/lib/actions/parameter-actions";
+import type { GeminiModelOption } from "@/types/gemini-model";
 import type { SystemParameterView } from "@/types/parameter";
 import type { Json } from "@/src/types/supabase";
 import { Button } from "@/components/ui/button";
@@ -25,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 
 type ParameterSettingsFormProps = {
   parameters: SystemParameterView[];
@@ -67,7 +70,7 @@ function parseSubmittedValue(
     }
     if (!/^[a-zA-Z0-9._-]{3,80}$/.test(trimmed)) {
       throw new Error(
-        "ชื่อโมเดลต้องเป็นตัวอักษร ตัวเลข จุด หรือขีด เช่น gemini-1.5-flash",
+        "ชื่อโมเดลต้องเป็นตัวอักษร ตัวเลข จุด หรือขีด",
       );
     }
     return trimmed;
@@ -101,6 +104,8 @@ export function ParameterSettingsForm({
   const [pinOpen, setPinOpen] = useState(false);
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
+  const [geminiModels, setGeminiModels] = useState<GeminiModelOption[]>([]);
+  const [isFetchingModels, setIsFetchingModels] = useState(false);
 
   const pendingSet = useMemo(
     () => new Set(pendingParamKeys.map((key) => key.toUpperCase())),
@@ -118,6 +123,25 @@ export function ParameterSettingsForm({
 
   function updateField(key: string, value: string) {
     setFormValues((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleFetchGeminiModels() {
+    setIsFetchingModels(true);
+    try {
+      const result = await listAvailableGeminiModels();
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      setGeminiModels(result.models);
+      toast.success(`พบ ${result.models.length} โมเดลจาก Google`);
+    } catch (error: unknown) {
+      toast.error(
+        error instanceof Error ? error.message : "ดึงรายชื่อโมเดลไม่สำเร็จ",
+      );
+    } finally {
+      setIsFetchingModels(false);
+    }
   }
 
   function handleSaveClick() {
@@ -246,24 +270,62 @@ export function ParameterSettingsForm({
 
             <div className="space-y-2">
               <Label htmlFor="gemini-model-version">Gemini Model Version</Label>
-              <Input
-                id="gemini-model-version"
-                value={formValues.GEMINI_MODEL_VERSION ?? ""}
-                disabled={
-                  isPending || pendingSet.has("GEMINI_MODEL_VERSION")
-                }
-                placeholder="gemini-1.5-flash"
-                onChange={(event) =>
-                  updateField("GEMINI_MODEL_VERSION", event.target.value)
-                }
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="gemini-model-version"
+                  value={formValues.GEMINI_MODEL_VERSION ?? ""}
+                  disabled={
+                    isPending || pendingSet.has("GEMINI_MODEL_VERSION")
+                  }
+                  placeholder="เลือกจากรายการ Google หรือพิมพ์ชื่อโมเดล"
+                  onChange={(event) =>
+                    updateField("GEMINI_MODEL_VERSION", event.target.value)
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0"
+                  disabled={
+                    isPending ||
+                    isFetchingModels ||
+                    pendingSet.has("GEMINI_MODEL_VERSION")
+                  }
+                  onClick={handleFetchGeminiModels}
+                >
+                  {isFetchingModels ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    "ดึงรายชื่อโมเดล"
+                  )}
+                </Button>
+              </div>
+              {geminiModels.length > 0 ? (
+                <Select
+                  aria-label="โมเดล Gemini ที่ Google เปิดให้ใช้"
+                  value={formValues.GEMINI_MODEL_VERSION ?? ""}
+                  disabled={
+                    isPending || pendingSet.has("GEMINI_MODEL_VERSION")
+                  }
+                  onChange={(event) =>
+                    updateField("GEMINI_MODEL_VERSION", event.target.value)
+                  }
+                >
+                  <option value="">เลือกโมเดลจาก Google</option>
+                  {geminiModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.displayName} ({model.id})
+                    </option>
+                  ))}
+                </Select>
+              ) : null}
               {geminiParam?.description ? (
                 <p className="text-xs text-slate-500">
                   {geminiParam.description}
                 </p>
               ) : (
                 <p className="text-xs text-slate-500">
-                  ชื่อโมเดลที่ Edge Function OCR ใช้ตอนประมวลผลบิล
+                  ชื่อโมเดลที่ OCR ใช้ตอนประมวลผลบิล — กดดึงรายชื่อจาก Google แล้วเลือกได้
                 </p>
               )}
               {pendingSet.has("GEMINI_MODEL_VERSION") ? (

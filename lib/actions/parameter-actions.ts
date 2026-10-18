@@ -30,14 +30,14 @@ const MANAGED_PARAM_KEYS = [
 const SYSTEM_PARAMETER_DEFAULTS: SystemParameterValueMap = {
   WHT_RATE: 3,
   NAS_BACKUP_PATH: "nas_storage",
-  GEMINI_MODEL_VERSION: "gemini-1.5-flash",
+  GEMINI_MODEL_VERSION: "",
   ARCHIVE_COLD_AGE_DAYS: 365,
   MANUAL_BACKUP_ENABLED: true,
 };
 
 const GEMINI_MODEL_SEED = {
   param_key: "GEMINI_MODEL_VERSION",
-  param_value: "gemini-1.5-flash" as Json,
+  param_value: "" as Json,
   description:
     "ชื่อโมเดล Gemini สำหรับ OCR (Edge Functions อ่านค่านี้ตอนรัน)",
   data_type: "string",
