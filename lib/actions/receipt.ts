@@ -16,7 +16,11 @@
  */
 
 import { revalidatePath } from "next/cache";
-import { cleanGeminiModelId } from "@/lib/ai/gemini-client";
+import {
+  cleanGeminiModelId,
+  GEMINI_API_KEY_MISSING_MESSAGE,
+  resolveGeminiApiKey,
+} from "@/lib/ai/gemini-client";
 import { runGoodsReceiptOcr } from "@/lib/ai/goods-receipt-ocr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -364,11 +368,9 @@ export async function parseReceiptOcr(
     return emptyParseReceiptOcrResult("ไม่พบไฟล์รูปบิล กรุณาอัปโหลดไฟล์ก่อน");
   }
 
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const apiKey = resolveGeminiApiKey();
   if (!apiKey) {
-    return emptyParseReceiptOcrResult(
-      "ไม่พบ GEMINI_API_KEY บนเซิร์ฟเวอร์ Next.js — ใส่ใน .env.development แล้วรีสตาร์ท",
-    );
+    return emptyParseReceiptOcrResult(GEMINI_API_KEY_MISSING_MESSAGE);
   }
 
   try {

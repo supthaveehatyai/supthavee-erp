@@ -62,8 +62,12 @@ async function readGoogleError(
   return { status: response.status, message };
 }
 
-async function listFlashCandidates(apiKey: string): Promise<string[]> {
-  const response = await fetch(`${MODELS_URL}?key=${encodeURIComponent(apiKey)}&pageSize=100`);
+export async function listGeminiModelCatalog(
+  apiKey: string,
+): Promise<ModelOption[]> {
+  const response = await fetch(
+    `${MODELS_URL}?key=${encodeURIComponent(apiKey)}&pageSize=100`,
+  );
   if (!response.ok) {
     const error = await readGoogleError(response);
     throw new Error(
@@ -73,6 +77,7 @@ async function listFlashCandidates(apiKey: string): Promise<string[]> {
   const body = (await response.json()) as {
     models?: Array<{
       name?: string;
+      displayName?: string;
       supportedGenerationMethods?: string[];
     }>;
   };
@@ -81,13 +86,23 @@ async function listFlashCandidates(apiKey: string): Promise<string[]> {
     const id = cleanGeminiModelId(row.name ?? "");
     const methods = row.supportedGenerationMethods ?? [];
     if (!id.includes("gemini") || !methods.includes("generateContent")) continue;
-    models.push({ id, displayName: id });
+    models.push({
+      id,
+      displayName: row.displayName?.trim() || id,
+    });
   }
   const flash = models.filter((model) => model.id.includes("flash"));
-  const pool = flash.length > 0 ? flash : models;
-  return pool
-    .sort((a, b) => versionScore(b.id) - versionScore(a.id))
-    .map((model) => model.id);
+  const rest = models.filter((model) => !model.id.includes("flash"));
+  const byVersion = (a: ModelOption, b: ModelOption) =>
+    versionScore(b.id) - versionScore(a.id);
+  return [...flash.sort(byVersion), ...rest.sort(byVersion)];
+}
+
+async function listFlashCandidates(apiKey: string): Promise<string[]> {
+  const catalog = await listGeminiModelCatalog(apiKey);
+  const flash = catalog.filter((model) => model.id.includes("flash"));
+  const pool = flash.length > 0 ? flash : catalog;
+  return pool.map((model) => model.id);
 }
 
 async function generateWithModel(

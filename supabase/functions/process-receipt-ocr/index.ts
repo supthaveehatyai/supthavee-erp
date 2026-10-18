@@ -17,7 +17,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // Deno / Supabase Edge: use npm: specifiers (do NOT use bare `@supabase/...` or esm.sh)
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { generateGeminiContent, loadGeminiModelVersion } from "../_shared/gemini-model.ts";
+import {
+  generateGeminiContent,
+  listGeminiModelCatalog,
+  loadGeminiModelVersion,
+} from "../_shared/gemini-model.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -294,6 +298,25 @@ serve(async (req: Request) => {
     const body = await req.json().catch(() => {
       throw new Error("Request body ไม่เป็น JSON ที่ถูกต้อง");
     });
+
+    if (body?.action === "LIST_MODELS") {
+      const geminiApiKey = Deno.env.get("GEMINI_API_KEY")?.trim();
+      if (!geminiApiKey) {
+        return new Response(
+          JSON.stringify({
+            error: "Missing GEMINI_API_KEY secret on this Edge Function",
+          }),
+          {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+      const models = await listGeminiModelCatalog(geminiApiKey);
+      return new Response(JSON.stringify({ models }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const vendorId = body?.vendorId as string | undefined;
     const imageBase64 = body?.imageBase64 as string | undefined;

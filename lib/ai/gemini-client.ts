@@ -27,6 +27,20 @@ type GoogleModelRow = {
 
 const MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 
+export const GEMINI_API_KEY_MISSING_MESSAGE =
+  "ไม่พบ GEMINI_API_KEY ทั้งบน Vercel (Environment Variables) และ Supabase Secrets";
+
+/** Server-side key. Checks Vercel / Next env names, including a public alias. */
+export function resolveGeminiApiKey(): string {
+  return (
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.NEXT_PUBLIC_GEMINI_API_KEY ||
+    ""
+  ).trim();
+}
+
 /** jsonb / quoted / `models/` prefix → bare model id. */
 export function cleanGeminiModelId(raw: unknown): string {
   if (raw == null) return "";
