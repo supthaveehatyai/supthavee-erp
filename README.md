@@ -84,10 +84,6 @@ supabase secrets set GEMINI_API_KEY=your_google_ai_studio_key
 supabase functions deploy process-receipt-ocr
 ```
 
-Optional:
-
-```bash
-supabase secrets set GEMINI_MODEL_VERSION=gemini-3.8-flash
-```
+Gemini model id is read from `system_parameters.GEMINI_MODEL_VERSION` (Settings → Maker-Checker). If the row is missing, OCR falls back to `gemini-1.5-flash`.
 
 `SUPABASE_URL` and `SUPABASE_ANON_KEY` are injected automatically by the Edge runtime.

@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "ตั้งค่าระบบ | System Parameters",
   description:
-    "จัดการพารามิเตอร์ระบบผ่าน Maker-Checker — NAS Backup Path และอัตราหัก ณ ที่จ่าย",
+    "จัดการพารามิเตอร์ระบบผ่าน Maker-Checker — NAS Backup Path, Gemini Model และอัตราหัก ณ ที่จ่าย",
 };
 
 export default async function SystemParametersPage() {

@@ -36,7 +36,9 @@ function jsonToFormValue(value: Json | null, dataType: string | null): string {
   if (dataType === "number") {
     return typeof value === "number" ? String(value) : String(value);
   }
-  if (typeof value === "string") return value;
+  if (typeof value === "string") {
+    return value.replace(/^["']+|["']+$/g, "");
+  }
   if (typeof value === "number" || typeof value === "boolean") {
     return String(value);
   }
@@ -58,6 +60,17 @@ function parseSubmittedValue(
       throw new Error("อัตราหัก ณ ที่จ่ายต้องอยู่ระหว่าง 0–100");
     }
     return num;
+  }
+  if (paramKey === "GEMINI_MODEL_VERSION") {
+    if (!trimmed) {
+      throw new Error("กรุณาระบุ Gemini Model Version");
+    }
+    if (!/^[a-zA-Z0-9._-]{3,80}$/.test(trimmed)) {
+      throw new Error(
+        "ชื่อโมเดลต้องเป็นตัวอักษร ตัวเลข จุด หรือขีด เช่น gemini-1.5-flash",
+      );
+    }
+    return trimmed;
   }
   if (!trimmed) {
     throw new Error("กรุณากรอกค่าให้ครบถ้วน");
@@ -191,6 +204,9 @@ export function ParameterSettingsForm({
   }
 
   const nasParam = parameters.find((item) => item.param_key === "NAS_BACKUP_PATH");
+  const geminiParam = parameters.find(
+    (item) => item.param_key === "GEMINI_MODEL_VERSION",
+  );
   const whtParam = parameters.find((item) => item.param_key === "WHT_RATE");
 
   return (
@@ -222,6 +238,35 @@ export function ParameterSettingsForm({
                 <p className="text-xs text-slate-500">{nasParam.description}</p>
               ) : null}
               {pendingSet.has("NAS_BACKUP_PATH") ? (
+                <p className="text-xs font-medium text-amber-700">
+                  มีคำขอแก้ไขรออนุมัติอยู่
+                </p>
+              ) : null}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="gemini-model-version">Gemini Model Version</Label>
+              <Input
+                id="gemini-model-version"
+                value={formValues.GEMINI_MODEL_VERSION ?? ""}
+                disabled={
+                  isPending || pendingSet.has("GEMINI_MODEL_VERSION")
+                }
+                placeholder="gemini-1.5-flash"
+                onChange={(event) =>
+                  updateField("GEMINI_MODEL_VERSION", event.target.value)
+                }
+              />
+              {geminiParam?.description ? (
+                <p className="text-xs text-slate-500">
+                  {geminiParam.description}
+                </p>
+              ) : (
+                <p className="text-xs text-slate-500">
+                  ชื่อโมเดลที่ Edge Function OCR ใช้ตอนประมวลผลบิล
+                </p>
+              )}
+              {pendingSet.has("GEMINI_MODEL_VERSION") ? (
                 <p className="text-xs font-medium text-amber-700">
                   มีคำขอแก้ไขรออนุมัติอยู่
                 </p>

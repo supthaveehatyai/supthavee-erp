@@ -45,6 +45,7 @@ export type GetParameterSettingsPageDataResult =
 export type SystemParameterValueMap = {
   WHT_RATE: number;
   NAS_BACKUP_PATH: string;
+  GEMINI_MODEL_VERSION: string;
   ARCHIVE_COLD_AGE_DAYS: number;
   MANUAL_BACKUP_ENABLED: boolean;
 };

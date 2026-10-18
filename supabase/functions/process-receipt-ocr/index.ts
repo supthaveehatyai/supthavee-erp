@@ -12,18 +12,14 @@
 //
 // Deploy: supabase functions deploy process-receipt-ocr
 // Secret:  supabase secrets set GEMINI_API_KEY=...
-// Optional: supabase secrets set GEMINI_MODEL_VERSION=gemini-3.8-flash
-//   (falls back to GEMINI_MODEL, then gemini-3.8-flash)
-//
-// Primary from env, then cascade fallbacks (no deprecated 2.5).
-// Retry only on 503/429; 404/400 skip straight to next model.
-// check https://ai.google.dev/gemini-api/docs/models/gemini for currently
-// supported model IDs.
+// Model:   system_parameters.GEMINI_MODEL_VERSION (jsonb), fallback gemini-1.5-flash
+// Retry only on 503/429 for the selected model.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // Deno / Supabase Edge: use npm: specifiers (do NOT use bare `@supabase/...` or esm.sh)
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { GoogleGenerativeAI } from "npm:@google/generative-ai";
+import { loadGeminiModelVersion } from "../_shared/gemini-model.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -74,93 +70,61 @@ function getErrorStatus(error: unknown): number | undefined {
   return undefined;
 }
 
-const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
-const FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-3.5-flash"] as const;
-
-function resolvePreferredModel(): string {
-  return (
-    Deno.env.get("GEMINI_MODEL_VERSION")?.trim() ||
-    Deno.env.get("GEMINI_MODEL")?.trim() ||
-    DEFAULT_GEMINI_MODEL
-  );
-}
-
-function resolveModelCascade(): string[] {
-  const primary = resolvePreferredModel();
-  return [primary, ...FALLBACK_MODELS.filter((model) => model !== primary)];
-}
-
 type GenerativePart =
   | string
   | { inlineData: { mimeType: string; data: string } };
 
 /**
- * Try each Gemini model in cascade.
- * - 503 / 429 → retry up to 3× with exponential backoff, then next model
- * - 404 / 400 → do NOT retry; fall through to next model immediately
+ * Retry the selected Gemini model on 503/429 only.
  * Preserves JSON responseMimeType for OCR parsing.
  */
-async function generateWithRetryAndFallback(
+async function generateWithRetry(
   genAI: GoogleGenerativeAI,
+  modelName: string,
   prompt: string,
   imageParts: GenerativePart[],
 ): Promise<string> {
+  console.log(`[OCR Engine] Attempting with model: ${modelName}`);
+  const model = genAI.getGenerativeModel({
+    model: modelName,
+    generationConfig: {
+      temperature: 0.1,
+      responseMimeType: "application/json",
+    },
+  });
+
   let lastError: unknown = null;
-  const models = resolveModelCascade();
 
-  for (const modelName of models) {
-    console.log(`[OCR Engine] Attempting with model: ${modelName}`);
-    const model = genAI.getGenerativeModel({
-      model: modelName,
-      generationConfig: {
-        temperature: 0.1,
-        responseMimeType: "application/json",
-      },
-    });
-
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const result = await model.generateContent([prompt, ...imageParts]);
-        const text = result.response.text();
-        if (!text?.trim()) {
-          throw new Error("Gemini returned empty response");
-        }
-        console.log(`[OCR Engine] Success with model: ${modelName}`);
-        return text;
-      } catch (error: unknown) {
-        lastError = error;
-        const status = getErrorStatus(error);
-
-        // Retired / invalid model or bad request — skip retries, next model.
-        if (status === 404 || status === 400) {
-          console.error(
-            `[OCR Engine] Model ${modelName} returned ${status}. Skipping retries, falling back to next model...`,
-            getErrorMessage(error),
-          );
-          break;
-        }
-
-        // Capacity / rate limit — exponential backoff retry.
-        if ((status === 503 || status === 429) && attempt < 3) {
-          const delayMs = attempt * 1500; // 1.5s, 3.0s
-          console.warn(
-            `[OCR Engine] Model ${modelName} hit ${status}. Retrying in ${delayMs}ms... (Attempt ${attempt}/3)`,
-          );
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-          continue;
-        }
-
-        console.error(
-          `[OCR Engine] Model ${modelName} failed on attempt ${attempt}. Switching model...`,
-          getErrorMessage(error),
-        );
-        break;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const result = await model.generateContent([prompt, ...imageParts]);
+      const text = result.response.text();
+      if (!text?.trim()) {
+        throw new Error("Gemini returned empty response");
       }
+      console.log(`[OCR Engine] Success with model: ${modelName}`);
+      return text;
+    } catch (error: unknown) {
+      lastError = error;
+      const status = getErrorStatus(error);
+
+      if ((status === 503 || status === 429) && attempt < 3) {
+        const delayMs = attempt * 1500;
+        console.warn(
+          `[OCR Engine] Model ${modelName} hit ${status}. Retrying in ${delayMs}ms... (Attempt ${attempt}/3)`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+
+      throw new Error(
+        `Gemini model ${modelName} failed: ${getErrorMessage(error)}`,
+      );
     }
   }
 
   throw new Error(
-    `All Gemini Models failed. Last error: ${getErrorMessage(lastError) || "Service Unavailable"}`,
+    `Gemini model ${modelName} failed: ${getErrorMessage(lastError) || "Service Unavailable"}`,
   );
 }
 
@@ -456,13 +420,14 @@ serve(async (req: Request) => {
       );
     }
 
-    // 5. Gemini Vision — cascade + retry, flatten Size Matrix into RawOcrLine[]
+    // 5. Gemini Vision — model from system_parameters, flatten Size Matrix
+    const geminiModel = await loadGeminiModelVersion(supabaseAdmin);
     const systemPrompt = buildOcrSystemPrompt(
       vendor.company_name ?? vendorId,
       vendor.ocr_pattern_config,
     );
 
-    const rawText = await generateWithRetryAndFallback(genAI, systemPrompt, [
+    const rawText = await generateWithRetry(genAI, geminiModel, systemPrompt, [
       { inlineData: { mimeType, data: imageBase64 } },
     ]);
 

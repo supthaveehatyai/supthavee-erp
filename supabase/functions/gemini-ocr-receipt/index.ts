@@ -2,11 +2,9 @@
 //
 // Generic Gemini Vision OCR for receipt/invoice line items. Unlike
 // `process-receipt-ocr` (which looks up `ocr_pattern_config` from the
-// `contacts` table via a vendorId), this function is fully stateless: the
-// caller sends the image AND the pattern config directly in the request
-// body — no Supabase client, no DB lookup. Useful for ad-hoc / preview OCR
-// calls where the vendor config is already in hand on the client/server
-// action side.
+// `contacts` table via a vendorId), this function does not look up vendor
+// pattern config from the DB — the caller sends image + pattern in the
+// request body. The Gemini model id is still read from system_parameters.
 //
 // Bulletproof error handling: the ENTIRE handler body runs inside one
 // try/catch. Every exit path (success AND failure) returns a proper JSON
@@ -15,18 +13,16 @@
 //
 // Deploy: supabase functions deploy gemini-ocr-receipt
 // Secret:  supabase secrets set GEMINI_API_KEY=...
-// Optional: supabase secrets set GEMINI_MODEL_VERSION=gemini-3.8-flash
-//   (falls back to GEMINI_MODEL, then gemini-3.8-flash)
-//
-// NOTE: intentionally UNpinned (no @version) — always resolves to the
-// latest stable @google/generative-ai. If a future SDK version starts
-// 404-ing again, the fallback model string below is the safety net; also
-// check https://ai.google.dev/gemini-api/docs/models/gemini for currently
-// supported model IDs before re-pinning.
+// Model:   system_parameters.GEMINI_MODEL_VERSION (jsonb), fallback gemini-1.5-flash
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // Deno / Supabase Edge: use npm: specifiers (do NOT use bare `@google/...` or esm.sh)
+import { createClient } from "npm:@supabase/supabase-js@2";
 import { GoogleGenerativeAI } from "npm:@google/generative-ai";
+import {
+  DEFAULT_GEMINI_MODEL,
+  loadGeminiModelVersion,
+} from "../_shared/gemini-model.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -156,10 +152,14 @@ serve(async (req: Request) => {
     const genAI = new GoogleGenerativeAI(geminiApiKey);
 
     // 3. Gemini Vision — flatten the Size Matrix into OcrReceiptItem[]
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const geminiModel =
-      Deno.env.get("GEMINI_MODEL_VERSION")?.trim() ||
-      Deno.env.get("GEMINI_MODEL")?.trim() ||
-      "gemini-3.8-flash";
+      supabaseUrl && serviceRoleKey
+        ? await loadGeminiModelVersion(
+            createClient(supabaseUrl, serviceRoleKey),
+          )
+        : DEFAULT_GEMINI_MODEL;
     const model = genAI.getGenerativeModel({
       model: geminiModel,
       generationConfig: {

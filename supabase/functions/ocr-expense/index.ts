@@ -8,16 +8,16 @@
 //
 // Deploy: supabase functions deploy ocr-expense
 // Secret:  supabase secrets set GEMINI_API_KEY=...
-// Optional: supabase secrets set GEMINI_MODEL_VERSION=gemini-3.8-flash
-//   (falls back to GEMINI_MODEL, then gemini-3.8-flash)
-//
-// OCR Resiliency Engine — primary from env, then cascade fallbacks.
-// - 503 / 429 → retry up to 3× with exponential backoff, then next model
-// - 404 / 400 → skip retries; fall through to next model immediately
+// Model:   system_parameters.GEMINI_MODEL_VERSION (jsonb), fallback gemini-1.5-flash
+// - 503 / 429 → retry up to 3× with exponential backoff on the selected model
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { GoogleGenerativeAI } from "npm:@google/generative-ai";
+import {
+  DEFAULT_GEMINI_MODEL,
+  loadGeminiModelVersion,
+} from "../_shared/gemini-model.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -100,102 +100,71 @@ function getErrorStatus(error: unknown): number | undefined {
   return undefined;
 }
 
-const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
-const FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-3.5-flash"] as const;
-
-function resolvePreferredModel(): string {
-  return (
-    Deno.env.get("GEMINI_MODEL_VERSION")?.trim() ||
-    Deno.env.get("GEMINI_MODEL")?.trim() ||
-    DEFAULT_GEMINI_MODEL
-  );
-}
-
-function resolveModelCascade(): string[] {
-  const primary = resolvePreferredModel();
-  return [primary, ...FALLBACK_MODELS.filter((model) => model !== primary)];
-}
-
 type GenerativePart =
   | string
   | { inlineData: { mimeType: string; data: string } };
 
 /**
- * OCR Resiliency Engine — try each Gemini model in cascade.
- * - 503 / 429 → retry up to 3× with exponential backoff, then next model
- * - 404 / 400 → do NOT retry; fall through to next model immediately
+ * Retry the selected Gemini model on 503/429 only.
  * Preserves JSON responseMimeType for OPEX schema parsing.
  */
-async function generateWithRetryAndFallback(
+async function generateWithRetry(
   genAI: GoogleGenerativeAI,
+  modelName: string,
   prompt: string,
   imageParts: GenerativePart[],
 ): Promise<string> {
+  console.log(`[ocr-expense] Attempting with model: ${modelName}`);
+  const model = genAI.getGenerativeModel({
+    model: modelName,
+    generationConfig: {
+      temperature: 0.1,
+      responseMimeType: "application/json",
+    },
+  });
+
   let lastError: unknown = null;
-  const models = resolveModelCascade();
 
-  for (const modelName of models) {
-    console.log(`[ocr-expense] Attempting with model: ${modelName}`);
-    const model = genAI.getGenerativeModel({
-      model: modelName,
-      generationConfig: {
-        temperature: 0.1,
-        responseMimeType: "application/json",
-      },
-    });
-
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const result = await model.generateContent([prompt, ...imageParts]);
-        const text = result.response.text();
-        if (!text?.trim()) {
-          throw new Error("Gemini returned empty response");
-        }
-        console.log(`[ocr-expense] Success with model: ${modelName}`);
-        return text;
-      } catch (error: unknown) {
-        lastError = error;
-        const status = getErrorStatus(error);
-
-        // Retired / invalid model — skip retries, next model in cascade.
-        if (status === 404 || status === 400) {
-          console.warn(
-            `[ocr-expense] Model ${modelName} returned ${status}. Skipping retries, falling back to next model...`,
-            getErrorMessage(error),
-          );
-          break;
-        }
-
-        // Capacity / rate limit — exponential backoff, then next model.
-        if (status === 503 || status === 429) {
-          if (attempt < 3) {
-            const delayMs = attempt * 1500; // 1.5s, 3.0s
-            console.warn(
-              `[ocr-expense] Model ${modelName} hit ${status}. Retrying in ${delayMs}ms... (Attempt ${attempt}/3)`,
-            );
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
-            continue;
-          }
-          console.warn(
-            `[ocr-expense] Model ${modelName} exhausted retries on ${status}. Falling back to next model...`,
-            getErrorMessage(error),
-          );
-          break;
-        }
-
-        console.warn(
-          `[ocr-expense] Model ${modelName} failed on attempt ${attempt}. Switching model...`,
-          getErrorMessage(error),
-        );
-        break;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const result = await model.generateContent([prompt, ...imageParts]);
+      const text = result.response.text();
+      if (!text?.trim()) {
+        throw new Error("Gemini returned empty response");
       }
+      console.log(`[ocr-expense] Success with model: ${modelName}`);
+      return text;
+    } catch (error: unknown) {
+      lastError = error;
+      const status = getErrorStatus(error);
+
+      if ((status === 503 || status === 429) && attempt < 3) {
+        const delayMs = attempt * 1500;
+        console.warn(
+          `[ocr-expense] Model ${modelName} hit ${status}. Retrying in ${delayMs}ms... (Attempt ${attempt}/3)`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+
+      throw httpError(
+        `Gemini model ${modelName} failed: ${getErrorMessage(error)}`,
+        502,
+      );
     }
   }
 
   throw httpError(
-    `All Gemini Models failed. Last error: ${getErrorMessage(lastError) || "Service Unavailable"}`,
+    `Gemini model ${modelName} failed: ${getErrorMessage(lastError) || "Service Unavailable"}`,
     502,
   );
+}
+
+function createServiceRoleClient() {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceRoleKey) return null;
+  return createClient(supabaseUrl, serviceRoleKey);
 }
 
 function buildOpexSystemPrompt(): string {
@@ -467,8 +436,13 @@ serve(async (req: Request) => {
     }
 
     const genAI = new GoogleGenerativeAI(geminiApiKey);
-    const rawText = await generateWithRetryAndFallback(
+    const paramClient = createServiceRoleClient();
+    const geminiModel = paramClient
+      ? await loadGeminiModelVersion(paramClient)
+      : DEFAULT_GEMINI_MODEL;
+    const rawText = await generateWithRetry(
       genAI,
+      geminiModel,
       buildOpexSystemPrompt(),
       [{ inlineData: { mimeType, data: imageBase64 } }],
     );

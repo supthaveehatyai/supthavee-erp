@@ -21,13 +21,27 @@ import type {
 } from "@/types/parameter";
 
 const SETTINGS_PARAMETERS_PATH = "/settings/parameters";
-const MANAGED_PARAM_KEYS = ["NAS_BACKUP_PATH", "WHT_RATE"] as const;
+const MANAGED_PARAM_KEYS = [
+  "NAS_BACKUP_PATH",
+  "GEMINI_MODEL_VERSION",
+  "WHT_RATE",
+] as const;
 
 const SYSTEM_PARAMETER_DEFAULTS: SystemParameterValueMap = {
   WHT_RATE: 3,
   NAS_BACKUP_PATH: "nas_storage",
+  GEMINI_MODEL_VERSION: "gemini-1.5-flash",
   ARCHIVE_COLD_AGE_DAYS: 365,
   MANUAL_BACKUP_ENABLED: true,
+};
+
+const GEMINI_MODEL_SEED = {
+  param_key: "GEMINI_MODEL_VERSION",
+  param_value: "gemini-1.5-flash" as Json,
+  description:
+    "ชื่อโมเดล Gemini สำหรับ OCR (Edge Functions อ่านค่านี้ตอนรัน)",
+  data_type: "string",
+  category: "ai",
 };
 
 const PARAM_KEY_RE = /^[A-Z][A-Z0-9_]{1,98}$/;
@@ -89,9 +103,10 @@ function castSystemParameterValue<K extends KnownSystemParameterKey>(
       const num = typeof raw === "number" ? raw : Number(raw);
       return (Number.isFinite(num) ? num : fallback) as SystemParameterValueMap[K];
     }
-    case "NAS_BACKUP_PATH": {
+    case "NAS_BACKUP_PATH":
+    case "GEMINI_MODEL_VERSION": {
       if (typeof raw === "string") {
-        const trimmed = raw.trim();
+        const trimmed = raw.trim().replace(/^["']+|["']+$/g, "");
         return (trimmed || fallback) as SystemParameterValueMap[K];
       }
       if (typeof raw === "number" || typeof raw === "boolean") {
@@ -243,6 +258,24 @@ export async function getParameterSettingsPageData(): Promise<GetParameterSettin
     }
 
     const supabaseAdmin = createSupabaseAdmin();
+
+    const { data: existingGemini } = await supabaseAdmin
+      .from("system_parameters")
+      .select("param_key")
+      .eq("param_key", GEMINI_MODEL_SEED.param_key)
+      .maybeSingle();
+
+    if (!existingGemini) {
+      const { error: seedError } = await supabaseAdmin
+        .from("system_parameters")
+        .insert(GEMINI_MODEL_SEED);
+      if (seedError) {
+        console.error(
+          "[getParameterSettingsPageData] seed GEMINI_MODEL_VERSION:",
+          seedError,
+        );
+      }
+    }
 
     const { data: paramRows, error: paramError } = await supabaseAdmin
       .from("system_parameters")
