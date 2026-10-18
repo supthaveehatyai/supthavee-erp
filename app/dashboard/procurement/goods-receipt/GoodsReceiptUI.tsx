@@ -1165,23 +1165,23 @@ export default function GoodsReceiptUI({
       {/* VAT summary (AI) — above sticky Save footer */}
       {rows.length > 0 ? (
         <Card className="border-violet-200 bg-violet-50/40">
-          <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-500">
+          <CardContent className="flex flex-col gap-4 p-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="w-full shrink-0 min-w-[220px] xl:w-64 xl:max-w-xs">
+              <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-violet-500">
                 AI VAT Analysis — ตรวจสอบก่อนบันทึก
               </p>
-              <p className="mt-1 text-sm font-semibold text-slate-900">
+              <p className="mt-1 whitespace-nowrap text-sm font-semibold text-slate-900">
                 โหมดภาษี:{" "}
                 <span className="text-violet-700">{vatTypeLabel}</span>
               </p>
-              <p className="mt-0.5 text-xs text-slate-500">
+              <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
                 ประเภทเอกสารจาก AI: {aiDocType} · แก้ไขได้ในหน้าต่าง Save to Ledger
                 {vatTotalsManual
                   ? " · ใช้ยอดที่พิมพ์ทับ (Manual Override)"
                   : " · Auto จาก Total Amount รายบรรทัด + ค่าขนส่ง (Freight-In)"}
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
+            <div className="grid min-w-0 flex-1 grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
               <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
                 <p className="text-[10px] font-medium text-slate-400">Sub Total</p>
                 <p className="mt-1 text-sm font-bold tabular-nums text-slate-900">
