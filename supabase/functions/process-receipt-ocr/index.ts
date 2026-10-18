@@ -12,10 +12,10 @@
 //
 // Deploy: supabase functions deploy process-receipt-ocr
 // Secret:  supabase secrets set GEMINI_API_KEY=...
-// Optional: supabase secrets set GEMINI_MODEL=... (overrides cascade primary)
+// Optional: supabase secrets set GEMINI_MODEL_VERSION=gemini-3.8-flash
+//   (falls back to GEMINI_MODEL, then gemini-3.8-flash)
 //
-// Model cascade (primary → fallback):
-//   gemini-3.6-flash → gemini-3.5-flash → gemini-2.5-flash
+// Primary from env, then cascade fallbacks (no deprecated 2.5).
 // Retry only on 503/429; 404/400 skip straight to next model.
 // check https://ai.google.dev/gemini-api/docs/models/gemini for currently
 // supported model IDs.
@@ -74,29 +74,20 @@ function getErrorStatus(error: unknown): number | undefined {
   return undefined;
 }
 
-/**
- * Active v1beta model cascade (retired 1.5 / 2.0 removed).
- * Optional `GEMINI_MODEL` secret prepends as the first attempt.
- */
-const DEFAULT_MODEL_CASCADE = [
-  "gemini-3.6-flash", // Primary
-  "gemini-3.5-flash", // Secondary fallback
-  "gemini-2.5-flash", // Final fallback
-] as const;
+const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
+const FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-3.5-flash"] as const;
+
+function resolvePreferredModel(): string {
+  return (
+    Deno.env.get("GEMINI_MODEL_VERSION")?.trim() ||
+    Deno.env.get("GEMINI_MODEL")?.trim() ||
+    DEFAULT_GEMINI_MODEL
+  );
+}
 
 function resolveModelCascade(): string[] {
-  const override = Deno.env.get("GEMINI_MODEL")?.trim();
-  const cascade = [...DEFAULT_MODEL_CASCADE];
-  if (
-    override &&
-    !cascade.includes(override as (typeof DEFAULT_MODEL_CASCADE)[number])
-  ) {
-    return [override, ...cascade];
-  }
-  if (override) {
-    return [override, ...cascade.filter((m) => m !== override)];
-  }
-  return cascade;
+  const primary = resolvePreferredModel();
+  return [primary, ...FALLBACK_MODELS.filter((model) => model !== primary)];
 }
 
 type GenerativePart =

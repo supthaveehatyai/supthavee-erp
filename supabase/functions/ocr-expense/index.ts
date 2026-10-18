@@ -8,10 +8,10 @@
 //
 // Deploy: supabase functions deploy ocr-expense
 // Secret:  supabase secrets set GEMINI_API_KEY=...
-// Optional: supabase secrets set GEMINI_MODEL=... (overrides cascade primary)
+// Optional: supabase secrets set GEMINI_MODEL_VERSION=gemini-3.8-flash
+//   (falls back to GEMINI_MODEL, then gemini-3.8-flash)
 //
-// OCR Resiliency Engine (Phase 3 standard) — model cascade:
-//   gemini-3.6-flash → gemini-3.5-flash → gemini-2.5-flash
+// OCR Resiliency Engine — primary from env, then cascade fallbacks.
 // - 503 / 429 → retry up to 3× with exponential backoff, then next model
 // - 404 / 400 → skip retries; fall through to next model immediately
 
@@ -100,29 +100,20 @@ function getErrorStatus(error: unknown): number | undefined {
   return undefined;
 }
 
-/**
- * Active OCR Resiliency Engine cascade (retired 1.5 / 2.0 removed).
- * Optional `GEMINI_MODEL` secret prepends as the first attempt.
- */
-const DEFAULT_MODEL_CASCADE = [
-  "gemini-3.6-flash", // Primary
-  "gemini-3.5-flash", // Secondary fallback
-  "gemini-2.5-flash", // Final fallback
-] as const;
+const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
+const FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-3.5-flash"] as const;
+
+function resolvePreferredModel(): string {
+  return (
+    Deno.env.get("GEMINI_MODEL_VERSION")?.trim() ||
+    Deno.env.get("GEMINI_MODEL")?.trim() ||
+    DEFAULT_GEMINI_MODEL
+  );
+}
 
 function resolveModelCascade(): string[] {
-  const override = Deno.env.get("GEMINI_MODEL")?.trim();
-  const cascade = [...DEFAULT_MODEL_CASCADE];
-  if (
-    override &&
-    !cascade.includes(override as (typeof DEFAULT_MODEL_CASCADE)[number])
-  ) {
-    return [override, ...cascade];
-  }
-  if (override) {
-    return [override, ...cascade.filter((m) => m !== override)];
-  }
-  return cascade;
+  const primary = resolvePreferredModel();
+  return [primary, ...FALLBACK_MODELS.filter((model) => model !== primary)];
 }
 
 type GenerativePart =

@@ -15,7 +15,8 @@
 //
 // Deploy: supabase functions deploy gemini-ocr-receipt
 // Secret:  supabase secrets set GEMINI_API_KEY=...
-// Optional: supabase secrets set GEMINI_MODEL=gemini-3.6-flash (default cascade primary)
+// Optional: supabase secrets set GEMINI_MODEL_VERSION=gemini-3.8-flash
+//   (falls back to GEMINI_MODEL, then gemini-3.8-flash)
 //
 // NOTE: intentionally UNpinned (no @version) — always resolves to the
 // latest stable @google/generative-ai. If a future SDK version starts
@@ -156,7 +157,9 @@ serve(async (req: Request) => {
 
     // 3. Gemini Vision — flatten the Size Matrix into OcrReceiptItem[]
     const geminiModel =
-      Deno.env.get("GEMINI_MODEL")?.trim() || "gemini-3.6-flash";
+      Deno.env.get("GEMINI_MODEL_VERSION")?.trim() ||
+      Deno.env.get("GEMINI_MODEL")?.trim() ||
+      "gemini-3.8-flash";
     const model = genAI.getGenerativeModel({
       model: geminiModel,
       generationConfig: {
