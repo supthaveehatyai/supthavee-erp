@@ -38,6 +38,7 @@ export function computePrintVatBreakdown(input: {
   vatRate: number;
   grandTotal: number;
   extractFromGrand?: boolean;
+  vatAmount?: number | null;
 }): { baseAmount: number; vatAmount: number; afterDiscount: number } {
   const subtotal = round2(input.subtotal);
   const discountAmount = round2(Math.max(0, input.discountAmount));
@@ -46,6 +47,18 @@ export function computePrintVatBreakdown(input: {
     Number.isFinite(input.vatRate) && input.vatRate >= 0 ? input.vatRate : 7;
   const grandTotal = round2(input.grandTotal);
   const vatType = normalizeVatType(input.vatType);
+  const overrideVat = Number(input.vatAmount);
+  if (
+    !input.extractFromGrand &&
+    input.vatAmount != null &&
+    Number.isFinite(overrideVat) &&
+    vatType !== "NONE"
+  ) {
+    const vatAmount = round2(Math.max(0, overrideVat));
+    const baseAmount =
+      vatType === "INCLUSIVE" ? round2(grandTotal - vatAmount) : afterDiscount;
+    return { baseAmount, vatAmount, afterDiscount };
+  }
 
   if (vatType === "NONE" || vatRate === 0) {
     return { baseAmount: afterDiscount, vatAmount: 0, afterDiscount };
@@ -108,6 +121,8 @@ export function DocumentPrintSummary({
   discountAmount,
   vatType: vatTypeProp,
   vatRate,
+  vatAmount: vatAmountProp,
+  vatLabel: vatLabelProp,
   grandTotal,
   withholdingTaxAmount,
   discountText,
@@ -137,6 +152,7 @@ export function DocumentPrintSummary({
     vatRate: safeVatRate,
     grandTotal: safeGrand,
     extractFromGrand,
+    vatAmount: vatAmountProp,
   });
 
   const showLinesSubtotal =
@@ -157,11 +173,12 @@ export function DocumentPrintSummary({
   const thaiBahtText = numberToThaiBaht(safeGrand);
 
   const vatLabel =
-    vatType === "INCLUSIVE"
+    vatLabelProp?.trim() ||
+    (vatType === "INCLUSIVE"
       ? `ภาษีมูลค่าเพิ่ม ${safeVatRate}% (Inclusive)`
       : vatType === "EXCLUSIVE"
         ? `ภาษีมูลค่าเพิ่ม ${safeVatRate}% (Exclusive)`
-        : `ภาษีมูลค่าเพิ่ม ${safeVatRate}%`;
+        : `ภาษีมูลค่าเพิ่ม ${safeVatRate}%`);
 
   return (
     <div

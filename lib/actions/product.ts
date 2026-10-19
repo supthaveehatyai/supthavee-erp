@@ -26,6 +26,7 @@ import {
   SIZE_CODE_ERROR_MESSAGE,
 } from "@/app/products/zod-schemas";
 import type { ReceiptProductSummary } from "@/lib/actions/receipt";
+import { resolveProductTaxCode } from "@/lib/utils/purchase-tax";
 
 /**
  * Raw service-role client — bypasses RLS.
@@ -272,7 +273,7 @@ export async function quickCreateSKU(
       .from("product_models")
       .select(
         `
-        id, model_code, name, gender, vendor_id,
+        id, model_code, name, gender, tax_type, vendor_id,
         brand:mst_brands ( brand_code ),
         category:mst_categories ( category_code )
       `,
@@ -292,6 +293,7 @@ export async function quickCreateSKU(
       model_code: string;
       name: string;
       gender: string | null;
+      tax_type: string | null;
       vendor_id: string | null;
       brand: { brand_code: string } | { brand_code: string }[] | null;
       category: { category_code: string } | { category_code: string }[] | null;
@@ -353,9 +355,10 @@ export async function quickCreateSKU(
         size: sizeRow.size_label,
         gender: modelRow.gender,
         cost_price: unitPrice,
+        tax_type: modelRow.tax_type,
         is_active: true,
       })
-      .select("id, sku, name, color, size")
+      .select("id, sku, name, color, size, tax_type")
       .single();
 
     if (productError || !product) {
@@ -368,7 +371,17 @@ export async function quickCreateSKU(
 
     // Formatted to match `ReceiptProductSummary` so the calling UI can
     // auto-select this row directly in the Smart Combobox.
-    return { product: product as ReceiptProductSummary, error: null };
+    return {
+      product: {
+        id: String(product.id),
+        sku: String(product.sku),
+        name: String(product.name ?? ""),
+        color: product.color ? String(product.color) : null,
+        size: product.size ? String(product.size) : null,
+        tax_type: resolveProductTaxCode(product.tax_type, modelRow.tax_type),
+      },
+      error: null,
+    };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "สร้างสินค้า (Quick Create SKU) ไม่สำเร็จ";

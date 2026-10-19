@@ -52,6 +52,7 @@ import {
   DEFAULT_PURCHASE_UOM_CODE,
   resolveConversionFactor,
 } from "@/lib/utils/purchase-uom";
+import { resolveProductTaxCode } from "@/lib/utils/purchase-tax";
 import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
 import type { DocumentType } from "@/types/document";
 import { requireSessionUserId } from "@/lib/auth/current-user";
@@ -186,6 +187,8 @@ export type ReceiptProductSummary = {
   name: string;
   color: string | null;
   size: string | null;
+  /** Normalized product tax mode: EXC_VAT / INC_VAT / NON_VAT. */
+  tax_type: string | null;
 };
 
 export type ReceiptMatchStatus = "matched" | "unmatched";
@@ -498,7 +501,8 @@ export async function matchReceiptItemsToProducts(
             name,
             color,
             size,
-            product_models!inner ( is_service )
+            tax_type,
+            product_models!inner ( is_service, tax_type )
           )
         `,
         )
@@ -509,10 +513,16 @@ export async function matchReceiptItemsToProducts(
         return { data: [], error: error.message };
       }
 
-      type ProductJoin = ReceiptProductSummary & {
+      type ProductJoin = {
+        id: string;
+        sku: string;
+        name: string;
+        color: string | null;
+        size: string | null;
+        tax_type: string | null;
         product_models:
-          | { is_service?: boolean | null }
-          | { is_service?: boolean | null }[]
+          | { is_service?: boolean | null; tax_type?: string | null }
+          | { is_service?: boolean | null; tax_type?: string | null }[]
           | null;
       };
 
@@ -540,6 +550,10 @@ export async function matchReceiptItemsToProducts(
           name: productRaw.name,
           color: productRaw.color,
           size: productRaw.size,
+          tax_type: resolveProductTaxCode(
+            productRaw.tax_type,
+            modelJoin && "tax_type" in modelJoin ? modelJoin.tax_type : null,
+          ),
         };
 
         mappingByNormalizedSku.set(normalizeVendorSku(row.vendor_sku), {
@@ -617,9 +631,11 @@ export async function getInternalProductsForMatching(): Promise<GetInternalProdu
         name,
         color,
         size,
+        tax_type,
         product_models!inner (
           is_raw_material,
-          is_service
+          is_service,
+          tax_type
         )
       `,
       )
@@ -631,15 +647,21 @@ export async function getInternalProductsForMatching(): Promise<GetInternalProdu
       return { data: [], error: error.message };
     }
 
-    const rows = (data ?? []).map((row) => ({
-      id: String(row.id),
-      sku: String(row.sku),
-      name: String(row.name ?? ""),
-      color: row.color ? String(row.color) : null,
-      size: row.size ? String(row.size) : null,
-    }));
+    const rows = (data ?? []).map((row) => {
+      const modelJoin = Array.isArray(row.product_models)
+        ? (row.product_models[0] ?? null)
+        : row.product_models;
+      return {
+        id: String(row.id),
+        sku: String(row.sku),
+        name: String(row.name ?? ""),
+        color: row.color ? String(row.color) : null,
+        size: row.size ? String(row.size) : null,
+        tax_type: resolveProductTaxCode(row.tax_type, modelJoin?.tax_type),
+      } satisfies ReceiptProductSummary;
+    });
 
-    return { data: rows as ReceiptProductSummary[], error: null };
+    return { data: rows, error: null };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "ไม่สามารถโหลดรายการสินค้าได้";
@@ -707,7 +729,8 @@ export async function createOnTheFlyReceiptMapping(
         name,
         color,
         size,
-        product_models!inner ( is_service )
+        tax_type,
+        product_models!inner ( is_service, tax_type )
       `,
       )
       .eq("id", internalProductId)
@@ -750,7 +773,7 @@ export async function createOnTheFlyReceiptMapping(
       .select(
         `
         id,
-        product:products ( id, sku, name, color, size )
+        product:products ( id, sku, name, color, size, tax_type )
       `,
       )
       .single();
@@ -766,7 +789,7 @@ export async function createOnTheFlyReceiptMapping(
         .select(
           `
           id,
-          product:products ( id, sku, name, color, size )
+          product:products ( id, sku, name, color, size, tax_type )
         `,
         )
         .single();
@@ -778,30 +801,59 @@ export async function createOnTheFlyReceiptMapping(
       return { mappingId: null, product: null, error: error.message, code: error.code };
     }
 
+    type EligibleProduct = {
+      id: string;
+      sku: string;
+      name: string | null;
+      color: string | null;
+      size: string | null;
+      tax_type: string | null;
+      product_models:
+        | { is_service?: boolean | null; tax_type?: string | null }
+        | { is_service?: boolean | null; tax_type?: string | null }[]
+        | null;
+    };
+    const eligible = eligibleProduct as EligibleProduct;
+    const eligibleModel = Array.isArray(eligible.product_models)
+      ? (eligible.product_models[0] ?? null)
+      : eligible.product_models;
+    const resolvedTax = resolveProductTaxCode(
+      eligible.tax_type,
+      eligibleModel?.tax_type,
+    );
+
     type Row = {
       id: string;
-      product: ReceiptProductSummary | ReceiptProductSummary[] | null;
+      product:
+        | (ReceiptProductSummary & { tax_type?: string | null })
+        | (ReceiptProductSummary & { tax_type?: string | null })[]
+        | null;
     };
     const row = data as Row;
-    const product = Array.isArray(row.product)
+    const joined = Array.isArray(row.product)
       ? (row.product[0] ?? null)
       : row.product;
+    const source = joined ?? {
+      id: eligible.id,
+      sku: eligible.sku,
+      name: eligible.name ?? "",
+      color: eligible.color,
+      size: eligible.size,
+      tax_type: eligible.tax_type,
+    };
 
-    if (!product) {
-      return {
-        mappingId: row.id,
-        product: {
-          id: String(eligibleProduct.id),
-          sku: String(eligibleProduct.sku),
-          name: String(eligibleProduct.name ?? ""),
-          color: eligibleProduct.color ? String(eligibleProduct.color) : null,
-          size: eligibleProduct.size ? String(eligibleProduct.size) : null,
-        },
-        error: null,
-      };
-    }
-
-    return { mappingId: row.id, product, error: null };
+    return {
+      mappingId: row.id,
+      product: {
+        id: String(source.id),
+        sku: String(source.sku),
+        name: String(source.name ?? ""),
+        color: source.color ? String(source.color) : null,
+        size: source.size ? String(source.size) : null,
+        tax_type: resolveProductTaxCode(source.tax_type, eligibleModel?.tax_type) ?? resolvedTax,
+      },
+      error: null,
+    };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "บันทึก mapping ไม่สำเร็จ";

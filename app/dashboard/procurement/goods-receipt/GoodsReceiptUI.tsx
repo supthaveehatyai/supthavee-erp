@@ -97,6 +97,17 @@ import {
   stockBaseQty,
   type PurchaseUomOption,
 } from "@/lib/utils/purchase-uom";
+import {
+  exVatGoodsAmount,
+  inheritVatTypeFromMatchedProducts,
+  purchaseTaxModeHint,
+  purchaseTaxModeToVatType,
+  resolveReceiptVatTotals,
+  vatTypeToPurchaseTaxMode,
+  type PurchaseTaxMode,
+  type TaxModeSource,
+} from "@/lib/utils/purchase-tax";
+import { Select } from "@/components/ui/select";
 
 function roundMoney2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -211,8 +222,13 @@ export default function GoodsReceiptUI({
   const [ocrDocDate, setOcrDocDate] = useState("");
   /** AI-classified document type — seeds Save to Ledger dropdown (human can override). */
   const [aiDocType, setAiDocType] = useState<GoodsReceiptDocType>("AP_TAX");
-  /** AI-classified VAT type — seeds Save to Ledger dropdown (human can override). */
+  /** AI-classified VAT type — seeds Save to Ledger (human or product master can override). */
   const [aiVatType, setAiVatType] = useState<VatCalculationType>("NONE");
+  const [taxModeSource, setTaxModeSource] = useState<TaxModeSource>("ai");
+  /** User typed VAT Amount — keep that figure instead of the automatic 7%. */
+  const [vatAmountTouched, setVatAmountTouched] = useState(false);
+  /** User edited Grand Total away from the formula (rounding). */
+  const [grandTouched, setGrandTouched] = useState(false);
 
   /** End-of-bill discount text (e.g. "40%", "1500") — fed into calculateNetCostApportionment. */
   const [billDiscountText, setBillDiscountText] = useState("");
@@ -295,6 +311,9 @@ export default function GoodsReceiptUI({
     setOcrDocDate("");
     setAiDocType("AP_TAX");
     setAiVatType("NONE");
+    setTaxModeSource("ai");
+    setVatAmountTouched(false);
+    setGrandTouched(false);
     setBillDiscountText("");
     setFreightCostInput("");
     setNetBeforeVatInput("");
@@ -316,6 +335,9 @@ export default function GoodsReceiptUI({
       setOcrDocDate("");
       setAiDocType("AP_TAX");
       setAiVatType("NONE");
+      setTaxModeSource("ai");
+      setVatAmountTouched(false);
+      setGrandTouched(false);
       setBillDiscountText("");
       setFreightCostInput("");
       setVatTotalsManual(false);
@@ -368,7 +390,6 @@ export default function GoodsReceiptUI({
       setOcrDocNumber(parsed.documentNumber ?? "");
       setOcrDocDate(parsed.documentDate ?? "");
       setAiDocType(parsed.docType);
-      setAiVatType(parsed.vatType);
 
       const matched = await matchReceiptItemsToProducts(vendorId, parsed.data);
       if (matched.error) {
@@ -381,7 +402,18 @@ export default function GoodsReceiptUI({
         toast.warning(parsed.modelNotice);
       }
 
-      setRows(applyApportionedTotals(matched.data, ""));
+      const reviewRows = applyApportionedTotals(matched.data, "");
+      const inherited = inheritVatTypeFromMatchedProducts({
+        currentVatType: parsed.vatType,
+        productTaxCodes: reviewRows.map((row) =>
+          row.status === "matched" ? row.matchedProduct?.tax_type : null,
+        ),
+      });
+      setAiVatType(inherited.vatType);
+      setTaxModeSource(inherited.inherited ? "product" : "ai");
+      setVatAmountTouched(false);
+      setGrandTouched(false);
+      setRows(reviewRows);
       setBillDiscountText("");
       setVatTotalsManual(false);
       setDraftProductByLineKey({});
@@ -394,7 +426,7 @@ export default function GoodsReceiptUI({
       const docDateSuffix = parsed.documentDate
         ? ` ลงวันที่ ${parsed.documentDate}`
         : "";
-      const typeSuffix = ` · ${parsed.docType} / VAT ${parsed.vatType}`;
+      const typeSuffix = ` · ${parsed.docType} / VAT ${inherited.vatType}`;
       toast.success(
         (unmatchedCount > 0
           ? `AI วิเคราะห์สำเร็จ — พบ ${matched.data.length} รายการ (${unmatchedCount} ยังไม่จับคู่)`
@@ -515,18 +547,32 @@ export default function GoodsReceiptUI({
       return;
     }
 
-    setRows((current) =>
-      current.map((item) =>
-        item.lineKey === row.lineKey
-          ? {
-              ...item,
-              status: "matched" as const,
-              mappingId: result.mappingId,
-              matchedProduct: result.product,
-            }
-          : item,
-      ),
+    const nextRows = rows.map((item) =>
+      item.lineKey === row.lineKey
+        ? {
+            ...item,
+            status: "matched" as const,
+            mappingId: result.mappingId,
+            matchedProduct: result.product,
+          }
+        : item,
     );
+    setRows(nextRows);
+    if (taxModeSource === "ai" || taxModeSource === "product") {
+      const inherited = inheritVatTypeFromMatchedProducts({
+        currentVatType: aiVatType,
+        productTaxCodes: nextRows.map((item) =>
+          item.status === "matched" ? item.matchedProduct?.tax_type : null,
+        ),
+      });
+      if (inherited.inherited) {
+        setAiVatType(inherited.vatType);
+        setTaxModeSource("product");
+        setVatAmountTouched(false);
+        setGrandTouched(false);
+        setVatTotalsManual(false);
+      }
+    }
     setDraftProductByLineKey((current) => {
       const next = { ...current };
       delete next[row.lineKey];
@@ -660,12 +706,45 @@ export default function GoodsReceiptUI({
     });
   }, [rows, aiVatType, freightCostNormalized]);
 
+  const receiptVat = useMemo(() => {
+    return resolveReceiptVatTotals({
+      netAfterDiscountAndFreight: vatPreview.net_after_discount,
+      vatType: aiVatType,
+      manualVatAmount: vatAmountTouched
+        ? roundMoney2(Math.max(0, parseMoneyInput(vatAmountInput)))
+        : null,
+    });
+  }, [vatPreview.net_after_discount, aiVatType, vatAmountTouched, vatAmountInput]);
+
   useEffect(() => {
-    if (vatTotalsManual) return;
-    setNetBeforeVatInput(formatMoney(vatPreview.net_before_vat));
-    setVatAmountInput(formatMoney(vatPreview.vat_amount));
-    setGrandTotalInput(formatMoney(vatPreview.grand_total));
-  }, [vatPreview, vatTotalsManual]);
+    setNetBeforeVatInput(formatMoney(receiptVat.preVatAmount));
+    if (!vatAmountTouched) {
+      setVatAmountInput(formatMoney(receiptVat.vatAmount));
+    }
+    if (!grandTouched) {
+      setGrandTotalInput(formatMoney(receiptVat.grandTotal));
+    }
+  }, [receiptVat, vatAmountTouched, grandTouched]);
+
+  function handleTaxModeChange(mode: PurchaseTaxMode) {
+    setAiVatType(purchaseTaxModeToVatType(mode));
+    setTaxModeSource("manual");
+    setVatAmountTouched(false);
+    setGrandTouched(false);
+    setVatTotalsManual(false);
+  }
+
+  function handleVatAmountChange(raw: string) {
+    const vat = roundMoney2(Math.max(0, parseMoneyInput(raw)));
+    setVatAmountInput(raw);
+    setVatAmountTouched(true);
+    setGrandTouched(false);
+    setVatTotalsManual(true);
+    if (aiVatType === "NONE" && vat > 0) {
+      setAiVatType("EXCLUSIVE");
+      setTaxModeSource("vat-input");
+    }
+  }
 
   /**
    * roundingDifference = Manual Grand Total − Calculated Grand Total
@@ -673,16 +752,9 @@ export default function GoodsReceiptUI({
    */
   const roundingDifference = useMemo(() => {
     const manualGrand = roundMoney2(parseMoneyInput(grandTotalInput));
-    const calculatedGrand = roundMoney2(vatPreview.grand_total);
+    const calculatedGrand = roundMoney2(receiptVat.grandTotal);
     return roundMoney2(manualGrand - calculatedGrand);
-  }, [grandTotalInput, vatPreview.grand_total]);
-
-  const vatTypeLabel =
-    aiVatType === "NONE"
-      ? "NON_VAT (ไม่มีภาษี)"
-      : aiVatType === "INCLUSIVE"
-        ? "INCLUSIVE (ราคารวม VAT)"
-        : "EXCLUSIVE (แยก VAT)";
+  }, [grandTotalInput, receiptVat.grandTotal]);
 
   const canSaveToLedger =
     rows.length > 0 && stats.unmatched === 0 && !isSavingToLedger && !isOcrRunning;
@@ -721,6 +793,24 @@ export default function GoodsReceiptUI({
         attachmentUrl = uploadResult.data.url;
       }
 
+      const saveNet = roundMoney2(
+        rowsForSave.reduce(
+          (sum, row) =>
+            sum + (row.isFoc ? 0 : Math.max(0, Number(row.totalAmount) || 0)),
+          0,
+        ) + freightCostNormalized,
+      );
+      const saveVat = resolveReceiptVatTotals({
+        netAfterDiscountAndFreight: saveNet,
+        vatType: payload.vatType,
+        manualVatAmount:
+          vatAmountTouched && payload.vatType === "EXCLUSIVE"
+            ? roundMoney2(Math.max(0, parseMoneyInput(vatAmountInput)))
+            : null,
+      });
+      const typedGrand = roundMoney2(parseMoneyInput(grandTotalInput));
+      const grandTotal = grandTouched ? typedGrand : saveVat.grandTotal;
+
       const result = await saveGoodsReceiptToLedger(
         rowsForSave,
         payload.docNumber,
@@ -730,23 +820,10 @@ export default function GoodsReceiptUI({
         payload.vatType,
         attachmentUrl,
         {
-          netBeforeVat: roundMoney2(parseMoneyInput(netBeforeVatInput)),
-          vatAmount: roundMoney2(parseMoneyInput(vatAmountInput)),
-          grandTotal: roundMoney2(parseMoneyInput(grandTotalInput)),
-          roundingDifference: roundMoney2(
-            roundMoney2(parseMoneyInput(grandTotalInput)) -
-              roundMoney2(
-                calculateDocumentSummary({
-                  lineTotals: rowsForSave.map((row) =>
-                    row.isFoc ? 0 : Math.max(0, Number(row.totalAmount) || 0),
-                  ),
-                  freightCost: freightCostNormalized,
-                  discountText: null,
-                  vatType: payload.vatType,
-                  vatRate: payload.vatType === "NONE" ? 0 : 7,
-                }).grand_total,
-              ),
-          ),
+          netBeforeVat: saveVat.preVatAmount,
+          vatAmount: saveVat.vatAmount,
+          grandTotal,
+          roundingDifference: roundMoney2(grandTotal - saveVat.grandTotal),
         },
         freightCostNormalized,
       );
@@ -1012,10 +1089,11 @@ export default function GoodsReceiptUI({
                       : roundMoney2(Number(row.totalAmount) || 0);
                     const freightShare =
                       landedByLineKey.get(row.lineKey)?.proratedFreight ?? 0;
+                    const goodsExVat = exVatGoodsAmount(displayTotalAmount, aiVatType);
                     const displayNetUnitCost = row.isFoc
                       ? 0
                       : baseQty > 0
-                        ? roundMoney2((displayTotalAmount + freightShare) / baseQty)
+                        ? roundMoney2((goodsExVat + freightShare) / baseQty)
                         : 0;
 
                     return (
@@ -1083,6 +1161,11 @@ export default function GoodsReceiptUI({
                                         .join(" / ")}`
                                     : ""}
                                 </p>
+                                {row.matchedProduct.tax_type ? (
+                                  <span className="mt-1 inline-flex w-fit rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-violet-700">
+                                    {row.matchedProduct.tax_type}
+                                  </span>
+                                ) : null}
                               </div>
                             </div>
                           ) : (
@@ -1206,7 +1289,7 @@ export default function GoodsReceiptUI({
                                 ? "text-emerald-700"
                                 : "text-amber-800",
                           )}
-                          title="Net Unit Cost = (Total Amount + Freight) ÷ จำนวนหน่วยย่อย"
+                          title="Net Unit Cost = ยอดก่อน VAT (+ Freight) ÷ จำนวนหน่วยย่อย"
                         >
                           {row.isFoc ? "0.00" : formatMoney(displayNetUnitCost)}
                         </TableCell>
@@ -1253,9 +1336,25 @@ export default function GoodsReceiptUI({
               <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-violet-500">
                 AI VAT Analysis — ตรวจสอบก่อนบันทึก
               </p>
-              <p className="mt-1 whitespace-nowrap text-sm font-semibold text-slate-900">
-                โหมดภาษี:{" "}
-                <span className="text-violet-700">{vatTypeLabel}</span>
+              <p className="mt-1 text-sm font-semibold text-slate-900">โหมดภาษี</p>
+              <Select
+                id="goods-receipt-tax-mode"
+                value={vatTypeToPurchaseTaxMode(aiVatType)}
+                onChange={(event) =>
+                  handleTaxModeChange(event.target.value as PurchaseTaxMode)
+                }
+                className="mt-1 h-9 text-sm"
+                aria-label="โหมดภาษี"
+              >
+                <option value="EXC_VAT">EXC_VAT — ภาษีนอก (+7% เพิ่มจากยอดบิล)</option>
+                <option value="INC_VAT">INC_VAT — ราคารวมภาษี (ถอด VAT 7% ในตัว)</option>
+                <option value="NON_VAT">NON_VAT — ไม่มีภาษี (0%)</option>
+              </Select>
+              <p className="mt-1 text-[11px] leading-relaxed text-violet-700">
+                {purchaseTaxModeHint(
+                  taxModeSource,
+                  vatTypeToPurchaseTaxMode(aiVatType),
+                )}
               </p>
               <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
                 ประเภทเอกสารจาก AI: {aiDocType} · แก้ไขได้ในหน้าต่าง Save to Ledger
@@ -1311,10 +1410,7 @@ export default function GoodsReceiptUI({
                     type="text"
                     inputMode="decimal"
                     value={vatAmountInput}
-                    onChange={(e) => {
-                      setVatTotalsManual(true);
-                      setVatAmountInput(e.target.value);
-                    }}
+                    onChange={(e) => handleVatAmountChange(e.target.value)}
                     className={cn(
                       "h-8 text-right text-sm font-bold tabular-nums text-violet-700",
                       vatTotalsManual && "border-blue-300 bg-blue-50/40",
@@ -1346,6 +1442,7 @@ export default function GoodsReceiptUI({
                     inputMode="decimal"
                     value={grandTotalInput}
                     onChange={(e) => {
+                      setGrandTouched(true);
                       setVatTotalsManual(true);
                       setGrandTotalInput(e.target.value);
                     }}
@@ -1375,8 +1472,20 @@ export default function GoodsReceiptUI({
               freightCost={freightCostNormalized}
               discountAmount={vatPreview.discount_amount}
               vatType={aiVatType as PrintVatType}
-              vatRate={vatPreview.vat_rate}
-              grandTotal={vatPreview.grand_total}
+              vatRate={receiptVat.vatRate}
+              vatAmount={receiptVat.vatAmount}
+              vatLabel={
+                aiVatType === "EXCLUSIVE"
+                  ? "ภาษีมูลค่าเพิ่ม 7% (Excluded)"
+                  : aiVatType === "INCLUSIVE"
+                    ? "ภาษีมูลค่าเพิ่ม 7% (Included)"
+                    : null
+              }
+              grandTotal={
+                grandTouched
+                  ? roundMoney2(parseMoneyInput(grandTotalInput))
+                  : receiptVat.grandTotal
+              }
               discountText={billDiscountText}
             />
           </CardContent>
@@ -1420,7 +1529,11 @@ export default function GoodsReceiptUI({
                 Grand Total
               </p>
               <p className="text-lg font-bold text-emerald-700">
-                ฿{formatMoney(vatPreview.grand_total)}
+                ฿{formatMoney(
+                  grandTouched
+                    ? roundMoney2(parseMoneyInput(grandTotalInput))
+                    : receiptVat.grandTotal,
+                )}
               </p>
             </div>
             <div className="h-8 w-px bg-slate-200" />

@@ -52,6 +52,13 @@ export type DocumentPrintSummaryProps = {
   vatType: PrintVatType;
   /** อัตรา VAT เป็นเปอร์เซ็นต์ เช่น 7 */
   vatRate: number;
+  /**
+   * เมื่อส่งมา ใช้ยอด VAT นี้แทนการคำนวณซ้ำ
+   * (เช่น ผู้ใช้แก้ VAT Amount ใน Goods Receipt)
+   */
+  vatAmount?: number | null;
+  /** ทับข้อความบรรทัด VAT เช่น "ภาษีมูลค่าเพิ่ม 7% (Excluded)" */
+  vatLabel?: string | null;
   /** ยอดสุทธิที่แสดงบนเอกสาร */
   grandTotal: number;
   /** ภาษีหัก ณ ที่จ่าย (เอกสารจ่าย / ถ้ามี) */
