@@ -13,7 +13,7 @@ export type InvoiceDropzoneProps = {
   isProcessing?: boolean;
   fileName?: string;
   previewUrl?: string | null;
-  onFileSelected: (file: File) => void;
+  onFilesSelected: (files: File[]) => void;
   onClear?: () => void;
   className?: string;
 };
@@ -32,7 +32,7 @@ export function InvoiceDropzone({
   isProcessing = false,
   fileName,
   previewUrl,
-  onFileSelected,
+  onFilesSelected,
   onClear,
   className,
 }: InvoiceDropzoneProps) {
@@ -40,17 +40,19 @@ export function InvoiceDropzone({
   const [isDragging, setIsDragging] = useState(false);
   const [localError, setLocalError] = useState("");
 
-  const pickFile = useCallback(
-    (file: File | undefined | null) => {
+  const pickFiles = useCallback(
+    (fileList: FileList | File[] | null | undefined) => {
       setLocalError("");
-      if (!file) return;
-      if (!isAcceptedFile(file)) {
-        setLocalError("รองรับเฉพาะ JPEG, PNG, WebP หรือ PDF");
+      const files = Array.from(fileList ?? []).filter(isAcceptedFile);
+      if (files.length === 0) {
+        if (fileList && fileList.length > 0) {
+          setLocalError("รองรับเฉพาะ JPEG, PNG, WebP หรือ PDF");
+        }
         return;
       }
-      onFileSelected(file);
+      onFilesSelected(files);
     },
-    [onFileSelected],
+    [onFilesSelected],
   );
 
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
@@ -71,8 +73,7 @@ export function InvoiceDropzone({
     event.stopPropagation();
     setIsDragging(false);
     if (disabled || isProcessing) return;
-    const file = event.dataTransfer.files?.[0];
-    pickFile(file);
+    pickFiles(event.dataTransfer.files);
   }
 
   return (
@@ -112,12 +113,13 @@ export function InvoiceDropzone({
           ref={inputRef}
           type="file"
           accept={ACCEPT}
+          multiple
           className="sr-only"
           disabled={disabled || isProcessing}
           onChange={(event) => {
-            const file = event.target.files?.[0];
+            const selected = event.target.files;
             event.target.value = "";
-            pickFile(file);
+            pickFiles(selected);
           }}
         />
 
@@ -140,10 +142,10 @@ export function InvoiceDropzone({
               ? "กำลังอัปโหลดและอ่านบิลด้วย AI…"
               : isDragging
                 ? "วางไฟล์ที่นี่"
-                : "ลากวางรูปบิล หรือคลิกเพื่อเลือกไฟล์"}
+                : "ลากวางรูปบิลหลายหน้า หรือคลิกเพื่อเลือกไฟล์"}
           </p>
           <p className="mt-1 text-[11px] text-slate-400">
-            JPEG / PNG / WebP / PDF · สูงสุด 8MB · จะถูกแปลงเป็น Base64 ก่อนส่ง OCR
+            JPEG / PNG / WebP / PDF · เลือกได้หลายหน้า · รวมเป็นตารางเดียว
           </p>
         </div>
 
@@ -155,7 +157,7 @@ export function InvoiceDropzone({
             className="pointer-events-none"
           >
             <FileImage className="size-3.5" aria-hidden />
-            เลือกไฟล์บิล
+            เลือกไฟล์บิล (หลายหน้าได้)
           </Button>
         ) : null}
       </div>
@@ -184,7 +186,7 @@ export function InvoiceDropzone({
               {fileName || "invoice"}
             </p>
             <p className="mt-0.5 text-[11px] text-slate-400">
-              พร้อมส่งไป process-receipt-ocr
+              พร้อมส่งให้ Parse with AI
             </p>
           </div>
           {onClear && !isProcessing ? (

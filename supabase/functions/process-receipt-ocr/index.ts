@@ -165,7 +165,11 @@ ${
     ? `Hint for THIS vendor's layout (from invoice_date_hint): ${invoiceDateHint}`
     : "No vendor-specific invoice_date_hint is configured for this vendor — infer the document date from the image using common Thai invoice layout conventions."
 }
-Thai invoices commonly print the date in Buddhist Era (พ.ศ., e.g. "15/03/2567"). You MUST convert Buddhist Era years to the Gregorian equivalent (subtract 543) and normalize the result to ISO format "YYYY-MM-DD" (e.g. "15/03/2567" → "2024-03-15"). Return it as "document_date" in the JSON response root. If it is truly not visible anywhere on the page, or you cannot confidently parse day/month/year, return an empty string "" — NEVER invent or guess one.
+Thai invoices commonly print the date in Buddhist Era (พ.ศ.). Convert EVERY Buddhist year to Gregorian by subtracting 543, then return ISO "YYYY-MM-DD".
+- 4-digit พ.ศ. such as "24 ส.ค. 2569" or "24/08/2569" → 2569 - 543 = 2026 → "2026-08-24".
+- 2-digit พ.ศ. such as "11/8/69" means year 2569 (2500 + 69), then 2569 - 543 = 2026 → "2026-08-11". Never treat "69" as 1969 or 2069.
+Return it as "document_date". If it is not visible or you cannot parse day/month/year, return "" — NEVER invent a date.
+MULTI-PAGE: several images are consecutive pages of ONE invoice. Extract each product line once. Do not add page subtotals into a second grand total.
 
 DOCUMENT TYPE (doc_type) — analyze the document TITLE / header label and classify into ONE of these purchase ERP enum values only:
 - "AP_TAX" if the header says ใบกำกับภาษี / Tax Invoice / ใบส่งของ+ใบกำกับ (credit purchase with VAT)
@@ -188,9 +192,10 @@ Other rules:
 - "raw_vendor_sku" = the factory/vendor product code exactly as printed, flattened per the rule above — this is Ground Truth, NEVER invent or guess an internal SKU.
 - "raw_description" = short description of the item as printed (Thai or English), or "" if none.
 - "discount_text" examples: "40%", "41.8%", "40+5%", "50", or "" if no discount.
-- "qty" and "unit_price" MUST be plain numbers — no currency symbols, no thousands separators.
-- Respond with ONLY a valid JSON OBJECT — no markdown code fences, no commentary, no trailing text — matching EXACTLY this shape:
-{"document_number": "", "document_date": "", "doc_type": "AP_TAX", "vat_type": "NONE", "items": [{"raw_vendor_sku": "", "raw_description": "", "qty": 0, "unit_price": 0, "discount_text": ""}]}
+- "qty" and "unit_price" MUST be plain numbers. "qty" is the printed purchase-unit quantity (5 โหล → qty 5, not 60).
+- If the quantity cell ends with "ล" or "โหล", set "purchase_uom_code" to "DZN" and "conversion_factor" to 12. Otherwise "PCS" and 1.
+- Respond with ONLY a valid JSON OBJECT — no markdown code fences, no commentary — matching EXACTLY this shape:
+{"document_number": "", "document_date": "", "doc_type": "AP_TAX", "vat_type": "NONE", "items": [{"raw_vendor_sku": "", "raw_description": "", "qty": 0, "unit_price": 0, "discount_text": "", "purchase_uom_code": "PCS", "conversion_factor": 1}]}
 `.trim();
 }
 

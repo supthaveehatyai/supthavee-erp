@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getActiveVendors } from "@/lib/actions/mapping";
+import { getPurchaseUoms } from "@/lib/actions/uom-actions";
 import GoodsReceiptUI from "./GoodsReceiptUI";
 
 export const dynamic = "force-dynamic";
@@ -12,12 +13,16 @@ export const metadata: Metadata = {
 };
 
 export default async function GoodsReceiptPage() {
-  const vendorsResult = await getActiveVendors();
+  const [vendorsResult, uomResult] = await Promise.all([
+    getActiveVendors(),
+    getPurchaseUoms(),
+  ]);
 
   return (
     <GoodsReceiptUI
       initialVendors={vendorsResult.data}
       initialVendorsError={vendorsResult.error}
+      purchaseUoms={uomResult.data}
     />
   );
 }

@@ -90,6 +90,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { InvoiceDropzone } from "./components/InvoiceDropzone";
+import { PurchaseUomCell } from "@/components/procurement/PurchaseUomCell";
+import { calculateLandedCost } from "@/lib/utils/landed-cost";
+import {
+  resolveConversionFactor,
+  stockBaseQty,
+  type PurchaseUomOption,
+} from "@/lib/utils/purchase-uom";
 
 function roundMoney2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -110,7 +117,7 @@ function applyApportionedTotals(
   const items: ApportionmentItem[] = rows.map((row) => ({
     id: row.lineKey,
     unitPrice: Number(row.unit_price) || 0,
-    qty: Math.max(0, Math.round(Number(row.qty) || 0)),
+    qty: Math.max(0, Number(row.qty) || 0),
     discountText: row.discount_text,
     isFoc: Boolean(row.isFoc),
   }));
@@ -125,24 +132,25 @@ function applyApportionedTotals(
     if (row.isFoc) {
       return { ...row, totalAmount: 0, netCost: 0 };
     }
+    const qty = Math.max(0, Number(row.qty) || 0);
+    const factor = resolveConversionFactor(row.conversionFactor);
+    const baseQty = stockBaseQty(qty, factor);
     if (row.totalAmountManual) {
-      const qty = Math.max(0, Number(row.qty) || 0);
       const total = roundMoney2(Number(row.totalAmount) || 0);
       return {
         ...row,
         totalAmount: total,
-        netCost: qty > 0 ? roundMoney2(total / qty) : 0,
+        netCost: baseQty > 0 ? roundMoney2(total / baseQty) : 0,
       };
     }
     const preview = byKey.get(row.lineKey);
     const total = roundMoney2(
       Number(preview?.finalLineTotal ?? row.totalAmount) || 0,
     );
-    const qty = Math.max(0, Number(row.qty) || 0);
     return {
       ...row,
       totalAmount: total,
-      netCost: qty > 0 ? roundMoney2(total / qty) : 0,
+      netCost: baseQty > 0 ? roundMoney2(total / baseQty) : 0,
     };
   });
 }
@@ -175,11 +183,13 @@ export type GoodsReceiptUIProps = {
   /** Loaded on the server via getActiveVendors() — contacts.contact_roles @> ['Vendor'] */
   initialVendors: VendorOption[];
   initialVendorsError: string | null;
+  purchaseUoms: PurchaseUomOption[];
 };
 
 export default function GoodsReceiptUI({
   initialVendors,
   initialVendorsError,
+  purchaseUoms,
 }: GoodsReceiptUIProps) {
   /* Header — vendor (prefetched server-side; no client-side contacts query) */
   const vendors = initialVendors;
@@ -190,7 +200,7 @@ export default function GoodsReceiptUI({
   const [products, setProducts] = useState<ReceiptProductSummary[]>([]);
 
   /* Upload zone */
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [fileName, setFileName] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isOcrRunning, setIsOcrRunning] = useState(false);
@@ -275,7 +285,7 @@ export default function GoodsReceiptUI({
   }
 
   const clearInvoice = useCallback(() => {
-    setPendingFile(null);
+    setPendingFiles([]);
     setFileName("");
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(null);
@@ -298,8 +308,8 @@ export default function GoodsReceiptUI({
    * preview URL. No Base64 conversion, no network call — `parseReceiptOcr`
    * receives the `File` itself via `FormData` (see `handleRunOcr`).
    */
-  const handleFileSelected = useCallback(
-    (file: File) => {
+  const handleFilesSelected = useCallback(
+    (files: File[]) => {
       setRows([]);
       setDraftProductByLineKey({});
       setOcrDocNumber("");
@@ -312,12 +322,15 @@ export default function GoodsReceiptUI({
       setNetBeforeVatInput("");
       setVatAmountInput("");
       setGrandTotalInput("");
-      setFileName(file.name);
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(
-        file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+      setFileName(
+        files.length === 1
+          ? files[0].name
+          : `${files.length} หน้า · ${files.map((file) => file.name).join(", ")}`,
       );
-      setPendingFile(file);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      const firstImage = files.find((file) => file.type.startsWith("image/"));
+      setPreviewUrl(firstImage ? URL.createObjectURL(firstImage) : null);
+      setPendingFiles(files);
     },
     [previewUrl],
   );
@@ -328,7 +341,7 @@ export default function GoodsReceiptUI({
       toast.error("เลือกผู้จำหน่าย (Vendor) ก่อนวิเคราะห์บิล");
       return;
     }
-    if (!pendingFile) {
+    if (pendingFiles.length === 0) {
       toast.error("กรุณาอัปโหลดรูปบิลก่อน");
       return;
     }
@@ -341,7 +354,9 @@ export default function GoodsReceiptUI({
       // it through the Flight protocol like a plain string/array.
       const formData = new FormData();
       formData.append("vendorId", vendorId);
-      formData.append("file", pendingFile);
+      for (const file of pendingFiles) {
+        formData.append("file", file);
+      }
 
       const parsed = await parseReceiptOcr(formData);
       if (parsed.error) {
@@ -489,6 +504,8 @@ export default function GoodsReceiptUI({
       vendorSku: row.raw_vendor_sku,
       vendorProductName: row.raw_description ?? product.name,
       internalProductId: productId,
+      purchaseUomCode: row.purchaseUomCode,
+      conversionFactor: row.conversionFactor,
     });
 
     setConfirmingLineKey(null);
@@ -560,6 +577,23 @@ export default function GoodsReceiptUI({
     setVatTotalsManual(false);
   }
 
+  function handlePurchaseUomChange(
+    lineKey: string,
+    uomCode: string,
+    conversionFactor: number,
+  ) {
+    setRows((current) =>
+      applyApportionedTotals(
+        current.map((row) =>
+          row.lineKey === lineKey
+            ? { ...row, purchaseUomCode: uomCode, conversionFactor }
+            : row,
+        ),
+        billDiscountText,
+      ),
+    );
+  }
+
   function handleBillDiscountChange(value: string) {
     setBillDiscountText(value);
     setRows((current) => applyApportionedTotals(current, value));
@@ -573,7 +607,11 @@ export default function GoodsReceiptUI({
   };
 
   const totals = {
-    qty: rows.reduce((sum, row) => sum + (Number(row.qty) || 0), 0),
+    qty: rows.reduce(
+      (sum, row) =>
+        sum + stockBaseQty(Number(row.qty) || 0, row.conversionFactor),
+      0,
+    ),
     value: rows.reduce(
       (sum, row) => sum + (row.isFoc ? 0 : Number(row.totalAmount) || 0),
       0,
@@ -584,6 +622,26 @@ export default function GoodsReceiptUI({
     () => roundMoney2(Math.max(0, parseMoneyInput(freightCostInput))),
     [freightCostInput],
   );
+
+  const landedByLineKey = useMemo(() => {
+    return new Map(
+      calculateLandedCost(
+        freightCostNormalized,
+        rows.map((row) => {
+          const qty = Math.max(0, Number(row.qty) || 0);
+          const total = row.isFoc ? 0 : Math.max(0, Number(row.totalAmount) || 0);
+          return {
+            id: row.lineKey,
+            qty,
+            lineNetAmount: total,
+            unitNetCost: qty > 0 ? total / qty : 0,
+            isFoc: row.isFoc,
+          };
+        }),
+        { vatType: aiVatType, vatRate: aiVatType === "NONE" ? 0 : 7 },
+      ).map((row) => [row.id, row]),
+    );
+  }, [rows, freightCostNormalized, aiVatType]);
 
   /**
    * Auto VAT from line Total Amounts (already include line/bill discounts).
@@ -650,9 +708,9 @@ export default function GoodsReceiptUI({
     try {
       let attachmentUrl: string | null = null;
 
-      if (pendingFile) {
+      if (pendingFiles[0]) {
         const uploadForm = new FormData();
-        uploadForm.append("file", pendingFile);
+        uploadForm.append("file", pendingFiles[0]);
         const uploadResult = await uploadDocumentImage(uploadForm);
         if (uploadResult.error || !uploadResult.data?.url) {
           toast.error(
@@ -811,14 +869,14 @@ export default function GoodsReceiptUI({
               isProcessing={isOcrRunning}
               fileName={fileName}
               previewUrl={previewUrl}
-              onFileSelected={(file) => void handleFileSelected(file)}
+              onFilesSelected={(files) => void handleFilesSelected(files)}
               onClear={clearInvoice}
             />
-            {pendingFile && (
+            {pendingFiles.length > 0 && (
               <Button
                 type="button"
                 onClick={() => void handleRunOcr()}
-                disabled={!vendorId || !pendingFile || isOcrRunning}
+                disabled={!vendorId || pendingFiles.length === 0 || isOcrRunning}
                 className="w-full"
               >
                 <Sparkles className="size-4" aria-hidden />
@@ -924,12 +982,13 @@ export default function GoodsReceiptUI({
                     </TableHead>
                     <TableHead className="text-center">ของแถม</TableHead>
                     <TableHead className="text-right">Qty</TableHead>
+                    <TableHead className="min-w-[180px]">หน่วยรับเข้า (UOM)</TableHead>
                     <TableHead className="text-right">Unit Price</TableHead>
                     <TableHead>Discount</TableHead>
                     <TableHead className="text-right">
                       Net Unit Cost
                       <span className="block text-[10px] font-normal text-slate-400">
-                        = Total ÷ Qty
+                        บาท/หน่วยย่อย
                       </span>
                     </TableHead>
                     <TableHead className="text-right">
@@ -946,13 +1005,17 @@ export default function GoodsReceiptUI({
                     const isBusy = confirmingLineKey === row.lineKey;
                     const draftProductId = draftProductByLineKey[row.lineKey] ?? "";
                     const qty = Math.max(0, Number(row.qty) || 0);
+                    const factor = resolveConversionFactor(row.conversionFactor);
+                    const baseQty = stockBaseQty(qty, factor);
                     const displayTotalAmount = row.isFoc
                       ? 0
                       : roundMoney2(Number(row.totalAmount) || 0);
+                    const freightShare =
+                      landedByLineKey.get(row.lineKey)?.proratedFreight ?? 0;
                     const displayNetUnitCost = row.isFoc
                       ? 0
-                      : qty > 0
-                        ? roundMoney2(displayTotalAmount / qty)
+                      : baseQty > 0
+                        ? roundMoney2((displayTotalAmount + freightShare) / baseQty)
                         : 0;
 
                     return (
@@ -1102,6 +1165,22 @@ export default function GoodsReceiptUI({
                         >
                           {row.qty.toLocaleString("th-TH")}
                         </TableCell>
+                        <TableCell>
+                          <PurchaseUomCell
+                            catalog={purchaseUoms}
+                            uomCode={row.purchaseUomCode || "PCS"}
+                            conversionFactor={row.conversionFactor || 1}
+                            qty={qty}
+                            disabled={isBusy}
+                            onChange={({ uomCode, conversionFactor }) =>
+                              handlePurchaseUomChange(
+                                row.lineKey,
+                                uomCode,
+                                conversionFactor,
+                              )
+                            }
+                          />
+                        </TableCell>
                         <TableCell
                           className={cn(
                             "text-right tabular-nums",
@@ -1127,7 +1206,7 @@ export default function GoodsReceiptUI({
                                 ? "text-emerald-700"
                                 : "text-amber-800",
                           )}
-                          title="Net Unit Cost = Total Amount ÷ Qty"
+                          title="Net Unit Cost = (Total Amount + Freight) ÷ จำนวนหน่วยย่อย"
                         >
                           {row.isFoc ? "0.00" : formatMoney(displayNetUnitCost)}
                         </TableCell>

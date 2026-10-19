@@ -168,8 +168,8 @@ export function calculateMovingAverageUnitCost(
   receiptQty: number,
   landedUnitCost: number,
 ): number {
-  const oldQty = Math.max(0, Math.trunc(onHandQty));
-  const newQty = Math.max(0, Math.trunc(receiptQty));
+  const oldQty = Math.max(0, Number(onHandQty) || 0);
+  const newQty = Math.max(0, Number(receiptQty) || 0);
   const oldCost = Number.isFinite(currentAvgCost) ? currentAvgCost : 0;
   const landed = Number.isFinite(landedUnitCost) ? landedUnitCost : 0;
 

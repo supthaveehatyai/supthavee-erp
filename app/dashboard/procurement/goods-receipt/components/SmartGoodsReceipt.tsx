@@ -281,7 +281,10 @@ export default function SmartGoodsReceipt({
               isProcessing={isOcrRunning}
               fileName={fileName}
               previewUrl={previewUrl}
-              onFileSelected={(file) => void handleFileSelected(file)}
+              onFilesSelected={(files) => {
+                const file = files[0];
+                if (file) void handleFileSelected(file);
+              }}
               onClear={clearInvoice}
             />
             {ocrMetaLabel ? (

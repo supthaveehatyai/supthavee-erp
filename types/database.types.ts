@@ -1470,16 +1470,25 @@ export type Database = {
       }
       mst_uom: {
         Row: {
+          allow_custom_multiplier: boolean | null
+          default_multiplier: number | null
+          sort_order: number | null
           uom_code: string
           uom_id: string
           uom_name: string
         }
         Insert: {
+          allow_custom_multiplier?: boolean | null
+          default_multiplier?: number | null
+          sort_order?: number | null
           uom_code: string
           uom_id?: string
           uom_name: string
         }
         Update: {
+          allow_custom_multiplier?: boolean | null
+          default_multiplier?: number | null
+          sort_order?: number | null
           uom_code?: string
           uom_id?: string
           uom_name?: string
@@ -2275,6 +2284,7 @@ export type Database = {
           created_at: string | null
           id: string
           internal_product_id: string | null
+          purchase_uom_code: string | null
           vendor_id: string | null
           vendor_product_name: string | null
           vendor_sku: string
@@ -2285,6 +2295,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           internal_product_id?: string | null
+          purchase_uom_code?: string | null
           vendor_id?: string | null
           vendor_product_name?: string | null
           vendor_sku: string
@@ -2295,6 +2306,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           internal_product_id?: string | null
+          purchase_uom_code?: string | null
           vendor_id?: string | null
           vendor_product_name?: string | null
           vendor_sku?: string

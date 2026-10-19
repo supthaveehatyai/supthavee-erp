@@ -48,6 +48,10 @@ import {
   calculateMovingAverageUnitCost,
 } from "@/lib/utils/landed-cost";
 import { applyPurchaseUomConversion } from "@/lib/utils/uom-conversion";
+import {
+  DEFAULT_PURCHASE_UOM_CODE,
+  resolveConversionFactor,
+} from "@/lib/utils/purchase-uom";
 import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
 import type { DocumentType } from "@/types/document";
 import { requireSessionUserId } from "@/lib/auth/current-user";
@@ -172,6 +176,8 @@ export type RawOcrLine = {
   qty: number;
   unit_price: number;
   discount_text: string;
+  purchase_uom_code?: string | null;
+  conversion_factor?: number | null;
 };
 
 export type ReceiptProductSummary = {
@@ -199,9 +205,13 @@ export type ReceiptLineRow = {
   netCost: number;
   /**
    * Invoice-facing line total (บาท) — editable Ground Truth from paper.
-   * Net Unit Cost UI = totalAmount / qty. Sent to save for apportionment.
+   * Net Unit Cost UI = allocated line total / (qty * conversionFactor).
    */
   totalAmount: number;
+  /** Purchase unit from mst_uom. Default PCS. */
+  purchaseUomCode: string;
+  /** Base units per 1 purchase unit. Default 1. */
+  conversionFactor: number;
   /**
    * true when user manually edited Total Amount — skip auto re-seed from
    * bill-discount apportionment.
@@ -357,14 +367,16 @@ export async function parseReceiptOcr(
   formData: FormData,
 ): Promise<ParseReceiptOcrResult> {
   const vendorId = String(formData.get("vendorId") ?? "").trim();
-  const file = formData.get("file");
+  const files = formData
+    .getAll("file")
+    .filter((entry): entry is File => entry instanceof File && entry.size > 0);
 
   if (!vendorId) {
     return emptyParseReceiptOcrResult(
       "กรุณาเลือกผู้จำหน่าย (vendor) ก่อนอัปโหลดบิล",
     );
   }
-  if (!(file instanceof File) || file.size === 0) {
+  if (files.length === 0) {
     return emptyParseReceiptOcrResult("ไม่พบไฟล์รูปบิล กรุณาอัปโหลดไฟล์ก่อน");
   }
 
@@ -375,8 +387,12 @@ export async function parseReceiptOcr(
 
   try {
     const supabaseAdmin = createSupabaseAdminClient();
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const imageBase64 = buffer.toString("base64");
+    const images = await Promise.all(
+      files.map(async (file) => ({
+        mimeType: file.type || "image/jpeg",
+        imageBase64: Buffer.from(await file.arrayBuffer()).toString("base64"),
+      })),
+    );
 
     const { data: vendor, error: vendorError } = await supabaseAdmin
       .from("contacts")
@@ -407,8 +423,7 @@ export async function parseReceiptOcr(
       preferredModel: cleanGeminiModelId(paramRow?.param_value),
       vendorName: vendor.company_name || vendorId,
       ocrPatternConfig: vendor.ocr_pattern_config,
-      imageBase64,
-      mimeType: file.type || "image/jpeg",
+      images,
     });
 
     return {
@@ -543,6 +558,14 @@ export async function matchReceiptItemsToProducts(
       );
 
       const qty = Number(item.qty) || 0;
+      const purchaseUomCode =
+        String(item.purchase_uom_code ?? "").trim().toUpperCase() ||
+        DEFAULT_PURCHASE_UOM_CODE;
+      const conversionFactor =
+        purchaseUomCode === "DZN"
+          ? resolveConversionFactor(item.conversion_factor ?? 12)
+          : resolveConversionFactor(item.conversion_factor ?? 1);
+      const baseQty = qty * conversionFactor;
       return {
         lineKey: `${index}:${normalizedSku}:${item.unit_price}:${item.discount_text ?? ""}`,
         raw_vendor_sku: item.raw_vendor_sku,
@@ -554,8 +577,10 @@ export async function matchReceiptItemsToProducts(
         mappingId: match?.id ?? null,
         matchedProduct: match?.product ?? null,
         discountAmountPerUnit,
-        netCost: unitCostPrice,
+        netCost: baseQty > 0 ? roundTo4Decimals(unitCostPrice / conversionFactor) : 0,
         totalAmount: roundMoney(unitCostPrice * qty),
+        purchaseUomCode,
+        conversionFactor,
         totalAmountManual: false,
         isFoc: false,
       };
@@ -631,6 +656,8 @@ export type CreateOnTheFlyReceiptMappingInput = {
   vendorSku: string;
   vendorProductName?: string | null;
   internalProductId: string;
+  purchaseUomCode?: string | null;
+  conversionFactor?: number | null;
 };
 
 export type CreateOnTheFlyReceiptMappingResult = {
@@ -704,19 +731,22 @@ export async function createOnTheFlyReceiptMapping(
       };
     }
 
-    const { data, error } = await supabaseAdmin
+    const purchaseUomCode =
+      String(input.purchaseUomCode ?? "").trim().toUpperCase() ||
+      DEFAULT_PURCHASE_UOM_CODE;
+    const conversionFactor = resolveConversionFactor(input.conversionFactor ?? 1);
+    const mappingPayload = {
+      vendor_id: vendorId,
+      vendor_sku: vendorSku,
+      vendor_product_name: input.vendorProductName?.trim() || null,
+      vendor_uom: purchaseUomCode,
+      purchase_uom_code: purchaseUomCode,
+      internal_product_id: internalProductId,
+      conversion_factor: conversionFactor,
+    };
+    let { data, error } = await supabaseAdmin
       .from("vendor_product_mapping")
-      .upsert(
-        {
-          vendor_id: vendorId,
-          vendor_sku: vendorSku,
-          vendor_product_name: input.vendorProductName?.trim() || null,
-          vendor_uom: "ตัว",
-          internal_product_id: internalProductId,
-          conversion_factor: 1,
-        },
-        { onConflict: "vendor_id,vendor_sku" },
-      )
+      .upsert(mappingPayload, { onConflict: "vendor_id,vendor_sku" })
       .select(
         `
         id,
@@ -724,6 +754,25 @@ export async function createOnTheFlyReceiptMapping(
       `,
       )
       .single();
+
+    if (
+      error &&
+      (error.code === "42703" || /purchase_uom_code/i.test(error.message ?? ""))
+    ) {
+      const { purchase_uom_code: _ignored, ...withoutPurchaseCode } = mappingPayload;
+      const retry = await supabaseAdmin
+        .from("vendor_product_mapping")
+        .upsert(withoutPurchaseCode, { onConflict: "vendor_id,vendor_sku" })
+        .select(
+          `
+          id,
+          product:products ( id, sku, name, color, size )
+        `,
+        )
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) {
       return { mappingId: null, product: null, error: error.message, code: error.code };
@@ -944,7 +993,7 @@ export async function saveGoodsReceiptToLedger(
     const vendorId = [...vendorIds][0];
 
     const qtyByLineKey = new Map(
-      rows.map((row) => [row.lineKey, Math.max(0, Math.round(Number(row.qty) || 0))]),
+      rows.map((row) => [row.lineKey, toNumeric14_4(row.qty)]),
     );
 
     const zeroQtyRow = rows.find((row) => (qtyByLineKey.get(row.lineKey) ?? 0) <= 0);
@@ -1150,7 +1199,7 @@ export async function saveGoodsReceiptToLedger(
         product_id: line.row.matchedProduct!.id,
         description: line.row.raw_description ?? line.row.matchedProduct!.name,
         qty: line.qty,
-        uom_used: "ตัว",
+        uom_used: line.row.purchaseUomCode || DEFAULT_PURCHASE_UOM_CODE,
         unit_price: line.unitPrice,
         unit_cost_price: unitCostWithFreight,
         discount_text: line.row.discount_text ?? "",
@@ -1268,7 +1317,7 @@ export async function saveGoodsReceiptToLedger(
           ""
         ).slice(0, 255),
         qty: line.qty,
-        uom_used: "ตัว",
+        uom_used: line.row.purchaseUomCode || DEFAULT_PURCHASE_UOM_CODE,
         unit_price: line.unitPrice,
         unit_cost_price: unitCostWithFreight,
         discount_text: line.row.discount_text?.trim() || null,
@@ -1320,7 +1369,9 @@ export async function saveGoodsReceiptToLedger(
       const converted = applyPurchaseUomConversion({
         purchaseQty: line.qty,
         purchaseUnitCost: landedUnitCost,
-        conversionFactor: uomFactorByProductId.get(productId) ?? 1,
+        conversionFactor: resolveConversionFactor(
+          line.row.conversionFactor ?? uomFactorByProductId.get(productId) ?? 1,
+        ),
       });
       return {
         product_id: productId,
@@ -1418,7 +1469,9 @@ export async function saveGoodsReceiptToLedger(
         const converted = applyPurchaseUomConversion({
           purchaseQty: line.qty,
           purchaseUnitCost: landedUnitCost,
-          conversionFactor: uomFactorByProductId.get(productId) ?? 1,
+          conversionFactor: resolveConversionFactor(
+            line.row.conversionFactor ?? uomFactorByProductId.get(productId) ?? 1,
+          ),
         });
         const resolved = resolveLppFromUnitCostPrice(converted.unitCostBase);
         if (resolved == null) continue;
@@ -1492,6 +1545,8 @@ export type ManualGoodsReceiptLineInput = {
   unit_cost: number;
   description?: string | null;
   sku?: string | null;
+  purchaseUomCode?: string | null;
+  conversionFactor?: number | null;
 };
 
 export type SaveManualGoodsReceiptInput = {
@@ -1679,7 +1734,10 @@ export async function saveManualGoodsReceipt(
         ).slice(0, 255),
         sku: line.sku?.trim() || String(product.sku ?? ""),
         qty,
-        uom_used: String(product.base_uom ?? "ตัว"),
+        uom_used:
+          String(line.purchaseUomCode ?? "").trim().toUpperCase() ||
+          DEFAULT_PURCHASE_UOM_CODE,
+        conversionFactor: resolveConversionFactor(line.conversionFactor ?? 1),
         unitPrice,
         sort_order: index,
         is_service: modelJoin?.is_service === true,
@@ -1723,6 +1781,7 @@ export async function saveManualGoodsReceipt(
         sku: line.sku,
         qty: line.qty,
         uom_used: line.uom_used,
+        conversionFactor: line.conversionFactor,
         unit_price: roundMoney(line.unitPrice),
         unit_cost: unitCostPrice,
         discount_amount: discountAmount,
@@ -1894,7 +1953,9 @@ export async function saveManualGoodsReceipt(
         const converted = applyPurchaseUomConversion({
           purchaseQty: toNumeric14_4(line.qty),
           purchaseUnitCost: line.unit_cost,
-          conversionFactor: uomFactorByProductId.get(line.product_id) ?? 1,
+          conversionFactor: resolveConversionFactor(
+            line.conversionFactor ?? uomFactorByProductId.get(line.product_id) ?? 1,
+          ),
         });
         return {
           product_id: line.product_id,
@@ -1952,7 +2013,11 @@ export async function saveManualGoodsReceipt(
           const converted = applyPurchaseUomConversion({
             purchaseQty: toNumeric14_4(line.qty),
             purchaseUnitCost: line.unit_cost,
-            conversionFactor: uomFactorByProductId.get(line.product_id) ?? 1,
+            conversionFactor: resolveConversionFactor(
+              line.conversionFactor ??
+                uomFactorByProductId.get(line.product_id) ??
+                1,
+            ),
           });
           const resolved = resolveLppFromUnitCostPrice(converted.unitCostBase);
           if (resolved == null) continue;

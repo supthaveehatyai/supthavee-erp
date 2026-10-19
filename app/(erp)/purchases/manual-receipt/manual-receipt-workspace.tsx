@@ -51,6 +51,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { PurchaseUomCell } from "@/components/procurement/PurchaseUomCell";
+import { calculateLandedCost } from "@/lib/utils/landed-cost";
+import {
+  defaultPurchaseUom,
+  netUnitCostPerBase,
+  resolveConversionFactor,
+  stockBaseQty,
+  type PurchaseUomOption,
+} from "@/lib/utils/purchase-uom";
 
 export type ManualReceiptLine = {
   key: string;
@@ -59,11 +68,14 @@ export type ManualReceiptLine = {
   name: string;
   qty: number;
   unit_cost: number;
+  purchaseUomCode: string;
+  conversionFactor: number;
 };
 
 export type ManualReceiptWorkspaceProps = {
   vendors: VendorOption[];
   vendorsError: string | null;
+  purchaseUoms: PurchaseUomOption[];
 };
 
 const DOC_TYPE_OPTIONS: { value: GoodsReceiptDocType; label: string }[] = [
@@ -106,6 +118,7 @@ function roundMoney(value: number): number {
 export default function ManualReceiptWorkspace({
   vendors,
   vendorsError,
+  purchaseUoms,
 }: ManualReceiptWorkspaceProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -154,7 +167,7 @@ export default function ManualReceiptWorkspace({
     let gross = 0;
     let netCost = 0;
     for (const line of lines) {
-      qty += Number(line.qty) || 0;
+      qty += stockBaseQty(line.qty, line.conversionFactor);
       gross += (Number(line.qty) || 0) * (Number(line.unit_cost) || 0);
       netCost += Number(costPreviewByKey.get(line.key)?.finalLineTotal ?? 0);
     }
@@ -169,6 +182,22 @@ export default function ManualReceiptWorkspace({
     () => roundMoney(Math.max(0, Number(freightCostInput) || 0)),
     [freightCostInput],
   );
+
+  const freightByKey = useMemo(() => {
+    return new Map(
+      calculateLandedCost(
+        freightCostNormalized,
+        lines.map((line) => ({
+          id: line.key,
+          qty: Number(line.qty) || 0,
+          lineNetAmount: Number(costPreviewByKey.get(line.key)?.finalLineTotal ?? 0),
+          unitNetCost: Number(costPreviewByKey.get(line.key)?.finalUnitCost ?? 0),
+          isFoc: false,
+        })),
+        { vatType, vatRate: vatType === "NONE" ? 0 : 7 },
+      ).map((row) => [row.id, row.proratedFreight]),
+    );
+  }, [lines, costPreviewByKey, freightCostNormalized, vatType]);
 
   const documentSummary = useMemo(() => {
     const lineTotals = lines.map(
@@ -200,6 +229,7 @@ export default function ManualReceiptWorkspace({
             : row,
         );
       }
+      const purchaseUom = defaultPurchaseUom(purchaseUoms, product.base_uom);
       return [
         ...current,
         {
@@ -209,6 +239,8 @@ export default function ManualReceiptWorkspace({
           name: product.display_name,
           qty: 1,
           unit_cost: roundMoney(Number(product.cost_price) || 0),
+          purchaseUomCode: purchaseUom.uomCode,
+          conversionFactor: purchaseUom.conversionFactor,
         },
       ];
     });
@@ -217,7 +249,12 @@ export default function ManualReceiptWorkspace({
 
   function updateLine(
     key: string,
-    patch: Partial<Pick<ManualReceiptLine, "qty" | "unit_cost">>,
+    patch: Partial<
+      Pick<
+        ManualReceiptLine,
+        "qty" | "unit_cost" | "purchaseUomCode" | "conversionFactor"
+      >
+    >,
   ) {
     setLines((current) =>
       current.map((row) => (row.key === key ? { ...row, ...patch } : row)),
@@ -269,6 +306,8 @@ export default function ManualReceiptWorkspace({
           unit_cost: line.unit_cost,
           description: line.name,
           sku: line.sku,
+          purchaseUomCode: line.purchaseUomCode,
+          conversionFactor: line.conversionFactor,
         })),
       });
 
@@ -478,6 +517,7 @@ export default function ManualReceiptWorkspace({
                   <TableHead className="whitespace-nowrap">รหัสสินค้า</TableHead>
                   <TableHead>ชื่อสินค้า</TableHead>
                   <TableHead className="w-[110px] text-right">จำนวน</TableHead>
+                  <TableHead className="min-w-[180px]">หน่วยรับเข้า (UOM)</TableHead>
                   <TableHead className="w-[140px] text-right">
                     ต้นทุน/หน่วย
                   </TableHead>
@@ -492,7 +532,7 @@ export default function ManualReceiptWorkspace({
                 {lines.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={7}
+                      colSpan={8}
                       className="h-24 text-center text-slate-500"
                     >
                       ยังไม่มีรายการ — ใช้ช่องค้นหาด้านบนเพื่อเพิ่มสินค้า
@@ -502,6 +542,18 @@ export default function ManualReceiptWorkspace({
                   lines.map((line) => {
                     const cost = costPreviewByKey.get(line.key);
                     const invoice = invoicePreviewByKey.get(line.key);
+                    const allocated =
+                      Number(cost?.finalLineTotal ?? 0) +
+                      Number(freightByKey.get(line.key) ?? 0);
+                    const baseUnitCost = netUnitCostPerBase(
+                      allocated,
+                      line.qty,
+                      resolveConversionFactor(line.conversionFactor),
+                    );
+                    const baseQty = stockBaseQty(
+                      line.qty,
+                      line.conversionFactor,
+                    );
                     return (
                       <TableRow key={line.key}>
                         <TableCell className="whitespace-nowrap font-mono text-sm font-semibold text-slate-900">
@@ -513,17 +565,29 @@ export default function ManualReceiptWorkspace({
                         <TableCell className="text-right">
                           <Input
                             type="number"
-                            min={1}
-                            step={1}
+                            min={0}
+                            step="0.0001"
                             value={line.qty}
                             disabled={isPending}
                             className="ml-auto h-9 w-[96px] text-right tabular-nums"
                             onChange={(e) =>
                               updateLine(line.key, {
-                                qty: Math.max(
-                                  0,
-                                  Math.round(Number(e.target.value) || 0),
-                                ),
+                                qty: Math.max(0, Number(e.target.value) || 0),
+                              })
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <PurchaseUomCell
+                            catalog={purchaseUoms}
+                            uomCode={line.purchaseUomCode}
+                            conversionFactor={line.conversionFactor}
+                            qty={line.qty}
+                            disabled={isPending}
+                            onChange={({ uomCode, conversionFactor }) =>
+                              updateLine(line.key, {
+                                purchaseUomCode: uomCode,
+                                conversionFactor,
                               })
                             }
                           />
@@ -544,7 +608,12 @@ export default function ManualReceiptWorkspace({
                           />
                         </TableCell>
                         <TableCell className="text-right font-medium tabular-nums text-emerald-700">
-                          {formatMoney(Number(cost?.finalUnitCost ?? 0))}
+                          <div>{formatMoney(baseUnitCost)}</div>
+                          {resolveConversionFactor(line.conversionFactor) > 1 ? (
+                            <p className="text-[10px] font-normal text-blue-700">
+                              = {baseQty.toLocaleString("th-TH")} ตัว
+                            </p>
+                          ) : null}
                         </TableCell>
                         <TableCell className="text-right font-medium tabular-nums text-slate-900">
                           {formatMoney(Number(invoice?.finalLineTotal ?? 0))}

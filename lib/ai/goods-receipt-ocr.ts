@@ -16,6 +16,8 @@ export type GoodsReceiptOcrLine = {
   qty: number;
   unit_price: number;
   discount_text: string;
+  purchase_uom_code?: string | null;
+  conversion_factor?: number | null;
 };
 
 export type GoodsReceiptOcrExtraction = {
@@ -65,7 +67,12 @@ ${
     ? `Hint for THIS vendor's layout (from invoice_date_hint): ${invoiceDateHint}`
     : "No vendor-specific invoice_date_hint is configured for this vendor — infer the document date from the image using common Thai invoice layout conventions."
 }
-Thai invoices commonly print the date in Buddhist Era (พ.ศ., e.g. "15/03/2567"). You MUST convert Buddhist Era years to the Gregorian equivalent (subtract 543) and normalize the result to ISO format "YYYY-MM-DD" (e.g. "15/03/2567" → "2024-03-15"). Return it as "document_date" in the JSON response root. If it is truly not visible anywhere on the page, or you cannot confidently parse day/month/year, return an empty string "" — NEVER invent or guess one.
+Thai invoices commonly print the date in Buddhist Era (พ.ศ.). Convert EVERY Buddhist year to Gregorian by subtracting 543, then return ISO "YYYY-MM-DD".
+- 4-digit พ.ศ. such as "24 ส.ค. 2569" or "24/08/2569" → 2569 - 543 = 2026 → "2026-08-24".
+- 2-digit พ.ศ. such as "11/8/69" means year 2569 (2500 + 69), then 2569 - 543 = 2026 → "2026-08-11". Never treat "69" as 1969 or 2069.
+Return it as "document_date". If it is not visible or you cannot parse day/month/year, return "" — NEVER invent a date.
+
+MULTI-PAGE: when several images are attached they are consecutive pages of ONE invoice (e.g. หน้า 1/2 and 2/2). Extract each product line ONCE. Do not duplicate a line that continues onto the next page. The printed grand total appears once — do not add page subtotals into a second grand total.
 
 DOCUMENT TYPE (doc_type) — analyze the document TITLE / header label and classify into ONE of these purchase ERP enum values only:
 - "AP_TAX" if the header says ใบกำกับภาษี / Tax Invoice / ใบส่งของ+ใบกำกับ (credit purchase with VAT)
@@ -88,9 +95,10 @@ Other rules:
 - "raw_vendor_sku" = the factory/vendor product code exactly as printed, flattened per the rule above — this is Ground Truth, NEVER invent or guess an internal SKU.
 - "raw_description" = short description of the item as printed (Thai or English), or "" if none.
 - "discount_text" examples: "40%", "41.8%", "40+5%", "50", or "" if no discount.
-- "qty" and "unit_price" MUST be plain numbers — no currency symbols, no thousands separators.
+- "qty" and "unit_price" MUST be plain numbers — no currency symbols, no thousands separators. "qty" is the quantity printed in the purchase unit (5 โหล → qty 5, not 60).
+- PURCHASE UOM: if the quantity cell ends with "ล" or "โหล" (dozen), set "purchase_uom_code" to "DZN" and "conversion_factor" to 12. Otherwise set "purchase_uom_code" to "PCS" and "conversion_factor" to 1.
 - Respond with ONLY a valid JSON OBJECT — no markdown code fences, no commentary, no trailing text — matching EXACTLY this shape:
-{"document_number": "", "document_date": "", "doc_type": "AP_TAX", "vat_type": "NONE", "items": [{"raw_vendor_sku": "", "raw_description": "", "qty": 0, "unit_price": 0, "discount_text": ""}]}
+{"document_number": "", "document_date": "", "doc_type": "AP_TAX", "vat_type": "NONE", "items": [{"raw_vendor_sku": "", "raw_description": "", "qty": 0, "unit_price": 0, "discount_text": "", "purchase_uom_code": "PCS", "conversion_factor": 1}]}
 `.trim();
 }
 
@@ -98,7 +106,8 @@ function normalizeIsoDate(value: string): string | null {
   if (!value) return null;
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) return null;
-  const year = Number(match[1]);
+  let year = Number(match[1]);
+  if (year >= 2400) year -= 543;
   const month = Number(match[2]);
   const day = Number(match[3]);
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
@@ -107,7 +116,9 @@ function normalizeIsoDate(value: string): string | null {
     date.getUTCFullYear() === year &&
     date.getUTCMonth() === month - 1 &&
     date.getUTCDate() === day;
-  return isReal ? value : null;
+  if (!isReal) return null;
+  const isoYear = String(year).padStart(4, "0");
+  return `${isoYear}-${match[2]}-${match[3]}`;
 }
 
 function normalizeDocType(value: unknown): GoodsReceiptOcrExtraction["doc_type"] {
@@ -169,6 +180,11 @@ export function parseGoodsReceiptOcrJson(
       qty: Number(item.qty) || 0,
       unit_price: Number(item.unit_price) || 0,
       discount_text: String(item.discount_text ?? "").trim(),
+      purchase_uom_code: normalizePurchaseUomCode(item.purchase_uom_code),
+      conversion_factor: normalizeOcrConversionFactor(
+        item.purchase_uom_code,
+        item.conversion_factor,
+      ),
     };
   });
 
@@ -188,14 +204,28 @@ export function parseGoodsReceiptOcrJson(
   };
 }
 
+function normalizePurchaseUomCode(value: unknown): string {
+  const code = String(value ?? "").trim().toUpperCase();
+  return code || "PCS";
+}
+
+function normalizeOcrConversionFactor(uomCode: unknown, value: unknown): number {
+  if (normalizePurchaseUomCode(uomCode) === "DZN") {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 1 ? n : 12;
+  }
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
 export async function runGoodsReceiptOcr(input: {
   apiKey: string;
   preferredModel: unknown;
   vendorName: string;
   ocrPatternConfig: Json | null;
-  imageBase64: string;
-  mimeType: string;
+  images: { imageBase64: string; mimeType: string }[];
 }): Promise<GoodsReceiptOcrExtraction> {
+  const images = input.images.filter((image) => image.imageBase64.trim());
   const generated = await generateGeminiContent({
     apiKey: input.apiKey,
     preferredModel: cleanGeminiModelId(input.preferredModel),
@@ -206,12 +236,12 @@ export async function runGoodsReceiptOcr(input: {
           input.ocrPatternConfig,
         ),
       },
-      {
+      ...images.map((image) => ({
         inlineData: {
-          mimeType: input.mimeType || "image/jpeg",
-          data: input.imageBase64,
+          mimeType: image.mimeType || "image/jpeg",
+          data: image.imageBase64,
         },
-      },
+      })),
     ],
   });
 
