@@ -27,7 +27,7 @@
 ## 3. Products, Inventory & Production (สินค้า, คลัง, ผลิต)
 - `product_models` (รุ่นสินค้า - Phase 1 ของการสร้าง Matrix — มี `is_service`, `is_raw_material`, `is_manufactured` Make vs Buy, `base_uom_id`, `purchasing_uom_id` หน่วยซื้อ bulk, `uom_conversion_factor` อัตราแปลง 1 หน่วยซื้อ → N หน่วยฐาน; Hard Delete รุ่นได้เฉพาะเมื่อ SKU ย่อยยังไม่ถูกใช้ใน `inventory_ledger` / `document_items` — ถ้ามีการเดินรายการแล้วให้ปิดใช้งาน `is_active` แทน)
 - `products` (สินค้า SKU ย่อย - Phase 2)
-- `mst_uom` (หน่วยนับรับเข้า — `uom_code`, `uom_name`, `default_multiplier`, `allow_custom_multiplier`, `sort_order`)
+- `mst_uom` (หน่วยนับรับเข้า — `uom_code`, `uom_name`, `default_multiplier`, `allow_custom_multiplier`, `sort_order`, `is_active`)
 - `vendor_product_mapping` (การผูกรหัสสินค้าซัพพลายเออร์ — เก็บ `purchase_uom_code` และ `conversion_factor` ตอน Confirm Mapping)
 - `inventory_ledger` (สมุดบัญชีคลังสินค้า - ควบคุมการเข้าออกสต็อก)
 - `production_jobs` (ใบสั่งผลิต / งาน MTO — มี `finished_model_id`, `target_quantity`, `estimated_completion_date`, `ref_document_id` → SO, `mockup_image_url`, `remark`; สถานะ Kanban: PLANNED / IN_PROGRESS / QA / COMPLETED; Phase 14 Tiered Storage: `storage_tier`)

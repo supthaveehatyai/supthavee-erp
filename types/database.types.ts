@@ -1472,6 +1472,7 @@ export type Database = {
         Row: {
           allow_custom_multiplier: boolean | null
           default_multiplier: number | null
+          is_active: boolean | null
           sort_order: number | null
           uom_code: string
           uom_id: string
@@ -1480,6 +1481,7 @@ export type Database = {
         Insert: {
           allow_custom_multiplier?: boolean | null
           default_multiplier?: number | null
+          is_active?: boolean | null
           sort_order?: number | null
           uom_code: string
           uom_id?: string
@@ -1488,6 +1490,7 @@ export type Database = {
         Update: {
           allow_custom_multiplier?: boolean | null
           default_multiplier?: number | null
+          is_active?: boolean | null
           sort_order?: number | null
           uom_code?: string
           uom_id?: string

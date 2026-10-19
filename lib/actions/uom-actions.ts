@@ -13,6 +13,14 @@ export type GetPurchaseUomsResult = {
   error: string | null;
 };
 
+interface MstUomRow {
+  uom_code: string | null;
+  uom_name: string | null;
+  default_multiplier: number | null;
+  allow_custom_multiplier: boolean | null;
+  sort_order: number | null;
+}
+
 /**
  * Purchase UOM catalog from `mst_uom`, ordered by sort_order.
  */
@@ -29,7 +37,8 @@ export async function getPurchaseUoms(): Promise<GetPurchaseUomsResult> {
       .select(
         "uom_code, uom_name, default_multiplier, allow_custom_multiplier, sort_order",
       )
-      .order("sort_order", { ascending: true });
+      .order("sort_order", { ascending: true })
+      .returns<MstUomRow[]>();
 
     if (error) {
       console.error("[getPurchaseUoms]", error);
