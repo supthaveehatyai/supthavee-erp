@@ -52,6 +52,12 @@ import {
   DEFAULT_PURCHASE_UOM_CODE,
   resolveConversionFactor,
 } from "@/lib/utils/purchase-uom";
+import {
+  buildFreightDocumentColumns,
+  computeVendorPayable,
+  normalizeFreightTaxMode,
+  type FreightTaxMode,
+} from "@/lib/utils/dual-freight";
 import { resolveProductTaxCode } from "@/lib/utils/purchase-tax";
 import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
 import type { DocumentType } from "@/types/document";
@@ -291,6 +297,8 @@ export type ParseReceiptOcrResult = {
   docType: GoodsReceiptDocType;
   /** AI-classified VAT mode — defaults to NONE when missing/invalid. */
   vatType: VatCalculationType;
+  /** Origin freight extracted from ค่าส่ง lines, excluded from product qty. */
+  freightCost: number;
   /** Model id that actually produced this OCR result. */
   modelUsed: string | null;
   /** Set when the configured model 404'd and a live Google model was used. */
@@ -307,6 +315,7 @@ function emptyParseReceiptOcrResult(
     documentDate: null,
     docType: "AP_TAX",
     vatType: "NONE",
+    freightCost: 0,
     modelUsed: null,
     modelNotice: null,
     error,
@@ -435,6 +444,7 @@ export async function parseReceiptOcr(
       documentDate: extraction.document_date,
       docType: normalizeGoodsReceiptDocType(extraction.doc_type),
       vatType: normalizeOcrVatType(extraction.vat_type),
+      freightCost: Number(extraction.freight_cost) || 0,
       modelUsed: extraction.modelUsed,
       modelNotice: extraction.modelNotice,
       error: null,
@@ -988,8 +998,14 @@ export async function saveGoodsReceiptToLedger(
   attachmentUrl?: string | null,
   /** Manual override จากกล่อง AI VAT Analysis — ยึดตัวเลขที่ผู้ใช้พิมพ์ */
   ledgerOverrides?: GoodsReceiptLedgerOverrides | null,
-  /** ค่าขนส่งต้นทาง (Freight-In) — รวมใน sub_total ก่อน VAT และกระจายลงต้นทุนสินค้า */
+  /** ค่าขนส่งต้นทาง (Freight-In) — รวมในหนี้ผู้ขาย และกระจายลงต้นทุนสินค้า */
   freightCost?: number | null,
+  freightContext?: {
+    freightTaxMode?: FreightTaxMode | null;
+    destFreightCost?: number | null;
+    carrierId?: string | null;
+    carrierTrackingNo?: string | null;
+  } | null,
 ): Promise<SaveGoodsReceiptToLedgerResult> {
   if (!Array.isArray(rows) || rows.length === 0) {
     return { docHeaderId: null, docNo: null, error: "ไม่มีรายการให้บันทึกรับสินค้า" };
@@ -1137,7 +1153,12 @@ export async function saveGoodsReceiptToLedger(
           unitNetCost: line.unitCostPrice,
           isFoc: Boolean(line.row.isFoc),
         })),
-        { vatType: resolvedVatType, vatRate },
+        {
+          vatType: resolvedVatType,
+          vatRate,
+          freightTaxMode: normalizeFreightTaxMode(freightContext?.freightTaxMode),
+          destFreightCost: freightContext?.destFreightCost,
+        },
       ).map((row) => [row.id, row]),
     );
 
@@ -1163,12 +1184,25 @@ export async function saveGoodsReceiptToLedger(
       lines.reduce((sum, line) => sum + line.discountAmount, 0),
     );
 
-    const vatSummary = calculateDocumentSummary({
-      lineTotals: lines.map((line) => line.lineTotal),
-      freightCost: freightCostNormalized,
-      discountText: null,
+    const freightTaxMode = normalizeFreightTaxMode(freightContext?.freightTaxMode);
+    const destFreightNormalized = roundMoney(
+      Math.max(0, Number(freightContext?.destFreightCost) || 0),
+    );
+    if (destFreightNormalized > 0 && !freightContext?.carrierId?.trim()) {
+      return {
+        docHeaderId: null,
+        docNo: null,
+        error: "ค่าขนส่งปลายทางต้องเลือกบริษัทขนส่ง",
+      };
+    }
+    const goodsNet = roundMoney(
+      lines.reduce((sum, line) => sum + line.lineTotal, 0),
+    );
+    const vatSummary = computeVendorPayable({
+      goodsNet,
+      originFreight: freightCostNormalized,
+      freightTaxMode,
       vatType: resolvedVatType,
-      vatRate,
     });
 
     // Header money: prefer manual AI VAT Analysis overrides when provided
@@ -1185,9 +1219,9 @@ export async function saveGoodsReceiptToLedger(
         ? roundMoney(Number(ledgerOverrides.grandTotal))
         : null;
 
-    const netBeforeVat = overrideNet ?? roundMoney(vatSummary.net_before_vat);
-    const vatAmountPersisted = overrideVat ?? roundMoney(vatSummary.vat_amount);
-    const grandTotal = overrideGrand ?? roundMoney(vatSummary.grand_total);
+    const netBeforeVat = overrideNet ?? roundMoney(vatSummary.preVatAmount);
+    const vatAmountPersisted = overrideVat ?? roundMoney(vatSummary.vatAmount);
+    const grandTotal = overrideGrand ?? roundMoney(vatSummary.grandTotal);
     const totalAmountHeader =
       resolvedVatType === "INCLUSIVE"
         ? grandTotal
@@ -1198,7 +1232,7 @@ export async function saveGoodsReceiptToLedger(
       ledgerOverrides?.roundingDifference != null &&
         Number.isFinite(Number(ledgerOverrides.roundingDifference))
         ? Number(ledgerOverrides.roundingDifference)
-        : grandTotal - roundMoney(vatSummary.grand_total),
+        : grandTotal - roundMoney(vatSummary.grandTotal),
     );
 
     // TODO (Phase X - GL Integration): ดึงค่า GL_ROUNDING_EXPENSE_ACC หรือ GL_ROUNDING_INCOME_ACC จาก system_settings
@@ -1318,7 +1352,6 @@ export async function saveGoodsReceiptToLedger(
         tax_rate: vatRate,
         tax_amount: vatAmountPersisted,
         grand_total: grandTotal,
-        freight_cost: freightCostNormalized,
         vat_type: resolvedVatType,
         vat_rate: vatRate,
         total_amount: totalAmountHeader,
@@ -1332,6 +1365,14 @@ export async function saveGoodsReceiptToLedger(
             ? grandTotal
             : 0,
         notes: vendorInvoiceNote,
+        ...buildFreightDocumentColumns({
+          originFreight: freightCostNormalized,
+          freightTaxMode,
+          destFreight: destFreightNormalized,
+          carrierId: freightContext?.carrierId,
+          carrierTrackingNo: freightContext?.carrierTrackingNo,
+          vendorGrandTotal: grandTotal,
+        }),
         attachment_url: resolvedAttachmentUrl,
         attached_file_url: resolvedAttachmentUrl,
         original_file_name: resolvedAttachmentUrl
@@ -1611,8 +1652,12 @@ export type SaveManualGoodsReceiptInput = {
   vatType?: VatCalculationType;
   /** Bill discount text e.g. "10%" or "500". */
   discountText?: string | null;
-  /** ค่าขนส่งต้นทาง (Freight-In) — รวมใน sub_total และกระจายลงต้นทุน */
+  /** ค่าขนส่งต้นทาง (Freight-In) — รวมในหนี้ผู้ขาย และกระจายลงต้นทุน */
   freightCost?: number | null;
+  freightTaxMode?: FreightTaxMode | null;
+  destFreightCost?: number | null;
+  carrierId?: string | null;
+  carrierTrackingNo?: string | null;
   /** ERP lifecycle — ledger ถูกโพสต์เฉพาะ ISSUED / PAID */
   status?: "DRAFT" | "ISSUED" | "PAID";
   lines: ManualGoodsReceiptLineInput[];
@@ -1670,6 +1715,13 @@ export async function saveManualGoodsReceipt(
     const freightCostNormalized = roundMoney(
       Math.max(0, Number(input?.freightCost) || 0),
     );
+    const freightTaxMode = normalizeFreightTaxMode(input?.freightTaxMode);
+    const destFreightNormalized = roundMoney(
+      Math.max(0, Number(input?.destFreightCost) || 0),
+    );
+    if (destFreightNormalized > 0 && !input?.carrierId?.trim()) {
+      return { data: null, error: "ค่าขนส่งปลายทางต้องเลือกบริษัทขนส่ง" };
+    }
 
     if (!vendorId) {
       return { data: null, error: "กรุณาเลือกผู้จำหน่าย (Vendor)" };
@@ -1858,7 +1910,12 @@ export async function saveManualGoodsReceipt(
             isFoc: false,
           };
         }),
-        { vatType: resolvedVatType, vatRate },
+        {
+          vatType: resolvedVatType,
+          vatRate,
+          freightTaxMode,
+          destFreightCost: destFreightNormalized,
+        },
       ).map((row) => [row.id, row]),
     );
 
@@ -1884,14 +1941,13 @@ export async function saveManualGoodsReceipt(
     const discountAmount = roundMoney(
       receiptLines.reduce((sum, line) => sum + line.discount_amount, 0),
     );
-    const vatSummary = calculateDocumentSummary({
-      lineTotals: receiptLines.map((line) => line.line_total),
-      freightCost: freightCostNormalized,
-      discountText: null,
+    const vatSummary = computeVendorPayable({
+      goodsNet: roundMoney(receiptLines.reduce((sum, line) => sum + line.line_total, 0)),
+      originFreight: freightCostNormalized,
+      freightTaxMode,
       vatType: resolvedVatType,
-      vatRate,
     });
-    const grandTotal = roundMoney(vatSummary.grand_total);
+    const grandTotal = roundMoney(vatSummary.grandTotal);
 
     const runningPrefix =
       DOCUMENT_TYPE_PREFIX[resolvedDocType as DocumentType] ?? "APT";
@@ -1929,15 +1985,23 @@ export async function saveManualGoodsReceipt(
         contact_person_id: null,
         sub_total: subTotal,
         discount_amount: discountAmount,
-        tax_rate: vatSummary.vat_rate,
-        tax_amount: vatSummary.vat_amount,
+        tax_rate: vatSummary.vatRate,
+        tax_amount: vatSummary.vatAmount,
         grand_total: grandTotal,
-        freight_cost: freightCostNormalized,
+        ...buildFreightDocumentColumns({
+          originFreight: freightCostNormalized,
+          freightTaxMode,
+          destFreight: destFreightNormalized,
+          carrierId: input?.carrierId,
+          carrierTrackingNo: input?.carrierTrackingNo,
+          vendorGrandTotal: grandTotal,
+        }),
         vat_type: resolvedVatType,
-        vat_rate: vatSummary.vat_rate,
-        total_amount: vatSummary.total_amount,
-        net_before_vat: vatSummary.net_before_vat,
-        vat_amount: vatSummary.vat_amount,
+        vat_rate: vatSummary.vatRate,
+        total_amount:
+          resolvedVatType === "INCLUSIVE" ? grandTotal : vatSummary.preVatAmount,
+        net_before_vat: vatSummary.preVatAmount,
+        vat_amount: vatSummary.vatAmount,
         discount_text: discountText,
         payment_status: paymentStatus,
         paid_amount: paymentStatus === "PAID" ? grandTotal : 0,

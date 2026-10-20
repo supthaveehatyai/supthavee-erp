@@ -23,10 +23,14 @@ import {
   type ApportionmentItem,
 } from "@/lib/utils/accounting";
 import { VAT_OPTIONS } from "@/lib/constants/accounting";
+import { type VatCalculationType } from "@/lib/utils/document-summary";
 import {
-  calculateDocumentSummary,
-  type VatCalculationType,
-} from "@/lib/utils/document-summary";
+  computeVendorPayable,
+  type FreightTaxMode,
+} from "@/lib/utils/dual-freight";
+import type { CarrierOption } from "@/types/carrier";
+import { DualFreightFields } from "@/components/procurement/DualFreightFields";
+import { CarrierFreightSummaryDialog } from "@/components/procurement/CarrierFreightSummaryDialog";
 import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
 import type { PrintVatType } from "@/types/print-document";
 import type { SalesProductSearchItem } from "@/types/document";
@@ -76,6 +80,7 @@ export type ManualReceiptWorkspaceProps = {
   vendors: VendorOption[];
   vendorsError: string | null;
   purchaseUoms: PurchaseUomOption[];
+  initialCarriers: CarrierOption[];
 };
 
 const DOC_TYPE_OPTIONS: { value: GoodsReceiptDocType; label: string }[] = [
@@ -119,6 +124,7 @@ export default function ManualReceiptWorkspace({
   vendors,
   vendorsError,
   purchaseUoms,
+  initialCarriers,
 }: ManualReceiptWorkspaceProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -130,6 +136,12 @@ export default function ManualReceiptWorkspace({
   const [vatType, setVatType] = useState<VatCalculationType>("NONE");
   const [discountText, setDiscountText] = useState("");
   const [freightCostInput, setFreightCostInput] = useState("");
+  const [freightTaxMode, setFreightTaxMode] = useState<FreightTaxMode>("INCLUDED_IN_TAX");
+  const [destFreightInput, setDestFreightInput] = useState("");
+  const [carrierId, setCarrierId] = useState("");
+  const [carrierTrackingNo, setCarrierTrackingNo] = useState("");
+  const [carriers, setCarriers] = useState(initialCarriers);
+  const [freightSummaryOpen, setFreightSummaryOpen] = useState(false);
   const [lines, setLines] = useState<ManualReceiptLine[]>([]);
 
   const costPreviewByKey = useMemo(() => {
@@ -194,23 +206,35 @@ export default function ManualReceiptWorkspace({
           unitNetCost: Number(costPreviewByKey.get(line.key)?.finalUnitCost ?? 0),
           isFoc: false,
         })),
-        { vatType, vatRate: vatType === "NONE" ? 0 : 7 },
+        {
+          vatType,
+          vatRate: vatType === "NONE" ? 0 : 7,
+          freightTaxMode,
+          destFreightCost: roundMoney(Math.max(0, Number(destFreightInput) || 0)),
+        },
       ).map((row) => [row.id, row.proratedFreight]),
     );
-  }, [lines, costPreviewByKey, freightCostNormalized, vatType]);
+  }, [lines, costPreviewByKey, freightCostNormalized, destFreightInput, freightTaxMode, vatType]);
 
   const documentSummary = useMemo(() => {
-    const lineTotals = lines.map(
-      (line) => invoicePreviewByKey.get(line.key)?.finalLineTotal ?? 0,
+    const goodsNet = lines.reduce(
+      (sum, line) => sum + (invoicePreviewByKey.get(line.key)?.finalLineTotal ?? 0),
+      0,
     );
-    return calculateDocumentSummary({
-      lineTotals,
-      freightCost: freightCostNormalized,
-      discountText: null,
+    const payable = computeVendorPayable({
+      goodsNet,
+      originFreight: freightCostNormalized,
+      freightTaxMode,
       vatType,
-      vatRate: vatType === "NONE" ? 0 : 7,
     });
-  }, [lines, invoicePreviewByKey, freightCostNormalized, vatType]);
+    return {
+      ...payable,
+      discount_amount: 0,
+      total_amount: roundMoney(
+        goodsNet + (freightTaxMode === "SEPARATE_NON_VAT" ? 0 : freightCostNormalized),
+      ),
+    };
+  }, [lines, invoicePreviewByKey, freightCostNormalized, freightTaxMode, vatType]);
 
   function handleSelectProduct(product: SalesProductSearchItem) {
     if (product.is_service) {
@@ -278,6 +302,10 @@ export default function ManualReceiptWorkspace({
       toast.error("กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ");
       return;
     }
+    if (roundMoney(Math.max(0, Number(destFreightInput) || 0)) > 0 && !carrierId) {
+      toast.error("ค่าขนส่งปลายทางต้องเลือกบริษัทขนส่ง");
+      return;
+    }
 
     for (const [index, line] of lines.entries()) {
       if (!Number.isFinite(line.qty) || line.qty <= 0) {
@@ -299,6 +327,10 @@ export default function ManualReceiptWorkspace({
         vatType,
         discountText: discountText.trim() || null,
         freightCost: freightCostNormalized,
+        freightTaxMode,
+        destFreightCost: roundMoney(Math.max(0, Number(destFreightInput) || 0)),
+        carrierId: carrierId || null,
+        carrierTrackingNo: carrierTrackingNo || null,
         status: "ISSUED",
         lines: lines.map((line) => ({
           product_id: line.product_id,
@@ -355,6 +387,9 @@ export default function ManualReceiptWorkspace({
             <ArrowLeft className="size-4" />
             รายการเอกสารซื้อ
           </Link>
+          <Button type="button" variant="outline" onClick={() => setFreightSummaryOpen(true)}>
+            สรุปค่าขนส่งปลายทาง (ขอใบเสร็จ)
+          </Button>
           <Link
             href="/dashboard/procurement/goods-receipt"
             className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
@@ -459,24 +494,22 @@ export default function ManualReceiptWorkspace({
                 : "ระบบจะกระจายส่วนลดตามสัดส่วนมูลค่าก่อนอัปเดตต้นทุนสุทธิ"}
             </p>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="manual-receipt-freight">
-              ค่าขนส่งต้นทาง (Freight Cost)
-            </Label>
-            <Input
-              id="manual-receipt-freight"
-              type="number"
-              min={0}
-              step="0.01"
-              value={freightCostInput}
-              onChange={(e) => setFreightCostInput(e.target.value)}
-              placeholder="0.00"
+          <div className="sm:col-span-2 lg:col-span-3">
+            <DualFreightFields
+              carriers={carriers}
+              onCarriersChange={setCarriers}
+              freightCost={freightCostInput}
+              onFreightCostChange={setFreightCostInput}
+              freightTaxMode={freightTaxMode}
+              onFreightTaxModeChange={setFreightTaxMode}
+              destFreightCost={destFreightInput}
+              onDestFreightCostChange={setDestFreightInput}
+              carrierId={carrierId}
+              onCarrierIdChange={setCarrierId}
+              trackingNo={carrierTrackingNo}
+              onTrackingNoChange={setCarrierTrackingNo}
               disabled={isPending}
-              className="text-right tabular-nums"
             />
-            <p className="text-[11px] text-slate-400">
-              รวมใน Sub Total ก่อนคำนวณ VAT · บันทึกลง documents.freight_cost
-            </p>
           </div>
         </CardContent>
       </Card>
@@ -659,10 +692,22 @@ export default function ManualReceiptWorkspace({
           freightCost={freightCostNormalized}
           discountAmount={documentSummary.discount_amount}
           vatType={vatType as PrintVatType}
-          vatRate={documentSummary.vat_rate}
-          grandTotal={documentSummary.grand_total}
+          vatRate={documentSummary.vatRate}
+          vatAmount={documentSummary.vatAmount}
+          grandTotal={documentSummary.grandTotal}
           discountText={discountText}
         />
+        {roundMoney(Math.max(0, Number(destFreightInput) || 0)) > 0 ? (
+          <p className="mt-2 text-right text-xs font-semibold text-amber-800">
+            ค่าขนส่งปลายทาง (จ่ายแยกให้ขนส่ง): ฿
+            {formatMoney(roundMoney(Math.max(0, Number(destFreightInput) || 0)))}
+          </p>
+        ) : null}
+      <CarrierFreightSummaryDialog
+        open={freightSummaryOpen}
+        onOpenChange={setFreightSummaryOpen}
+        carriers={carriers}
+      />
         <Button
           type="button"
           size="lg"

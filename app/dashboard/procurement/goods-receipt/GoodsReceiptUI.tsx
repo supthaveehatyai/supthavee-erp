@@ -102,11 +102,18 @@ import {
   inheritVatTypeFromMatchedProducts,
   purchaseTaxModeHint,
   purchaseTaxModeToVatType,
-  resolveReceiptVatTotals,
   vatTypeToPurchaseTaxMode,
   type PurchaseTaxMode,
   type TaxModeSource,
 } from "@/lib/utils/purchase-tax";
+import {
+  computeVendorPayable,
+  originFreightLineAmount,
+  type FreightTaxMode,
+} from "@/lib/utils/dual-freight";
+import type { CarrierOption } from "@/types/carrier";
+import { DualFreightFields } from "@/components/procurement/DualFreightFields";
+import { CarrierFreightSummaryDialog } from "@/components/procurement/CarrierFreightSummaryDialog";
 import { Select } from "@/components/ui/select";
 
 function roundMoney2(value: number): number {
@@ -195,12 +202,14 @@ export type GoodsReceiptUIProps = {
   initialVendors: VendorOption[];
   initialVendorsError: string | null;
   purchaseUoms: PurchaseUomOption[];
+  initialCarriers: CarrierOption[];
 };
 
 export default function GoodsReceiptUI({
   initialVendors,
   initialVendorsError,
   purchaseUoms,
+  initialCarriers,
 }: GoodsReceiptUIProps) {
   /* Header — vendor (prefetched server-side; no client-side contacts query) */
   const vendors = initialVendors;
@@ -233,8 +242,14 @@ export default function GoodsReceiptUI({
   /** End-of-bill discount text (e.g. "40%", "1500") — fed into calculateNetCostApportionment. */
   const [billDiscountText, setBillDiscountText] = useState("");
 
-  /** ค่าขนส่งต้นทาง (Freight-In) — preview only; รวมใน sub_total ก่อน VAT */
+  /** ค่าขนส่งต้นทาง (ผู้ขายเรียกเก็บ) */
   const [freightCostInput, setFreightCostInput] = useState("");
+  const [freightTaxMode, setFreightTaxMode] = useState<FreightTaxMode>("INCLUDED_IN_TAX");
+  const [destFreightInput, setDestFreightInput] = useState("");
+  const [carrierId, setCarrierId] = useState("");
+  const [carrierTrackingNo, setCarrierTrackingNo] = useState("");
+  const [carriers, setCarriers] = useState<CarrierOption[]>(initialCarriers);
+  const [freightSummaryOpen, setFreightSummaryOpen] = useState(false);
 
   /** AI VAT Analysis — controlled amounts (auto from lines until user overrides). */
   const [netBeforeVatInput, setNetBeforeVatInput] = useState("");
@@ -316,6 +331,10 @@ export default function GoodsReceiptUI({
     setGrandTouched(false);
     setBillDiscountText("");
     setFreightCostInput("");
+    setFreightTaxMode("INCLUDED_IN_TAX");
+    setDestFreightInput("");
+    setCarrierId("");
+    setCarrierTrackingNo("");
     setNetBeforeVatInput("");
     setVatAmountInput("");
     setGrandTotalInput("");
@@ -340,6 +359,10 @@ export default function GoodsReceiptUI({
       setGrandTouched(false);
       setBillDiscountText("");
       setFreightCostInput("");
+      setFreightTaxMode("INCLUDED_IN_TAX");
+      setDestFreightInput("");
+      setCarrierId("");
+      setCarrierTrackingNo("");
       setVatTotalsManual(false);
       setNetBeforeVatInput("");
       setVatAmountInput("");
@@ -414,6 +437,14 @@ export default function GoodsReceiptUI({
       setVatAmountTouched(false);
       setGrandTouched(false);
       setRows(reviewRows);
+      if ((parsed.freightCost ?? 0) > 0) {
+        setFreightCostInput((current) => {
+          const next = roundMoney2(
+            parseMoneyInput(current) + (parsed.freightCost ?? 0),
+          );
+          return next > 0 ? next.toFixed(2) : "";
+        });
+      }
       setBillDiscountText("");
       setVatTotalsManual(false);
       setDraftProductByLineKey({});
@@ -684,10 +715,15 @@ export default function GoodsReceiptUI({
             isFoc: row.isFoc,
           };
         }),
-        { vatType: aiVatType, vatRate: aiVatType === "NONE" ? 0 : 7 },
+        {
+          vatType: aiVatType,
+          vatRate: aiVatType === "NONE" ? 0 : 7,
+          freightTaxMode,
+          destFreightCost: roundMoney2(Math.max(0, parseMoneyInput(destFreightInput))),
+        },
       ).map((row) => [row.id, row]),
     );
-  }, [rows, freightCostNormalized, aiVatType]);
+  }, [rows, freightCostNormalized, destFreightInput, freightTaxMode, aiVatType]);
 
   /**
    * Auto VAT from line Total Amounts (already include line/bill discounts).
@@ -706,15 +742,40 @@ export default function GoodsReceiptUI({
     });
   }, [rows, aiVatType, freightCostNormalized]);
 
+  const goodsNet = useMemo(
+    () =>
+      roundMoney2(
+        rows.reduce(
+          (sum, row) => sum + (row.isFoc ? 0 : Math.max(0, Number(row.totalAmount) || 0)),
+          0,
+        ),
+      ),
+    [rows],
+  );
+
+  const destFreightNormalized = useMemo(
+    () => roundMoney2(Math.max(0, parseMoneyInput(destFreightInput))),
+    [destFreightInput],
+  );
+
   const receiptVat = useMemo(() => {
-    return resolveReceiptVatTotals({
-      netAfterDiscountAndFreight: vatPreview.net_after_discount,
+    return computeVendorPayable({
+      goodsNet,
+      originFreight: freightCostNormalized,
+      freightTaxMode,
       vatType: aiVatType,
       manualVatAmount: vatAmountTouched
         ? roundMoney2(Math.max(0, parseMoneyInput(vatAmountInput)))
         : null,
     });
-  }, [vatPreview.net_after_discount, aiVatType, vatAmountTouched, vatAmountInput]);
+  }, [
+    goodsNet,
+    freightCostNormalized,
+    freightTaxMode,
+    aiVatType,
+    vatAmountTouched,
+    vatAmountInput,
+  ]);
 
   useEffect(() => {
     setNetBeforeVatInput(formatMoney(receiptVat.preVatAmount));
@@ -725,6 +786,21 @@ export default function GoodsReceiptUI({
       setGrandTotalInput(formatMoney(receiptVat.grandTotal));
     }
   }, [receiptVat, vatAmountTouched, grandTouched]);
+
+  function moveUnmatchedRowToOriginFreight(row: ReceiptLineRow) {
+    const amount = row.isFoc
+      ? 0
+      : originFreightLineAmount(row.qty, row.unit_price) ||
+        roundMoney2(Math.max(0, Number(row.totalAmount) || 0));
+    setFreightCostInput((current) => {
+      const next = roundMoney2(parseMoneyInput(current) + amount);
+      return next > 0 ? next.toFixed(2) : "";
+    });
+    setRows((current) => current.filter((item) => item.lineKey !== row.lineKey));
+    setVatAmountTouched(false);
+    setGrandTouched(false);
+    toast.success(`ย้าย ${formatMoney(amount)} บาท ไปค่าขนส่งต้นทางแล้ว`);
+  }
 
   function handleTaxModeChange(mode: PurchaseTaxMode) {
     setAiVatType(purchaseTaxModeToVatType(mode));
@@ -793,15 +869,21 @@ export default function GoodsReceiptUI({
         attachmentUrl = uploadResult.data.url;
       }
 
-      const saveNet = roundMoney2(
+      if (destFreightNormalized > 0 && !carrierId) {
+        toast.error("ค่าขนส่งปลายทางต้องเลือกบริษัทขนส่ง");
+        return;
+      }
+      const saveGoodsNet = roundMoney2(
         rowsForSave.reduce(
           (sum, row) =>
             sum + (row.isFoc ? 0 : Math.max(0, Number(row.totalAmount) || 0)),
           0,
-        ) + freightCostNormalized,
+        ),
       );
-      const saveVat = resolveReceiptVatTotals({
-        netAfterDiscountAndFreight: saveNet,
+      const saveVat = computeVendorPayable({
+        goodsNet: saveGoodsNet,
+        originFreight: freightCostNormalized,
+        freightTaxMode,
         vatType: payload.vatType,
         manualVatAmount:
           vatAmountTouched && payload.vatType === "EXCLUSIVE"
@@ -826,6 +908,12 @@ export default function GoodsReceiptUI({
           roundingDifference: roundMoney2(grandTotal - saveVat.grandTotal),
         },
         freightCostNormalized,
+        {
+          freightTaxMode,
+          destFreightCost: destFreightNormalized,
+          carrierId,
+          carrierTrackingNo,
+        },
       );
       if (result.error || !result.docHeaderId) {
         toast.error(result.error ?? "บันทึกรับสินค้าเข้าคลังไม่สำเร็จ");
@@ -860,7 +948,14 @@ export default function GoodsReceiptUI({
             เลือกผู้จำหน่าย → ลากวางรูปบิล → กด Parse with AI → ตรวจทานและยืนยันรายการที่ยังไม่จับคู่
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setFreightSummaryOpen(true)}
+          >
+            สรุปค่าขนส่งปลายทาง (ขอใบเสร็จ)
+          </Button>
           <div className="rounded-xl bg-slate-100 px-3 py-2 text-center">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
               OCR Lines
@@ -1219,6 +1314,16 @@ export default function GoodsReceiptUI({
                                   )}
                                 </Button>
                               </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8"
+                                disabled={isBusy}
+                                onClick={() => moveUnmatchedRowToOriginFreight(row)}
+                              >
+                                🚚 ย้ายไปค่าส่งต้นทาง
+                              </Button>
                             </div>
                           )}
                         </TableCell>
@@ -1327,6 +1432,32 @@ export default function GoodsReceiptUI({
           </Card>
         )}
       </section>
+
+      {rows.length > 0 ? (
+        <DualFreightFields
+          carriers={carriers}
+          onCarriersChange={setCarriers}
+          freightCost={freightCostInput}
+          onFreightCostChange={(value) => {
+            setFreightCostInput(value);
+            setVatTotalsManual(false);
+            setGrandTouched(false);
+          }}
+          freightTaxMode={freightTaxMode}
+          onFreightTaxModeChange={(mode) => {
+            setFreightTaxMode(mode);
+            setVatAmountTouched(false);
+            setGrandTouched(false);
+          }}
+          destFreightCost={destFreightInput}
+          onDestFreightCostChange={setDestFreightInput}
+          carrierId={carrierId}
+          onCarrierIdChange={setCarrierId}
+          trackingNo={carrierTrackingNo}
+          onTrackingNoChange={setCarrierTrackingNo}
+          disabled={isSavingToLedger || isOcrRunning}
+        />
+      ) : null}
 
       {/* VAT summary (AI) — above sticky Save footer */}
       {rows.length > 0 ? (
@@ -1488,6 +1619,11 @@ export default function GoodsReceiptUI({
               }
               discountText={billDiscountText}
             />
+            {destFreightNormalized > 0 ? (
+              <p className="mt-2 text-right text-xs font-semibold text-amber-800">
+                ค่าขนส่งปลายทาง (จ่ายแยกให้ขนส่ง): ฿{formatMoney(destFreightNormalized)}
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
@@ -1553,29 +1689,6 @@ export default function GoodsReceiptUI({
               />
               <p className="mt-0.5 text-[10px] text-slate-400">เช่น 40%, 1500</p>
             </div>
-            <div className="w-40">
-              <Label
-                htmlFor="freight-cost-input"
-                className="text-[10px] font-semibold uppercase tracking-wide text-slate-400"
-              >
-                ค่าขนส่ง (Freight Cost)
-              </Label>
-              <Input
-                id="freight-cost-input"
-                type="text"
-                inputMode="decimal"
-                value={freightCostInput}
-                onChange={(e) => {
-                  setFreightCostInput(e.target.value);
-                  setVatTotalsManual(false);
-                }}
-                placeholder="0.00"
-                className="mt-1 h-9 text-right text-sm tabular-nums"
-              />
-              <p className="mt-0.5 text-[10px] text-slate-400">
-                รวมใน Sub Total ก่อน VAT
-              </p>
-            </div>
             {stats.unmatched > 0 && (
               <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-800">
                 <AlertTriangle className="size-3.5" aria-hidden />
@@ -1596,6 +1709,12 @@ export default function GoodsReceiptUI({
           </Button>
         </div>
       )}
+
+      <CarrierFreightSummaryDialog
+        open={freightSummaryOpen}
+        onOpenChange={setFreightSummaryOpen}
+        carriers={carriers}
+      />
 
       <SaveToLedgerDialog
         open={isSaveDialogOpen}

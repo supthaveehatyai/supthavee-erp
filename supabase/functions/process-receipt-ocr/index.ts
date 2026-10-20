@@ -59,6 +59,7 @@ type RawOcrExtraction = {
   doc_type: "AP_TAX" | "AP_INV" | "AP_CASH";
   /** ERP `vat_calculation_type`: NONE | INCLUSIVE | EXCLUSIVE */
   vat_type: "NONE" | "INCLUSIVE" | "EXCLUSIVE";
+  freight_cost: number;
   items: RawOcrLine[];
 };
 
@@ -194,8 +195,9 @@ Other rules:
 - "discount_text" examples: "40%", "41.8%", "40+5%", "50", or "" if no discount.
 - "qty" and "unit_price" MUST be plain numbers. "qty" is the printed purchase-unit quantity (5 โหล → qty 5, not 60).
 - If the quantity cell ends with "ล" or "โหล", set "purchase_uom_code" to "DZN" and "conversion_factor" to 12. Otherwise "PCS" and 1.
+- ORIGIN FREIGHT: lines described as ค่าส่ง, ค่าขนส่ง, ค่าจัดส่ง, or "ค่าส่ง รวมกับบิลแรก" are NOT products. Omit them from "items" and put the baht amount in root "freight_cost" so received quantity is not inflated.
 - Respond with ONLY a valid JSON OBJECT — no markdown code fences, no commentary — matching EXACTLY this shape:
-{"document_number": "", "document_date": "", "doc_type": "AP_TAX", "vat_type": "NONE", "items": [{"raw_vendor_sku": "", "raw_description": "", "qty": 0, "unit_price": 0, "discount_text": "", "purchase_uom_code": "PCS", "conversion_factor": 1}]}
+{"document_number": "", "document_date": "", "doc_type": "AP_TAX", "vat_type": "NONE", "freight_cost": 0, "items": [{"raw_vendor_sku": "", "raw_description": "", "qty": 0, "unit_price": 0, "discount_text": "", "purchase_uom_code": "PCS", "conversion_factor": 1}]}
 `.trim();
 }
 
@@ -252,12 +254,31 @@ function parseOcrExtractionJson(rawText: string): RawOcrExtraction {
     typeof root.document_date === "string" ? root.document_date.trim() : "",
   );
 
+  const freightPattern = /ค่าส่ง|ค่าขนส่ง|ค่าจัดส่ง|freight|shipping/i;
+  let freightFromLines = 0;
+  const productItems = items.filter((item) => {
+    const text = `${item.raw_vendor_sku} ${item.raw_description ?? ""}`;
+    if (!freightPattern.test(text)) return true;
+    const qty = Number(item.qty) || 0;
+    const price = Math.max(0, Number(item.unit_price) || 0);
+    freightFromLines += qty === 0 ? price : Math.max(0, qty) * price;
+    return false;
+  });
+  const headerFreight = Number(root.freight_cost);
+  const freightCost =
+    freightFromLines > 0
+      ? Math.round(freightFromLines * 100) / 100
+      : Number.isFinite(headerFreight)
+        ? Math.round(Math.max(0, headerFreight) * 100) / 100
+        : 0;
+
   return {
     document_number: documentNumber || null,
     document_date: documentDate,
     doc_type: normalizeOcrDocType(root.doc_type),
     vat_type: normalizeOcrVatType(root.vat_type),
-    items,
+    freight_cost: freightCost,
+    items: productItems,
   };
 }
 
@@ -390,6 +411,7 @@ serve(async (req: Request) => {
         document_date: extraction.document_date,
         doc_type: extraction.doc_type,
         vat_type: extraction.vat_type,
+        freight_cost: extraction.freight_cost,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

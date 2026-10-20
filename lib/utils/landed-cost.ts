@@ -41,10 +41,18 @@ export type FreightNetValueResult = {
 };
 
 export type LandedCostOptions = {
-  /** INCLUSIVE: strip VAT from freight before proration. EXCLUSIVE / NONE: as entered. */
+  /** INCLUSIVE: strip VAT from origin freight when it is inside the tax invoice. */
   vatType?: LandedCostVatType | null;
   /** Percent, default 7. */
   vatRate?: number;
+  /**
+   * INCLUDED_IN_TAX: origin freight follows the document VAT mode.
+   * SEPARATE_NON_VAT: origin freight is already ex-VAT.
+   * Destination freight is always added ex-VAT and is not stripped.
+   */
+  freightTaxMode?: "INCLUDED_IN_TAX" | "SEPARATE_NON_VAT" | null;
+  /** Carrier collect freight — added to landed cost, never to vendor AP. */
+  destFreightCost?: number | null;
 };
 
 function roundMoney2(value: number): number {
@@ -201,7 +209,13 @@ export function calculateLandedCost(
       ? Math.max(0, options.vatRate)
       : 7;
 
-  const freightExVat = resolveFreightExVat(freightCost, vatType, vatRate);
+  const originRaw = Math.max(0, Number(freightCost) || 0);
+  const destRaw = Math.max(0, Number(options?.destFreightCost) || 0);
+  const originExVat =
+    options?.freightTaxMode === "SEPARATE_NON_VAT"
+      ? roundTo4Decimals(originRaw)
+      : resolveFreightExVat(originRaw, vatType, vatRate);
+  const freightExVat = roundMoney2(originExVat + destRaw);
   const proratedById = new Map(
     apportionFreightByNetValue(
       freightExVat,

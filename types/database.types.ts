@@ -314,6 +314,7 @@ export type Database = {
           created_at: string | null
           credit_days: number | null
           customer_type: string | null
+          default_freight_tax_mode: string | null
           default_price_tier: string | null
           entity_type: string | null
           id: string
@@ -333,6 +334,7 @@ export type Database = {
           created_at?: string | null
           credit_days?: number | null
           customer_type?: string | null
+          default_freight_tax_mode?: string | null
           default_price_tier?: string | null
           entity_type?: string | null
           id?: string
@@ -352,6 +354,7 @@ export type Database = {
           created_at?: string | null
           credit_days?: number | null
           customer_type?: string | null
+          default_freight_tax_mode?: string | null
           default_price_tier?: string | null
           entity_type?: string | null
           id?: string
@@ -758,6 +761,17 @@ export type Database = {
           ecommerce_buyer_name: string | null
           ecommerce_order_no: string | null
           freight_cost: number | null
+          freight_tax_mode: string | null
+          freight_paid_separately: boolean | null
+          separate_freight_amount: number | null
+          billing_note_eligible_amount: number | null
+          dest_freight_cost: number | null
+          carrier_id: string | null
+          carrier_tracking_no: string | null
+          dest_freight_paid_status: string | null
+          carrier_receipt_status: string | null
+          carrier_receipt_no: string | null
+          carrier_receipt_date: string | null
           grand_total: number
           id: string
           is_voided: boolean | null
@@ -811,6 +825,17 @@ export type Database = {
           ecommerce_buyer_name?: string | null
           ecommerce_order_no?: string | null
           freight_cost?: number | null
+          freight_tax_mode?: string | null
+          freight_paid_separately?: boolean | null
+          separate_freight_amount?: number | null
+          billing_note_eligible_amount?: number | null
+          dest_freight_cost?: number | null
+          carrier_id?: string | null
+          carrier_tracking_no?: string | null
+          dest_freight_paid_status?: string | null
+          carrier_receipt_status?: string | null
+          carrier_receipt_no?: string | null
+          carrier_receipt_date?: string | null
           grand_total?: number
           id?: string
           is_voided?: boolean | null
@@ -864,6 +889,17 @@ export type Database = {
           ecommerce_buyer_name?: string | null
           ecommerce_order_no?: string | null
           freight_cost?: number | null
+          freight_tax_mode?: string | null
+          freight_paid_separately?: boolean | null
+          separate_freight_amount?: number | null
+          billing_note_eligible_amount?: number | null
+          dest_freight_cost?: number | null
+          carrier_id?: string | null
+          carrier_tracking_no?: string | null
+          dest_freight_paid_status?: string | null
+          carrier_receipt_status?: string | null
+          carrier_receipt_no?: string | null
+          carrier_receipt_date?: string | null
           grand_total?: number
           id?: string
           is_voided?: boolean | null
@@ -1329,6 +1365,42 @@ export type Database = {
           brand_name?: string
           id?: string
           is_active?: boolean | null
+        }
+        Relationships: []
+      }
+      mst_carriers: {
+        Row: {
+          carrier_id: string
+          carrier_code: string
+          carrier_name: string
+          tax_id: string | null
+          phone: string | null
+          default_wht_rate: number | null
+          sort_order: number | null
+          is_active: boolean | null
+          created_at: string | null
+        }
+        Insert: {
+          carrier_id?: string
+          carrier_code: string
+          carrier_name: string
+          tax_id?: string | null
+          phone?: string | null
+          default_wht_rate?: number | null
+          sort_order?: number | null
+          is_active?: boolean | null
+          created_at?: string | null
+        }
+        Update: {
+          carrier_id?: string
+          carrier_code?: string
+          carrier_name?: string
+          tax_id?: string | null
+          phone?: string | null
+          default_wht_rate?: number | null
+          sort_order?: number | null
+          is_active?: boolean | null
+          created_at?: string | null
         }
         Relationships: []
       }
