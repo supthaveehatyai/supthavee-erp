@@ -62,8 +62,7 @@ import {
   calculateDocumentSummary,
   type VatCalculationType,
 } from "@/lib/utils/document-summary";
-import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
-import type { PrintVatType } from "@/types/print-document";
+import { numberToThaiBaht } from "@/lib/utils/thai-baht-text";
 import VendorCombobox from "@/components/procurement/VendorCombobox";
 import InternalProductCombobox from "@/components/procurement/InternalProductCombobox";
 import QuickCreateDialog from "@/components/procurement/QuickCreateDialog";
@@ -91,7 +90,7 @@ import {
 } from "@/components/ui/table";
 import { InvoiceDropzone } from "./components/InvoiceDropzone";
 import { PurchaseUomCell } from "@/components/procurement/PurchaseUomCell";
-import { calculateLandedCost } from "@/lib/utils/landed-cost";
+import { calculateLandedCost, resolveFreightExVat } from "@/lib/utils/landed-cost";
 import {
   resolveConversionFactor,
   stockBaseQty,
@@ -178,6 +177,31 @@ function formatMoney(value: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+const VAT_MONEY_INPUT_CLASS =
+  "h-auto w-full min-w-[115px] px-2.5 py-1.5 text-right font-mono text-base font-semibold tabular-nums";
+
+function VerificationRow({
+  label,
+  amount,
+  strong = false,
+}: {
+  label: string;
+  amount: string;
+  strong?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-start justify-between gap-3 py-1 text-sm",
+        strong && "mt-1 border-t border-slate-200 pt-2 font-semibold text-slate-900",
+      )}
+    >
+      <span className={strong ? "text-slate-900" : "text-slate-600"}>{label}</span>
+      <span className="shrink-0 font-mono tabular-nums">{amount}</span>
+    </div>
+  );
 }
 
 function StatusBadge({ status }: { status: ReceiptLineRow["status"] }) {
@@ -758,6 +782,49 @@ export default function GoodsReceiptUI({
     [destFreightInput],
   );
 
+  const goodsExVatTotal = useMemo(
+    () =>
+      roundMoney2(
+        rows.reduce((sum, row) => {
+          if (row.isFoc) return sum;
+          return (
+            sum +
+            exVatGoodsAmount(Math.max(0, Number(row.totalAmount) || 0), aiVatType)
+          );
+        }, 0),
+      ),
+    [rows, aiVatType],
+  );
+
+  const originFreightInventory = useMemo(() => {
+    if (freightTaxMode === "SEPARATE_NON_VAT") return freightCostNormalized;
+    return roundMoney2(
+      resolveFreightExVat(
+        freightCostNormalized,
+        aiVatType,
+        aiVatType === "NONE" ? 0 : 7,
+      ),
+    );
+  }, [freightCostNormalized, freightTaxMode, aiVatType]);
+
+  const landedCostPool = roundMoney2(
+    goodsExVatTotal + originFreightInventory + destFreightNormalized,
+  );
+  const landedUnitAverage = totals.qty > 0 ? landedCostPool / totals.qty : 0;
+  const destCarrierName =
+    carriers.find((carrier) => carrier.carrier_id === carrierId)?.carrier_name ??
+    "ยังไม่เลือกบริษัทขนส่ง";
+  const originFreightApLabel =
+    freightTaxMode === "SEPARATE_NON_VAT"
+      ? "ค่าขนส่งต้นทาง (ชำระแยก Non-VAT)"
+      : "ค่าขนส่งต้นทาง (รวมในใบกำกับภาษี)";
+  const vatRowLabel =
+    aiVatType === "EXCLUSIVE"
+      ? "ภาษีมูลค่าเพิ่ม 7% (Excluded)"
+      : aiVatType === "INCLUSIVE"
+        ? "ภาษีมูลค่าเพิ่ม 7% (Included)"
+        : "ภาษีมูลค่าเพิ่ม 0%";
+
   const receiptVat = useMemo(() => {
     return computeVendorPayable({
       goodsNet,
@@ -776,6 +843,13 @@ export default function GoodsReceiptUI({
     vatAmountTouched,
     vatAmountInput,
   ]);
+
+  const vendorGrandTotal = grandTouched
+    ? roundMoney2(parseMoneyInput(grandTotalInput))
+    : receiptVat.grandTotal;
+  const displayedVatAmount = vatAmountTouched
+    ? roundMoney2(Math.max(0, parseMoneyInput(vatAmountInput)))
+    : receiptVat.vatAmount;
 
   useEffect(() => {
     setNetBeforeVatInput(formatMoney(receiptVat.preVatAmount));
@@ -1462,168 +1536,212 @@ export default function GoodsReceiptUI({
       {/* VAT summary (AI) — above sticky Save footer */}
       {rows.length > 0 ? (
         <Card className="border-violet-200 bg-violet-50/40">
-          <CardContent className="flex flex-col gap-4 p-4 xl:flex-row xl:items-start xl:justify-between">
-            <div className="w-full shrink-0 min-w-[220px] xl:w-64 xl:max-w-xs">
-              <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-violet-500">
-                AI VAT Analysis — ตรวจสอบก่อนบันทึก
-              </p>
-              <p className="mt-1 text-sm font-semibold text-slate-900">โหมดภาษี</p>
-              <Select
-                id="goods-receipt-tax-mode"
-                value={vatTypeToPurchaseTaxMode(aiVatType)}
-                onChange={(event) =>
-                  handleTaxModeChange(event.target.value as PurchaseTaxMode)
-                }
-                className="mt-1 h-9 text-sm"
-                aria-label="โหมดภาษี"
-              >
-                <option value="EXC_VAT">EXC_VAT — ภาษีนอก (+7% เพิ่มจากยอดบิล)</option>
-                <option value="INC_VAT">INC_VAT — ราคารวมภาษี (ถอด VAT 7% ในตัว)</option>
-                <option value="NON_VAT">NON_VAT — ไม่มีภาษี (0%)</option>
-              </Select>
-              <p className="mt-1 text-[11px] leading-relaxed text-violet-700">
-                {purchaseTaxModeHint(
-                  taxModeSource,
-                  vatTypeToPurchaseTaxMode(aiVatType),
-                )}
-              </p>
-              <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
-                ประเภทเอกสารจาก AI: {aiDocType} · แก้ไขได้ในหน้าต่าง Save to Ledger
-                {vatTotalsManual
-                  ? " · ใช้ยอดที่พิมพ์ทับ (Manual Override)"
-                  : " · Auto จาก Total Amount รายบรรทัด + ค่าขนส่ง (Freight-In)"}
-              </p>
+          <CardContent className="space-y-0 p-4">
+            <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
+              <div className="lg:col-span-4">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-500">
+                  AI VAT ANALYSIS — ตรวจสอบก่อนบันทึก
+                </p>
+                <Label htmlFor="goods-receipt-tax-mode" className="mt-2 text-sm font-semibold text-slate-900">
+                  โหมดภาษี
+                </Label>
+                <Select
+                  id="goods-receipt-tax-mode"
+                  value={vatTypeToPurchaseTaxMode(aiVatType)}
+                  onChange={(event) =>
+                    handleTaxModeChange(event.target.value as PurchaseTaxMode)
+                  }
+                  className="mt-1 h-9 w-full text-sm"
+                  aria-label="โหมดภาษี"
+                >
+                  <option value="EXC_VAT">EXC_VAT — ภาษีนอก (+7% เพิ่มจากยอดบิล)</option>
+                  <option value="INC_VAT">INC_VAT — ราคารวมภาษี (ถอด VAT 7% ในตัว)</option>
+                  <option value="NON_VAT">NON_VAT — ไม่มีภาษี (0%)</option>
+                </Select>
+                <p className="mt-2 text-[11px] leading-relaxed text-violet-700">
+                  {taxModeSource === "product"
+                    ? `ดึงอัตโนมัติจากสินค้า: ${vatTypeToPurchaseTaxMode(aiVatType)}`
+                    : purchaseTaxModeHint(
+                        taxModeSource,
+                        vatTypeToPurchaseTaxMode(aiVatType),
+                      )}
+                  {" • เอกสาร: "}
+                  {aiDocType}
+                  {vatTotalsManual ? " • ใช้ยอดที่พิมพ์ทับ" : ""}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5 lg:col-span-8">
+                <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
+                  <p className="text-[10px] font-medium text-slate-400">
+                    Sub Total (สินค้า+ส่งต้นทาง)
+                  </p>
+                  <p className="mt-1 w-full min-w-[115px] text-right font-mono text-base font-semibold tabular-nums text-slate-900">
+                    <span className="mr-1 text-xs font-normal text-slate-400">฿</span>
+                    {formatMoney(vatPreview.total_amount)}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
+                  <Label htmlFor="vat-net-before" className="text-[10px] font-medium text-slate-400">
+                    ยอดก่อน VAT (ฐานภาษี)
+                  </Label>
+                  <div className="relative mt-1">
+                    <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-xs text-slate-400">
+                      ฿
+                    </span>
+                    <Input
+                      id="vat-net-before"
+                      type="text"
+                      inputMode="decimal"
+                      value={netBeforeVatInput}
+                      onChange={(e) => {
+                        setVatTotalsManual(true);
+                        setNetBeforeVatInput(e.target.value);
+                      }}
+                      className={cn(
+                        VAT_MONEY_INPUT_CLASS,
+                        "pl-7",
+                        vatTotalsManual && "border-blue-300 bg-blue-50/40",
+                      )}
+                    />
+                  </div>
+                </div>
+                <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
+                  <Label htmlFor="vat-amount" className="text-[10px] font-medium text-slate-400">
+                    VAT Amount (7%)
+                  </Label>
+                  <div className="relative mt-1">
+                    <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-xs text-slate-400">
+                      ฿
+                    </span>
+                    <Input
+                      id="vat-amount"
+                      type="text"
+                      inputMode="decimal"
+                      value={vatAmountInput}
+                      onChange={(e) => handleVatAmountChange(e.target.value)}
+                      className={cn(
+                        VAT_MONEY_INPUT_CLASS,
+                        "pl-7 text-violet-700",
+                        vatTotalsManual && "border-blue-300 bg-blue-50/40",
+                      )}
+                    />
+                  </div>
+                </div>
+                <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
+                  <p className="text-[10px] font-medium text-slate-400">ส่วนลดท้ายบิล</p>
+                  <p className="mt-1 w-full min-w-[115px] text-right font-mono text-base font-semibold tabular-nums text-slate-900">
+                    {billDiscountText?.trim() || "—"}
+                  </p>
+                  <p className="text-[10px] text-slate-400">(กระจายลง Total แล้ว)</p>
+                </div>
+                <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
+                  <Label htmlFor="vat-grand-total" className="text-[10px] font-medium text-slate-400">
+                    Grand Total (ตั้งหนี้ผู้ขาย)
+                  </Label>
+                  <div className="relative mt-1">
+                    <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-xs text-slate-400">
+                      ฿
+                    </span>
+                    <Input
+                      id="vat-grand-total"
+                      type="text"
+                      inputMode="decimal"
+                      value={grandTotalInput}
+                      onChange={(e) => {
+                        setGrandTouched(true);
+                        setVatTotalsManual(true);
+                        setGrandTotalInput(e.target.value);
+                      }}
+                      className={cn(
+                        VAT_MONEY_INPUT_CLASS,
+                        "pl-7",
+                        vatTotalsManual && "border-blue-300 bg-blue-50/40",
+                      )}
+                    />
+                  </div>
+                  {Math.abs(roundingDifference) >= 0.005 ? (
+                    <p className="mt-1 text-[11px] font-medium text-orange-600">
+                      มีการปรับปัดเศษ: {roundingDifference > 0 ? "+" : ""}
+                      {formatMoney(roundingDifference)} บาท
+                      {Math.abs(roundingDifference) > 1 ? (
+                        <span className="block text-[10px] text-orange-500">
+                          (เกิน ±1.00 บาท — ตรวจสอบอีกครั้ง)
+                        </span>
+                      ) : null}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
             </div>
-            <div className="grid min-w-0 flex-1 grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
-              <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
-                <p className="text-[10px] font-medium text-slate-400">Sub Total</p>
-                <p className="mt-1 text-sm font-bold tabular-nums text-slate-900">
-                  {formatMoney(vatPreview.total_amount)}
+
+            <div className="mt-4 grid grid-cols-1 gap-4 border-t border-dashed border-violet-200 pt-4 lg:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <p className="text-xs font-semibold text-slate-800">
+                  สรุปต้นทุนรับเข้าคลังตามมาตรฐาน TAS 2 — Inventory Landed Cost
                 </p>
-                <p className="text-[10px] text-slate-400">รายการ + ขนส่ง</p>
-              </div>
-              <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
-                <Label
-                  htmlFor="vat-net-before"
-                  className="text-[10px] font-medium text-slate-400"
-                >
-                  ยอดก่อน VAT
-                </Label>
-                <div className="mt-0.5 flex items-center gap-1">
-                  <span className="text-xs text-slate-400">฿</span>
-                  <Input
-                    id="vat-net-before"
-                    type="text"
-                    inputMode="decimal"
-                    value={netBeforeVatInput}
-                    onChange={(e) => {
-                      setVatTotalsManual(true);
-                      setNetBeforeVatInput(e.target.value);
-                    }}
-                    className={cn(
-                      "h-8 text-right text-sm font-bold tabular-nums",
-                      vatTotalsManual && "border-blue-300 bg-blue-50/40",
-                    )}
+                <div className="mt-2">
+                  <VerificationRow
+                    label={`มูลค่าสินค้าสุทธิ (ก่อน VAT) • ${totals.qty.toLocaleString("th-TH")} ตัว`}
+                    amount={`฿${formatMoney(goodsExVatTotal)}`}
                   />
+                  <VerificationRow
+                    label="+ ค่าขนส่งต้นทาง (เข้าต้นทุนสินค้า)"
+                    amount={`฿${formatMoney(originFreightInventory)}`}
+                  />
+                  <VerificationRow
+                    label={`+ ค่าขนส่งเก็บปลายทาง (${destCarrierName})`}
+                    amount={`฿${formatMoney(destFreightNormalized)}`}
+                  />
+                  <VerificationRow
+                    label="รวมฐานต้นทุนเข้าคลังสุทธิ (Landed Cost Pool)"
+                    amount={`฿${formatMoney(landedCostPool)}`}
+                    strong
+                  />
+                  <p className="text-right text-[11px] text-slate-500">
+                    เฉลี่ย ฿{formatMoney(landedUnitAverage)} / ตัว
+                  </p>
                 </div>
               </div>
-              <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
-                <Label
-                  htmlFor="vat-amount"
-                  className="text-[10px] font-medium text-slate-400"
-                >
-                  VAT Amount
-                </Label>
-                <div className="mt-0.5 flex items-center gap-1">
-                  <span className="text-xs text-slate-400">฿</span>
-                  <Input
-                    id="vat-amount"
-                    type="text"
-                    inputMode="decimal"
-                    value={vatAmountInput}
-                    onChange={(e) => handleVatAmountChange(e.target.value)}
-                    className={cn(
-                      "h-8 text-right text-sm font-bold tabular-nums text-violet-700",
-                      vatTotalsManual && "border-blue-300 bg-blue-50/40",
-                    )}
-                  />
-                </div>
-              </div>
-              <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
-                <p className="text-[10px] font-medium text-slate-400">ส่วนลดท้ายบิล</p>
-                <p className="mt-1 text-sm font-bold tabular-nums text-slate-900">
-                  {billDiscountText?.trim() || "—"}
+
+              <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <p className="text-xs font-semibold text-slate-800">
+                  สรุปยอดตั้งหนี้ผู้ขายและใบวางบิล — AP Invoice & Settlement
                 </p>
-                <p className="text-[10px] text-slate-400">
-                  (กระจายลง Total แล้ว)
-                </p>
-              </div>
-              <div className="rounded-lg border border-violet-100 bg-white px-3 py-2">
-                <Label
-                  htmlFor="vat-grand-total"
-                  className="text-[10px] font-medium text-slate-400"
-                >
-                  Grand Total
-                </Label>
-                <div className="mt-0.5 flex items-center gap-1">
-                  <span className="text-xs text-slate-400">฿</span>
-                  <Input
-                    id="vat-grand-total"
-                    type="text"
-                    inputMode="decimal"
-                    value={grandTotalInput}
-                    onChange={(e) => {
-                      setGrandTouched(true);
-                      setVatTotalsManual(true);
-                      setGrandTotalInput(e.target.value);
-                    }}
-                    className={cn(
-                      "h-8 text-right text-sm font-bold tabular-nums",
-                      vatTotalsManual && "border-blue-300 bg-blue-50/40",
-                    )}
+                <div className="mt-2">
+                  <VerificationRow
+                    label="รวมรายการสินค้า"
+                    amount={formatMoney(goodsExVatTotal)}
                   />
+                  <VerificationRow
+                    label={originFreightApLabel}
+                    amount={formatMoney(freightCostNormalized)}
+                  />
+                  <VerificationRow
+                    label="รวมเป็นเงิน (ฐานก่อน VAT)"
+                    amount={formatMoney(receiptVat.preVatAmount)}
+                  />
+                  <VerificationRow
+                    label={vatRowLabel}
+                    amount={formatMoney(displayedVatAmount)}
+                  />
+                  <VerificationRow
+                    label="ยอดสุทธิตั้งหนี้ผู้ขาย (Grand Total)"
+                    amount={formatMoney(vendorGrandTotal)}
+                    strong
+                  />
+                  <p className="text-right text-[11px] text-slate-500">
+                    ({numberToThaiBaht(vendorGrandTotal)})
+                  </p>
                 </div>
-                {Math.abs(roundingDifference) >= 0.005 ? (
-                  <p className="mt-1 text-[11px] font-medium text-orange-600">
-                    มีการปรับปัดเศษ:{" "}
-                    {roundingDifference > 0 ? "+" : ""}
-                    {formatMoney(roundingDifference)} บาท
-                    {Math.abs(roundingDifference) > 1 ? (
-                      <span className="block text-[10px] text-orange-500">
-                        (เกิน ±1.00 บาท — ตรวจสอบอีกครั้ง)
-                      </span>
-                    ) : null}
+                {destFreightNormalized > 0 ? (
+                  <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                    🚚 ค่าขนส่งปลายทาง (จ่ายแยกให้บริษัทขนส่ง ไม่รวมในหนี้ผู้ขาย): ฿
+                    {formatMoney(destFreightNormalized)}
                   </p>
                 ) : null}
               </div>
             </div>
-            <DocumentPrintSummary
-              className="w-full max-w-sm shrink-0"
-              subtotal={vatPreview.total_amount}
-              freightCost={freightCostNormalized}
-              discountAmount={vatPreview.discount_amount}
-              vatType={aiVatType as PrintVatType}
-              vatRate={receiptVat.vatRate}
-              vatAmount={receiptVat.vatAmount}
-              vatLabel={
-                aiVatType === "EXCLUSIVE"
-                  ? "ภาษีมูลค่าเพิ่ม 7% (Excluded)"
-                  : aiVatType === "INCLUSIVE"
-                    ? "ภาษีมูลค่าเพิ่ม 7% (Included)"
-                    : null
-              }
-              grandTotal={
-                grandTouched
-                  ? roundMoney2(parseMoneyInput(grandTotalInput))
-                  : receiptVat.grandTotal
-              }
-              discountText={billDiscountText}
-            />
-            {destFreightNormalized > 0 ? (
-              <p className="mt-2 text-right text-xs font-semibold text-amber-800">
-                ค่าขนส่งปลายทาง (จ่ายแยกให้ขนส่ง): ฿{formatMoney(destFreightNormalized)}
-              </p>
-            ) : null}
           </CardContent>
         </Card>
       ) : null}

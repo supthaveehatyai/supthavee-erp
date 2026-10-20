@@ -237,9 +237,10 @@ function validateCsvRows(matrix: string[][]): CsvPreviewRow[] {
     if (
       contactType !== "Customer" &&
       contactType !== "Vendor" &&
+      contactType !== "Carrier" &&
       contactType !== "Technician"
     ) {
-      errors.push("contact_type ต้องเป็น Customer, Vendor หรือ Technician");
+      errors.push("contact_type ต้องเป็น Customer, Vendor, Carrier หรือ Technician");
     }
     if (!companyName) {
       errors.push("company_name ห้ามว่าง");
@@ -499,6 +500,9 @@ export default function ContactsClient({
   ).length;
   const technicianCount = contacts.filter((contact) =>
     contactHasRole(contact, "Technician"),
+  ).length;
+  const carrierCount = contacts.filter((contact) =>
+    contactHasRole(contact, "Carrier"),
   ).length;
   const importInvalidCount = importRows.filter((row) => !row.isValid).length;
   const canImport =
@@ -830,6 +834,7 @@ export default function ContactsClient({
                 { key: "All", label: "ทั้งหมด", count: contacts.length },
                 { key: "Customer", label: "ลูกค้า", count: customerCount },
                 { key: "Vendor", label: "ผู้จำหน่าย", count: vendorCount },
+                { key: "Carrier", label: "ขนส่ง", count: carrierCount },
                 { key: "Technician", label: "ช่างรับเหมา", count: technicianCount },
               ] as const
             ).map((tab) => {
@@ -1219,7 +1224,7 @@ export default function ContactsClient({
                         })}
                       </div>
                       <p className="mt-1.5 text-[11px] text-slate-400">
-                        เช่น เป็นทั้งลูกค้าและผู้จำหน่ายในคนเดียวกันได้
+                        เลือกได้มากกว่า 1 สถานะ เช่น ผู้จำหน่ายคู่กับขนส่ง (Carrier)
                       </p>
                     </div>
 

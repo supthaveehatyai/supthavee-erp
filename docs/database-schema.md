@@ -17,7 +17,7 @@
 - `mst_sizes` (ไซส์มาตรฐาน Global Size รวมถึงไซส์บริการ — `size_code` สูงสุด 2 ตัวอักษร, `size_label`, `sort_order` Gap of 10, `is_active` Soft Delete; จัดการผ่าน Master Data Hub `/settings/master-data`)
 
 ## 2. Core Entities (องค์กร, ผู้ใช้, ตั้งค่า)
-- `contacts` (คู่ค้า Multi-Role: `contact_roles` VARCHAR[] เท่านั้น — ไม่ใช้ `contact_type`)
+- `contacts` (คู่ค้า Multi-Role: `contact_roles` VARCHAR[] — `Customer` / `Vendor` / `Carrier` / `Technician` เท่านั้น — ไม่ใช้ `contact_type`)
 - `contact_persons` (ผู้ติดต่อภายใต้คู่ค้า)
 - `user_profiles` (โปรไฟล์พนักงาน/ผู้ใช้งาน — `data_access_scope` IN ('ALL','OWN'), `approval_limit`)
 - `app_roles` (สิทธิ์การใช้งาน Dynamic RBAC — `accessible_modules` JSONB: sales, purchases, inventory, finance, settings; Phase 20 Report Center: หน้า `/finance/tax-reports` และ API `/api/finance/export-tax` อนุญาตเฉพาะ `role_code` ในกลุ่ม admin / finance / manager / accountant และบล็อกบทบาทหน้างาน sales / store / warehouse / ช่าง แม้โมดูล finance จะเป็น true)

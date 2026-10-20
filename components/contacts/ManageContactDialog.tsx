@@ -8,7 +8,6 @@ import {
   CONTACT_ROLE_OPTIONS,
   contactHasRole,
   contactRoleBadgeClass,
-  contactRoleLabel,
   normalizeContactRoles,
 } from "@/app/contacts/contacts";
 import {
@@ -441,6 +440,9 @@ export default function ManageContactDialog({
                       );
                     })}
                   </div>
+                  <p className="text-[11px] text-slate-400">
+                    เลือกได้มากกว่า 1 สถานะ เช่น ผู้จำหน่ายคู่กับขนส่ง (Carrier)
+                  </p>
                 </div>
 
                 <div className="space-y-1.5 sm:col-span-2">

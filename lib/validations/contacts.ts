@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const ALLOWED_CONTACT_ROLES = ["Customer", "Vendor", "Technician"] as const;
+const ALLOWED_CONTACT_ROLES = ["Customer", "Vendor", "Carrier", "Technician"] as const;
 
 /**
  * Coerce any payload shape into string[]:

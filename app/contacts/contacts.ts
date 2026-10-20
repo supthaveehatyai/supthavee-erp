@@ -1,10 +1,10 @@
 /**
  * Contacts / Vendors domain types (Supabase `contacts` table).
- * Multi-Role only: `contact_roles` (VARCHAR[]) — Customer / Vendor / Technician.
+ * Multi-Role only: `contact_roles` (VARCHAR[]) — Customer / Vendor / Carrier / Technician.
  * Legacy `contact_type` is removed — do not read or write it.
  */
 
-export type ContactType = "Customer" | "Vendor" | "Technician";
+export type ContactType = "Customer" | "Vendor" | "Carrier" | "Technician";
 export type CustomerType = "นิติบุคคล" | "บุคคลธรรมดา";
 export type PriceTier = "Retail" | "Wholesale";
 
@@ -14,24 +14,35 @@ export const CONTACT_ROLE_OPTIONS: ReadonlyArray<{
 }> = [
   { value: "Customer", label: "ลูกค้า" },
   { value: "Vendor", label: "ผู้จำหน่าย" },
+  { value: "Carrier", label: "ขนส่ง (Carrier)" },
   { value: "Technician", label: "ช่างรับเหมา" },
 ] as const;
 
 export function contactRoleLabel(role: ContactType | string): string {
   if (role === "Vendor") return "ผู้จำหน่าย";
+  if (role === "Carrier") return "🚚 ขนส่ง";
   if (role === "Technician") return "ช่างรับเหมา";
-  return "ลูกค้า";
+  if (role === "Customer") return "ลูกค้า";
+  return role;
 }
 
 export function contactRoleBadgeClass(role: ContactType | string): string {
   if (role === "Vendor") return "bg-amber-50 text-amber-700 ring-1 ring-amber-100";
+  if (role === "Carrier") {
+    return "bg-indigo-50 text-indigo-700 border border-indigo-200";
+  }
   if (role === "Technician")
     return "bg-violet-50 text-violet-700 ring-1 ring-violet-100";
   return "bg-blue-50 text-blue-700 ring-1 ring-blue-100";
 }
 
 export function parseContactType(value: unknown): ContactType | null {
-  if (value === "Customer" || value === "Vendor" || value === "Technician") {
+  if (
+    value === "Customer" ||
+    value === "Vendor" ||
+    value === "Carrier" ||
+    value === "Technician"
+  ) {
     return value;
   }
   return null;
@@ -86,7 +97,7 @@ export type OcrPatternConfig = Record<string, any>;
 export type Contact = {
   id: string;
   created_at: string;
-  /** Multi-role tags (Customer / Vendor / Technician). */
+  /** Multi-role tags (Customer / Vendor / Carrier / Technician). */
   contact_roles: ContactType[];
   customer_type: string | null;
   company_name: string;
