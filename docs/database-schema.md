@@ -6,7 +6,7 @@
 
 ## 1. Master Data (ตารางข้อมูลหลัก)
 - `mst_bank_accounts` (สมุดบัญชีธนาคารบริษัท)
-- `mst_carriers` (บริษัทขนส่งปลายทาง — `carrier_id`, `carrier_code`, `carrier_name`, `tax_id`, `phone`, `default_wht_rate`, `sort_order`, `is_active`)
+- `mst_carriers` (บริษัทขนส่งปลายทาง 12 เจ้า เชื่อม `contacts` — `carrier_id`, `carrier_code`, `carrier_name`, `contact_id`, `carrier_tier` `PRIMARY_MONTHLY` | `OCCASIONAL`, `requires_monthly_receipt`, `tax_id`, `branch_code`, `phone`, `address`, `default_wht_rate`, `sort_order`, `is_active`; สรุปรายเดือนผ่าน `vw_carrier_freight_summary`)
 - `mst_brands` (แบรนด์สินค้า)
 - `mst_categories` (หมวดหมู่สินค้า — `category_code`, `category_name`, `parent_id` nullable, `is_active` Soft Delete; Parent รหัส 1 ตัวอักษร / Child 2 ตัวอักษรตัวแรกสืบทอดจากแม่; จัดการผ่าน Master Data Hub `/settings/master-data?tab=categories`)
 - `mst_colors` (สีมาตรฐาน - ล็อก 3 ตัวอักษรพิมพ์ใหญ่)

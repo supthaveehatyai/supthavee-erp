@@ -12,6 +12,33 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 
+export function CarrierOptionGroups({ carriers }: { carriers: CarrierOption[] }) {
+  const primary = carriers.filter((carrier) => carrier.carrier_tier === "PRIMARY_MONTHLY");
+  const occasional = carriers.filter((carrier) => carrier.carrier_tier !== "PRIMARY_MONTHLY");
+  return (
+    <>
+      {primary.length > 0 ? (
+        <optgroup label="🌟 3 ขนส่งหลัก (สรุปขอใบเสร็จรายเดือน)">
+          {primary.map((carrier) => (
+            <option key={carrier.carrier_id} value={carrier.carrier_id}>
+              {carrier.carrier_code} — {carrier.carrier_name}
+            </option>
+          ))}
+        </optgroup>
+      ) : null}
+      {occasional.length > 0 ? (
+        <optgroup label="📦 ขนส่งอื่นๆ (ใช้เป็นครั้งคราว)">
+          {occasional.map((carrier) => (
+            <option key={carrier.carrier_id} value={carrier.carrier_id}>
+              {carrier.carrier_code} — {carrier.carrier_name}
+            </option>
+          ))}
+        </optgroup>
+      ) : null}
+    </>
+  );
+}
+
 export type DualFreightFieldsProps = {
   carriers: CarrierOption[];
   onCarriersChange: (carriers: CarrierOption[]) => void;
@@ -140,11 +167,7 @@ export function DualFreightFields({
                 className="mt-1 h-9"
               >
                 <option value="">เลือกบริษัทขนส่ง</option>
-                {carriers.map((carrier) => (
-                  <option key={carrier.carrier_id} value={carrier.carrier_id}>
-                    {carrier.carrier_code} — {carrier.carrier_name}
-                  </option>
-                ))}
+                <CarrierOptionGroups carriers={carriers} />
               </Select>
             </div>
             <div>

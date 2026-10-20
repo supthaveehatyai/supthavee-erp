@@ -1373,36 +1373,62 @@ export type Database = {
           carrier_id: string
           carrier_code: string
           carrier_name: string
+          contact_id: string | null
+          carrier_tier: "PRIMARY_MONTHLY" | "OCCASIONAL" | null
+          requires_monthly_receipt: boolean | null
           tax_id: string | null
+          branch_code: string | null
           phone: string | null
+          address: string | null
           default_wht_rate: number | null
           sort_order: number | null
           is_active: boolean | null
           created_at: string | null
+          updated_at: string | null
         }
         Insert: {
           carrier_id?: string
           carrier_code: string
           carrier_name: string
+          contact_id?: string | null
+          carrier_tier?: "PRIMARY_MONTHLY" | "OCCASIONAL" | null
+          requires_monthly_receipt?: boolean | null
           tax_id?: string | null
+          branch_code?: string | null
           phone?: string | null
+          address?: string | null
           default_wht_rate?: number | null
           sort_order?: number | null
           is_active?: boolean | null
           created_at?: string | null
+          updated_at?: string | null
         }
         Update: {
           carrier_id?: string
           carrier_code?: string
           carrier_name?: string
+          contact_id?: string | null
+          carrier_tier?: "PRIMARY_MONTHLY" | "OCCASIONAL" | null
+          requires_monthly_receipt?: boolean | null
           tax_id?: string | null
+          branch_code?: string | null
           phone?: string | null
+          address?: string | null
           default_wht_rate?: number | null
           sort_order?: number | null
           is_active?: boolean | null
           created_at?: string | null
+          updated_at?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "mst_carriers_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       mst_categories: {
         Row: {
@@ -2406,6 +2432,27 @@ export type Database = {
       }
     }
     Views: {
+      vw_carrier_freight_summary: {
+        Row: {
+          document_id: string | null
+          doc_no: string | null
+          doc_date: string | null
+          vendor_name: string | null
+          carrier_id: string | null
+          carrier_code: string | null
+          carrier_name: string | null
+          carrier_tier: "PRIMARY_MONTHLY" | "OCCASIONAL" | null
+          carrier_tax_id: string | null
+          carrier_branch_code: string | null
+          dest_freight_cost: number | null
+          carrier_tracking_no: string | null
+          carrier_receipt_status: string | null
+          carrier_receipt_no: string | null
+          carrier_receipt_date: string | null
+          estimated_wht_1pct: number | null
+        }
+        Relationships: []
+      }
       vw_monthly_profit_summary: {
         Row: {
           cogs: number | null

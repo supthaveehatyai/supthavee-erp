@@ -7,6 +7,7 @@ import {
   listDestFreightSummary,
 } from "@/lib/actions/carrier-actions";
 import type { CarrierOption, DestFreightSummaryRow } from "@/types/carrier";
+import { CarrierOptionGroups } from "@/components/procurement/DualFreightFields";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -126,11 +127,7 @@ export function CarrierFreightSummaryDialog({
               className="mt-1 h-9"
             >
               <option value="">ทุกเจ้า</option>
-              {carriers.map((carrier) => (
-                <option key={carrier.carrier_id} value={carrier.carrier_id}>
-                  {carrier.carrier_name}
-                </option>
-              ))}
+              <CarrierOptionGroups carriers={carriers} />
             </Select>
           </div>
           <div>
@@ -174,7 +171,7 @@ export function CarrierFreightSummaryDialog({
             <p className="text-lg font-bold tabular-nums">฿{formatMoney(totalFreight)}</p>
           </div>
           <div className="rounded-lg bg-slate-50 px-3 py-2">
-            <p className="text-[11px] text-slate-500">หัก ณ ที่จ่าย (ตามอัตราของขนส่ง)</p>
+            <p className="text-[11px] text-slate-500">ยอดหัก ณ ที่จ่าย 1%</p>
             <p className="text-lg font-bold tabular-nums">฿{formatMoney(totalWht)}</p>
           </div>
         </div>
@@ -209,7 +206,11 @@ export function CarrierFreightSummaryDialog({
                 <p className="text-xs text-slate-500">
                   {row.doc_date}
                   {row.vendor_name ? ` · ผู้ขาย ${row.vendor_name}` : ""}
+                  {row.carrier_tax_id ? ` · เลขผู้เสียภาษี ${row.carrier_tax_id}` : ""}
+                  {row.carrier_branch_code ? ` · สาขา ${row.carrier_branch_code}` : ""}
                   {row.carrier_tracking_no ? ` · พัสดุ ${row.carrier_tracking_no}` : ""}
+                  {" · หัก ณ ที่จ่าย 1% ฿"}
+                  {formatMoney(row.estimated_wht_1pct)}
                   {" · "}
                   {row.carrier_receipt_status === "RECEIVED"
                     ? `RECEIVED ${row.carrier_receipt_no ?? ""}`
