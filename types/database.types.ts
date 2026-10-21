@@ -2509,8 +2509,73 @@ export type Database = {
       }
       get_user_access_scope: { Args: never; Returns: string }
       is_period_closed: { Args: { doc_date: string }; Returns: boolean }
+      issue_document_transaction: {
+        Args: {
+          p_document_id: string
+          p_needs_official_no: boolean
+          p_doc_prefix: string
+          p_issue_date: string
+          p_issued_status: string
+          p_payment_status: string
+          p_paid_amount: number
+          p_approval_status?: string | null
+          p_ledger_lines?: Json
+          p_new_items?: Json | null
+          p_sub_total?: number | null
+          p_tax_amount?: number | null
+          p_grand_total?: number | null
+        }
+        Returns: Json
+      }
       issue_credit_note_transaction: {
         Args: { p_document_id: string; p_user_id: string }
+        Returns: Json
+      }
+      process_ar_receipt_transaction: {
+        Args: {
+          p_contact_id: string
+          p_payment_date: string
+          p_payment_method: string
+          p_bank_account_id: string | null
+          p_net_cash_amount: number
+          p_receipt_grand_total: number
+          p_header_wht: number
+          p_reference_no?: string | null
+          p_slip_url?: string | null
+          p_original_file_name?: string | null
+          p_notes?: string | null
+          p_user_id?: string | null
+          p_invoice_allocations?: Json
+          p_cn_allocations?: Json
+          p_deposit_allocations?: Json
+        }
+        Returns: Json
+      }
+      save_manual_goods_receipt_transaction: {
+        Args: {
+          p_should_post_ledger: boolean
+          p_running_prefix: string
+          p_draft_doc_no: string
+          p_doc_date: string
+          p_document_ref: string
+          p_header: Json
+          p_items?: Json
+          p_ledger_lines?: Json
+          p_cost_updates?: Json
+        }
+        Returns: Json
+      }
+      save_goods_receipt_to_ledger_transaction: {
+        Args: {
+          p_running_prefix: string
+          p_doc_date: string
+          p_legacy_header: Json
+          p_legacy_details?: Json
+          p_document_header?: Json
+          p_document_items?: Json
+          p_ledger_lines?: Json
+          p_cost_updates?: Json
+        }
         Returns: Json
       }
       void_document_transaction: {

@@ -7,7 +7,6 @@
 
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { generateDocumentNumber } from "@/lib/actions/document-actions";
 import { requireSessionUserId } from "@/lib/auth/current-user";
 import {
   AR_OUTSTANDING_DOC_TYPES,
@@ -347,22 +346,6 @@ function parseDepositsJson(
   }
 }
 
-function resolvePaymentStatus(
-  grandTotal: number,
-  newPaidAmount: number,
-): "UNPAID" | "PARTIAL" | "PAID" {
-  if (newPaidAmount <= MONEY_EPS) return "UNPAID";
-  if (newPaidAmount >= roundMoney(grandTotal) - MONEY_EPS) return "PAID";
-  return "PARTIAL";
-}
-
-/** Lifecycle status: fully settled documents leave ISSUED → PAID. */
-function resolveSettledDocumentStatus(
-  paymentStatus: "UNPAID" | "PARTIAL" | "PAID",
-): "ISSUED" | "PAID" {
-  return paymentStatus === "PAID" ? "PAID" : "ISSUED";
-}
-
 async function uploadArPaymentSlip(
   supabase: SupabaseClient,
   file: File,
@@ -425,20 +408,130 @@ async function uploadArPaymentSlip(
   return { url, path: objectPath };
 }
 
+async function removeUploadedSlip(
+  supabase: SupabaseClient,
+  path: string | null,
+): Promise<void> {
+  if (!path) return;
+  await supabase.storage.from(DOCUMENT_ATTACHMENTS_BUCKET).remove([path]);
+}
+
+type AppliedCnDoc = {
+  id: string;
+  doc_no: string;
+  allocated_amount: number;
+  previous_status: string;
+  previous_payment_status: string;
+  previous_paid_amount: number;
+  next_status: string;
+  next_payment_status: string;
+  paid_amount: number;
+};
+
+function parseArReceiptRpc(rpcData: unknown): {
+  success: boolean;
+  error: string | null;
+  receiptDocId: string | null;
+  receiptDocNo: string | null;
+  appliedCnDocs: AppliedCnDoc[];
+} {
+  if (typeof rpcData === "string") {
+    const trimmed = rpcData.trim();
+    if (!trimmed) {
+      return {
+        success: false,
+        error: "RPC process_ar_receipt_transaction ไม่คืนผลลัพธ์",
+        receiptDocId: null,
+        receiptDocNo: null,
+        appliedCnDocs: [],
+      };
+    }
+    try {
+      return parseArReceiptRpc(JSON.parse(trimmed) as unknown);
+    } catch {
+      return {
+        success: false,
+        error: trimmed,
+        receiptDocId: null,
+        receiptDocNo: null,
+        appliedCnDocs: [],
+      };
+    }
+  }
+
+  if (rpcData == null || typeof rpcData !== "object") {
+    return {
+      success: false,
+      error: "RPC process_ar_receipt_transaction ไม่คืนผลลัพธ์",
+      receiptDocId: null,
+      receiptDocNo: null,
+      appliedCnDocs: [],
+    };
+  }
+
+  const payload = rpcData as Record<string, unknown>;
+  const errorRaw = payload.error ?? payload.message ?? null;
+  const error =
+    errorRaw != null && String(errorRaw).trim() ? String(errorRaw).trim() : null;
+  const successFlag = payload.success;
+  const success =
+    successFlag === false || successFlag === "false" ? false : error == null;
+
+  const appliedRaw = payload.applied_cn_docs;
+  const appliedCnDocs = Array.isArray(appliedRaw)
+    ? appliedRaw.flatMap((row) => {
+        if (row == null || typeof row !== "object") return [];
+        const item = row as Record<string, unknown>;
+        const id = String(item.id ?? "").trim();
+        if (!id) return [];
+        return [
+          {
+            id,
+            doc_no: String(item.doc_no ?? "").trim() || id,
+            allocated_amount: roundMoney(Number(item.allocated_amount ?? 0)),
+            previous_status: String(item.previous_status ?? "ISSUED"),
+            previous_payment_status: String(
+              item.previous_payment_status ?? "UNPAID",
+            ),
+            previous_paid_amount: roundMoney(
+              Number(item.previous_paid_amount ?? 0),
+            ),
+            next_status: String(item.next_status ?? "ISSUED"),
+            next_payment_status: String(item.next_payment_status ?? "UNPAID"),
+            paid_amount: roundMoney(Number(item.paid_amount ?? 0)),
+          },
+        ];
+      })
+    : [];
+
+  return {
+    success,
+    error,
+    receiptDocId:
+      payload.receipt_doc_id != null ? String(payload.receipt_doc_id) : null,
+    receiptDocNo:
+      payload.receipt_doc_no != null
+        ? String(payload.receipt_doc_no)
+        : payload.doc_no != null
+          ? String(payload.doc_no)
+          : null,
+    appliedCnDocs,
+  };
+}
+
 /**
  * Knock-off payment (AR):
  * 1) Upload slip → Storage (optional)
- * 2) Create REC receipt document (+ attachment URL)
- * 3) Insert payment_transactions
- * 4) Insert document_allocations per invoice
- * 5) Update invoice paid_amount + payment_status
+ * 2) One RPC `process_ar_receipt_transaction` writes REC, payment_transactions,
+ *    document_allocations, invoice/CN balances, and DEP_IN deposit_deducted
+ * 3) Sync billing notes and write the audit trail after the RPC commits
  */
 export async function processPaymentKnockoff(
   formData: FormData,
 ): Promise<ProcessPaymentKnockoffResult> {
   const supabase = createSupabaseServerClient();
-  let receiptDocId: string | null = null;
   let slipStoragePath: string | null = null;
+  let receiptCommitted = false;
 
   try {
     const contactId = String(formData.get("contact_id") ?? "").trim();
@@ -469,6 +562,11 @@ export async function processPaymentKnockoff(
     }
     if (cashAmount < 0 || headerWht < 0) {
       return { success: false, error: "ยอดเงินต้องไม่ติดลบ" };
+    }
+
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { success: false, error: owner.error };
     }
 
     const depositTotal = roundMoney(
@@ -778,14 +876,6 @@ export async function processPaymentKnockoff(
       }
     }
 
-    const numberResult = await generateDocumentNumber("REC", paymentDate);
-    if (!numberResult.data) {
-      return {
-        success: false,
-        error: numberResult.error ?? "สร้างเลขที่ใบเสร็จไม่สำเร็จ",
-      };
-    }
-
     let slipUrl: string | null = null;
     if (slipFile instanceof File && slipFile.size > 0) {
       const uploaded = await uploadArPaymentSlip(supabase, slipFile);
@@ -798,180 +888,69 @@ export async function processPaymentKnockoff(
 
     const receiptGrandTotal = recSummary.totalInvoices;
     const netCashAmount = expectedNetCash;
-    const nowIso = new Date().toISOString();
-    const paymentDateIso = `${paymentDate}T00:00:00.000Z`;
+    const notes = `AR Knock-off | invoices=${sumAllocated} | cash=${netCashAmount} | cn=${cnTotal} | deposit=${depositTotal} | wht=${headerWht}${referenceNo ? ` | ref=${referenceNo}` : ""}`;
 
-    const owner = await requireSessionUserId();
-    if (!owner.ok) {
-      return { success: false, error: owner.error };
-    }
-
-    // 1) REC receipt document
-    // grand_total = Total Invoices (ยอดหนี้เต็มที่ต้องการล้าง) — Phase 5
-    // ไม่ใช่ Net Cash: มัดจำ / CN / WHT อยู่ที่ sub_total, paid_amount, allocations
-    const { data: receipt, error: receiptError } = await supabase
-      .from("documents")
-      .insert({
-        doc_no: numberResult.data,
-        doc_type: "REC",
-        status: "ISSUED",
-        doc_date: paymentDate,
-        contact_id: contactId,
-        sub_total: netCashAmount,
-        discount_amount: 0,
-        tax_rate: 0,
-        tax_amount: 0,
-        wht_rate: 0,
-        wht_amount: headerWht,
-        grand_total: receiptGrandTotal,
-        total_amount: netCashAmount,
-        net_before_vat: netCashAmount,
-        vat_amount: 0,
-        vat_rate: 0,
-        vat_type: "NONE",
-        paid_amount: netCashAmount,
-        payment_status: "PAID",
-        attachment_url: slipUrl,
-        attached_file_url: slipUrl,
-        original_file_name:
+    const { data: rpcData, error: rpcError } = await supabase.rpc(
+      "process_ar_receipt_transaction",
+      {
+        p_contact_id: contactId,
+        p_payment_date: paymentDate,
+        p_payment_method: isCash ? "CASH" : "BANK_TRANSFER",
+        p_bank_account_id: bankAccountId,
+        p_net_cash_amount: netCashAmount,
+        p_receipt_grand_total: receiptGrandTotal,
+        p_header_wht: headerWht,
+        p_reference_no: referenceNo,
+        p_slip_url: slipUrl,
+        p_original_file_name:
           slipFile instanceof File && slipFile.size > 0
             ? slipFile.name.slice(0, 255)
             : null,
-        notes: `AR Knock-off | invoices=${sumAllocated} | cash=${netCashAmount} | cn=${cnTotal} | deposit=${depositTotal} | wht=${headerWht}${referenceNo ? ` | ref=${referenceNo}` : ""}`,
-        created_by: owner.userId,
-        updated_at: nowIso,
-      })
-      .select("id, doc_no")
-      .single();
+        p_notes: notes,
+        p_user_id: owner.userId,
+        p_invoice_allocations: invoiceAllocations.map((row) => ({
+          invoice_id: row.invoice_id,
+          allocated_amount: row.allocated_amount,
+          wht_amount: row.wht_amount,
+        })),
+        p_cn_allocations: cnAllocations.map((row) => ({
+          invoice_id: row.invoice_id,
+          allocated_amount: row.allocated_amount,
+        })),
+        p_deposit_allocations: depositAllocations.map((row) => ({
+          deposit_id: row.deposit_id,
+          allocated_amount: row.allocated_amount,
+        })),
+      },
+    );
 
-    if (receiptError || !receipt) {
-      if (slipStoragePath) {
-        await supabase.storage
-          .from(DOCUMENT_ATTACHMENTS_BUCKET)
-          .remove([slipStoragePath]);
-      }
+    const parsed = parseArReceiptRpc(rpcData);
+    if (rpcError || !parsed.success) {
+      await removeUploadedSlip(supabase, slipStoragePath);
       return {
         success: false,
-        error: receiptError?.message ?? "สร้างใบเสร็จรับเงิน (REC) ไม่สำเร็จ",
+        error:
+          rpcError?.message ??
+          parsed.error ??
+          "สร้างใบเสร็จรับเงิน (REC) ไม่สำเร็จ",
       };
     }
 
-    receiptDocId = receipt.id as string;
-    const receiptDocNo = String(receipt.doc_no);
-
-    // 2) payment_transactions
-    const { error: txError } = await supabase
-      .from("payment_transactions")
-      .insert({
-        document_id: receiptDocId,
-        payment_method: isCash ? "CASH" : "BANK_TRANSFER",
-        bank_account_id: bankAccountId,
-        amount: netCashAmount,
-        reference_no: referenceNo,
-        payment_date: paymentDateIso,
-        attachment_url: slipUrl,
-        is_reconciled: false,
-        is_voided: false,
-      });
-
-    if (txError) {
-      await supabase.from("documents").delete().eq("id", receiptDocId);
-      if (slipStoragePath) {
-        await supabase.storage
-          .from(DOCUMENT_ATTACHMENTS_BUCKET)
-          .remove([slipStoragePath]);
-      }
+    receiptCommitted = true;
+    const receiptDocId = parsed.receiptDocId;
+    const receiptDocNo = parsed.receiptDocNo ?? "";
+    const appliedCnDocs = parsed.appliedCnDocs;
+    if (!receiptDocId || !receiptDocNo) {
       return {
         success: false,
-        error: txError.message ?? "บันทึก payment_transactions ไม่สำเร็จ",
+        error: "สร้างใบเสร็จรับเงิน (REC) ไม่สำเร็จ",
       };
     }
 
-    // 3) document_allocations — invoices + CN + deposits
-    const allocationRows = [
-      ...invoiceAllocations.map((row) => ({
-        receipt_doc_id: receiptDocId,
-        invoice_doc_id: row.invoice_id,
-        allocated_amount: row.allocated_amount,
-        wht_amount: row.wht_amount,
-        adjustment_amount: 0,
-        adjustment_reason: null as string | null,
-      })),
-      ...cnAllocations.map((row) => ({
-        receipt_doc_id: receiptDocId,
-        invoice_doc_id: row.invoice_id,
-        allocated_amount: row.allocated_amount,
-        wht_amount: 0,
-        adjustment_amount: 0,
-        adjustment_reason: "CN_APPLY",
-      })),
-      ...depositAllocations.map((row) => ({
-        receipt_doc_id: receiptDocId,
-        invoice_doc_id: row.deposit_id,
-        allocated_amount: row.allocated_amount,
-        wht_amount: 0,
-        adjustment_amount: 0,
-        adjustment_reason: "DEPOSIT_APPLY",
-      })),
-    ];
-
-    const { error: allocError } = await supabase
-      .from("document_allocations")
-      .insert(allocationRows);
-
-    if (allocError) {
-      await supabase
-        .from("payment_transactions")
-        .delete()
-        .eq("document_id", receiptDocId);
-      await supabase.from("documents").delete().eq("id", receiptDocId);
-      if (slipStoragePath) {
-        await supabase.storage
-          .from(DOCUMENT_ATTACHMENTS_BUCKET)
-          .remove([slipStoragePath]);
-      }
-      return {
-        success: false,
-        error: allocError.message ?? "บันทึก document_allocations ไม่สำเร็จ",
-      };
-    }
-
-    // 4) Update source invoices (paid_amount + payment_status + lifecycle status)
-    const touchedInvoiceIds: string[] = [];
-    for (const alloc of invoiceAllocations) {
-      const invoice = invoiceMap.get(alloc.invoice_id)!;
-      const grandTotal = toMoney(invoice.grand_total ?? invoice.total_amount);
-      const prevPaid = toMoney(invoice.paid_amount);
-      const apply = roundMoney(alloc.allocated_amount);
-      const newPaid = roundMoney(prevPaid + apply);
-      const nextPaymentStatus = resolvePaymentStatus(grandTotal, newPaid);
-      const nextDocStatus = resolveSettledDocumentStatus(nextPaymentStatus);
-
-      const { error: updateError } = await supabase
-        .from("documents")
-        .update({
-          paid_amount: newPaid,
-          payment_status: nextPaymentStatus,
-          status: nextDocStatus,
-          updated_at: nowIso,
-        })
-        .eq("id", alloc.invoice_id);
-
-      if (updateError) {
-        return {
-          success: false,
-          error: `บันทึกใบเสร็จ ${receiptDocNo} แล้ว แต่อัปเดตบิลต้นทางไม่สำเร็จ: ${updateError.message}`,
-          receipt_doc_no: receiptDocNo,
-        };
-      }
-      touchedInvoiceIds.push(alloc.invoice_id);
-    }
-
-    // 4b) Sync parent BN/BR payment_status (COMPLETED / PARTIAL)
-    if (touchedInvoiceIds.length > 0) {
+    if (invoiceAllocations.length > 0) {
       const bnSync = await syncBillingNotesAfterInvoicePayment(
         supabase,
-        touchedInvoiceIds,
+        invoiceAllocations.map((row) => row.invoice_id),
       );
       if (bnSync.error) {
         return {
@@ -982,128 +961,33 @@ export async function processPaymentKnockoff(
       }
     }
 
-    // 5) Update deposit_deducted on applied DEP_IN docs
-    for (const alloc of depositAllocations) {
-      const { data: depositRow, error: depositLoadError } = await supabase
-        .from("documents")
-        .select("id, deposit_deducted, grand_total, doc_no")
-        .eq("id", alloc.deposit_id)
-        .maybeSingle();
-
-      if (depositLoadError || !depositRow) {
-        return {
-          success: false,
-          error: `บันทึกใบเสร็จ ${receiptDocNo} แล้ว แต่อัปเดตมัดจำไม่สำเร็จ`,
-          receipt_doc_no: receiptDocNo,
-        };
-      }
-
-      const prevDeducted = toMoney(depositRow.deposit_deducted);
-      const newDeducted = roundMoney(prevDeducted + alloc.allocated_amount);
-
-      const { error: depositUpdateError } = await supabase
-        .from("documents")
-        .update({
-          deposit_deducted: newDeducted,
-          updated_at: nowIso,
-        })
-        .eq("id", alloc.deposit_id);
-
-      if (depositUpdateError) {
-        return {
-          success: false,
-          error: `บันทึกใบเสร็จ ${receiptDocNo} แล้ว แต่อัปเดตมัดจำไม่สำเร็จ: ${depositUpdateError.message}`,
-          receipt_doc_no: receiptDocNo,
-        };
-      }
-
-      // Best-effort mirror on doc_headers
-      if (depositRow.doc_no) {
-        await supabase
-          .from("doc_headers")
-          .update({ deposit_deducted: newDeducted })
-          .eq("doc_no", depositRow.doc_no)
-          .eq("doc_type", "DEP_IN");
-      }
-    }
-
-    // 6) Update paid_amount on applied CN docs (full use → status PAID)
-    const appliedCnDocs: Array<{
-      id: string;
-      doc_no: string;
-      allocated_amount: number;
-      previous_status: string;
-      next_status: "ISSUED" | "PAID";
-      next_payment_status: "UNPAID" | "PARTIAL" | "PAID";
-    }> = [];
-
-    for (const alloc of cnAllocations) {
-      const creditNote = invoiceMap.get(alloc.invoice_id)!;
-      const grandTotal = toMoney(
-        creditNote.grand_total ?? creditNote.total_amount,
-      );
-      const prevPaid = toMoney(creditNote.paid_amount);
-      const newPaid = roundMoney(prevPaid + alloc.allocated_amount);
-      const nextPaymentStatus = resolvePaymentStatus(grandTotal, newPaid);
-      const nextDocStatus = resolveSettledDocumentStatus(nextPaymentStatus);
-      const cnDocNo = String(creditNote.doc_no ?? "").trim() || alloc.invoice_id;
-
-      const { error: cnUpdateError } = await supabase
-        .from("documents")
-        .update({
-          paid_amount: newPaid,
-          payment_status: nextPaymentStatus,
-          status: nextDocStatus,
-          updated_at: nowIso,
-        })
-        .eq("id", alloc.invoice_id);
-
-      if (cnUpdateError) {
-        return {
-          success: false,
-          error: `บันทึกใบเสร็จ ${receiptDocNo} แล้ว แต่อัปเดตใบลดหนี้ไม่สำเร็จ: ${cnUpdateError.message}`,
-          receipt_doc_no: receiptDocNo,
-        };
-      }
-
-      appliedCnDocs.push({
-        id: alloc.invoice_id,
-        doc_no: cnDocNo,
-        allocated_amount: alloc.allocated_amount,
-        previous_status: String(creditNote.status ?? "ISSUED"),
-        next_status: nextDocStatus,
-        next_payment_status: nextPaymentStatus,
-      });
-
+    for (const cn of appliedCnDocs) {
       const cnAudit = await logAuditTrail(
         "documents",
-        alloc.invoice_id,
+        cn.id,
         "UPDATE",
         {
-          id: alloc.invoice_id,
-          doc_no: cnDocNo,
+          id: cn.id,
+          doc_no: cn.doc_no,
           doc_type: "CN",
-          status: creditNote.status ?? "ISSUED",
-          payment_status: creditNote.payment_status ?? "UNPAID",
-          paid_amount: prevPaid,
+          status: cn.previous_status,
+          payment_status: cn.previous_payment_status,
+          paid_amount: cn.previous_paid_amount,
         },
         {
           audit_event: "CN_KNOCKOFF",
-          id: alloc.invoice_id,
-          doc_no: cnDocNo,
+          id: cn.id,
+          doc_no: cn.doc_no,
           doc_type: "CN",
-          status: nextDocStatus,
-          payment_status: nextPaymentStatus,
-          paid_amount: newPaid,
-          allocated_amount: alloc.allocated_amount,
+          status: cn.next_status,
+          payment_status: cn.next_payment_status,
+          paid_amount: cn.paid_amount,
+          allocated_amount: cn.allocated_amount,
           applied_on_receipt: receiptDocNo,
         },
       );
       if (!cnAudit.success) {
-        console.error(
-          "[processPaymentKnockoff][audit CN]",
-          cnAudit.error,
-        );
+        console.error("[processPaymentKnockoff][audit CN]", cnAudit.error);
       }
     }
 
@@ -1150,21 +1034,8 @@ export async function processPaymentKnockoff(
       receipt_doc_no: receiptDocNo,
     };
   } catch (err) {
-    if (receiptDocId) {
-      await supabase
-        .from("document_allocations")
-        .delete()
-        .eq("receipt_doc_id", receiptDocId);
-      await supabase
-        .from("payment_transactions")
-        .delete()
-        .eq("document_id", receiptDocId);
-      await supabase.from("documents").delete().eq("id", receiptDocId);
-    }
-    if (slipStoragePath) {
-      await supabase.storage
-        .from(DOCUMENT_ATTACHMENTS_BUCKET)
-        .remove([slipStoragePath]);
+    if (!receiptCommitted) {
+      await removeUploadedSlip(supabase, slipStoragePath);
     }
     const message =
       err instanceof Error ? err.message : "ตัดยอดชำระเงินไม่สำเร็จ";

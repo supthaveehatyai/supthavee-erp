@@ -1100,11 +1100,10 @@ async function searchProductsInternal(
 }
 
 /**
- * Finalize a DRAFT sales document:
+ * Finalize a DRAFT sales document in one RPC (`issue_document_transaction`):
  * 1. Snapshot `products.cost_price` → `document_items.unit_cost_price`
- * 2. INSERT all lines into `document_items`
- * 3. Roll up header totals + set status `ISSUED`
- * 4. For stock-moving doc types: INSERT `inventory_ledger` (`trans_type = OUT`)
+ * 2. INSERT all lines, roll up header totals, set status `ISSUED`
+ * 3. For stock-moving doc types: INSERT `inventory_ledger` (`trans_type = OUT`)
  */
 export async function completeDocument(
   input: CompleteDocumentInput,
@@ -1215,35 +1214,36 @@ export async function completeDocument(
         ? Math.round(subTotal * (taxRate / 100) * 100) / 100
         : 0;
     const grandTotal = Math.round((subTotal + taxAmount) * 100) / 100;
-    const nowIso = new Date().toISOString();
-    const issueDate = nowIso.slice(0, 10);
+    const issueDate = new Date().toISOString().slice(0, 10);
     const issuedStatus: DocumentStatus = "ISSUED";
     const draftStatus: DocumentStatus = "DRAFT";
     const docType = document.doc_type as DocumentType;
-
     const previousDocNo = String(document.doc_no ?? "");
-    let officialDocNo = previousDocNo;
-    const needsOfficialNumber = isTemporaryDraftDocNo(previousDocNo);
+    const documentApproval = approvalStatusFields(docType);
+    const paymentStatus = resolveInitialPaymentStatus(docType);
+    const paidAmount = paymentStatus === "PAID" ? grandTotal : 0;
 
     const serviceIds = await loadServiceProductIdSet(supabase, productIds);
+    const ledgerSource = isStockOutDocType(docType)
+      ? excludeServiceLines(
+          lineRows.map((row) => ({
+            product_id: row.product_id,
+            qty: Math.round(Number(row.qty)),
+            unit_cost_price: row.unit_cost_price,
+          })),
+          serviceIds,
+        )
+      : [];
 
-    if (isStockOutDocType(docType)) {
+    if (ledgerSource.length > 0) {
       const settingsResult = await getSystemSettings();
       const allowNegative = settingsResult.success
         ? settingsResult.data.allow_negative_inventory
         : false;
 
-      const stockableLines = excludeServiceLines(
-        lineRows.map((row) => ({
-          product_id: row.product_id,
-          qty: Math.round(Number(row.qty)),
-        })),
-        serviceIds,
-      );
-
       const stockCheck = await assertStockOutAvailability(
         supabase,
-        stockableLines,
+        ledgerSource,
         allowNegative,
       );
 
@@ -1255,111 +1255,48 @@ export async function completeDocument(
       }
     }
 
-    if (needsOfficialNumber) {
-      const numberResult = await generateDocumentNumber(docType, issueDate);
-      if (numberResult.error || !numberResult.data) {
-        return {
-          data: null,
-          error:
-            numberResult.error ??
-            "สร้างเลขที่เอกสารทางการไม่สำเร็จ — ยังไม่ปิดบิล",
-        };
-      }
-      officialDocNo = numberResult.data;
-    }
-
-    const { error: itemsError } = await supabase
-      .from("document_items")
-      .insert(lineRows);
-
-    if (itemsError) {
-      return {
-        data: null,
-        error: itemsError.message ?? "บันทึก document_items ไม่สำเร็จ",
-      };
-    }
-
-    const headerUpdate: Record<string, unknown> = {
-      status: issuedStatus,
-      doc_no: officialDocNo,
-      sub_total: Math.round(subTotal * 100) / 100,
-      tax_amount: taxAmount,
-      grand_total: grandTotal,
-      payment_status: resolveInitialPaymentStatus(document.doc_type as string),
-      paid_amount:
-        resolveInitialPaymentStatus(document.doc_type as string) === "PAID"
-          ? grandTotal
-          : 0,
-      updated_at: nowIso,
-      ...approvalStatusFields(docType),
-    };
-    if (needsOfficialNumber) {
-      headerUpdate.doc_date = issueDate;
-    }
-
-    const { error: headerError } = await supabase
-      .from("documents")
-      .update(headerUpdate)
-      .eq("id", documentId)
-      .eq("status", "DRAFT");
-
-    if (headerError) {
-      await supabase.from("document_items").delete().eq("document_id", documentId);
-      return {
-        data: null,
-        error: headerError.message ?? "อัปเดตสถานะเอกสารเป็น ISSUED ไม่สำเร็จ",
-      };
-    }
-
-    let ledgerCount = 0;
-
-    if (isStockOutDocType(docType)) {
-      const ledgerPayload = excludeServiceLines(
-        lineRows.map((row) => ({
+    const { data: rpcData, error: rpcError } = await supabase.rpc(
+      "issue_document_transaction",
+      {
+        p_document_id: documentId,
+        p_needs_official_no: isTemporaryDraftDocNo(previousDocNo),
+        p_doc_prefix: DOCUMENT_TYPE_PREFIX[docType],
+        p_issue_date: issueDate,
+        p_issued_status: issuedStatus,
+        p_payment_status: paymentStatus,
+        p_paid_amount: paidAmount,
+        p_approval_status: documentApproval.approval_status,
+        p_ledger_lines: ledgerSource.map((row) => ({
           product_id: row.product_id,
-          doc_header_id: null as string | null,
-          trans_type: "OUT",
-          qty: Math.round(Number(row.qty)),
-          notes: `ขายจากเอกสาร ${officialDocNo} | document_id=${documentId} | SKU cost snapshot ${row.unit_cost_price}`,
+          qty: row.qty,
+          notes_suffix: `SKU cost snapshot ${row.unit_cost_price}`,
         })),
-        serviceIds,
-      );
+        p_new_items: lineRows,
+        p_sub_total: Math.round(subTotal * 100) / 100,
+        p_tax_amount: taxAmount,
+        p_grand_total: grandTotal,
+      },
+    );
 
-      if (ledgerPayload.length === 0) {
-        ledgerCount = 0;
-      } else {
-        const { error: ledgerError } = await supabase
-          .from("inventory_ledger")
-          .insert(ledgerPayload);
-
-        if (ledgerError) {
-          await supabase
-            .from("document_items")
-            .delete()
-            .eq("document_id", documentId);
-          await supabase
-            .from("documents")
-            .update({
-              status: draftStatus,
-              // Keep official doc_no if sequence was already consumed.
-              sub_total: 0,
-              tax_amount: 0,
-              grand_total: 0,
-              updated_at: nowIso,
-            })
-            .eq("id", documentId);
-
-          return {
-            data: null,
-            error:
-              ledgerError.message ??
-              "ตัดสต็อก (inventory_ledger OUT) ไม่สำเร็จ — ยกเลิกการปิดบิลแล้ว",
-          };
-        }
-
-        ledgerCount = ledgerPayload.length;
-      }
+    if (rpcError) {
+      return {
+        data: null,
+        error: rpcError.message ?? "ปิดเอกสารไม่สำเร็จ",
+      };
     }
+
+    const parsed = parseIssueCreditNoteRpc(rpcData);
+    if (!parsed.success) {
+      return {
+        data: null,
+        error: parsed.error ?? "ปิดเอกสารไม่สำเร็จ",
+      };
+    }
+
+    const officialDocNo = parsed.docNo || previousDocNo;
+    const ledgerCount = Number.isFinite(parsed.ledgerCount)
+      ? parsed.ledgerCount
+      : 0;
 
     fireDocumentAuditLog({
       recordId: documentId,
@@ -2169,9 +2106,9 @@ export async function updateDraftDocument(
  * Confirm a DRAFT document → ISSUED (or COMPLETED for QT only)
  * and post inventory_ledger OUT rows when applicable.
  *
- * Late Numbering: if `doc_no` starts with `DRAFT-`, assign the official
- * running number via `generate_document_no` and set `doc_date` to today
- * before flipping status (sales ledger table: `documents`).
+ * The real issue path is one RPC, `issue_document_transaction`: late numbering
+ * (`generate_document_no` when `doc_no` starts with `DRAFT-`), header update,
+ * and ledger OUT commit together. Maker-Checker stays DRAFT in this action.
  * Never mutates `products` stock directly — ledger only.
  */
 export async function issueDocument(
@@ -2315,29 +2252,9 @@ export async function issueDocument(
     const grandTotal = Number(document.grand_total ?? 0);
     const paidAmount =
       paymentStatus === "PAID" ? grandTotal : Number(document.paid_amount ?? 0);
-    const nowIso = new Date().toISOString();
-    const issueDate = nowIso.slice(0, 10);
-
-    let officialDocNo = String(document.doc_no ?? "");
-    const updatePayload: {
-      status: DocumentStatus;
-      payment_status: string;
-      paid_amount: number;
-      updated_at: string;
-      approval_status: typeof documentApproval.approval_status;
-      approved_by: null;
-      approved_at: null;
-      doc_no?: string;
-      doc_date?: string;
-    } = {
-      status: issuedStatus,
-      payment_status: paymentStatus,
-      paid_amount: paidAmount,
-      updated_at: nowIso,
-      approval_status: documentApproval.approval_status,
-      approved_by: documentApproval.approved_by,
-      approved_at: documentApproval.approved_at,
-    };
+    const issueDate = new Date().toISOString().slice(0, 10);
+    const draftDocNo = String(document.doc_no ?? "");
+    const needsOfficialNumber = isTemporaryDraftDocNo(draftDocNo);
 
     const stockOutLinesRaw = isStockOutDocType(docType)
       ? lineItems
@@ -2375,72 +2292,45 @@ export async function issueDocument(
       }
     }
 
-    // Late Numbering — consume sequence only when issuing.
-    if (isTemporaryDraftDocNo(officialDocNo)) {
-      const numberResult = await generateDocumentNumber(docType, issueDate);
-      if (numberResult.error || !numberResult.data) {
-        return {
-          data: null,
-          error:
-            numberResult.error ??
-            "สร้างเลขที่เอกสารทางการไม่สำเร็จ — ยังไม่ออกเอกสาร",
-        };
-      }
-      officialDocNo = numberResult.data;
-      updatePayload.doc_no = officialDocNo;
-      updatePayload.doc_date = issueDate;
-    }
+    const { data: rpcData, error: rpcError } = await supabase.rpc(
+      "issue_document_transaction",
+      {
+        p_document_id: id,
+        p_needs_official_no: needsOfficialNumber,
+        p_doc_prefix: DOCUMENT_TYPE_PREFIX[docType],
+        p_issue_date: issueDate,
+        p_issued_status: issuedStatus,
+        p_payment_status: paymentStatus,
+        p_paid_amount: paidAmount,
+        p_approval_status: documentApproval.approval_status,
+        p_ledger_lines: stockOutLines.map((row) => ({
+          product_id: row.product_id,
+          qty: row.qty,
+          notes_suffix: `ออกเอกสาร ${issuedStatus}`,
+        })),
+      },
+    );
 
-    const { error: statusError } = await supabase
-      .from("documents")
-      .update(updatePayload)
-      .eq("id", id)
-      .eq("status", "DRAFT");
-
-    if (statusError) {
+    if (rpcError) {
       return {
         data: null,
-        error:
-          statusError.message ??
-          `อัปเดตสถานะเอกสารเป็น ${issuedStatus} ไม่สำเร็จ`,
+        error: rpcError.message ?? `อัปเดตสถานะเอกสารเป็น ${issuedStatus} ไม่สำเร็จ`,
       };
     }
 
-    let ledgerCount = 0;
-
-    if (stockOutLines.length > 0) {
-      const ledgerPayload = stockOutLines.map((row) => ({
-        product_id: row.product_id,
-        doc_header_id: null as string | null,
-        trans_type: "OUT",
-        qty: row.qty,
-        notes: `ขายจากเอกสาร ${officialDocNo} | document_id=${id} | ออกเอกสาร ${issuedStatus}`,
-      }));
-
-      const { error: ledgerError } = await supabase
-        .from("inventory_ledger")
-        .insert(ledgerPayload);
-
-      if (ledgerError) {
-        // Keep official doc_no if already assigned (sequence already consumed).
-        await supabase
-          .from("documents")
-          .update({
-            status: "DRAFT" satisfies DocumentStatus,
-            updated_at: nowIso,
-          })
-          .eq("id", id);
-
-        return {
-          data: null,
-          error:
-            ledgerError.message ??
-            "ตัดสต็อก (inventory_ledger OUT) ไม่สำเร็จ — คืนสถานะ DRAFT แล้ว",
-        };
-      }
-
-      ledgerCount = ledgerPayload.length;
+    const parsed = parseIssueCreditNoteRpc(rpcData);
+    if (!parsed.success) {
+      return {
+        data: null,
+        error: parsed.error ?? `อัปเดตสถานะเอกสารเป็น ${issuedStatus} ไม่สำเร็จ`,
+      };
     }
+
+    const officialDocNo = parsed.docNo || draftDocNo;
+    const ledgerCount = Number.isFinite(parsed.ledgerCount)
+      ? parsed.ledgerCount
+      : 0;
+    const nextStatus = parsed.status || issuedStatus;
 
     // Audit Trail (non-blocking) — DRAFT → ISSUED / COMPLETED
     fireDocumentAuditLog({
@@ -2458,12 +2348,10 @@ export async function issueDocument(
         id,
         doc_no: officialDocNo,
         doc_type: docType,
-        status: issuedStatus,
+        status: nextStatus,
         payment_status: paymentStatus,
         paid_amount: paidAmount,
-        ...(updatePayload.doc_date
-          ? { doc_date: updatePayload.doc_date }
-          : {}),
+        ...(needsOfficialNumber ? { doc_date: issueDate } : {}),
       },
     });
 
@@ -2473,7 +2361,7 @@ export async function issueDocument(
       data: {
         document_id: id,
         document_no: officialDocNo,
-        status: issuedStatus,
+        status: nextStatus,
         ledger_count: ledgerCount,
         pending_approval: pendingApproval,
         successMessage: buildIssueSuccessMessage(officialDocNo, pendingApproval, {
