@@ -2,13 +2,17 @@
 
 /**
  * ปุ่มสำรอง / กู้คืนบน Executive Dashboard
- * Backup ดาวน์โหลด JSON, Restore อัปโหลดไฟล์แล้วเลือกตารางก่อนยืนยันด้วย PIN
+ * Backup ดาวน์โหลด JSON, Restore ส่งแถวขึ้นเซิร์ฟเวอร์ทีละ 500 แถว
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Database, Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
-import { parseBackupText, readBackupFileText } from "@/lib/backup/backup-file";
+import {
+  parseBackupText,
+  readBackupFileText,
+  type BackupRow,
+} from "@/lib/backup/backup-file";
 import {
   BACKUP_MODULE_KEYS,
   BACKUP_MODULE_LABELS,
@@ -17,7 +21,11 @@ import {
   type BackupModuleKey,
   type BackupModuleSelection,
 } from "@/lib/backup/backup-modules";
-import { orderTablesForRestore } from "@/lib/backup/restore-rows";
+import {
+  RESTORE_UPSERT_BATCH,
+  orderTablesForRestore,
+  sortRowsForRestore,
+} from "@/lib/backup/restore-rows";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
 import { Button } from "@/components/ui/button";
 import {
@@ -59,18 +67,34 @@ type RestoreProgress = {
   total: number;
 };
 
+type RestoreResult = {
+  table: string;
+  rows: number;
+};
+
+type SkippedTable = {
+  table: string;
+  reason: string;
+};
+
+function populatedNames(tables: PreviewTable[]): string[] {
+  return tables.filter((item) => item.rows > 0).map((item) => item.table);
+}
+
 export function ManualBackupButton() {
   const [open, setOpen] = useState(false);
   const [moduleName, setModuleName] = useState<BackupModuleSelection>("all");
   const [isDownloading, setIsDownloading] = useState(false);
-  const [backupFile, setBackupFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PreviewTable[] | null>(null);
   const [summary, setSummary] = useState<BackupSummary | null>(null);
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
-  const [pin, setPin] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
   const [progress, setProgress] = useState<RestoreProgress | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
+  const rowsRef = useRef<Record<string, BackupRow[]>>({});
+  const moduleRef = useRef<string | null>(null);
 
   async function handleDownload() {
     if (isDownloading) return;
@@ -112,16 +136,21 @@ export function ManualBackupButton() {
   }
 
   async function handleFile(file: File | null) {
-    setBackupFile(file);
     setPreview(null);
     setSummary(null);
     setSelectedTables([]);
+    setConfirmed(false);
     setProgress(null);
+    setRestoreError(null);
+    rowsRef.current = {};
+    moduleRef.current = null;
     if (!file) return;
 
     setIsPreviewing(true);
     try {
       const payload = parseBackupText(await readBackupFileText(file));
+      rowsRef.current = payload.data;
+      moduleRef.current = payload.module;
       const tables = orderTablesForRestore(
         Object.keys(payload.data).filter((table) => Array.isArray(payload.data[table])),
       ).map((table) => ({
@@ -130,6 +159,7 @@ export function ManualBackupButton() {
       }));
       const populated = tables.filter((item) => item.rows > 0);
       setPreview(tables);
+      setSelectedTables(populated.map((item) => item.table));
       setSummary({
         filename: file.name,
         exportedAt: payload.exportedAt,
@@ -148,9 +178,7 @@ export function ManualBackupButton() {
     if (!preview) return;
     const allowed = new Set(tablesForModule(option));
     setSelectedTables(
-      preview
-        .map((item) => item.table)
-        .filter((table) => option === "all" || allowed.has(table)),
+      populatedNames(preview).filter((table) => option === "all" || allowed.has(table)),
     );
   }
 
@@ -162,80 +190,89 @@ export function ManualBackupButton() {
     );
   }
 
-  async function handleRestore() {
-    if (!backupFile || isRestoring || selectedTables.length === 0) return;
-    setIsRestoring(true);
-    setProgress({ table: "กำลังเริ่ม", index: 0, total: selectedTables.length });
+  async function readRestorePayload(response: Response): Promise<{
+    error?: string;
+    skipped?: boolean;
+    reason?: string;
+  } | null> {
+    const text = await response.text();
+    if (!text) return null;
     try {
-      const body = new FormData();
-      body.set("mode", "execute");
-      body.set("file", backupFile);
-      body.set("pin", pin);
-      body.set("selectedTables", JSON.stringify(selectedTables));
-      const response = await fetch("/api/backup/restore", { method: "POST", body });
-      const contentType = response.headers.get("content-type") ?? "";
-      if (!response.ok || !contentType.includes("ndjson")) {
-        const payload = (await response.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        toast.error(payload?.error ?? "กู้คืนข้อมูลไม่สำเร็จ");
-        return;
-      }
+      return JSON.parse(text) as { error?: string; skipped?: boolean; reason?: string };
+    } catch {
+      return { error: text.slice(0, 300) || `HTTP ${response.status}` };
+    }
+  }
 
-      const reader = response.body?.getReader();
-      if (!reader) {
-        toast.error("กู้คืนข้อมูลไม่สำเร็จ");
-        return;
-      }
+  async function handleRestore() {
+    if (isRestoring || !preview || !confirmed || selectedTables.length === 0) return;
+    const ordered = orderTablesForRestore(selectedTables);
+    setIsRestoring(true);
+    setRestoreError(null);
+    setProgress({ table: ordered[0] ?? "", index: 1, total: ordered.length });
 
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let restoredCount = 0;
-      let skippedCount = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const event = JSON.parse(line) as {
-            type?: string;
-            table?: string;
-            index?: number;
-            total?: number;
-            error?: string;
-            restored?: { table: string }[];
-            skipped_tables?: { table: string }[];
-          };
-          if (event.type === "progress" && event.table) {
-            setProgress({
-              table: event.table,
-              index: event.index ?? 0,
-              total: event.total ?? selectedTables.length,
-            });
+    const restored: RestoreResult[] = [];
+    const skipped: SkippedTable[] = [];
+
+    try {
+      for (let index = 0; index < ordered.length; index += 1) {
+        const table = ordered[index];
+        setProgress({ table, index: index + 1, total: ordered.length });
+        const rows = sortRowsForRestore(table, rowsRef.current[table] ?? []);
+        if (rows.length === 0) {
+          restored.push({ table, rows: 0 });
+          continue;
+        }
+
+        let tableSkipped = false;
+        for (let offset = 0; offset < rows.length; offset += RESTORE_UPSERT_BATCH) {
+          const batch = rows.slice(offset, offset + RESTORE_UPSERT_BATCH);
+          const response = await fetch("/api/backup/restore", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ table, rows: batch }),
+          });
+          const payload = await readRestorePayload(response);
+          if (!response.ok || payload?.error) {
+            const raw = payload?.error || `HTTP ${response.status}`;
+            const detail =
+              raw === "Forbidden" ? "ต้องล็อกอินด้วยสิทธิ์ Admin" : raw;
+            const message = detail.startsWith("กู้คืนข้อมูลไม่สำเร็จที่ตาราง")
+              ? detail
+              : `กู้คืนข้อมูลไม่สำเร็จที่ตาราง ${table}: ${detail}`;
+            throw new Error(message);
           }
-          if (event.type === "error") {
-            throw new Error(event.error || "กู้คืนข้อมูลไม่สำเร็จ");
-          }
-          if (event.type === "done") {
-            restoredCount = event.restored?.length ?? 0;
-            skippedCount = event.skipped_tables?.length ?? 0;
+          if (payload?.skipped) {
+            skipped.push({ table, reason: payload.reason ?? "ไม่มีตารางใน schema" });
+            tableSkipped = true;
+            break;
           }
         }
+        if (!tableSkipped) restored.push({ table, rows: rows.length });
       }
 
+      await fetch("/api/backup/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "audit",
+          module: moduleRef.current,
+          restored,
+          skipped_tables: skipped,
+        }),
+      });
+
       toast.success(
-        `กู้คืน ${restoredCount.toLocaleString("th-TH")} ตารางแล้ว` +
-          (skippedCount > 0
-            ? ` (ข้าม ${skippedCount.toLocaleString("th-TH")} ตารางที่ไม่มีใน schema)`
+        `กู้คืน ${restored.length.toLocaleString("th-TH")} ตารางแล้ว` +
+          (skipped.length > 0
+            ? ` (ข้าม ${skipped.length.toLocaleString("th-TH")} ตารางที่ไม่มีใน schema)`
             : ""),
       );
-      setPin("");
       setProgress(null);
+      setConfirmed(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "กู้คืนข้อมูลไม่สำเร็จ";
+      setRestoreError(msg);
       toast.error(msg);
     } finally {
       setIsRestoring(false);
@@ -257,16 +294,16 @@ export function ManualBackupButton() {
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-5xl gap-3 p-5">
-          <DialogHeader className="mb-2">
+        <DialogContent className="flex max-h-[90vh] max-w-5xl flex-col gap-3 overflow-hidden p-5">
+          <DialogHeader className="mb-0 shrink-0">
             <DialogTitle>สำรองและกู้คืนข้อมูล (Backup & Restore)</DialogTitle>
             <DialogDescription>
-              เลือกไฟล์จาก {DEFAULT_GOOGLE_DRIVE_BACKUP_DIR} แล้วกู้คืนเฉพาะตารางที่ต้องการ
+              ดาวน์โหลดไฟล์ JSON หรือเลือกไฟล์ Backup แล้วกู้คืนเฉพาะตารางที่ต้องการ
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid items-stretch gap-3 md:grid-cols-2">
-            <section className="flex h-full flex-col justify-between space-y-3 rounded-xl border border-slate-200 p-4">
+          <div className="grid min-h-0 flex-1 items-stretch gap-3 md:grid-cols-2">
+            <section className="flex h-full min-h-0 flex-col justify-between rounded-xl border border-slate-200 p-4">
               <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-slate-800">
                   สำรองข้อมูล (Backup)
@@ -292,9 +329,14 @@ export function ManualBackupButton() {
                     </label>
                   ))}
                 </fieldset>
-                <pre className="whitespace-pre-wrap font-mono text-[11px] leading-snug text-slate-500">
-                  {NAS_CLI}
-                </pre>
+                <details className="text-xs text-slate-500">
+                  <summary className="cursor-pointer select-none">
+                    คำสั่ง CLI สำหรับนักพัฒนา
+                  </summary>
+                  <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] leading-snug">
+                    {NAS_CLI}
+                  </pre>
+                </details>
               </div>
               <Button
                 type="button"
@@ -311,7 +353,7 @@ export function ManualBackupButton() {
               </Button>
             </section>
 
-            <section className="flex h-full flex-col justify-between space-y-3 rounded-xl border border-slate-200 p-4">
+            <section className="flex h-full min-h-0 flex-col justify-between rounded-xl border border-slate-200 p-4">
               <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-slate-800">
                   กู้คืนข้อมูล (Restore)
@@ -380,72 +422,77 @@ export function ManualBackupButton() {
                         </Button>
                       ))}
                     </div>
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                      {preview.map((item) => (
-                        <label
-                          key={item.table}
-                          className="flex items-center gap-1.5 text-xs text-slate-700"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedTables.includes(item.table)}
-                            disabled={busy}
-                            onChange={() => toggleTable(item.table)}
-                          />
-                          <span className="truncate font-mono">{item.table}</span>
-                          <span className="text-slate-400">
-                            {item.rows.toLocaleString("th-TH")}
-                          </span>
-                        </label>
-                      ))}
+                    <div className="max-h-44 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                        {preview.map((item) => {
+                          const empty = item.rows === 0;
+                          return (
+                            <label
+                              key={item.table}
+                              className={`flex items-center gap-1.5 text-xs ${
+                                empty ? "text-slate-400" : "text-slate-700"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedTables.includes(item.table)}
+                                disabled={busy}
+                                onChange={() => toggleTable(item.table)}
+                              />
+                              <span className="truncate font-mono">{item.table}</span>
+                              <span className={empty ? "text-slate-300" : "text-slate-400"}>
+                                {item.rows.toLocaleString("th-TH")}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
                     </div>
                   </>
                 ) : null}
 
-                <label className="block text-sm">
-                  <span className="mb-1 block text-xs font-medium text-slate-700">
-                    รหัส PIN 6 หลักของ Admin
-                  </span>
+                <label className="flex items-start gap-2 text-xs text-slate-700">
                   <input
-                    type="password"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    maxLength={6}
-                    value={pin}
-                    disabled={busy}
-                    onChange={(event) =>
-                      setPin(event.target.value.replace(/\D/g, "").slice(0, 6))
-                    }
-                    className="h-9 w-36 rounded-lg border border-slate-200 px-3 font-mono tracking-[0.3em]"
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={confirmed}
+                    disabled={busy || !preview}
+                    onChange={(event) => setConfirmed(event.target.checked)}
                   />
+                  <span>ยืนยันการเขียนทับข้อมูลเดิมในตารางที่เลือก</span>
                 </label>
 
                 {progress ? (
                   <div className="space-y-1">
                     <p className="text-xs text-slate-600">
-                      กำลังกู้คืน {progress.table} ({progress.index}/
-                      {progress.total})
+                      กำลังกู้คืน {progress.table} ({progress.index}/{progress.total})
                     </p>
                     <div className="h-1.5 rounded-full bg-slate-100">
                       <div
                         className="h-1.5 rounded-full bg-blue-600"
                         style={{
-                          width: `${progress.total > 0 ? Math.round((progress.index / progress.total) * 100) : 0}%`,
+                          width: `${
+                            progress.total > 0
+                              ? Math.round((progress.index / progress.total) * 100)
+                              : 0
+                          }%`,
                         }}
                       />
                     </div>
                   </div>
+                ) : null}
+
+                {restoreError ? (
+                  <p className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-700">
+                    {restoreError}
+                  </p>
                 ) : null}
               </div>
               <Button
                 type="button"
                 className="mt-3 w-full gap-2"
                 disabled={
-                  isRestoring ||
-                  !backupFile ||
-                  !preview ||
-                  selectedTables.length === 0 ||
-                  pin.length !== 6
+                  isRestoring || !preview || selectedTables.length === 0 || !confirmed
                 }
                 onClick={handleRestore}
               >

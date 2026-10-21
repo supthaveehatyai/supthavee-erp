@@ -1,10 +1,25 @@
 import { RESTORE_TABLE_ORDER, upsertConflictColumn } from "@/lib/backup/backup-modules";
 import type { BackupRow } from "@/lib/backup/backup-file";
 
+export const RESTORE_UPSERT_BATCH = 500;
+
 export type UpsertOptions = {
   onConflict?: string;
   ignoreDuplicates?: boolean;
 };
+
+const FIXED_CONFLICT: Record<string, string> = {
+  system_parameters: "param_key",
+  app_roles: "role_code",
+  mst_uom: "uom_id",
+  mst_carriers: "carrier_id",
+};
+
+function columnPresent(row: BackupRow | undefined, column: string): boolean {
+  if (!row || !Object.prototype.hasOwnProperty.call(row, column)) return false;
+  const value = row[column];
+  return value != null && value !== "";
+}
 
 export function orderTablesForRestore(tables: string[]): string[] {
   const rank = new Map<string, number>(
@@ -34,14 +49,24 @@ export function resolveUpsertOptions(
   if (table === "audit_logs") {
     return { onConflict: "id", ignoreDuplicates: true };
   }
-  if (table === "vendor_product_mapping") {
-    if (firstRow && firstRow.id != null && firstRow.id !== "") {
-      return { onConflict: "id" };
-    }
-    if (firstRow && firstRow.mapping_id != null && firstRow.mapping_id !== "") {
-      return { onConflict: "mapping_id" };
-    }
-    return {};
+
+  const fixed = FIXED_CONFLICT[table];
+  if (fixed) return { onConflict: fixed };
+
+  if (columnPresent(firstRow, "id")) {
+    return { onConflict: "id" };
   }
-  return { onConflict: upsertConflictColumn(table) };
+
+  if (firstRow) {
+    const detected = Object.keys(firstRow).find(
+      (column) =>
+        columnPresent(firstRow, column) &&
+        (column === "mapping_id" || column.endsWith("_key")),
+    );
+    if (detected) return { onConflict: detected };
+  }
+
+  const fallback = upsertConflictColumn(table);
+  if (columnPresent(firstRow, fallback)) return { onConflict: fallback };
+  return {};
 }
