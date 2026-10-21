@@ -214,3 +214,10 @@ CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names listed below. DO NOT i
   vw\_monthly\_profit\_summary (product\_cogs, wage\_cogs, cogs = เสื้อเปล่า + ค่าแรง)
   vw\_sales\_profit\_analysis (กำไรต่อบิล — product\_cogs + document\_items.wage\_cost = total\_cogs)
 
+7. มาตรฐานค่าขนส่ง 2 ทิศทาง (Dual-Freight Landed Cost) และการแปลงหน่วยนับจัดซื้อ (TAS 2 Compliance)
+- การแยกค่าขนส่งต้นทางและปลายทาง (Origin vs Destination Freight):
+  1. ค่าขนส่งต้นทาง (Origin Freight / freight_cost): ค่าขนส่งที่ผู้ขายสินค้าเรียกเก็บมาในใบแจ้งหนี้/ใบกำกับภาษีเดียวกัน ระบบจะนำไปรวมคำนวณยอดเจ้าหนี้ผู้ขาย (Vendor AP) ตามโหมดภาษีค่าขนส่ง (INCLUDED_IN_TAX หรือ SEPARATE_NON_VAT) และปันส่วนเข้าต้นทุนสินค้า
+  2. ค่าขนส่งปลายทาง (Destination Freight / dest_freight_cost): ค่าขนส่งที่กิจการจ่ายให้บริษัทขนส่งแยกต่างหาก (ระบุผู้ขนส่งจากตาราง mst_carriers) ระบบจะนำมารวมปันส่วนเป็นต้นทุนสินค้าเข้าคลัง (Landed Cost ตามมาตรฐาน TAS 2) แต่ห้ามนำไปรวมในยอดเจ้าหนี้ของผู้ขายสินค้า (Vendor AP) โดยเด็ดขาด และระบบจะคำนวณภาษีหัก ณ ที่จ่ายค่าขนส่ง 1% ผ่านมุมมอง vw_carrier_freight_summary
+- การคำนวณต้นทุนถัวเฉลี่ยเคลื่อนที่ (Moving Average Cost):
+  ทุกครั้งที่มีการรับสินค้าเข้าคลัง (Goods Receipt ทั้ง OCR และ Manual) หรือการปรับปรุงสต็อกขาเข้า (STK_ADJ ที่ระบุต้นทุน) ระบบต้องดึงยอดคงเหลือทางกายภาพจาก RPC get_on_hand_qty_by_product_ids "ก่อน" การบันทึกรายการรับเข้าใหม่ลง inventory_ledger เสมอ เพื่อนำมาถัวเฉลี่ยกับต้นทุนล็อตใหม่ (หลังแปลงหน่วยนับจัดซื้อเป็นหน่วยฐานด้วย uom_conversion_factor) แล้วจึงอัปเดตลง products.cost_price
+
