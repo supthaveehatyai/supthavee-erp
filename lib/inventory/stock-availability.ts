@@ -4,14 +4,13 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
+import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
+import type { Database } from "@/src/types/supabase";
 
 export type StockOutDemandLine = {
   product_id: string;
   qty: number;
-};
-
-type ServiceJoin = {
-  is_service?: boolean | null;
 };
 
 function unwrapJoin<T>(value: T | T[] | null | undefined): T | null {
@@ -23,8 +22,7 @@ function unwrapJoin<T>(value: T | T[] | null | undefined): T | null {
  * Product IDs whose `product_models.is_service = true` — skip stock check / ledger OUT.
  */
 export async function loadServiceProductIdSet(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: SupabaseClient<any>,
+  supabase: SupabaseClient<Database>,
   productIds: string[],
 ): Promise<Set<string>> {
   const ids = [...new Set(productIds.map((id) => id.trim()).filter(Boolean))];
@@ -42,7 +40,7 @@ export async function loadServiceProductIdSet(
 
   const serviceIds = new Set<string>();
   for (const row of data ?? []) {
-    const model = unwrapJoin(row.product_models as ServiceJoin | ServiceJoin[] | null);
+    const model = unwrapJoin(row.product_models);
     if (model?.is_service === true) {
       serviceIds.add(String(row.id));
     }
@@ -64,14 +62,6 @@ function toQty(value: number | string | null | undefined): number {
   return n;
 }
 
-function signedLedgerQty(transType: string | null | undefined, qty: number): number {
-  const t = String(transType ?? "").trim().toUpperCase();
-  if (t === "OUT") return -Math.abs(qty);
-  if (t === "IN") return Math.abs(qty);
-  // ADJUST / unknown — treat signed as stored qty direction
-  return qty;
-}
-
 /* -------------------------------------------------------------------------- */
 /* Soft Allocation — Committed Stock from SO (ISSUED)                         */
 /* -------------------------------------------------------------------------- */
@@ -84,8 +74,7 @@ function signedLedgerQty(transType: string | null | undefined, qty: number): num
  * Available Stock (ATP) = Physical Stock − Committed Stock
  */
 export async function getCommittedStockByProducts(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: SupabaseClient<any>,
+  supabase: SupabaseClient<Database>,
   productIds: string[],
 ): Promise<Map<string, number>> {
   const committed = new Map<string, number>();
@@ -96,51 +85,72 @@ export async function getCommittedStockByProducts(
 
   // 1. Find all SO ISSUED documents that still need fulfillment
   //    (no active child billing doc — i.e. not yet converted to INV_DO/TAX_INV etc.)
-  const { data: soDocIds, error: soError } = await supabase
-    .from("documents")
-    .select("id")
-    .eq("doc_type", "SO")
-    .eq("status", "ISSUED")
-    .or("is_voided.is.null,is_voided.eq.false");
+  const soPage = await fetchAllPages<{ id: string }>((from, to) =>
+    supabase
+      .from("documents")
+      .select("id")
+      .eq("doc_type", "SO")
+      .eq("status", "ISSUED")
+      .or("is_voided.is.null,is_voided.eq.false")
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
 
-  if (soError || !soDocIds || soDocIds.length === 0) {
+  if (soPage.error || soPage.data.length === 0) {
     return committed;
   }
 
-  const allSoIds = soDocIds.map((d: { id: string }) => d.id);
+  const allSoIds = soPage.data.map((row) => row.id);
 
   // 2. Exclude SOs that already have an active child document (fulfilled)
-  const { data: fulfilledRows } = await supabase
-    .from("documents")
-    .select("ref_document_id")
-    .in("ref_document_id", allSoIds)
-    .not("status", "in", '("CANCELLED","VOID")');
+  const fulfilledSoIds = new Set<string>();
+  const idChunk = 200;
+  for (let i = 0; i < allSoIds.length; i += idChunk) {
+    const chunk = allSoIds.slice(i, i + idChunk);
+    const fulfilledPage = await fetchAllPages<{
+      ref_document_id: string | null;
+    }>((from, to) =>
+      supabase
+        .from("documents")
+        .select("ref_document_id")
+        .in("ref_document_id", chunk)
+        .not("status", "in", '("CANCELLED","VOID")')
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+    if (fulfilledPage.error) continue;
+    for (const row of fulfilledPage.data) {
+      if (row.ref_document_id) {
+        fulfilledSoIds.add(String(row.ref_document_id));
+      }
+    }
+  }
 
-  const fulfilledSoIds = new Set(
-    (fulfilledRows ?? []).map((r: { ref_document_id: string }) =>
-      String(r.ref_document_id),
-    ),
-  );
-  const openSoIds = allSoIds.filter(
-    (id: string) => !fulfilledSoIds.has(id),
-  );
+  const openSoIds = allSoIds.filter((id) => !fulfilledSoIds.has(id));
 
   if (openSoIds.length === 0) return committed;
 
   // 3. Sum qty from document_items for open SOs, filtered to requested product_ids
-  const chunkSize = 200;
-  for (let i = 0; i < openSoIds.length; i += chunkSize) {
-    const chunk = openSoIds.slice(i, i + chunkSize);
-    const { data: items, error: itemsError } = await supabase
-      .from("document_items")
-      .select("product_id, qty")
-      .in("document_id", chunk)
-      .in("product_id", ids);
+  for (let i = 0; i < openSoIds.length; i += idChunk) {
+    const chunk = openSoIds.slice(i, i + idChunk);
+    const itemsPage = await fetchAllPages<{
+      product_id: string | null;
+      qty: number | null;
+    }>((from, to) =>
+      supabase
+        .from("document_items")
+        .select("product_id, qty")
+        .in("document_id", chunk)
+        .in("product_id", ids)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
 
-    if (itemsError) continue;
+    if (itemsPage.error) continue;
 
-    for (const item of items ?? []) {
-      const pid = String(item.product_id);
+    for (const item of itemsPage.data) {
+      const pid = String(item.product_id ?? "");
+      if (!pid) continue;
       const qty = Math.abs(toQty(item.qty));
       if (qty > 0) {
         committed.set(pid, (committed.get(pid) ?? 0) + qty);
@@ -157,8 +167,7 @@ export async function getCommittedStockByProducts(
  * When false and any SKU has demand > available → error "สต็อกไม่เพียงพอ".
  */
 export async function assertStockOutAvailability(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: SupabaseClient<any>,
+  supabase: SupabaseClient<Database>,
   lines: StockOutDemandLine[],
   allowNegativeInventory: boolean,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -182,32 +191,14 @@ export async function assertStockOutAvailability(
   }
 
   const productIds = [...demandByProduct.keys()];
-  const balanceByProduct = new Map<string, number>();
-  for (const id of productIds) balanceByProduct.set(id, 0);
-
-  const chunkSize = 200;
-  for (let i = 0; i < productIds.length; i += chunkSize) {
-    const chunk = productIds.slice(i, i + chunkSize);
-    const { data: ledgerRows, error: ledgerError } = await supabase
-      .from("inventory_ledger")
-      .select("product_id, qty, trans_type")
-      .in("product_id", chunk);
-
-    if (ledgerError) {
-      return {
-        ok: false,
-        error:
-          ledgerError.message ??
-          "ตรวจสอบยอดคงเหลือจาก inventory_ledger ไม่สำเร็จ",
-      };
-    }
-
-    for (const row of ledgerRows ?? []) {
-      const pid = String(row.product_id);
-      const signed = signedLedgerQty(row.trans_type, toQty(row.qty));
-      balanceByProduct.set(pid, (balanceByProduct.get(pid) ?? 0) + signed);
-    }
+  const onHand = await fetchOnHandQtyByProductIds(supabase, productIds);
+  if (onHand.error) {
+    return {
+      ok: false,
+      error: onHand.error,
+    };
   }
+  const balanceByProduct = onHand.balances;
 
   // ── Soft Allocation: deduct SO committed qty from available ──
   const committedByProduct = await getCommittedStockByProducts(
@@ -235,12 +226,7 @@ export async function assertStockOutAvailability(
     .select("id, sku")
     .in("id", shortfalls);
 
-  const skuById = new Map(
-    ((products ?? []) as { id: string; sku: string }[]).map((p) => [
-      p.id,
-      p.sku,
-    ]),
-  );
+  const skuById = new Map((products ?? []).map((p) => [p.id, p.sku]));
 
   const details = shortfalls
     .map((id) => {

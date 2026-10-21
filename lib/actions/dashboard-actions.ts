@@ -16,6 +16,7 @@ import {
   type SalesChannelCode,
 } from "@/lib/constants/document";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
+import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import type {
   GetSalesByChannelResult,
   SalesByChannelDatum,
@@ -99,26 +100,33 @@ export async function getSalesByChannel(
       };
     }
 
+    const dateFrom = from;
+    const dateTo = to;
     const supabase = createSupabaseServerClient();
-    const { data, error } = await supabase
-      .from("documents")
-      .select("sales_channel, grand_total")
-      .in("doc_type", [...CHANNEL_SALES_DOC_TYPES])
-      .in("status", [...CHANNEL_SALES_STATUSES])
-      .not("is_voided", "eq", true)
-      .gte("doc_date", from)
-      .lte("doc_date", to);
+    const page = await fetchAllPages<ChannelSalesRow>((pageFrom, pageTo) =>
+      supabase
+        .from("documents")
+        .select("sales_channel, grand_total")
+        .in("doc_type", [...CHANNEL_SALES_DOC_TYPES])
+        .in("status", [...CHANNEL_SALES_STATUSES])
+        .not("is_voided", "eq", true)
+        .gte("doc_date", dateFrom)
+        .lte("doc_date", dateTo)
+        .order("doc_date", { ascending: true })
+        .order("id", { ascending: true })
+        .range(pageFrom, pageTo),
+    );
 
-    if (error) {
-      console.error("[getSalesByChannel]", error.message);
-      return { data: emptyChannelSeries(), error: error.message };
+    if (page.error) {
+      console.error("[getSalesByChannel]", page.error.message);
+      return { data: emptyChannelSeries(), error: page.error.message };
     }
 
     const totals = new Map<SalesChannelCode, number>(
       SALES_CHANNELS.map((channel) => [channel, 0]),
     );
 
-    for (const row of (data ?? []) as ChannelSalesRow[]) {
+    for (const row of page.data) {
       const channel = normalizeChannel(row.sales_channel);
       const next = roundMoney((totals.get(channel) ?? 0) + toMoney(row.grand_total));
       totals.set(channel, next);

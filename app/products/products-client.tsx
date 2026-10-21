@@ -3,7 +3,6 @@
 import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { supabase } from "@/lib/supabase";
 import {
   buildSizeSortIndex,
   compareSizesBySortOrder,
@@ -51,7 +50,11 @@ import {
   overwriteDraftProductModel,
   updateProductModel,
 } from "./actions/product-matrix";
-import { deleteProductModel } from "@/lib/actions/product-actions";
+import {
+  deactivateProductsByIds,
+  deleteProductModel,
+  getProductsForCatalog,
+} from "@/lib/actions/product-actions";
 import type {
   ExistingProductModel,
   LoadableProductModel,
@@ -256,9 +259,6 @@ type PreviewRow = {
   size: Size;
   prices: SizePrice;
 };
-
-const productSelect =
-  "id, created_at, sku, name, short_name, description, category, color, size, gender, tax_type, base_uom, cost_price, retail_price, wholesale_price, is_active, model_id";
 
 const emptyMasterData: MasterData = {
   brands: [],
@@ -1105,21 +1105,18 @@ export default function ProductsClient() {
   const loadProducts = useCallback(async () => {
     setIsLoading(true);
     setLoadError("");
-    const { data, error } = await supabase
-      .from("products")
-      .select(productSelect)
-      .order("created_at", { ascending: false });
+    const catalog = await getProductsForCatalog();
 
-    if (error) {
+    if (catalog.error) {
       setProducts([]);
       setVendorByProductId({});
       setListBrands([]);
-      setLoadError(error.message);
+      setLoadError(catalog.error);
       setIsLoading(false);
       return;
     }
 
-    const nextProducts = (data ?? []) as Product[];
+    const nextProducts = catalog.data as Product[];
     setProducts(nextProducts);
 
     // Brands (mst_brands) + vendor mapping (vendor_product_mapping → contacts)
@@ -2498,13 +2495,10 @@ export default function ProductsClient() {
     setDeactivateError("");
 
     const ids = deactivateTarget.products.map((product) => product.id);
-    const { error } = await supabase
-      .from("products")
-      .update({ is_active: false })
-      .in("id", ids);
+    const result = await deactivateProductsByIds(ids);
 
-    if (error) {
-      setDeactivateError(error.message);
+    if (result.error) {
+      setDeactivateError(result.error);
       setIsDeactivating(false);
       return;
     }

@@ -4,6 +4,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 
 function toQty(value: number | string | null | undefined): number {
   const n = Number(value ?? 0);
@@ -37,24 +38,49 @@ export async function fetchOnHandQtyByProductIds(
   const chunkSize = 200;
   for (let i = 0; i < uniqueIds.length; i += chunkSize) {
     const chunk = uniqueIds.slice(i, i + chunkSize);
-    const { data, error } = await supabase
-      .from("inventory_ledger")
-      .select("product_id, qty, trans_type")
-      .in("product_id", chunk);
+    const rpc = await supabase.rpc("get_on_hand_qty_by_product_ids", {
+      p_product_ids: chunk,
+    });
 
-    if (error) {
+    if (!rpc.error) {
+      const rows = (rpc.data ?? []) as Array<{
+        product_id: string;
+        on_hand_qty: number | string | null;
+      }>;
+      for (const row of rows) {
+        const pid = String(row.product_id);
+        if (!balances.has(pid)) continue;
+        balances.set(pid, toQty(row.on_hand_qty));
+      }
+      continue;
+    }
+
+    const page = await fetchAllPages<{
+      product_id: string;
+      qty: number | string | null;
+      trans_type: string | null;
+    }>((from, to) =>
+      supabase
+        .from("inventory_ledger")
+        .select("product_id, qty, trans_type")
+        .in("product_id", chunk)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+
+    if (page.error) {
       return {
         balances,
-        error: error.message ?? "ดึงยอดคงเหลือจาก inventory_ledger ไม่สำเร็จ",
+        error:
+          page.error.message ||
+          rpc.error.message ||
+          "ดึงยอดคงเหลือจาก inventory_ledger ไม่สำเร็จ",
       };
     }
 
-    for (const row of data ?? []) {
+    for (const row of page.data) {
       const pid = String(row.product_id);
-      const signed = signedLedgerQty(
-        row.trans_type as string,
-        toQty(row.qty as number),
-      );
+      const signed = signedLedgerQty(row.trans_type, toQty(row.qty));
       balances.set(pid, (balances.get(pid) ?? 0) + signed);
     }
   }

@@ -320,9 +320,51 @@ async function fetchDocumentItemForRouting(
   return mapFetchedRow(data);
 }
 
+type RoutedDocumentJoin = {
+  id: string;
+  doc_no: string | null;
+  doc_type: string | null;
+  status: string | null;
+  attachment_url: string | null;
+  attached_file_url: string | null;
+  notes: string | null;
+};
+
+type RoutedProductModelJoin = {
+  id: string;
+  model_code: string | null;
+  name: string | null;
+  is_service: boolean | null;
+  is_manufactured: boolean | null;
+  is_raw_material: boolean | null;
+};
+
+type RoutedProductJoin = {
+  id: string;
+  sku: string | null;
+  model_id: string | null;
+  cost_price: number | null;
+  product_models: RoutedProductModelJoin | RoutedProductModelJoin[] | null;
+};
+
+/** Columns selected from `document_items` for Smart Routing. */
+type RoutedDocumentItemRow = {
+  id: string;
+  document_id: string;
+  product_id: string | null;
+  qty: number | null;
+  description: string | null;
+  production_status: string | null;
+  is_sent_to_production: boolean | null;
+  mockup_image_url: string | null;
+  technician_id: string | null;
+  wage_cost: number | null;
+  documents: RoutedDocumentJoin | RoutedDocumentJoin[] | null;
+  products: RoutedProductJoin | RoutedProductJoin[] | null;
+};
+
 function mapFetchedRow(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  row: any,
+  row: RoutedDocumentItemRow,
 ): { data: FetchedLine | null; error: string | null } {
   const doc = unwrapOne(row.documents);
   const product = unwrapOne(row.products);

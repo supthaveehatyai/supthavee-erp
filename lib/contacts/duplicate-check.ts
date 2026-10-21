@@ -4,6 +4,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/src/types/supabase";
 
 export const DUPLICATE_CONTACT_NAME_ERROR =
   "มีชื่อผู้ติดต่อนี้ในระบบแล้ว หากหาไม่พบกรุณาตรวจสอบในสถานะ 'ระงับการใช้งาน'";
@@ -19,20 +20,12 @@ function normalizeTaxId(raw: string): string {
   return raw.replace(/[\s-]/g, "");
 }
 
-type DuplicateRow = {
-  id: string;
-  company_name: string | null;
-  tax_id: string | null;
-  is_active: boolean | null;
-};
-
 /**
  * Returns a UI error string when a duplicate exists, otherwise null.
  * Checks inactive rows too — so users know to look under "ระงับการใช้งาน".
  */
 export async function findDuplicateContactError(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: SupabaseClient<any>,
+  supabase: SupabaseClient<Database>,
   input: {
     companyName: string;
     taxId?: string | null;
@@ -61,7 +54,7 @@ export async function findDuplicateContactError(
     return nameError.message ?? "ตรวจสอบชื่อคู่ค้าซ้ำไม่สำเร็จ";
   }
 
-  const nameHit = ((nameRows ?? []) as DuplicateRow[]).find((row) => {
+  const nameHit = (nameRows ?? []).find((row) => {
     const existing = String(row.company_name ?? "").trim();
     return existing.localeCompare(companyName, undefined, {
       sensitivity: "accent",
@@ -93,7 +86,7 @@ export async function findDuplicateContactError(
     return taxError.message ?? "ตรวจสอบเลขผู้เสียภาษีซ้ำไม่สำเร็จ";
   }
 
-  const taxHit = ((taxRows ?? []) as DuplicateRow[]).some((row) => {
+  const taxHit = (taxRows ?? []).some((row) => {
     const existing = normalizeTaxId(String(row.tax_id ?? ""));
     return existing.length > 0 && existing === taxIdNormalized;
   });

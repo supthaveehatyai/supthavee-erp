@@ -24,11 +24,13 @@ import {
   isPendingApprovalStatus,
 } from "@/lib/approval/approval-rules";
 import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
+import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
 import {
   assertStockOutAvailability,
   excludeServiceLines,
   loadServiceProductIdSet,
 } from "@/lib/inventory/stock-availability";
+import { calculateMovingAverageUnitCost } from "@/lib/utils/landed-cost";
 import type {
   AdjustInventoryInput,
   AdjustInventoryResult,
@@ -458,9 +460,54 @@ export async function adjustInventory(
       };
     }
 
+    const increaseLines =
+      docType === "STK_ADJ"
+        ? stockLines.filter(
+            (line) => line.qty > 0 && line.unit_cost_price != null,
+          )
+        : [];
+
+    const blendedCostByProduct = new Map<string, number>();
+    if (increaseLines.length > 0) {
+      const productIds = [
+        ...new Set(increaseLines.map((line) => line.product_id)),
+      ];
+      const { balances, error: balanceError } =
+        await fetchOnHandQtyByProductIds(supabase, productIds);
+      if (balanceError) {
+        await supabase.from("document_items").delete().eq("document_id", documentId);
+        await supabase.from("documents").delete().eq("id", documentId);
+        return { success: false, error: balanceError };
+      }
+
+      const virtualQty = new Map(balances);
+      const virtualCost = new Map(
+        productIds.map((id) => [
+          id,
+          roundCost(Number(productMap.get(id)?.cost_price ?? 0)),
+        ]),
+      );
+
+      for (const line of increaseLines) {
+        const receiptQty = Math.abs(line.qty);
+        const unitCost = roundCost(Number(line.unit_cost_price));
+        const onHand = virtualQty.get(line.product_id) ?? 0;
+        const currentAvg = virtualCost.get(line.product_id) ?? 0;
+        const blended = calculateMovingAverageUnitCost(
+          onHand,
+          currentAvg,
+          receiptQty,
+          unitCost,
+        );
+        virtualQty.set(line.product_id, onHand + receiptQty);
+        virtualCost.set(line.product_id, blended);
+        blendedCostByProduct.set(line.product_id, roundCost(blended));
+      }
+    }
+
     const ledgerPayload = stockLines.map((line) => {
       const product = productMap.get(line.product_id)!;
-      const absQty = Math.abs(Math.trunc(line.qty));
+      const absQty = Math.abs(line.qty);
       const unitCost =
         docType === "STK_OB"
           ? roundCost(Number(line.unit_cost_price ?? 0))
@@ -472,6 +519,7 @@ export async function adjustInventory(
         return {
           product_id: line.product_id,
           doc_header_id: null as string | null,
+          document_id: documentId,
           trans_type: "IN",
           qty: absQty,
           notes: `${docType} ${docNo} | document_id=${documentId} | unit_cost=${unitCost.toFixed(4)}${remark ? ` | ${remark}` : ""}`,
@@ -482,6 +530,7 @@ export async function adjustInventory(
       return {
         product_id: line.product_id,
         doc_header_id: null as string | null,
+        document_id: documentId,
         trans_type: transType,
         qty: absQty,
         notes: `${docType} ${docNo} | document_id=${documentId} | adj=${line.qty > 0 ? "+" : "-"}${absQty} | ${remark}`,
@@ -504,16 +553,16 @@ export async function adjustInventory(
     }
 
     const costUpdates = new Map<string, number>();
-    for (const line of stockLines) {
-      if (docType === "STK_OB") {
+    if (docType === "STK_OB") {
+      for (const line of stockLines) {
         costUpdates.set(
           line.product_id,
           roundCost(Number(line.unit_cost_price ?? 0)),
         );
-        continue;
       }
-      if (line.qty > 0 && line.unit_cost_price != null) {
-        costUpdates.set(line.product_id, roundCost(Number(line.unit_cost_price)));
+    } else {
+      for (const [productId, cost] of blendedCostByProduct) {
+        costUpdates.set(productId, cost);
       }
     }
 

@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { requireSessionUserId } from "@/lib/auth/current-user";
+import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 
 /**
  * Raw service-role client — bypasses RLS.
@@ -256,24 +258,31 @@ export type GetActiveVendorsResult = {
  * Never uses anon / SSR clients.
  */
 export async function getActiveVendors(): Promise<GetActiveVendorsResult> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) {
+    return { data: [], error: owner.error };
+  }
+
   try {
     // Strict: service-role only — same pattern as bulkUpsertVendorMapping
     const supabaseAdmin = createSupabaseAdminClient();
 
-    const { data, error } = await supabaseAdmin
-      .from("contacts")
-      .select("id, company_name")
-      .contains("contact_roles", ["Vendor"])
-      .eq("is_active", true)
-      .order("company_name", { ascending: true });
+    const page = await fetchAllPages<VendorOption>((from, to) =>
+      supabaseAdmin
+        .from("contacts")
+        .select("id, company_name")
+        .contains("contact_roles", ["Vendor"])
+        .eq("is_active", true)
+        .order("company_name", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
 
-    if (error) {
-      return { data: [], error: error.message };
+    if (page.error) {
+      return { data: [], error: page.error.message };
     }
 
-    // Always return a real array — never undefined
-    const vendors = Array.isArray(data) ? (data as VendorOption[]) : [];
-    return { data: vendors, error: null };
+    return { data: page.data, error: null };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "ไม่สามารถโหลดรายการ Vendor ได้";
@@ -304,10 +313,11 @@ export async function getVendorMappingData(
     const supabaseAdmin = createSupabaseAdminClient();
 
     const [modelsResult, mappingsResult] = await Promise.all([
-      supabaseAdmin
-        .from("product_models")
-        .select(
-          `
+      fetchAllPages<RawModelRow>((from, to) =>
+        supabaseAdmin
+          .from("product_models")
+          .select(
+            `
           id,
           model_code,
           name,
@@ -323,13 +333,17 @@ export async function getVendorMappingData(
             name
           )
         `,
-        )
-        .eq("vendor_id", trimmedId)
-        .order("model_code", { ascending: true }),
-      supabaseAdmin
-        .from("vendor_product_mapping")
-        .select(
-          `
+          )
+          .eq("vendor_id", trimmedId)
+          .order("model_code", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
+      fetchAllPages<RawExistingMappingRow>((from, to) =>
+        supabaseAdmin
+          .from("vendor_product_mapping")
+          .select(
+            `
           id,
           vendor_id,
           vendor_sku,
@@ -346,9 +360,12 @@ export async function getVendorMappingData(
             size
           )
         `,
-        )
-        .eq("vendor_id", trimmedId)
-        .order("created_at", { ascending: false }),
+          )
+          .eq("vendor_id", trimmedId)
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
     ]);
 
     if (modelsResult.error) {
@@ -369,7 +386,7 @@ export async function getVendorMappingData(
       return emptyVendorMappingResult(mappingsResult.error.message);
     }
 
-    const rawMappings = (mappingsResult.data ?? []) as RawExistingMappingRow[];
+    const rawMappings = mappingsResult.data;
     const existingMappings = normalizeExistingMappings(rawMappings);
 
     const mappingByProductId = new Map<string, RawVendorMappingRow>();
@@ -384,9 +401,7 @@ export async function getVendorMappingData(
       }
     }
 
-    const data: VendorMappingModel[] = (
-      (modelsResult.data ?? []) as RawModelRow[]
-    ).map((row) => ({
+    const data: VendorMappingModel[] = modelsResult.data.map((row) => ({
       id: row.id,
       model_code: row.model_code,
       name: row.name,

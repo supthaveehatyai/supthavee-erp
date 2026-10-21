@@ -1237,6 +1237,7 @@ export type Database = {
         Row: {
           created_at: string | null
           doc_header_id: string | null
+          document_id: string | null
           id: string
           notes: string | null
           product_id: string
@@ -1247,6 +1248,7 @@ export type Database = {
         Insert: {
           created_at?: string | null
           doc_header_id?: string | null
+          document_id?: string | null
           id?: string
           notes?: string | null
           product_id: string
@@ -1257,6 +1259,7 @@ export type Database = {
         Update: {
           created_at?: string | null
           doc_header_id?: string | null
+          document_id?: string | null
           id?: string
           notes?: string | null
           product_id?: string
@@ -2495,6 +2498,14 @@ export type Database = {
       generate_expense_no: {
         Args: { p_expense_date?: string }
         Returns: string
+      }
+      get_on_hand_qty_by_product_ids: {
+        Args: { p_product_ids?: string[] | null }
+        Returns: {
+          product_id: string
+          on_hand_qty: number
+          movement_count: number
+        }[]
       }
       get_user_access_scope: { Args: never; Returns: string }
       is_period_closed: { Args: { doc_date: string }; Returns: boolean }

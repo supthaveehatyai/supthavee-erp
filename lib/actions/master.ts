@@ -14,6 +14,7 @@
 
 import { unstable_noStore as noStore } from "next/cache";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import { findDuplicateContactError } from "@/lib/contacts/duplicate-check";
 import {
   enrichCategoriesFromFlatList,
@@ -623,20 +624,33 @@ export type GetVendorMappingsResult = {
 export async function getVendorMappingsByProductIds(
   productIds: string[],
 ): Promise<GetVendorMappingsResult> {
-  if (productIds.length === 0) return { data: [], error: null };
+  const uniqueIds = [
+    ...new Set(productIds.map((id) => String(id ?? "").trim()).filter(Boolean)),
+  ];
+  if (uniqueIds.length === 0) return { data: [], error: null };
 
   try {
     const supabaseAdmin = createSupabaseAdminClient();
-    const { data, error } = await supabaseAdmin
-      .from("vendor_product_mapping")
-      .select(
-        "internal_product_id, vendor:contacts(id, company_name, phone, tax_id, address, branch_code, credit_days, default_price_tier)",
-      )
-      .in("internal_product_id", productIds);
+    const chunkSize = 200;
+    const data: unknown[] = [];
 
-    if (error) return { data: [], error: error.message };
+    for (let index = 0; index < uniqueIds.length; index += chunkSize) {
+      const chunk = uniqueIds.slice(index, index + chunkSize);
+      const page = await fetchAllPages((from, to) =>
+        supabaseAdmin
+          .from("vendor_product_mapping")
+          .select(
+            "internal_product_id, vendor:contacts(id, company_name, phone, tax_id, address, branch_code, credit_days, default_price_tier)",
+          )
+          .in("internal_product_id", chunk)
+          .order("id", { ascending: true })
+          .range(from, to),
+      );
+      if (page.error) return { data: [], error: page.error.message };
+      data.push(...page.data);
+    }
 
-    const rows = (data ?? [])
+    const rows = data
       .map((row) => {
         const record = row as {
           internal_product_id: string;

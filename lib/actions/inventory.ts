@@ -13,6 +13,8 @@
  */
 
 import { createClient } from "@/lib/supabase/server-admin";
+import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
+import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 
 export type StockTransactionType = "IN" | "OUT" | "ADJUST" | string;
 
@@ -558,21 +560,33 @@ export async function getInventoryOverview(
   if (q) {
     const pattern = `%${escapeIlikePattern(q)}%`;
     const [byCode, byName, byShort] = await Promise.all([
-      supabase
-        .from("product_models")
-        .select(modelSelect)
-        .ilike("model_code", pattern)
-        .order("model_code", { ascending: true }),
-      supabase
-        .from("product_models")
-        .select(modelSelect)
-        .ilike("name", pattern)
-        .order("model_code", { ascending: true }),
-      supabase
-        .from("product_models")
-        .select(modelSelect)
-        .ilike("short_name", pattern)
-        .order("model_code", { ascending: true }),
+      fetchAllPages<ModelRow>((from, to) =>
+        supabase
+          .from("product_models")
+          .select(modelSelect)
+          .ilike("model_code", pattern)
+          .order("model_code", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
+      fetchAllPages<ModelRow>((from, to) =>
+        supabase
+          .from("product_models")
+          .select(modelSelect)
+          .ilike("name", pattern)
+          .order("model_code", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
+      fetchAllPages<ModelRow>((from, to) =>
+        supabase
+          .from("product_models")
+          .select(modelSelect)
+          .ilike("short_name", pattern)
+          .order("model_code", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
     ]);
 
     if (byCode.error) {
@@ -586,27 +600,27 @@ export async function getInventoryOverview(
     }
 
     const byId = new Map<string, ModelRow>();
-    for (const row of [
-      ...((byCode.data ?? []) as ModelRow[]),
-      ...((byName.data ?? []) as ModelRow[]),
-      ...((byShort.data ?? []) as ModelRow[]),
-    ]) {
+    for (const row of [...byCode.data, ...byName.data, ...byShort.data]) {
       if (!byId.has(row.id)) byId.set(row.id, row);
     }
     modelRows = [...byId.values()];
   } else {
-    const { data, error: modelError } = await supabase
-      .from("product_models")
-      .select(modelSelect)
-      .order("model_code", { ascending: true });
+    const allModels = await fetchAllPages<ModelRow>((from, to) =>
+      supabase
+        .from("product_models")
+        .select(modelSelect)
+        .order("model_code", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
 
-    if (modelError) {
+    if (allModels.error) {
       return {
         success: false,
-        error: modelError.message ?? "ดึงรายการรุ่นสินค้าไม่สำเร็จ",
+        error: allModels.error.message ?? "ดึงรายการรุ่นสินค้าไม่สำเร็จ",
       };
     }
-    modelRows = (data ?? []) as ModelRow[];
+    modelRows = allModels.data;
   }
 
   const models = modelRows.filter(
@@ -690,19 +704,23 @@ export async function getInventoryOverview(
 
   for (let i = 0; i < modelIds.length; i += chunkSize) {
     const chunk = modelIds.slice(i, i + chunkSize);
-    const { data, error } = await supabase
-      .from("products")
-      .select("id, sku, color, size, cost_price, is_active, model_id")
-      .in("model_id", chunk)
-      .order("sku", { ascending: true });
+    const page = await fetchAllPages<BrandSkuRow>((from, to) =>
+      supabase
+        .from("products")
+        .select("id, sku, color, size, cost_price, is_active, model_id")
+        .in("model_id", chunk)
+        .order("sku", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
 
-    if (error) {
+    if (page.error) {
       return {
         success: false,
-        error: error.message ?? "ดึงรายการ SKU ไม่สำเร็จ",
+        error: page.error.message ?? "ดึงรายการ SKU ไม่สำเร็จ",
       };
     }
-    skuRows.push(...((data ?? []) as BrandSkuRow[]));
+    skuRows.push(...page.data);
   }
 
   const products = skuRows.filter(
@@ -710,31 +728,14 @@ export async function getInventoryOverview(
   );
 
   const productIds = products.map((row) => row.id);
-  const balanceByProduct = new Map<string, number>();
-  for (const pid of productIds) balanceByProduct.set(pid, 0);
-
-  for (let i = 0; i < productIds.length; i += chunkSize) {
-    const chunk = productIds.slice(i, i + chunkSize);
-    if (chunk.length === 0) continue;
-    const { data: ledgerRows, error: ledgerError } = await supabase
-      .from("inventory_ledger")
-      .select("product_id, qty, trans_type")
-      .in("product_id", chunk);
-
-    if (ledgerError) {
-      return {
-        success: false,
-        error: ledgerError.message ?? "คำนวณยอดคงเหลือจาก Ledger ไม่สำเร็จ",
-      };
-    }
-
-    for (const row of ledgerRows ?? []) {
-      const pid = String(row.product_id);
-      const type = normalizeTransType(row.trans_type);
-      const signed = signedQuantity(type, toQty(row.qty));
-      balanceByProduct.set(pid, (balanceByProduct.get(pid) ?? 0) + signed);
-    }
+  const onHand = await fetchOnHandQtyByProductIds(supabase, productIds);
+  if (onHand.error) {
+    return {
+      success: false,
+      error: onHand.error,
+    };
   }
+  const balanceByProduct = onHand.balances;
 
   const colorCodes = [
     ...new Set(
@@ -958,49 +959,38 @@ export async function getStockCardByModel(
     colors: [],
   });
 
-  const { data: skuRows, error: skuError } = await supabase
-    .from("products")
-    .select("id, sku, color, size, cost_price, is_active")
-    .eq("model_id", id)
-    .order("sku", { ascending: true });
+  const skuPage = await fetchAllPages<ModelSkuRow>((from, to) =>
+    supabase
+      .from("products")
+      .select("id, sku, color, size, cost_price, is_active")
+      .eq("model_id", id)
+      .order("sku", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
 
-  if (skuError) {
+  if (skuPage.error) {
     return {
       success: false,
-      error: skuError.message ?? "ดึงรายการ SKU ของรุ่นไม่สำเร็จ",
+      error: skuPage.error.message ?? "ดึงรายการ SKU ของรุ่นไม่สำเร็จ",
     };
   }
 
-  const products = ((skuRows ?? []) as ModelSkuRow[]).filter(
-    (row) => row.is_active !== false,
-  );
+  const products = skuPage.data.filter((row) => row.is_active !== false);
 
   if (products.length === 0) {
     return { success: true, data: emptyPayload() };
   }
 
   const productIds = products.map((row) => row.id);
-
-  const { data: ledgerRows, error: ledgerError } = await supabase
-    .from("inventory_ledger")
-    .select("product_id, qty, trans_type")
-    .in("product_id", productIds);
-
-  if (ledgerError) {
+  const onHand = await fetchOnHandQtyByProductIds(supabase, productIds);
+  if (onHand.error) {
     return {
       success: false,
-      error: ledgerError.message ?? "คำนวณยอดคงเหลือจาก Ledger ไม่สำเร็จ",
+      error: onHand.error,
     };
   }
-
-  const balanceByProduct = new Map<string, number>();
-  for (const pid of productIds) balanceByProduct.set(pid, 0);
-  for (const row of ledgerRows ?? []) {
-    const pid = String(row.product_id);
-    const type = normalizeTransType(row.trans_type);
-    const signed = signedQuantity(type, toQty(row.qty));
-    balanceByProduct.set(pid, (balanceByProduct.get(pid) ?? 0) + signed);
-  }
+  const balanceByProduct = onHand.balances;
 
   const colorCodes = [
     ...new Set(
@@ -1265,20 +1255,27 @@ export async function getProductStockCard(
   let broughtForward = 0;
 
   if (startBound) {
-    const { data: priorRows, error: priorError } = await supabase
-      .from("inventory_ledger")
-      .select("qty, trans_type")
-      .eq("product_id", id)
-      .lt("created_at", startBound);
+    const priorPage = await fetchAllPages<{
+      qty: number;
+      trans_type: string;
+    }>((from, to) =>
+      supabase
+        .from("inventory_ledger")
+        .select("qty, trans_type")
+        .eq("product_id", id)
+        .lt("created_at", startBound)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
 
-    if (priorError) {
+    if (priorPage.error) {
       return {
         success: false,
-        error: priorError.message ?? "คำนวณยอดยกมาไม่สำเร็จ",
+        error: priorPage.error.message ?? "คำนวณยอดยกมาไม่สำเร็จ",
       };
     }
 
-    broughtForward = sumSignedQty(priorRows);
+    broughtForward = sumSignedQty(priorPage.data);
   }
 
   // ── Logic 3: Movements ในช่วงวันที่ ──────────────────────────────────────
@@ -1305,45 +1302,42 @@ export async function getProductStockCard(
       doc_header_id
     `;
 
-  const runLedgerQuery = async (selectSql: string) => {
-    let query = supabase
-      .from("inventory_ledger")
-      .select(selectSql)
-      .eq("product_id", id)
-      .order("created_at", { ascending: true })
-      .order("id", { ascending: true });
+  const runLedgerQuery = (selectSql: string) =>
+    fetchAllPages<LedgerRow>((from, to) => {
+      let query = supabase
+        .from("inventory_ledger")
+        .select(selectSql)
+        .eq("product_id", id)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true });
 
-    if (startBound) {
-      query = query.gte("created_at", startBound);
-    }
-    if (endExclusive) {
-      query = query.lt("created_at", endExclusive);
-    }
+      if (startBound) {
+        query = query.gte("created_at", startBound);
+      }
+      if (endExclusive) {
+        query = query.lt("created_at", endExclusive);
+      }
 
-    return query;
-  };
+      return query.range(from, to).returns<LedgerRow[]>();
+    });
 
-  let { data: ledgerRows, error: ledgerError } = await runLedgerQuery(
-    ledgerSelectWithDocuments,
-  );
+  let ledgerPage = await runLedgerQuery(ledgerSelectWithDocuments);
 
   if (
-    ledgerError &&
-    /could not find a relationship/i.test(ledgerError.message)
+    ledgerPage.error &&
+    /could not find a relationship/i.test(ledgerPage.error.message)
   ) {
-    const fallback = await runLedgerQuery(ledgerSelectBase);
-    ledgerRows = fallback.data;
-    ledgerError = fallback.error;
+    ledgerPage = await runLedgerQuery(ledgerSelectBase);
   }
 
-  if (ledgerError) {
+  if (ledgerPage.error) {
     return {
       success: false,
-      error: ledgerError.message ?? "ดึงรายการความเคลื่อนไหวไม่สำเร็จ",
+      error: ledgerPage.error.message ?? "ดึงรายการความเคลื่อนไหวไม่สำเร็จ",
     };
   }
 
-  const rawMovements = (ledgerRows as LedgerRow[] | null) ?? [];
+  const rawMovements = ledgerPage.data;
 
   // Enrich document_no จากตาราง documents เมื่อ Join ไม่ครบ หรือมีแค่ UUID ใน notes / doc_header_id
   const documentIds = [
@@ -1358,19 +1352,28 @@ export async function getProductStockCard(
   ];
   const docNoByDocumentId = new Map<string, string>();
   if (documentIds.length > 0) {
-    const { data: docs, error: docsError } = await supabase
-      .from("documents")
-      .select("id, doc_no")
-      .in("id", documentIds);
-    if (docsError) {
-      return {
-        success: false,
-        error: docsError.message ?? "ดึงเลขที่เอกสาร (documents) ไม่สำเร็จ",
-      };
-    }
-    for (const doc of docs ?? []) {
-      if (doc.id && doc.doc_no) {
-        docNoByDocumentId.set(doc.id, doc.doc_no);
+    const idChunk = 200;
+    for (let i = 0; i < documentIds.length; i += idChunk) {
+      const chunk = documentIds.slice(i, i + idChunk);
+      const docsPage = await fetchAllPages<{ id: string; doc_no: string }>(
+        (from, to) =>
+          supabase
+            .from("documents")
+            .select("id, doc_no")
+            .in("id", chunk)
+            .order("id", { ascending: true })
+            .range(from, to),
+      );
+      if (docsPage.error) {
+        return {
+          success: false,
+          error: docsPage.error.message ?? "ดึงเลขที่เอกสาร (documents) ไม่สำเร็จ",
+        };
+      }
+      for (const doc of docsPage.data) {
+        if (doc.id && doc.doc_no) {
+          docNoByDocumentId.set(doc.id, doc.doc_no);
+        }
       }
     }
   }

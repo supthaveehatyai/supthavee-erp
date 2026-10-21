@@ -58,6 +58,7 @@ import {
   normalizeFreightTaxMode,
   type FreightTaxMode,
 } from "@/lib/utils/dual-freight";
+import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import { resolveProductTaxCode } from "@/lib/utils/purchase-tax";
 import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
 import type { DocumentType } from "@/types/document";
@@ -397,6 +398,11 @@ export async function parseReceiptOcr(
     return emptyParseReceiptOcrResult(GEMINI_API_KEY_MISSING_MESSAGE);
   }
 
+  const owner = await requireSessionUserId();
+  if (!owner.ok) {
+    return emptyParseReceiptOcrResult(owner.error);
+  }
+
   try {
     const supabaseAdmin = createSupabaseAdminClient();
     const images = await Promise.all(
@@ -629,13 +635,30 @@ export type GetInternalProductsResult = {
 
 /** Active products for on-the-fly mapping — raw materials + finished goods only (no services). */
 export async function getInternalProductsForMatching(): Promise<GetInternalProductsResult> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) {
+    return { data: [], error: owner.error };
+  }
+
   try {
     const supabaseAdmin = createSupabaseAdminClient();
 
-    const { data, error } = await supabaseAdmin
-      .from("products")
-      .select(
-        `
+    const page = await fetchAllPages<{
+      id: string;
+      sku: string;
+      name: string | null;
+      color: string | null;
+      size: string | null;
+      tax_type: string | null;
+      product_models:
+        | { is_raw_material?: boolean | null; is_service?: boolean | null; tax_type?: string | null }
+        | { is_raw_material?: boolean | null; is_service?: boolean | null; tax_type?: string | null }[]
+        | null;
+    }>((from, to) =>
+      supabaseAdmin
+        .from("products")
+        .select(
+          `
         id,
         sku,
         name,
@@ -648,16 +671,19 @@ export async function getInternalProductsForMatching(): Promise<GetInternalProdu
           tax_type
         )
       `,
-      )
-      .eq("is_active", true)
-      .eq("product_models.is_service", false)
-      .order("sku", { ascending: true });
+        )
+        .eq("is_active", true)
+        .eq("product_models.is_service", false)
+        .order("sku", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
 
-    if (error) {
-      return { data: [], error: error.message };
+    if (page.error) {
+      return { data: [], error: page.error.message };
     }
 
-    const rows = (data ?? []).map((row) => {
+    const rows = page.data.map((row) => {
       const modelJoin = Array.isArray(row.product_models)
         ? (row.product_models[0] ?? null)
         : row.product_models;
@@ -1246,6 +1272,11 @@ export async function saveGoodsReceiptToLedger(
       ? documentDate.trim()
       : new Date().toISOString().slice(0, 10);
 
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { docHeaderId: null, docNo: null, error: owner.error };
+    }
+
     // 1. doc_headers — legacy financial document (keeps vendor invoice identity)
     const { data: docHeader, error: docHeaderError } = await supabaseAdmin
       .from("doc_headers")
@@ -1331,12 +1362,6 @@ export async function saveGoodsReceiptToLedger(
     const nowIso = new Date().toISOString();
     const vendorInvoiceNote = `อ้างอิงบิลซัพพลายเออร์: ${docNo}`;
     const resolvedAttachmentUrl = attachmentUrl?.trim() || null;
-
-    const owner = await requireSessionUserId();
-    if (!owner.ok) {
-      await supabaseAdmin.from("doc_headers").delete().eq("id", docHeader.id);
-      return { docHeaderId: null, docNo: null, error: owner.error };
-    }
 
     const { data: phase4Document, error: phase4DocError } = await supabaseAdmin
       .from("documents")
@@ -1476,6 +1501,61 @@ export async function saveGoodsReceiptToLedger(
       };
     });
 
+    // Snapshot on-hand BEFORE the new IN rows so Moving Average does not
+    // count this receipt twice in the denominator.
+    const maTargets = lines.filter(
+      (line) => !line.row.isFoc && line.row.matchedProduct?.id,
+    );
+    const maProductIds =
+      maTargets.length > 0
+        ? [...new Set(maTargets.map((line) => line.row.matchedProduct!.id))]
+        : [];
+    let preInsertBalances = new Map<string, number>();
+    let currentCostById = new Map<string, number>();
+
+    if (maProductIds.length > 0) {
+      const { balances, error: balanceError } = await fetchOnHandQtyByProductIds(
+        supabaseAdmin,
+        maProductIds,
+      );
+      if (balanceError) {
+        await supabaseAdmin.from("documents").delete().eq("id", phase4DocumentId);
+        await supabaseAdmin
+          .from("doc_details")
+          .delete()
+          .eq("doc_header_id", docHeaderId);
+        await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+        return { docHeaderId: null, docNo: null, error: balanceError };
+      }
+      preInsertBalances = balances;
+
+      const { data: productCosts, error: productCostError } = await supabaseAdmin
+        .from("products")
+        .select("id, cost_price")
+        .in("id", maProductIds);
+
+      if (productCostError) {
+        await supabaseAdmin.from("documents").delete().eq("id", phase4DocumentId);
+        await supabaseAdmin
+          .from("doc_details")
+          .delete()
+          .eq("doc_header_id", docHeaderId);
+        await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
+        return {
+          docHeaderId: null,
+          docNo: null,
+          error: productCostError.message ?? "ดึงต้นทุนสินค้าปัจจุบันไม่สำเร็จ",
+        };
+      }
+
+      currentCostById = new Map(
+        (productCosts ?? []).map((row) => [
+          String(row.id),
+          Number(row.cost_price ?? 0),
+        ]),
+      );
+    }
+
     const { error: ledgerError } = await supabaseAdmin
       .from("inventory_ledger")
       .insert(ledgerPayload);
@@ -1494,64 +1574,9 @@ export async function saveGoodsReceiptToLedger(
 
     // 4. Moving Average Cost — products.cost_price blended with landed unit cost
     // (net after discounts + apportioned freight). Skips FOC lines.
-    const maTargets = lines.filter(
-      (line) => !line.row.isFoc && line.row.matchedProduct?.id,
-    );
-
+    // Balances were snapshotted before the ledger insert above.
     if (maTargets.length > 0) {
-      const productIds = [
-        ...new Set(maTargets.map((line) => line.row.matchedProduct!.id)),
-      ];
-
-      const { balances, error: balanceError } = await fetchOnHandQtyByProductIds(
-        supabaseAdmin,
-        productIds,
-      );
-      if (balanceError) {
-        await supabaseAdmin
-          .from("inventory_ledger")
-          .delete()
-          .eq("doc_header_id", docHeaderId);
-        await supabaseAdmin.from("documents").delete().eq("id", phase4DocumentId);
-        await supabaseAdmin
-          .from("doc_details")
-          .delete()
-          .eq("doc_header_id", docHeaderId);
-        await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
-        return { docHeaderId: null, docNo: null, error: balanceError };
-      }
-
-      const { data: productCosts, error: productCostError } = await supabaseAdmin
-        .from("products")
-        .select("id, cost_price")
-        .in("id", productIds);
-
-      if (productCostError) {
-        await supabaseAdmin
-          .from("inventory_ledger")
-          .delete()
-          .eq("doc_header_id", docHeaderId);
-        await supabaseAdmin.from("documents").delete().eq("id", phase4DocumentId);
-        await supabaseAdmin
-          .from("doc_details")
-          .delete()
-          .eq("doc_header_id", docHeaderId);
-        await supabaseAdmin.from("doc_headers").delete().eq("id", docHeaderId);
-        return {
-          docHeaderId: null,
-          docNo: null,
-          error: productCostError.message ?? "ดึงต้นทุนสินค้าปัจจุบันไม่สำเร็จ",
-        };
-      }
-
-      const currentCostById = new Map(
-        (productCosts ?? []).map((row) => [
-          String(row.id),
-          Number(row.cost_price ?? 0),
-        ]),
-      );
-
-      const virtualQty = new Map(balances);
+      const virtualQty = new Map(preInsertBalances);
       const virtualCost = new Map(currentCostById);
 
       const maCostByProductId = new Map<string, number>();
@@ -2083,6 +2108,34 @@ export async function saveManualGoodsReceipt(
         };
       });
 
+      let preInsertBalances = new Map<string, number>();
+      let currentCostById = new Map<string, number>();
+      if (stockLines.length > 0) {
+        const { balances, error: balanceError } =
+          await fetchOnHandQtyByProductIds(supabaseAdmin, ledgerProductIds);
+        if (balanceError) {
+          throw new Error(balanceError);
+        }
+        preInsertBalances = balances;
+
+        const { data: productCosts, error: productCostError } =
+          await supabaseAdmin
+            .from("products")
+            .select("id, cost_price")
+            .in("id", ledgerProductIds);
+
+        if (productCostError) {
+          throw new Error(productCostError.message);
+        }
+
+        currentCostById = new Map(
+          (productCosts ?? []).map((row) => [
+            String(row.id),
+            Number(row.cost_price ?? 0),
+          ]),
+        );
+      }
+
       if (ledgerPayload.length > 0) {
         const { error: ledgerError } = await supabaseAdmin
           .from("inventory_ledger")
@@ -2098,30 +2151,7 @@ export async function saveManualGoodsReceipt(
       }
 
       if (stockLines.length > 0) {
-        const { balances, error: balanceError } =
-          await fetchOnHandQtyByProductIds(supabaseAdmin, ledgerProductIds);
-        if (balanceError) {
-          throw new Error(balanceError);
-        }
-
-        const { data: productCosts, error: productCostError } =
-          await supabaseAdmin
-            .from("products")
-            .select("id, cost_price")
-            .in("id", ledgerProductIds);
-
-        if (productCostError) {
-          throw new Error(productCostError.message);
-        }
-
-        const currentCostById = new Map(
-          (productCosts ?? []).map((row) => [
-            String(row.id),
-            Number(row.cost_price ?? 0),
-          ]),
-        );
-
-        const virtualQty = new Map(balances);
+        const virtualQty = new Map(preInsertBalances);
         const virtualCost = new Map(currentCostById);
         const maCostByProductId = new Map<string, number>();
 

@@ -24,7 +24,9 @@ import {
   APPROVAL_LIMIT_EXCEEDED_MESSAGE,
   exceedsApprovalLimit,
 } from "@/lib/approval/approval-rules";
+import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
 import { reverseRefundSettlementOnReject } from "@/lib/finance/refund-settlement";
+import { calculateMovingAverageUnitCost } from "@/lib/utils/landed-cost";
 import { isTemporaryDraftDocNo } from "@/lib/utils/draft-document-no";
 import { settleExpenseCashPurchase } from "@/lib/actions/finance/expense-cash-settlement";
 import type { Database } from "@/src/types/supabase";
@@ -332,15 +334,72 @@ async function postInventoryAdjustmentLedger(
     return { error: null };
   }
 
+  const isOb = docType === "STK_OB";
+  const increaseLines = isOb
+    ? []
+    : lines.filter(
+        (line) => Number(line.qty ?? 0) > 0 && line.unit_cost_price != null,
+      );
+
+  const blendedCostByProduct = new Map<string, number>();
+  if (increaseLines.length > 0) {
+    const productIds = [
+      ...new Set(increaseLines.map((line) => String(line.product_id))),
+    ];
+    const { data: products, error: productsError } = await supabaseAdmin
+      .from("products")
+      .select("id, cost_price")
+      .in("id", productIds);
+    if (productsError) {
+      return { error: productsError.message };
+    }
+
+    const { balances, error: balanceError } = await fetchOnHandQtyByProductIds(
+      supabaseAdmin,
+      productIds,
+    );
+    if (balanceError) {
+      return { error: balanceError };
+    }
+
+    const costById = new Map(
+      (products ?? []).map((row) => [
+        String(row.id),
+        Number(row.cost_price ?? 0),
+      ]),
+    );
+    const virtualQty = new Map(balances);
+    const virtualCost = new Map(
+      productIds.map((id) => [id, costById.get(id) ?? 0]),
+    );
+
+    for (const line of increaseLines) {
+      const productId = String(line.product_id);
+      const receiptQty = Math.abs(Number(line.qty ?? 0));
+      const unitCost = Number(line.unit_cost_price ?? 0);
+      const onHand = virtualQty.get(productId) ?? 0;
+      const currentAvg = virtualCost.get(productId) ?? 0;
+      const blended = calculateMovingAverageUnitCost(
+        onHand,
+        currentAvg,
+        receiptQty,
+        unitCost,
+      );
+      virtualQty.set(productId, onHand + receiptQty);
+      virtualCost.set(productId, blended);
+      blendedCostByProduct.set(productId, blended);
+    }
+  }
+
   const ledgerPayload = lines.map((line) => {
     const qty = Number(line.qty ?? 0);
-    const absQty = Math.abs(Math.trunc(qty));
+    const absQty = Math.abs(qty);
     const unitCost = Number(line.unit_cost_price ?? 0);
-    const isOb = docType === "STK_OB";
     const transType = isOb || qty > 0 ? "IN" : "OUT";
     return {
       product_id: line.product_id as string,
       doc_header_id: null as string | null,
+      document_id: documentId,
       trans_type: transType,
       qty: absQty,
       notes: isOb
@@ -353,7 +412,41 @@ async function postInventoryAdjustmentLedger(
     .from("inventory_ledger")
     .insert(ledgerPayload);
 
-  return { error: ledgerError?.message ?? null };
+  if (ledgerError) {
+    return { error: ledgerError.message };
+  }
+
+  const costUpdates = new Map<string, number>();
+  if (isOb) {
+    for (const line of lines) {
+      if (!line.product_id) continue;
+      costUpdates.set(String(line.product_id), Number(line.unit_cost_price ?? 0));
+    }
+  } else {
+    for (const [productId, cost] of blendedCostByProduct) {
+      costUpdates.set(productId, cost);
+    }
+  }
+
+  for (const [productId, cost] of costUpdates) {
+    const { error: costError } = await supabaseAdmin
+      .from("products")
+      .update({ cost_price: cost })
+      .eq("id", productId);
+    if (costError) {
+      await supabaseAdmin
+        .from("inventory_ledger")
+        .delete()
+        .eq("document_id", documentId);
+      return {
+        error:
+          costError.message ??
+          "อัปเดต products.cost_price ไม่สำเร็จ — ยกเลิกการลงสต็อกแล้ว",
+      };
+    }
+  }
+
+  return { error: null };
 }
 
 /**

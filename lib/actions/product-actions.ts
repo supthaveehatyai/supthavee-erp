@@ -9,7 +9,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server-admin";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import type { DeleteProductModelResult } from "@/types/product-matrix";
+
+const CATALOG_PRODUCT_SELECT =
+  "id, created_at, sku, name, short_name, description, category, color, size, gender, tax_type, base_uom, cost_price, retail_price, wholesale_price, is_active, model_id" as const;
 
 const USAGE_BLOCK_MESSAGE =
   "ไม่อนุญาตให้ลบ: สินค้ารุ่นนี้มีการเดินรายการบัญชีหรือสต็อกแล้ว กรุณาใช้วิธี 'ปิดการใช้งาน (Inactive)' แทน";
@@ -175,5 +179,68 @@ export async function deleteProductModel(
     const message =
       err instanceof Error ? err.message : "ลบสินค้ารุ่นไม่สำเร็จ";
     return { success: false, error: message };
+  }
+}
+
+/** Full product catalog for /products — paged past the PostgREST 1,000-row cap. */
+export async function getProductsForCatalog() {
+  const actor = await getCurrentAuthUser();
+  if (!actor) {
+    return { data: [], error: "กรุณาเข้าสู่ระบบ" };
+  }
+
+  try {
+    const supabaseAdmin = createClient();
+    const page = await fetchAllPages((from, to) =>
+      supabaseAdmin
+        .from("products")
+        .select(CATALOG_PRODUCT_SELECT)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+
+    if (page.error) {
+      return { data: [], error: page.error.message };
+    }
+    return { data: page.data, error: null as string | null };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "โหลดรายการสินค้าไม่สำเร็จ";
+    return { data: [], error: message };
+  }
+}
+
+/** Soft-delete catalog SKUs. Chunks ids so `.in()` stays inside the URL limit. */
+export async function deactivateProductsByIds(productIds: string[]) {
+  const actor = await getCurrentAuthUser();
+  if (!actor) {
+    return { error: "กรุณาเข้าสู่ระบบ" };
+  }
+
+  const ids = [
+    ...new Set(productIds.map((id) => String(id ?? "").trim()).filter(Boolean)),
+  ];
+  if (ids.length === 0) {
+    return { error: "ไม่พบรหัสสินค้าที่ต้องการปิดใช้งาน" };
+  }
+
+  try {
+    const supabaseAdmin = createClient();
+    for (const chunk of chunkIds(ids)) {
+      const { error } = await supabaseAdmin
+        .from("products")
+        .update({ is_active: false })
+        .in("id", chunk);
+      if (error) return { error: error.message };
+    }
+
+    revalidatePath(PRODUCTS_PATH);
+    revalidatePath(PRODUCTS_PATH, "layout");
+    return { error: null as string | null };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "ปิดการใช้งานสินค้าไม่สำเร็จ";
+    return { error: message };
   }
 }

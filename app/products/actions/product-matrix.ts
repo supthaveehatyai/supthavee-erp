@@ -1,6 +1,7 @@
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase-server";
+import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import { revalidatePath } from "next/cache";
 import {
   isValidModelCode,
@@ -283,30 +284,34 @@ export async function listLoadableProductModels(): Promise<{
   error?: string;
 }> {
   const supabase = createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("product_models")
-    .select(
-      `
+  const page = await fetchAllPages((from, to) =>
+    supabase
+      .from("product_models")
+      .select(
+        `
       ${EXISTING_MODEL_SELECT},
       brand:mst_brands(brand_code, brand_name),
       category:mst_categories(category_code, category_name)
     `,
-    )
-    .in("status", ["DRAFT", "ACTIVE"])
-    .order("created_at", { ascending: false });
+      )
+      .in("status", ["DRAFT", "ACTIVE"])
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
 
-  if (error) {
+  if (page.error) {
     return {
       ok: false,
       models: [],
       error:
-        error.code === "42P01"
+        page.error.code === "42P01"
           ? "ยังไม่มีตาราง product_models — รัน sql/product_models.sql ก่อน"
-          : error.message,
+          : page.error.message,
     };
   }
 
-  const models: LoadableProductModel[] = (data ?? []).map((row) => {
+  const models: LoadableProductModel[] = page.data.map((row) => {
     const record = row as ExistingProductModel & {
       brand?:
         | { brand_code?: string; brand_name?: string }

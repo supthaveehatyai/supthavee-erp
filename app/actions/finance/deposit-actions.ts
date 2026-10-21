@@ -722,11 +722,6 @@ async function rollbackDepositBalance(
       .from("document_allocations")
       .delete()
       .eq("receipt_doc_id", params.stubDocId);
-    await supabaseAdmin
-      .from("audit_logs")
-      .delete()
-      .eq("table_name", "documents")
-      .eq("record_id", params.stubDocId);
     await supabaseAdmin.from("documents").delete().eq("id", params.stubDocId);
   }
   if (params.stubHeaderId) {

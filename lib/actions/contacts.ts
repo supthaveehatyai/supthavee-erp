@@ -20,6 +20,8 @@ import {
 import { findDuplicateContactError } from "@/lib/contacts/duplicate-check";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { parseContactMutation, parseContactRolesInput } from "@/lib/validations/contacts";
+import { requireSessionUserId } from "@/lib/auth/current-user";
+import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 
 const CONTACTS_PATH = "/contacts";
 
@@ -78,19 +80,28 @@ export type ImportContactsResult = {
 
 /** List all contacts — Service Role (bypass RLS). */
 export async function getContacts(): Promise<GetContactsResult> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) {
+    return { data: [], error: owner.error };
+  }
+
   try {
     const supabaseAdmin = createSupabaseServerClient();
-    const { data, error } = await supabaseAdmin
-      .from("contacts")
-      .select(contactSelect)
-      .order("created_at", { ascending: false });
+    const page = await fetchAllPages((from, to) =>
+      supabaseAdmin
+        .from("contacts")
+        .select(contactSelect)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
 
-    if (error) {
-      return { data: [], error: error.message };
+    if (page.error) {
+      return { data: [], error: page.error.message };
     }
 
     return {
-      data: (data ?? []).map((row) => normalizeContactRow(row)),
+      data: page.data.map((row) => normalizeContactRow(row)),
       error: null,
     };
   } catch (err) {
