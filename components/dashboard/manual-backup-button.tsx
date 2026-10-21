@@ -83,6 +83,7 @@ function populatedNames(tables: PreviewTable[]): string[] {
 
 export function ManualBackupButton() {
   const [open, setOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"backup" | "restore">("backup");
   const [moduleName, setModuleName] = useState<BackupModuleSelection>("all");
   const [isDownloading, setIsDownloading] = useState(false);
   const [preview, setPreview] = useState<PreviewTable[] | null>(null);
@@ -310,25 +311,53 @@ export function ManualBackupButton() {
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="flex max-h-[90vh] max-w-5xl flex-col gap-3 overflow-hidden p-5">
-          <DialogHeader className="mb-0 shrink-0">
-            <DialogTitle>สำรองและกู้คืนข้อมูล (Backup & Restore)</DialogTitle>
-            <DialogDescription>
-              ดาวน์โหลดไฟล์ JSON หรือเลือกไฟล์ Backup แล้วกู้คืนเฉพาะตารางที่ต้องการ
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="flex max-h-[90vh] w-full max-w-2xl flex-col gap-0 overflow-hidden p-0">
+          <div className="flex shrink-0 items-start justify-between border-b border-slate-100 px-6 pb-3 pt-5">
+            <DialogHeader className="mb-0 pr-8">
+              <DialogTitle className="text-lg font-bold text-slate-800">
+                สำรองและกู้คืนข้อมูล (Backup & Restore)
+              </DialogTitle>
+              <DialogDescription className="mt-0.5 text-xs text-slate-500">
+                ดาวน์โหลดไฟล์ JSON เพื่อสำรองข้อมูล หรืออัปโหลดไฟล์เพื่อกู้คืนข้อมูลเฉพาะตารางที่ต้องการ
+              </DialogDescription>
+            </DialogHeader>
+          </div>
 
-          <div className="grid min-h-0 flex-1 items-stretch gap-3 md:grid-cols-2">
-            <section className="flex h-full min-h-0 flex-col justify-between rounded-xl border border-slate-200 p-4">
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-slate-800">
-                  สำรองข้อมูล (Backup)
-                </h3>
+          <div className="shrink-0 border-b border-slate-100 bg-slate-50/50 px-6 pb-3 pt-3">
+            <div className="grid grid-cols-2 rounded-xl bg-slate-200/70 p-1">
+              <button
+                type="button"
+                onClick={() => setActiveTab("backup")}
+                className={`flex items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                  activeTab === "backup"
+                    ? "bg-white text-blue-600 shadow-sm"
+                    : "text-slate-600 hover:text-slate-800"
+                }`}
+              >
+                สำรองข้อมูล (Backup)
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("restore")}
+                className={`flex items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                  activeTab === "restore"
+                    ? "bg-white text-blue-600 shadow-sm"
+                    : "text-slate-600 hover:text-slate-800"
+                }`}
+              >
+                กู้คืนข้อมูล (Restore)
+              </button>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto p-6">
+            {activeTab === "backup" ? (
+              <div className="space-y-4">
                 <fieldset className="space-y-1.5" disabled={busy}>
                   {MODULE_OPTIONS.map((option) => (
                     <label
                       key={option}
-                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm hover:bg-slate-50"
+                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50"
                     >
                       <input
                         type="radio"
@@ -353,27 +382,22 @@ export function ManualBackupButton() {
                     {NAS_CLI}
                   </pre>
                 </details>
+                <Button
+                  type="button"
+                  className="w-full gap-2"
+                  disabled={isDownloading}
+                  onClick={handleDownload}
+                >
+                  {isDownloading ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Database className="size-4" />
+                  )}
+                  {isDownloading ? "กำลังเตรียมไฟล์…" : "ดาวน์โหลดไฟล์ Backup (.json)"}
+                </Button>
               </div>
-              <Button
-                type="button"
-                className="mt-3 w-full gap-2"
-                disabled={isDownloading}
-                onClick={handleDownload}
-              >
-                {isDownloading ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Database className="size-4" />
-                )}
-                {isDownloading ? "กำลังเตรียมไฟล์…" : "ดาวน์โหลดไฟล์ Backup (.json)"}
-              </Button>
-            </section>
-
-            <section className="flex h-full min-h-0 flex-col justify-between rounded-xl border border-slate-200 p-4">
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-slate-800">
-                  กู้คืนข้อมูล (Restore)
-                </h3>
+            ) : (
+              <div className="space-y-4">
                 <label className="flex cursor-pointer flex-col gap-1 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">
                   <span className="inline-flex items-center gap-2 font-medium text-slate-800">
                     <Upload className="size-4" />
@@ -438,31 +462,30 @@ export function ManualBackupButton() {
                         </Button>
                       ))}
                     </div>
-                    <div className="max-h-44 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                        {preview.map((item) => {
-                          const empty = item.rows === 0;
-                          return (
-                            <label
-                              key={item.table}
-                              className={`flex items-center gap-1.5 text-xs ${
-                                empty ? "text-slate-400" : "text-slate-700"
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selectedTables.includes(item.table)}
-                                disabled={busy}
-                                onChange={() => toggleTable(item.table)}
-                              />
-                              <span className="truncate font-mono">{item.table}</span>
-                              <span className={empty ? "text-slate-300" : "text-slate-400"}>
-                                {item.rows.toLocaleString("th-TH")}
-                              </span>
-                            </label>
-                          );
-                        })}
-                      </div>
+                    <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
+                      {preview.map((item) => {
+                        const empty = item.rows === 0;
+                        return (
+                          <label
+                            key={item.table}
+                            className={`flex items-center gap-2 text-xs ${
+                              empty ? "text-slate-400" : "text-slate-700"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="shrink-0"
+                              checked={selectedTables.includes(item.table)}
+                              disabled={busy}
+                              onChange={() => toggleTable(item.table)}
+                            />
+                            <span className="font-mono">{item.table}</span>
+                            <span className={empty ? "text-slate-300" : "text-slate-400"}>
+                              {item.rows.toLocaleString("th-TH")}
+                            </span>
+                          </label>
+                        );
+                      })}
                     </div>
                   </>
                 ) : null}
@@ -503,23 +526,24 @@ export function ManualBackupButton() {
                     {restoreError}
                   </p>
                 ) : null}
+
+                <Button
+                  type="button"
+                  className="w-full gap-2"
+                  disabled={
+                    isRestoring || !preview || selectedTables.length === 0 || !confirmed
+                  }
+                  onClick={handleRestore}
+                >
+                  {isRestoring ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Database className="size-4" />
+                  )}
+                  {isRestoring ? "กำลังกู้คืน…" : "เริ่มกู้คืนข้อมูล"}
+                </Button>
               </div>
-              <Button
-                type="button"
-                className="mt-3 w-full gap-2"
-                disabled={
-                  isRestoring || !preview || selectedTables.length === 0 || !confirmed
-                }
-                onClick={handleRestore}
-              >
-                {isRestoring ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Database className="size-4" />
-                )}
-                {isRestoring ? "กำลังกู้คืน…" : "เริ่มกู้คืนข้อมูล"}
-              </Button>
-            </section>
+            )}
           </div>
         </DialogContent>
       </Dialog>

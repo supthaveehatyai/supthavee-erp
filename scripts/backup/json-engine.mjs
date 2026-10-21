@@ -161,7 +161,12 @@ const COLUMN_ERROR_PATTERNS = [
 ];
 const ON_CONFLICT_MISMATCH =
   /there is no unique or exclusion constraint matching the ON CONFLICT specification/i;
-const DEFAULT_EXCLUDED = { mst_asset_categories: ["depreciation_rate"] };
+const KNOWN_GENERATED_COLUMNS = {
+  mst_asset_categories: ["depreciation_rate"],
+  expenses: ["grand_total"],
+  expense_installments: ["total_installment"],
+  fixed_assets: ["current_net_book_value"],
+};
 
 function upsertOptionsFor(table, firstRow, catalog) {
   if (table === "audit_logs") {
@@ -255,7 +260,7 @@ export async function upsertJsonBackup(supabase, payload, tables) {
     }
     const upsertOptions = upsertOptionsFor(table, rows[0], catalog);
     const stripState = {
-      excluded: new Set(DEFAULT_EXCLUDED[table] ?? []),
+      excluded: new Set(KNOWN_GENERATED_COLUMNS[table] ?? []),
       strips: 0,
     };
     let skipped = false;

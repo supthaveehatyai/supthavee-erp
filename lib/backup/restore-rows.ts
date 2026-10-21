@@ -72,8 +72,11 @@ const COLUMN_ERROR_PATTERNS = [
 const ON_CONFLICT_MISMATCH =
   /there is no unique or exclusion constraint matching the ON CONFLICT specification/i;
 
-const DEFAULT_EXCLUDED: Record<string, string[]> = {
+const KNOWN_GENERATED_COLUMNS: Record<string, string[]> = {
   mst_asset_categories: ["depreciation_rate"],
+  expenses: ["grand_total"],
+  expense_installments: ["total_installment"],
+  fixed_assets: ["current_net_book_value"],
 };
 
 type StripState = {
@@ -101,7 +104,7 @@ function stateFor(table: string): StripState {
   const existing = stripStateByTable.get(table);
   if (existing) return existing;
   const created: StripState = {
-    excluded: new Set(DEFAULT_EXCLUDED[table] ?? []),
+    excluded: new Set(KNOWN_GENERATED_COLUMNS[table] ?? []),
     strips: 0,
   };
   stripStateByTable.set(table, created);
