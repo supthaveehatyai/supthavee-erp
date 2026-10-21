@@ -56,10 +56,15 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { ParameterApprovalTable } from "@/app/(dashboard)/settings/parameters/parameter-approval-table";
+import type { PendingParameterChangeRequest } from "@/types/parameter";
 
 export type ApprovalCenterPanelProps = {
   data: PendingApprovalsPayload;
   initialTab: ApprovalTab;
+  parameterRequests: PendingParameterChangeRequest[];
+  parameterIsAdmin: boolean;
+  parameterError: string | null;
 };
 
 function formatMoney(value: number): string {
@@ -359,6 +364,9 @@ function PendingApprovalTable({
 export function ApprovalCenterPanel({
   data,
   initialTab,
+  parameterRequests,
+  parameterIsAdmin,
+  parameterError,
 }: ApprovalCenterPanelProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -379,6 +387,7 @@ export function ApprovalCenterPanel({
 
   const documentCount = data.documents.length;
   const expenseCount = data.expenses.length;
+  const parameterCount = parameterRequests.length;
 
   return (
     <div className="flex flex-col gap-6">
@@ -388,13 +397,13 @@ export function ApprovalCenterPanel({
           Approval Center
         </h1>
         <p className="text-slate-500">
-          Maker-Checker — อนุมัติหรือปฏิเสธเอกสารและค่าใช้จ่ายที่รอดำเนินการ
+          Maker-Checker — อนุมัติหรือปฏิเสธเอกสาร ค่าใช้จ่าย และพารามิเตอร์ระบบที่รอดำเนินการ
           (Admin)
         </p>
       </div>
 
       <Tabs value={activeTab} onValueChange={handleTabChange}>
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+        <TabsList className="grid w-full max-w-3xl grid-cols-3">
           <TabsTrigger value="documents" className="gap-2">
             เอกสารระบบ
             <Badge
@@ -411,6 +420,15 @@ export function ApprovalCenterPanel({
               className="min-w-6 justify-center px-1.5"
             >
               {expenseCount}
+            </Badge>
+          </TabsTrigger>
+          <TabsTrigger value="parameters" className="gap-2">
+            พารามิเตอร์ระบบ (System Parameters)
+            <Badge
+              variant={parameterCount > 0 ? "amber" : "default"}
+              className="min-w-6 justify-center px-1.5"
+            >
+              {parameterCount}
             </Badge>
           </TabsTrigger>
         </TabsList>
@@ -450,6 +468,19 @@ export function ApprovalCenterPanel({
               />
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="parameters" className="mt-4">
+          {parameterError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {parameterError}
+            </div>
+          ) : (
+            <ParameterApprovalTable
+              rows={parameterRequests}
+              isAdmin={parameterIsAdmin}
+            />
+          )}
         </TabsContent>
       </Tabs>
     </div>

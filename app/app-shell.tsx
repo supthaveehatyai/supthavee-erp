@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { canAccessPath, canSeeNavItem, isAuthPath, normalizePathname, STOCK_CARD_PATH } from "@/lib/auth/module-access";
+import { AccessProvider } from "@/components/auth/access-context";
 import type { AccessibleModules, ErpModuleKey } from "@/types/rbac";
 
 type IconName =
@@ -14,8 +15,8 @@ type IconName =
   | "wallet"
   | "warehouse"
   | "book"
-  | "settings"
-  | "sliders";
+  | "clipboard"
+  | "settings";
 
 type NavigationItem = {
   label: string;
@@ -98,7 +99,6 @@ const navigationGroups: NavigationGroup[] = [
       },
       { label: "เจ้าหนี้ / ลูกหนี้", href: "/finance/ap-ar" },
       { label: "ปิดงบรายเดือน (Period Lock)", href: "/accounting-periods" },
-      { label: "ศูนย์อนุมัติ (Approval Center)", href: "/approvals" },
       { label: "สินทรัพย์ถาวร (Fixed Assets)", href: "/fixed-assets" },
     ],
   },
@@ -171,23 +171,18 @@ function Icon({
         <path d="M8 7h8M8 11h6" />
       </>
     ),
+    clipboard: (
+      <>
+        <path d="M9 5h6a1 1 0 0 1 1 1v1H8V6a1 1 0 0 1 1-1Z" />
+        <path d="M8 5.5A2 2 0 0 1 9.8 4h4.4A2 2 0 0 1 16 5.5" />
+        <path d="M6 7h12v13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2Z" />
+        <path d="M9 12h6M9 16h4" />
+      </>
+    ),
     settings: (
       <>
         <circle cx="12" cy="12" r="3" />
         <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.56 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.2 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.4v-4h.09A1.7 1.7 0 0 0 4.2 8.56a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 8.56 4.2a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V2.4h4v.09A1.7 1.7 0 0 0 15 4.2a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 8.56a1.7 1.7 0 0 0 .6 1c.3.26.7.4 1.1.4h.09v4h-.09A1.7 1.7 0 0 0 19.4 15Z" />
-      </>
-    ),
-    sliders: (
-      <>
-        <path d="M4 21v-7" />
-        <path d="M4 10V3" />
-        <path d="M12 21v-9" />
-        <path d="M12 8V3" />
-        <path d="M20 21v-5" />
-        <path d="M20 12V3" />
-        <path d="M2 14h4" />
-        <path d="M10 8h4" />
-        <path d="M18 16h4" />
       </>
     ),
   };
@@ -233,10 +228,30 @@ function SidebarContent({
     }))
     .filter((group) => group.items.length > 0);
   const canOpenSettings = canAccessPath(
-    "/settings",
+    "/settings/company",
     accessibleModules,
     roleCode,
   );
+  const canOpenDashboard = canAccessPath(
+    "/dashboard",
+    accessibleModules,
+    roleCode,
+  );
+  const canOpenApprovals = canAccessPath(
+    "/approvals",
+    accessibleModules,
+    roleCode,
+  );
+  const settingsHubActive = [
+    "/settings/company",
+    "/settings/parameters",
+    "/settings/master-data",
+    "/finance/bank-accounts",
+    "/settings/users",
+  ].some((href) => {
+    const itemPath = normalizePathname(href);
+    return pathname === itemPath || pathname.startsWith(`${itemPath}/`);
+  });
 
   return (
     <>
@@ -254,18 +269,36 @@ function SidebarContent({
         <p className="mb-2 px-3 text-[10px] font-semibold tracking-[0.16em] text-blue-300/80">
           ภาพรวม
         </p>
-        <Link
-          href="/dashboard"
-          onNavigate={closeMenu}
-          className={`mb-6 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition ${
-            pathname === "/dashboard"
-              ? "bg-white text-blue-700 shadow-sm"
-              : "text-blue-100 hover:bg-white/10 hover:text-white"
-          }`}
-        >
-          <Icon name="dashboard" />
-          <span className="font-medium">แดชบอร์ด</span>
-        </Link>
+        <div className="mb-6 space-y-1">
+          {canOpenDashboard ? (
+            <Link
+              href="/dashboard"
+              onNavigate={closeMenu}
+              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition ${
+                pathname === "/dashboard"
+                  ? "bg-white text-blue-700 shadow-sm"
+                  : "text-blue-100 hover:bg-white/10 hover:text-white"
+              }`}
+            >
+              <Icon name="dashboard" />
+              <span className="font-medium">แดชบอร์ด</span>
+            </Link>
+          ) : null}
+          {canOpenApprovals ? (
+            <Link
+              href="/approvals"
+              onNavigate={closeMenu}
+              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition ${
+                pathname === "/approvals" || pathname.startsWith("/approvals/")
+                  ? "bg-white text-blue-700 shadow-sm"
+                  : "text-blue-100 hover:bg-white/10 hover:text-white"
+              }`}
+            >
+              <Icon name="clipboard" />
+              <span className="font-medium">ศูนย์อนุมัติ</span>
+            </Link>
+          ) : null}
+        </div>
 
         <p className="mb-2 px-3 text-[10px] font-semibold tracking-[0.16em] text-blue-300/80">
           เมนูหลัก
@@ -314,62 +347,18 @@ function SidebarContent({
 
       <div className="border-t border-white/10 p-3">
         {canOpenSettings ? (
-          <>
-            <Link
-              href="/settings/users"
-              onNavigate={closeMenu}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition ${
-                pathname === "/settings/users" ||
-                pathname.startsWith("/settings/users/")
-                  ? "bg-white/15 font-medium text-white"
-                  : "text-blue-200 hover:bg-white/10 hover:text-white"
-              }`}
-            >
-              <Icon name="database" className="size-[18px]" />
-              จัดการผู้ใช้งาน
-            </Link>
-            <Link
-              href="/settings/company"
-              onNavigate={closeMenu}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition ${
-                pathname === "/settings/company" ||
-                pathname.startsWith("/settings/company/") ||
-                pathname === "/finance/bank-accounts" ||
-                pathname.startsWith("/finance/bank-accounts/")
-                  ? "bg-white/15 font-medium text-white"
-                  : "text-blue-200 hover:bg-white/10 hover:text-white"
-              }`}
-            >
-              <Icon name="settings" className="size-[18px]" />
-              ตั้งค่าข้อมูลบริษัท
-            </Link>
-            <Link
-              href="/settings/parameters"
-              onNavigate={closeMenu}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition ${
-                pathname === "/settings/parameters" ||
-                pathname.startsWith("/settings/parameters/")
-                  ? "bg-white/15 font-medium text-white"
-                  : "text-blue-200 hover:bg-white/10 hover:text-white"
-              }`}
-            >
-              <Icon name="sliders" className="size-[18px]" />
-              ตั้งค่าระบบ
-            </Link>
-            <Link
-              href="/settings/master-data"
-              onNavigate={closeMenu}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition ${
-                pathname === "/settings/master-data" ||
-                pathname.startsWith("/settings/master-data/")
-                  ? "bg-white/15 font-medium text-white"
-                  : "text-blue-200 hover:bg-white/10 hover:text-white"
-              }`}
-            >
-              <Icon name="database" className="size-[18px]" />
-              Master Data
-            </Link>
-          </>
+          <Link
+            href="/settings/company"
+            onNavigate={closeMenu}
+            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition ${
+              settingsHubActive
+                ? "bg-white/15 font-medium text-white"
+                : "text-blue-200 hover:bg-white/10 hover:text-white"
+            }`}
+          >
+            <Icon name="settings" className="size-[18px]" />
+            ตั้งค่าระบบ (Settings)
+          </Link>
         ) : null}
       </div>
     </>
@@ -393,12 +382,22 @@ export default function AppShell({
 
   // Auth routes render without ERP chrome (sidebar / top bar).
   if (isAuthPath(pathname)) {
-    return <>{children}</>;
+    return (
+      <AccessProvider roleCode={roleCode} accessibleModules={accessibleModules}>
+        {children}
+      </AccessProvider>
+    );
   }
 
   const resolvedUserName = userDisplayName?.trim() || null;
+  const canOpenApprovals = canAccessPath(
+    "/approvals",
+    accessibleModules,
+    roleCode,
+  );
 
   return (
+    <AccessProvider roleCode={roleCode} accessibleModules={accessibleModules}>
     <div className="min-h-dvh bg-slate-50">
       <aside className="app-shell-sidebar fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-blue-700 print:hidden lg:flex">
         <SidebarContent
@@ -454,6 +453,18 @@ export default function AppShell({
           </div>
 
           <div className="flex items-center gap-3">
+            {canOpenApprovals ? (
+              <Link
+                href="/approvals"
+                className={`inline-flex h-9 items-center rounded-lg border px-3 text-xs font-semibold transition ${
+                  pathname === "/approvals" || pathname.startsWith("/approvals/")
+                    ? "border-blue-200 bg-blue-50 text-blue-700"
+                    : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                ศูนย์อนุมัติ
+              </Link>
+            ) : null}
             <div className="hidden text-right sm:block">
               <p className="text-xs font-semibold text-slate-700">ผู้ใช้งาน</p>
               <p className="text-[11px] text-slate-400">
@@ -469,5 +480,6 @@ export default function AppShell({
         </main>
       </div>
     </div>
+    </AccessProvider>
   );
 }

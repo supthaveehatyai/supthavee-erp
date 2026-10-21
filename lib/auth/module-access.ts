@@ -19,6 +19,7 @@ export const ALL_MODULES_GRANTED: AccessibleModules = {
   inventory: true,
   finance: true,
   settings: true,
+  production: true,
 };
 
 export const ALL_MODULES_DENIED: AccessibleModules = {
@@ -27,6 +28,7 @@ export const ALL_MODULES_DENIED: AccessibleModules = {
   inventory: false,
   finance: false,
   settings: false,
+  production: false,
 };
 
 /**
@@ -36,7 +38,8 @@ export const ALL_MODULES_DENIED: AccessibleModules = {
 export const MODULE_PATH_PREFIXES: Record<ErpModuleKey, readonly string[]> = {
   sales: ["/sales"],
   purchases: ["/purchases"],
-  inventory: ["/inventory", "/production"],
+  inventory: ["/inventory"],
+  production: ["/production"],
   finance: [
     "/finance",
     "/expenses",
@@ -109,6 +112,7 @@ export function parseAccessibleModules(
   for (const key of ERP_MODULE_KEYS) {
     next[key] = raw[key] === true;
   }
+  applyProductionFallback(raw, roleCode, next);
   return next;
 }
 
@@ -205,6 +209,56 @@ function normalizeRoleCode(roleCode: string | null | undefined): string {
     .toLowerCase();
 }
 
+/** บทบาทที่ถ้า JSON เก่ายังไม่มีคีย์ production ให้เปิดงานผลิตเป็นค่าเริ่มต้น */
+const PRODUCTION_DEFAULT_TRUE_ROLES = new Set([
+  "embroiderer",
+  "seamstress",
+  "screen_printer",
+  "warehouse",
+  "sales",
+  "admin",
+]);
+
+const TECHNICIAN_HOME_ROLES = new Set([
+  "embroiderer",
+  "seamstress",
+  "screen_printer",
+]);
+
+function applyProductionFallback(
+  raw: Record<string, unknown>,
+  roleCode: string | null | undefined,
+  next: AccessibleModules,
+): void {
+  if (Object.prototype.hasOwnProperty.call(raw, "production")) return;
+  const role = normalizeRoleCode(roleCode);
+  if (PRODUCTION_DEFAULT_TRUE_ROLES.has(role)) {
+    next.production = true;
+  }
+}
+
+export function isTechnicianRole(roleCode: string | null | undefined): boolean {
+  return TECHNICIAN_HOME_ROLES.has(normalizeRoleCode(roleCode));
+}
+
+/**
+ * ช่างที่เปิดได้แค่งานผลิต ไม่มีสิทธิ์แดชบอร์ด — ส่งไป Kanban แทนหน้า Forbidden
+ */
+export function prefersProductionKanbanHome(
+  roleCode: string | null | undefined,
+  modules: AccessibleModules | null | undefined,
+): boolean {
+  if (!isTechnicianRole(roleCode)) return false;
+  const granted = parseAccessibleModules(modules, roleCode);
+  const hasOfficeModule =
+    granted.sales ||
+    granted.purchases ||
+    granted.inventory ||
+    granted.finance ||
+    granted.settings;
+  return granted.production === true && !hasOfficeModule;
+}
+
 /**
  * Report Center gate — Zero Trust
  * 1) บล็อกบทบาทหน้างาน (Sales / Store / Warehouse / ช่าง) แม้ finance module = true
@@ -256,6 +310,12 @@ export function canAccessPath(
   roleCode?: string | null,
 ): boolean {
   const path = normalizePathname(pathname);
+  if (
+    (path === "/" || path === "/dashboard") &&
+    prefersProductionKanbanHome(roleCode, modules)
+  ) {
+    return false;
+  }
   if (isUngatedPath(path)) return true;
   if (isAdminRoleCode(roleCode)) return true;
 

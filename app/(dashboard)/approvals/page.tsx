@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { getPendingApprovals } from "@/app/actions/approval";
+import { getParameterSettingsPageData } from "@/lib/actions/parameter-actions";
 import { DocumentPreviewSheet } from "@/components/finance/DocumentPreviewSheet";
 import type { ApprovalTab } from "@/types/approval";
 import { ApprovalCenterPanel } from "./approval-center-panel";
@@ -25,7 +26,8 @@ type PageProps = {
 };
 
 function resolveTab(raw: string | undefined): ApprovalTab {
-  return raw === "expenses" ? "expenses" : "documents";
+  if (raw === "expenses" || raw === "parameters") return raw;
+  return "documents";
 }
 
 function ApprovalCenterFallback() {
@@ -41,7 +43,10 @@ async function ApprovalCenterContent({ searchParams }: PageProps) {
   const tab = resolveTab(params.tab);
   const viewExpenseId = params.view_expense?.trim() || null;
   const previewDocId = params.preview_doc_id?.trim() || null;
-  const result = await getPendingApprovals();
+  const [result, parameterResult] = await Promise.all([
+    getPendingApprovals(),
+    getParameterSettingsPageData(),
+  ]);
 
   if (!result.success) {
     return (
@@ -53,7 +58,17 @@ async function ApprovalCenterContent({ searchParams }: PageProps) {
 
   return (
     <>
-      <ApprovalCenterPanel data={result.data} initialTab={tab} />
+      <ApprovalCenterPanel
+        data={result.data}
+        initialTab={tab}
+        parameterRequests={
+          parameterResult.success ? parameterResult.data.pendingRequests : []
+        }
+        parameterIsAdmin={
+          parameterResult.success ? parameterResult.data.isAdmin : false
+        }
+        parameterError={parameterResult.success ? null : parameterResult.error}
+      />
       <DocumentPreviewSheet previewDocId={previewDocId}>
         {previewDocId ? (
           <Suspense

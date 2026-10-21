@@ -9,7 +9,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   canAccessPath,
   isAuthPath,
+  normalizePathname,
   parseAccessibleModules,
+  prefersProductionKanbanHome,
 } from "@/lib/auth/module-access";
 
 function isStaticAsset(pathname: string): boolean {
@@ -83,13 +85,25 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   }
 
   if (user && !onAuthPage) {
-    const denied = await isModuleAccessDenied(pathname, user.id);
-    if (denied) {
-      const forbiddenUrl = request.nextUrl.clone();
-      forbiddenUrl.pathname = "/forbidden";
-      forbiddenUrl.search = "";
-      forbiddenUrl.searchParams.set("from", pathname);
-      return NextResponse.redirect(forbiddenUrl);
+    const access = await loadModuleAccess(user.id);
+    if (access) {
+      const path = normalizePathname(pathname);
+      const sendToKanban =
+        prefersProductionKanbanHome(access.roleCode, access.modules) &&
+        (path === "/" || path === "/dashboard");
+      if (sendToKanban) {
+        const kanbanUrl = request.nextUrl.clone();
+        kanbanUrl.pathname = "/production/kanban";
+        kanbanUrl.search = "";
+        return NextResponse.redirect(kanbanUrl);
+      }
+      if (!canAccessPath(pathname, access.modules, access.roleCode)) {
+        const forbiddenUrl = request.nextUrl.clone();
+        forbiddenUrl.pathname = "/forbidden";
+        forbiddenUrl.search = "";
+        forbiddenUrl.searchParams.set("from", pathname);
+        return NextResponse.redirect(forbiddenUrl);
+      }
     }
   }
 
@@ -111,13 +125,13 @@ function unwrapRoleModules(join: RoleModulesJoin): unknown {
  * Module AuthGuard — Service Role lookup of app_roles.accessible_modules.
  * Fail-open when Service Role is missing so login still works.
  */
-async function isModuleAccessDenied(
-  pathname: string,
-  userId: string,
-): Promise<boolean> {
+async function loadModuleAccess(userId: string): Promise<{
+  roleCode: string | null;
+  modules: ReturnType<typeof parseAccessibleModules>;
+} | null> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) return false;
+  if (!supabaseUrl || !serviceRoleKey) return null;
 
   try {
     const admin = createClient(supabaseUrl, serviceRoleKey, {
@@ -134,7 +148,7 @@ async function isModuleAccessDenied(
       .eq("id", userId)
       .maybeSingle();
 
-    if (error || !profile) return false;
+    if (error || !profile) return null;
 
     const roleCode = String(profile.role_code ?? "").trim() || null;
     const modules = parseAccessibleModules(
@@ -142,8 +156,8 @@ async function isModuleAccessDenied(
       roleCode,
     );
 
-    return !canAccessPath(pathname, modules, roleCode);
+    return { roleCode, modules };
   } catch {
-    return false;
+    return null;
   }
 }

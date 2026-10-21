@@ -1,5 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { canAccessPath } from "@/lib/auth/module-access";
+import { useAccessContext } from "@/components/auth/access-context";
 
 export type PageModeTab = {
   key: string;
@@ -16,13 +20,22 @@ export function PageModeTabs({
   activeKey: string;
   ariaLabel: string;
 }) {
+  const access = useAccessContext();
+  const visibleTabs = access
+    ? tabs.filter((tab) =>
+        canAccessPath(tab.href, access.accessibleModules, access.roleCode),
+      )
+    : tabs;
+
+  if (visibleTabs.length === 0) return null;
+
   return (
     <div
       role="tablist"
       aria-label={ariaLabel}
       className="inline-flex h-10 w-full items-center justify-center gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 text-slate-600"
     >
-      {tabs.map((tab) => {
+      {visibleTabs.map((tab) => {
         const active = tab.key === activeKey;
         return (
           <Link

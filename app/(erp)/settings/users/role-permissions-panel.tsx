@@ -15,7 +15,11 @@ import {
   ERP_MODULE_LABELS,
   isAdminRoleCode,
 } from "@/lib/auth/module-access";
-import type { AccessibleModules, RolePermissionRow } from "@/types/rbac";
+import {
+  ERP_MODULE_COLUMN_LABELS,
+  type AccessibleModules,
+  type RolePermissionRow,
+} from "@/types/rbac";
 import {
   Accordion,
   AccordionContent,
@@ -59,7 +63,10 @@ export function RolePermissionsPanel({ roles }: RolePermissionsPanelProps) {
             <TableHead>บทบาท</TableHead>
             {ERP_MODULE_KEYS.map((key) => (
               <TableHead key={key} className="text-center text-xs">
-                {key}
+                <span className="block">{ERP_MODULE_COLUMN_LABELS[key].code}</span>
+                <span className="block font-normal text-slate-500">
+                  {ERP_MODULE_COLUMN_LABELS[key].nameTh}
+                </span>
               </TableHead>
             ))}
           </TableRow>

@@ -9,6 +9,7 @@ export const ERP_MODULE_KEYS = [
   "inventory",
   "finance",
   "settings",
+  "production",
 ] as const;
 
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
@@ -18,9 +19,23 @@ export type AccessibleModules = Record<ErpModuleKey, boolean>;
 export const ERP_MODULE_LABELS: Record<ErpModuleKey, string> = {
   sales: "ฝ่ายขาย (sales)",
   purchases: "จัดซื้อ (purchases)",
-  inventory: "คลังสินค้า/ผลิต (inventory)",
+  inventory: "คลังสินค้า (inventory)",
   finance: "การเงิน/บัญชี (finance)",
   settings: "ตั้งค่าระบบ (settings)",
+  production: "งานผลิต (production)",
+};
+
+/** หัวคอลัมน์ Permission Matrix — รหัสบน / ชื่อไทยล่าง */
+export const ERP_MODULE_COLUMN_LABELS: Record<
+  ErpModuleKey,
+  { code: string; nameTh: string }
+> = {
+  sales: { code: "SALES", nameTh: "ฝ่ายขาย" },
+  purchases: { code: "PURCHASES", nameTh: "จัดซื้อ" },
+  inventory: { code: "INVENTORY", nameTh: "คลังสินค้า" },
+  finance: { code: "FINANCE", nameTh: "การเงิน" },
+  settings: { code: "SETTINGS", nameTh: "ตั้งค่า" },
+  production: { code: "PRODUCTION", nameTh: "งานผลิต" },
 };
 
 export type RolePermissionRow = {

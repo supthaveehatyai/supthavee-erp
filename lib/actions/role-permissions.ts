@@ -220,6 +220,7 @@ function modulesEqual(
     left.purchases === right.purchases &&
     left.inventory === right.inventory &&
     left.finance === right.finance &&
-    left.settings === right.settings
+    left.settings === right.settings &&
+    left.production === right.production
   );
 }

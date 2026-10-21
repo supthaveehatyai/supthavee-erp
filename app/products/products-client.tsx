@@ -3003,7 +3003,7 @@ export default function ProductsClient() {
                         className="cursor-pointer bg-white transition hover:bg-slate-50/80"
                         onClick={() => openModelPreview(group.modelId)}
                       >
-                        <td className="px-5 py-4">
+                        <td className="px-5 py-2.5">
                           <div className="flex max-w-md items-start gap-2 text-left">
                             <button
                               type="button"
@@ -3038,10 +3038,11 @@ export default function ProductsClient() {
                             </span>
                           </div>
                         </td>
-                        <td className="px-5 py-4 text-xs">
+                        <td className="px-5 py-2.5 text-xs">
                           {groupVendor ? (
                             <button
                               type="button"
+                              title={groupVendor.company_name}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 setEntitySheet({
@@ -3049,7 +3050,7 @@ export default function ProductsClient() {
                                   data: groupVendor,
                                 });
                               }}
-                              className="text-left font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 transition hover:text-blue-800 hover:decoration-blue-500"
+                              className="block max-w-[170px] truncate text-left font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 transition hover:text-blue-800 hover:decoration-blue-500"
                             >
                               {groupVendor.company_name}
                             </button>
@@ -3057,7 +3058,7 @@ export default function ProductsClient() {
                             <span className="text-slate-400">—</span>
                           )}
                         </td>
-                        <td className="px-5 py-4 text-xs">
+                        <td className="px-5 py-2.5 text-xs">
                           {groupBrand ? (
                             <button
                               type="button"
@@ -3070,8 +3071,8 @@ export default function ProductsClient() {
                               }}
                               className="text-left font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 transition hover:text-blue-800 hover:decoration-blue-500"
                             >
-                              {groupBrand.brand_name}
-                              <span className="ml-1 font-mono text-[10px] text-blue-500">
+                              <span className="block">{groupBrand.brand_name}</span>
+                              <span className="block font-mono text-[11px] text-slate-400 leading-tight">
                                 ({groupBrand.brand_code})
                               </span>
                             </button>
@@ -3079,13 +3080,13 @@ export default function ProductsClient() {
                             <span className="text-slate-400">—</span>
                           )}
                         </td>
-                        <td className="px-5 py-4 text-xs text-slate-600">
+                        <td className="px-5 py-2.5 text-xs text-slate-600">
                           <p>{group.category || "—"}</p>
                           <p className="mt-0.5 text-slate-400">
                             {group.gender || "—"}
                           </p>
                         </td>
-                        <td className="px-5 py-4 text-xs text-slate-600">
+                        <td className="px-5 py-2.5 text-xs text-slate-600">
                           <p>
                             {group.colors.length || 0} สี ×{" "}
                             {group.sizes.length || 0} ไซส์
@@ -3094,9 +3095,9 @@ export default function ProductsClient() {
                             {group.products.length.toLocaleString("th-TH")} SKU
                           </p>
                         </td>
-                        <td className="px-5 py-4">
+                        <td className="px-5 py-2.5">
                           <span
-                            className={`inline-flex items-center gap-1.5 text-[11px] font-medium ${
+                            className={`inline-flex items-center gap-1.5 whitespace-nowrap text-[11px] font-medium ${
                               isFullyActive
                                 ? "text-emerald-700"
                                 : isPartiallyActive
@@ -3120,15 +3121,15 @@ export default function ProductsClient() {
                                 : "ปิดใช้งานทั้งหมด"}
                           </span>
                         </td>
-                        <td className="px-5 py-4">
-                          <div className="flex flex-wrap items-center gap-2">
+                        <td className="px-5 py-2.5">
+                          <div className="flex flex-nowrap items-center justify-end gap-1.5 whitespace-nowrap">
                             <button
                               type="button"
                               onClick={(event) => {
                                 event.stopPropagation();
                                 openBatchEdit(group);
                               }}
-                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
                             >
                               <Icon name="edit" className="size-3.5" />
                               แก้ไขทั้งรุ่น
@@ -3140,7 +3141,7 @@ export default function ProductsClient() {
                                 openDeactivateDialog(group);
                               }}
                               disabled={group.activeCount === 0}
-                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-2.5 text-[11px] font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-2.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
                             >
                               <Icon name="ban" className="size-3.5" />
                               ปิดการใช้งาน
@@ -3152,7 +3153,7 @@ export default function ProductsClient() {
                                 openDeleteDialog(group);
                               }}
                               disabled={isDeleting}
-                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-300 bg-red-600 px-2.5 text-[11px] font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-300 bg-red-600 px-2.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               <Icon name="trash" className="size-3.5" />
                               ลบ

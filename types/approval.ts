@@ -7,7 +7,7 @@ export type ApprovalTargetType = "DOCUMENT" | "EXPENSE";
 
 export type ApprovalDecision = "APPROVED" | "REJECTED";
 
-export type ApprovalTab = "documents" | "expenses";
+export type ApprovalTab = "documents" | "expenses" | "parameters";
 
 export type PendingApprovalItem = {
   id: string;
