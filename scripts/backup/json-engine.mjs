@@ -135,29 +135,68 @@ export function readJsonBackup(filePath) {
 /**
  * Upsert ทีละ 500 แถว ตามลำดับตารางที่ส่งมา (Parent → Child)
  */
+function orderRestoreTables(tables, catalogOrder) {
+  const rank = new Map((catalogOrder ?? []).map((table, index) => [table, index]));
+  return [...tables].sort((left, right) => {
+    const leftRank = rank.has(left) ? rank.get(left) : 10000;
+    const rightRank = rank.has(right) ? rank.get(right) : 10000;
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    return String(left).localeCompare(String(right));
+  });
+}
+
+function rowsForRestore(table, rows) {
+  if (table !== "mst_categories") return rows;
+  return [...rows].sort((left, right) => {
+    const leftRoot = left?.parent_id == null ? 0 : 1;
+    const rightRoot = right?.parent_id == null ? 0 : 1;
+    return leftRoot - rightRoot;
+  });
+}
+
+function upsertOptionsFor(table, firstRow, catalog) {
+  if (table === "audit_logs") {
+    return { onConflict: "id", ignoreDuplicates: true };
+  }
+  if (table === "vendor_product_mapping") {
+    if (firstRow && firstRow.id != null && firstRow.id !== "") {
+      return { onConflict: "id" };
+    }
+    if (firstRow && firstRow.mapping_id != null && firstRow.mapping_id !== "") {
+      return { onConflict: "mapping_id" };
+    }
+    return null;
+  }
+  const conflict =
+    typeof catalog.upsertConflictColumn === "function"
+      ? catalog.upsertConflictColumn(table)
+      : "id";
+  return { onConflict: conflict };
+}
+
 export async function upsertJsonBackup(supabase, payload, tables) {
   const catalog = await loadBackupCatalog();
-  const data = payload?.data ?? {};
+  const data = payload?.data ?? payload?.tables ?? {};
+  const rowMap = data && !Array.isArray(data) ? data : {};
   const skippedTables = [];
+  const ordered = orderRestoreTables(tables, catalog.RESTORE_TABLE_ORDER);
 
-  for (const table of tables) {
-    const rows = Array.isArray(data[table]) ? data[table] : [];
+  for (const table of ordered) {
+    const rows = rowsForRestore(
+      table,
+      Array.isArray(rowMap[table]) ? rowMap[table] : [],
+    );
     if (rows.length === 0) {
       console.log(`   → ${table}: 0 แถว`);
       continue;
     }
-    const conflict =
-      typeof catalog.upsertConflictColumn === "function"
-        ? catalog.upsertConflictColumn(table)
-        : "id";
-    const upsertOptions =
-      table === "audit_logs"
-        ? { onConflict: "id", ignoreDuplicates: true }
-        : { onConflict: conflict };
+    const upsertOptions = upsertOptionsFor(table, rows[0], catalog);
     let skipped = false;
     for (let index = 0; index < rows.length; index += UPSERT_BATCH) {
       const batch = rows.slice(index, index + UPSERT_BATCH);
-      const { error } = await supabase.from(table).upsert(batch, upsertOptions);
+      const { error } = upsertOptions
+        ? await supabase.from(table).upsert(batch, upsertOptions)
+        : await supabase.from(table).upsert(batch);
       if (error && isMissingSchemaTableError(error)) {
         skippedTables.push({ table, reason: error.message });
         console.warn(`⚠️ ข้าม ${table}: ${error.message}`);

@@ -118,6 +118,57 @@ export function tablesForModule(moduleName: BackupModuleSelection): string[] {
   return [...tables];
 }
 
+/**
+ * ลำดับกู้คืน: Master Data → Contacts → Products → Documents → Transactions → Logs
+ * เรียง Parent ก่อน Child ตาม Foreign Key
+ */
+export const RESTORE_TABLE_ORDER = [
+  "system_settings",
+  "system_parameters",
+  "app_roles",
+  "user_profiles",
+  "accounting_periods",
+  "mst_uom",
+  "mst_wht_rates",
+  "mst_bank_accounts",
+  "mst_brands",
+  "mst_categories",
+  "mst_colors",
+  "mst_expense_categories",
+  "mst_asset_categories",
+  "mst_genders",
+  "mst_sizes",
+  "contacts",
+  "contact_persons",
+  "mst_carriers",
+  "product_models",
+  "products",
+  "vendor_product_mapping",
+  "product_boms",
+  "technician_rates",
+  "doc_headers",
+  "doc_details",
+  "documents",
+  "document_items",
+  "inventory_ledger",
+  "production_jobs",
+  "production_job_items",
+  "production_job_materials",
+  "production_job_operations",
+  "document_allocations",
+  "billing_note_items",
+  "expenses",
+  "expense_installments",
+  "payment_transactions",
+  "payment_allocations",
+  "fixed_assets",
+  "asset_depreciation_ledger",
+  "depreciation_ledgers",
+  "approval_logs",
+  "parameter_change_requests",
+  "audit_logs",
+] as const;
+
 /** Primary key ที่ใช้ตอน upsert — นอกเหนือจากนี้ใช้ `id` */
 export function upsertConflictColumn(table: string): string {
   if (table === "system_parameters") return "param_key";

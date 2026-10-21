@@ -2,15 +2,18 @@
  * POST /api/backup/restore
  * mode=preview อ่านไฟล์แล้วคืนจำนวนแถว
  * mode=execute กู้คืนเฉพาะตารางที่เลือก หลังตรวจ PIN ของ Admin
+ * ส่งความคืบหน้าเป็น NDJSON ทีละตาราง
  */
 
 import { gunzipSync } from "node:zlib";
 import { NextRequest, NextResponse } from "next/server";
 import { isAdminRoleCode } from "@/lib/auth/module-access";
+import { parseBackupText, type BackupRow, type NormalizedBackup } from "@/lib/backup/backup-file";
 import {
-  tablesForModule,
-  upsertConflictColumn,
-} from "@/lib/backup/backup-modules";
+  orderTablesForRestore,
+  resolveUpsertOptions,
+  sortRowsForRestore,
+} from "@/lib/backup/restore-rows";
 import { isMissingSchemaTableError } from "@/lib/backup/schema-cache";
 import { createClient as createSupabaseAdmin } from "@/lib/supabase/server-admin";
 import { createSupabaseSSRClient } from "@/lib/supabase/ssr-server";
@@ -23,16 +26,9 @@ const UPSERT_BATCH = 500;
 const PIN_RE = /^\d{6}$/;
 const TABLE_NAME_RE = /^[a-z][a-z0-9_]*$/;
 
-type Row = Record<string, unknown>;
-
 type SkippedTable = {
   table: string;
   reason: string;
-};
-
-type BackupPayload = {
-  module?: string;
-  data?: Record<string, unknown>;
 };
 
 function pinAsString(value: unknown): string {
@@ -60,42 +56,29 @@ async function requireAdmin() {
     return { ok: false as const, error: "Forbidden" };
   }
 
-  return { ok: true as const, userId: user.id, pinCode: profile.pin_code, supabaseAdmin };
+  return {
+    ok: true as const,
+    userId: user.id,
+    pinCode: profile.pin_code,
+    supabaseAdmin,
+  };
 }
 
-function readBackupFile(bytes: Buffer, filename: string): BackupPayload {
+function decodeUpload(bytes: Buffer, filename: string): NormalizedBackup {
   const text = filename.toLowerCase().endsWith(".gz")
     ? gunzipSync(bytes).toString("utf8")
     : bytes.toString("utf8");
-  const parsed = JSON.parse(text) as BackupPayload;
-  if (!parsed || typeof parsed !== "object" || !parsed.data || typeof parsed.data !== "object") {
-    throw new Error("ไฟล์ Backup ต้องมีอ็อบเจ็กต์ data");
-  }
-  return parsed;
+  return parseBackupText(text);
 }
 
-function tablesInFile(payload: BackupPayload): { table: string; rows: number }[] {
-  const data = payload.data ?? {};
-  const present = Object.entries(data)
-    .filter((entry): entry is [string, Row[]] => Array.isArray(entry[1]))
-    .map(([table, rows]) => ({ table, rows: rows.length }));
-  const catalog = tablesForModule("all");
-  const ordered = catalog
-    .map((table) => present.find((item) => item.table === table))
-    .filter((item): item is { table: string; rows: number } => Boolean(item));
-  const extras = present.filter((item) => !catalog.includes(item.table));
-  return [...ordered, ...extras];
-}
-
-function orderSelected(selected: string[], present: Set<string>): string[] {
-  const catalog = tablesForModule("all");
-  const ordered = catalog.filter(
-    (table) => selected.includes(table) && present.has(table),
+function presentTables(payload: NormalizedBackup): { table: string; rows: number }[] {
+  const withRows = payload.tables
+    .filter((table) => Array.isArray(payload.data[table]))
+    .map((table) => ({ table, rows: payload.data[table].length }));
+  const orderedNames = orderTablesForRestore(withRows.map((item) => item.table));
+  return orderedNames.map(
+    (table) => withRows.find((item) => item.table === table) ?? { table, rows: 0 },
   );
-  const extras = selected.filter(
-    (table) => present.has(table) && !ordered.includes(table) && TABLE_NAME_RE.test(table),
-  );
-  return [...ordered, ...extras];
 }
 
 export async function POST(request: NextRequest) {
@@ -108,11 +91,18 @@ export async function POST(request: NextRequest) {
     const form = await request.formData();
     const mode = String(form.get("mode") ?? "").trim();
     const uploaded = form.get("file");
-    if (!(uploaded instanceof File)) {
+    if (
+      !uploaded ||
+      typeof uploaded === "string" ||
+      typeof uploaded.arrayBuffer !== "function"
+    ) {
       return NextResponse.json({ error: "ต้องแนบไฟล์ .json หรือ .json.gz" }, { status: 400 });
     }
 
-    const filename = uploaded.name || "backup.json";
+    const filename =
+      "name" in uploaded && typeof uploaded.name === "string" && uploaded.name
+        ? uploaded.name
+        : "backup.json";
     const lower = filename.toLowerCase();
     if (!lower.endsWith(".json") && !lower.endsWith(".json.gz") && !lower.endsWith(".gz")) {
       return NextResponse.json(
@@ -121,20 +111,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let payload: BackupPayload;
+    let payload: NormalizedBackup;
     try {
-      payload = readBackupFile(Buffer.from(await uploaded.arrayBuffer()), filename);
+      payload = decodeUpload(Buffer.from(await uploaded.arrayBuffer()), filename);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "อ่านไฟล์ Backup ไม่ได้";
       return NextResponse.json({ error: message }, { status: 400 });
     }
 
-    const listed = tablesInFile(payload);
+    const listed = presentTables(payload);
+    const populated = listed.filter((item) => item.rows > 0);
     if (mode === "preview") {
       return NextResponse.json({
-        module: typeof payload.module === "string" ? payload.module : null,
+        filename,
+        exportedAt: payload.exportedAt,
+        module: payload.module,
         tables: listed,
-        rowCounts: Object.fromEntries(listed.map((item) => [item.table, item.rows])),
+        tableCount: populated.length,
+        totalRows: populated.reduce((sum, item) => sum + item.rows, 0),
+        rowCounts: payload.rowCounts,
+        skipped_tables: payload.skippedTables,
       });
     }
 
@@ -161,75 +157,112 @@ export async function POST(request: NextRequest) {
     }
 
     const present = new Set(listed.map((item) => item.table));
-    const selected = orderSelected(requested, present);
+    const selected = orderTablesForRestore(
+      requested.filter(
+        (table): table is string =>
+          typeof table === "string" && present.has(table) && TABLE_NAME_RE.test(table),
+      ),
+    );
     if (selected.length === 0) {
       return NextResponse.json({ error: "ยังไม่ได้เลือกตารางที่จะกู้คืน" }, { status: 400 });
     }
 
-    const data = payload.data ?? {};
     const dynamic = auth.supabaseAdmin as unknown as {
       from: (table: string) => {
         upsert: (
-          values: Row[],
-          options: { onConflict: string; ignoreDuplicates?: boolean },
+          values: BackupRow[],
+          options?: { onConflict?: string; ignoreDuplicates?: boolean },
         ) => PromiseLike<{ error: { message: string; code?: string } | null }>;
       };
     };
 
-    const restored: { table: string; rows: number }[] = [];
-    const skippedTables: SkippedTable[] = [];
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const send = (event: unknown) => {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        };
+        const restored: { table: string; rows: number }[] = [];
+        const skippedTables: SkippedTable[] = [];
 
-    for (const table of selected) {
-      const rows = Array.isArray(data[table]) ? (data[table] as Row[]) : [];
-      if (rows.length === 0) {
-        restored.push({ table, rows: 0 });
-        continue;
-      }
-      const options =
-        table === "audit_logs"
-          ? { onConflict: "id", ignoreDuplicates: true }
-          : { onConflict: upsertConflictColumn(table) };
-      let skipped = false;
-      for (let index = 0; index < rows.length; index += UPSERT_BATCH) {
-        const batch = rows.slice(index, index + UPSERT_BATCH);
-        const { error } = await dynamic.from(table).upsert(batch, options);
-        if (error && isMissingSchemaTableError(error)) {
-          skippedTables.push({ table, reason: error.message });
-          skipped = true;
-          break;
-        }
-        if (error) {
-          return NextResponse.json(
-            { error: `${table}: ${error.message}`, restored, skipped_tables: skippedTables },
-            { status: 500 },
-          );
-        }
-      }
-      if (!skipped) restored.push({ table, rows: rows.length });
-    }
+        try {
+          for (let index = 0; index < selected.length; index += 1) {
+            const table = selected[index];
+            send({
+              type: "progress",
+              table,
+              index: index + 1,
+              total: selected.length,
+            });
 
-    const { error: auditError } = await auth.supabaseAdmin.from("audit_logs").insert({
-      action: "INSERT",
-      table_name: "system",
-      record_id: "N/A",
-      changed_by: auth.userId,
-      new_data: {
-        action: "MANUAL_RESTORE_EXECUTED",
-        module: typeof payload.module === "string" ? payload.module : null,
-        selectedTables: selected,
-        restored,
-        skipped_tables: skippedTables,
-        timestamp: new Date().toISOString(),
+            const rows = sortRowsForRestore(
+              table,
+              Array.isArray(payload.data[table]) ? payload.data[table] : [],
+            );
+            if (rows.length === 0) {
+              restored.push({ table, rows: 0 });
+              continue;
+            }
+
+            const options = resolveUpsertOptions(table, rows[0]);
+            let skipped = false;
+            for (let offset = 0; offset < rows.length; offset += UPSERT_BATCH) {
+              const batch = rows.slice(offset, offset + UPSERT_BATCH);
+              const { error } = options.onConflict
+                ? await dynamic.from(table).upsert(batch, options)
+                : await dynamic.from(table).upsert(batch);
+              if (error && isMissingSchemaTableError(error)) {
+                skippedTables.push({ table, reason: error.message });
+                skipped = true;
+                break;
+              }
+              if (error) {
+                send({
+                  type: "error",
+                  error: `${table}: ${error.message}`,
+                  restored,
+                  skipped_tables: skippedTables,
+                });
+                controller.close();
+                return;
+              }
+            }
+            if (!skipped) restored.push({ table, rows: rows.length });
+          }
+
+          const { error: auditError } = await auth.supabaseAdmin.from("audit_logs").insert({
+            action: "INSERT",
+            table_name: "system",
+            record_id: "N/A",
+            changed_by: auth.userId,
+            new_data: {
+              action: "MANUAL_RESTORE_EXECUTED",
+              module: payload.module,
+              selectedTables: selected,
+              restored,
+              skipped_tables: skippedTables,
+              timestamp: new Date().toISOString(),
+            },
+          });
+          if (auditError && !isMissingSchemaTableError(auditError)) {
+            console.error("Restore audit error:", auditError);
+          }
+
+          send({ type: "done", restored, skipped_tables: skippedTables });
+          controller.close();
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : "กู้คืนข้อมูลไม่สำเร็จ";
+          send({ type: "error", error: message });
+          controller.close();
+        }
       },
     });
-    if (auditError && !isMissingSchemaTableError(auditError)) {
-      console.error("Restore audit error:", auditError);
-    }
 
-    return NextResponse.json({
-      success: true,
-      restored,
-      skipped_tables: skippedTables,
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
     });
   } catch (error: unknown) {
     console.error("Backup restore error:", error);
