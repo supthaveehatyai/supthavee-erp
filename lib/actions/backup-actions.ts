@@ -7,12 +7,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import {
-  isAdminRoleCode,
-  parseAccessibleModules,
-} from "@/lib/auth/module-access";
+import { resolveManualBackupAuth } from "@/lib/backup/manual-backup-auth";
 import { createClient as createSupabaseAdmin } from "@/lib/supabase/server-admin";
-import { createSupabaseSSRClient } from "@/lib/supabase/ssr-server";
 
 export type TriggerManualBackupResult = {
   success: boolean;
@@ -21,91 +17,7 @@ export type TriggerManualBackupResult = {
 };
 
 const MANUAL_BACKUP_DR_MESSAGE =
-  "แจ้งเตือน: การสำรองข้อมูลระดับ Database (Disaster Recovery) ไม่สามารถรันบน Cloud ได้ กรุณารันสคริปต์ npm run backup:db และ npm run backup:storage ที่เครื่อง Server สาขาหาดใหญ่โดยตรง เพื่อความปลอดภัยของข้อมูล";
-
-type RoleModulesJoin =
-  | { accessible_modules: unknown }
-  | { accessible_modules: unknown }[]
-  | null;
-
-function unwrapRoleModules(join: RoleModulesJoin): unknown {
-  if (!join) return null;
-  if (Array.isArray(join)) return join[0]?.accessible_modules ?? null;
-  return join.accessible_modules ?? null;
-}
-
-type AuthSuccess = {
-  ok: true;
-  userId: string;
-};
-
-type AuthFailure = {
-  ok: false;
-  error: string;
-};
-
-/**
- * Authorization for Manual Backup request:
- * 1) Auth Session → user.id
- * 2) user_profiles ⋈ app_roles (Service Role)
- * 3) Allow when role is Admin OR accessible_modules.settings === true
- */
-async function resolveManualBackupAuth(): Promise<AuthSuccess | AuthFailure> {
-  const supabaseAuth = await createSupabaseSSRClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabaseAuth.auth.getUser();
-
-  if (authError || !user?.id) {
-    return { ok: false, error: "Forbidden" };
-  }
-
-  const supabaseAdmin = createSupabaseAdmin();
-  const { data: profile, error: profileError } = await supabaseAdmin
-    .from("user_profiles")
-    .select(
-      `
-      id,
-      full_name,
-      email,
-      role_code,
-      is_active,
-      app_roles!user_profiles_role_code_fkey (
-        accessible_modules
-      )
-    `,
-    )
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (profileError || !profile) {
-    return { ok: false, error: "Forbidden" };
-  }
-
-  if (profile.is_active === false) {
-    return { ok: false, error: "Forbidden" };
-  }
-
-  const roleCode =
-    typeof profile.role_code === "string" && profile.role_code.trim()
-      ? profile.role_code.trim()
-      : null;
-
-  const modules = parseAccessibleModules(
-    unwrapRoleModules(profile.app_roles as RoleModulesJoin),
-    roleCode,
-  );
-
-  const isHighLevelAdmin = isAdminRoleCode(roleCode);
-  const canAccessSettings = modules.settings === true;
-
-  if (!isHighLevelAdmin && !canAccessSettings) {
-    return { ok: false, error: "Forbidden" };
-  }
-
-  return { ok: true, userId: user.id };
-}
+  "แจ้งเตือน: การสำรองทั้งสคีมาและไฟล์แนบรันบน Cloud ไม่ได้ กรุณาเปิด PowerShell บนเครื่องที่แมปไดรฟ์ H: แล้วรัน npm run backup:all เพื่อเขียนไฟล์ลง H:\\My Drive\\STV_ERP_SuperApp\\Backup";
 
 /**
  * บันทึกคำขอ Manual Backup จาก Cloud ลง audit_logs (supabaseAdmin เท่านั้น)

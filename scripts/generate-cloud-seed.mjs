@@ -12,27 +12,17 @@ import { existsSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
+import { loadBackupCatalog } from "./backup/load-backup-modules.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENV_PATH = resolve(ROOT, ".env.production");
 const OUT = resolve(ROOT, "cloud_master_data.sql");
 
-/** ลำดับ FK-safe — ห้ามสลับ */
-const WHITELIST = [
-  "system_settings",
-  "mst_bank_accounts",
-  "mst_brands",
-  "mst_categories",
-  "mst_colors",
-  "mst_expense_categories",
-  "mst_genders",
-  "mst_sizes",
-  "contacts",
-  "contact_persons",
-  "product_models",
-  "products",
-  "technician_rates",
-];
+/**
+ * Master Data ยุค Phase 14–21 เรียงตาม lib/backup/backup-modules.ts
+ * ไม่รวม user_profiles / accounting_periods เพราะผูก auth.users และงวดบัญชี
+ */
+const SETTINGS_SEED = ["system_settings", "system_parameters", "app_roles"];
 
 /** ตารางธุรกรรม — ห้าม dump เด็ดขาด */
 const BLACKLIST = new Set([
@@ -44,13 +34,22 @@ const BLACKLIST = new Set([
   "billing_note_items",
   "inventory_ledger",
   "production_jobs",
+  "production_job_items",
+  "production_job_materials",
+  "production_job_operations",
   "service_tracking",
   "payment_transactions",
   "payment_allocations",
   "payment_slips",
   "expenses",
+  "expense_installments",
+  "fixed_assets",
+  "asset_depreciation_ledger",
+  "approval_logs",
+  "parameter_change_requests",
   "audit_logs",
-  "vendor_product_mapping",
+  "user_profiles",
+  "accounting_periods",
 ]);
 
 function fail(message, detail) {
@@ -123,61 +122,68 @@ function dumpTable(pgDump, dbUrl, table) {
   return runPgDump(pgDump.bin, args);
 }
 
-for (const table of WHITELIST) {
-  if (BLACKLIST.has(table)) {
-    fail("Whitelist ชนกับ Blacklist (ตารางธุรกรรม)", table);
-  }
-}
+async function main() {
+  const catalog = await loadBackupCatalog();
+  const WHITELIST = [
+    ...SETTINGS_SEED,
+    ...catalog.BACKUP_MODULE_TABLES.master,
+  ];
 
-if (!existsSync(ENV_PATH)) {
-  fail("ไม่พบไฟล์ .env.production", ENV_PATH);
-}
-
-dotenv.config({ path: ENV_PATH });
-const dbUrl = process.env.DATABASE_URL?.trim() ?? "";
-if (!dbUrl) {
-  fail(
-    "ไม่พบ DATABASE_URL ใน .env.production",
-    "ใช้ Direct connection พอร์ต 5432 (ไม่ใช่ Transaction Pooler :6543)",
-  );
-}
-
-console.log(`☁️  Cloud seed: ${redactDbUrl(dbUrl)}`);
-console.log(`📋 Tables (${WHITELIST.length}): ${WHITELIST.join(", ")}`);
-
-const pgDump = resolvePgDump();
-const chunks = [];
-
-for (const table of WHITELIST) {
-  process.stdout.write(`   → ${table} ... `);
-  const result = dumpTable(pgDump, dbUrl, table);
-
-  if (result.error?.code === "ENOENT") {
-    fail("ไม่พบคำสั่ง pg_dump / docker", result.error.message);
+  for (const table of WHITELIST) {
+    if (BLACKLIST.has(table)) {
+      fail("Whitelist ชนกับ Blacklist (ตารางธุรกรรม)", table);
+    }
   }
 
-  if (result.status !== 0) {
-    const stderr = (result.stderr || result.error?.message || "").trim();
-    const isConn =
-      /could not connect|connection refused|timeout|password authentication|SSL/i.test(
-        stderr,
-      );
+  if (!existsSync(ENV_PATH)) {
+    fail("ไม่พบไฟล์ .env.production", ENV_PATH);
+  }
+
+  dotenv.config({ path: ENV_PATH });
+  const dbUrl = process.env.DATABASE_URL?.trim() ?? "";
+  if (!dbUrl) {
     fail(
-      isConn
-        ? `เชื่อมต่อ Cloud Database ไม่สำเร็จ (ตาราง ${table})`
-        : `pg_dump ล้มเหลวที่ตาราง ${table}`,
-      stderr || `exit code ${result.status}`,
+      "ไม่พบ DATABASE_URL ใน .env.production",
+      "ใช้ Direct connection พอร์ต 5432 (ไม่ใช่ Transaction Pooler :6543)",
     );
   }
 
-  const body = sanitizeSeedSql(result.stdout || "");
-  const insertCount = (body.match(/^INSERT INTO\b/gim) ?? []).length;
-  console.log(`${insertCount} INSERT`);
-  chunks.push(`-- ---------------------------------------------------------------------------\n-- public.${table}\n-- ---------------------------------------------------------------------------\n${body || `-- (no rows)`}`);
-}
+  console.log(`☁️  Cloud seed: ${redactDbUrl(dbUrl)}`);
+  console.log(`📋 Tables (${WHITELIST.length}): ${WHITELIST.join(", ")}`);
 
-const header = `-- =============================================================================
--- Cloud Master Data (Go-Live review dump)
+  const pgDump = resolvePgDump();
+  const chunks = [];
+
+  for (const table of WHITELIST) {
+    process.stdout.write(`   → ${table} ... `);
+    const result = dumpTable(pgDump, dbUrl, table);
+
+    if (result.error?.code === "ENOENT") {
+      fail("ไม่พบคำสั่ง pg_dump / docker", result.error.message);
+    }
+
+    if (result.status !== 0) {
+      const stderr = (result.stderr || result.error?.message || "").trim();
+      const isConn =
+        /could not connect|connection refused|timeout|password authentication|SSL/i.test(
+          stderr,
+        );
+      fail(
+        isConn
+          ? `เชื่อมต่อ Cloud Database ไม่สำเร็จ (ตาราง ${table})`
+          : `pg_dump ล้มเหลวที่ตาราง ${table}`,
+        stderr || `exit code ${result.status}`,
+      );
+    }
+
+    const body = sanitizeSeedSql(result.stdout || "");
+    const insertCount = (body.match(/^INSERT INTO\b/gim) ?? []).length;
+    console.log(`${insertCount} INSERT`);
+    chunks.push(`-- ---------------------------------------------------------------------------\n-- public.${table}\n-- ---------------------------------------------------------------------------\n${body || `-- (no rows)`}`);
+  }
+
+  const header = `-- =============================================================================
+-- Cloud Master Data (Go-Live review dump — Phase 14–21)
 -- Generated at: ${new Date().toISOString()}
 -- Source: .env.production DATABASE_URL
 -- Tables: ${WHITELIST.join(", ")}
@@ -186,6 +192,11 @@ const header = `-- =============================================================
 
 `;
 
-writeFileSync(OUT, `${header}${chunks.join("\n\n")}\n`, "utf8");
-console.log(`✅ Wrote ${OUT}`);
-console.log("   รีวิวไฟล์นี้ก่อนนำไปเป็น Seed / Go-Live");
+  writeFileSync(OUT, `${header}${chunks.join("\n\n")}\n`, "utf8");
+  console.log(`✅ Wrote ${OUT}`);
+  console.log("   รีวิวไฟล์นี้ก่อนนำไปเป็น Seed / Go-Live");
+}
+
+main().catch((err) => {
+  fail("generate-cloud-seed ล้มเหลว", err.message || err);
+});

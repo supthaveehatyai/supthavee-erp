@@ -14,6 +14,9 @@
     "seed:uat": "npx tsx scripts/seed-uat-data.ts",
     "backup:db": "node scripts/backup/backup-db.mjs",
     "backup:storage": "node scripts/backup/backup-storage.mjs",
+    "backup:all": "node scripts/backup/backup-db.mjs --module=all && node scripts/backup/backup-storage.mjs",
+    "backup:module": "node scripts/backup/backup-db.mjs",
+    "restore:db": "node scripts/backup/restore-db.mjs",
     "archive:nas": "node scripts/nas-archiver.mjs"
   },
   "dependencies": {

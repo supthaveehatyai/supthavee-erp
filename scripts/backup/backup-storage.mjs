@@ -1,151 +1,240 @@
 // scripts/backup/backup-storage.mjs
-import { S3Client, ListObjectsV2Command, GetObjectCommand } from "@aws-sdk/client-s3";
-import fs from "fs";
-import path from "path";
-import { pipeline } from "stream/promises";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+/**
+ * Incremental mirror ของ Storage ลง NAS
+ * ช่องทางหลัก: Supabase Storage API
+ * ช่องทางสำรอง: S3 เมื่อตั้ง S3_ACCESS_KEY_ID และไม่มี Service Role
+ *
+ * Usage:
+ *   node scripts/backup/backup-storage.mjs
+ *   node scripts/backup/backup-storage.mjs --bucket=product_assets
+ */
+import fs from "node:fs";
+import path from "node:path";
+import { pipeline } from "node:stream/promises";
+import { createClient } from "@supabase/supabase-js";
+import { ensureBackupEnv, resolveBaseDir } from "./pg-tools.mjs";
 
 const TARGET_BUCKETS = [
   "document_attachments",
   "production_attachments",
+  "expense_documents",
+  "product_assets",
 ];
 
-
-/**
- * Load .env.production locally; on Vercel/production use injected env only.
- */
-async function ensureBackupEnv(requiredKeys) {
-  const skipLoadEnv =
-    process.env.VERCEL === "1" || process.env.NODE_ENV === "production";
-
-  if (!skipLoadEnv) {
-    try {
-      const { checkEnv } = await import("./load-env.mjs");
-      checkEnv(requiredKeys);
-      return;
-    } catch (err) {
-      console.warn(
-        `[backup] Could not import load-env.mjs (${err.message}); validating injected env only.`,
-      );
-    }
+function parseArgs(argv) {
+  let bucket = "";
+  for (const arg of argv) {
+    if (arg.startsWith("--bucket=")) bucket = arg.slice("--bucket=".length).trim();
+    else if (arg === "--help") return { help: true, bucket: "" };
+    else throw new Error(`ไม่รู้จักอาร์กิวเมนต์ ${arg}`);
   }
-
-  const missing = requiredKeys.filter((key) => !process.env[key]);
-  if (missing.length > 0) {
-    console.error(
-      `❌ [Error] Missing required environment variables: ${missing.join(", ")}`,
+  if (bucket && !TARGET_BUCKETS.includes(bucket)) {
+    throw new Error(
+      `bucket ไม่ถูกต้อง: ${bucket} (ใช้ ${TARGET_BUCKETS.join(", ")})`,
     );
-    process.exit(1);
   }
+  return { help: false, bucket };
 }
 
+function localObjectPath(baseDir, bucket, key) {
+  const parts = String(key)
+    .split("/")
+    .filter((part) => part && part !== "." && part !== "..");
+  return path.join(baseDir, "storage_mirror", bucket, ...parts);
+}
 
-async function backupBucket(s3Client, baseBackupDir, bucketName) {
-  console.log(
-    `\n🗂️ [Storage Backup] เริ่มต้นดึงข้อมูลจาก Bucket: ${bucketName}...`,
-  );
+function shouldSkip(localPath) {
+  if (!fs.existsSync(localPath)) return false;
+  return fs.statSync(localPath).size > 0;
+}
 
-  try {
-    let isTruncated = true;
-    let continuationToken = undefined;
-    let fileCount = 0;
-
-    while (isTruncated) {
-      const listCommand = new ListObjectsV2Command({
-        Bucket: bucketName,
-        ContinuationToken: continuationToken,
-      });
-
-      const { Contents, IsTruncated, NextContinuationToken } =
-        await s3Client.send(listCommand);
-
-      if (!Contents || Contents.length === 0) {
-        console.log(`   ℹ️ ไม่พบไฟล์ใน Bucket: ${bucketName}`);
-        break;
-      }
-
-      for (const item of Contents) {
-        if (item.Key.endsWith("/")) continue;
-
-        const filePath = path.join(baseBackupDir, bucketName, item.Key);
-        const fileDir = path.dirname(filePath);
-
-        if (!fs.existsSync(fileDir)) {
-          fs.mkdirSync(fileDir, { recursive: true });
-        }
-
-        const getCommand = new GetObjectCommand({
-          Bucket: bucketName,
-          Key: item.Key,
-        });
-
-        const { Body } = await s3Client.send(getCommand);
-
-        await pipeline(Body, fs.createWriteStream(filePath));
-
-        console.log(
-          `   ✅ โหลดสำเร็จ: [${bucketName}] ${item.Key} (${(item.Size / 1024).toFixed(2)} KB)`,
-        );
-        fileCount++;
-      }
-
-      isTruncated = IsTruncated;
-      continuationToken = NextContinuationToken;
-    }
-
-    console.log(
-      `🎉 [Storage Backup] สำเร็จ! รวม ${fileCount} ไฟล์ สำหรับ Bucket: ${bucketName}`,
-    );
-  } catch (error) {
-    console.error(
-      `❌ [Error] เกิดข้อผิดพลาดในการดึงข้อมูล Bucket: ${bucketName}`,
-    );
-    console.error("   👉 สาเหตุ:", error.message);
+async function listStorageTree(supabase, bucket, folder, depth = 0) {
+  if (depth > 20) {
+    throw new Error(`โฟลเดอร์ลึกเกินกำหนด: ${bucket}/${folder}`);
   }
+  const files = [];
+  let offset = 0;
+  const limit = 1000;
+
+  while (true) {
+    const { data, error } = await supabase.storage.from(bucket).list(folder, {
+      limit,
+      offset,
+      sortBy: { column: "name", order: "asc" },
+    });
+    if (error) {
+      throw new Error(`${bucket}/${folder || ""}: ${error.message}`);
+    }
+    const batch = data ?? [];
+    for (const item of batch) {
+      if (!item?.name || item.name === ".emptyFolderPlaceholder") continue;
+      const key = folder ? `${folder}/${item.name}` : item.name;
+      if (item.id == null) {
+        files.push(...(await listStorageTree(supabase, bucket, key, depth + 1)));
+        continue;
+      }
+      const size = Number(item.metadata?.size ?? 0);
+      files.push({ key, size: Number.isFinite(size) ? size : 0 });
+    }
+    if (batch.length < limit) break;
+    offset += limit;
+  }
+
+  return files;
+}
+
+async function backupBucketViaApi(supabase, baseDir, bucket) {
+  console.log(`\n🗂️ [Storage API] ${bucket}`);
+  const objects = await listStorageTree(supabase, bucket, "");
+  if (objects.length === 0) {
+    console.log(`   ℹ️ ไม่พบไฟล์ใน Bucket: ${bucket}`);
+    return { downloaded: 0, skipped: 0, failed: 0 };
+  }
+
+  let downloaded = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const item of objects) {
+    const filePath = localObjectPath(baseDir, bucket, item.key);
+    if (shouldSkip(filePath)) {
+      skipped += 1;
+      continue;
+    }
+    try {
+      const { data, error } = await supabase.storage.from(bucket).download(item.key);
+      if (error || !data) {
+        throw new Error(error?.message || "download failed");
+      }
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      const buffer = Buffer.from(await data.arrayBuffer());
+      fs.writeFileSync(filePath, buffer);
+      downloaded += 1;
+      console.log(
+        `   ✅ [${bucket}] ${item.key} (${(buffer.length / 1024).toFixed(2)} KB)`,
+      );
+    } catch (error) {
+      failed += 1;
+      console.error(`   ❌ [${bucket}] ${item.key}: ${error.message}`);
+    }
+  }
+
+  console.log(
+    `🎉 [Storage API] ${bucket}: ดาวน์โหลด ${downloaded}, ข้าม ${skipped}, ล้มเหลว ${failed}`,
+  );
+  return { downloaded, skipped, failed };
+}
+
+async function backupBucketViaS3(s3, baseDir, bucket) {
+  const { ListObjectsV2Command, GetObjectCommand } = await import(
+    "@aws-sdk/client-s3"
+  );
+  console.log(`\n🗂️ [S3] ${bucket}`);
+  let continuationToken;
+  let downloaded = 0;
+  let skipped = 0;
+  let failed = 0;
+  let found = false;
+
+  do {
+    const page = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        ContinuationToken: continuationToken,
+      }),
+    );
+    for (const item of page.Contents ?? []) {
+      if (!item.Key || item.Key.endsWith("/")) continue;
+      found = true;
+      const remoteSize = Number(item.Size ?? 0);
+      const filePath = localObjectPath(baseDir, bucket, item.Key);
+      if (shouldSkip(filePath)) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        const { Body } = await s3.send(
+          new GetObjectCommand({ Bucket: bucket, Key: item.Key }),
+        );
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        await pipeline(Body, fs.createWriteStream(filePath));
+        downloaded += 1;
+        console.log(
+          `   ✅ [${bucket}] ${item.Key} (${(remoteSize / 1024).toFixed(2)} KB)`,
+        );
+      } catch (error) {
+        failed += 1;
+        console.error(`   ❌ [${bucket}] ${item.Key}: ${error.message}`);
+      }
+    }
+    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  if (!found) console.log(`   ℹ️ ไม่พบไฟล์ใน Bucket: ${bucket}`);
+  console.log(
+    `🎉 [S3] ${bucket}: ดาวน์โหลด ${downloaded}, ข้าม ${skipped}, ล้มเหลว ${failed}`,
+  );
+  return { downloaded, skipped, failed };
 }
 
 async function runStorageBackup() {
-  await ensureBackupEnv([
-    "S3_ENDPOINT",
-    "S3_REGION",
-    "S3_ACCESS_KEY_ID",
-    "S3_SECRET_ACCESS_KEY",
-  ]);
-
-  const s3Client = new S3Client({
-    endpoint: process.env.S3_ENDPOINT,
-    region: process.env.S3_REGION,
-    credentials: {
-      accessKeyId: process.env.S3_ACCESS_KEY_ID,
-      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
-    },
-    forcePathStyle: true,
-  });
-
-  const date = new Date();
-  const timestamp = date
-    .toISOString()
-    .replace(/[:.]/g, "-")
-    .split("T")
-    .join("_")
-    .slice(0, 15);
-  const baseBackupDir = path.resolve(
-    __dirname,
-    `../../backups/storage/backup_${timestamp}`,
-  );
-
-  console.log("🚀 [Storage Backup] เริ่มกระบวนการสำรองไฟล์ทั้งหมด...");
-  console.log(`📍 ปลายทาง: ${baseBackupDir}`);
-
-  for (const bucket of TARGET_BUCKETS) {
-    await backupBucket(s3Client, baseBackupDir, bucket);
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    console.log(
+      `Usage: node scripts/backup/backup-storage.mjs [--bucket=${TARGET_BUCKETS.join("|")}]`,
+    );
+    return;
   }
 
-  console.log("\n✨ [System] กระบวนการ Storage Backup เสร็จสมบูรณ์ทั้งหมด!");
+  await ensureBackupEnv([]);
+
+  const buckets = args.bucket ? [args.bucket] : TARGET_BUCKETS;
+  const baseDir = await resolveBaseDir();
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const s3Key = process.env.S3_ACCESS_KEY_ID?.trim();
+  const totals = { downloaded: 0, skipped: 0, failed: 0 };
+
+  console.log("🚀 [Storage Backup] Incremental mirror");
+  console.log(`📍 ปลายทาง: ${path.join(baseDir, "storage_mirror")}`);
+
+  const addTotals = (result) => {
+    totals.downloaded += result.downloaded;
+    totals.skipped += result.skipped;
+    totals.failed += result.failed;
+  };
+
+  if (supabaseUrl && serviceRole) {
+    const supabase = createClient(supabaseUrl, serviceRole, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    for (const bucket of buckets) {
+      addTotals(await backupBucketViaApi(supabase, baseDir, bucket));
+    }
+  } else if (s3Key && process.env.S3_ENDPOINT && process.env.S3_SECRET_ACCESS_KEY) {
+    const { S3Client } = await import("@aws-sdk/client-s3");
+    const s3 = new S3Client({
+      endpoint: process.env.S3_ENDPOINT,
+      region: process.env.S3_REGION,
+      credentials: {
+        accessKeyId: process.env.S3_ACCESS_KEY_ID,
+        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+      },
+      forcePathStyle: true,
+    });
+    for (const bucket of buckets) {
+      addTotals(await backupBucketViaS3(s3, baseDir, bucket));
+    }
+  } else {
+    console.error(
+      "❌ ต้องมี NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY",
+    );
+    process.exit(1);
+  }
+
+  console.log(
+    `\n✨ [System] downloaded=${totals.downloaded} skipped=${totals.skipped} failed=${totals.failed}`,
+  );
+  if (totals.failed > 0) process.exit(1);
 }
 
 runStorageBackup().catch((err) => {
