@@ -5,6 +5,10 @@ import { getAllWhtRates } from "@/lib/actions/wht-rate-actions";
 import { ParameterApprovalTable } from "./parameter-approval-table";
 import { ParameterSettingsForm } from "./parameter-settings-form";
 import { WhtRatesTable } from "./wht-rates-table";
+import {
+  PageModeTabs,
+  SETTINGS_HUB_TABS,
+} from "@/components/shared/page-mode-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +26,12 @@ export default async function SystemParametersPage() {
 
   if (!result.success) {
     return (
-      <div className="p-6">
+      <div className="flex flex-col gap-6 p-6">
+        <PageModeTabs
+          tabs={SETTINGS_HUB_TABS}
+          activeKey="parameters"
+          ariaLabel="ตั้งค่าระบบและข้อมูลหลัก"
+        />
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {result.error}
         </div>
@@ -34,6 +43,11 @@ export default async function SystemParametersPage() {
 
   return (
     <div className="flex flex-col gap-8 p-6">
+      <PageModeTabs
+        tabs={SETTINGS_HUB_TABS}
+        activeKey="parameters"
+        ariaLabel="ตั้งค่าระบบและข้อมูลหลัก"
+      />
       <div className="flex flex-col gap-2">
         <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
           <SlidersHorizontal className="h-8 w-8 text-blue-600" />

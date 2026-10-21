@@ -5,6 +5,10 @@ import {
 import { getOpenBillingNotesForContact } from "@/app/actions/billing";
 import { getBankAccounts } from "@/lib/actions/bank-accounts";
 import { APPaymentClient } from "@/app/(erp)/finance/ap-payment/components/APPaymentClient";
+import {
+  PageModeTabs,
+  PAYMENT_TABS,
+} from "@/components/shared/page-mode-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +33,15 @@ export default async function ApPaymentPage({
     ]);
 
   return (
-    <APPaymentClient
+    <>
+      <div className="px-6 pt-6">
+        <PageModeTabs
+          tabs={PAYMENT_TABS}
+          activeKey="ap"
+          ariaLabel="รับและจ่ายชำระหนี้"
+        />
+      </div>
+      <APPaymentClient
       key={selectedVendorId || "none"}
       vendors={vendors}
       invoices={paymentContext.invoices}
@@ -38,5 +50,6 @@ export default async function ApPaymentPage({
       selectedVendorId={selectedVendorId}
       billingNotes={billingNotesResult.data}
     />
+    </>
   );
 }

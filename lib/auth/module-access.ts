@@ -167,6 +167,9 @@ export function canAccessCustomerDeposits(
 
 export const REPORT_CENTER_PATH = "/finance/tax-reports";
 
+/** บัตรสต็อก — เมนูคลังและ Auth Guard ใช้ path นี้เท่านั้น */
+export const STOCK_CARD_PATH = "/inventory/ledger";
+
 /**
  * Phase 20 — บทบาทที่เปิด Report Center ได้โดยตรง
  * (admin / finance / manager ตามโจทย์ + accountant ตาม seed บัญชีภาษี)

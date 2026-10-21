@@ -5,6 +5,10 @@ import { getBankAccounts } from "@/lib/actions/bank-accounts";
 import { todayIsoDate } from "@/lib/utils/outstanding-summary";
 import type { RefundSide } from "@/types/refund";
 import { RefundCreateForm } from "@/app/(erp)/finance/refunds/create/refund-create-form";
+import {
+  DEPOSIT_MODE_TABS,
+  PageModeTabs,
+} from "@/components/shared/page-mode-tabs";
 
 export const metadata: Metadata = {
   title: "คืนเงินมัดจำ | Refund Management",
@@ -43,7 +47,15 @@ export default async function RefundCreatePage({
   );
 
   return (
-    <RefundCreateForm
+    <>
+      <div className="px-6 pt-6">
+        <PageModeTabs
+          tabs={DEPOSIT_MODE_TABS}
+          activeKey="REFUND"
+          ariaLabel="เงินมัดจำและคืนเงินมัดจำ"
+        />
+      </div>
+      <RefundCreateForm
       key={`${type}-${selectedContactId || "empty"}`}
       type={type}
       selectedContactId={selectedContactId}
@@ -54,5 +66,6 @@ export default async function RefundCreatePage({
       bankAccounts={bankAccountsResult.data ?? []}
       defaultDate={todayIsoDate()}
     />
+    </>
   );
 }

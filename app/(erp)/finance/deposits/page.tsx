@@ -23,6 +23,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import {
+  PageModeTabs,
+  type PageModeTab,
+} from "@/components/shared/page-mode-tabs";
 
 export const metadata: Metadata = {
   title: "เงินมัดจำ | Deposit Management",
@@ -189,8 +193,35 @@ export default async function DepositsPage({ searchParams }: PageProps) {
     (row) => row.status_label === "รอนำไปตัดชำระ",
   ).length;
 
+  const depositTabs: PageModeTab[] = [
+    {
+      key: "DEP_IN",
+      href: buildTabHref("DEP_IN", search),
+      label: "รับเงินมัดจำลูกค้า (DEP_IN)",
+    },
+  ];
+  if (canUseDepOut) {
+    depositTabs.push(
+      {
+        key: "DEP_OUT",
+        href: buildTabHref("DEP_OUT", search),
+        label: "จ่ายเงินมัดจำซัพพลายเออร์ (DEP_OUT)",
+      },
+      {
+        key: "REFUND",
+        href: "/finance/refunds/create",
+        label: "คืนเงินมัดจำ (Refund)",
+      },
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6 p-6">
+      <PageModeTabs
+        tabs={depositTabs}
+        activeKey={tab}
+        ariaLabel="เงินมัดจำและคืนเงินมัดจำ"
+      />
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-2">
           <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
@@ -220,41 +251,6 @@ export default async function DepositsPage({ searchParams }: PageProps) {
             </Link>
           ) : null}
         </div>
-      </div>
-
-      {/* URL-driven tabs — Server Component safe (no client tab state) */}
-      <div
-        role="tablist"
-        className="inline-flex h-10 w-full max-w-xl items-center justify-center rounded-xl bg-slate-100 p-1 text-slate-600"
-      >
-        <Link
-          role="tab"
-          aria-selected={tab === "DEP_IN"}
-          href={buildTabHref("DEP_IN", search)}
-          className={cn(
-            "inline-flex flex-1 items-center justify-center whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-semibold transition",
-            tab === "DEP_IN"
-              ? "bg-white text-slate-900 shadow-sm"
-              : "text-slate-600 hover:text-slate-900",
-          )}
-        >
-          รับเงินมัดจำลูกค้า (DEP_IN)
-        </Link>
-        {canUseDepOut ? (
-          <Link
-            role="tab"
-            aria-selected={tab === "DEP_OUT"}
-            href={buildTabHref("DEP_OUT", search)}
-            className={cn(
-              "inline-flex flex-1 items-center justify-center whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-semibold transition",
-              tab === "DEP_OUT"
-                ? "bg-white text-slate-900 shadow-sm"
-                : "text-slate-600 hover:text-slate-900",
-            )}
-          >
-            จ่ายเงินมัดจำซัพพลายเออร์ (DEP_OUT)
-          </Link>
-        ) : null}
       </div>
 
       {error ? (

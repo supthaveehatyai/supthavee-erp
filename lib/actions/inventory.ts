@@ -728,14 +728,49 @@ export async function getInventoryOverview(
   );
 
   const productIds = products.map((row) => row.id);
-  const onHand = await fetchOnHandQtyByProductIds(supabase, productIds);
-  if (onHand.error) {
-    return {
-      success: false,
-      error: onHand.error,
-    };
+  const balanceByProduct = new Map<string, number>();
+  for (const id of productIds) balanceByProduct.set(id, 0);
+
+  // ไม่มีคำค้นหา หรือสินค้าเยอะเกินหนึ่งก้อน .in() — ให้ Postgres รวมยอดทั้งคลังครั้งเดียว
+  const useWarehouseSnapshot = !q || productIds.length > 200;
+  if (useWarehouseSnapshot) {
+    const pageSize = 1000;
+    let from = 0;
+    for (;;) {
+      const rpc = await supabase
+        .rpc("get_on_hand_qty_by_product_ids", { p_product_ids: null })
+        .range(from, from + pageSize - 1);
+      if (rpc.error) {
+        return {
+          success: false,
+          error: rpc.error.message ?? "ดึงยอดคงเหลือทั้งคลังไม่สำเร็จ",
+        };
+      }
+      const rows = (rpc.data ?? []) as Array<{
+        product_id: string;
+        on_hand_qty: number | string | null;
+      }>;
+      for (const row of rows) {
+        const pid = String(row.product_id);
+        if (!balanceByProduct.has(pid)) continue;
+        const qty = Number(row.on_hand_qty ?? 0);
+        balanceByProduct.set(pid, Number.isFinite(qty) ? qty : 0);
+      }
+      if (rows.length < pageSize) break;
+      from += pageSize;
+    }
+  } else {
+    const onHand = await fetchOnHandQtyByProductIds(supabase, productIds);
+    if (onHand.error) {
+      return {
+        success: false,
+        error: onHand.error,
+      };
+    }
+    for (const [id, qty] of onHand.balances) {
+      balanceByProduct.set(id, qty);
+    }
   }
-  const balanceByProduct = onHand.balances;
 
   const colorCodes = [
     ...new Set(

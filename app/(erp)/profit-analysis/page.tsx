@@ -4,6 +4,10 @@ import { ChartColumnIncreasing } from "lucide-react";
 import { getProfitAnalysisDashboard } from "@/lib/actions/profit-analysis.actions";
 import { ProfitAnalysisDashboard } from "./profit-analysis-dashboard";
 import { ProfitAnalysisMonthPicker } from "./profit-analysis-month-picker";
+import {
+  PageModeTabs,
+  REPORT_TABS,
+} from "@/components/shared/page-mode-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +69,11 @@ export default async function ProfitAnalysisPage({ searchParams }: PageProps) {
 
   return (
     <div className="flex flex-col gap-6 p-6">
+      <PageModeTabs
+        tabs={REPORT_TABS}
+        activeKey="profit"
+        ariaLabel="ศูนย์รายงานและภาษี"
+      />
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex flex-col gap-2">
           <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">

@@ -7,7 +7,9 @@ import {
   Scale,
   ShoppingCart,
   Store,
+  Truck,
   Undo2,
+  Warehouse,
 } from "lucide-react";
 import { getSystemSettings } from "@/lib/actions/settings";
 import { resolvePrintPaperSize } from "@/lib/constants/print-paper-size";
@@ -34,7 +36,7 @@ import { DocumentPaperSizeSelect } from "./document-paper-size-select";
 export const metadata: Metadata = {
   title: "มาตรฐานเอกสาร | Knowledge Base",
   description:
-    "คู่มือ Document Taxonomy และ Lineage ฝั่งขาย/ซื้อ จนถึง Phase 19 — One-Time Customer (CPD), Reverse Logistics และ Report Center",
+    "คู่มือ Document Taxonomy และ Lineage จนถึง Phase 21 — Dual-Freight Landed Cost, คลัง/ผลิต และ Atomic RPC Transactions",
 };
 
 type DocRow = {
@@ -239,6 +241,16 @@ const PURCHASE_DOCS: DocRow[] = [
     legalNote: "เอกสารจัดคิวจ่าย · ไม่ใช่ใบกำกับภาษี",
   },
   {
+    code: "TB",
+    nameTh: "สรุปวางบิลช่าง",
+    nameEn: "Technician Billing",
+    role: "รวบรวมยอดค่าแรงงานบริการจาก document_items และงานผลิตภายในจาก production_job_operations ที่เสร็จสิ้นเพื่อตั้งเจ้าหนี้ค่าแรง",
+    stock: "ไม่รับเข้า",
+    payment: "UNPAID → PAY",
+    paper: "A4",
+    legalNote: "Prefix TB · ตั้งเจ้าหนี้ค่าแรงช่าง ไม่ใช่ใบกำกับภาษีซื้อ",
+  },
+  {
     code: "PAY",
     nameTh: "ใบจ่ายชำระ",
     nameEn: "Payment Voucher",
@@ -415,7 +427,7 @@ export default async function DocumentStandardsPage() {
         </div>
         <p className="max-w-3xl text-sm text-slate-500 md:text-base">
           SOP อ้างอิง Document Taxonomy และ Lineage ของ Supthavee ERP จนถึง
-          Phase 19 (Omnichannel / CPD, Reverse Logistics, Report Center) —
+          Phase 21 (Dual-Freight, คลัง/ผลิต, Atomic RPC) —
           ตั้งค่าขนาดกระดาษพิมพ์ได้ต่อประเภทเอกสาร (บันทึกลง{" "}
           <span className="font-mono text-xs">system_settings.document_print_settings</span>
           ) และใช้เป็นคู่มือพนักงานฝ่ายขาย การเงิน และจัดซื้อ
@@ -432,10 +444,10 @@ export default async function DocumentStandardsPage() {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base text-amber-950">
             <Scale className="size-4" />
-            กฎวงจรชีวิตเอกสาร (Lifecycle) — ใช้ร่วมทั้งระบบ
+            กฎวงจรชีวิตเอกสารและธุรกรรมฐานข้อมูล (Atomic RPC Transactions — Phase 21)
           </CardTitle>
           <CardDescription className="text-amber-900/80">
-            Late Numbering · DRAFT / ISSUED · ห้ามลบเอกสารที่ออกเลขแล้ว
+            Late Numbering · DRAFT / ISSUED · ทุกโพสต์หลักอยู่ใน PostgreSQL Transaction เดียว
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm text-amber-950/90 md:grid-cols-3">
@@ -457,6 +469,23 @@ export default async function DocumentStandardsPage() {
             <p className="font-semibold">3. ISSUED = Void</p>
             <p className="mt-1 text-amber-900/80">
               เอกสารที่ยืนยันแล้วห้ามลบ ใช้ยกเลิก (Void) และคืนสต็อกอัตโนมัติเมื่อจำเป็น
+            </p>
+          </div>
+          <div className="rounded-lg border border-amber-200/80 bg-white/70 p-3 md:col-span-3">
+            <p className="font-semibold">4. Single PostgreSQL Transaction</p>
+            <p className="mt-1 text-amber-900/80">
+              การออกเอกสารขาย (
+              <span className="font-mono">issue_document_transaction</span>
+              ), การรับชำระหนี้ลูกหนี้ (
+              <span className="font-mono">process_ar_receipt_transaction</span>
+              ), การรับสินค้าเข้าคลังแบบคีย์มือ (
+              <span className="font-mono">save_manual_goods_receipt_transaction</span>
+              ), การรับสินค้าผ่าน AI OCR (
+              <span className="font-mono">save_goods_receipt_to_ledger_transaction</span>
+              ) และการออกใบลดหนี้ (
+              <span className="font-mono">issue_credit_note_transaction</span>
+              ) ทำงานภายใต้ Single PostgreSQL Transaction เดียวทั้งหมด
+              ป้องกันเลขที่เอกสารกระโดดข้ามและป้องกันสต็อกคลาดเคลื่อน 100%
             </p>
           </div>
         </CardContent>
@@ -615,7 +644,127 @@ export default async function DocumentStandardsPage() {
                 <span className="font-mono font-semibold">PAY</span> =
                 ใบจ่ายชำระตัดเจ้าหนี้ แนบสลิปโอนเงิน · อัปเดต LPP จากต้นทุนสุทธิเมื่อรับของ
               </li>
+              <li>
+                <span className="font-mono font-semibold">TB</span> =
+                สรุปวางบิลช่าง รวบรวมค่าแรงบริการและงานผลิตที่เสร็จแล้วเพื่อตั้งเจ้าหนี้ค่าแรง
+              </li>
             </ul>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-slate-200 shadow-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Warehouse className="size-5 text-teal-700" />
+            ฝั่งคลังสินค้าและสายการผลิต (Inventory & Production Taxonomy)
+          </CardTitle>
+          <CardDescription>
+            ยอดยกมา · ปรับปรุงสต็อก · ใบสั่งผลิตจาก SO และ Production Kanban
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-teal-200/80 bg-teal-50/40 p-4 text-sm">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <Badge className="border-teal-200 bg-white font-mono text-teal-800 hover:bg-white">
+                STK_OB
+              </Badge>
+              <Badge className="border-slate-200 bg-white font-mono text-slate-700 hover:bg-white">
+                SOB-
+              </Badge>
+            </div>
+            <p className="font-semibold text-slate-900">ยอดยกมาสต็อก (Opening Balance)</p>
+            <p className="mt-2 text-slate-600">
+              บันทึกรับเข้า <span className="font-mono text-xs">inventory_ledger</span>{" "}
+              (<span className="font-mono text-xs">IN</span>) พร้อมตั้งต้นทุน{" "}
+              <span className="font-mono text-xs">products.cost_price</span>
+            </p>
+          </div>
+          <div className="rounded-xl border border-teal-200/80 bg-teal-50/40 p-4 text-sm">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <Badge className="border-teal-200 bg-white font-mono text-teal-800 hover:bg-white">
+                STK_ADJ
+              </Badge>
+              <Badge className="border-slate-200 bg-white font-mono text-slate-700 hover:bg-white">
+                SAD-
+              </Badge>
+            </div>
+            <p className="font-semibold text-slate-900">ปรับปรุงสต็อก (Stock Adjustment)</p>
+            <p className="mt-2 text-slate-600">
+              คีย์ยอดตรวจนับจริง แล้วคำนวณผลต่าง (
+              <span className="font-mono text-xs">IN</span>/
+              <span className="font-mono text-xs">OUT</span>) ลง{" "}
+              <span className="font-mono text-xs">inventory_ledger</span> หากปรับเพิ่มและระบุต้นทุน
+              จะคำนวณถัวเฉลี่ยเคลื่อนที่ (Moving Average) และต้องผ่าน Maker-Checker Approval
+            </p>
+          </div>
+          <div className="rounded-xl border border-teal-200/80 bg-teal-50/40 p-4 text-sm">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <Badge className="border-teal-200 bg-white font-mono text-teal-800 hover:bg-white">
+                MTO / JOB
+              </Badge>
+              <Badge className="border-slate-200 bg-white font-mono text-slate-700 hover:bg-white">
+                MTO-
+              </Badge>
+            </div>
+            <p className="font-semibold text-slate-900">ใบสั่งผลิตจากเอกสาร SO</p>
+            <p className="mt-2 text-slate-600">
+              ทำงานคู่กับ Production Kanban 4 สถานะ พร้อมระบบตัดสต็อกวัตถุดิบอัตโนมัติ
+              (Material Backflush <span className="font-mono text-xs">NUMERIC(14,4)</span>)
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-indigo-200 bg-indigo-50/30 shadow-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg text-indigo-950">
+            <Truck className="size-5 text-indigo-700" />
+            ต้นทุนสินค้าคงคลัง ค่าขนส่ง 2 ทิศทาง (Dual-Freight Landed Cost) และการแปลงหน่วยนับจัดซื้อ (Phase 20 — TAS 2 Compliance)
+          </CardTitle>
+          <CardDescription className="text-indigo-900/75">
+            แยกค่าขนส่งต้นทางออกจากปลายทาง แล้วถัวเฉลี่ยต้นทุนหลังแปลงหน่วยเป็นหน่วยฐาน
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-indigo-200/80 bg-white/80 p-4 text-sm">
+            <p className="font-mono text-xs font-semibold text-indigo-800">
+              freight_cost
+            </p>
+            <p className="mt-1 font-semibold text-slate-900">ค่าขนส่งต้นทาง</p>
+            <p className="mt-2 text-slate-600">
+              เรียกเก็บโดยผู้ขายในบิลซื้อ นำไปรวมคำนวณยอดเจ้าหนี้ผู้ขาย (Vendor AP)
+              ตามโหมดภาษี (<span className="font-mono text-xs">INCLUDED_IN_TAX</span> หรือ{" "}
+              <span className="font-mono text-xs">SEPARATE_NON_VAT</span>) และปันส่วนเข้าต้นทุนสินค้า
+            </p>
+          </div>
+          <div className="rounded-xl border border-indigo-200/80 bg-white/80 p-4 text-sm">
+            <p className="font-mono text-xs font-semibold text-indigo-800">
+              dest_freight_cost
+            </p>
+            <p className="mt-1 font-semibold text-slate-900">ค่าขนส่งปลายทาง</p>
+            <p className="mt-2 text-slate-600">
+              จ่ายให้บริษัทขนส่ง (<span className="font-mono text-xs">mst_carriers</span>) แยกต่างหาก
+              นำมารวมปันส่วนเข้าต้นทุนสินค้า (Landed Cost) แต่ห้ามรวมในยอดเจ้าหนี้ผู้ขาย
+              และใช้คำนวณภาษีหัก ณ ที่จ่ายค่าขนส่ง 1% ผ่าน{" "}
+              <span className="font-mono text-xs">vw_carrier_freight_summary</span>
+            </p>
+          </div>
+          <div className="rounded-xl border border-indigo-200/80 bg-white/80 p-4 text-sm">
+            <p className="font-mono text-xs font-semibold text-indigo-800">
+              uom_conversion_factor
+            </p>
+            <p className="mt-1 font-semibold text-slate-900">
+              การแปลงหน่วยนับและ Moving Average Cost
+            </p>
+            <p className="mt-2 text-slate-600">
+              แปลงหน่วยจัดซื้อเป็นหน่วยฐานคลังสินค้าด้วย{" "}
+              <span className="font-mono text-xs">uom_conversion_factor</span> และดึงยอดคงเหลือจาก RPC{" "}
+              <span className="font-mono text-xs">get_on_hand_qty_by_product_ids</span>{" "}
+              <span className="font-semibold">ก่อน</span> บันทึกรับเข้าใหม่เสมอ
+              เพื่อคำนวณต้นทุนถัวเฉลี่ยเคลื่อนที่ลง{" "}
+              <span className="font-mono text-xs">products.cost_price</span>
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -755,7 +904,10 @@ export default async function DocumentStandardsPage() {
               ["รับของตั้งหนี้ (มี VAT)", "AP_TAX"],
               ["รับของตั้งหนี้ (Non-VAT)", "AP_INV"],
               ["รับวางบิลเจ้าหนี้", "BR"],
+              ["สรุปวางบิลช่าง", "TB"],
               ["จ่ายชำระ / ตัดหนี้เจ้าหนี้", "PAY"],
+              ["ยอดยกมาสต็อก", "STK_OB / SOB"],
+              ["ปรับปรุงสต็อก", "STK_ADJ / SAD"],
               ["จ่ายเงินคืนลูกค้า", "AR_REFUND / SRF"],
               ["รับเงินคืนจาก Vendor", "AP_REFUND / PRF"],
               ["ตัดหนี้สูญลูกหนี้", "AR_WRITEOFF / SWO"],

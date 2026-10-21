@@ -3,6 +3,10 @@ import { getActiveVendors } from "@/lib/actions/mapping";
 import { getPurchaseUoms } from "@/lib/actions/uom-actions";
 import { getActiveCarriers } from "@/lib/actions/carrier-actions";
 import GoodsReceiptUI from "./GoodsReceiptUI";
+import {
+  GOODS_RECEIPT_TABS,
+  PageModeTabs,
+} from "@/components/shared/page-mode-tabs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -21,11 +25,18 @@ export default async function GoodsReceiptPage() {
   ]);
 
   return (
-    <GoodsReceiptUI
+    <div className="mx-auto flex max-w-[1400px] flex-col gap-5">
+      <PageModeTabs
+        tabs={GOODS_RECEIPT_TABS}
+        activeKey="ocr"
+        ariaLabel="รับสินค้าเข้าคลัง"
+      />
+      <GoodsReceiptUI
       initialVendors={vendorsResult.data}
       initialVendorsError={vendorsResult.error}
       purchaseUoms={uomResult.data}
       initialCarriers={carrierResult.data}
     />
+    </div>
   );
 }

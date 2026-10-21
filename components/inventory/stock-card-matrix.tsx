@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
 import { History, Layers, Tag } from "lucide-react";
 import type { InventoryOverviewPayload } from "@/lib/actions/inventory";
@@ -52,6 +55,47 @@ export type StockCardMatrixProps = {
   endDate?: string;
 };
 
+type OpenState = {
+  brands: string[];
+  models: string[];
+  colors: string[];
+};
+
+function asValueList(value: string | string[]): string[] {
+  if (Array.isArray(value)) return value;
+  return value ? [value] : [];
+}
+
+function initialOpenState(
+  brands: InventoryOverviewPayload[],
+  q: string,
+  selection: ReturnType<typeof findSelection>,
+): OpenState {
+  if (selection) {
+    return {
+      brands: [selection.brandId],
+      models: [selection.modelId],
+      colors: [selection.colorKey],
+    };
+  }
+
+  if (!q.trim()) {
+    const brand = brands[0];
+    const model = brand?.models[0];
+    return {
+      brands: brand ? [brand.brand_id] : [],
+      models: model ? [model.model_id] : [],
+      colors: [],
+    };
+  }
+
+  return {
+    brands: brands.map((brand) => brand.brand_id),
+    models: brands.flatMap((brand) => brand.models.map((model) => model.model_id)),
+    colors: [],
+  };
+}
+
 function findSelection(brands: InventoryOverviewPayload[], productId: string) {
   for (const brand of brands) {
     for (const model of brand.models) {
@@ -83,6 +127,21 @@ export function StockCardMatrix({
   const selection = selectedProductId
     ? findSelection(brands, selectedProductId)
     : null;
+  const openKey = `${q}\n${selectedProductId}\n${brands
+    .map((brand) => brand.brand_id)
+    .join("|")}`;
+  const seeded = initialOpenState(brands, q, selection);
+  const [trackedKey, setTrackedKey] = useState(openKey);
+  const [openBrands, setOpenBrands] = useState(seeded.brands);
+  const [openModels, setOpenModels] = useState(seeded.models);
+  const [openColors, setOpenColors] = useState(seeded.colors);
+
+  if (trackedKey !== openKey) {
+    setTrackedKey(openKey);
+    setOpenBrands(seeded.brands);
+    setOpenModels(seeded.models);
+    setOpenColors(seeded.colors);
+  }
 
   if (brands.length === 0) {
     return (
@@ -93,22 +152,24 @@ export function StockCardMatrix({
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <Accordion
+      type="multiple"
+      value={openBrands}
+      onValueChange={(value) => setOpenBrands(asValueList(value))}
+      className="flex flex-col gap-5"
+    >
       {brands.map((brand) => {
-        const defaultModels =
-          selection?.brandId === brand.brand_id && selection.modelId
-            ? [selection.modelId]
-            : brand.models[0]
-              ? [brand.models[0].model_id]
-              : [];
+        const brandOpen = openBrands.includes(brand.brand_id);
 
         return (
-          <section
+          <AccordionItem
             key={brand.brand_id}
+            value={brand.brand_id}
             className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
           >
-            {/* Level 1 — Brand */}
-            <header className="flex items-start gap-3 border-b border-slate-100 bg-slate-50/80 px-5 py-3.5">
+            {/* Level 1 — Brand (collapsed until opened) */}
+            <AccordionTrigger className="bg-slate-50/80 px-5 py-3.5 hover:no-underline">
+              <span className="flex items-start gap-3">
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
                 <Tag className="h-4 w-4" />
               </div>
@@ -134,21 +195,23 @@ export function StockCardMatrix({
                   {formatQty(brand.total_brand_qty)}
                 </p>
               </div>
-            </header>
+              </span>
+            </AccordionTrigger>
 
-            {brand.models.length === 0 ? (
+            {brandOpen && brand.models.length === 0 ? (
               <div className="px-5 py-8 text-center text-xs text-slate-400">
                 ยังไม่มีรุ่นภายใต้แบรนด์นี้
               </div>
-            ) : (
-              <Accordion type="multiple" defaultValue={defaultModels}>
+            ) : null}
+
+            {brandOpen && brand.models.length > 0 ? (
+              <Accordion
+                type="multiple"
+                value={openModels}
+                onValueChange={(value) => setOpenModels(asValueList(value))}
+              >
                 {brand.models.map((model) => {
-                  const defaultColors =
-                    selection?.modelId === model.model_id && selection.colorKey
-                      ? [selection.colorKey]
-                      : model.colors[0]
-                        ? [`${model.model_id}::${model.colors[0].color_code}`]
-                        : [];
+                  const modelOpen = openModels.includes(model.model_id);
 
                   return (
                     <AccordionItem
@@ -178,6 +241,7 @@ export function StockCardMatrix({
                         </span>
                       </AccordionTrigger>
 
+                      {modelOpen ? (
                       <AccordionContent className="pb-3">
                         {model.colors.length === 0 ? (
                           <p className="py-4 text-center text-xs text-slate-400">
@@ -186,7 +250,10 @@ export function StockCardMatrix({
                         ) : (
                           <Accordion
                             type="multiple"
-                            defaultValue={defaultColors}
+                            value={openColors}
+                            onValueChange={(value) =>
+                              setOpenColors(asValueList(value))
+                            }
                             className="rounded-xl border border-slate-200 bg-slate-50/40"
                           >
                             {model.colors.map((color) => {
@@ -215,7 +282,8 @@ export function StockCardMatrix({
                                     </span>
                                   </AccordionTrigger>
 
-                                  {/* Level 4 — Size table (backend sort_order) */}
+                                  {/* Level 4 — Size table mounts only while this color is open */}
+                                  {openColors.includes(colorKey) ? (
                                   <AccordionContent className="pb-3">
                                     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                                       <Table>
@@ -316,20 +384,22 @@ export function StockCardMatrix({
                                       </Table>
                                     </div>
                                   </AccordionContent>
+                                  ) : null}
                                 </AccordionItem>
                               );
                             })}
                           </Accordion>
                         )}
                       </AccordionContent>
+                      ) : null}
                     </AccordionItem>
                   );
                 })}
               </Accordion>
-            )}
-          </section>
+            ) : null}
+          </AccordionItem>
         );
       })}
-    </div>
+    </Accordion>
   );
 }

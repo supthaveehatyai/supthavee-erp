@@ -29,6 +29,10 @@ import { parseVatLedgerPeriod } from "@/lib/tax/vat-ledger-data";
 import { formatThaiCurrency } from "@/lib/utils/currency";
 import type { ReportCenterPreview } from "@/types/finance-report";
 import { ReportCenterForm } from "./tax-reports-panel";
+import {
+  PageModeTabs,
+  REPORT_TABS,
+} from "@/components/shared/page-mode-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -149,6 +153,11 @@ export default async function TaxReportsPage({ searchParams }: PageProps) {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
+      <PageModeTabs
+        tabs={REPORT_TABS}
+        activeKey="tax"
+        ariaLabel="ศูนย์รายงานและภาษี"
+      />
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-900">
           <FileSpreadsheet className="size-7 text-blue-600" />

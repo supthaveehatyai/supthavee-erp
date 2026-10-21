@@ -5,6 +5,10 @@ import type { MonthlyWHTReportData, WHTReportRow } from "@/types/tax";
 import { WhtDocumentPreviewContent } from "./wht-document-preview-content";
 import { parseWhtDocumentPreviewTarget } from "./wht-document-preview-utils";
 import { WhtReportClient } from "./wht-report-client";
+import {
+  PageModeTabs,
+  REPORT_TABS,
+} from "@/components/shared/page-mode-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -117,7 +121,15 @@ export default async function WhtReportPage({ searchParams }: PageProps) {
   const monthLabel = THAI_MONTH_LABELS[month] ?? `เดือน ${month}`;
 
   return (
-    <WhtReportClient
+    <>
+      <div className="px-6 pt-6">
+        <PageModeTabs
+          tabs={REPORT_TABS}
+          activeKey="wht"
+          ariaLabel="ศูนย์รายงานและภาษี"
+        />
+      </div>
+      <WhtReportClient
       year={year}
       month={month}
       monthLabel={monthLabel}
@@ -151,5 +163,6 @@ export default async function WhtReportPage({ searchParams }: PageProps) {
         </Suspense>
       ) : null}
     </WhtReportClient>
+    </>
   );
 }

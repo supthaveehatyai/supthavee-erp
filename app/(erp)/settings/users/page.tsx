@@ -24,6 +24,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  PageModeTabs,
+  SETTINGS_HUB_TABS,
+} from "@/components/shared/page-mode-tabs";
 import { CreateUserDialog } from "./create-user-dialog";
 import { RolePermissionsPanel } from "./role-permissions-panel";
 import { UserProfileFormSheet } from "./user-profile-form-sheet";
@@ -165,6 +169,11 @@ export default async function UsersSettingsPage({ searchParams }: PageProps) {
 
   return (
     <div className="flex flex-col gap-6 p-6">
+      <PageModeTabs
+        tabs={SETTINGS_HUB_TABS}
+        activeKey="users"
+        ariaLabel="ตั้งค่าระบบและข้อมูลหลัก"
+      />
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">

@@ -10,6 +10,7 @@ import { LedgerSheet } from "@/components/inventory/ledger-sheet";
 import { StockCardMatrix } from "@/components/inventory/stock-card-matrix";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export const metadata: Metadata = {
   title: "บัตรสต็อก (Stock Card) | Inventory Overview",

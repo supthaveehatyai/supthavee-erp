@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { SignOutButton } from "@/components/auth/sign-out-button";
-import { canAccessPath, canSeeNavItem, isAuthPath, normalizePathname } from "@/lib/auth/module-access";
+import { canAccessPath, canSeeNavItem, isAuthPath, normalizePathname, STOCK_CARD_PATH } from "@/lib/auth/module-access";
 import type { AccessibleModules, ErpModuleKey } from "@/types/rbac";
 
 type IconName =
@@ -14,7 +14,6 @@ type IconName =
   | "wallet"
   | "warehouse"
   | "book"
-  | "history"
   | "settings"
   | "sliders";
 
@@ -25,6 +24,10 @@ type NavigationItem = {
   requiresModule?: ErpModuleKey;
   /** Phase 20 — ศูนย์รายงาน: เฉพาะ Admin / Finance / Manager / Accountant */
   requiresReportCenter?: boolean;
+  /** URL ของแท็บย่อยที่ต้องไฮไลต์เมนูหลักนี้ด้วย */
+  activePaths?: string[];
+  /** path ที่อยู่ในเมนูอื่นแล้ว ไม่ให้ prefix ของรายการนี้ติด Active */
+  excludePaths?: string[];
 };
 
 type NavigationGroup = {
@@ -46,44 +49,53 @@ const navigationGroups: NavigationGroup[] = [
     label: "เอกสาร / บัญชี",
     icon: "document",
     items: [
-      { label: "เอกสารขาย", href: "/sales" },
-      { label: "เปิดบิลขาย", href: "/sales/create" },
       {
-        label: "รับเงินมัดจำลูกค้า",
-        href: "/finance/deposits?tab=DEP_IN",
-        requiresModule: "sales",
+        label: "เอกสารขาย",
+        href: "/sales",
+        excludePaths: ["/sales/orders"],
       },
       { label: "ใบสั่งขาย (SO)", href: "/sales/orders" },
-      { label: "เอกสารซื้อ", href: "/purchases" },
-      { label: "วิเคราะห์กำไร", href: "/profit-analysis" },
+      {
+        label: "เอกสารซื้อ",
+        href: "/purchases",
+        excludePaths: ["/purchases/manual-receipt"],
+      },
     ],
   },
   {
     label: "จัดซื้อ / การเงิน",
     icon: "wallet",
     items: [
-      { label: "รับสินค้าอัจฉริยะ", href: "/dashboard/procurement/goods-receipt" },
-      { label: "รับสินค้า (Manual)", href: "/purchases/manual-receipt" },
+      {
+        label: "รับสินค้าอัจฉริยะ",
+        href: "/dashboard/procurement/goods-receipt",
+        activePaths: ["/purchases/manual-receipt"],
+      },
       { label: "ผูกรหัสซัพพลายเออร์", href: "/dashboard/procurement/vendor-mapping" },
-      { label: "รับและจ่ายเงิน", href: "/finance/payments" },
-      { label: "ตัดหนี้สูญ (AR Write-off)", href: "/finance/ar-writeoff/create" },
-      { label: "ตัดหนี้สูญ (AP Write-off)", href: "/finance/ap-writeoff" },
-      { label: "จ่ายชำระหนี้ซัพพลายเออร์", href: "/finance/ap-payment" },
+      {
+        label: "รับและจ่ายเงิน",
+        href: "/finance/payments",
+        activePaths: ["/finance/ap-payment"],
+      },
+      {
+        label: "ตัดหนี้สูญ (AR Write-off)",
+        href: "/finance/ar-writeoff/create",
+        activePaths: ["/finance/ar-writeoff", "/finance/ap-writeoff"],
+      },
       {
         label: "รับ/จ่าย เงินมัดจำ",
         href: "/finance/deposits",
         requiresModule: "finance",
+        activePaths: ["/finance/refunds"],
       },
-      { label: "คืนเงินมัดจำ (Refund)", href: "/finance/refunds/create" },
       { label: "ระบบวางบิล", href: "/finance/billing-notes" },
       { label: "ค่าใช้จ่าย (Expenses)", href: "/expenses" },
-      { label: "รายงานหัก ณ ที่จ่าย (WHT)", href: "/tax/wht-report" },
       {
         label: "ศูนย์รายงาน (Report Center)",
         href: "/finance/tax-reports",
         requiresReportCenter: true,
+        activePaths: ["/tax/wht-report", "/profit-analysis"],
       },
-      { label: "สมุดบัญชีธนาคาร", href: "/finance/bank-accounts" },
       { label: "เจ้าหนี้ / ลูกหนี้", href: "/finance/ap-ar" },
       { label: "ปิดงบรายเดือน (Period Lock)", href: "/accounting-periods" },
       { label: "ศูนย์อนุมัติ (Approval Center)", href: "/approvals" },
@@ -94,7 +106,7 @@ const navigationGroups: NavigationGroup[] = [
     label: "คลังสินค้า / ผลิต",
     icon: "warehouse",
     items: [
-      { label: "บัตรสต็อก (Stock Card)", href: "/inventory/ledger" },
+      { label: "บัตรสต็อก (Stock Card)", href: STOCK_CARD_PATH },
       { label: "ปรับปรุงคลังสินค้า", href: "/inventory/adjustments" },
       { label: "Production Kanban", href: "/production/kanban" },
     ],
@@ -157,12 +169,6 @@ function Icon({
         <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
         <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
         <path d="M8 7h8M8 11h6" />
-      </>
-    ),
-    history: (
-      <>
-        <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-        <path d="M3 3v5h5M12 7v5l3 2" />
       </>
     ),
     settings: (
@@ -273,10 +279,17 @@ function SidebarContent({
               </div>
               <div className="mt-1 space-y-0.5 border-l border-blue-400/25 pl-3 ml-[21px]">
                 {group.items.map((item) => {
-                  const itemPath = normalizePathname(item.href);
+                  const matches = (href: string) => {
+                    const itemPath = normalizePathname(href);
+                    return (
+                      pathname === itemPath ||
+                      pathname.startsWith(`${itemPath}/`)
+                    );
+                  };
+                  const excluded = (item.excludePaths ?? []).some(matches);
                   const isActive =
-                    pathname === itemPath ||
-                    pathname.startsWith(`${itemPath}/`);
+                    !excluded &&
+                    [item.href, ...(item.activePaths ?? [])].some(matches);
 
                   return (
                     <Link
@@ -300,14 +313,6 @@ function SidebarContent({
       </nav>
 
       <div className="border-t border-white/10 p-3">
-        <Link
-          href="/audit-logs"
-          onNavigate={closeMenu}
-          className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs text-blue-200 transition hover:bg-white/10 hover:text-white"
-        >
-          <Icon name="history" className="size-[18px]" />
-          ประวัติการทำงาน
-        </Link>
         {canOpenSettings ? (
           <>
             <Link
@@ -328,7 +333,9 @@ function SidebarContent({
               onNavigate={closeMenu}
               className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition ${
                 pathname === "/settings/company" ||
-                pathname.startsWith("/settings/company/")
+                pathname.startsWith("/settings/company/") ||
+                pathname === "/finance/bank-accounts" ||
+                pathname.startsWith("/finance/bank-accounts/")
                   ? "bg-white/15 font-medium text-white"
                   : "text-blue-200 hover:bg-white/10 hover:text-white"
               }`}

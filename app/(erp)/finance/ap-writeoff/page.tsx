@@ -25,6 +25,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  PageModeTabs,
+  WRITEOFF_TABS,
+} from "@/components/shared/page-mode-tabs";
 
 export const metadata: Metadata = {
   title: "ประวัติตัดหนี้สูญเจ้าหนี้ | AP Write-off",
@@ -79,6 +83,11 @@ export default async function ApWriteoffIndexPage({
 
   return (
     <div className="flex flex-col gap-6 p-6">
+      <PageModeTabs
+        tabs={WRITEOFF_TABS}
+        activeKey="ap"
+        ariaLabel="ตัดหนี้สูญ"
+      />
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-2">
           <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">

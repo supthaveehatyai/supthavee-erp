@@ -8,6 +8,10 @@ import { roundMoney } from "@/lib/utils/payment-fifo";
 import type { ApVendorOption } from "@/types/ap-payment";
 import type { OutstandingApDocument } from "@/types/ap-writeoff";
 import type { UnpaidInvoice } from "@/types/payment";
+import {
+  PageModeTabs,
+  WRITEOFF_TABS,
+} from "@/components/shared/page-mode-tabs";
 
 export const metadata: Metadata = {
   title: "เปิดบิลตัดหนี้สูญ | AP Write-off",
@@ -108,6 +112,11 @@ export default async function ApWriteoffCreatePage({
 
   return (
     <div className="flex flex-col gap-6 p-6">
+      <PageModeTabs
+        tabs={WRITEOFF_TABS}
+        activeKey="ap"
+        ariaLabel="ตัดหนี้สูญ"
+      />
       <div className="flex flex-col gap-2">
         <Link
           href="/finance/ap-writeoff"

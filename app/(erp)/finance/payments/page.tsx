@@ -5,6 +5,10 @@ import {
 import { getOpenBillingNotesForContact } from "@/app/actions/billing";
 import { getBankAccounts } from "@/lib/actions/bank-accounts";
 import { ARPaymentClient } from "@/app/(erp)/finance/payments/components/ARPaymentClient";
+import {
+  PageModeTabs,
+  PAYMENT_TABS,
+} from "@/components/shared/page-mode-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +33,15 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
   const bankAccounts = bankAccountsResult.data ?? [];
 
   return (
-    <ARPaymentClient
+    <>
+      <div className="px-6 pt-6">
+        <PageModeTabs
+          tabs={PAYMENT_TABS}
+          activeKey="ar"
+          ariaLabel="รับและจ่ายชำระหนี้"
+        />
+      </div>
+      <ARPaymentClient
       key={selectedContactId || "summary"}
       debtors={debtors}
       invoices={paymentContext.invoices}
@@ -38,5 +50,6 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
       selectedContactId={selectedContactId}
       billingNotes={billingNotesResult.data}
     />
+    </>
   );
 }

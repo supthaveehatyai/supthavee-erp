@@ -25,6 +25,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Building2, Landmark } from "lucide-react";
+import {
+  PageModeTabs,
+  SETTINGS_HUB_TABS,
+} from "@/components/shared/page-mode-tabs";
 
 function EmptyBankAccountsState() {
   return (
@@ -58,6 +62,11 @@ export default async function BankAccountsPage() {
 
   return (
     <div className="flex flex-col gap-6 p-6">
+      <PageModeTabs
+        tabs={SETTINGS_HUB_TABS}
+        activeKey="banks"
+        ariaLabel="ตั้งค่าระบบและข้อมูลหลัก"
+      />
       <div className="flex flex-col gap-2">
         <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
           <Building2 className="h-8 w-8 text-blue-600" />

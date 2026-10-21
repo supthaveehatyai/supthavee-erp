@@ -7,6 +7,10 @@ import {
   getUnpaidInvoicesByCustomer,
 } from "@/lib/actions/finance/payment";
 import { isArWriteoffSourceDocType } from "@/lib/constants/document";
+import {
+  PageModeTabs,
+  WRITEOFF_TABS,
+} from "@/components/shared/page-mode-tabs";
 
 export const metadata: Metadata = {
   title: "เปิดบิลตัดหนี้สูญ | AR Write-off",
@@ -40,6 +44,11 @@ export default async function ArWriteoffCreatePage({
 
   return (
     <div className="flex flex-col gap-6 p-6">
+      <PageModeTabs
+        tabs={WRITEOFF_TABS}
+        activeKey="ar"
+        ariaLabel="ตัดหนี้สูญ"
+      />
       <div className="flex flex-col gap-2">
         <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
           <FileMinus2 className="h-8 w-8 text-blue-600" />
