@@ -1,5 +1,6 @@
-import { RESTORE_TABLE_ORDER, upsertConflictColumn } from "@/lib/backup/backup-modules";
+import { RESTORE_TABLE_ORDER } from "@/lib/backup/backup-modules";
 import type { BackupRow } from "@/lib/backup/backup-file";
+import { isMissingSchemaTableError } from "@/lib/backup/schema-cache";
 
 export const RESTORE_UPSERT_BATCH = 500;
 
@@ -57,16 +58,127 @@ export function resolveUpsertOptions(
     return { onConflict: "id" };
   }
 
-  if (firstRow) {
-    const detected = Object.keys(firstRow).find(
-      (column) =>
-        columnPresent(firstRow, column) &&
-        (column === "mapping_id" || column.endsWith("_key")),
-    );
-    if (detected) return { onConflict: detected };
-  }
-
-  const fallback = upsertConflictColumn(table);
-  if (columnPresent(firstRow, fallback)) return { onConflict: fallback };
   return {};
+}
+
+const MAX_COLUMN_STRIPS = 10;
+
+const COLUMN_ERROR_PATTERNS = [
+  /cannot insert a non-DEFAULT value into column "([^"]+)"/i,
+  /column "([^"]+)" can only be updated to DEFAULT/i,
+  /Could not find the '([^']+)' column/i,
+];
+
+const ON_CONFLICT_MISMATCH =
+  /there is no unique or exclusion constraint matching the ON CONFLICT specification/i;
+
+const DEFAULT_EXCLUDED: Record<string, string[]> = {
+  mst_asset_categories: ["depreciation_rate"],
+};
+
+type StripState = {
+  excluded: Set<string>;
+  strips: number;
+};
+
+const stripStateByTable = new Map<string, StripState>();
+
+type UpsertError = { message: string; code?: string };
+
+type ChunkUpsert = (
+  rows: BackupRow[],
+  options?: UpsertOptions,
+) => PromiseLike<{ error: UpsertError | null }>;
+
+export type ChunkUpsertResult = {
+  rows: number;
+  excludedColumns: string[];
+  skipped?: boolean;
+  reason?: string;
+};
+
+function stateFor(table: string): StripState {
+  const existing = stripStateByTable.get(table);
+  if (existing) return existing;
+  const created: StripState = {
+    excluded: new Set(DEFAULT_EXCLUDED[table] ?? []),
+    strips: 0,
+  };
+  stripStateByTable.set(table, created);
+  return created;
+}
+
+export function stripColumns(rows: BackupRow[], columns: ReadonlySet<string>): BackupRow[] {
+  if (columns.size === 0) return rows;
+  return rows.map((row) => {
+    const next: BackupRow = { ...row };
+    for (const column of columns) delete next[column];
+    return next;
+  });
+}
+
+function columnFromUpsertError(message: string): string | null {
+  for (const pattern of COLUMN_ERROR_PATTERNS) {
+    const match = pattern.exec(message);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+export async function upsertChunkWithAutoStrip(
+  table: string,
+  chunk: BackupRow[],
+  options: UpsertOptions,
+  upsert: ChunkUpsert,
+): Promise<ChunkUpsertResult> {
+  const state = stateFor(table);
+  let rows = stripColumns(chunk, state.excluded);
+  let onConflict = options.onConflict;
+  let ignoreDuplicates = options.ignoreDuplicates;
+  let droppedConflict = false;
+
+  for (;;) {
+    const upsertOptions: UpsertOptions = {};
+    if (onConflict) {
+      upsertOptions.onConflict = onConflict;
+      if (ignoreDuplicates) upsertOptions.ignoreDuplicates = true;
+    }
+
+    const { error } = onConflict
+      ? await upsert(rows, upsertOptions)
+      : await upsert(rows);
+
+    if (!error) {
+      return { rows: rows.length, excludedColumns: [...state.excluded] };
+    }
+
+    const column = columnFromUpsertError(error.message);
+    if (column) {
+      if (!state.excluded.has(column) && state.strips < MAX_COLUMN_STRIPS) {
+        state.excluded.add(column);
+        state.strips += 1;
+        rows = stripColumns(rows, state.excluded);
+        continue;
+      }
+      throw new Error(error.message);
+    }
+
+    if (onConflict && !droppedConflict && ON_CONFLICT_MISMATCH.test(error.message)) {
+      onConflict = undefined;
+      ignoreDuplicates = undefined;
+      droppedConflict = true;
+      continue;
+    }
+
+    if (isMissingSchemaTableError(error)) {
+      return {
+        rows: 0,
+        excludedColumns: [...state.excluded],
+        skipped: true,
+        reason: error.message,
+      };
+    }
+
+    throw new Error(error.message);
+  }
 }

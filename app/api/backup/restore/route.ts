@@ -12,6 +12,7 @@ import {
   RESTORE_UPSERT_BATCH,
   resolveUpsertOptions,
   sortRowsForRestore,
+  upsertChunkWithAutoStrip,
 } from "@/lib/backup/restore-rows";
 import { isMissingSchemaTableError } from "@/lib/backup/schema-cache";
 import { createClient as createSupabaseAdmin } from "@/lib/supabase/server-admin";
@@ -126,23 +127,31 @@ export async function POST(request: NextRequest) {
       };
     };
 
-    const { error } = options.onConflict
-      ? await dynamic.from(table).upsert(rows, options)
-      : await dynamic.from(table).upsert(rows);
-
-    if (error && isMissingSchemaTableError(error)) {
+    try {
+      const result = await upsertChunkWithAutoStrip(table, rows, options, (chunk, upsertOptions) =>
+        upsertOptions?.onConflict
+          ? dynamic.from(table).upsert(chunk, upsertOptions)
+          : dynamic.from(table).upsert(chunk),
+      );
+      if (result.skipped) {
+        return NextResponse.json({
+          ok: true,
+          table,
+          skipped: true,
+          reason: result.reason,
+          excludedColumns: result.excludedColumns,
+        });
+      }
       return NextResponse.json({
         ok: true,
         table,
-        skipped: true,
-        reason: error.message,
+        rows: result.rows,
+        excludedColumns: result.excludedColumns,
       });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "กู้คืนข้อมูลไม่สำเร็จ";
+      return failure(table, message);
     }
-    if (error) {
-      return failure(table, error.message);
-    }
-
-    return NextResponse.json({ ok: true, table, rows: rows.length });
   } catch (error: unknown) {
     console.error("Backup restore error:", error);
     const message = error instanceof Error ? error.message : "กู้คืนข้อมูลไม่สำเร็จ";

@@ -154,24 +154,87 @@ function rowsForRestore(table, rows) {
   });
 }
 
+const COLUMN_ERROR_PATTERNS = [
+  /cannot insert a non-DEFAULT value into column "([^"]+)"/i,
+  /column "([^"]+)" can only be updated to DEFAULT/i,
+  /Could not find the '([^']+)' column/i,
+];
+const ON_CONFLICT_MISMATCH =
+  /there is no unique or exclusion constraint matching the ON CONFLICT specification/i;
+const DEFAULT_EXCLUDED = { mst_asset_categories: ["depreciation_rate"] };
+
 function upsertOptionsFor(table, firstRow, catalog) {
   if (table === "audit_logs") {
     return { onConflict: "id", ignoreDuplicates: true };
   }
-  if (table === "vendor_product_mapping") {
-    if (firstRow && firstRow.id != null && firstRow.id !== "") {
-      return { onConflict: "id" };
-    }
-    if (firstRow && firstRow.mapping_id != null && firstRow.mapping_id !== "") {
-      return { onConflict: "mapping_id" };
-    }
-    return null;
+  if (table === "system_parameters") return { onConflict: "param_key" };
+  if (table === "app_roles") return { onConflict: "role_code" };
+  if (table === "mst_uom") return { onConflict: "uom_id" };
+  if (table === "mst_carriers") return { onConflict: "carrier_id" };
+  if (firstRow && firstRow.id != null && firstRow.id !== "") {
+    return { onConflict: "id" };
   }
-  const conflict =
-    typeof catalog.upsertConflictColumn === "function"
-      ? catalog.upsertConflictColumn(table)
-      : "id";
-  return { onConflict: conflict };
+  if (typeof catalog.upsertConflictColumn === "function") {
+    const conflict = catalog.upsertConflictColumn(table);
+    if (conflict !== "id" && firstRow && firstRow[conflict] != null && firstRow[conflict] !== "") {
+      return { onConflict: conflict };
+    }
+  }
+  return null;
+}
+
+function columnFromUpsertError(message) {
+  for (const pattern of COLUMN_ERROR_PATTERNS) {
+    const match = pattern.exec(message ?? "");
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+async function upsertChunkWithAutoStrip(supabase, table, chunk, options, state) {
+  let rows = chunk.map((row) => {
+    const next = { ...row };
+    for (const column of state.excluded) delete next[column];
+    return next;
+  });
+  let onConflict = options?.onConflict;
+  let ignoreDuplicates = options?.ignoreDuplicates;
+  let droppedConflict = false;
+
+  for (;;) {
+    const upsertOptions = {};
+    if (onConflict) {
+      upsertOptions.onConflict = onConflict;
+      if (ignoreDuplicates) upsertOptions.ignoreDuplicates = true;
+    }
+    const { error } = onConflict
+      ? await supabase.from(table).upsert(rows, upsertOptions)
+      : await supabase.from(table).upsert(rows);
+    if (!error) return { skipped: false };
+
+    const column = columnFromUpsertError(error.message);
+    if (column) {
+      if (!state.excluded.has(column) && state.strips < 10) {
+        state.excluded.add(column);
+        state.strips += 1;
+        rows = rows.map((row) => {
+          const next = { ...row };
+          delete next[column];
+          return next;
+        });
+        continue;
+      }
+      throw new Error(error.message);
+    }
+    if (onConflict && !droppedConflict && ON_CONFLICT_MISMATCH.test(error.message)) {
+      onConflict = undefined;
+      ignoreDuplicates = undefined;
+      droppedConflict = true;
+      continue;
+    }
+    if (isMissingSchemaTableError(error)) return { skipped: true, reason: error.message };
+    throw new Error(error.message);
+  }
 }
 
 export async function upsertJsonBackup(supabase, payload, tables) {
@@ -191,20 +254,30 @@ export async function upsertJsonBackup(supabase, payload, tables) {
       continue;
     }
     const upsertOptions = upsertOptionsFor(table, rows[0], catalog);
+    const stripState = {
+      excluded: new Set(DEFAULT_EXCLUDED[table] ?? []),
+      strips: 0,
+    };
     let skipped = false;
     for (let index = 0; index < rows.length; index += UPSERT_BATCH) {
       const batch = rows.slice(index, index + UPSERT_BATCH);
-      const { error } = upsertOptions
-        ? await supabase.from(table).upsert(batch, upsertOptions)
-        : await supabase.from(table).upsert(batch);
-      if (error && isMissingSchemaTableError(error)) {
-        skippedTables.push({ table, reason: error.message });
-        console.warn(`⚠️ ข้าม ${table}: ${error.message}`);
-        skipped = true;
-        break;
-      }
-      if (error) {
-        throw new Error(`${table} แถว ${index + 1}: ${error.message}`);
+      try {
+        const result = await upsertChunkWithAutoStrip(
+          supabase,
+          table,
+          batch,
+          upsertOptions,
+          stripState,
+        );
+        if (result.skipped) {
+          skippedTables.push({ table, reason: result.reason });
+          console.warn(`⚠️ ข้าม ${table}: ${result.reason}`);
+          skipped = true;
+          break;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`${table} แถว ${index + 1}: ${message}`);
       }
     }
     if (!skipped) console.log(`   → ${table}: upsert ${rows.length} แถว`);

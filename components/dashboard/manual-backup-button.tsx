@@ -194,13 +194,28 @@ export function ManualBackupButton() {
     error?: string;
     skipped?: boolean;
     reason?: string;
+    excludedColumns?: string[];
   } | null> {
     const text = await response.text();
     if (!text) return null;
     try {
-      return JSON.parse(text) as { error?: string; skipped?: boolean; reason?: string };
+      return JSON.parse(text) as {
+        error?: string;
+        skipped?: boolean;
+        reason?: string;
+        excludedColumns?: string[];
+      };
     } catch {
       return { error: text.slice(0, 300) || `HTTP ${response.status}` };
+    }
+  }
+
+  function dropExcludedColumns(table: string, columns: string[] | undefined) {
+    if (!columns || columns.length === 0) return;
+    const rows = rowsRef.current[table];
+    if (!rows) return;
+    for (const row of rows) {
+      for (const column of columns) delete row[column];
     }
   }
 
@@ -242,6 +257,7 @@ export function ManualBackupButton() {
               : `กู้คืนข้อมูลไม่สำเร็จที่ตาราง ${table}: ${detail}`;
             throw new Error(message);
           }
+          dropExcludedColumns(table, payload?.excludedColumns);
           if (payload?.skipped) {
             skipped.push({ table, reason: payload.reason ?? "ไม่มีตารางใน schema" });
             tableSkipped = true;
