@@ -11,6 +11,7 @@ import {
   type BackupModuleSelection,
 } from "@/lib/backup/backup-modules";
 import { resolveManualBackupAuth } from "@/lib/backup/manual-backup-auth";
+import { isMissingSchemaTableError } from "@/lib/backup/schema-cache";
 import { createClient as createSupabaseAdmin } from "@/lib/supabase/server-admin";
 
 export const runtime = "nodejs";
@@ -18,6 +19,11 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 type Row = Record<string, unknown>;
+
+type SkippedTable = {
+  table: string;
+  reason: string;
+};
 
 function backupTimestamp(date = new Date()) {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -30,7 +36,7 @@ function backupTimestamp(date = new Date()) {
 async function fetchTable(
   supabase: ReturnType<typeof createSupabaseAdmin>,
   table: string,
-): Promise<Row[]> {
+): Promise<{ rows: Row[] } | { skipped: string }> {
   const page = await fetchAllPages<Row>((from, to) => {
     const query = supabase.from(table as "audit_logs").select("*").range(from, to);
     return query as PromiseLike<{
@@ -39,9 +45,12 @@ async function fetchTable(
     }>;
   });
   if (page.error) {
+    if (isMissingSchemaTableError(page.error)) {
+      return { skipped: page.error.message };
+    }
     throw new Error(`${table}: ${page.error.message}`);
   }
-  return page.data;
+  return { rows: page.data };
 }
 
 export async function GET(request: NextRequest) {
@@ -67,11 +76,18 @@ export async function GET(request: NextRequest) {
     const supabaseAdmin = createSupabaseAdmin();
     const data: Record<string, Row[]> = {};
     const rowCounts: Record<string, number> = {};
+    const skippedTables: SkippedTable[] = [];
+    const exportedTables: string[] = [];
 
     for (const table of tables) {
-      const rows = await fetchTable(supabaseAdmin, table);
-      data[table] = rows;
-      rowCounts[table] = rows.length;
+      const result = await fetchTable(supabaseAdmin, table);
+      if ("skipped" in result) {
+        skippedTables.push({ table, reason: result.skipped });
+        continue;
+      }
+      data[table] = result.rows;
+      rowCounts[table] = result.rows.length;
+      exportedTables.push(table);
     }
 
     const exportedAt = new Date().toISOString();
@@ -83,8 +99,9 @@ export async function GET(request: NextRequest) {
       new_data: {
         action: "MANUAL_BACKUP_EXPORT",
         module: selection,
-        tables,
+        tables: exportedTables,
         rowCounts,
+        skipped_tables: skippedTables,
         timestamp: exportedAt,
       },
     });
@@ -98,8 +115,9 @@ export async function GET(request: NextRequest) {
     const body = JSON.stringify({
       exportedAt,
       module: selection,
-      tables,
+      tables: exportedTables,
       rowCounts,
+      skipped_tables: skippedTables,
       data,
     });
 

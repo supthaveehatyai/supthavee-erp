@@ -63,7 +63,6 @@ export const BACKUP_MODULE_TABLES = {
     "production_job_items",
     "production_job_materials",
     "production_job_operations",
-    "service_tracking",
   ],
   finance_audit: [
     "document_allocations",
@@ -72,9 +71,9 @@ export const BACKUP_MODULE_TABLES = {
     "expense_installments",
     "payment_transactions",
     "payment_allocations",
-    "payment_slips",
     "fixed_assets",
     "asset_depreciation_ledger",
+    "depreciation_ledgers",
     "approval_logs",
     "parameter_change_requests",
     "audit_logs",
@@ -117,4 +116,13 @@ export function tablesForModule(moduleName: BackupModuleSelection): string[] {
     throw new Error(`Unknown backup module: ${moduleName}`);
   }
   return [...tables];
+}
+
+/** Primary key ที่ใช้ตอน upsert — นอกเหนือจากนี้ใช้ `id` */
+export function upsertConflictColumn(table: string): string {
+  if (table === "system_parameters") return "param_key";
+  if (table === "app_roles") return "role_code";
+  if (table === "mst_uom") return "uom_id";
+  if (table === "mst_carriers") return "carrier_id";
+  return "id";
 }

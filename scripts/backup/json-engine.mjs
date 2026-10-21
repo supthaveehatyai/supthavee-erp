@@ -6,6 +6,8 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { createClient } from "@supabase/supabase-js";
 import { pruneOlderThan } from "./pg-tools.mjs";
+import { isMissingSchemaTableError } from "./schema-cache.mjs";
+import { loadBackupCatalog } from "./load-backup-modules.mjs";
 
 const PAGE_SIZE = 1000;
 const UPSERT_BATCH = 500;
@@ -29,7 +31,11 @@ export async function fetchAllRows(supabase, table) {
   while (true) {
     const to = from + PAGE_SIZE - 1;
     const { data, error } = await supabase.from(table).select("*").range(from, to);
-    if (error) throw new Error(`${table}: ${error.message}`);
+    if (error) {
+      const wrapped = new Error(`${table}: ${error.message}`);
+      wrapped.cause = error;
+      throw wrapped;
+    }
     const page = data ?? [];
     rows.push(...page);
     if (page.length < PAGE_SIZE) return rows;
@@ -37,28 +43,51 @@ export async function fetchAllRows(supabase, table) {
   }
 }
 
-export async function writeJsonBackup({
-  moduleName,
-  tables,
-  outDir,
-  filename,
-  retentionDays = null,
-  baseDir,
-}) {
+export async function writeJsonBackup(options) {
+  const {
+    moduleName,
+    tables,
+    outDir,
+    filename,
+    retentionDays = null,
+    baseDir,
+  } = options;
   const supabase = createBackupSupabase();
+  const shouldSkip = options.shouldSkipTableError ?? isMissingSchemaTableError;
   const data = {};
   const rowCounts = {};
+  const skippedTables = [];
+  const exportedTables = [];
 
   for (const table of tables) {
     process.stdout.write(`   → ${table} ... `);
-    const rows = await fetchAllRows(supabase, table);
-    data[table] = rows;
-    rowCounts[table] = rows.length;
-    console.log(`${rows.length} แถว`);
+    try {
+      const rows = await fetchAllRows(supabase, table);
+      data[table] = rows;
+      rowCounts[table] = rows.length;
+      exportedTables.push(table);
+      console.log(`${rows.length} แถว`);
+    } catch (error) {
+      const cause = error?.cause ?? error;
+      if (shouldSkip(cause) || shouldSkip(error)) {
+        const reason = String(cause?.message || error?.message || "schema cache");
+        skippedTables.push({ table, reason });
+        console.warn(`⚠️ ข้าม ${table}: ${reason}`);
+        continue;
+      }
+      throw error;
+    }
   }
 
   const exportedAt = new Date().toISOString();
-  const payload = { exportedAt, module: moduleName, tables, rowCounts, data };
+  const payload = {
+    exportedAt,
+    module: moduleName,
+    tables: exportedTables,
+    rowCounts,
+    skipped_tables: skippedTables,
+    data,
+  };
   fs.mkdirSync(outDir, { recursive: true });
   const filepath = path.join(outDir, filename);
   const gz = zlib.gzipSync(Buffer.from(JSON.stringify(payload), "utf8"));
@@ -67,8 +96,9 @@ export async function writeJsonBackup({
   const manifest = {
     createdAt: exportedAt,
     module: moduleName,
-    tables,
+    tables: exportedTables,
     rowCounts,
+    skipped_tables: skippedTables,
     bytes: gz.length,
     filename,
     kind: "json",
@@ -86,7 +116,7 @@ export async function writeJsonBackup({
 
   const fileSizeInMB = (gz.length / (1024 * 1024)).toFixed(2);
   console.log(`✅ [JSON Backup] ${filename} (${fileSizeInMB} MB)`);
-  return { filepath, manifestPath, bytes: gz.length, rowCounts };
+  return { filepath, manifestPath, bytes: gz.length, rowCounts, skippedTables };
 }
 
 export function readJsonBackup(filePath) {
@@ -106,20 +136,40 @@ export function readJsonBackup(filePath) {
  * Upsert ทีละ 500 แถว ตามลำดับตารางที่ส่งมา (Parent → Child)
  */
 export async function upsertJsonBackup(supabase, payload, tables) {
+  const catalog = await loadBackupCatalog();
   const data = payload?.data ?? {};
+  const skippedTables = [];
+
   for (const table of tables) {
     const rows = Array.isArray(data[table]) ? data[table] : [];
     if (rows.length === 0) {
       console.log(`   → ${table}: 0 แถว`);
       continue;
     }
+    const conflict =
+      typeof catalog.upsertConflictColumn === "function"
+        ? catalog.upsertConflictColumn(table)
+        : "id";
+    const upsertOptions =
+      table === "audit_logs"
+        ? { onConflict: "id", ignoreDuplicates: true }
+        : { onConflict: conflict };
+    let skipped = false;
     for (let index = 0; index < rows.length; index += UPSERT_BATCH) {
       const batch = rows.slice(index, index + UPSERT_BATCH);
-      const { error } = await supabase.from(table).upsert(batch);
+      const { error } = await supabase.from(table).upsert(batch, upsertOptions);
+      if (error && isMissingSchemaTableError(error)) {
+        skippedTables.push({ table, reason: error.message });
+        console.warn(`⚠️ ข้าม ${table}: ${error.message}`);
+        skipped = true;
+        break;
+      }
       if (error) {
         throw new Error(`${table} แถว ${index + 1}: ${error.message}`);
       }
     }
-    console.log(`   → ${table}: upsert ${rows.length} แถว`);
+    if (!skipped) console.log(`   → ${table}: upsert ${rows.length} แถว`);
   }
+
+  return skippedTables;
 }

@@ -17,6 +17,9 @@ import {
   writeDatabaseBackup,
 } from "./pg-tools.mjs";
 import { writeJsonBackup } from "./json-engine.mjs";
+import { isMissingSchemaTableError } from "./schema-cache.mjs";
+
+export { isMissingSchemaTableError };
 
 const __filename = fileURLToPath(import.meta.url);
 
@@ -59,29 +62,45 @@ export async function runDatabaseBackup(argv = process.argv.slice(2)) {
   const pgDump = tryResolvePgBinary("pg_dump");
   const dbUrl = process.env.DATABASE_URL?.trim();
 
-  if (pgDump && dbUrl) {
-    await writeDatabaseBackup({
-      moduleName,
-      tables,
-      outDir,
-      filename: `supthavee_erp_db_${moduleName}_${stamp}.sql.gz`,
-      retentionDays: args.retentionDays,
-      baseDir,
-    });
-    return;
-  }
-
-  console.warn(
-    "⚠️ ไม่พบ pg_dump หรือ DATABASE_URL — ใช้ Supabase JSON backup (.json.gz) แทน",
-  );
-  await writeJsonBackup({
+  const jsonOptions = {
     moduleName,
     tables,
     outDir,
     filename: `supthavee_erp_db_${moduleName}_${stamp}.json.gz`,
     retentionDays: args.retentionDays,
     baseDir,
-  });
+    shouldSkipTableError: isMissingSchemaTableError,
+  };
+
+  if (pgDump && dbUrl) {
+    try {
+      await writeDatabaseBackup({
+        moduleName,
+        tables,
+        outDir,
+        filename: `supthavee_erp_db_${moduleName}_${stamp}.sql.gz`,
+        retentionDays: args.retentionDays,
+        baseDir,
+      });
+      return;
+    } catch (error) {
+      if (!isMissingSchemaTableError(error)) throw error;
+      console.warn(
+        "⚠️ pg_dump พบตารางที่ไม่มีในฐานข้อมูล — สลับไป JSON backup และข้ามตารางนั้น",
+      );
+    }
+  } else {
+    console.warn(
+      "⚠️ ไม่พบ pg_dump หรือ DATABASE_URL — ใช้ Supabase JSON backup (.json.gz) แทน",
+    );
+  }
+
+  const written = await writeJsonBackup(jsonOptions);
+  if (written.skippedTables?.length) {
+    console.warn(
+      `⚠️ ข้าม ${written.skippedTables.length} ตารางที่ไม่อยู่ใน schema cache`,
+    );
+  }
 }
 
 const invokedDirectly =
