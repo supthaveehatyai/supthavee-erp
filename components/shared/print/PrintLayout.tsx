@@ -5,34 +5,34 @@ import { cn } from "@/lib/utils";
 
 const PAPER_PREVIEW: Record<
   PrintPaperSize,
-  { width: string; minHeight: string; padding: string }
+  { frame: string; printMin: string; padding: string }
 > = {
   A4: {
-    width: "w-[210mm]",
-    minHeight: "min-h-[297mm]",
-    padding: "p-8",
+    frame: "w-[210mm] max-w-[210mm] min-h-[297mm]",
+    printMin: "print:min-h-[281mm]",
+    padding: "p-6",
   },
   "A5-Portrait": {
-    width: "w-[148mm]",
-    minHeight: "min-h-[210mm]",
-    padding: "p-5",
+    frame: "w-[148mm] max-w-[148mm] min-h-[210mm]",
+    printMin: "print:min-h-[194mm]",
+    padding: "p-4",
   },
   "A5-Landscape": {
-    width: "w-[210mm]",
-    minHeight: "min-h-[148mm]",
-    padding: "p-5",
+    frame: "w-[210mm] max-w-[210mm] min-h-[148mm]",
+    printMin: "print:min-h-[132mm]",
+    padding: "p-4",
   },
 };
 
 function pageRuleFor(paperSize: PrintPaperSize): string {
   switch (paperSize) {
     case "A5-Portrait":
-      return "@page { size: A5 portrait; margin: 10mm; }";
+      return "@page { size: A5 portrait; margin: 8mm; }";
     case "A5-Landscape":
-      return "@page { size: A5 landscape; margin: 10mm; }";
+      return "@page { size: A5 landscape; margin: 8mm; }";
     case "A4":
     default:
-      return "@page { size: A4; margin: 10mm; }";
+      return "@page { size: A4 portrait; margin: 8mm; }";
   }
 }
 
@@ -56,6 +56,7 @@ export async function PrintLayout({
   headerVariant = "default",
   respectPrinterPaper = false,
   children,
+  bottom,
   footer,
   className,
   documentId = "erp-print-document",
@@ -77,18 +78,17 @@ export async function PrintLayout({
         id={documentId}
         data-paper-size={paperSize}
         className={cn(
-          "erp-print-document mx-auto flex flex-col bg-white text-black",
-          /* Screen preview — จำลองแผ่นกระดาษลอย */
-          preview.width,
-          headerVariant === "goods-receipt" ? "min-h-0" : preview.minHeight,
-          headerVariant === "goods-receipt" ? "p-4" : preview.padding,
+          "erp-print-document mx-auto flex flex-col justify-between bg-white text-black",
+          preview.frame,
+          preview.printMin,
+          preview.padding,
           "shadow-lg ring-1 ring-black/5",
-          /* Print — ลบเงา/กรอบ/พื้นหลังจำลอง ให้พิมพ์สะอาด */
-          "print:m-0 print:w-full print:min-h-0 print:max-w-none print:p-0",
-          "print:bg-transparent print:shadow-none print:ring-0",
+          "print:mx-auto print:w-full print:max-w-none print:shadow-none print:ring-0",
+          "print:bg-white",
           className,
         )}
       >
+        <div className="min-h-0">
         <DocumentPrintHeader
           title={title}
           documentNo={documentNo}
@@ -105,14 +105,18 @@ export async function PrintLayout({
 
         <section
           className={cn(
-            "erp-print-content flex-1 text-neutral-900",
+            "erp-print-content text-neutral-900",
             headerVariant === "goods-receipt" ? "mt-2 text-[10px]" : "mt-3 text-[11px]",
           )}
         >
           {children}
         </section>
+        </div>
 
-        <DocumentPrintFooter {...footer} />
+        <div className="mt-4">
+          {bottom}
+          <DocumentPrintFooter {...footer} />
+        </div>
       </article>
     </>
   );

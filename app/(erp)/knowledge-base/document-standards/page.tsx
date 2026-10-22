@@ -192,8 +192,8 @@ const PURCHASE_DOCS: DocRow[] = [
   },
   {
     code: "AP_TAX",
-    nameTh: "ใบส่งของ/ใบกำกับซื้อ (ตั้งหนี้)",
-    nameEn: "AP Tax Invoice",
+    nameTh: "ใบรับสินค้า/ใบสำคัญตั้งหนี้",
+    nameEn: "Goods Receipt & AP Voucher",
     role: "รับของ + ตั้งเจ้าหนี้ (มี VAT)",
     stock: "รับเข้า IN + อัปเดต LPP",
     payment: "UNPAID → PAY",
@@ -410,6 +410,19 @@ function LineageCard({ flows }: { flows: FlowStep[] }) {
   );
 }
 
+function withPurchaseTaxonomy(rows: DocRow[]): DocRow[] {
+  const extra = PURCHASE_DOCS.filter(
+    (row) => row.code === "AP_TAX" || row.code === "PO",
+  );
+  const cnIndex = rows.findIndex((row) => row.code === "CN");
+  if (cnIndex < 0) return [...rows, ...extra];
+  return [
+    ...rows.slice(0, cnIndex + 1),
+    ...extra,
+    ...rows.slice(cnIndex + 1),
+  ];
+}
+
 export default async function DocumentStandardsPage() {
   const settingsResult = await getSystemSettings();
   const printSettings: DocumentPrintSettings = settingsResult.success
@@ -429,8 +442,10 @@ export default async function DocumentStandardsPage() {
           SOP อ้างอิง Document Taxonomy และ Lineage ของ Supthavee ERP จนถึง
           Phase 21 (Dual-Freight, คลัง/ผลิต, Atomic RPC) —
           ตั้งค่าขนาดกระดาษพิมพ์ได้ต่อประเภทเอกสาร (บันทึกลง{" "}
+          <span className="font-mono text-xs">mst_document_taxonomy</span>
+          {" "}และสำรองใน{" "}
           <span className="font-mono text-xs">system_settings.document_print_settings</span>
-          ) และใช้เป็นคู่มือพนักงานฝ่ายขาย การเงิน และจัดซื้อ
+          ) แล้วหน้าพิมพ์จะใช้ขนาดนั้นทันที
         </p>
         {!settingsResult.success ? (
           <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -558,7 +573,10 @@ export default async function DocumentStandardsPage() {
             <h3 className="mb-3 text-sm font-semibold tracking-wide text-slate-700 uppercase">
               Document Taxonomy
             </h3>
-            <DocTaxonomyTable rows={SALES_DOCS} printSettings={printSettings} />
+            <DocTaxonomyTable
+              rows={withPurchaseTaxonomy(SALES_DOCS)}
+              printSettings={printSettings}
+            />
           </div>
 
           <div>
@@ -613,7 +631,9 @@ export default async function DocumentStandardsPage() {
               Document Taxonomy
             </h3>
             <DocTaxonomyTable
-              rows={PURCHASE_DOCS}
+              rows={PURCHASE_DOCS.filter(
+                (row) => row.code !== "AP_TAX" && row.code !== "PO",
+              )}
               printSettings={printSettings}
             />
           </div>

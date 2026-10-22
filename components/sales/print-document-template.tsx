@@ -1,40 +1,11 @@
 import { PrintLayout } from "@/components/shared/print/PrintLayout";
 import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
 import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
-import { getDocumentTypeLabel } from "@/lib/constants/document";
-import type { DocumentDetail, DocumentType } from "@/types/document";
+import { documentPartyLabel, documentPrintHeading } from "@/lib/constants/document-print-heading";
+import type { DocumentDetail } from "@/types/document";
 import type { PrintPaperSize, PrintVatType } from "@/types/print-document";
 import { cn } from "@/lib/utils";
 import { displayDocumentItemDescription } from "@/lib/utils/credit-note-line";
-
-const DOC_TYPE_LABELS: Record<DocumentType, string> = {
-  QT: "ใบเสนอราคา (Quotation)",
-  SO: "ใบสั่งขาย (Sales Order)",
-  INV_DO: "ใบส่งของ / Delivery Order",
-  TAX_INV: "ใบกำกับภาษี / ใบส่งของ (Tax Invoice)",
-  CS_TAX: "ใบกำกับเงินสด (Cash Tax Invoice)",
-  ABB: "ใบเสร็จอย่างย่อ (ABB)",
-  DEP_IN: "ใบมัดจำรับ (Deposit In)",
-  REC: "ใบเสร็จรับเงิน (Receipt)",
-  CN: "ใบลดหนี้ (Credit Note)",
-  PO: "ใบสั่งซื้อ (Purchase Order)",
-  AP_TAX: "ใบส่งของ/ใบกำกับภาษีซื้อ (AP Tax)",
-  AP_INV: "บิลซื้อธรรมดา (AP Invoice)",
-  AP_CASH: "บิลเงินสดซื้อ (AP Cash)",
-  DEP_OUT: "มัดจำจ่าย (Deposit Out)",
-  PAY: "ใบจ่ายชำระ (Payment)",
-  AR_REFUND: "ใบสำคัญจ่ายเงินคืน (Refund Payment)",
-  AR_WRITEOFF: "ใบสำคัญปรับปรุงบัญชี - รับรู้รายได้ (Write-off Income)",
-  AP_REFUND: "ใบสำคัญรับเงินคืน (Refund Receipt)",
-  AP_WRITEOFF: "ใบสำคัญปรับปรุงบัญชี - ตัดเป็นค่าใช้จ่าย (Write-off Expense)",
-  TB: "สรุปวางบิลช่าง (Technician Billing)",
-  STK_OB: "ยอดยกมาสต็อก (Opening Balance)",
-  STK_ADJ: "ปรับปรุงสต็อก (Stock Adjustment)",
-  REFUND: "ใบสำคัญคืนเงิน (Refund — legacy)",
-  WRITE_OFF: "ใบสำคัญตัดเศษ (Write-off — legacy)",
-  DEP: "ใบมัดจำ (Deposit — legacy)",
-  INT_REC: "ใบรับภายใน (Internal Receipt — legacy)",
-};
 
 function formatMoney(value: number): string {
   return value.toLocaleString("th-TH", {
@@ -79,22 +50,8 @@ export default async function PrintDocumentTemplate({
   const vatType = normalizePrintVatType(doc.vat_type);
   const hasVat = vatType !== "NONE" && vatType !== undefined;
   const grandTotal = Number(doc.grand_total ?? 0);
-  const sharedTypeLabel = getDocumentTypeLabel(doc.doc_type);
-  const docTypeLabel =
-    sharedTypeLabel !== doc.doc_type
-      ? sharedTypeLabel
-      : (DOC_TYPE_LABELS[doc.doc_type] ?? doc.doc_type);
-  const partyLabel =
-    doc.doc_type === "DEP_OUT" ||
-    doc.doc_type === "PO" ||
-    doc.doc_type === "AP_TAX" ||
-    doc.doc_type === "AP_INV" ||
-    doc.doc_type === "AP_CASH" ||
-    doc.doc_type === "PAY" ||
-    doc.doc_type === "AP_REFUND" ||
-    doc.doc_type === "AP_WRITEOFF"
-      ? "ซัพพลายเออร์ / Vendor"
-      : "ลูกค้า / Customer";
+  const partyLabel = documentPartyLabel(doc.doc_type);
+  const heading = documentPrintHeading(doc.doc_type);
 
   const resolvedPaperSize =
     paperSize ?? (await getDocumentPrintPaperSize(doc.doc_type));
@@ -120,11 +77,14 @@ export default async function PrintDocumentTemplate({
 
   return (
     <PrintLayout
-      title={docTypeLabel}
+      title={heading.title}
+      titleSubtitle={heading.subtitle}
+      headerVariant="goods-receipt"
       documentNo={doc.doc_no}
       date={doc.doc_date}
       dueDate={doc.due_date}
       status={doc.status}
+      docType={doc.doc_type}
       referenceNo={printReferenceNo}
       partyLabel={partyLabel}
       customerData={printCustomer}
@@ -135,7 +95,25 @@ export default async function PrintDocumentTemplate({
         preparedLabel: "ผู้จัดทำ",
         receivedLabel: isDepositDoc ? "ผู้รับ/จ่ายเงิน" : "ผู้รับของ",
         approvedLabel: "ผู้อนุมัติ",
+        compact: true,
       }}
+      bottom={
+        <DocumentPrintSummary
+          subtotal={isDepositDoc ? grandTotal : subtotal}
+          freightCost={isDepositDoc ? 0 : freightCost}
+          discountAmount={isDepositDoc ? 0 : discountAmount}
+          vatType={vatType}
+          vatRate={vatRate}
+          grandTotal={grandTotal}
+          docType={doc.doc_type}
+          discountText={doc.discount_text}
+          withholdingTaxAmount={
+            doc.doc_type === "PAY" || doc.doc_type === "REC"
+              ? Number(doc.wht_amount ?? 0)
+              : undefined
+          }
+        />
+      }
     >
       {/* ตารางสินค้า / มัดจำ */}
       <section className={compact ? "mt-2" : "mt-1"}>
@@ -265,23 +243,6 @@ export default async function PrintDocumentTemplate({
           </p>
         </section>
       ) : null}
-
-      <DocumentPrintSummary
-        className={cn("mt-4", compact && "max-w-[14rem]")}
-        subtotal={isDepositDoc ? grandTotal : subtotal}
-        freightCost={isDepositDoc ? 0 : freightCost}
-        discountAmount={isDepositDoc ? 0 : discountAmount}
-        vatType={vatType}
-        vatRate={vatRate}
-        grandTotal={grandTotal}
-        docType={doc.doc_type}
-        discountText={doc.discount_text}
-        withholdingTaxAmount={
-          doc.doc_type === "PAY" || doc.doc_type === "REC"
-            ? Number(doc.wht_amount ?? 0)
-            : undefined
-        }
-      />
 
       {doc.contact_person?.name ? (
         <p className="mt-2 text-[10px] text-neutral-500">

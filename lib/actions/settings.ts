@@ -175,12 +175,62 @@ export const getSystemSettings = cache(
   async (): Promise<GetSystemSettingsResult> => fetchSystemSettingsRow(),
 );
 
+function isMissingTaxonomyTable(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  const message = String(error.message ?? "").toLowerCase();
+  return (
+    error.code === "PGRST205" ||
+    error.code === "42P01" ||
+    message.includes("does not exist") ||
+    message.includes("schema cache") ||
+    message.includes("could not find the table")
+  );
+}
+
+type TaxonomyPaperRow = { paper_size?: string | null };
+
 /**
- * Resolve paper size for print templates — settings override → default → A4.
+ * อ่านขนาดกระดาษจาก `mst_document_taxonomy` ถ้าตารางมีอยู่
+ * คอลัมน์ที่ใช้: `doc_type`, `paper_size`
+ */
+async function readTaxonomyPaperSize(docType: string): Promise<PrintPaperSize | null> {
+  const supabaseAdmin = createSupabaseAdminClient();
+  const { data, error } = await supabaseAdmin
+    .from("mst_document_taxonomy" as never)
+    .select("paper_size")
+    .eq("doc_type" as never, docType)
+    .maybeSingle();
+
+  if (error || isMissingTaxonomyTable(error)) return null;
+  const row = data as TaxonomyPaperRow | null;
+  return normalizePrintPaperSize(row?.paper_size);
+}
+
+async function writeTaxonomyPaperSize(
+  docType: string,
+  paperSize: PrintPaperSize,
+): Promise<"table" | "settings"> {
+  const supabaseAdmin = createSupabaseAdminClient();
+  const { error } = await supabaseAdmin
+    .from("mst_document_taxonomy" as never)
+    .upsert(
+      { doc_type: docType, paper_size: paperSize } as never,
+      { onConflict: "doc_type" },
+    );
+  if (error || isMissingTaxonomyTable(error)) return "settings";
+  return "table";
+}
+
+/**
+ * Resolve paper size for print templates.
+ * Priority: mst_document_taxonomy → system_settings.document_print_settings → default → A4
  */
 export async function getDocumentPrintPaperSize(
   docType: string,
 ): Promise<PrintPaperSize> {
+  const code = String(docType ?? "").trim().toUpperCase();
+  const fromTable = code ? await readTaxonomyPaperSize(code) : null;
+  if (fromTable) return fromTable;
   const settings = await getSystemSettings();
   const overrides = settings.success
     ? settings.data.document_print_settings
@@ -309,14 +359,16 @@ export async function updateDocumentPrintSetting(
       return { success: false, error: error.message };
     }
 
+    const taxonomyStored = await writeTaxonomyPaperSize(code, size);
+
     revalidatePath(KNOWLEDGE_BASE_PATH);
     revalidatePath(SETTINGS_PATH);
-    revalidatePath("/sales");
-    revalidatePath("/purchases");
-    revalidatePath("/expenses");
-    revalidatePath("/finance");
+    revalidatePath("/sales", "layout");
+    revalidatePath("/purchases", "layout");
+    revalidatePath("/expenses", "layout");
+    revalidatePath("/finance", "layout");
 
-    return { success: true, data: mapRow(row) };
+    return { success: true, data: mapRow(row), taxonomyStored };
   } catch (err) {
     const message =
       err instanceof Error

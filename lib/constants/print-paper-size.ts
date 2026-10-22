@@ -44,9 +44,9 @@ export const PRINT_PAPER_SIZE_OPTIONS: ReadonlyArray<{
   value: PrintPaperSize;
   label: string;
 }> = [
-  { value: "A4", label: "A4" },
-  { value: "A5-Portrait", label: "A5" },
-  { value: "A5-Landscape", label: "A5 Landscape" },
+  { value: "A4", label: "A4-แนวตั้ง (A4 Portrait)" },
+  { value: "A5-Portrait", label: "A5-แนวตั้ง (A5 Portrait)" },
+  { value: "A5-Landscape", label: "A5-แนวนอน (A5 Landscape)" },
 ];
 
 export function isPrintPaperSize(value: string): value is PrintPaperSize {

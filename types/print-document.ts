@@ -113,6 +113,8 @@ export type PrintLayoutProps = {
   /** ไม่ล็อกขนาดกระดาษ เพื่อให้ผู้ใช้เลือก A4 หรือ A5 ในหน้าต่างพิมพ์ */
   respectPrinterPaper?: boolean;
   children: ReactNode;
+  /** สรุปยอด — ถูกดันไปชิดล่างคู่กับช่องลายเซ็น */
+  bottom?: ReactNode;
   footer?: DocumentPrintFooterProps;
   className?: string;
   /** DOM id สำหรับ @media print — default erp-print-document */

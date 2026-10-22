@@ -10,6 +10,7 @@ import { useTransition } from "react";
 import { toast } from "sonner";
 import { updateDocumentPrintSetting } from "@/lib/actions/settings";
 import { PRINT_PAPER_SIZE_OPTIONS } from "@/lib/constants/print-paper-size";
+import { writeLocalTaxonomyPaper } from "@/lib/print/taxonomy-storage";
 import type { PrintPaperSize } from "@/types/print-document";
 import { Select } from "@/components/ui/select";
 
@@ -30,14 +31,24 @@ export function DocumentPaperSizeSelect({
 
     startTransition(async () => {
       const result = await updateDocumentPrintSetting(docType, next);
-      if (!result.success) {
-        toast.error(result.error ?? "บันทึกขนาดกระดาษไม่สำเร็จ");
-        return;
-      }
       const label =
         PRINT_PAPER_SIZE_OPTIONS.find((opt) => opt.value === next)?.label ??
         next;
-      toast.success(`บันทึก ${docType} → ${label} แล้ว`);
+      if (!result.success) {
+        writeLocalTaxonomyPaper(docType, next);
+        toast.error(
+          `${result.error ?? "บันทึกขนาดกระดาษไม่สำเร็จ"} — เก็บสำรองในเครื่องแล้ว`,
+        );
+        return;
+      }
+      if (result.taxonomyStored !== "table") {
+        writeLocalTaxonomyPaper(docType, next);
+        toast.success(
+          `บันทึก ${docType} → ${label} แล้ว (ตาราง mst_document_taxonomy ยังไม่มี จึงสำรองในเครื่องและการตั้งค่าระบบ)`,
+        );
+      } else {
+        toast.success(`บันทึก ${docType} → ${label} แล้ว`);
+      }
       router.refresh();
     });
   }

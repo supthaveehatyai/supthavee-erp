@@ -1,6 +1,7 @@
 import { PrintLayout } from "@/components/shared/print/PrintLayout";
 import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
 import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
+import { documentPrintHeading } from "@/lib/constants/document-print-heading";
 import type { DocumentDetail } from "@/types/document";
 import type { DocumentAllocationRow } from "@/types/document-allocation";
 import type { PrintVatType } from "@/types/print-document";
@@ -63,11 +64,8 @@ export default async function PrintPaymentReceiptTemplate({
   const invoiceSettlement = Number(doc.grand_total ?? 0);
   const whtAmount = Number(doc.wht_amount ?? 0);
   const partyLabel =
-    mode === "REC" ? "ลูกค้า / Customer" : "ผู้จำหน่าย / Vendor";
-  const titleLabel =
-    mode === "REC"
-      ? "ใบเสร็จรับเงิน (Receipt)"
-      : "ใบจ่ายชำระหนี้ (Payment Voucher)";
+    mode === "REC" ? "ลูกค้า / CUSTOMER" : "ผู้จำหน่าย / VENDOR";
+  const heading = documentPrintHeading(mode);
 
   const invoiceSum = allocations
     .filter((row) => !isAllocationCreditDocType(row.target_doc_type))
@@ -99,13 +97,16 @@ export default async function PrintPaymentReceiptTemplate({
 
   return (
     <PrintLayout
-      title={titleLabel}
+      title={heading.title}
+      titleSubtitle={heading.subtitle}
+      headerVariant="goods-receipt"
       documentNo={doc.doc_no}
       date={doc.doc_date}
       status={`${doc.status} · ${doc.payment_status}`}
+      docType={mode}
       partyLabel={partyLabel}
       customerData={doc.contact}
-      referenceNo={doc.notes?.trim() || undefined}
+      referenceNo={doc.reference_no}
       paperSize={paperSize}
       documentId="payment-print-document"
       className={cn("mt-2 print:mt-0", className)}
@@ -113,7 +114,19 @@ export default async function PrintPaymentReceiptTemplate({
         preparedLabel: "ผู้จัดทำ",
         receivedLabel: mode === "REC" ? "ผู้ชำระเงิน" : "ผู้รับเงิน",
         approvedLabel: "ผู้อนุมัติ",
+        compact: true,
       }}
+      bottom={
+        <DocumentPrintSummary
+          subtotal={invoiceSettlement}
+          discountAmount={creditDiscount}
+          discountText={discountLabel}
+          vatType={vatType}
+          vatRate={vatRate}
+          grandTotal={netFromAllocations}
+          withholdingTaxAmount={whtAmount || allocatedWht || undefined}
+        />
+      }
     >
       <section>
         <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-neutral-700">
@@ -258,17 +271,6 @@ export default async function PrintPaymentReceiptTemplate({
           ) : null}
         </table>
       </section>
-
-      <DocumentPrintSummary
-        className="mt-4"
-        subtotal={invoiceSettlement}
-        discountAmount={creditDiscount}
-        discountText={discountLabel}
-        vatType={vatType}
-        vatRate={vatRate}
-        grandTotal={netFromAllocations}
-        withholdingTaxAmount={whtAmount || allocatedWht || undefined}
-      />
     </PrintLayout>
   );
 }

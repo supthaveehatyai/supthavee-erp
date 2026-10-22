@@ -1,9 +1,11 @@
 import { PrintLayout } from "@/components/shared/print/PrintLayout";
 import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
+import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
+import { documentPartyLabel, documentPrintHeading } from "@/lib/constants/document-print-heading";
 import { numberToThaiBaht } from "@/lib/utils/thai-baht-text";
 import { displayDocumentItemDescription } from "@/lib/utils/credit-note-line";
 import type { DocumentDetail } from "@/types/document";
-import type { PrintVatType } from "@/types/print-document";
+import type { PrintPaperSize, PrintVatType } from "@/types/print-document";
 import { cn } from "@/lib/utils";
 
 function formatMoney(value: number): string {
@@ -27,12 +29,14 @@ function normalizePrintVatType(value: string | null | undefined): PrintVatType {
   return "NONE";
 }
 
-export default function GoodsReceiptPrintTemplate({
+export default async function GoodsReceiptPrintTemplate({
   document: doc,
   className,
+  paperSize,
 }: {
   document: DocumentDetail;
   className?: string;
+  paperSize?: PrintPaperSize;
 }) {
   const freightCost = Math.max(0, Number(doc.freight_cost ?? 0));
   const destFreight = Math.max(0, Number(doc.dest_freight_cost ?? 0));
@@ -42,21 +46,22 @@ export default function GoodsReceiptPrintTemplate({
   const vatType = normalizePrintVatType(doc.vat_type);
   const grandTotal = Number(doc.grand_total ?? 0);
   const totalQty = doc.items.reduce((sum, item) => sum + Number(item.qty || 0), 0);
+  const heading = documentPrintHeading(doc.doc_type);
+  const resolvedPaper = paperSize ?? (await getDocumentPrintPaperSize(doc.doc_type));
 
   return (
     <PrintLayout
-      title="ใบรับสินค้า / ใบสำคัญตั้งหนี้การค้า"
-      titleSubtitle="(GOODS RECEIPT & AP VOUCHER)"
+      title={heading.title}
+      titleSubtitle={heading.subtitle}
       headerVariant="goods-receipt"
-      respectPrinterPaper
       documentNo={doc.doc_no}
       date={doc.doc_date}
       status={doc.status}
       docType={doc.doc_type}
       referenceNo={doc.reference_no}
-      partyLabel="ผู้จำหน่าย / VENDOR"
+      partyLabel={documentPartyLabel(doc.doc_type)}
       customerData={doc.contact}
-      paperSize="A4"
+      paperSize={resolvedPaper}
       documentId="goods-receipt-print-document"
       className={cn("print:mt-0", className)}
       footer={{
@@ -65,6 +70,39 @@ export default function GoodsReceiptPrintTemplate({
         approvedLabel: "ผู้อนุมัติ",
         compact: true,
       }}
+      bottom={
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1 space-y-1 text-[10px] leading-snug text-neutral-800">
+            <p>
+              จำนวนรวมทั้งหมด{" "}
+              <span className="font-semibold tabular-nums">{formatQty(totalQty)}</span>
+            </p>
+            <p className="font-medium">({numberToThaiBaht(grandTotal)})</p>
+            <p className="text-neutral-600">
+              หมายเหตุต้นทุนแฝงตามมาตรฐาน TAS 2 — ค่าขนส่งต้นทาง{" "}
+              {formatMoney(freightCost)} บาท เข้าต้นทุนสินค้าและหนี้ผู้ขาย
+              {destFreight > 0
+                ? ` · ค่าขนส่งปลายทาง ${formatMoney(destFreight)} บาท จ่ายแยกให้บริษัทขนส่ง ไม่รวมในหนี้ผู้ขาย แต่เข้าฐานต้นทุนคลัง`
+                : ""}
+            </p>
+          </div>
+          <DocumentPrintSummary
+            className="shrink-0"
+            subtotal={subtotal}
+            freightCost={freightCost}
+            discountAmount={discountAmount}
+            vatType={vatType}
+            vatRate={vatType === "NONE" ? 0 : vatRate}
+            vatAmount={doc.vat_amount}
+            vatLabel={vatType === "NONE" ? "ภาษีมูลค่าเพิ่ม 7% (VAT)" : `ภาษีมูลค่าเพิ่ม ${vatRate}% (VAT)`}
+            grandTotal={grandTotal}
+            discountText={doc.discount_text}
+            docType={doc.doc_type}
+            hideBahtText
+            showEmptyRows
+          />
+        </div>
+      }
     >
       <table className="w-full border-collapse text-left text-[10px]">
         <thead>
@@ -108,38 +146,6 @@ export default function GoodsReceiptPrintTemplate({
           )}
         </tbody>
       </table>
-
-      <div className="mt-2 flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1 space-y-1 text-[10px] leading-snug text-neutral-800">
-          <p>
-            จำนวนรวมทั้งหมด{" "}
-            <span className="font-semibold tabular-nums">{formatQty(totalQty)}</span>
-          </p>
-          <p className="font-medium">({numberToThaiBaht(grandTotal)})</p>
-          <p className="text-neutral-600">
-            หมายเหตุต้นทุนแฝงตามมาตรฐาน TAS 2 — ค่าขนส่งต้นทาง{" "}
-            {formatMoney(freightCost)} บาท เข้าต้นทุนสินค้าและหนี้ผู้ขาย
-            {destFreight > 0
-              ? ` · ค่าขนส่งปลายทาง ${formatMoney(destFreight)} บาท จ่ายแยกให้บริษัทขนส่ง ไม่รวมในหนี้ผู้ขาย แต่เข้าฐานต้นทุนคลัง`
-              : ""}
-          </p>
-        </div>
-        <DocumentPrintSummary
-          className="shrink-0"
-          subtotal={subtotal}
-          freightCost={freightCost}
-          discountAmount={discountAmount}
-          vatType={vatType}
-          vatRate={vatType === "NONE" ? 0 : vatRate}
-          vatAmount={doc.vat_amount}
-          vatLabel={vatType === "NONE" ? "ภาษีมูลค่าเพิ่ม 7% (VAT)" : `ภาษีมูลค่าเพิ่ม ${vatRate}% (VAT)`}
-          grandTotal={grandTotal}
-          discountText={doc.discount_text}
-          docType={doc.doc_type}
-          hideBahtText
-          showEmptyRows
-        />
-      </div>
     </PrintLayout>
   );
 }

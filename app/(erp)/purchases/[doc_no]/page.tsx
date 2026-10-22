@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Eye, FileInput } from "lucide-react";
 import { getDocumentByNo, voidDocumentAction } from "@/lib/actions/document-actions";
+import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
 import {
   getDepositAllocationHistory,
   getDocumentAllocationsByReceiptId,
@@ -22,6 +23,8 @@ import { VoidedDocumentAlert } from "@/components/shared/document/voided-documen
 import { resolveVoidRemark } from "@/lib/utils/void-remark";
 import { displayDocumentItemDescription } from "@/lib/utils/credit-note-line";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
+import { normalizePrintPaperSize } from "@/lib/constants/print-paper-size";
+import type { PrintPaperSize } from "@/types/print-document";
 import { cn } from "@/lib/utils";
 import GoodsReceiptPrintTemplate from "@/components/procurement/goods-receipt-print-template";
 import type { DocumentDetail, DocumentStatus, DocumentType } from "@/types/document";
@@ -58,7 +61,7 @@ import {
 
 type PageProps = {
   params: Promise<{ doc_no: string }>;
-  searchParams: Promise<{ view?: string }>;
+  searchParams: Promise<{ view?: string; paper?: string }>;
 };
 
 function formatMoney(value: number): string {
@@ -139,7 +142,7 @@ export default async function PurchaseDocumentDetailPage({
   searchParams,
 }: PageProps) {
   const { doc_no: rawDocNo } = await params;
-  const { view } = await searchParams;
+  const { view, paper } = await searchParams;
   const docNo = decodeURIComponent(rawDocNo ?? "").trim();
   if (!docNo) {
     notFound();
@@ -263,6 +266,25 @@ export default async function PurchaseDocumentDetailPage({
     doc.doc_type === "AP_CASH";
   const showDocumentForm = isGoodsReceipt && view === "form";
   const docHref = `/purchases/${encodeURIComponent(doc.doc_no)}`;
+  const taxonomyPaper = isGoodsReceipt
+    ? await getDocumentPrintPaperSize(doc.doc_type)
+    : "A4";
+  const paperSize: PrintPaperSize =
+    normalizePrintPaperSize(paper) ?? taxonomyPaper;
+  const paperChoices: { value: PrintPaperSize; label: string }[] = [
+    { value: "A4", label: "A4-แนวตั้ง" },
+    { value: "A5-Portrait", label: "A5-แนวตั้ง" },
+    { value: "A5-Landscape", label: "A5-แนวนอน" },
+  ];
+  function pageHref(next: { view?: "form" | ""; paper?: PrintPaperSize }) {
+    const params = new URLSearchParams();
+    const nextView = next.view ?? (showDocumentForm ? "form" : "");
+    if (nextView === "form") params.set("view", "form");
+    const nextPaper = next.paper ?? paperSize;
+    if (nextPaper) params.set("paper", nextPaper);
+    const query = params.toString();
+    return query ? `${docHref}?${query}` : docHref;
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6 print:max-w-none print:gap-0 print:p-0">
@@ -304,8 +326,24 @@ export default async function PurchaseDocumentDetailPage({
                 label="พิมพ์เอกสาร (Print / PDF)"
                 className="h-10 gap-2 bg-blue-600 text-white hover:bg-blue-700"
               />
+              <span className="inline-flex overflow-hidden rounded-xl border border-slate-200">
+                {paperChoices.map((choice) => (
+                  <Link
+                    key={choice.value}
+                    href={pageHref({ paper: choice.value })}
+                    className={cn(
+                      "inline-flex h-10 items-center px-3 text-sm font-medium",
+                      paperSize === choice.value
+                        ? "bg-blue-600 text-white"
+                        : "bg-white text-slate-600 hover:bg-slate-50",
+                    )}
+                  >
+                    {choice.label}
+                  </Link>
+                ))}
+              </span>
               <Link
-                href={docHref}
+                href={pageHref({ view: "" })}
                 className={cn(
                   "inline-flex h-10 items-center rounded-xl border px-3 text-sm font-medium",
                   showDocumentForm
@@ -316,7 +354,7 @@ export default async function PurchaseDocumentDetailPage({
                 มุมมองการ์ดสรุป
               </Link>
               <Link
-                href={`${docHref}?view=form`}
+                href={pageHref({ view: "form" })}
                 className={cn(
                   "inline-flex h-10 items-center rounded-xl border px-3 text-sm font-medium",
                   showDocumentForm
@@ -736,7 +774,7 @@ export default async function PurchaseDocumentDetailPage({
 
       {isGoodsReceipt ? (
         <div className={cn("goods-receipt-print-host", !showDocumentForm && "hidden")}>
-          <GoodsReceiptPrintTemplate document={doc} />
+          <GoodsReceiptPrintTemplate document={doc} paperSize={paperSize} />
         </div>
       ) : null}
 

@@ -54,5 +54,10 @@ export type UpdateSystemSettingsResult =
   | { success: false; error: string };
 
 export type UpdateDocumentPrintSettingResult =
-  | { success: true; data: SystemSettings }
+  | {
+      success: true;
+      data: SystemSettings;
+      /** `table` = mst_document_taxonomy · `settings` = ตารางยังไม่มี จึงใช้ system_settings */
+      taxonomyStored: "table" | "settings";
+    }
   | { success: false; error: string };

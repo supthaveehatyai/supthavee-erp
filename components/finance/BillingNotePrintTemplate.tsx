@@ -1,6 +1,7 @@
 import { PrintLayout } from "@/components/shared/print/PrintLayout";
 import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
 import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
+import { documentPartyLabel, documentPrintHeading } from "@/lib/constants/document-print-heading";
 import type { BillingNoteDetailData } from "@/types/billing";
 import { cn } from "@/lib/utils";
 
@@ -34,10 +35,8 @@ export default async function BillingNotePrintTemplate({
   document: doc,
   className,
 }: BillingNotePrintTemplateProps) {
-  const isBN = doc.doc_type === "BN";
-  const titleTh = isBN ? "ใบวางบิล" : "ใบรับวางบิล";
-  const titleEn = isBN ? "Billing Note" : "Bill Receipt";
-  const partyLabel = isBN ? "ลูกค้า / Bill To" : "คู่ค้า / Bill From";
+  const heading = documentPrintHeading(doc.doc_type);
+  const partyLabel = documentPartyLabel(doc.doc_type);
   const lineTotal = doc.invoices.reduce(
     (sum, line) => sum + line.billed_amount,
     0,
@@ -47,11 +46,14 @@ export default async function BillingNotePrintTemplate({
 
   return (
     <PrintLayout
-      title={`${titleTh} / ${titleEn}`}
+      title={heading.title}
+      titleSubtitle={heading.subtitle}
+      headerVariant="goods-receipt"
       documentNo={doc.doc_no}
       date={doc.doc_date}
       dueDate={doc.due_date}
       status={doc.payment_status}
+      docType={doc.doc_type}
       partyLabel={partyLabel}
       customerData={doc.contact}
       paperSize={paperSize}
@@ -61,7 +63,17 @@ export default async function BillingNotePrintTemplate({
         preparedLabel: "ผู้จัดทำ",
         receivedLabel: "ผู้รับเอกสาร",
         approvedLabel: "ผู้อนุมัติ",
+        compact: true,
       }}
+      bottom={
+        <DocumentPrintSummary
+          subtotal={grandTotal}
+          discountAmount={0}
+          vatType="NONE"
+          vatRate={7}
+          grandTotal={grandTotal}
+        />
+      }
     >
       <section>
         <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-neutral-700">
@@ -122,15 +134,6 @@ export default async function BillingNotePrintTemplate({
           </tbody>
         </table>
       </section>
-
-      <DocumentPrintSummary
-        className="mt-4"
-        subtotal={grandTotal}
-        discountAmount={0}
-        vatType="NONE"
-        vatRate={7}
-        grandTotal={grandTotal}
-      />
     </PrintLayout>
   );
 }
