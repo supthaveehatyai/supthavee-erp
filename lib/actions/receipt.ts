@@ -1454,6 +1454,16 @@ export async function saveGoodsReceiptToLedger(
       carrierTrackingNo: freightContext?.carrierTrackingNo,
       vendorGrandTotal: grandTotal,
     });
+    const originFreightAmount = Number(freightColumns.freight_cost || 0);
+    const destFreightAmount = Number(freightColumns.dest_freight_cost || 0);
+    const discountAmountSafe = Number(discountAmount || 0);
+    const subTotalSafe = Number(subTotal || 0);
+    const grandTotalSafe = Number(grandTotal || 0);
+    const taxAmountSafe = Number(vatAmountPersisted || 0);
+    const taxRateSafe = Number(vatRate || 0);
+    const paymentStatusSafe = paymentStatus || "UNPAID";
+    const statusSafe = issuedStatus || "ISSUED";
+    const destFreightPaidStatus = destFreightAmount > 0 ? "UNPAID" : "NONE";
     const detailRows = lines.map((line, index) => {
       const unitCostWithFreight =
         landedUnitCostByLineKey.get(line.row.lineKey) ?? line.unitCostPrice;
@@ -1482,27 +1492,39 @@ export async function saveGoodsReceiptToLedger(
       .insert({
         doc_no: officialDocNo,
         doc_type: resolvedDocType,
-        status: issuedStatus,
+        status: statusSafe,
         doc_date: docDate,
         contact_id: vendorId,
         contact_person_id: null,
-        sub_total: subTotal,
-        discount_amount: discountAmount,
-        tax_rate: vatRate,
-        tax_amount: vatAmountPersisted,
-        grand_total: grandTotal,
-        vat_type: resolvedVatType,
-        vat_rate: vatRate,
-        total_amount: totalAmountHeader,
-        net_before_vat: netBeforeVat,
-        vat_amount: vatAmountPersisted,
-        rounding_difference: roundingDifference,
+        sub_total: subTotalSafe,
+        discount_amount: discountAmountSafe,
+        tax_rate: taxRateSafe,
+        tax_amount: taxAmountSafe,
+        grand_total: grandTotalSafe,
+        vat_type: resolvedVatType || "NONE",
+        vat_rate: taxRateSafe,
+        total_amount: Number(totalAmountHeader || 0),
+        net_before_vat: Number(netBeforeVat || 0),
+        vat_amount: taxAmountSafe,
+        rounding_difference: Number(roundingDifference || 0),
+        deposit_deducted: 0,
+        wht_amount: 0,
+        wht_rate: 0,
         discount_text: billDiscountText?.trim() || null,
-        payment_status: paymentStatus,
-        paid_amount: paymentStatus === "PAID" ? grandTotal : 0,
+        payment_status: paymentStatusSafe,
+        paid_amount: Number(paymentStatusSafe === "PAID" ? grandTotalSafe : 0),
         notes: vendorInvoiceNote,
         reference_no: docNo,
         ...freightColumns,
+        freight_cost: originFreightAmount,
+        dest_freight_cost: destFreightAmount,
+        separate_freight_amount: Number(freightColumns.separate_freight_amount || 0),
+        billing_note_eligible_amount: Number(
+          freightColumns.billing_note_eligible_amount || 0,
+        ),
+        freight_paid_separately: freightColumns.freight_paid_separately === true,
+        dest_freight_paid_status: destFreightPaidStatus,
+        carrier_receipt_status: freightColumns.carrier_receipt_status || "PENDING",
         attachment_url: resolvedAttachmentUrl,
         attached_file_url: resolvedAttachmentUrl,
         original_file_name: resolvedAttachmentUrl
@@ -1543,13 +1565,13 @@ export async function saveGoodsReceiptToLedger(
         doc_type: resolvedDocType,
         doc_date: docDate,
         contact_id: vendorId,
-        sub_total: subTotal,
-        discount_amount: discountAmount,
-        tax_rate: vatRate,
-        tax_amount: vatAmountPersisted,
-        grand_total: grandTotal,
-        freight_cost: freightCostNormalized,
-        payment_status: paymentStatus,
+        sub_total: subTotalSafe,
+        discount_amount: discountAmountSafe,
+        tax_rate: taxRateSafe,
+        tax_amount: taxAmountSafe,
+        grand_total: grandTotalSafe,
+        freight_cost: originFreightAmount,
+        payment_status: paymentStatusSafe,
         created_by: owner.userId,
       })
       .select("id, doc_no")
