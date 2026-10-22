@@ -986,9 +986,13 @@ export type SaveGoodsReceiptToLedgerResult = {
  * vendor (one receipt document = one vendor), same convention as `doc_headers.contact_id`
  * and Phase 4 `documents.contact_id`.
  *
- * Writes commit in one RPC, `save_goods_receipt_to_ledger_transaction`:
- * `doc_headers`, `doc_details`, official `documents` number, `document_items`,
- * `inventory_ledger` IN, and `products.cost_price`.
+ * Writes in this order, matching Manual Goods Receipt:
+ * 1. `documents` header, then `.select('id, doc_no').single()`
+ * 2. `doc_headers` with that same `id`
+ * 3. `doc_details` + `document_items` using only that id
+ * 4. `inventory_ledger` IN (`doc_header_id` = the selected document id)
+ * 5. `products.cost_price`
+ * Ledger is never inserted before the header select succeeds.
  *
  * `documentDate` is the ACTUAL invoice date printed on the vendor's receipt
  * (ISO `YYYY-MM-DD`, reviewed/edited by the user in the Save to Ledger
@@ -1003,59 +1007,23 @@ export type SaveGoodsReceiptToLedgerResult = {
  * is applied (existing call sites in `GoodsReceiptUI`, which is a locked
  * module, are unaffected since this is a new trailing optional param).
  */
-function parseGoodsReceiptLedgerRpc(rpcData: unknown): {
-  success: boolean;
-  error: string | null;
-  docHeaderId: string | null;
-  vendorDocNo: string | null;
-} {
-  if (typeof rpcData === "string") {
-    const trimmed = rpcData.trim();
-    if (!trimmed) {
-      return {
-        success: false,
-        error: "RPC save_goods_receipt_to_ledger_transaction ไม่คืนผลลัพธ์",
-        docHeaderId: null,
-        vendorDocNo: null,
-      };
-    }
-    try {
-      return parseGoodsReceiptLedgerRpc(JSON.parse(trimmed) as unknown);
-    } catch {
-      return {
-        success: false,
-        error: trimmed,
-        docHeaderId: null,
-        vendorDocNo: null,
-      };
-    }
-  }
+function isUniqueViolation(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  return error.code === "23505" || /duplicate key|unique constraint/i.test(error.message ?? "");
+}
 
-  if (rpcData == null || typeof rpcData !== "object") {
-    return {
-      success: false,
-      error: "RPC save_goods_receipt_to_ledger_transaction ไม่คืนผลลัพธ์",
-      docHeaderId: null,
-      vendorDocNo: null,
-    };
-  }
-
-  const payload = rpcData as Record<string, unknown>;
-  const errorRaw = payload.error ?? payload.message ?? null;
-  const error =
-    errorRaw != null && String(errorRaw).trim() ? String(errorRaw).trim() : null;
-  const successFlag = payload.success;
-  const success =
-    successFlag === false || successFlag === "false" ? false : error == null;
-
-  return {
-    success,
-    error,
-    docHeaderId:
-      payload.doc_header_id != null ? String(payload.doc_header_id) : null,
-    vendorDocNo:
-      payload.vendor_doc_no != null ? String(payload.vendor_doc_no) : null,
-  };
+async function rollbackOcrGoodsReceipt(
+  supabaseAdmin: SupabaseClient,
+  headerId: string,
+): Promise<void> {
+  const id = headerId.trim();
+  if (!id) return;
+  await supabaseAdmin.from("inventory_ledger").delete().eq("doc_header_id", id);
+  await supabaseAdmin.from("inventory_ledger").delete().eq("document_id", id);
+  await supabaseAdmin.from("document_items").delete().eq("document_id", id);
+  await supabaseAdmin.from("doc_details").delete().eq("doc_header_id", id);
+  await supabaseAdmin.from("doc_headers").delete().eq("id", id);
+  await supabaseAdmin.from("documents").delete().eq("id", id);
 }
 
 async function linkProcurementBills(
@@ -1395,6 +1363,7 @@ export async function saveGoodsReceiptToLedger(
       maTargets.length > 0
         ? [...new Set(maTargets.map((line) => line.row.matchedProduct!.id))]
         : [];
+    let previousCostById = new Map<string, number>();
     let costUpdates: Array<{ product_id: string; cost_price: number }> = [];
 
     if (maProductIds.length > 0) {
@@ -1425,6 +1394,7 @@ export async function saveGoodsReceiptToLedger(
           Number(row.cost_price ?? 0),
         ]),
       );
+      previousCostById = currentCostById;
       const virtualQty = new Map(balances);
       const virtualCost = new Map(currentCostById);
       const maCostByProductId = new Map<string, number>();
@@ -1463,140 +1433,253 @@ export async function saveGoodsReceiptToLedger(
       );
     }
 
-    const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc(
-      "save_goods_receipt_to_ledger_transaction",
-      {
-        p_running_prefix: runningPrefix,
-        p_doc_date: docDate,
-        p_legacy_header: {
-          doc_no: docNo,
-          doc_type: resolvedDocType,
-          doc_date: docDate,
-          contact_id: vendorId,
-          sub_total: subTotal,
-          discount_amount: discountAmount,
-          grand_total: grandTotal,
-          freight_cost: freightCostNormalized,
-          payment_status: paymentStatus,
-        },
-        p_legacy_details: lines.map((line) => {
-          const unitCostWithFreight =
-            landedUnitCostByLineKey.get(line.row.lineKey) ?? line.unitCostPrice;
-          return {
-            product_id: line.row.matchedProduct!.id,
-            description: line.row.raw_description ?? line.row.matchedProduct!.name,
-            qty: line.qty,
-            uom_used: line.row.purchaseUomCode || DEFAULT_PURCHASE_UOM_CODE,
-            unit_price: line.unitPrice,
-            unit_cost_price: unitCostWithFreight,
-            discount_text: line.row.discount_text ?? "",
-            discount_amount: line.discountAmount,
-            line_total: line.lineTotal,
-          };
-        }),
-        p_document_header: {
-          doc_type: resolvedDocType,
-          status: issuedStatus,
-          contact_id: vendorId,
-          contact_person_id: null,
-          sub_total: subTotal,
-          discount_amount: discountAmount,
-          tax_rate: vatRate,
-          tax_amount: vatAmountPersisted,
-          grand_total: grandTotal,
-          vat_type: resolvedVatType,
-          vat_rate: vatRate,
-          total_amount: totalAmountHeader,
-          net_before_vat: netBeforeVat,
-          vat_amount: vatAmountPersisted,
-          rounding_difference: roundingDifference,
-          discount_text: billDiscountText?.trim() || null,
-          payment_status: paymentStatus,
-          paid_amount: paymentStatus === "PAID" ? grandTotal : 0,
-          notes: vendorInvoiceNote,
-          ...buildFreightDocumentColumns({
-            originFreight: freightCostNormalized,
-            freightTaxMode,
-            destFreight: destFreightNormalized,
-            carrierId: freightContext?.carrierId,
-            carrierTrackingNo: freightContext?.carrierTrackingNo,
-            vendorGrandTotal: grandTotal,
-          }),
-          attachment_url: resolvedAttachmentUrl,
-          attached_file_url: resolvedAttachmentUrl,
-          original_file_name: resolvedAttachmentUrl
-            ? resolvedAttachmentUrl.split("/").pop() || null
-            : null,
-          created_by: owner.userId,
-        },
-        p_document_items: lines.map((line, index) => {
-          const unitCostWithFreight =
-            landedUnitCostByLineKey.get(line.row.lineKey) ?? line.unitCostPrice;
-          return {
-            product_id: line.row.matchedProduct!.id,
-            description: (
-              line.row.raw_description ??
-              line.row.matchedProduct!.name ??
-              ""
-            ).slice(0, 255),
-            qty: line.qty,
-            uom_used: line.row.purchaseUomCode || DEFAULT_PURCHASE_UOM_CODE,
-            unit_price: line.unitPrice,
-            unit_cost_price: unitCostWithFreight,
-            discount_text: line.row.discount_text?.trim() || null,
-            discount_amount: line.discountAmount,
-            line_total: line.lineTotal,
-            prorated_freight: proratedFreightByLineKey.get(line.row.lineKey) ?? 0,
-            sort_order: index,
-          };
-        }),
-        p_ledger_lines: ledgerLines.map((line) => ({
-          product_id: line.product_id,
-          qty: line.qty,
-          unit_cost: line.unit_cost,
-          notes_detail: line.notes_detail,
-        })),
-        p_cost_updates: costUpdates,
-      },
+    const { data: generatedNo, error: numberError } = await supabaseAdmin.rpc(
+      "generate_document_no",
+      { p_doc_type: runningPrefix, p_doc_date: docDate },
     );
-
-    if (rpcError?.code === "23505") {
+    const officialDocNo = typeof generatedNo === "string" ? generatedNo.trim() : "";
+    if (numberError || !officialDocNo) {
       return {
         docHeaderId: null,
         docNo: null,
-        error: `เลขที่เอกสาร "${docNo}" ลงวันที่ ${docDate} ถูกบันทึกเข้าระบบแล้วสำหรับผู้จำหน่ายรายนี้ — กรุณาตรวจสอบอีกครั้ง`,
-      };
-    }
-    if (rpcError) {
-      return {
-        docHeaderId: null,
-        docNo: null,
-        error: rpcError.message ?? "สร้างเอกสารรับสินค้า (doc_headers) ไม่สำเร็จ",
+        error: numberError?.message ?? "สร้างเลขที่เอกสารรับสินค้าไม่สำเร็จ",
       };
     }
 
-    const parsed = parseGoodsReceiptLedgerRpc(rpcData);
-    if (!parsed.success || !parsed.docHeaderId || !parsed.vendorDocNo) {
+    const freightColumns = buildFreightDocumentColumns({
+      originFreight: freightCostNormalized,
+      freightTaxMode,
+      destFreight: destFreightNormalized,
+      carrierId: freightContext?.carrierId,
+      carrierTrackingNo: freightContext?.carrierTrackingNo,
+      vendorGrandTotal: grandTotal,
+    });
+    const detailRows = lines.map((line, index) => {
+      const unitCostWithFreight =
+        landedUnitCostByLineKey.get(line.row.lineKey) ?? line.unitCostPrice;
+      const description = (
+        line.row.raw_description ??
+        line.row.matchedProduct!.name ??
+        ""
+      ).slice(0, 255);
+      return {
+        product_id: line.row.matchedProduct!.id,
+        description,
+        qty: line.qty,
+        uom_used: line.row.purchaseUomCode || DEFAULT_PURCHASE_UOM_CODE,
+        unit_price: line.unitPrice,
+        unit_cost_price: unitCostWithFreight,
+        discount_text: line.row.discount_text?.trim() || null,
+        discount_amount: line.discountAmount,
+        line_total: line.lineTotal,
+        prorated_freight: proratedFreightByLineKey.get(line.row.lineKey) ?? 0,
+        sort_order: index,
+      };
+    });
+
+    const { data: createdDoc, error: docError } = await supabaseAdmin
+      .from("documents")
+      .insert({
+        doc_no: officialDocNo,
+        doc_type: resolvedDocType,
+        status: issuedStatus,
+        doc_date: docDate,
+        contact_id: vendorId,
+        contact_person_id: null,
+        sub_total: subTotal,
+        discount_amount: discountAmount,
+        tax_rate: vatRate,
+        tax_amount: vatAmountPersisted,
+        grand_total: grandTotal,
+        vat_type: resolvedVatType,
+        vat_rate: vatRate,
+        total_amount: totalAmountHeader,
+        net_before_vat: netBeforeVat,
+        vat_amount: vatAmountPersisted,
+        rounding_difference: roundingDifference,
+        discount_text: billDiscountText?.trim() || null,
+        payment_status: paymentStatus,
+        paid_amount: paymentStatus === "PAID" ? grandTotal : 0,
+        notes: vendorInvoiceNote,
+        reference_no: docNo,
+        ...freightColumns,
+        attachment_url: resolvedAttachmentUrl,
+        attached_file_url: resolvedAttachmentUrl,
+        original_file_name: resolvedAttachmentUrl
+          ? resolvedAttachmentUrl.split("/").pop() || null
+          : null,
+        created_by: owner.userId,
+        updated_at: new Date().toISOString(),
+      })
+      .select("id, doc_no")
+      .single();
+
+    if (docError || !createdDoc) {
       return {
         docHeaderId: null,
         docNo: null,
-        error: parsed.error ?? "บันทึกรับสินค้าเข้าคลังไม่สำเร็จ",
+        error: isUniqueViolation(docError)
+          ? `เลขที่เอกสาร "${officialDocNo}" ถูกใช้แล้ว — กรุณาลองบันทึกอีกครั้ง`
+          : (docError?.message ?? "สร้างหัวเอกสาร (documents) ไม่สำเร็จ"),
       };
+    }
+
+    const headerId = String(createdDoc.id ?? "").trim();
+    const persistedDocNo = String(createdDoc.doc_no ?? "").trim();
+    if (!headerId || !persistedDocNo) {
+      if (headerId) await rollbackOcrGoodsReceipt(supabaseAdmin, headerId);
+      return {
+        docHeaderId: null,
+        docNo: null,
+        error: "หัวเอกสารไม่คืน id หรือเลขที่เอกสาร — ยกเลิกก่อนลงรายการและสต็อก",
+      };
+    }
+
+    const { data: legacyHeader, error: legacyError } = await supabaseAdmin
+      .from("doc_headers")
+      .insert({
+        id: headerId,
+        doc_no: docNo,
+        doc_type: resolvedDocType,
+        doc_date: docDate,
+        contact_id: vendorId,
+        sub_total: subTotal,
+        discount_amount: discountAmount,
+        tax_rate: vatRate,
+        tax_amount: vatAmountPersisted,
+        grand_total: grandTotal,
+        freight_cost: freightCostNormalized,
+        payment_status: paymentStatus,
+        created_by: owner.userId,
+      })
+      .select("id, doc_no")
+      .single();
+
+    if (legacyError || !legacyHeader || String(legacyHeader.id ?? "") !== headerId) {
+      await rollbackOcrGoodsReceipt(supabaseAdmin, headerId);
+      return {
+        docHeaderId: null,
+        docNo: null,
+        error: isUniqueViolation(legacyError)
+          ? `เลขที่เอกสาร "${docNo}" ลงวันที่ ${docDate} ถูกบันทึกเข้าระบบแล้วสำหรับผู้จำหน่ายรายนี้ — กรุณาตรวจสอบอีกครั้ง`
+          : (legacyError?.message ?? "สร้างหัวเอกสาร (doc_headers) ไม่สำเร็จ"),
+      };
+    }
+
+    const { error: legacyDetailError } = await supabaseAdmin.from("doc_details").insert(
+      detailRows.map((line) => ({
+        doc_header_id: headerId,
+        product_id: line.product_id,
+        description: line.description,
+        qty: line.qty,
+        uom_used: line.uom_used,
+        unit_price: line.unit_price,
+        unit_cost_price: line.unit_cost_price,
+        discount_text: line.discount_text ?? "",
+        discount_amount: line.discount_amount,
+        line_total: line.line_total,
+      })),
+    );
+    if (legacyDetailError) {
+      await rollbackOcrGoodsReceipt(supabaseAdmin, headerId);
+      return {
+        docHeaderId: null,
+        docNo: null,
+        error: legacyDetailError.message ?? "บันทึกรายการ (doc_details) ไม่สำเร็จ",
+      };
+    }
+
+    const { error: itemError } = await supabaseAdmin.from("document_items").insert(
+      detailRows.map((line) => ({
+        document_id: headerId,
+        product_id: line.product_id,
+        description: line.description,
+        qty: line.qty,
+        uom_used: line.uom_used,
+        unit_price: line.unit_price,
+        unit_cost_price: line.unit_cost_price,
+        discount_text: line.discount_text,
+        discount_amount: line.discount_amount,
+        line_total: line.line_total,
+        prorated_freight: line.prorated_freight,
+        sort_order: line.sort_order,
+      })),
+    );
+    if (itemError) {
+      await rollbackOcrGoodsReceipt(supabaseAdmin, headerId);
+      return {
+        docHeaderId: null,
+        docNo: null,
+        error: itemError.message ?? "บันทึกรายการ (document_items) ไม่สำเร็จ",
+      };
+    }
+
+    const ledgerPayload = ledgerLines
+      .filter((line) => Boolean(line.product_id))
+      .map((line) => ({
+        product_id: line.product_id,
+        doc_header_id: headerId,
+        document_id: headerId,
+        trans_type: "IN",
+        qty: line.qty,
+        unit_cost: line.unit_cost,
+        notes: `รับสินค้าจากเอกสาร ${docNo} (${persistedDocNo}) — ${line.notes_detail}`.slice(
+          0,
+          255,
+        ),
+      }));
+
+    if (ledgerPayload.length > 0) {
+      const { error: ledgerError } = await supabaseAdmin
+        .from("inventory_ledger")
+        .insert(ledgerPayload);
+      if (ledgerError) {
+        await rollbackOcrGoodsReceipt(supabaseAdmin, headerId);
+        return {
+          docHeaderId: null,
+          docNo: null,
+          error: ledgerError.message ?? "บันทึกสต็อก (inventory_ledger) ไม่สำเร็จ",
+        };
+      }
+    }
+
+    for (const update of costUpdates) {
+      const { error: costError } = await supabaseAdmin
+        .from("products")
+        .update({ cost_price: update.cost_price })
+        .eq("id", update.product_id);
+      if (costError) {
+        for (const prior of costUpdates) {
+          const previous = previousCostById.get(prior.product_id);
+          if (previous == null) continue;
+          await supabaseAdmin
+            .from("products")
+            .update({ cost_price: previous })
+            .eq("id", prior.product_id);
+        }
+        await rollbackOcrGoodsReceipt(supabaseAdmin, headerId);
+        return {
+          docHeaderId: null,
+          docNo: null,
+          error: costError.message ?? "อัปเดตต้นทุนเฉลี่ย (products.cost_price) ไม่สำเร็จ",
+        };
+      }
     }
 
     const billError = await linkProcurementBills(supabaseAdmin, {
-      docNo: parsed.vendorDocNo,
-      docHeaderId: parsed.docHeaderId,
+      documentId: headerId,
+      docNo: persistedDocNo,
+      docHeaderId: headerId,
       bills: billAttachments,
     });
 
     revalidatePath("/purchases");
-    revalidatePath(`/purchases/${encodeURIComponent(parsed.vendorDocNo)}`);
+    revalidatePath(`/purchases/${encodeURIComponent(persistedDocNo)}`);
     revalidatePath("/inventory/ledger");
 
     return {
-      docHeaderId: parsed.docHeaderId,
-      docNo: parsed.vendorDocNo,
+      docHeaderId: headerId,
+      docNo: persistedDocNo,
       error: billError
         ? `เอกสารถูกบันทึกแล้ว แต่ผูกไฟล์บิลไม่สำเร็จ: ${billError}`
         : null,

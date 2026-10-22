@@ -31,6 +31,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   Check,
@@ -52,6 +53,7 @@ import {
   type ReceiptLineRow,
   type ReceiptProductSummary,
 } from "@/lib/actions/receipt";
+import { saveDocumentProcurementBills } from "@/lib/actions/procurement-bills";
 import { uploadProcurementBills } from "@/lib/procurement/upload-bill-files";
 import {
   calculateNetCostApportionment,
@@ -235,6 +237,7 @@ export default function GoodsReceiptUI({
   purchaseUoms,
   initialCarriers,
 }: GoodsReceiptUIProps) {
+  const router = useRouter();
   /* Header — vendor (prefetched server-side; no client-side contacts query) */
   const vendors = initialVendors;
   const vendorsError = initialVendorsError;
@@ -928,19 +931,6 @@ export default function GoodsReceiptUI({
     setBillDiscountText(payload.billDiscountText);
     setRows(rowsForSave);
     try {
-      let attachmentUrl: string | null = null;
-      let billAttachments = null;
-
-      if (pendingFiles.length > 0) {
-        const uploaded = await uploadProcurementBills(pendingFiles, payload.docNumber);
-        if (uploaded.error || !uploaded.data) {
-          toast.error(uploaded.error ?? "อัปโหลดภาพบิลไม่สำเร็จ — ยกเลิกการบันทึก");
-          return;
-        }
-        billAttachments = uploaded.data;
-        attachmentUrl = uploaded.data.attachment_urls[0] ?? null;
-      }
-
       if (destFreightNormalized > 0 && !carrierId) {
         toast.error("ค่าขนส่งปลายทางต้องเลือกบริษัทขนส่ง");
         return;
@@ -972,7 +962,7 @@ export default function GoodsReceiptUI({
         payload.billDiscountText || null,
         payload.docType,
         payload.vatType,
-        attachmentUrl,
+        null,
         {
           netBeforeVat: saveVat.preVatAmount,
           vatAmount: saveVat.vatAmount,
@@ -986,22 +976,40 @@ export default function GoodsReceiptUI({
           carrierId,
           carrierTrackingNo,
         },
-        billAttachments,
+        null,
       );
-      if (!result.docHeaderId) {
+      if (!result.docHeaderId || !result.docNo) {
         toast.error(result.error ?? "บันทึกรับสินค้าเข้าคลังไม่สำเร็จ");
         return;
       }
-      if (result.error) {
-        toast.error(result.error);
+
+      let billWarning: string | null = result.error;
+      if (pendingFiles.length > 0) {
+        const uploaded = await uploadProcurementBills(pendingFiles, result.docNo);
+        if (uploaded.error || !uploaded.data) {
+          billWarning =
+            uploaded.error ?? "อัปโหลดภาพบิลขึ้น procurement_bills ไม่สำเร็จ";
+        } else {
+          const saved = await saveDocumentProcurementBills({
+            documentId: result.docHeaderId,
+            docHeaderId: result.docHeaderId,
+            bills: uploaded.data,
+          });
+          if (!saved.success) {
+            billWarning = saved.error ?? "บันทึก URL รูปบิลลงหัวเอกสารไม่สำเร็จ";
+          }
+        }
       }
 
       toast.success(
-        `บันทึกรับสินค้าเข้าคลังสำเร็จ — เอกสาร ${result.docNo ?? result.docHeaderId} (${stats.matched.toLocaleString("th-TH")} รายการ)` +
-          (attachmentUrl ? " · แนบภาพบิลแล้ว" : ""),
+        `บันทึกรับสินค้าเข้าคลังสำเร็จ — เอกสาร ${result.docNo} (${stats.matched.toLocaleString("th-TH")} รายการ)`,
       );
+      if (billWarning) {
+        toast.error(`เอกสารถูกบันทึกแล้ว แต่ผูกไฟล์บิลไม่สำเร็จ: ${billWarning}`);
+      }
       setIsSaveDialogOpen(false);
       clearInvoice();
+      router.push(`/purchases/${encodeURIComponent(result.docNo)}?view=form`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "บันทึกรับสินค้าเข้าคลังไม่สำเร็จ");
     } finally {
