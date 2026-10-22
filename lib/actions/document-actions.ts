@@ -26,6 +26,7 @@ import {
   resolveInitialPaymentStatus,
   resolveIssuedDocumentStatus,
 } from "@/lib/constants/document";
+import { billUrlsFromNotes, splitBillNotes } from "@/lib/procurement/bill-notes";
 import { revalidatePath } from "next/cache";
 import { logAuditTrail } from "@/lib/supabase/auditService";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
@@ -1678,8 +1679,13 @@ export async function getDocumentByNo(
       .sort((left, right) => left.sort_order - right.sort_order);
 
     const notes = (data.notes as string | null) ?? null;
-    const vendorRefMatch = notes?.match(/อ้างอิงบิลซัพพลายเออร์:\s*(.+)$/m);
+    const visibleNotes = splitBillNotes(notes).notes;
+    const vendorRefMatch = visibleNotes.match(/อ้างอิงบิลซัพพลายเออร์:\s*(.+)$/m);
     const referenceNo = vendorRefMatch?.[1]?.trim() || null;
+    const billAttachmentUrls = billUrlsFromNotes(
+      notes,
+      (data.attachment_url as string | null) ?? null,
+    );
 
     const detail: DocumentDetail = {
       id: documentId,
@@ -1720,7 +1726,7 @@ export async function getDocumentByNo(
       wht_rate: Number(data.wht_rate ?? 0),
       wht_amount: Number(data.wht_amount ?? 0),
       payment_status: String(data.payment_status ?? "Pending"),
-      notes,
+      notes: visibleNotes,
       remark: (data.remark as string | null) ?? null,
       void_reason: (data.void_reason as string | null) ?? null,
       reference_no: referenceNo,
@@ -1729,6 +1735,7 @@ export async function getDocumentByNo(
       wht_attachment_url: (data.wht_attachment_url as string | null) ?? null,
       original_receipt_url:
         (data.original_receipt_url as string | null) ?? null,
+      bill_attachment_urls: billAttachmentUrls,
       created_at: String(data.created_at),
       updated_at: String(data.updated_at),
       contact,
@@ -2726,6 +2733,7 @@ export async function getPurchaseDocuments(
         id,
         doc_no,
         notes,
+        attachment_url,
         doc_type,
         status,
         doc_date,
@@ -2771,7 +2779,8 @@ export async function getPurchaseDocuments(
         ? row.contacts[0]
         : row.contacts;
       const notes = (row.notes as string | null) ?? null;
-      const vendorRefMatch = notes?.match(/อ้างอิงบิลซัพพลายเออร์:\s*(.+)$/m);
+      const visibleNotes = splitBillNotes(notes).notes;
+      const vendorRefMatch = visibleNotes.match(/อ้างอิงบิลซัพพลายเออร์:\s*(.+)$/m);
       const vendorRef = vendorRefMatch?.[1]?.trim() || null;
 
       return {
@@ -2787,6 +2796,10 @@ export async function getPurchaseDocuments(
         vendor_name:
           (contact as { company_name?: string | null } | null)?.company_name ??
           null,
+        bill_attachment_urls: billUrlsFromNotes(
+          notes,
+          (row.attachment_url as string | null) ?? null,
+        ),
       };
     });
 

@@ -17,6 +17,8 @@ import {
 import { toast } from "sonner";
 import type { VendorOption } from "@/lib/actions/mapping";
 import { saveManualGoodsReceipt } from "@/lib/actions/receipt";
+import { uploadProcurementBills } from "@/lib/procurement/upload-bill-files";
+import { BillAttachmentPicker } from "@/components/procurement/bill-attachment-picker";
 import type { GoodsReceiptDocType } from "@/lib/constants/document";
 import {
   calculateNetCostApportionment,
@@ -128,6 +130,7 @@ export default function ManualReceiptWorkspace({
 }: ManualReceiptWorkspaceProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [billFiles, setBillFiles] = useState<File[]>([]);
 
   const [vendorId, setVendorId] = useState("");
   const [docDate, setDocDate] = useState(todayIsoDate);
@@ -319,10 +322,20 @@ export default function ManualReceiptWorkspace({
     }
 
     startTransition(async () => {
+      let bills = null;
+      if (billFiles.length > 0) {
+        const uploaded = await uploadProcurementBills(billFiles, documentRef.trim());
+        if (uploaded.error || !uploaded.data) {
+          toast.error(uploaded.error ?? "อัปโหลดรูปบิลไม่สำเร็จ");
+          return;
+        }
+        bills = uploaded.data;
+      }
       const result = await saveManualGoodsReceipt({
         vendorId,
         docDate,
         documentRef: documentRef.trim(),
+        bills,
         docType,
         vatType,
         discountText: discountText.trim() || null,
@@ -343,9 +356,12 @@ export default function ManualReceiptWorkspace({
         })),
       });
 
-      if (result.error || !result.data) {
+      if (!result.data) {
         toast.error(result.error ?? "บันทึกรับสินค้าไม่สำเร็จ");
         return;
+      }
+      if (result.error) {
+        toast.error(result.error);
       }
 
       toast.success(
@@ -511,6 +527,22 @@ export default function ManualReceiptWorkspace({
               disabled={isPending}
             />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-slate-200 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">รูปบิล / เอกสารอ้างอิง</CardTitle>
+          <CardDescription>
+            ลากวางหรือเลือกได้หลายหน้า ระบบจะอัปโหลดขึ้น procurement_bills เมื่อกดบันทึก
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <BillAttachmentPicker
+            files={billFiles}
+            onChange={setBillFiles}
+            disabled={isPending}
+          />
         </CardContent>
       </Card>
 

@@ -23,6 +23,7 @@ export const STORAGE_BUCKETS = [
   "production_attachments",
   "expense_documents",
   "product_assets",
+  "procurement_bills",
 ] as const;
 
 export const BACKUP_MODULE_TABLES = {

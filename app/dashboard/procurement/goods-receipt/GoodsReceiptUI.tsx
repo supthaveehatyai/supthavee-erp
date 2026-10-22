@@ -52,7 +52,7 @@ import {
   type ReceiptLineRow,
   type ReceiptProductSummary,
 } from "@/lib/actions/receipt";
-import { uploadDocumentImage } from "@/lib/actions/document-actions";
+import { uploadProcurementBills } from "@/lib/procurement/upload-bill-files";
 import {
   calculateNetCostApportionment,
   type ApportionmentItem,
@@ -929,18 +929,16 @@ export default function GoodsReceiptUI({
     setRows(rowsForSave);
     try {
       let attachmentUrl: string | null = null;
+      let billAttachments = null;
 
-      if (pendingFiles[0]) {
-        const uploadForm = new FormData();
-        uploadForm.append("file", pendingFiles[0]);
-        const uploadResult = await uploadDocumentImage(uploadForm);
-        if (uploadResult.error || !uploadResult.data?.url) {
-          toast.error(
-            uploadResult.error ?? "อัปโหลดภาพบิลไม่สำเร็จ — ยกเลิกการบันทึก",
-          );
+      if (pendingFiles.length > 0) {
+        const uploaded = await uploadProcurementBills(pendingFiles, payload.docNumber);
+        if (uploaded.error || !uploaded.data) {
+          toast.error(uploaded.error ?? "อัปโหลดภาพบิลไม่สำเร็จ — ยกเลิกการบันทึก");
           return;
         }
-        attachmentUrl = uploadResult.data.url;
+        billAttachments = uploaded.data;
+        attachmentUrl = uploaded.data.attachment_urls[0] ?? null;
       }
 
       if (destFreightNormalized > 0 && !carrierId) {
@@ -988,10 +986,14 @@ export default function GoodsReceiptUI({
           carrierId,
           carrierTrackingNo,
         },
+        billAttachments,
       );
-      if (result.error || !result.docHeaderId) {
+      if (!result.docHeaderId) {
         toast.error(result.error ?? "บันทึกรับสินค้าเข้าคลังไม่สำเร็จ");
         return;
+      }
+      if (result.error) {
+        toast.error(result.error);
       }
 
       toast.success(

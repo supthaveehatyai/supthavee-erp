@@ -63,6 +63,8 @@ import { resolveProductTaxCode } from "@/lib/utils/purchase-tax";
 import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
 import type { DocumentType } from "@/types/document";
 import { requireSessionUserId } from "@/lib/auth/current-user";
+import { saveDocumentProcurementBills } from "@/lib/actions/procurement-bills";
+import type { ProcurementBillSet } from "@/types/procurement-bills";
 
 function isGoodsReceiptDocType(value: string): value is GoodsReceiptDocType {
   return (GOODS_RECEIPT_DOC_TYPES as readonly string[]).includes(value);
@@ -1056,6 +1058,37 @@ function parseGoodsReceiptLedgerRpc(rpcData: unknown): {
   };
 }
 
+async function linkProcurementBills(
+  supabaseAdmin: SupabaseClient,
+  input: {
+    documentId?: string | null;
+    docNo?: string | null;
+    docHeaderId?: string | null;
+    bills?: ProcurementBillSet | null;
+  },
+): Promise<string | null> {
+  if (!input.bills || input.bills.attachments.length === 0) return null;
+  let documentId = input.documentId?.trim() ?? "";
+  if (!documentId && input.docNo) {
+    const { data, error } = await supabaseAdmin
+      .from("documents")
+      .select("id")
+      .eq("doc_no", input.docNo)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) return error.message;
+    documentId = data?.id ? String(data.id) : "";
+  }
+  if (!documentId) return "ไม่พบเอกสารสำหรับผูกไฟล์บิล";
+  const saved = await saveDocumentProcurementBills({
+    documentId,
+    docHeaderId: input.docHeaderId,
+    bills: input.bills,
+  });
+  return saved.success ? null : saved.error;
+}
+
 export async function saveGoodsReceiptToLedger(
   rows: ReceiptLineRow[],
   documentRef: string,
@@ -1074,6 +1107,7 @@ export async function saveGoodsReceiptToLedger(
     carrierId?: string | null;
     carrierTrackingNo?: string | null;
   } | null,
+  billAttachments?: ProcurementBillSet | null,
 ): Promise<SaveGoodsReceiptToLedgerResult> {
   if (!Array.isArray(rows) || rows.length === 0) {
     return { docHeaderId: null, docNo: null, error: "ไม่มีรายการให้บันทึกรับสินค้า" };
@@ -1550,6 +1584,12 @@ export async function saveGoodsReceiptToLedger(
       };
     }
 
+    const billError = await linkProcurementBills(supabaseAdmin, {
+      docNo: parsed.vendorDocNo,
+      docHeaderId: parsed.docHeaderId,
+      bills: billAttachments,
+    });
+
     revalidatePath("/purchases");
     revalidatePath(`/purchases/${encodeURIComponent(parsed.vendorDocNo)}`);
     revalidatePath("/inventory/ledger");
@@ -1557,7 +1597,9 @@ export async function saveGoodsReceiptToLedger(
     return {
       docHeaderId: parsed.docHeaderId,
       docNo: parsed.vendorDocNo,
-      error: null,
+      error: billError
+        ? `เอกสารถูกบันทึกแล้ว แต่ผูกไฟล์บิลไม่สำเร็จ: ${billError}`
+        : null,
     };
   } catch (err) {
     const message =
@@ -1603,6 +1645,7 @@ export type SaveManualGoodsReceiptInput = {
   /** ERP lifecycle — ledger ถูกโพสต์เฉพาะ ISSUED / PAID */
   status?: "DRAFT" | "ISSUED" | "PAID";
   lines: ManualGoodsReceiptLineInput[];
+  bills?: ProcurementBillSet | null;
 };
 
 export type SaveManualGoodsReceiptResult = {
@@ -2128,9 +2171,25 @@ export async function saveManualGoodsReceipt(
       };
     }
 
+    const billError = await linkProcurementBills(supabaseAdmin, {
+      documentId: parsed.documentId,
+      bills: input.bills,
+    });
+
     revalidatePath("/purchases");
     revalidatePath(`/purchases/${encodeURIComponent(parsed.docNo)}`);
     revalidatePath("/inventory/ledger");
+
+    if (billError) {
+      return {
+        data: {
+          document_id: parsed.documentId,
+          doc_no: parsed.docNo,
+          ledger_count: parsed.ledgerCount,
+        },
+        error: `เอกสารถูกบันทึกแล้ว แต่ผูกไฟล์บิลไม่สำเร็จ: ${billError}`,
+      };
+    }
 
     return {
       data: {

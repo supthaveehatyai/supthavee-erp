@@ -391,6 +391,8 @@ export type DocumentDetail = {
   wht_attachment_url: string | null;
   /** Scanned original vendor receipt / tax invoice (PAY). */
   original_receipt_url: string | null;
+  /** รูปบิลที่อัปโหลดขึ้น procurement_bills */
+  bill_attachment_urls?: string[];
   created_at: string;
   updated_at: string;
   contact: DocumentDetailContact | null;
@@ -492,6 +494,7 @@ export type PurchaseDocumentListItem = {
   grand_total: number;
   contact_id: string;
   vendor_name: string | null;
+  bill_attachment_urls?: string[];
 };
 
 export type GetPurchaseDocumentsResult = {

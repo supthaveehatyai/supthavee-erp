@@ -31,6 +31,10 @@ import PrintDocumentTemplate from "@/components/sales/print-document-template";
 import PrintSettlementVoucherTemplate from "@/components/finance/PrintSettlementVoucherTemplate";
 import { ReferenceDocumentsSection } from "@/components/finance/ReferenceDocumentsSection";
 import { AttachmentSheetViewer } from "@/components/shared/attachment-sheet-viewer";
+import {
+  BillAttachmentAppender,
+  BillGalleryButton,
+} from "@/components/procurement/bill-gallery-dialog";
 import { getPaymentTransactionStorageMetaByDocumentId } from "@/app/actions/payment-slips";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -282,6 +286,11 @@ export default async function PurchaseDocumentDetailPage({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <BillGalleryButton urls={doc.bill_attachment_urls ?? []} />
+          <BillAttachmentAppender
+            documentId={doc.id}
+            vendorRef={doc.reference_no || doc.doc_no}
+          />
           <Link
             href="/purchases"
             className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50"

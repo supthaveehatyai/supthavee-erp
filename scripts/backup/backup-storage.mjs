@@ -19,6 +19,7 @@ const TARGET_BUCKETS = [
   "production_attachments",
   "expense_documents",
   "product_assets",
+  "procurement_bills",
 ];
 
 function parseArgs(argv) {

@@ -5,6 +5,7 @@ import { FileInput, PackagePlus, ScanLine } from "lucide-react";
 import { getPurchaseDocuments } from "@/lib/actions/document-actions";
 import type { DocumentStatus, DocumentType } from "@/types/document";
 import DocumentFilter from "@/components/documents/document-filter";
+import { BillGalleryButton } from "@/components/procurement/bill-gallery-dialog";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -231,12 +232,15 @@ export default async function PurchaseDocumentsPage({
                         {statusBadge(doc.status)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right">
-                        <Link
-                          href={`/purchases/${encodeURIComponent(doc.doc_no)}`}
-                          className="inline-flex h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                        >
-                          ดูรายละเอียด
-                        </Link>
+                        <div className="flex justify-end gap-2">
+                          <BillGalleryButton urls={doc.bill_attachment_urls ?? []} />
+                          <Link
+                            href={`/purchases/${encodeURIComponent(doc.doc_no)}`}
+                            className="inline-flex h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                          >
+                            ดูรายละเอียด
+                          </Link>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
