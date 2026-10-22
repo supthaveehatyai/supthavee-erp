@@ -128,6 +128,8 @@ export function DocumentPrintSummary({
   discountText,
   className,
   docType,
+  hideBahtText = false,
+  showEmptyRows = false,
 }: DocumentPrintSummaryProps) {
   const vatType = normalizeVatType(vatTypeProp);
   const extractFromGrand = isRefundDocType(String(docType ?? ""));
@@ -162,10 +164,12 @@ export function DocumentPrintSummary({
     !extractFromGrand && !showLinesSubtotal && safeSubtotal !== 0;
   const showCombinedSubtotal =
     !extractFromGrand && showFreight && safeSubtotal !== 0;
-  const showDiscount = !extractFromGrand && safeDiscount > 0;
+  const showDiscount = !extractFromGrand && (safeDiscount > 0 || showEmptyRows);
   const showAfterDiscount =
     !extractFromGrand && showDiscount && afterDiscount !== safeSubtotal;
-  const showVat = vatType !== "NONE" && vatAmount > 0;
+  const showVat =
+    (vatType !== "NONE" && vatAmount > 0) ||
+    (showEmptyRows && (vatType !== "NONE" || vatAmount > 0 || Boolean(vatLabelProp?.trim())));
   const showBaseBeforeVat =
     showVat && (vatType === "INCLUSIVE" || extractFromGrand) && baseAmount > 0;
   const showWht = safeWht > 0;
@@ -189,7 +193,10 @@ export function DocumentPrintSummary({
     >
       <div className="space-y-1.5 border border-neutral-300 bg-white p-2.5">
         {showLinesSubtotal ? (
-          <SummaryRow label="รวมรายการสินค้า" value={formatMoney(linesSubtotal)} />
+          <SummaryRow
+            label={showEmptyRows ? "ยอดรวมสินค้า (Subtotal)" : "รวมรายการสินค้า"}
+            value={formatMoney(linesSubtotal)}
+          />
         ) : null}
 
         {showFreight ? (
@@ -202,15 +209,20 @@ export function DocumentPrintSummary({
         {showCombinedSubtotal ? (
           <SummaryRow label="รวมเป็นเงิน" value={formatMoney(safeSubtotal)} />
         ) : showSubtotal ? (
-          <SummaryRow label="รวมเป็นเงิน" value={formatMoney(safeSubtotal)} />
+          <SummaryRow
+            label={showEmptyRows ? "ยอดรวมสินค้า (Subtotal)" : "รวมเป็นเงิน"}
+            value={formatMoney(safeSubtotal)}
+          />
         ) : null}
 
         {showDiscount ? (
           <SummaryRow
             label={
               discountText?.trim()
-                ? `ส่วนลด (${discountText.trim()})`
-                : "ส่วนลด"
+                ? `${showEmptyRows ? "ส่วนลดท้ายบิล" : "ส่วนลด"} (${discountText.trim()})`
+                : showEmptyRows
+                  ? "ส่วนลดท้ายบิล"
+                  : "ส่วนลด"
             }
             value={`−${formatMoney(safeDiscount)}`}
           />
@@ -239,7 +251,7 @@ export function DocumentPrintSummary({
         ) : null}
 
         <SummaryRow
-          label="ยอดสุทธิ"
+          label={showEmptyRows ? "ยอดสุทธิ (Grand Total)" : "ยอดสุทธิ"}
           value={formatMoney(safeGrand)}
           emphasize
         />
@@ -259,9 +271,11 @@ export function DocumentPrintSummary({
         ) : null}
       </div>
 
-      <p className="text-right text-[11px] font-medium leading-snug text-neutral-800">
-        ({thaiBahtText})
-      </p>
+      {hideBahtText ? null : (
+        <p className="text-right text-[11px] font-medium leading-snug text-neutral-800">
+          ({thaiBahtText})
+        </p>
+      )}
     </div>
   );
 }

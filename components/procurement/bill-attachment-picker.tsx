@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
-import { FileImage, UploadCloud, X } from "lucide-react";
+import { FileImage, UploadCloud, X, ZoomIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -27,10 +27,12 @@ export function BillAttachmentPicker({
   files,
   onChange,
   disabled = false,
+  compact = false,
 }: {
   files: File[];
   onChange: (files: File[]) => void;
   disabled?: boolean;
+  compact?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -79,7 +81,7 @@ export function BillAttachmentPicker({
   }
 
   return (
-    <div className="space-y-3">
+    <div className={compact ? "space-y-2" : "space-y-3"}>
       <div
         role="button"
         tabIndex={disabled ? -1 : 0}
@@ -100,7 +102,8 @@ export function BillAttachmentPicker({
         onDragLeave={() => setIsDragging(false)}
         onDrop={onDrop}
         className={cn(
-          "flex min-h-[148px] cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-6 text-center",
+          "flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed text-center",
+          compact ? "min-h-[88px] gap-1 px-3 py-2" : "min-h-[148px] gap-2 px-6 py-6",
           isDragging ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-slate-50/70 hover:border-blue-400",
           disabled && "cursor-not-allowed opacity-60",
         )}
@@ -117,10 +120,15 @@ export function BillAttachmentPicker({
             event.target.value = "";
           }}
         />
-        <div className="grid size-11 place-items-center rounded-2xl bg-white text-slate-500 shadow-sm">
-          <UploadCloud className="size-5" />
+        <div
+          className={cn(
+            "grid place-items-center rounded-xl bg-white text-slate-500 shadow-sm",
+            compact ? "size-8" : "size-11 rounded-2xl",
+          )}
+        >
+          <UploadCloud className={compact ? "size-4" : "size-5"} />
         </div>
-        <p className="text-sm font-semibold text-slate-800">
+        <p className={cn("font-semibold text-slate-800", compact ? "text-xs" : "text-sm")}>
           อัปโหลดรูปบิล / เอกสารอ้างอิง (Drag & Drop)
         </p>
         <p className="text-[11px] text-slate-400">
@@ -129,12 +137,13 @@ export function BillAttachmentPicker({
       </div>
       {error ? <p className="text-xs font-medium text-red-600">{error}</p> : null}
       {previews.length > 0 ? (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className={cn("grid gap-2", compact ? "grid-cols-4" : "grid-cols-2 sm:grid-cols-4")}>
           {previews.map((item, index) => (
-            <div key={item.key} className="relative rounded-xl border border-slate-200 bg-white p-2">
+            <div key={item.key} className="relative rounded-xl border border-slate-200 bg-white p-1.5">
               <button
                 type="button"
                 className="block w-full"
+                aria-label="ซูมดูรูป"
                 onClick={() => {
                   if (pdfUrl) URL.revokeObjectURL(pdfUrl);
                   setPdfUrl(item.previewUrl ? null : URL.createObjectURL(item.file));
@@ -145,24 +154,43 @@ export function BillAttachmentPicker({
                   <img
                     src={item.previewUrl}
                     alt={item.file.name}
-                    className="h-28 w-full rounded-lg object-cover"
+                    className={cn("w-full rounded-lg object-cover", compact ? "h-14" : "h-28")}
                   />
                 ) : (
-                  <div className="grid h-28 place-items-center rounded-lg bg-slate-100 text-slate-400">
-                    <FileImage className="size-6" />
-                    <span className="text-[11px]">PDF</span>
+                  <div
+                    className={cn(
+                      "grid place-items-center rounded-lg bg-slate-100 text-slate-400",
+                      compact ? "h-14" : "h-28",
+                    )}
+                  >
+                    <FileImage className="size-4" />
+                    <span className="text-[10px]">PDF</span>
                   </div>
                 )}
               </button>
-              <p className="mt-1 truncate text-[11px] text-slate-600">{item.file.name}</p>
+              <div className="mt-1 flex items-center justify-between gap-1">
+                <p className="min-w-0 truncate text-[10px] text-slate-600">{item.file.name}</p>
+                <button
+                  type="button"
+                  aria-label="ซูมดูรูป"
+                  onClick={() => {
+                    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+                    setPdfUrl(item.previewUrl ? null : URL.createObjectURL(item.file));
+                    setLightbox(item);
+                  }}
+                  className="grid size-5 shrink-0 place-items-center text-slate-500 hover:text-blue-600"
+                >
+                  <ZoomIn className="size-3" />
+                </button>
+              </div>
               <button
                 type="button"
                 aria-label="ลบรูปบิล"
                 disabled={disabled}
                 onClick={() => removeAt(index)}
-                className="absolute right-3 top-3 grid size-7 place-items-center rounded-lg bg-white/90 text-slate-500 shadow-sm hover:text-red-600"
+                className="absolute right-2 top-2 grid size-5 place-items-center rounded-md bg-white/90 text-slate-500 shadow-sm hover:text-red-600"
               >
-                <X className="size-3.5" />
+                <X className="size-3" />
               </button>
             </div>
           ))}

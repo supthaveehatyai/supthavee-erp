@@ -27,6 +27,8 @@ export type DocumentPrintHeaderProps = {
   partyLabel?: string;
   status?: string | null;
   referenceNo?: string | null;
+  /** รหัสประเภทเอกสาร เช่น AP_TAX — แสดงในกล่องมุมขวา */
+  docType?: string | null;
 };
 
 export type DocumentPrintFooterProps = {
@@ -71,6 +73,10 @@ export type DocumentPrintSummaryProps = {
    * ตาม vat_type / vat_rate ที่สืบทอดจากมัดจำต้นทาง
    */
   docType?: string | null;
+  /** ซ่อนตัวอักษรไทยใต้ยอด เมื่อหน้าเอกสารแสดงไว้ฝั่งซ้ายแล้ว */
+  hideBahtText?: boolean;
+  /** แสดงส่วนลดและ VAT แม้ยอดเป็น 0 */
+  showEmptyRows?: boolean;
 };
 
 export type PrintLayoutProps = {
@@ -82,6 +88,7 @@ export type PrintLayoutProps = {
   partyLabel?: string;
   status?: string | null;
   referenceNo?: string | null;
+  docType?: string | null;
   children: ReactNode;
   footer?: DocumentPrintFooterProps;
   className?: string;

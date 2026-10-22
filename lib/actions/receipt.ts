@@ -1624,6 +1624,8 @@ export type ManualGoodsReceiptLineInput = {
   sku?: string | null;
   purchaseUomCode?: string | null;
   conversionFactor?: number | null;
+  /** ของแถม — ตั้งหนี้เป็น 0 แต่จำนวนยังเข้าฐานต้นทุนเฉลี่ย TAS 2 */
+  isFoc?: boolean;
 };
 
 export type SaveManualGoodsReceiptInput = {
@@ -1870,10 +1872,12 @@ export async function saveManualGoodsReceipt(
         ? (product.product_models[0] ?? null)
         : product.product_models;
       const qty = toNumeric14_4(line.qty);
-      const unitPrice = Number(line.unit_cost) || 0;
+      const isFoc = line.isFoc === true;
+      const unitPrice = isFoc ? 0 : Number(line.unit_cost) || 0;
       const lineKey = `line-${index}-${productId}`;
       return {
         lineKey,
+        isFoc,
         product_id: productId,
         description: (
           line.description?.trim() ||
@@ -1897,7 +1901,7 @@ export async function saveManualGoodsReceipt(
       unitPrice: line.unitPrice,
       qty: line.qty,
       discountText: null,
-      isFoc: false,
+      isFoc: line.isFoc,
     }));
 
     // Cost path — INCLUSIVE strips VAT before bill-discount apportionment (LPP).
@@ -1936,6 +1940,7 @@ export async function saveManualGoodsReceipt(
         line_total: invoiceLineTotal,
         sort_order: line.sort_order,
         is_service: line.is_service,
+        isFoc: line.isFoc,
       };
     });
 
@@ -1951,7 +1956,7 @@ export async function saveManualGoodsReceipt(
             qty: line.qty,
             lineNetAmount: costLineTotal,
             unitNetCost: line.unit_cost,
-            isFoc: false,
+            isFoc: line.isFoc,
           };
         }),
         {

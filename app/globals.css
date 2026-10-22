@@ -69,8 +69,13 @@ a {
   /* Hide app chrome; only the print document should remain visible */
   .app-shell-sidebar,
   .app-shell-header,
-  .app-shell-mobile-overlay {
+  .app-shell-mobile-overlay,
+  .print\:hidden {
     display: none !important;
+  }
+
+  .goods-receipt-print-host {
+    display: block !important;
   }
 
   .app-shell-main {
@@ -89,6 +94,7 @@ a {
   #billing-note-print-document,
   #settlement-print-document,
   #expense-print-document,
+  #goods-receipt-print-document,
   #erp-print-document,
   .erp-print-document {
     break-inside: avoid;
@@ -99,6 +105,7 @@ a {
   #billing-note-print-document table,
   #settlement-print-document table,
   #expense-print-document table,
+  #goods-receipt-print-document table,
   #erp-print-document table,
   .erp-print-document table {
     break-inside: auto;
@@ -109,6 +116,7 @@ a {
   #billing-note-print-document tr,
   #settlement-print-document tr,
   #expense-print-document tr,
+  #goods-receipt-print-document tr,
   #erp-print-document tr,
   .erp-print-document tr {
     break-inside: avoid;

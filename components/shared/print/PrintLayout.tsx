@@ -51,6 +51,7 @@ export async function PrintLayout({
   partyLabel,
   status,
   referenceNo,
+  docType,
   children,
   footer,
   className,
@@ -92,6 +93,7 @@ export async function PrintLayout({
           partyLabel={partyLabel}
           status={status}
           referenceNo={referenceNo}
+          docType={docType}
         />
 
         <section className="erp-print-content mt-3 flex-1 text-[11px] text-neutral-900">

@@ -21,6 +21,9 @@ import { VoidDocumentButton } from "@/components/shared/document/void-document-b
 import { VoidedDocumentAlert } from "@/components/shared/document/voided-document-alert";
 import { resolveVoidRemark } from "@/lib/utils/void-remark";
 import { displayDocumentItemDescription } from "@/lib/utils/credit-note-line";
+import { formatThaiDate } from "@/lib/utils/date-formatter";
+import { cn } from "@/lib/utils";
+import GoodsReceiptPrintTemplate from "@/components/procurement/goods-receipt-print-template";
 import type { DocumentDetail, DocumentStatus, DocumentType } from "@/types/document";
 import { AllocatedDocumentsTable } from "@/components/finance/AllocatedDocumentsTable";
 import { DepositAllocationHistoryTable } from "@/components/finance/DepositAllocationHistoryTable";
@@ -55,6 +58,7 @@ import {
 
 type PageProps = {
   params: Promise<{ doc_no: string }>;
+  searchParams: Promise<{ view?: string }>;
 };
 
 function formatMoney(value: number): string {
@@ -66,13 +70,7 @@ function formatMoney(value: number): string {
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("th-TH", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return formatThaiDate(value, "long");
 }
 
 function statusBadge(status: DocumentStatus) {
@@ -138,8 +136,10 @@ export async function generateMetadata({
  */
 export default async function PurchaseDocumentDetailPage({
   params,
+  searchParams,
 }: PageProps) {
   const { doc_no: rawDocNo } = await params;
+  const { view } = await searchParams;
   const docNo = decodeURIComponent(rawDocNo ?? "").trim();
   if (!docNo) {
     notFound();
@@ -257,6 +257,12 @@ export default async function PurchaseDocumentDetailPage({
   const settlementTitle = getDocumentTypeLabel(doc.doc_type);
   const canVoid =
     doc.status === "ISSUED" && Number(doc.paid_amount ?? 0) === 0;
+  const isGoodsReceipt =
+    doc.doc_type === "AP_TAX" ||
+    doc.doc_type === "AP_INV" ||
+    doc.doc_type === "AP_CASH";
+  const showDocumentForm = isGoodsReceipt && view === "form";
+  const docHref = `/purchases/${encodeURIComponent(doc.doc_no)}`;
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6 print:max-w-none print:gap-0 print:p-0">
@@ -291,6 +297,37 @@ export default async function PurchaseDocumentDetailPage({
             documentId={doc.id}
             vendorRef={doc.reference_no || doc.doc_no}
           />
+          {isGoodsReceipt ? (
+            <>
+              <PrintDocumentButton
+                variant="default"
+                label="พิมพ์เอกสาร (Print / PDF)"
+                className="h-10 gap-2 bg-blue-600 text-white hover:bg-blue-700"
+              />
+              <Link
+                href={docHref}
+                className={cn(
+                  "inline-flex h-10 items-center rounded-xl border px-3 text-sm font-medium",
+                  showDocumentForm
+                    ? "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    : "border-blue-200 bg-blue-50 text-blue-800",
+                )}
+              >
+                มุมมองการ์ดสรุป
+              </Link>
+              <Link
+                href={`${docHref}?view=form`}
+                className={cn(
+                  "inline-flex h-10 items-center rounded-xl border px-3 text-sm font-medium",
+                  showDocumentForm
+                    ? "border-blue-200 bg-blue-50 text-blue-800"
+                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                )}
+              >
+                มุมมองแบบฟอร์มเอกสาร (A4)
+              </Link>
+            </>
+          ) : null}
           <Link
             href="/purchases"
             className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
@@ -321,7 +358,7 @@ export default async function PurchaseDocumentDetailPage({
         </div>
       </div>
 
-      <div className="flex flex-col gap-4 print:hidden">
+      <div className={cn("flex flex-col gap-4 print:hidden", showDocumentForm && "hidden")}>
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="border-slate-200 shadow-sm">
           <CardHeader className="pb-3">
@@ -696,6 +733,12 @@ export default async function PurchaseDocumentDetailPage({
         />
       ) : null}
       </div>
+
+      {isGoodsReceipt ? (
+        <div className={cn("goods-receipt-print-host", !showDocumentForm && "hidden")}>
+          <GoodsReceiptPrintTemplate document={doc} />
+        </div>
+      ) : null}
 
       {isPaymentDoc ? (
         <PrintPaymentReceiptTemplate

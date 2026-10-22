@@ -13,6 +13,7 @@ import {
   searchProductsForSales,
 } from "@/lib/actions/document-actions";
 import type { SalesProductSearchItem } from "@/types/document";
+import type { VendorMappedReceiptProduct } from "@/types/manual-receipt";
 import { cn } from "@/lib/utils";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +44,8 @@ export type SmartSkuPickerProps = {
   mode?: SmartSkuPickerMode;
   /** Fires with the full product payload (incl. cost_price) when user picks a row. */
   onSelectProduct: (product: SalesProductSearchItem) => void;
+  /** Mapped SKUs for the selected vendor — shown first in purchases mode. */
+  vendorCatalog?: VendorMappedReceiptProduct[];
 };
 
 function formatMoney(value: number): string {
@@ -58,6 +61,7 @@ export default function SmartSkuPicker({
   placeholder = "ค้นหา SKU หรือชื่อรุ่น...",
   mode = "sales",
   onSelectProduct,
+  vendorCatalog = [],
 }: SmartSkuPickerProps) {
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -67,6 +71,14 @@ export default function SmartSkuPicker({
   const [results, setResults] = useState<SalesProductSearchItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const vendorMatches = vendorCatalog
+    .filter((item) => {
+      if (!debouncedQuery) return true;
+      const haystack = `${item.vendor_sku} ${item.sku} ${item.display_name}`.toLowerCase();
+      return haystack.includes(debouncedQuery.toLowerCase());
+    })
+    .slice(0, 24);
+  const vendorIds = new Set(vendorMatches.map((item) => item.id));
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -202,22 +214,62 @@ export default function SmartSkuPicker({
                 </div>
               ) : null}
 
-              {!error && !isPending && debouncedQuery.length === 0 ? (
+              {!error &&
+              !isPending &&
+              debouncedQuery.length === 0 &&
+              vendorMatches.length === 0 ? (
                 <div className="px-3 py-6 text-center text-xs text-slate-400">
-                  พิมพ์อย่างน้อย 1 ตัวอักษรเพื่อค้นหา
+                  {vendorCatalog.length > 0
+                    ? "ไม่พบสินค้าที่ผูกกับผู้จำหน่ายนี้"
+                    : "พิมพ์อย่างน้อย 1 ตัวอักษรเพื่อค้นหา"}
                 </div>
               ) : null}
 
               {!error &&
               !isPending &&
               debouncedQuery.length > 0 &&
-              results.length === 0 ? (
+              results.length === 0 &&
+              vendorMatches.length === 0 ? (
                 <CommandEmpty>ไม่พบสินค้าที่ตรงกับคำค้น</CommandEmpty>
               ) : null}
 
-              {!error && results.length > 0 ? (
-                <CommandGroup heading={`ผลการค้นหา (${results.length})`}>
-                  {results.map((product) => (
+              {!error && vendorMatches.length > 0 ? (
+                <CommandGroup heading={`สินค้าของผู้จำหน่ายนี้ (${vendorMatches.length})`}>
+                  {vendorMatches.map((product) => (
+                    <CommandItem
+                      key={`vendor-${product.id}-${product.vendor_sku}`}
+                      value={`${product.vendor_sku} ${product.sku} ${product.display_name}`}
+                      onSelect={() => pickProduct(product)}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        pickProduct(product);
+                      }}
+                      className="cursor-pointer items-center gap-2 py-2"
+                    >
+                      <LineItemProductThumb imageUrl={product.image_url} alt={product.sku} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-mono text-xs font-semibold text-slate-900">
+                          {product.vendor_sku}
+                          <span className="ml-1.5 font-sans font-normal text-slate-400">
+                            {product.sku}
+                          </span>
+                        </p>
+                        <p className="truncate text-sm text-slate-700">{product.display_name}</p>
+                        <p className="mt-0.5 text-[11px] font-medium text-emerald-700">
+                          LPP {formatMoney(product.cost_price)} ฿
+                          {product.base_uom ? ` · ${product.base_uom}` : ""}
+                        </p>
+                      </div>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              ) : null}
+
+              {!error && results.some((product) => !vendorIds.has(product.id)) ? (
+                <CommandGroup
+                  heading={`สินค้าทั้งหมดในคลัง (${results.filter((product) => !vendorIds.has(product.id)).length})`}
+                >
+                  {results.filter((product) => !vendorIds.has(product.id)).map((product) => (
                     <CommandItem
                       key={product.id}
                       value={`${product.sku} ${product.display_name}`}

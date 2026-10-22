@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 export type PrintDocumentButtonProps = {
   className?: string;
   label?: string;
+  variant?: "outline" | "default";
 };
 
 /**
@@ -15,11 +16,12 @@ export type PrintDocumentButtonProps = {
 export default function PrintDocumentButton({
   className,
   label = "พิมพ์เอกสาร",
+  variant = "outline",
 }: PrintDocumentButtonProps) {
   return (
     <Button
       type="button"
-      variant="outline"
+      variant={variant}
       className={className}
       onClick={() => window.print()}
     >

@@ -1435,6 +1435,8 @@ export async function getDocumentByNo(
         total_amount,
         net_before_vat,
         vat_amount,
+        freight_cost,
+        dest_freight_cost,
         wht_rate,
         wht_amount,
         payment_status,
@@ -1714,6 +1716,10 @@ export async function getDocumentByNo(
         data.net_before_vat == null ? null : Number(data.net_before_vat),
       vat_amount:
         data.vat_amount == null ? null : Number(data.vat_amount),
+      freight_cost:
+        data.freight_cost == null ? null : Number(data.freight_cost),
+      dest_freight_cost:
+        data.dest_freight_cost == null ? null : Number(data.dest_freight_cost),
       sales_channel: (() => {
         const channelRaw = String(data.sales_channel ?? "");
         return isSalesChannel(channelRaw) ? channelRaw : null;

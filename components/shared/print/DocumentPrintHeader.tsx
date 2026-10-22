@@ -1,15 +1,10 @@
 import { getSystemSettings } from "@/lib/actions/settings";
+import { formatThaiDate } from "@/lib/utils/date-formatter";
 import type { DocumentPrintHeaderProps } from "@/types/print-document";
 
 function formatDisplayDate(value: string | null | undefined): string {
   if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("th-TH", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  return formatThaiDate(value, "long");
 }
 
 function formatTaxId(taxId: string | null | undefined): string {
@@ -75,12 +70,15 @@ export async function DocumentPrintHeader({
   partyLabel = "ลูกค้า / Customer",
   status,
   referenceNo,
+  docType,
 }: DocumentPrintHeaderProps) {
   const settingsResult = await getSystemSettings();
   const company = settingsResult.success ? settingsResult.data : null;
 
   const companyName =
     company?.company_name?.trim() || "บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด";
+  const companyNameEn =
+    company?.company_name_en?.trim() || "Supthavee Hat Yai Co., Ltd.";
   const branchCode = company?.branch_code?.trim() || "00000";
   const branchName = company?.branch_name?.trim() || "สำนักงานใหญ่";
   const companyAddress = flattenAddress(company?.address);
@@ -138,8 +136,9 @@ export async function DocumentPrintHeader({
             )}
           </div>
           <div className="min-w-0 flex-1 overflow-hidden text-[10.5px] leading-snug text-neutral-800">
-            <p className="truncate text-[12px] font-bold tracking-tight text-neutral-950">
+            <p className="text-[12px] font-bold tracking-tight text-neutral-950">
               {companyNameLine}
+              {companyNameEn ? ` (${companyNameEn})` : ""}
             </p>
             {companyAddress ? (
               <p className="mt-0.5 whitespace-normal break-words text-neutral-700">
@@ -170,8 +169,11 @@ export async function DocumentPrintHeader({
               วันครบกำหนด: {formatDisplayDate(dueDate)}
             </p>
           ) : null}
+          {docType?.trim() ? (
+            <p className="mt-0.5 text-neutral-700">ประเภทเอกสาร: {docType.trim()}</p>
+          ) : null}
           {status ? (
-            <p className="mt-0.5 truncate text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+            <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
               สถานะ: {status}
             </p>
           ) : null}
