@@ -245,6 +245,10 @@ export type VendorOption = {
   company_name: string;
   /** Present when loaded from contacts — multi-role array (Customer / Vendor / Technician). */
   contact_roles?: string[];
+  tax_id?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  branch_code?: string | null;
 };
 
 export type GetActiveVendorsResult = {
@@ -270,7 +274,7 @@ export async function getActiveVendors(): Promise<GetActiveVendorsResult> {
     const page = await fetchAllPages<VendorOption>((from, to) =>
       supabaseAdmin
         .from("contacts")
-        .select("id, company_name")
+        .select("id, company_name, tax_id, address, phone, branch_code")
         .contains("contact_roles", ["Vendor"])
         .eq("is_active", true)
         .order("company_name", { ascending: true })

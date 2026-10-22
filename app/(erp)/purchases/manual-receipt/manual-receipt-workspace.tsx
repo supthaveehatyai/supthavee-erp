@@ -38,6 +38,7 @@ import {
   type FreightTaxMode,
 } from "@/lib/utils/dual-freight";
 import type { CarrierOption } from "@/types/carrier";
+import type { PrintCompanyProfile } from "@/types/print-document";
 import { DualFreightFields } from "@/components/procurement/DualFreightFields";
 import { CarrierFreightSummaryDialog } from "@/components/procurement/CarrierFreightSummaryDialog";
 import type { SalesProductSearchItem } from "@/types/document";
@@ -91,6 +92,7 @@ export type ManualReceiptWorkspaceProps = {
   vendorsError: string | null;
   purchaseUoms: PurchaseUomOption[];
   initialCarriers: CarrierOption[];
+  company: PrintCompanyProfile;
 };
 
 const DOC_TYPE_OPTIONS: { value: GoodsReceiptDocType; label: string }[] = [
@@ -135,6 +137,7 @@ export default function ManualReceiptWorkspace({
   vendorsError,
   purchaseUoms,
   initialCarriers,
+  company,
 }: ManualReceiptWorkspaceProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -925,9 +928,15 @@ export default function ManualReceiptWorkspace({
         onOpenChange={setPreviewOpen}
         onConfirm={postReceipt}
         isPending={isPending}
+        company={company}
         vendorName={selectedVendor?.company_name ?? "—"}
+        vendorAddress={selectedVendor?.address}
+        vendorTaxId={selectedVendor?.tax_id}
+        vendorPhone={selectedVendor?.phone}
+        vendorBranchCode={selectedVendor?.branch_code}
         docDate={docDate}
         documentRef={documentRef.trim()}
+        docType={docType}
         docTypeLabel={DOC_TYPE_OPTIONS.find((option) => option.value === docType)?.label ?? docType}
         vatLabel={vatTypeToPurchaseTaxMode(vatType) === "NON_VAT" ? "NONE" : vatTypeToPurchaseTaxMode(vatType)}
         lines={lines.map((line) => ({

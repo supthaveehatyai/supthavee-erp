@@ -4,6 +4,19 @@
 
 import type { ReactNode } from "react";
 
+/** ข้อมูลบริษัทสำหรับหัวเอกสาร — ค่าจริงมาจาก system_settings */
+export type PrintCompanyProfile = {
+  companyName: string;
+  companyNameEn: string;
+  branchCode: string;
+  branchName: string;
+  address: string;
+  taxId: string;
+  phone: string;
+  email: string;
+  logoUrl: string;
+};
+
 export type PrintCustomerData = {
   company_name?: string | null;
   tax_id?: string | null;
@@ -29,6 +42,10 @@ export type DocumentPrintHeaderProps = {
   referenceNo?: string | null;
   /** รหัสประเภทเอกสาร เช่น AP_TAX — แสดงในกล่องมุมขวา */
   docType?: string | null;
+  /** บรรทัดภาษาอังกฤษใต้ชื่อเอกสาร เช่น (GOODS RECEIPT & AP VOUCHER) */
+  titleSubtitle?: string | null;
+  /** `goods-receipt` จัดหัวเอกสารกระชับสำหรับ A4/A5 */
+  headerVariant?: "default" | "goods-receipt";
 };
 
 export type DocumentPrintFooterProps = {
@@ -36,6 +53,8 @@ export type DocumentPrintFooterProps = {
   receivedLabel?: string;
   approvedLabel?: string;
   className?: string;
+  /** ลดความสูงช่องเซ็น เพื่อให้ฟอร์มอยู่ในหน้าเดียว */
+  compact?: boolean;
 };
 
 /** ขนาดกระดาษสำหรับ PrintLayout / @page */
@@ -89,6 +108,10 @@ export type PrintLayoutProps = {
   status?: string | null;
   referenceNo?: string | null;
   docType?: string | null;
+  titleSubtitle?: string | null;
+  headerVariant?: "default" | "goods-receipt";
+  /** ไม่ล็อกขนาดกระดาษ เพื่อให้ผู้ใช้เลือก A4 หรือ A5 ในหน้าต่างพิมพ์ */
+  respectPrinterPaper?: boolean;
   children: ReactNode;
   footer?: DocumentPrintFooterProps;
   className?: string;

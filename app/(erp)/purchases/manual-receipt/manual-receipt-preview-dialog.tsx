@@ -1,5 +1,6 @@
 "use client";
 
+import { GoodsReceiptSheetHeader } from "@/components/shared/print/GoodsReceiptSheetHeader";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -9,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
 import { numberToThaiBaht } from "@/lib/utils/thai-baht-text";
+import type { PrintCompanyProfile } from "@/types/print-document";
 
 export type ManualReceiptPreviewLine = {
   key: string;
@@ -34,9 +36,15 @@ export function ManualReceiptPreviewDialog({
   onOpenChange,
   onConfirm,
   isPending,
+  company,
   vendorName,
+  vendorAddress,
+  vendorTaxId,
+  vendorPhone,
+  vendorBranchCode,
   docDate,
   documentRef,
+  docType,
   docTypeLabel,
   vatLabel,
   lines,
@@ -53,9 +61,15 @@ export function ManualReceiptPreviewDialog({
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
   isPending: boolean;
+  company: PrintCompanyProfile;
   vendorName: string;
+  vendorAddress?: string | null;
+  vendorTaxId?: string | null;
+  vendorPhone?: string | null;
+  vendorBranchCode?: string | null;
   docDate: string;
   documentRef: string;
+  docType: string;
   docTypeLabel: string;
   vatLabel: string;
   lines: ManualReceiptPreviewLine[];
@@ -77,30 +91,28 @@ export function ManualReceiptPreviewDialog({
             ตรวจทานฟอร์มเอกสารก่อนยืนยัน ระบบยังไม่บันทึกลงฐานข้อมูล
           </DialogDescription>
         </div>
-        <div className="px-6 py-5 text-slate-800">
-          <div className="border-b border-slate-300 pb-3 text-center">
-            <p className="text-lg font-bold">บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด</p>
-            <p className="text-sm text-slate-500">ใบรับสินค้า / ใบสำคัญตั้งหนี้ผู้ขาย</p>
-          </div>
-          <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
-            <p>
-              <span className="text-slate-500">ผู้จำหน่าย: </span>
-              <span className="font-semibold">{vendorName}</span>
-            </p>
-            <p>
-              <span className="text-slate-500">วันที่เอกสาร: </span>
-              {formatThaiDate(docDate, "long")}
-            </p>
-            <p>
-              <span className="text-slate-500">เลขที่บิลอ้างอิง: </span>
-              <span className="font-mono font-semibold">{documentRef}</span>
-            </p>
-            <p>
-              <span className="text-slate-500">ประเภท / ภาษี: </span>
-              {docTypeLabel} · {vatLabel}
-            </p>
-          </div>
-          <div className="mt-4 overflow-x-auto">
+        <div className="px-4 py-4 text-slate-800">
+          <div className="rounded-sm border border-neutral-300 bg-white p-4">
+          <GoodsReceiptSheetHeader
+            company={company}
+            title="ใบรับสินค้า / ใบสำคัญตั้งหนี้การค้า"
+            subtitle="(GOODS RECEIPT & AP VOUCHER)"
+            partyLabel="ผู้จำหน่าย / VENDOR"
+            partyName={vendorName}
+            partyBranchCode={vendorBranchCode}
+            partyAddress={vendorAddress}
+            partyTaxId={vendorTaxId}
+            partyPhone={vendorPhone}
+            documentNo="DRAFT"
+            dateLabel={formatThaiDate(docDate, "long")}
+            referenceNo={documentRef}
+            docType={docType}
+            status="DRAFT"
+          />
+          <p className="mt-1 text-[10px] text-neutral-500">
+            {docTypeLabel} · ภาษี {vatLabel} · เลขที่เอกสารจริงจะออกเมื่อยืนยันบันทึก
+          </p>
+          <div className="mt-3 overflow-x-auto">
             <table className="w-full min-w-[640px] border-collapse text-sm">
               <thead>
                 <tr className="border-y border-slate-300 bg-slate-50 text-left text-xs text-slate-500">
@@ -155,6 +167,7 @@ export function ManualReceiptPreviewDialog({
                 ค่าขนส่งปลายทางจ่ายแยก ฿{money(destFreight)} ไม่รวมในหนี้ผู้ขาย
               </p>
             ) : null}
+          </div>
           </div>
         </div>
         <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 px-6 py-4">

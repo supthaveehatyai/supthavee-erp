@@ -45,12 +45,16 @@ export default function GoodsReceiptPrintTemplate({
 
   return (
     <PrintLayout
-      title="ใบรับสินค้า / ใบสำคัญตั้งหนี้การค้า (GOODS RECEIPT & AP VOUCHER)"
+      title="ใบรับสินค้า / ใบสำคัญตั้งหนี้การค้า"
+      titleSubtitle="(GOODS RECEIPT & AP VOUCHER)"
+      headerVariant="goods-receipt"
+      respectPrinterPaper
       documentNo={doc.doc_no}
       date={doc.doc_date}
       status={doc.status}
       docType={doc.doc_type}
-      partyLabel="ผู้จำหน่าย / Vendor"
+      referenceNo={doc.reference_no}
+      partyLabel="ผู้จำหน่าย / VENDOR"
       customerData={doc.contact}
       paperSize="A4"
       documentId="goods-receipt-print-document"
@@ -59,27 +63,19 @@ export default function GoodsReceiptPrintTemplate({
         preparedLabel: "ผู้รับสินค้า / คลังสินค้า",
         receivedLabel: "ผู้ตรวจสอบ / บัญชี",
         approvedLabel: "ผู้อนุมัติ",
+        compact: true,
       }}
     >
-      <p className="text-[11px] text-neutral-800">
-        <span className="font-semibold uppercase tracking-wide text-neutral-500">
-          เลขที่บิลผู้จำหน่ายอ้างอิง (Reference No.)
-        </span>
-        <span className="ml-2 font-mono font-semibold">
-          {doc.reference_no?.trim() || "—"}
-        </span>
-      </p>
-
-      <table className="mt-3 w-full border-collapse text-left text-xs">
+      <table className="w-full border-collapse text-left text-[10px]">
         <thead>
           <tr className="border-y border-neutral-400 bg-neutral-50">
-            <th className="px-1.5 py-1.5 font-semibold text-neutral-700">#</th>
-            <th className="px-1.5 py-1.5 font-semibold text-neutral-700">SKU</th>
-            <th className="px-1.5 py-1.5 font-semibold text-neutral-700">Description</th>
-            <th className="px-1.5 py-1.5 text-right font-semibold text-neutral-700">Qty</th>
-            <th className="px-1.5 py-1.5 text-center font-semibold text-neutral-700">UOM</th>
-            <th className="px-1.5 py-1.5 text-right font-semibold text-neutral-700">Unit Cost</th>
-            <th className="px-1.5 py-1.5 text-right font-semibold text-neutral-700">Amount</th>
+            <th className="px-1 py-1 font-semibold text-neutral-700">#</th>
+            <th className="px-1 py-1 font-semibold text-neutral-700">SKU</th>
+            <th className="px-1 py-1 font-semibold text-neutral-700">Description</th>
+            <th className="px-1 py-1 text-right font-semibold text-neutral-700">Qty</th>
+            <th className="px-1 py-1 text-center font-semibold text-neutral-700">UOM</th>
+            <th className="px-1 py-1 text-right font-semibold text-neutral-700">Unit Cost</th>
+            <th className="px-1 py-1 text-right font-semibold text-neutral-700">Amount</th>
           </tr>
         </thead>
         <tbody>
@@ -92,19 +88,19 @@ export default function GoodsReceiptPrintTemplate({
           ) : (
             doc.items.map((item, index) => (
               <tr key={item.id} className="border-b border-neutral-200 align-top">
-                <td className="px-1.5 py-1.5 tabular-nums text-neutral-500">{index + 1}</td>
-                <td className="px-1.5 py-1.5 font-mono text-[11px] font-medium">
+                <td className="px-1 py-1 tabular-nums text-neutral-500">{index + 1}</td>
+                <td className="px-1 py-1 font-mono font-medium">
                   {item.sku ?? "—"}
                 </td>
-                <td className="px-1.5 py-1.5 text-neutral-800">
+                <td className="px-1 py-1 text-neutral-800">
                   {displayDocumentItemDescription(item.description, item.product_name)}
                 </td>
-                <td className="px-1.5 py-1.5 text-right tabular-nums">{formatQty(item.qty)}</td>
-                <td className="px-1.5 py-1.5 text-center">{item.uom_used ?? "—"}</td>
-                <td className="px-1.5 py-1.5 text-right tabular-nums">
+                <td className="px-1 py-1 text-right tabular-nums">{formatQty(item.qty)}</td>
+                <td className="px-1 py-1 text-center">{item.uom_used ?? "—"}</td>
+                <td className="px-1 py-1 text-right tabular-nums">
                   {formatMoney(item.unit_price)}
                 </td>
-                <td className="px-1.5 py-1.5 text-right font-medium tabular-nums">
+                <td className="px-1 py-1 text-right font-medium tabular-nums">
                   {formatMoney(item.line_total)}
                 </td>
               </tr>
@@ -113,8 +109,8 @@ export default function GoodsReceiptPrintTemplate({
         </tbody>
       </table>
 
-      <div className="mt-4 flex items-start justify-between gap-6">
-        <div className="min-w-0 flex-1 space-y-2 text-[11px] leading-relaxed text-neutral-800">
+      <div className="mt-2 flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1 space-y-1 text-[10px] leading-snug text-neutral-800">
           <p>
             จำนวนรวมทั้งหมด{" "}
             <span className="font-semibold tabular-nums">{formatQty(totalQty)}</span>

@@ -94,10 +94,21 @@ a {
   #billing-note-print-document,
   #settlement-print-document,
   #expense-print-document,
-  #goods-receipt-print-document,
   #erp-print-document,
   .erp-print-document {
     break-inside: avoid;
+  }
+
+  #goods-receipt-print-document {
+    break-inside: auto;
+    font-size: 10px;
+    line-height: 1.25;
+  }
+
+  #goods-receipt-print-document table th,
+  #goods-receipt-print-document table td {
+    padding-top: 1px !important;
+    padding-bottom: 1px !important;
   }
 
   #sales-print-document table,

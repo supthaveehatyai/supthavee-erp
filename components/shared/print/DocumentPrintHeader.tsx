@@ -1,4 +1,6 @@
+import { GoodsReceiptSheetHeader } from "@/components/shared/print/GoodsReceiptSheetHeader";
 import { getSystemSettings } from "@/lib/actions/settings";
+import { toPrintCompanyProfile } from "@/lib/print/company-profile";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
 import type { DocumentPrintHeaderProps } from "@/types/print-document";
 
@@ -71,14 +73,14 @@ export async function DocumentPrintHeader({
   status,
   referenceNo,
   docType,
+  titleSubtitle,
+  headerVariant = "default",
 }: DocumentPrintHeaderProps) {
   const settingsResult = await getSystemSettings();
   const company = settingsResult.success ? settingsResult.data : null;
 
   const companyName =
     company?.company_name?.trim() || "บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด";
-  const companyNameEn =
-    company?.company_name_en?.trim() || "Supthavee Hat Yai Co., Ltd.";
   const branchCode = company?.branch_code?.trim() || "00000";
   const branchName = company?.branch_name?.trim() || "สำนักงานใหญ่";
   const companyAddress = flattenAddress(company?.address);
@@ -114,6 +116,28 @@ export async function DocumentPrintHeader({
     email: customerEmail || undefined,
   });
 
+  if (headerVariant === "goods-receipt") {
+    return (
+      <GoodsReceiptSheetHeader
+        company={toPrintCompanyProfile(company)}
+        title={title}
+        subtitle={titleSubtitle?.trim() || "(GOODS RECEIPT & AP VOUCHER)"}
+        partyLabel={partyLabel}
+        partyName={customerName}
+        partyBranchCode={customerData?.branch_code}
+        partyBranchName={customerData?.branch_name}
+        partyAddress={customerAddress}
+        partyTaxId={customerData?.tax_id}
+        partyPhone={customerPhone}
+        documentNo={documentNo}
+        dateLabel={formatDisplayDate(date)}
+        referenceNo={referenceNo}
+        docType={docType}
+        status={status}
+      />
+    );
+  }
+
   return (
     <header className="border-b border-neutral-400 pb-3">
       {/* บังคับซ้าย-ขวาตายตัว — ไม่ใช้ responsive breakpoint (A4 / A5 เหมือนกัน) */}
@@ -136,9 +160,8 @@ export async function DocumentPrintHeader({
             )}
           </div>
           <div className="min-w-0 flex-1 overflow-hidden text-[10.5px] leading-snug text-neutral-800">
-            <p className="text-[12px] font-bold tracking-tight text-neutral-950">
+            <p className="truncate text-[12px] font-bold tracking-tight text-neutral-950">
               {companyNameLine}
-              {companyNameEn ? ` (${companyNameEn})` : ""}
             </p>
             {companyAddress ? (
               <p className="mt-0.5 whitespace-normal break-words text-neutral-700">

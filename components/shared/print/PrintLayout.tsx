@@ -52,6 +52,9 @@ export async function PrintLayout({
   status,
   referenceNo,
   docType,
+  titleSubtitle,
+  headerVariant = "default",
+  respectPrinterPaper = false,
   children,
   footer,
   className,
@@ -64,7 +67,9 @@ export async function PrintLayout({
     <>
       <style
         dangerouslySetInnerHTML={{
-          __html: `@media print { ${pageRuleFor(paperSize)} }`,
+          __html: respectPrinterPaper
+            ? "@media print { @page { margin: 6mm; } }"
+            : `@media print { ${pageRuleFor(paperSize)} }`,
         }}
       />
 
@@ -75,8 +80,8 @@ export async function PrintLayout({
           "erp-print-document mx-auto flex flex-col bg-white text-black",
           /* Screen preview — จำลองแผ่นกระดาษลอย */
           preview.width,
-          preview.minHeight,
-          preview.padding,
+          headerVariant === "goods-receipt" ? "min-h-0" : preview.minHeight,
+          headerVariant === "goods-receipt" ? "p-4" : preview.padding,
           "shadow-lg ring-1 ring-black/5",
           /* Print — ลบเงา/กรอบ/พื้นหลังจำลอง ให้พิมพ์สะอาด */
           "print:m-0 print:w-full print:min-h-0 print:max-w-none print:p-0",
@@ -94,9 +99,16 @@ export async function PrintLayout({
           status={status}
           referenceNo={referenceNo}
           docType={docType}
+          titleSubtitle={titleSubtitle}
+          headerVariant={headerVariant}
         />
 
-        <section className="erp-print-content mt-3 flex-1 text-[11px] text-neutral-900">
+        <section
+          className={cn(
+            "erp-print-content flex-1 text-neutral-900",
+            headerVariant === "goods-receipt" ? "mt-2 text-[10px]" : "mt-3 text-[11px]",
+          )}
+        >
           {children}
         </section>
 
