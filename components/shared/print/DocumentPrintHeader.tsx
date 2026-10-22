@@ -75,6 +75,7 @@ export async function DocumentPrintHeader({
   docType,
   titleSubtitle,
   headerVariant = "default",
+  paperSize,
 }: DocumentPrintHeaderProps) {
   const settingsResult = await getSystemSettings();
   const company = settingsResult.success ? settingsResult.data : null;
@@ -134,6 +135,7 @@ export async function DocumentPrintHeader({
         referenceNo={referenceNo}
         docType={docType}
         status={status}
+        paperSize={paperSize}
       />
     );
   }

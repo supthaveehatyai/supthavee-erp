@@ -3,7 +3,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Eye, FileInput } from "lucide-react";
 import { getDocumentByNo, voidDocumentAction } from "@/lib/actions/document-actions";
-import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
 import {
   getDepositAllocationHistory,
   getDocumentAllocationsByReceiptId,
@@ -264,22 +263,19 @@ export default async function PurchaseDocumentDetailPage({
     doc.doc_type === "AP_TAX" ||
     doc.doc_type === "AP_INV" ||
     doc.doc_type === "AP_CASH";
-  const showDocumentForm = isGoodsReceipt && view === "form";
+  const showDocumentForm = isGoodsReceipt && view !== "card";
   const docHref = `/purchases/${encodeURIComponent(doc.doc_no)}`;
-  const taxonomyPaper = isGoodsReceipt
-    ? await getDocumentPrintPaperSize(doc.doc_type)
-    : "A4";
   const paperSize: PrintPaperSize =
-    normalizePrintPaperSize(paper) ?? taxonomyPaper;
+    normalizePrintPaperSize(paper) ?? (isGoodsReceipt ? "A5-Portrait" : "A4");
   const paperChoices: { value: PrintPaperSize; label: string }[] = [
     { value: "A4", label: "A4-แนวตั้ง" },
     { value: "A5-Portrait", label: "A5-แนวตั้ง" },
     { value: "A5-Landscape", label: "A5-แนวนอน" },
   ];
-  function pageHref(next: { view?: "form" | ""; paper?: PrintPaperSize }) {
+  function pageHref(next: { view?: "form" | "card"; paper?: PrintPaperSize }) {
     const params = new URLSearchParams();
-    const nextView = next.view ?? (showDocumentForm ? "form" : "");
-    if (nextView === "form") params.set("view", "form");
+    const nextView = next.view ?? (showDocumentForm ? "form" : "card");
+    params.set("view", nextView);
     const nextPaper = next.paper ?? paperSize;
     if (nextPaper) params.set("paper", nextPaper);
     const query = params.toString();
@@ -343,7 +339,7 @@ export default async function PurchaseDocumentDetailPage({
                 ))}
               </span>
               <Link
-                href={pageHref({ view: "" })}
+                href={pageHref({ view: "card" })}
                 className={cn(
                   "inline-flex h-10 items-center rounded-xl border px-3 text-sm font-medium",
                   showDocumentForm
@@ -362,7 +358,7 @@ export default async function PurchaseDocumentDetailPage({
                     : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
                 )}
               >
-                มุมมองแบบฟอร์มเอกสาร (A4)
+                มุมมองแบบฟอร์มเอกสาร
               </Link>
             </>
           ) : null}

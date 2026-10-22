@@ -1009,7 +1009,9 @@ export default function GoodsReceiptUI({
       }
       setIsSaveDialogOpen(false);
       clearInvoice();
-      router.push(`/purchases/${encodeURIComponent(result.docNo)}?view=form`);
+      router.push(
+        `/purchases/${encodeURIComponent(result.docNo)}?view=form&paper=A5-Portrait`,
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "บันทึกรับสินค้าเข้าคลังไม่สำเร็จ");
     } finally {

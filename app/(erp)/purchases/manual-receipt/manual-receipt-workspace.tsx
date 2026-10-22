@@ -452,7 +452,9 @@ export default function ManualReceiptWorkspace({
           ` · ตัดเข้า ${result.data.ledger_count} รายการ · อัปเดต LPP (Net Cost) แล้ว`,
       );
       setPreviewOpen(false);
-      router.push(`/purchases/${encodeURIComponent(result.data.doc_no)}`);
+      router.push(
+        `/purchases/${encodeURIComponent(result.data.doc_no)}?view=form&paper=A5-Portrait`,
+      );
     });
   }
 

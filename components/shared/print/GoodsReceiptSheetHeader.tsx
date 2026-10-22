@@ -1,4 +1,4 @@
-import type { PrintCompanyProfile } from "@/types/print-document";
+import type { PrintCompanyProfile, PrintPaperSize } from "@/types/print-document";
 
 function formatTaxId(taxId: string | null | undefined): string {
   const digits = (taxId ?? "").replace(/\D/g, "");
@@ -32,6 +32,7 @@ export function GoodsReceiptSheetHeader({
   referenceNo,
   docType,
   status,
+  paperSize,
 }: {
   company: PrintCompanyProfile;
   title: string;
@@ -48,7 +49,13 @@ export function GoodsReceiptSheetHeader({
   referenceNo?: string | null;
   docType?: string | null;
   status?: string | null;
+  paperSize?: PrintPaperSize;
 }) {
+  const branchName = company.branchName.trim();
+  const identityLine =
+    branchName && !company.companyName.includes(branchName)
+      ? `${company.companyName} ${branchName}`
+      : company.companyName;
   const companyLine = `${company.companyName} ${company.branchName} สาขา: ${company.branchCode}`;
   const taxId = formatTaxId(company.taxId);
   const companyMeta = [
@@ -66,22 +73,68 @@ export function GoodsReceiptSheetHeader({
     .filter(Boolean)
     .join(" | ");
 
+  const compact = paperSize === "A5-Portrait";
+  const phoneEmail = [
+    company.phone ? `โทร: ${company.phone}` : "",
+    company.email ? `อีเมล: ${company.email}` : "",
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
+  const logo = (
+    <div
+      className={
+        compact
+          ? "flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded border border-neutral-300 bg-neutral-50"
+          : "flex size-10 shrink-0 items-center justify-center overflow-hidden rounded border border-neutral-300 bg-neutral-50"
+      }
+    >
+      {company.logoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={company.logoUrl}
+          alt={company.companyName}
+          className="max-h-full max-w-full object-contain p-0.5"
+        />
+      ) : (
+        <span className="text-[10px] font-black tracking-tight text-neutral-800">ST</span>
+      )}
+    </div>
+  );
+
   return (
     <header className="goods-receipt-sheet-header text-neutral-900">
+      {compact ? (
+        <>
+          <div className="flex items-start justify-between gap-2">
+            {logo}
+            <div className="min-w-0 text-right">
+              <p className="text-[10px] font-bold leading-snug tracking-tight text-neutral-950">
+                {title}
+              </p>
+              <p className="text-[8px] font-semibold leading-snug tracking-tight whitespace-nowrap text-slate-600">
+                {subtitle}
+              </p>
+            </div>
+          </div>
+          <div className="mt-1 text-[9.5px] leading-snug tracking-tight">
+            <p className="font-bold whitespace-nowrap text-neutral-950">{identityLine}</p>
+            <p className="whitespace-nowrap text-neutral-600">({company.companyNameEn})</p>
+            <p className="whitespace-nowrap text-[9px] text-neutral-800">{company.address}</p>
+            {taxId ? (
+              <p className="whitespace-nowrap text-[8.5px] text-neutral-800">
+                เลขประจำตัวผู้เสียภาษี: {taxId}
+              </p>
+            ) : null}
+            {phoneEmail ? (
+              <p className="whitespace-nowrap text-[8.5px] text-neutral-800">{phoneEmail}</p>
+            ) : null}
+          </div>
+        </>
+      ) : (
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-start gap-2">
-          <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded border border-neutral-300 bg-neutral-50">
-            {company.logoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={company.logoUrl}
-                alt={company.companyName}
-                className="max-h-full max-w-full object-contain p-0.5"
-              />
-            ) : (
-              <span className="text-xs font-black tracking-tight text-neutral-800">ST</span>
-            )}
-          </div>
+          {logo}
           <div className="min-w-0 leading-tight">
             <p className="text-[12px] font-bold text-neutral-950">{companyLine}</p>
             <p className="text-[10px] text-neutral-600">({company.companyNameEn})</p>
@@ -98,6 +151,7 @@ export function GoodsReceiptSheetHeader({
           </p>
         </div>
       </div>
+      )}
 
       <div className="mt-2 grid grid-cols-[3fr_2fr] border-t border-neutral-300 pt-1.5">
         <div className="min-w-0 pr-3 leading-tight">

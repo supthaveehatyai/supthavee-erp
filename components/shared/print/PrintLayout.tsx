@@ -15,7 +15,7 @@ const PAPER_PREVIEW: Record<
   "A5-Portrait": {
     frame: "w-[148mm] max-w-[148mm] min-h-[210mm]",
     printMin: "print:min-h-[194mm]",
-    padding: "p-4",
+    padding: "px-2.5 py-3",
   },
   "A5-Landscape": {
     frame: "w-[210mm] max-w-[210mm] min-h-[148mm]",
@@ -101,6 +101,7 @@ export async function PrintLayout({
           docType={docType}
           titleSubtitle={titleSubtitle}
           headerVariant={headerVariant}
+          paperSize={paperSize}
         />
 
         <section

@@ -46,6 +46,8 @@ export type DocumentPrintHeaderProps = {
   titleSubtitle?: string | null;
   /** `goods-receipt` จัดหัวเอกสารกระชับสำหรับ A4/A5 */
   headerVariant?: "default" | "goods-receipt";
+  /** ขนาดกระดาษที่กำลังแสดง — ใช้จัดหัวบริษัทให้พอดี A5 แนวตั้ง */
+  paperSize?: PrintPaperSize;
 };
 
 export type DocumentPrintFooterProps = {
