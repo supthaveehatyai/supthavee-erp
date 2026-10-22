@@ -59,6 +59,10 @@ import {
   type FreightTaxMode,
 } from "@/lib/utils/dual-freight";
 import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
+import {
+  matchVendorSkuCandidate,
+  normalizeOcrSkuText,
+} from "@/lib/utils/ocr-sku";
 import { resolveProductTaxCode } from "@/lib/utils/purchase-tax";
 import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
 import type { DocumentType } from "@/types/document";
@@ -170,9 +174,66 @@ function createSupabaseAdminClient(): SupabaseClient {
   });
 }
 
-/** UPPERCASE + trim + collapse spaces so OCR noise still matches stored SKUs. */
-function normalizeVendorSku(sku: string): string {
-  return (sku ?? "").trim().toUpperCase().replace(/\s+/g, " ");
+function isMissingMappingColumn(
+  error: { code?: string; message?: string } | null | undefined,
+  column: string,
+): boolean {
+  if (!error) return false;
+  return (
+    error.code === "42703" ||
+    new RegExp(column, "i").test(error.message ?? "") ||
+    /schema cache|could not find the/i.test(error.message ?? "")
+  );
+}
+
+async function writeVendorMappingRow(
+  supabaseAdmin: SupabaseClient,
+  input: {
+    existingId: string | null;
+    payload: Record<string, unknown>;
+    select: string;
+  },
+): Promise<{
+  data: { id: string; product: unknown } | null;
+  error: { message: string; code?: string } | null;
+}> {
+  let payload = { ...input.payload };
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const query = input.existingId
+      ? supabaseAdmin
+          .from("vendor_product_mapping")
+          .update(payload)
+          .eq("id", input.existingId)
+      : supabaseAdmin.from("vendor_product_mapping").insert(payload);
+    const result = await query.select(input.select).single();
+    if (!result.error) {
+      return {
+        data: result.data as unknown as { id: string; product: unknown },
+        error: null,
+      };
+    }
+
+    const error = { message: result.error.message, code: result.error.code };
+    if (isMissingMappingColumn(error, "normalized_key") && "normalized_key" in payload) {
+      const { normalized_key: _ignored, ...rest } = payload;
+      payload = rest;
+      continue;
+    }
+    if (isMissingMappingColumn(error, "purchase_uom_code") && "purchase_uom_code" in payload) {
+      const { purchase_uom_code: _ignored, ...rest } = payload;
+      payload = rest;
+      continue;
+    }
+    if (error.code === "23505" && input.existingId && "vendor_sku" in payload) {
+      const { vendor_sku: _ignored, ...rest } = payload;
+      payload = rest;
+      continue;
+    }
+    return { data: null, error };
+  }
+
+  return { data: null, error: { message: "บันทึก mapping ไม่สำเร็จ" } };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -462,6 +523,118 @@ export type MatchReceiptItemsResult = {
   error: string | null;
 };
 
+type MappingProductJoin = {
+  id: string;
+  sku: string;
+  name: string;
+  color: string | null;
+  size: string | null;
+  tax_type: string | null;
+  product_models:
+    | { is_service?: boolean | null; tax_type?: string | null }
+    | { is_service?: boolean | null; tax_type?: string | null }[]
+    | null;
+};
+
+type VendorMappingCandidate = {
+  id: string;
+  vendorSku: string;
+  normalizedKey: string | null;
+  product: ReceiptProductSummary;
+};
+
+const VENDOR_MAPPING_PRODUCT_SELECT = `
+  id,
+  sku,
+  name,
+  color,
+  size,
+  tax_type,
+  product_models!inner ( is_service, tax_type )
+`;
+
+function toReceiptProduct(productRaw: MappingProductJoin): ReceiptProductSummary | null {
+  const modelJoin = Array.isArray(productRaw.product_models)
+    ? (productRaw.product_models[0] ?? null)
+    : productRaw.product_models;
+  if (modelJoin?.is_service === true) return null;
+  return {
+    id: productRaw.id,
+    sku: productRaw.sku,
+    name: productRaw.name,
+    color: productRaw.color,
+    size: productRaw.size,
+    tax_type: resolveProductTaxCode(
+      productRaw.tax_type,
+      modelJoin && "tax_type" in modelJoin ? modelJoin.tax_type : null,
+    ),
+  };
+}
+
+async function loadVendorMappingCandidates(
+  supabaseAdmin: SupabaseClient,
+  vendorId: string,
+): Promise<{ candidates: VendorMappingCandidate[]; error: string | null }> {
+  const selectWithKey = `
+    id,
+    vendor_sku,
+    normalized_key,
+    product:products!inner ( ${VENDOR_MAPPING_PRODUCT_SELECT} )
+  `;
+  const selectWithoutKey = `
+    id,
+    vendor_sku,
+    product:products!inner ( ${VENDOR_MAPPING_PRODUCT_SELECT} )
+  `;
+
+  const fetchRows = (columns: string) =>
+    fetchAllPages<{
+      id: string;
+      vendor_sku: string;
+      normalized_key?: string | null;
+      product: MappingProductJoin | MappingProductJoin[] | null;
+    }>((from, to) =>
+      supabaseAdmin
+        .from("vendor_product_mapping")
+        .select(columns)
+        .eq("vendor_id", vendorId)
+        .order("id", { ascending: true })
+        .range(from, to) as unknown as PromiseLike<{
+        data: {
+          id: string;
+          vendor_sku: string;
+          normalized_key?: string | null;
+          product: MappingProductJoin | MappingProductJoin[] | null;
+        }[] | null;
+        error: { message: string; code?: string } | null;
+      }>,
+    );
+
+  let page = await fetchRows(selectWithKey);
+  if (page.error && isMissingMappingColumn(page.error, "normalized_key")) {
+    page = await fetchRows(selectWithoutKey);
+  }
+  if (page.error && page.error.code !== "42P01") {
+    return { candidates: [], error: page.error.message };
+  }
+
+  const candidates: VendorMappingCandidate[] = [];
+  for (const row of page.data ?? []) {
+    const productRaw = Array.isArray(row.product) ? (row.product[0] ?? null) : row.product;
+    if (!productRaw) continue;
+    const product = toReceiptProduct(productRaw);
+    if (!product) continue;
+    candidates.push({
+      id: String(row.id),
+      vendorSku: String(row.vendor_sku ?? ""),
+      normalizedKey: row.normalized_key ? String(row.normalized_key) : null,
+      product,
+    });
+  }
+
+  return { candidates, error: null };
+}
+
 /**
  * Looks up each OCR line against `vendor_product_mapping` (+ joined
  * `products`) for the given vendor, and computes net cost via
@@ -483,96 +656,14 @@ export async function matchReceiptItemsToProducts(
   try {
     const supabaseAdmin = createSupabaseAdminClient();
 
-    const normalizedSkus = [
-      ...new Set(
-        items.map((item) => normalizeVendorSku(item.raw_vendor_sku)).filter(Boolean),
-      ),
-    ];
-
-    const mappingByNormalizedSku = new Map<
-      string,
-      { id: string; product: ReceiptProductSummary }
-    >();
-
-    if (normalizedSkus.length > 0) {
-      const { data, error } = await supabaseAdmin
-        .from("vendor_product_mapping")
-        .select(
-          `
-          id,
-          vendor_sku,
-          internal_product_id,
-          product:products!inner (
-            id,
-            sku,
-            name,
-            color,
-            size,
-            tax_type,
-            product_models!inner ( is_service, tax_type )
-          )
-        `,
-        )
-        .eq("vendor_id", trimmedVendorId)
-        .in("vendor_sku", normalizedSkus);
-
-      if (error && error.code !== "42P01") {
-        return { data: [], error: error.message };
-      }
-
-      type ProductJoin = {
-        id: string;
-        sku: string;
-        name: string;
-        color: string | null;
-        size: string | null;
-        tax_type: string | null;
-        product_models:
-          | { is_service?: boolean | null; tax_type?: string | null }
-          | { is_service?: boolean | null; tax_type?: string | null }[]
-          | null;
-      };
-
-      type Row = {
-        id: string;
-        vendor_sku: string;
-        internal_product_id: string;
-        product: ProductJoin | ProductJoin[] | null;
-      };
-
-      for (const row of (data ?? []) as Row[]) {
-        const productRaw = Array.isArray(row.product)
-          ? (row.product[0] ?? null)
-          : row.product;
-        if (!productRaw) continue;
-
-        const modelJoin = Array.isArray(productRaw.product_models)
-          ? (productRaw.product_models[0] ?? null)
-          : productRaw.product_models;
-        if (modelJoin?.is_service === true) continue;
-
-        const product: ReceiptProductSummary = {
-          id: productRaw.id,
-          sku: productRaw.sku,
-          name: productRaw.name,
-          color: productRaw.color,
-          size: productRaw.size,
-          tax_type: resolveProductTaxCode(
-            productRaw.tax_type,
-            modelJoin && "tax_type" in modelJoin ? modelJoin.tax_type : null,
-          ),
-        };
-
-        mappingByNormalizedSku.set(normalizeVendorSku(row.vendor_sku), {
-          id: row.id,
-          product,
-        });
-      }
+    const loaded = await loadVendorMappingCandidates(supabaseAdmin, trimmedVendorId);
+    if (loaded.error) {
+      return { data: [], error: loaded.error };
     }
 
     const rows: ReceiptLineRow[] = items.map((item, index) => {
-      const normalizedSku = normalizeVendorSku(item.raw_vendor_sku);
-      const match = mappingByNormalizedSku.get(normalizedSku) ?? null;
+      const normalizedSku = normalizeOcrSkuText(item.raw_vendor_sku);
+      const match = matchVendorSkuCandidate(item.raw_vendor_sku, loaded.candidates);
       const { unitCostPrice, discountAmountPerUnit } = calculateNetUnitCost(
         item.unit_price,
         item.discount_text,
@@ -735,7 +826,8 @@ export async function createOnTheFlyReceiptMapping(
   input: CreateOnTheFlyReceiptMappingInput,
 ): Promise<CreateOnTheFlyReceiptMappingResult> {
   const vendorId = input.vendorId?.trim() ?? "";
-  const vendorSku = normalizeVendorSku(input.vendorSku ?? "");
+  const vendorSku = (input.vendorSku ?? "").trim();
+  const normalizedKey = normalizeOcrSkuText(vendorSku);
   const internalProductId = input.internalProductId?.trim() ?? "";
 
   if (!vendorId) return { mappingId: null, product: null, error: "กรุณาเลือกผู้จำหน่าย" };
@@ -785,7 +877,17 @@ export async function createOnTheFlyReceiptMapping(
       String(input.purchaseUomCode ?? "").trim().toUpperCase() ||
       DEFAULT_PURCHASE_UOM_CODE;
     const conversionFactor = resolveConversionFactor(input.conversionFactor ?? 1);
-    const mappingPayload = {
+    const loaded = await loadVendorMappingCandidates(supabaseAdmin, vendorId);
+    if (loaded.error) {
+      return { mappingId: null, product: null, error: loaded.error };
+    }
+    const existing = loaded.candidates.find((candidate) => {
+      if (candidate.vendorSku.trim() === vendorSku) return true;
+      if (!normalizedKey) return false;
+      const key = candidate.normalizedKey?.trim() || normalizeOcrSkuText(candidate.vendorSku);
+      return key === normalizedKey;
+    });
+    const mappingPayload: Record<string, unknown> = {
       vendor_id: vendorId,
       vendor_sku: vendorSku,
       vendor_product_name: input.vendorProductName?.trim() || null,
@@ -793,36 +895,19 @@ export async function createOnTheFlyReceiptMapping(
       purchase_uom_code: purchaseUomCode,
       internal_product_id: internalProductId,
       conversion_factor: conversionFactor,
+      normalized_key: normalizedKey || null,
     };
-    let { data, error } = await supabaseAdmin
-      .from("vendor_product_mapping")
-      .upsert(mappingPayload, { onConflict: "vendor_id,vendor_sku" })
-      .select(
-        `
-        id,
-        product:products ( id, sku, name, color, size, tax_type )
-      `,
-      )
-      .single();
-
-    if (
-      error &&
-      (error.code === "42703" || /purchase_uom_code/i.test(error.message ?? ""))
-    ) {
-      const { purchase_uom_code: _ignored, ...withoutPurchaseCode } = mappingPayload;
-      const retry = await supabaseAdmin
-        .from("vendor_product_mapping")
-        .upsert(withoutPurchaseCode, { onConflict: "vendor_id,vendor_sku" })
-        .select(
-          `
-          id,
-          product:products ( id, sku, name, color, size, tax_type )
-        `,
-        )
-        .single();
-      data = retry.data;
-      error = retry.error;
-    }
+    const mappingSelect = `
+      id,
+      product:products ( id, sku, name, color, size, tax_type )
+    `;
+    const written = await writeVendorMappingRow(supabaseAdmin, {
+      existingId: existing?.id ?? null,
+      payload: mappingPayload,
+      select: mappingSelect,
+    });
+    let data = written.data;
+    let error = written.error;
 
     if (error) {
       return { mappingId: null, product: null, error: error.message, code: error.code };

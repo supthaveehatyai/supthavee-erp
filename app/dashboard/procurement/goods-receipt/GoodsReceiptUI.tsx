@@ -55,6 +55,7 @@ import {
 } from "@/lib/actions/receipt";
 import { saveDocumentProcurementBills } from "@/lib/actions/procurement-bills";
 import { uploadProcurementBills } from "@/lib/procurement/upload-bill-files";
+import { normalizeOcrSkuText } from "@/lib/utils/ocr-sku";
 import {
   calculateNetCostApportionment,
   type ApportionmentItem,
@@ -605,16 +606,24 @@ export default function GoodsReceiptUI({
       return;
     }
 
-    const nextRows = rows.map((item) =>
-      item.lineKey === row.lineKey
-        ? {
-            ...item,
-            status: "matched" as const,
-            mappingId: result.mappingId,
-            matchedProduct: result.product,
-          }
-        : item,
-    );
+    const confirmedKey = normalizeOcrSkuText(row.raw_vendor_sku);
+    const siblingKeys = new Set<string>();
+    const nextRows = rows.map((item) => {
+      const sameConfirmedLine = item.lineKey === row.lineKey;
+      const sameNormalizedSku =
+        item.lineKey !== row.lineKey &&
+        item.status === "unmatched" &&
+        confirmedKey.length > 0 &&
+        normalizeOcrSkuText(item.raw_vendor_sku) === confirmedKey;
+      if (!sameConfirmedLine && !sameNormalizedSku) return item;
+      if (sameNormalizedSku) siblingKeys.add(item.lineKey);
+      return {
+        ...item,
+        status: "matched" as const,
+        mappingId: result.mappingId,
+        matchedProduct: result.product,
+      };
+    });
     setRows(nextRows);
     if (taxModeSource === "ai" || taxModeSource === "product") {
       const inherited = inheritVatTypeFromMatchedProducts({
@@ -634,9 +643,14 @@ export default function GoodsReceiptUI({
     setDraftProductByLineKey((current) => {
       const next = { ...current };
       delete next[row.lineKey];
+      for (const lineKey of siblingKeys) delete next[lineKey];
       return next;
     });
-    toast.success(`บันทึก Ground Truth แล้ว: ${row.raw_vendor_sku} ↔ ${result.product.sku}`);
+    toast.success(
+      siblingKeys.size > 0
+        ? `บันทึก Ground Truth แล้ว: ${row.raw_vendor_sku} ↔ ${result.product.sku} · จับคู่เพิ่ม ${siblingKeys.size.toLocaleString("th-TH")} แถวที่ข้อความตรงกัน`
+        : `บันทึก Ground Truth แล้ว: ${row.raw_vendor_sku} ↔ ${result.product.sku}`,
+    );
   }
 
   /** Toggle FOC (ของแถม) — FOC forces Total Amount / Net Cost = 0. */
