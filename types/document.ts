@@ -367,6 +367,7 @@ export type DocumentDetail = {
   vat_amount: number | null;
   /** Inbound freight (ค่าขนส่งต้นทาง) — included in sub_total before VAT. */
   freight_cost?: number | null;
+  freight_tax_mode?: string | null;
   /** ค่าขนส่งปลายทาง — เข้าต้นทุนสินค้า แต่ไม่รวมหนี้ผู้ขาย */
   dest_freight_cost?: number | null;
   /** Phase 19 — ช่องทางขาย; NULL = ลูกค้า B2B ปกติ */

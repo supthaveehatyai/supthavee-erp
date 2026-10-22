@@ -3,6 +3,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Eye, FileInput } from "lucide-react";
 import { getDocumentByNo, voidDocumentAction } from "@/lib/actions/document-actions";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { isAdminRoleCode } from "@/lib/auth/module-access";
+import { documentVatToPurchaseReviseMode } from "@/lib/utils/purchase-vat-revise";
+import { PurchaseDocumentControls } from "./purchase-document-controls";
 import {
   getDepositAllocationHistory,
   getDocumentAllocationsByReceiptId,
@@ -257,8 +261,17 @@ export default async function PurchaseDocumentDetailPage({
     Boolean(slipUrl) ||
     Boolean(resolveSlipUrl(doc));
   const settlementTitle = getDocumentTypeLabel(doc.doc_type);
-  const canVoid =
-    doc.status === "ISSUED" && Number(doc.paid_amount ?? 0) === 0;
+  const actor = await getCurrentAuthUser();
+  const isAdmin = isAdminRoleCode(actor?.roleCode);
+  const issuedUnpaid =
+    doc.status === "ISSUED" &&
+    doc.payment_status === "UNPAID" &&
+    Number(doc.paid_amount ?? 0) === 0;
+  const canVoid = issuedUnpaid && isAdmin;
+  const goodsNet = doc.items.reduce(
+    (sum, item) => sum + Number(item.line_total || 0),
+    0,
+  );
   const isGoodsReceipt =
     doc.doc_type === "AP_TAX" ||
     doc.doc_type === "AP_INV" ||
@@ -371,6 +384,23 @@ export default async function PurchaseDocumentDetailPage({
           </Link>
           {isPaymentDoc || isDepositDoc || isSettlementDoc ? (
             <PrintDocumentButton className="h-10 gap-2" />
+          ) : null}
+          {issuedUnpaid && (!isAdmin || isGoodsReceipt) ? (
+            <PurchaseDocumentControls
+              isAdmin={isAdmin}
+              documentId={doc.id}
+              docNo={doc.doc_no}
+              goodsNet={goodsNet}
+              originFreight={Number(doc.freight_cost ?? 0)}
+              freightTaxMode={doc.freight_tax_mode}
+              currentMode={documentVatToPurchaseReviseMode(doc.vat_type)}
+              current={{
+                preVatAmount: Number(doc.net_before_vat ?? doc.sub_total ?? 0),
+                vatAmount: Number(doc.vat_amount ?? doc.tax_amount ?? 0),
+                grandTotal: Number(doc.grand_total ?? 0),
+                vatRate: Number(doc.vat_rate ?? doc.tax_rate ?? 0),
+              }}
+            />
           ) : null}
           {canVoid ? (
             <VoidDocumentButton

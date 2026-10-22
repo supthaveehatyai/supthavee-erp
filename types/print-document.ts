@@ -98,6 +98,8 @@ export type DocumentPrintSummaryProps = {
   hideBahtText?: boolean;
   /** แสดงส่วนลดและ VAT แม้ยอดเป็น 0 */
   showEmptyRows?: boolean;
+  /** ใบรับสินค้า INC_VAT — แสดงฐานต้นทุน TAS 2 ชัดในกรอบสรุป */
+  purchaseInclusiveLayout?: boolean;
 };
 
 export type PrintLayoutProps = {

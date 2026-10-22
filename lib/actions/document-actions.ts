@@ -1436,6 +1436,7 @@ export async function getDocumentByNo(
         net_before_vat,
         vat_amount,
         freight_cost,
+        freight_tax_mode,
         dest_freight_cost,
         wht_rate,
         wht_amount,
@@ -1718,6 +1719,7 @@ export async function getDocumentByNo(
         data.vat_amount == null ? null : Number(data.vat_amount),
       freight_cost:
         data.freight_cost == null ? null : Number(data.freight_cost),
+      freight_tax_mode: (data.freight_tax_mode as string | null) ?? null,
       dest_freight_cost:
         data.dest_freight_cost == null ? null : Number(data.dest_freight_cost),
       sales_channel: (() => {

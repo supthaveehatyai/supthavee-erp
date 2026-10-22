@@ -130,6 +130,7 @@ export function DocumentPrintSummary({
   docType,
   hideBahtText = false,
   showEmptyRows = false,
+  purchaseInclusiveLayout = false,
 }: DocumentPrintSummaryProps) {
   const vatType = normalizeVatType(vatTypeProp);
   const extractFromGrand = isRefundDocType(String(docType ?? ""));
@@ -192,6 +193,28 @@ export function DocumentPrintSummary({
       )}
     >
       <div className="space-y-1.5 border border-neutral-300 bg-white p-2.5">
+        {purchaseInclusiveLayout && vatType === "INCLUSIVE" ? (
+          <>
+            <SummaryRow
+              label="รวมมูลค่าสินค้า (รวมภาษี)"
+              value={formatMoney(safeGrand)}
+            />
+            <SummaryRow
+              label="มูลค่าก่อนภาษี (ฐานต้นทุน TAS 2)"
+              value={formatMoney(baseAmount)}
+            />
+            <SummaryRow
+              label={`ภาษีมูลค่าเพิ่ม ${safeVatRate}% (VAT)`}
+              value={formatMoney(vatAmount)}
+            />
+            <SummaryRow
+              label="ยอดสุทธิ (Grand Total)"
+              value={formatMoney(safeGrand)}
+              emphasize
+            />
+          </>
+        ) : (
+        <>
         {showLinesSubtotal ? (
           <SummaryRow
             label={showEmptyRows ? "ยอดรวมสินค้า (Subtotal)" : "รวมรายการสินค้า"}
@@ -255,6 +278,8 @@ export function DocumentPrintSummary({
           value={formatMoney(safeGrand)}
           emphasize
         />
+        </>
+        )}
 
         {showWht ? (
           <>

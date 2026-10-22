@@ -93,13 +93,18 @@ export default async function GoodsReceiptPrintTemplate({
             discountAmount={discountAmount}
             vatType={vatType}
             vatRate={vatType === "NONE" ? 0 : vatRate}
-            vatAmount={doc.vat_amount}
+            vatAmount={
+              vatType === "INCLUSIVE" && !(Number(doc.vat_amount) > 0)
+                ? undefined
+                : doc.vat_amount
+            }
             vatLabel={vatType === "NONE" ? "ภาษีมูลค่าเพิ่ม 7% (VAT)" : `ภาษีมูลค่าเพิ่ม ${vatRate}% (VAT)`}
             grandTotal={grandTotal}
             discountText={doc.discount_text}
             docType={doc.doc_type}
             hideBahtText
             showEmptyRows
+            purchaseInclusiveLayout={vatType === "INCLUSIVE"}
           />
         </div>
       }

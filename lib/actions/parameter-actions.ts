@@ -21,6 +21,21 @@ import type {
 } from "@/types/parameter";
 
 const SETTINGS_PARAMETERS_PATH = "/settings/parameters";
+
+function readPurchaseControlRequest(value: Json | null): {
+  documentId: string | null;
+  docNo: string;
+  reason: string;
+} | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, Json | undefined>;
+  if (record.kind !== "purchase_document_control") return null;
+  return {
+    documentId: typeof record.document_id === "string" ? record.document_id : null,
+    docNo: typeof record.doc_no === "string" ? record.doc_no : "",
+    reason: typeof record.reason === "string" ? record.reason : "",
+  };
+}
 const MANAGED_PARAM_KEYS = [
   "NAS_BACKUP_PATH",
   "GEMINI_MODEL_VERSION",
@@ -535,6 +550,53 @@ export async function approveParameterChange(
     }
 
     const paramKey = String(requestRow.param_key ?? "").trim();
+    const purchaseControl = readPurchaseControlRequest(requestRow.new_value);
+    if (purchaseControl) {
+      const nowIso = new Date().toISOString();
+      const { error: updateRequestError } = await supabaseAdmin
+        .from("parameter_change_requests")
+        .update({
+          status: "APPROVED",
+          approved_by: auth.actorId,
+          resolved_at: nowIso,
+        })
+        .eq("id", trimmedId)
+        .eq("status", "PENDING");
+      if (updateRequestError) {
+        return { success: false, error: updateRequestError.message };
+      }
+
+      const { error: logError } = await supabaseAdmin.from("approval_logs").insert({
+        action: "APPROVE_PURCHASE_CONTROL",
+        actor_id: auth.actorId,
+        document_id: purchaseControl.documentId,
+        comments: purchaseControl.reason,
+      });
+      if (logError) {
+        return { success: false, error: logError.message };
+      }
+
+      await logAuditTrail(
+        "parameter_change_requests",
+        trimmedId,
+        "UPDATE",
+        { status: "PENDING", new_value: requestRow.new_value },
+        {
+          event: "PURCHASE_DOCUMENT_CONTROL_APPROVED",
+          status: "APPROVED",
+          doc_no: purchaseControl.docNo,
+          approved_by: auth.actorId,
+        },
+      );
+
+      revalidatePath(SETTINGS_PARAMETERS_PATH);
+      revalidatePath("/approvals");
+      return {
+        success: true,
+        requestId: trimmedId,
+        message: `อนุมัติคำขอเอกสารซื้อ ${purchaseControl.docNo || ""} แล้ว`,
+      };
+    }
     if (!paramKey) {
       return { success: false, error: "คำขอไม่มี param_key" };
     }

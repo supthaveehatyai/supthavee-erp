@@ -5,7 +5,7 @@
  * Persistence via `saveManualGoodsReceipt` Server Action only (no client Supabase).
  */
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -39,6 +39,8 @@ import {
 } from "@/lib/utils/dual-freight";
 import type { CarrierOption } from "@/types/carrier";
 import type { PrintCompanyProfile } from "@/types/print-document";
+import type { PurchaseCloneDraft } from "@/types/purchase-document-control";
+import type { ProcurementBillSet } from "@/types/procurement-bills";
 import { DualFreightFields } from "@/components/procurement/DualFreightFields";
 import { CarrierFreightSummaryDialog } from "@/components/procurement/CarrierFreightSummaryDialog";
 import type { SalesProductSearchItem } from "@/types/document";
@@ -93,6 +95,8 @@ export type ManualReceiptWorkspaceProps = {
   purchaseUoms: PurchaseUomOption[];
   initialCarriers: CarrierOption[];
   company: PrintCompanyProfile;
+  cloneDraft?: PurchaseCloneDraft | null;
+  cloneError?: string | null;
 };
 
 const DOC_TYPE_OPTIONS: { value: GoodsReceiptDocType; label: string }[] = [
@@ -138,29 +142,65 @@ export default function ManualReceiptWorkspace({
   purchaseUoms,
   initialCarriers,
   company,
+  cloneDraft = null,
+  cloneError = null,
 }: ManualReceiptWorkspaceProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [, startDefaults] = useTransition();
   const [billFiles, setBillFiles] = useState<File[]>([]);
+  const [cloneBillUrls, setCloneBillUrls] = useState<string[]>(
+    cloneDraft?.billUrls ?? [],
+  );
   const [vendorProducts, setVendorProducts] = useState<VendorMappedReceiptProduct[]>([]);
   const [defaultHint, setDefaultHint] = useState("");
   const [previewOpen, setPreviewOpen] = useState(false);
 
-  const [vendorId, setVendorId] = useState("");
-  const [docDate, setDocDate] = useState(todayIsoDate);
-  const [documentRef, setDocumentRef] = useState("");
-  const [docType, setDocType] = useState<GoodsReceiptDocType>("AP_TAX");
-  const [vatType, setVatType] = useState<VatCalculationType>("NONE");
-  const [discountText, setDiscountText] = useState("");
-  const [freightCostInput, setFreightCostInput] = useState("");
-  const [freightTaxMode, setFreightTaxMode] = useState<FreightTaxMode>("INCLUDED_IN_TAX");
-  const [destFreightInput, setDestFreightInput] = useState("");
+  const [vendorId, setVendorId] = useState(cloneDraft?.vendorId ?? "");
+  const [docDate, setDocDate] = useState(
+    cloneDraft?.docDate?.slice(0, 10) || todayIsoDate(),
+  );
+  const [documentRef, setDocumentRef] = useState(cloneDraft?.documentRef ?? "");
+  const [docType, setDocType] = useState<GoodsReceiptDocType>(
+    cloneDraft?.docType ?? "AP_TAX",
+  );
+  const [vatType, setVatType] = useState<VatCalculationType>(
+    cloneDraft?.vatType ?? "NONE",
+  );
+  const [discountText, setDiscountText] = useState(cloneDraft?.discountText ?? "");
+  const [freightCostInput, setFreightCostInput] = useState(
+    cloneDraft && cloneDraft.freightCost > 0 ? String(cloneDraft.freightCost) : "",
+  );
+  const [freightTaxMode, setFreightTaxMode] = useState<FreightTaxMode>(
+    cloneDraft?.freightTaxMode === "SEPARATE_NON_VAT"
+      ? "SEPARATE_NON_VAT"
+      : "INCLUDED_IN_TAX",
+  );
+  const [destFreightInput, setDestFreightInput] = useState(
+    cloneDraft && cloneDraft.destFreightCost > 0
+      ? String(cloneDraft.destFreightCost)
+      : "",
+  );
   const [carrierId, setCarrierId] = useState("");
   const [carrierTrackingNo, setCarrierTrackingNo] = useState("");
   const [carriers, setCarriers] = useState(initialCarriers);
   const [freightSummaryOpen, setFreightSummaryOpen] = useState(false);
-  const [lines, setLines] = useState<ManualReceiptLine[]>([]);
+  const [lines, setLines] = useState<ManualReceiptLine[]>(
+    cloneDraft?.lines ?? [],
+  );
+
+  useEffect(() => {
+    if (cloneError) toast.error(cloneError);
+  }, [cloneError]);
+
+  useEffect(() => {
+    const vendor = cloneDraft?.vendorId;
+    if (!vendor) return;
+    startDefaults(async () => {
+      const result = await getManualReceiptVendorContext(vendor);
+      if (result.data) setVendorProducts(result.data.products);
+    });
+  }, [cloneDraft?.vendorId]);
 
   const costPreviewByKey = useMemo(() => {
     const items: ApportionmentItem[] = lines.map((line) => ({
@@ -402,16 +442,37 @@ export default function ManualReceiptWorkspace({
     return true;
   }
 
+  function existingCloneBills(): ProcurementBillSet | null {
+    if (cloneBillUrls.length === 0) return null;
+    const attachments = cloneBillUrls.map((url, index) => ({
+      name: `บิลเดิม-${index + 1}`,
+      path: url,
+      url,
+      type: "image",
+      size: 0,
+      uploaded_at: new Date().toISOString(),
+    }));
+    return { attachment_urls: [...cloneBillUrls], attachments };
+  }
+
   function postReceipt() {
     startTransition(async () => {
-      let bills = null;
+      let bills = existingCloneBills();
       if (billFiles.length > 0) {
         const uploaded = await uploadProcurementBills(billFiles, documentRef.trim());
         if (uploaded.error || !uploaded.data) {
           toast.error(uploaded.error ?? "อัปโหลดรูปบิลไม่สำเร็จ");
           return;
         }
-        bills = uploaded.data;
+        bills = bills
+          ? {
+              attachment_urls: [
+                ...bills.attachment_urls,
+                ...uploaded.data.attachment_urls,
+              ],
+              attachments: [...bills.attachments, ...uploaded.data.attachments],
+            }
+          : uploaded.data;
       }
       const result = await saveManualGoodsReceipt({
         vendorId,
@@ -471,6 +532,11 @@ export default function ManualReceiptWorkspace({
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 sm:p-6">
+      {cloneDraft ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          คัดลอกจากเอกสารที่ยกเลิก {cloneDraft.sourceDocNo} — ตรวจรายการแล้วออกใบใหม่
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3">
           <div className="grid size-11 place-items-center rounded-xl bg-blue-50 text-blue-600">
@@ -579,6 +645,33 @@ export default function ManualReceiptWorkspace({
             <CardTitle className="text-sm">รูปบิล / เอกสารอ้างอิง</CardTitle>
           </CardHeader>
           <CardContent>
+            {cloneBillUrls.length > 0 ? (
+              <ul className="mb-3 space-y-1 text-sm">
+                {cloneBillUrls.map((url) => (
+                  <li key={url} className="flex items-center justify-between gap-2">
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="truncate text-blue-700 underline"
+                    >
+                      รูปบิลเดิม
+                    </a>
+                    <button
+                      type="button"
+                      className="text-xs text-slate-500 hover:text-red-600"
+                      onClick={() =>
+                        setCloneBillUrls((current) =>
+                          current.filter((item) => item !== url),
+                        )
+                      }
+                    >
+                      เอาออก
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <BillAttachmentPicker
               compact
               files={billFiles}

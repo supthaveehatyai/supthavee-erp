@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { loadVoidedPurchaseClone } from "@/lib/actions/purchase-document-control";
 import { getActiveVendors } from "@/lib/actions/mapping";
 import { getPurchaseUoms } from "@/lib/actions/uom-actions";
 import { getActiveCarriers } from "@/lib/actions/carrier-actions";
@@ -18,12 +19,22 @@ export const metadata: Metadata = {
 /**
  * Server Component — loads vendors via Service Role, then Client workspace.
  */
-export default async function ManualGoodsReceiptPage() {
-  const [vendorsResult, uomResult, carrierResult, settingsResult] = await Promise.all([
+export default async function ManualGoodsReceiptPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ clone?: string }>;
+}) {
+  const params = await searchParams;
+  const cloneNo = params.clone?.trim() ?? "";
+  const [vendorsResult, uomResult, carrierResult, settingsResult, cloneResult] =
+    await Promise.all([
     getActiveVendors(),
     getPurchaseUoms(),
     getActiveCarriers(),
     getSystemSettings(),
+    cloneNo
+      ? loadVoidedPurchaseClone(cloneNo)
+      : Promise.resolve({ data: null, error: null }),
   ]);
   const company = toPrintCompanyProfile(
     settingsResult.success ? settingsResult.data : null,
@@ -42,6 +53,8 @@ export default async function ManualGoodsReceiptPage() {
       purchaseUoms={uomResult.data}
       initialCarriers={carrierResult.data}
       company={company}
+      cloneDraft={cloneResult.data}
+      cloneError={cloneResult.error}
     />
     </div>
   );

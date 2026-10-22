@@ -46,6 +46,27 @@ type ParameterApprovalTableProps = {
   isAdmin: boolean;
 };
 
+function purchaseControlLabel(value: Json | null | undefined): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, Json | undefined>;
+  if (record.kind !== "purchase_document_control") return null;
+  const docNo = typeof record.doc_no === "string" ? record.doc_no : "";
+  const reason = typeof record.reason === "string" ? record.reason : "";
+  return `เอกสารซื้อ ${docNo}${reason ? ` — ${reason}` : ""}`;
+}
+
+function formatControlSnapshot(value: Json | null | undefined): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return formatParamValue(value);
+  }
+  const record = value as Record<string, Json | undefined>;
+  const docNo = typeof record.doc_no === "string" ? record.doc_no : "";
+  const vat = typeof record.vat_type === "string" ? record.vat_type : "";
+  const status = typeof record.status === "string" ? record.status : "";
+  const parts = [docNo, vat, status].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : formatParamValue(value);
+}
+
 function formatParamValue(value: Json | null | undefined): string {
   if (value === null || value === undefined) return "—";
   if (typeof value === "string") return value;
@@ -145,16 +166,19 @@ export function ParameterApprovalTable({
                 <TableBody>
                   {rows.map((row) => {
                     const rowBusy = isPending && activeRequestId === row.id;
+                    const controlLabel = purchaseControlLabel(row.new_value);
                     return (
                       <TableRow key={row.id}>
                         <TableCell className="font-mono text-sm font-medium text-slate-900">
-                          {row.param_key}
+                          {controlLabel ? `เอกสารซื้อ` : row.param_key || "—"}
                         </TableCell>
                         <TableCell className="text-slate-700">
-                          {formatParamValue(row.old_value)}
+                          {controlLabel
+                            ? formatControlSnapshot(row.old_value)
+                            : formatParamValue(row.old_value)}
                         </TableCell>
                         <TableCell className="font-medium text-slate-900">
-                          {formatParamValue(row.new_value)}
+                          {controlLabel ?? formatParamValue(row.new_value)}
                         </TableCell>
                         <TableCell className="text-slate-700">
                           {row.requested_by_name ?? "—"}
