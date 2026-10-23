@@ -19,8 +19,16 @@ import { revalidatePath } from "next/cache";
 import {
   cleanGeminiModelId,
   GEMINI_API_KEY_MISSING_MESSAGE,
+  GeminiQuotaExhaustedError,
   resolveGeminiApiKey,
 } from "@/lib/ai/gemini-client";
+import {
+  defaultOcrQuotaModels,
+  isGeminiQuotaError,
+  normalizeOcrQuotaPayload,
+  OCR_QUOTA_EXHAUSTED_MESSAGE,
+  OCR_QUOTA_RESET_NOTE,
+} from "@/lib/ai/ocr-quota";
 import { runGoodsReceiptOcr } from "@/lib/ai/goods-receipt-ocr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -64,6 +72,7 @@ import {
   normalizeOcrSkuText,
 } from "@/lib/utils/ocr-sku";
 import type { OcrLineMatchResult, OcrLineMatchTier } from "@/types/ocr-line-match";
+import type { OcrQuotaStatus } from "@/lib/ai/ocr-quota";
 import { resolveProductTaxCode } from "@/lib/utils/purchase-tax";
 import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
 import type { DocumentType } from "@/types/document";
@@ -498,6 +507,9 @@ export async function parseReceiptOcr(
       vendorName: vendor.company_name || vendorId,
       ocrPatternConfig: vendor.ocr_pattern_config,
       images,
+      onModelOutcome: async ({ model, exhausted }) => {
+        await recordOcrQuota(supabaseAdmin, model, exhausted);
+      },
     });
 
     return {
@@ -512,9 +524,84 @@ export async function parseReceiptOcr(
       error: null,
     };
   } catch (err) {
+    if (
+      err instanceof GeminiQuotaExhaustedError ||
+      (err instanceof Error && err.name === "GeminiQuotaExhaustedError")
+    ) {
+      return emptyParseReceiptOcrResult(OCR_QUOTA_EXHAUSTED_MESSAGE);
+    }
     const message =
       err instanceof Error ? err.message : "วิเคราะห์บิลด้วย OCR ไม่สำเร็จ";
+    if (isGeminiQuotaError(undefined, message)) {
+      return emptyParseReceiptOcrResult(OCR_QUOTA_EXHAUSTED_MESSAGE);
+    }
     return emptyParseReceiptOcrResult(message);
+  }
+}
+
+function isMissingOcrQuotaRpc(
+  error: { code?: string; message?: string } | null,
+): boolean {
+  if (!error) return false;
+  const message = error.message ?? "";
+  return (
+    error.code === "PGRST202" ||
+    /record_and_get_ocr_quota|does not exist|could not find the function|schema cache/i.test(
+      message,
+    )
+  );
+}
+
+async function recordOcrQuota(
+  supabaseAdmin: SupabaseClient,
+  model: string | null,
+  exhausted: boolean,
+): Promise<unknown> {
+  const rpcClient = supabaseAdmin as unknown as {
+    rpc: (
+      fn: "record_and_get_ocr_quota",
+      args: { p_model_used: string | null; p_is_exhausted: boolean },
+    ) => Promise<{
+      data: unknown;
+      error: { code?: string; message?: string } | null;
+    }>;
+  };
+  const { data, error } = await rpcClient.rpc("record_and_get_ocr_quota", {
+    p_model_used: model,
+    p_is_exhausted: exhausted,
+  });
+  if (error && isMissingOcrQuotaRpc(error)) {
+    console.warn("[ocr-quota] record_and_get_ocr_quota is not deployed:", error.message);
+    return null;
+  }
+  if (error) {
+    console.warn("[ocr-quota]", error.message);
+    return null;
+  }
+  return data;
+}
+
+export async function getOcrQuotaStatusAction(): Promise<OcrQuotaStatus> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) {
+    return { models: [], resetNote: OCR_QUOTA_RESET_NOTE, error: owner.error };
+  }
+
+  try {
+    const supabaseAdmin = createSupabaseAdminClient();
+    const data = await recordOcrQuota(supabaseAdmin, null, false);
+    return {
+      models: normalizeOcrQuotaPayload(data),
+      resetNote: OCR_QUOTA_RESET_NOTE,
+      error: null,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "อ่านโควตา OCR ไม่สำเร็จ";
+    return {
+      models: defaultOcrQuotaModels(),
+      resetNote: OCR_QUOTA_RESET_NOTE,
+      error: message,
+    };
   }
 }
 

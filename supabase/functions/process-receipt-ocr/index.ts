@@ -347,8 +347,21 @@ serve(async (req: Request) => {
     const vendorId = body?.vendorId as string | undefined;
     const imageBase64 = body?.imageBase64 as string | undefined;
     const mimeType = (body?.mimeType as string | undefined) || "image/jpeg";
+    const imageList = Array.isArray(body?.images) ? body.images : [];
+    const images: { mimeType: string; data: string }[] = [];
+    for (const image of imageList) {
+      const data = String(image?.imageBase64 ?? "").trim();
+      if (!data) continue;
+      images.push({
+        mimeType: String(image?.mimeType ?? "image/jpeg"),
+        data,
+      });
+    }
+    if (images.length === 0 && imageBase64) {
+      images.push({ mimeType, data: imageBase64 });
+    }
 
-    if (!vendorId || !imageBase64) {
+    if (!vendorId || images.length === 0) {
       throw new Error("Missing required parameters: vendorId or imageBase64");
     }
 
@@ -394,9 +407,18 @@ serve(async (req: Request) => {
     const generated = await generateGeminiContent({
       apiKey: geminiApiKey,
       preferredModel: geminiModel,
+      onModelOutcome: async ({ model, exhausted }) => {
+        const { error } = await supabaseAdmin.rpc("record_and_get_ocr_quota", {
+          p_model_used: model,
+          p_is_exhausted: exhausted,
+        });
+        if (error) console.warn("[ocr-quota]", error.message);
+      },
       parts: [
         { text: systemPrompt },
-        { inlineData: { mimeType, data: imageBase64 } },
+        ...images.map((image) => ({
+          inlineData: { mimeType: image.mimeType, data: image.data },
+        })),
       ],
     });
     const rawText = generated.text;
@@ -412,6 +434,7 @@ serve(async (req: Request) => {
         doc_type: extraction.doc_type,
         vat_type: extraction.vat_type,
         freight_cost: extraction.freight_cost,
+        model_used: generated.modelUsed,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

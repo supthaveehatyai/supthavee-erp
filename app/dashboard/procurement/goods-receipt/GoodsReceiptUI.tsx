@@ -36,6 +36,7 @@ import {
   AlertTriangle,
   Check,
   CheckCircle2,
+  ExternalLink,
   PackageCheck,
   Pencil,
   RefreshCw,
@@ -49,6 +50,7 @@ import type { VendorOption } from "@/lib/actions/mapping";
 import {
   createOnTheFlyReceiptMapping,
   getInternalProductsForMatching,
+  getOcrQuotaStatusAction,
   matchReceiptItemsToProducts,
   parseReceiptOcr,
   rematchSingleOcrLineAction,
@@ -59,6 +61,10 @@ import {
 import { saveDocumentProcurementBills } from "@/lib/actions/procurement-bills";
 import { uploadProcurementBills } from "@/lib/procurement/upload-bill-files";
 import { normalizeOcrSkuText } from "@/lib/utils/ocr-sku";
+import {
+  formatOcrQuotaChip,
+  type OcrQuotaStatus,
+} from "@/lib/ai/ocr-quota";
 import {
   calculateNetCostApportionment,
   type ApportionmentItem,
@@ -295,6 +301,7 @@ export default function GoodsReceiptUI({
   const [carrierTrackingNo, setCarrierTrackingNo] = useState("");
   const [carriers, setCarriers] = useState<CarrierOption[]>(initialCarriers);
   const [freightSummaryOpen, setFreightSummaryOpen] = useState(false);
+  const [ocrQuota, setOcrQuota] = useState<OcrQuotaStatus | null>(null);
 
   /** AI VAT Analysis — controlled amounts (auto from lines until user overrides). */
   const [netBeforeVatInput, setNetBeforeVatInput] = useState("");
@@ -350,6 +357,15 @@ export default function GoodsReceiptUI({
   useEffect(() => {
     void refreshInternalProducts();
   }, [refreshInternalProducts]);
+
+  const refreshOcrQuota = useCallback(async () => {
+    const result = await getOcrQuotaStatusAction();
+    setOcrQuota(result);
+  }, []);
+
+  useEffect(() => {
+    void refreshOcrQuota();
+  }, [refreshOcrQuota]);
 
   useEffect(() => {
     return () => {
@@ -519,6 +535,7 @@ export default function GoodsReceiptUI({
       toast.error(err instanceof Error ? err.message : "วิเคราะห์บิลไม่สำเร็จ");
     } finally {
       setIsOcrRunning(false);
+      void refreshOcrQuota();
     }
   }
 
@@ -1154,6 +1171,27 @@ export default function GoodsReceiptUI({
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
+          {ocrQuota ? (
+            <div className="max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left">
+              <p className="text-[11px] font-semibold leading-snug text-slate-700">
+                {ocrQuota.models.length > 0
+                  ? ocrQuota.models.map((model) => formatOcrQuotaChip(model)).join(" | ")
+                  : "ยังไม่มีข้อมูลโควตา OCR"}
+              </p>
+              <a
+                href="https://ai.dev/rate-limit"
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 inline-flex items-center gap-1 text-[10px] text-slate-500 hover:text-blue-700"
+              >
+                {ocrQuota.resetNote}
+                <ExternalLink className="size-3" aria-hidden />
+              </a>
+              {ocrQuota.error ? (
+                <p className="mt-1 text-[10px] text-red-600">{ocrQuota.error}</p>
+              ) : null}
+            </div>
+          ) : null}
           <Button
             type="button"
             variant="outline"

@@ -234,11 +234,13 @@ export async function runGoodsReceiptOcr(input: {
   vendorName: string;
   ocrPatternConfig: Json | null;
   images: { imageBase64: string; mimeType: string }[];
+  onModelOutcome?: (outcome: { model: string; exhausted: boolean }) => Promise<void>;
 }): Promise<GoodsReceiptOcrExtraction> {
   const images = input.images.filter((image) => image.imageBase64.trim());
   const generated = await generateGeminiContent({
     apiKey: input.apiKey,
     preferredModel: cleanGeminiModelId(input.preferredModel),
+    onModelOutcome: input.onModelOutcome,
     parts: [
       {
         text: buildGoodsReceiptOcrPrompt(

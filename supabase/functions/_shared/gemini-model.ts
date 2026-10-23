@@ -98,13 +98,6 @@ export async function listGeminiModelCatalog(
   return [...flash.sort(byVersion), ...rest.sort(byVersion)];
 }
 
-async function listFlashCandidates(apiKey: string): Promise<string[]> {
-  const catalog = await listGeminiModelCatalog(apiKey);
-  const flash = catalog.filter((model) => model.id.includes("flash"));
-  const pool = flash.length > 0 ? flash : catalog;
-  return pool.map((model) => model.id);
-}
-
 async function generateWithModel(
   apiKey: string,
   modelName: string,
@@ -160,7 +153,13 @@ async function generateWithModel(
 
     const error = await readGoogleError(response);
     lastMessage = error.message;
-    if ((error.status === 503 || error.status === 429) && attempt < 3) {
+    if (
+      error.status === 429 ||
+      /quota exceeded|resource_exhausted|free_tier_requests/i.test(error.message)
+    ) {
+      throw Object.assign(new Error(error.message), { status: 429 });
+    }
+    if (error.status === 503 && attempt < 3) {
       await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
       continue;
     }
@@ -203,59 +202,64 @@ export async function loadGeminiModelVersion(
   }
 }
 
+const OCR_MODEL_CASCADE = [
+  "gemini-3.8-flash",
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+];
+
+const OCR_QUOTA_EXHAUSTED_MESSAGE =
+  "โควตาฟรีรายวันครบกำหนดแล้ว (รีเซ็ตเวลา 14:00 น.) สามารถตรวจสอบโควตาหรือเปิด Billing ได้ที่ ai.dev/rate-limit";
+
+function isQuotaError(status: number | undefined, message: string): boolean {
+  return (
+    status === 429 ||
+    /quota exceeded|resource_exhausted|free_tier_requests/i.test(message)
+  );
+}
+
+function ocrCascade(preferred: string): string[] {
+  return [...new Set([preferred, ...OCR_MODEL_CASCADE].map((id) => id.trim()).filter(Boolean))];
+}
+
 export async function generateGeminiContent(options: {
   apiKey: string;
   preferredModel: string;
   parts: GeminiPart[];
+  onModelOutcome?: (outcome: { model: string; exhausted: boolean }) => Promise<void>;
 }): Promise<{ text: string; modelUsed: string; notice: string | null }> {
   const preferred = cleanGeminiModelId(options.preferredModel);
-
-  if (preferred) {
-    try {
-      const text = await generateWithModel(
-        options.apiKey,
-        preferred,
-        options.parts,
-      );
-      console.log(`[gemini-model] using ${preferred}`);
-      return { text, modelUsed: preferred, notice: null };
-    } catch (error) {
-      if (errorStatus(error) !== 404) throw error;
-      console.warn(
-        `[gemini-model] ${preferred} returned 404. Discovering a live flash model...`,
-      );
-    }
-  }
-
-  const candidates = (await listFlashCandidates(options.apiKey)).filter(
-    (id) => id !== preferred,
-  );
-  if (candidates.length === 0) {
-    throw new Error(
-      preferred
-        ? `โมเดล ${preferred} ใช้ไม่ได้ และ Google API ไม่มีโมเดล gemini ที่รองรับ generateContent`
-        : "ไม่พบโมเดล gemini ที่รองรับ generateContent จาก Google API",
-    );
-  }
-
+  const cascade = ocrCascade(preferred);
+  let quotaFailures = 0;
   let lastError: unknown = null;
-  for (const modelName of candidates.slice(0, 3)) {
+
+  for (const modelName of cascade) {
     try {
-      const text = await generateWithModel(
-        options.apiKey,
-        modelName,
-        options.parts,
-      );
-      const notice = preferred
-        ? `โมเดลที่ตั้งไว้ (${preferred}) ใช้ไม่ได้ ระบบใช้ ${modelName} จาก Google API แทน`
-        : `ระบบใช้ ${modelName} จาก Google API`;
-      console.warn(`[gemini-model] ${notice}`);
+      const text = await generateWithModel(options.apiKey, modelName, options.parts);
+      await options.onModelOutcome?.({ model: modelName, exhausted: false });
+      const notice =
+        preferred && modelName !== preferred
+          ? `โควตาโมเดลก่อนหน้าเต็ม ระบบใช้ ${modelName} แทน`
+          : null;
+      console.log(`[gemini-model] using ${modelName}`);
       return { text, modelUsed: modelName, notice };
     } catch (error) {
       lastError = error;
-      if (errorStatus(error) === 404) continue;
+      const status = errorStatus(error);
+      const message = error instanceof Error ? error.message : "";
+      if (isQuotaError(status, message)) {
+        quotaFailures += 1;
+        console.warn(`[gemini-model] ${modelName} quota exhausted — next model`);
+        await options.onModelOutcome?.({ model: modelName, exhausted: true });
+        continue;
+      }
+      if (status === 404) continue;
       throw error;
     }
+  }
+
+  if (quotaFailures > 0 && quotaFailures === cascade.length) {
+    throw new Error(OCR_QUOTA_EXHAUSTED_MESSAGE);
   }
 
   const detail = lastError instanceof Error ? lastError.message : "ไม่ทราบสาเหตุ";

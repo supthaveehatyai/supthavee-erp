@@ -1,7 +1,13 @@
 /**
  * Gemini REST client (Node + Edge-safe fetch).
- * Model id comes from system_parameters, then Google's live model list on 404.
+ * Daily quota skips to the next flash model instead of retrying the same id.
  */
+
+import {
+  buildOcrModelCascade,
+  isGeminiQuotaError,
+  OCR_QUOTA_EXHAUSTED_MESSAGE,
+} from "@/lib/ai/ocr-quota";
 
 export type GeminiModelOption = {
   id: string;
@@ -214,7 +220,10 @@ async function generateWithModel(
 
     const error = await readGoogleError(response);
     lastMessage = error.message;
-    if ((error.status === 503 || error.status === 429) && attempt < 3) {
+    if (isGeminiQuotaError(error.status, error.message)) {
+      throw Object.assign(new Error(error.message), { status: 429 });
+    }
+    if (error.status === 503 && attempt < 3) {
       await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
       continue;
     }
@@ -233,75 +242,65 @@ function errorStatus(error: unknown): number | undefined {
   return undefined;
 }
 
+export class GeminiQuotaExhaustedError extends Error {
+  constructor() {
+    super(OCR_QUOTA_EXHAUSTED_MESSAGE);
+    this.name = "GeminiQuotaExhaustedError";
+  }
+}
+
 /**
- * 1) Preferred model from system_parameters.
- * 2) On 404 (or empty preferred), pick the newest flash model from Google's list.
+ * One generateContent call per invoice.
+ * On daily quota (429) the same model is not retried — the next id in the
+ * cascade is used immediately.
  */
 export async function generateGeminiContent(options: {
   apiKey: string;
   preferredModel: string;
   parts: GeminiPart[];
+  onModelOutcome?: (outcome: { model: string; exhausted: boolean }) => Promise<void>;
 }): Promise<GeminiGenerateResult> {
   const preferred = cleanGeminiModelId(options.preferredModel);
-
-  if (preferred) {
-    try {
-      const text = await generateWithModel(
-        options.apiKey,
-        preferred,
-        options.parts,
-      );
-      console.log(`[gemini] using ${preferred}`);
-      return {
-        text,
-        modelUsed: preferred,
-        fellBack: false,
-        notice: null,
-      };
-    } catch (error) {
-      if (errorStatus(error) !== 404) throw error;
-      console.warn(
-        `[gemini] ${preferred} returned 404. Discovering a live flash model...`,
-      );
-    }
-  }
-
-  const listed = await listGeminiGenerateModels(options.apiKey);
-  const candidates = rankFlashModelIds(listed).filter((id) => id !== preferred);
-  if (candidates.length === 0) {
-    throw new Error(
-      preferred
-        ? `โมเดล ${preferred} ใช้ไม่ได้ และ Google API ไม่มีโมเดล gemini ที่รองรับ generateContent`
-        : "ไม่พบโมเดล gemini ที่รองรับ generateContent จาก Google API",
-    );
-  }
-
+  const cascade = buildOcrModelCascade(preferred);
+  let quotaFailures = 0;
   let lastError: unknown = null;
-  for (const modelName of candidates.slice(0, 3)) {
+
+  for (const modelName of cascade) {
     try {
       const text = await generateWithModel(
         options.apiKey,
         modelName,
         options.parts,
       );
-      const notice = preferred
-        ? `โมเดลที่ตั้งไว้ (${preferred}) ใช้ไม่ได้ ระบบใช้ ${modelName} จาก Google API แทน — อัปเดตได้ที่ตั้งค่าระบบ`
-        : `ไม่ได้ตั้งค่าโมเดล ระบบใช้ ${modelName} จาก Google API`;
-      console.warn(`[gemini] ${notice}`);
-      return {
-        text,
-        modelUsed: modelName,
-        fellBack: true,
-        notice,
-      };
+      await options.onModelOutcome?.({ model: modelName, exhausted: false });
+      const fellBack = Boolean(preferred) && modelName !== preferred;
+      const notice = fellBack
+        ? `โควตาโมเดลก่อนหน้าเต็ม ระบบใช้ ${modelName} แทน`
+        : null;
+      console.log(`[gemini] using ${modelName}`);
+      return { text, modelUsed: modelName, fellBack, notice };
     } catch (error) {
       lastError = error;
-      if (errorStatus(error) === 404) continue;
+      const status = errorStatus(error);
+      const message = error instanceof Error ? error.message : "";
+      if (isGeminiQuotaError(status, message)) {
+        quotaFailures += 1;
+        console.warn(`[gemini] ${modelName} quota exhausted — next model`);
+        await options.onModelOutcome?.({ model: modelName, exhausted: true });
+        continue;
+      }
+      if (status === 404) {
+        console.warn(`[gemini] ${modelName} returned 404 — next model`);
+        continue;
+      }
       throw error;
     }
   }
 
-  const detail =
-    lastError instanceof Error ? lastError.message : "ไม่ทราบสาเหตุ";
+  if (quotaFailures > 0 && quotaFailures === cascade.length) {
+    throw new GeminiQuotaExhaustedError();
+  }
+
+  const detail = lastError instanceof Error ? lastError.message : "ไม่ทราบสาเหตุ";
   throw new Error(`เรียก Gemini ไม่สำเร็จ: ${detail}`);
 }
