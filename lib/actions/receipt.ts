@@ -1146,10 +1146,41 @@ export async function createOnTheFlyReceiptMapping(
       };
     }
 
+    const rpcClient = supabaseAdmin as unknown as {
+      rpc: (
+        fn: "upsert_ocr_vendor_mapping",
+        args: {
+          p_vendor_id: string;
+          p_vendor_sku: string;
+          p_internal_product_id: string;
+          p_vendor_product_name: string | null;
+          p_purchase_uom_code: string;
+          p_conversion_factor: number;
+        },
+      ) => Promise<{ error: { code?: string; message?: string } | null }>;
+    };
     const purchaseUomCode =
       String(input.purchaseUomCode ?? "").trim().toUpperCase() ||
       DEFAULT_PURCHASE_UOM_CODE;
     const conversionFactor = resolveConversionFactor(input.conversionFactor ?? 1);
+    const { error: rpcError } = await rpcClient.rpc("upsert_ocr_vendor_mapping", {
+      p_vendor_id: vendorId,
+      p_vendor_sku: vendorSku,
+      p_internal_product_id: internalProductId,
+      p_vendor_product_name: input.vendorProductName?.trim() || null,
+      p_purchase_uom_code: purchaseUomCode,
+      p_conversion_factor: conversionFactor,
+    });
+    if (
+      rpcError &&
+      rpcError.code !== "PGRST202" &&
+      !/upsert_ocr_vendor_mapping|does not exist|could not find the function|schema cache/i.test(
+        rpcError.message ?? "",
+      )
+    ) {
+      return { mappingId: null, product: null, error: rpcError.message ?? "บันทึก mapping ไม่สำเร็จ" };
+    }
+
     const loaded = await loadVendorMappingCandidates(supabaseAdmin, vendorId);
     if (loaded.error) {
       return { mappingId: null, product: null, error: loaded.error };

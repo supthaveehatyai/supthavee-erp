@@ -36,11 +36,13 @@ import {
   AlertTriangle,
   Check,
   CheckCircle2,
+  Copy,
   ExternalLink,
   PackageCheck,
   Pencil,
   RefreshCw,
   Sparkles,
+  Trash2,
   UploadCloud,
   X,
 } from "lucide-react";
@@ -707,11 +709,16 @@ export default function GoodsReceiptUI({
       return;
     }
 
+    const typedSku = (
+      editingRawKey === row.lineKey ? rawDraft : row.raw_vendor_sku
+    ).trim();
+    const vendorSku = typedSku || product.name.trim() || product.sku;
+
     setConfirmingLineKey(row.lineKey);
 
     const result = await createOnTheFlyReceiptMapping({
       vendorId,
-      vendorSku: row.raw_vendor_sku,
+      vendorSku,
       vendorProductName: row.raw_description ?? product.name,
       internalProductId: productId,
       purchaseUomCode: row.purchaseUomCode,
@@ -725,7 +732,7 @@ export default function GoodsReceiptUI({
       return;
     }
 
-    const confirmedKey = normalizeOcrSkuText(row.raw_vendor_sku);
+    const confirmedKey = normalizeOcrSkuText(typedSku || row.raw_vendor_sku);
     const siblingKeys = new Set<string>();
     const nextRows = rows.map((item) => {
       const sameConfirmedLine = item.lineKey === row.lineKey;
@@ -738,6 +745,7 @@ export default function GoodsReceiptUI({
       if (sameNormalizedSku) siblingKeys.add(item.lineKey);
       return {
         ...item,
+        raw_vendor_sku: sameConfirmedLine ? typedSku || item.raw_vendor_sku : item.raw_vendor_sku,
         status: "matched" as const,
         mappingId: result.mappingId,
         matchedProduct: result.product,
@@ -768,6 +776,7 @@ export default function GoodsReceiptUI({
       return next;
     });
     setOverrideLineKey((current) => (current === row.lineKey ? null : current));
+    if (editingRawKey === row.lineKey) setEditingRawKey(null);
     toast.success(
       siblingKeys.size > 0
         ? `บันทึก Ground Truth แล้ว: ${row.raw_vendor_sku} ↔ ${result.product.sku} · จับคู่เพิ่ม ${siblingKeys.size.toLocaleString("th-TH")} แถวที่ข้อความตรงกัน`
@@ -793,6 +802,116 @@ export default function GoodsReceiptUI({
       });
       return applyApportionedTotals(next, billDiscountText);
     });
+    setVatTotalsManual(false);
+  }
+
+  function patchReviewLine(lineKey: string, patch: Partial<ReceiptLineRow>) {
+    setRows((current) =>
+      applyApportionedTotals(
+        current.map((row) =>
+          row.lineKey === lineKey
+            ? { ...row, ...patch, totalAmountManual: false }
+            : row,
+        ),
+        billDiscountText,
+      ),
+    );
+    setVatTotalsManual(false);
+    setVatAmountTouched(false);
+    setGrandTouched(false);
+  }
+
+  function handleQtyChange(lineKey: string, raw: string) {
+    const qty = Number(raw);
+    if (!Number.isFinite(qty) || qty < 0) return;
+    patchReviewLine(lineKey, { qty });
+  }
+
+  function handleUnitPriceChange(lineKey: string, raw: string) {
+    const unitPrice = Number(raw);
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) return;
+    patchReviewLine(lineKey, { unit_price: unitPrice });
+  }
+
+  function duplicateReviewRow(row: ReceiptLineRow) {
+    const lineKey = `copy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const copy: ReceiptLineRow = {
+      lineKey,
+      raw_vendor_sku: row.raw_vendor_sku,
+      raw_description: row.raw_description,
+      qty: row.qty,
+      unit_price: row.unit_price,
+      discount_text: row.discount_text,
+      status: "unmatched",
+      mappingId: null,
+      matchedProduct: null,
+      matchTier: null,
+      similarityScore: null,
+      discountAmountPerUnit: 0,
+      netCost: 0,
+      totalAmount: 0,
+      purchaseUomCode: row.purchaseUomCode || "PCS",
+      conversionFactor: row.conversionFactor || 1,
+      totalAmountManual: false,
+      isFoc: row.isFoc,
+    };
+    setRows((current) => {
+      const index = current.findIndex((item) => item.lineKey === row.lineKey);
+      const next = [...current];
+      next.splice(Math.max(index, 0) + 1, 0, copy);
+      return applyApportionedTotals(next, billDiscountText);
+    });
+    setEditingRawKey(lineKey);
+    setRawDraft(row.raw_vendor_sku);
+    setDraftProductByLineKey((current) => ({ ...current, [lineKey]: "" }));
+    setVatTotalsManual(false);
+  }
+
+  function deleteReviewRow(lineKey: string) {
+    setRows((current) =>
+      applyApportionedTotals(
+        current.filter((row) => row.lineKey !== lineKey),
+        billDiscountText,
+      ),
+    );
+    if (editingRawKey === lineKey) setEditingRawKey(null);
+    if (overrideLineKey === lineKey) setOverrideLineKey(null);
+    setDraftProductByLineKey((current) => {
+      const next = { ...current };
+      delete next[lineKey];
+      return next;
+    });
+    setVatTotalsManual(false);
+    setVatAmountTouched(false);
+    setGrandTouched(false);
+  }
+
+  function addMissingReviewRow() {
+    const lineKey = `manual-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const blank: ReceiptLineRow = {
+      lineKey,
+      raw_vendor_sku: "",
+      raw_description: null,
+      qty: 1,
+      unit_price: 0,
+      discount_text: "",
+      status: "unmatched",
+      mappingId: null,
+      matchedProduct: null,
+      matchTier: null,
+      similarityScore: null,
+      discountAmountPerUnit: 0,
+      netCost: 0,
+      totalAmount: 0,
+      purchaseUomCode: "PCS",
+      conversionFactor: 1,
+      totalAmountManual: false,
+      isFoc: false,
+    };
+    setRows((current) => applyApportionedTotals([...current, blank], billDiscountText));
+    setEditingRawKey(lineKey);
+    setRawDraft("");
+    setDraftProductByLineKey((current) => ({ ...current, [lineKey]: "" }));
     setVatTotalsManual(false);
   }
 
@@ -1369,6 +1488,9 @@ export default function GoodsReceiptUI({
               <p className="max-w-sm text-xs text-slate-400">
                 เลือก Vendor แล้วลากวางรูปบิล จากนั้นกด Parse with AI — ระบบจะแสดงรายการที่สกัดได้ในตารางนี้
               </p>
+              <Button type="button" variant="outline" onClick={addMissingReviewRow}>
+                + เพิ่มรายการที่ตกหล่น (Add Missing Item)
+              </Button>
             </CardContent>
           </Card>
         ) : (
@@ -1412,6 +1534,7 @@ export default function GoodsReceiptUI({
                         แก้ได้ตามกระดาษ
                       </span>
                     </TableHead>
+                    <TableHead className="text-right">จัดการ</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1674,13 +1797,20 @@ export default function GoodsReceiptUI({
                           </label>
                         </TableCell>
 
-                        <TableCell
-                          className={cn(
-                            "text-right tabular-nums",
-                            row.isFoc && "text-slate-400",
-                          )}
-                        >
-                          {row.qty.toLocaleString("th-TH")}
+                        <TableCell className="text-right">
+                          <Input
+                            type="number"
+                            inputMode="decimal"
+                            min="0.0001"
+                            step="any"
+                            value={Number.isFinite(qty) ? qty : 0}
+                            disabled={isBusy}
+                            onChange={(event) =>
+                              handleQtyChange(row.lineKey, event.target.value)
+                            }
+                            className="ml-auto h-8 w-[6.5rem] text-right font-mono tabular-nums"
+                            aria-label={`จำนวน ${row.raw_vendor_sku || "รายการ"}`}
+                          />
                         </TableCell>
                         <TableCell>
                           <PurchaseUomCell
@@ -1698,13 +1828,23 @@ export default function GoodsReceiptUI({
                             }
                           />
                         </TableCell>
-                        <TableCell
-                          className={cn(
-                            "text-right tabular-nums",
-                            row.isFoc && "text-slate-400 line-through",
-                          )}
-                        >
-                          {formatMoney(row.unit_price)}
+                        <TableCell className="text-right">
+                          <Input
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="0.01"
+                            value={row.isFoc ? 0 : Number(row.unit_price) || 0}
+                            disabled={isBusy || row.isFoc}
+                            onChange={(event) =>
+                              handleUnitPriceChange(row.lineKey, event.target.value)
+                            }
+                            className={cn(
+                              "ml-auto h-8 w-[7rem] text-right font-mono tabular-nums",
+                              row.isFoc && "text-slate-400",
+                            )}
+                            aria-label={`ราคาต่อหน่วย ${row.raw_vendor_sku || "รายการ"}`}
+                          />
                         </TableCell>
                         <TableCell
                           className={cn(
@@ -1752,11 +1892,49 @@ export default function GoodsReceiptUI({
                             />
                           )}
                         </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="size-8"
+                              disabled={isBusy}
+                              title="คัดลอกแถว"
+                              aria-label={`คัดลอกแถว ${row.raw_vendor_sku || "รายการ"}`}
+                              onClick={() => duplicateReviewRow(row)}
+                            >
+                              <Copy className="size-3.5" aria-hidden />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="size-8 text-red-600 hover:bg-red-50 hover:text-red-700"
+                              disabled={isBusy}
+                              title="ลบแถว"
+                              aria-label={`ลบแถว ${row.raw_vendor_sku || "รายการ"}`}
+                              onClick={() => deleteReviewRow(row.lineKey)}
+                            >
+                              <Trash2 className="size-3.5" aria-hidden />
+                            </Button>
+                          </div>
+                        </TableCell>
                       </TableRow>
                     );
                   })}
                 </TableBody>
               </Table>
+              <div className="px-4 pt-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={addMissingReviewRow}
+                  disabled={isOcrRunning}
+                >
+                  + เพิ่มรายการที่ตกหล่น (Add Missing Item)
+                </Button>
+              </div>
             </CardContent>
           </Card>
         )}

@@ -173,6 +173,7 @@ Thai invoices commonly print the date in Buddhist Era (พ.ศ.). Convert EVERY 
 - 2-digit พ.ศ. such as "11/8/69" means year 2569 (2500 + 69), then 2569 - 543 = 2026 → "2026-08-11". Never treat "69" as 1969 or 2069.
 Return it as "document_date". If it is not visible or you cannot parse day/month/year, return "" — NEVER invent a date.
 MULTI-PAGE: several images are consecutive pages of ONE invoice. Extract each product line once. Do not add page subtotals into a second grand total.
+CRITICAL RULE FOR PAGE BREAKS: ในบิลที่มีหลายหน้า บรรทัดสุดท้ายของหน้าแรกมักมีคำว่า 'ต่อหน้าถัด' หรือ 'ต่อหน้าถัดไป' พิมพ์ทับซ้อนอยู่ตรงชื่อไซส์หรือรายการสินค้า ห้ามข้ามบรรทัดนั้นเด็ดขาด! ให้สกัดรายการสินค้านั้นออกมาเป็น line item ตามปกติ (ตัดคำว่า 'ต่อหน้าถัด' ออก และเดาไซส์จากบริบทหรือเว้นไว้ให้ผู้ใช้แก้) และนับจำนวนบรรทัดรวมทุกหน้าให้ครบถ้วนตรงตามเลขลำดับ No. ในบิล
 
 DOCUMENT TYPE (doc_type) — analyze the document TITLE / header label and classify into ONE of these purchase ERP enum values only:
 - "AP_TAX" if the header says ใบกำกับภาษี / Tax Invoice / ใบส่งของ+ใบกำกับ (credit purchase with VAT)

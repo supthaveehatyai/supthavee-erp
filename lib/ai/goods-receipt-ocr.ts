@@ -76,6 +76,7 @@ Thai invoices commonly print the date in Buddhist Era (พ.ศ.). Convert EVERY 
 Return it as "document_date". If it is not visible or you cannot parse day/month/year, return "" — NEVER invent a date.
 
 MULTI-PAGE: when several images are attached they are consecutive pages of ONE invoice (e.g. หน้า 1/2 and 2/2). Extract each product line ONCE. Do not duplicate a line that continues onto the next page. The printed grand total appears once — do not add page subtotals into a second grand total.
+CRITICAL RULE FOR PAGE BREAKS: ในบิลที่มีหลายหน้า บรรทัดสุดท้ายของหน้าแรกมักมีคำว่า 'ต่อหน้าถัด' หรือ 'ต่อหน้าถัดไป' พิมพ์ทับซ้อนอยู่ตรงชื่อไซส์หรือรายการสินค้า ห้ามข้ามบรรทัดนั้นเด็ดขาด! ให้สกัดรายการสินค้านั้นออกมาเป็น line item ตามปกติ (ตัดคำว่า 'ต่อหน้าถัด' ออก และเดาไซส์จากบริบทหรือเว้นไว้ให้ผู้ใช้แก้) และนับจำนวนบรรทัดรวมทุกหน้าให้ครบถ้วนตรงตามเลขลำดับ No. ในบิล
 
 DOCUMENT TYPE (doc_type) — analyze the document TITLE / header label and classify into ONE of these purchase ERP enum values only:
 - "AP_TAX" if the header says ใบกำกับภาษี / Tax Invoice / ใบส่งของ+ใบกำกับ (credit purchase with VAT)
