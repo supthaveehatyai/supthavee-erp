@@ -1,0 +1,609 @@
+table_name,column_name,ordinal_position,data_type,udt_name,is_nullable,column_default,is_generated,generation_expression,constraint_type
+accounting_periods,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+accounting_periods,period_year,2,integer,int4,NO,null,NEVER,null,UNIQUE
+accounting_periods,period_month,3,integer,int4,NO,null,NEVER,null,UNIQUE
+accounting_periods,is_closed,4,boolean,bool,NO,false,NEVER,null,null
+accounting_periods,closed_at,5,timestamp with time zone,timestamptz,YES,null,NEVER,null,null
+accounting_periods,closed_by,6,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+accounting_periods,created_at,7,timestamp with time zone,timestamptz,NO,now(),NEVER,null,null
+accounting_periods,updated_at,8,timestamp with time zone,timestamptz,NO,now(),NEVER,null,null
+app_roles,role_code,1,text,text,NO,null,NEVER,null,PRIMARY KEY
+app_roles,role_name_th,2,text,text,NO,null,NEVER,null,null
+app_roles,description,3,text,text,YES,null,NEVER,null,null
+app_roles,created_at,4,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+app_roles,accessible_modules,5,jsonb,jsonb,YES,"'{""sales"": false, ""finance"": false, ""settings"": false, ""inventory"": false, ""purchases"": false}'::jsonb",NEVER,null,null
+approval_logs,id,1,uuid,uuid,NO,uuid_generate_v4(),NEVER,null,PRIMARY KEY
+approval_logs,document_id,2,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+approval_logs,expense_id,3,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+approval_logs,action,4,character varying,varchar,NO,null,NEVER,null,null
+approval_logs,actor_id,5,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+approval_logs,comments,6,text,text,YES,null,NEVER,null,null
+approval_logs,created_at,7,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+asset_depreciation_ledger,id,1,uuid,uuid,NO,uuid_generate_v4(),NEVER,null,PRIMARY KEY
+asset_depreciation_ledger,asset_id,2,uuid,uuid,NO,null,NEVER,null,UNIQUE
+asset_depreciation_ledger,asset_id,2,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+asset_depreciation_ledger,period_id,3,uuid,uuid,NO,null,NEVER,null,UNIQUE
+asset_depreciation_ledger,period_id,3,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+asset_depreciation_ledger,depreciation_date,4,date,date,NO,null,NEVER,null,null
+asset_depreciation_ledger,depreciation_amount,5,numeric,numeric,NO,null,NEVER,null,null
+asset_depreciation_ledger,accumulated_depreciation,6,numeric,numeric,NO,null,NEVER,null,null
+asset_depreciation_ledger,net_book_value,7,numeric,numeric,NO,null,NEVER,null,null
+asset_depreciation_ledger,is_prorated,8,boolean,bool,YES,false,NEVER,null,null
+asset_depreciation_ledger,created_at,9,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+asset_depreciation_ledger,created_by,10,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+audit_logs,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+audit_logs,table_name,2,character varying,varchar,NO,null,NEVER,null,null
+audit_logs,record_id,3,character varying,varchar,NO,null,NEVER,null,null
+audit_logs,action,4,USER-DEFINED,audit_action_type,NO,null,NEVER,null,null
+audit_logs,old_data,5,jsonb,jsonb,YES,null,NEVER,null,null
+audit_logs,new_data,6,jsonb,jsonb,YES,null,NEVER,null,null
+audit_logs,changed_by,7,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+audit_logs,ip_address,8,character varying,varchar,YES,null,NEVER,null,null
+audit_logs,changed_at,9,timestamp with time zone,timestamptz,NO,now(),NEVER,null,null
+audit_logs,changed_by_name,10,character varying,varchar,YES,null,NEVER,null,null
+audit_logs,correlation_id,11,uuid,uuid,YES,null,NEVER,null,null
+billing_note_items,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+billing_note_items,billing_note_id,2,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+billing_note_items,billing_note_id,2,uuid,uuid,NO,null,NEVER,null,UNIQUE
+billing_note_items,invoice_id,3,uuid,uuid,NO,null,NEVER,null,UNIQUE
+billing_note_items,invoice_id,3,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+billing_note_items,billed_amount,4,numeric,numeric,NO,0,NEVER,null,null
+billing_note_items,created_at,5,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+billing_note_items,updated_at,6,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+contact_persons,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+contact_persons,contact_id,2,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+contact_persons,name,3,character varying,varchar,NO,null,NEVER,null,null
+contact_persons,phone,4,character varying,varchar,YES,null,NEVER,null,null
+contact_persons,email,5,character varying,varchar,YES,null,NEVER,null,null
+contact_persons,department_or_role,6,character varying,varchar,YES,null,NEVER,null,null
+contact_persons,is_primary,7,boolean,bool,YES,false,NEVER,null,null
+contact_persons,notes,8,text,text,YES,null,NEVER,null,null
+contact_persons,created_at,9,timestamp with time zone,timestamptz,YES,"timezone('utc'::text, now())",NEVER,null,null
+contacts,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+contacts,customer_type,3,character varying,varchar,YES,'บุคคลธรรมดา'::character varying,NEVER,null,null
+contacts,company_name,4,character varying,varchar,NO,null,NEVER,null,null
+contacts,tax_id,5,character varying,varchar,YES,null,NEVER,null,null
+contacts,branch_code,6,character varying,varchar,YES,'สำนักงานใหญ่'::character varying,NEVER,null,null
+contacts,address,7,text,text,YES,null,NEVER,null,null
+contacts,phone,8,character varying,varchar,YES,null,NEVER,null,null
+contacts,default_price_tier,9,character varying,varchar,YES,'Retail'::character varying,NEVER,null,null
+contacts,credit_days,10,integer,int4,YES,0,NEVER,null,null
+contacts,ocr_pattern_config,11,jsonb,jsonb,YES,'{}'::jsonb,NEVER,null,null
+contacts,is_active,12,boolean,bool,YES,true,NEVER,null,null
+contacts,created_at,13,timestamp with time zone,timestamptz,YES,CURRENT_TIMESTAMP,NEVER,null,null
+contacts,tax_branch_code,14,character varying,varchar,YES,'00000'::character varying,NEVER,null,null
+contacts,entity_type,15,character varying,varchar,YES,null,NEVER,null,null
+contacts,tax_address,16,text,text,YES,null,NEVER,null,null
+contacts,is_tax_validated,17,boolean,bool,YES,false,NEVER,null,null
+contacts,contact_roles,18,ARRAY,_varchar,NO,ARRAY['Customer'::character varying],NEVER,null,null
+contacts,default_freight_tax_mode,19,character varying,varchar,NO,'INCLUDED_IN_TAX'::character varying,NEVER,null,null
+contacts,default_doc_type,20,text,text,YES,'AP_TAX'::text,NEVER,null,null
+contacts,default_vat_mode,21,text,text,YES,'EXC_VAT'::text,NEVER,null,null
+contacts,default_credit_days,22,integer,int4,YES,30,NEVER,null,null
+depreciation_ledgers,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+depreciation_ledgers,asset_id,2,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+depreciation_ledgers,asset_id,2,uuid,uuid,YES,null,NEVER,null,UNIQUE
+depreciation_ledgers,period_year,3,integer,int4,NO,null,NEVER,null,UNIQUE
+depreciation_ledgers,period_month,4,integer,int4,NO,null,NEVER,null,UNIQUE
+depreciation_ledgers,depreciation_amount,5,numeric,numeric,NO,null,NEVER,null,null
+depreciation_ledgers,created_by,6,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+depreciation_ledgers,created_at,7,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+doc_details,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+doc_details,doc_header_id,2,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+doc_details,product_id,3,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+doc_details,description,4,character varying,varchar,YES,null,NEVER,null,null
+doc_details,qty,5,integer,int4,NO,1,NEVER,null,null
+doc_details,uom_used,6,character varying,varchar,YES,null,NEVER,null,null
+doc_details,unit_price,7,numeric,numeric,NO,null,NEVER,null,null
+doc_details,unit_cost_price,8,numeric,numeric,YES,0.00,NEVER,null,null
+doc_details,discount_text,9,character varying,varchar,YES,null,NEVER,null,null
+doc_details,discount_amount,10,numeric,numeric,YES,0.00,NEVER,null,null
+doc_details,line_total,11,numeric,numeric,NO,null,NEVER,null,null
+doc_headers,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+doc_headers,created_at,2,timestamp with time zone,timestamptz,YES,CURRENT_TIMESTAMP,NEVER,null,null
+doc_headers,doc_no,3,character varying,varchar,NO,null,NEVER,null,UNIQUE
+doc_headers,doc_type,4,character varying,varchar,NO,null,NEVER,null,null
+doc_headers,doc_date,5,date,date,NO,null,NEVER,null,UNIQUE
+doc_headers,due_date,6,date,date,YES,null,NEVER,null,null
+doc_headers,contact_id,7,uuid,uuid,NO,null,NEVER,null,UNIQUE
+doc_headers,contact_id,7,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+doc_headers,contact_person_id,8,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+doc_headers,ref_doc_id,9,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+doc_headers,sub_total,10,numeric,numeric,YES,0.00,NEVER,null,null
+doc_headers,discount_amount,11,numeric,numeric,YES,0.00,NEVER,null,null
+doc_headers,tax_rate,12,numeric,numeric,YES,7.00,NEVER,null,null
+doc_headers,tax_amount,13,numeric,numeric,YES,0.00,NEVER,null,null
+doc_headers,wht_rate,14,numeric,numeric,YES,0.00,NEVER,null,null
+doc_headers,wht_amount,15,numeric,numeric,YES,0.00,NEVER,null,null
+doc_headers,grand_total,16,numeric,numeric,YES,0.00,NEVER,null,null
+doc_headers,deposit_deducted,17,numeric,numeric,YES,0.00,NEVER,null,null
+doc_headers,payment_status,18,character varying,varchar,YES,'Pending'::character varying,NEVER,null,null
+doc_headers,attached_file_url,19,text,text,YES,null,NEVER,null,null
+doc_headers,original_file_name,20,text,text,YES,null,NEVER,null,null
+doc_headers,wht_attachment_url,21,text,text,YES,null,NEVER,null,null
+doc_headers,original_receipt_url,22,text,text,YES,null,NEVER,null,null
+doc_headers,created_by,23,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+doc_headers,freight_cost,24,numeric,numeric,YES,0,NEVER,null,null
+doc_headers,attachment_urls,25,ARRAY,_text,YES,'{}'::text[],NEVER,null,null
+doc_headers,attachments,26,jsonb,jsonb,YES,'[]'::jsonb,NEVER,null,null
+document_allocations,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+document_allocations,receipt_doc_id,2,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+document_allocations,invoice_doc_id,3,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+document_allocations,allocated_amount,4,numeric,numeric,NO,0,NEVER,null,null
+document_allocations,wht_amount,5,numeric,numeric,YES,0,NEVER,null,null
+document_allocations,wht_reference_no,6,text,text,YES,null,NEVER,null,null
+document_allocations,adjustment_amount,7,numeric,numeric,YES,0,NEVER,null,null
+document_allocations,adjustment_reason,8,text,text,YES,null,NEVER,null,null
+document_allocations,created_at,9,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+document_allocations,updated_at,10,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+document_allocations,original_receipt_received,11,boolean,bool,NO,false,NEVER,null,null
+document_items,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+document_items,created_at,2,timestamp with time zone,timestamptz,NO,CURRENT_TIMESTAMP,NEVER,null,null
+document_items,document_id,3,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+document_items,product_id,4,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+document_items,description,5,character varying,varchar,YES,null,NEVER,null,null
+document_items,qty,6,numeric,numeric,NO,1,NEVER,null,null
+document_items,uom_used,7,character varying,varchar,YES,null,NEVER,null,null
+document_items,unit_price,8,numeric,numeric,NO,0.00,NEVER,null,null
+document_items,unit_cost_price,9,numeric,numeric,NO,0.00,NEVER,null,null
+document_items,discount_text,10,character varying,varchar,YES,null,NEVER,null,null
+document_items,discount_amount,11,numeric,numeric,NO,0.00,NEVER,null,null
+document_items,line_total,12,numeric,numeric,NO,0.00,NEVER,null,null
+document_items,sort_order,13,integer,int4,NO,0,NEVER,null,null
+document_items,technician_id,14,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+document_items,wage_cost,15,numeric,numeric,NO,0,NEVER,null,null
+document_items,technician_bill_id,16,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+document_items,prorated_freight,17,numeric,numeric,YES,0,NEVER,null,null
+document_items,mockup_image_url,18,text,text,YES,null,NEVER,null,null
+document_items,is_sent_to_production,19,boolean,bool,YES,false,NEVER,null,null
+document_items,production_status,20,character varying,varchar,NO,'NONE'::character varying,NEVER,null,null
+documents,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+documents,created_at,2,timestamp with time zone,timestamptz,NO,CURRENT_TIMESTAMP,NEVER,null,null
+documents,updated_at,3,timestamp with time zone,timestamptz,NO,CURRENT_TIMESTAMP,NEVER,null,null
+documents,doc_no,4,character varying,varchar,NO,null,NEVER,null,UNIQUE
+documents,doc_type,5,USER-DEFINED,document_type,NO,null,NEVER,null,null
+documents,status,6,USER-DEFINED,document_status,NO,'DRAFT'::document_status,NEVER,null,null
+documents,doc_date,7,date,date,NO,CURRENT_DATE,NEVER,null,null
+documents,due_date,8,date,date,YES,null,NEVER,null,null
+documents,contact_id,9,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+documents,contact_person_id,10,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+documents,ref_doc_id,11,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+documents,sub_total,12,numeric,numeric,NO,0.00,NEVER,null,null
+documents,discount_amount,13,numeric,numeric,NO,0.00,NEVER,null,null
+documents,tax_rate,14,numeric,numeric,NO,7.00,NEVER,null,null
+documents,tax_amount,15,numeric,numeric,NO,0.00,NEVER,null,null
+documents,wht_rate,16,numeric,numeric,NO,0.00,NEVER,null,null
+documents,wht_amount,17,numeric,numeric,NO,0.00,NEVER,null,null
+documents,grand_total,18,numeric,numeric,NO,0.00,NEVER,null,null
+documents,deposit_deducted,19,numeric,numeric,NO,0.00,NEVER,null,null
+documents,payment_status,20,character varying,varchar,NO,'Pending'::character varying,NEVER,null,null
+documents,notes,21,text,text,YES,null,NEVER,null,null
+documents,attached_file_url,22,text,text,YES,null,NEVER,null,null
+documents,original_file_name,23,text,text,YES,null,NEVER,null,null
+documents,vat_type,24,USER-DEFINED,vat_calculation_type,NO,'EXCLUSIVE'::vat_calculation_type,NEVER,null,null
+documents,vat_rate,25,numeric,numeric,NO,7.00,NEVER,null,null
+documents,total_amount,26,numeric,numeric,NO,0.00,NEVER,null,null
+documents,net_before_vat,27,numeric,numeric,NO,0.00,NEVER,null,null
+documents,vat_amount,28,numeric,numeric,NO,0.00,NEVER,null,null
+documents,discount_text,29,character varying,varchar,YES,null,NEVER,null,null
+documents,ref_document_id,30,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+documents,attachment_url,31,text,text,YES,null,NEVER,null,null
+documents,paid_amount,32,numeric,numeric,YES,0,NEVER,null,null
+documents,is_voided,33,boolean,bool,YES,false,NEVER,null,null
+documents,voided_at,34,timestamp with time zone,timestamptz,YES,null,NEVER,null,null
+documents,voided_by,35,uuid,uuid,YES,null,NEVER,null,null
+documents,void_reason,36,text,text,YES,null,NEVER,null,null
+documents,reference_no,37,text,text,YES,null,NEVER,null,null
+documents,wht_attachment_url,38,text,text,YES,null,NEVER,null,null
+documents,original_receipt_url,39,text,text,YES,null,NEVER,null,null
+documents,rounding_difference,40,numeric,numeric,YES,0.00,NEVER,null,null
+documents,approval_status,41,USER-DEFINED,approval_status,NO,'APPROVED'::approval_status,NEVER,null,null
+documents,approved_by,42,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+documents,approved_at,43,timestamp with time zone,timestamptz,YES,null,NEVER,null,null
+documents,created_by,44,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+documents,freight_cost,45,numeric,numeric,YES,0,NEVER,null,null
+documents,remark,46,text,text,YES,null,NEVER,null,null
+documents,sales_channel,47,character varying,varchar,YES,'STORE'::character varying,NEVER,null,null
+documents,ecommerce_order_no,48,character varying,varchar,YES,null,NEVER,null,null
+documents,ecommerce_buyer_name,49,character varying,varchar,YES,null,NEVER,null,null
+documents,tracking_no,50,character varying,varchar,YES,null,NEVER,null,null
+documents,one_time_address,51,text,text,YES,null,NEVER,null,null
+documents,tax_type,52,character varying,varchar,YES,'NON_VAT'::character varying,NEVER,null,null
+documents,pre_vat_amount,53,numeric,numeric,YES,0,NEVER,null,null
+documents,freight_tax_mode,54,character varying,varchar,NO,'INCLUDED_IN_TAX'::character varying,NEVER,null,null
+documents,freight_paid_separately,55,boolean,bool,NO,false,NEVER,null,null
+documents,separate_freight_amount,56,numeric,numeric,NO,0,NEVER,null,null
+documents,billing_note_eligible_amount,57,numeric,numeric,NO,0,NEVER,null,null
+documents,dest_freight_cost,58,numeric,numeric,NO,0,NEVER,null,null
+documents,carrier_id,59,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+documents,carrier_tracking_no,60,character varying,varchar,YES,null,NEVER,null,null
+documents,dest_freight_paid_status,61,character varying,varchar,NO,'NONE'::character varying,NEVER,null,null
+documents,carrier_receipt_status,62,character varying,varchar,NO,'PENDING'::character varying,NEVER,null,null
+documents,carrier_receipt_no,63,character varying,varchar,YES,null,NEVER,null,null
+documents,carrier_receipt_date,64,date,date,YES,null,NEVER,null,null
+documents,attachment_urls,65,ARRAY,_text,YES,'{}'::text[],NEVER,null,null
+documents,attachments,66,jsonb,jsonb,YES,'[]'::jsonb,NEVER,null,null
+expense_installments,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+expense_installments,expense_id,2,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+expense_installments,installment_period,3,integer,int4,NO,null,NEVER,null,null
+expense_installments,due_date,4,date,date,NO,null,NEVER,null,null
+expense_installments,principal_amount,5,numeric,numeric,NO,null,NEVER,null,null
+expense_installments,interest_amount,6,numeric,numeric,YES,0.0000,NEVER,null,null
+expense_installments,total_installment,7,numeric,numeric,YES,null,ALWAYS,(principal_amount + interest_amount),null
+expense_installments,is_paid,8,boolean,bool,YES,false,NEVER,null,null
+expense_installments,paid_date,9,date,date,YES,null,NEVER,null,null
+expense_installments,payment_transaction_id,10,uuid,uuid,YES,null,NEVER,null,null
+expense_installments,created_at,11,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+expense_installments,updated_at,12,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+expenses,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+expenses,document_no,2,character varying,varchar,NO,null,NEVER,null,UNIQUE
+expenses,expense_date,3,date,date,NO,null,NEVER,null,null
+expenses,category_id,4,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+expenses,net_amount,5,numeric,numeric,NO,0,NEVER,null,null
+expenses,vat_amount,6,numeric,numeric,NO,0,NEVER,null,null
+expenses,grand_total,7,numeric,numeric,YES,null,ALWAYS,(net_amount + vat_amount),null
+expenses,payment_method,8,character varying,varchar,YES,null,NEVER,null,null
+expenses,receipt_url,9,text,text,YES,null,NEVER,null,null
+expenses,status,10,character varying,varchar,NO,'DRAFT'::character varying,NEVER,null,null
+expenses,remark,11,text,text,YES,null,NEVER,null,null
+expenses,recorded_by,12,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+expenses,created_at,13,timestamp with time zone,timestamptz,NO,now(),NEVER,null,null
+expenses,updated_at,14,timestamp with time zone,timestamptz,NO,now(),NEVER,null,null
+expenses,vendor_id,15,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+expenses,bank_account_id,16,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+expenses,vendor_doc_no,17,text,text,YES,null,NEVER,null,null
+expenses,wht_type,18,text,text,YES,null,NEVER,null,null
+expenses,wht_rate,19,numeric,numeric,NO,0,NEVER,null,null
+expenses,wht_amount,20,numeric,numeric,NO,0,NEVER,null,null
+expenses,net_payable,21,numeric,numeric,NO,0,NEVER,null,null
+expenses,wht_base_amount,22,numeric,numeric,YES,null,NEVER,null,null
+expenses,wht_doc_no,23,character varying,varchar,YES,null,NEVER,null,null
+expenses,payment_slip_url,24,text,text,YES,null,NEVER,null,null
+expenses,approval_status,25,USER-DEFINED,approval_status,NO,'APPROVED'::approval_status,NEVER,null,null
+expenses,approved_by,26,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+expenses,approved_at,27,timestamp with time zone,timestamptz,YES,null,NEVER,null,null
+expenses,is_installment,28,boolean,bool,YES,false,NEVER,null,null
+expenses,total_interest_amount,29,numeric,numeric,YES,0.0000,NEVER,null,null
+fixed_assets,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+fixed_assets,asset_code,2,character varying,varchar,NO,null,NEVER,null,UNIQUE
+fixed_assets,asset_name,3,character varying,varchar,NO,null,NEVER,null,null
+fixed_assets,category_id,4,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+fixed_assets,location,5,character varying,varchar,YES,null,NEVER,null,null
+fixed_assets,acquisition_date,6,date,date,NO,null,NEVER,null,null
+fixed_assets,acquisition_cost,7,numeric,numeric,NO,null,NEVER,null,null
+fixed_assets,salvage_value,8,numeric,numeric,YES,1.0000,NEVER,null,null
+fixed_assets,useful_life_months,9,integer,int4,NO,null,NEVER,null,null
+fixed_assets,accumulated_depreciation,10,numeric,numeric,YES,0.0000,NEVER,null,null
+fixed_assets,net_book_value,11,numeric,numeric,NO,null,NEVER,null,null
+fixed_assets,status,12,character varying,varchar,YES,'ACTIVE'::character varying,NEVER,null,null
+fixed_assets,created_at,13,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+fixed_assets,updated_at,14,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+fixed_assets,expense_id,15,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+fixed_assets,warranty_expiry_date,16,date,date,YES,null,NEVER,null,null
+fixed_assets,attachment_urls,17,ARRAY,_text,YES,'{}'::text[],NEVER,null,null
+fixed_assets,current_accumulated_depreciation,18,numeric,numeric,YES,0,NEVER,null,null
+fixed_assets,current_net_book_value,19,numeric,numeric,YES,null,ALWAYS,(acquisition_cost - current_accumulated_depreciation),null
+fixed_assets,last_depreciation_date,20,date,date,YES,null,NEVER,null,null
+inventory_ledger,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+inventory_ledger,created_at,2,timestamp with time zone,timestamptz,YES,CURRENT_TIMESTAMP,NEVER,null,null
+inventory_ledger,product_id,3,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+inventory_ledger,doc_header_id,4,uuid,uuid,YES,null,NEVER,null,null
+inventory_ledger,trans_type,5,character varying,varchar,NO,null,NEVER,null,null
+inventory_ledger,qty,6,numeric,numeric,NO,null,NEVER,null,null
+inventory_ledger,notes,7,character varying,varchar,YES,null,NEVER,null,null
+inventory_ledger,unit_cost,8,numeric,numeric,YES,0,NEVER,null,null
+inventory_ledger,document_id,9,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+mst_asset_categories,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+mst_asset_categories,category_code,2,character varying,varchar,NO,null,NEVER,null,UNIQUE
+mst_asset_categories,category_name,3,character varying,varchar,NO,null,NEVER,null,null
+mst_asset_categories,useful_life_years,4,integer,int4,NO,null,NEVER,null,null
+mst_asset_categories,depreciation_rate,5,numeric,numeric,YES,null,ALWAYS,(100.0 / (useful_life_years)::numeric),null
+mst_asset_categories,is_active,6,boolean,bool,YES,true,NEVER,null,null
+mst_asset_categories,created_at,7,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+mst_asset_categories,updated_at,8,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+mst_bank_accounts,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+mst_bank_accounts,bank_name,2,text,text,NO,null,NEVER,null,null
+mst_bank_accounts,account_no,3,text,text,NO,null,NEVER,null,UNIQUE
+mst_bank_accounts,account_name,4,text,text,NO,null,NEVER,null,null
+mst_bank_accounts,branch_name,5,text,text,YES,null,NEVER,null,null
+mst_bank_accounts,is_active,6,boolean,bool,YES,true,NEVER,null,null
+mst_bank_accounts,created_at,7,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+mst_bank_accounts,updated_at,8,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+mst_brands,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+mst_brands,brand_code,2,character varying,varchar,NO,null,NEVER,null,UNIQUE
+mst_brands,brand_name,3,character varying,varchar,NO,null,NEVER,null,null
+mst_brands,is_active,4,boolean,bool,YES,true,NEVER,null,null
+mst_carriers,carrier_id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+mst_carriers,carrier_code,2,character varying,varchar,NO,null,NEVER,null,UNIQUE
+mst_carriers,carrier_name,3,character varying,varchar,NO,null,NEVER,null,null
+mst_carriers,tax_id,4,character varying,varchar,YES,null,NEVER,null,null
+mst_carriers,phone,5,character varying,varchar,YES,null,NEVER,null,null
+mst_carriers,default_wht_rate,6,numeric,numeric,NO,1.00,NEVER,null,null
+mst_carriers,sort_order,7,integer,int4,NO,100,NEVER,null,null
+mst_carriers,is_active,8,boolean,bool,NO,true,NEVER,null,null
+mst_carriers,created_at,9,timestamp with time zone,timestamptz,NO,now(),NEVER,null,null
+mst_carriers,contact_id,10,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+mst_carriers,carrier_tier,11,character varying,varchar,NO,'OCCASIONAL'::character varying,NEVER,null,null
+mst_carriers,requires_monthly_receipt,12,boolean,bool,NO,false,NEVER,null,null
+mst_carriers,branch_code,13,character varying,varchar,YES,null,NEVER,null,null
+mst_carriers,address,14,text,text,YES,null,NEVER,null,null
+mst_carriers,updated_at,15,timestamp with time zone,timestamptz,NO,now(),NEVER,null,null
+mst_categories,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+mst_categories,category_code,2,character varying,varchar,NO,null,NEVER,null,UNIQUE
+mst_categories,category_name,3,character varying,varchar,NO,null,NEVER,null,null
+mst_categories,is_active,4,boolean,bool,YES,true,NEVER,null,null
+mst_categories,parent_id,5,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+mst_colors,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+mst_colors,color_code,2,character varying,varchar,NO,null,NEVER,null,UNIQUE
+mst_colors,color_name,3,character varying,varchar,NO,null,NEVER,null,null
+mst_colors,is_active,4,boolean,bool,YES,true,NEVER,null,null
+mst_document_taxonomy,doc_code,1,text,text,NO,null,NEVER,null,PRIMARY KEY
+mst_document_taxonomy,doc_name_th,2,text,text,NO,null,NEVER,null,null
+mst_document_taxonomy,doc_name_en,3,text,text,NO,null,NEVER,null,null
+mst_document_taxonomy,module_group,4,text,text,NO,null,NEVER,null,null
+mst_document_taxonomy,paper_format,5,text,text,NO,'A4_PORTRAIT'::text,NEVER,null,null
+mst_document_taxonomy,max_items_per_page,6,integer,int4,YES,15,NEVER,null,null
+mst_document_taxonomy,show_signature_block,7,boolean,bool,YES,true,NEVER,null,null
+mst_document_taxonomy,updated_at,8,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+mst_expense_categories,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+mst_expense_categories,category_name,2,character varying,varchar,NO,null,NEVER,null,UNIQUE
+mst_expense_categories,description,3,text,text,YES,null,NEVER,null,null
+mst_expense_categories,is_active,4,boolean,bool,NO,true,NEVER,null,null
+mst_expense_categories,created_at,5,timestamp with time zone,timestamptz,NO,now(),NEVER,null,null
+mst_genders,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+mst_genders,gender_code,2,character varying,varchar,NO,null,NEVER,null,UNIQUE
+mst_genders,gender_name,3,character varying,varchar,NO,null,NEVER,null,UNIQUE
+mst_genders,is_active,4,boolean,bool,YES,true,NEVER,null,null
+mst_genders,created_at,5,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+mst_sizes,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+mst_sizes,brand_id,2,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+mst_sizes,size_label,3,character varying,varchar,NO,null,NEVER,null,null
+mst_sizes,size_code,4,character varying,varchar,NO,null,NEVER,null,UNIQUE
+mst_sizes,sort_order,5,integer,int4,YES,99,NEVER,null,null
+mst_sizes,is_active,6,boolean,bool,YES,true,NEVER,null,null
+mst_uom,uom_id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+mst_uom,uom_code,2,character varying,varchar,NO,null,NEVER,null,UNIQUE
+mst_uom,uom_name,3,character varying,varchar,NO,null,NEVER,null,null
+mst_uom,default_multiplier,4,numeric,numeric,NO,1,NEVER,null,null
+mst_uom,allow_custom_multiplier,5,boolean,bool,NO,false,NEVER,null,null
+mst_uom,sort_order,6,integer,int4,NO,100,NEVER,null,null
+mst_uom,is_active,7,boolean,bool,NO,true,NEVER,null,null
+mst_wht_rates,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+mst_wht_rates,wht_name,2,character varying,varchar,NO,null,NEVER,null,UNIQUE
+mst_wht_rates,wht_rate,3,numeric,numeric,NO,null,NEVER,null,null
+mst_wht_rates,is_active,4,boolean,bool,NO,true,NEVER,null,null
+mst_wht_rates,created_at,5,timestamp with time zone,timestamptz,NO,now(),NEVER,null,null
+mst_wht_rates,updated_at,6,timestamp with time zone,timestamptz,NO,now(),NEVER,null,null
+parameter_change_requests,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+parameter_change_requests,param_key,2,character varying,varchar,YES,null,NEVER,null,FOREIGN KEY
+parameter_change_requests,old_value,3,jsonb,jsonb,YES,null,NEVER,null,null
+parameter_change_requests,new_value,4,jsonb,jsonb,NO,null,NEVER,null,null
+parameter_change_requests,requested_by,5,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+parameter_change_requests,approved_by,6,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+parameter_change_requests,status,7,character varying,varchar,YES,'PENDING'::character varying,NEVER,null,null
+parameter_change_requests,created_at,8,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+parameter_change_requests,resolved_at,9,timestamp with time zone,timestamptz,YES,null,NEVER,null,null
+parameter_change_requests,change_reason,10,text,text,YES,null,NEVER,null,null
+parameter_change_requests,review_comment,11,text,text,YES,null,NEVER,null,null
+parameter_change_requests,updated_at,12,timestamp with time zone,timestamptz,NO,now(),NEVER,null,null
+payment_allocations,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+payment_allocations,doc_header_id,3,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+payment_allocations,allocated_amount,4,numeric,numeric,NO,null,NEVER,null,null
+payment_transactions,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+payment_transactions,document_id,2,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+payment_transactions,payment_method,3,USER-DEFINED,payment_method_enum,NO,null,NEVER,null,null
+payment_transactions,bank_account_id,4,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+payment_transactions,amount,5,numeric,numeric,NO,0,NEVER,null,null
+payment_transactions,reference_no,6,text,text,YES,null,NEVER,null,null
+payment_transactions,payment_date,7,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+payment_transactions,attachment_url,8,text,text,YES,null,NEVER,null,null
+payment_transactions,is_reconciled,9,boolean,bool,YES,false,NEVER,null,null
+payment_transactions,reconciled_at,10,timestamp with time zone,timestamptz,YES,null,NEVER,null,null
+payment_transactions,reconciled_by,11,uuid,uuid,YES,null,NEVER,null,null
+payment_transactions,is_voided,12,boolean,bool,YES,false,NEVER,null,null
+payment_transactions,voided_at,13,timestamp with time zone,timestamptz,YES,null,NEVER,null,null
+payment_transactions,voided_by,14,uuid,uuid,YES,null,NEVER,null,null
+payment_transactions,void_reason,15,text,text,YES,null,NEVER,null,null
+payment_transactions,created_at,16,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+payment_transactions,updated_at,17,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+payment_transactions,storage_tier,18,USER-DEFINED,storage_tier_type,YES,'CLOUD'::storage_tier_type,NEVER,null,null
+payment_transactions,nas_archive_url,19,text,text,YES,null,NEVER,null,null
+product_boms,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+product_boms,finished_model_id,2,uuid,uuid,NO,null,NEVER,null,UNIQUE
+product_boms,finished_model_id,2,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+product_boms,raw_material_model_id,3,uuid,uuid,NO,null,NEVER,null,UNIQUE
+product_boms,raw_material_model_id,3,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+product_boms,uom_id,4,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+product_boms,quantity_required,5,numeric,numeric,NO,null,NEVER,null,null
+product_boms,waste_percent,6,numeric,numeric,YES,0.00,NEVER,null,null
+product_boms,created_at,7,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+product_boms,updated_at,8,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+product_boms,created_by,9,uuid,uuid,YES,null,NEVER,null,null
+product_models,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+product_models,model_code,2,character varying,varchar,NO,null,NEVER,null,UNIQUE
+product_models,name,3,character varying,varchar,NO,null,NEVER,null,null
+product_models,short_name,4,character varying,varchar,YES,null,NEVER,null,null
+product_models,vendor_id,5,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+product_models,brand_id,6,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+product_models,category_id,7,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+product_models,gender,8,character varying,varchar,YES,'Unisex (U)'::character varying,NEVER,null,null
+product_models,tax_type,9,character varying,varchar,YES,'INC_VAT'::character varying,NEVER,null,null
+product_models,status,10,character varying,varchar,YES,'DRAFT'::character varying,NEVER,null,null
+product_models,size_pricing_config,11,jsonb,jsonb,YES,'[]'::jsonb,NEVER,null,null
+product_models,is_active,12,boolean,bool,YES,true,NEVER,null,null
+product_models,created_at,13,timestamp with time zone,timestamptz,YES,CURRENT_TIMESTAMP,NEVER,null,null
+product_models,image_url,14,text,text,YES,null,NEVER,null,null
+product_models,is_service,15,boolean,bool,YES,false,NEVER,null,null
+product_models,is_raw_material,16,boolean,bool,YES,false,NEVER,null,null
+product_models,base_uom_id,17,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+product_models,is_manufactured,18,boolean,bool,YES,false,NEVER,null,null
+product_models,purchasing_uom_id,19,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+product_models,uom_conversion_factor,20,numeric,numeric,YES,1.0000,NEVER,null,null
+production_job_items,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+production_job_items,job_id,2,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+production_job_items,product_id,3,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+production_job_items,quantity,4,integer,int4,NO,null,NEVER,null,null
+production_job_items,created_at,5,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+production_job_materials,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+production_job_materials,job_id,2,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+production_job_materials,raw_material_model_id,3,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+production_job_materials,uom_id,4,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+production_job_materials,planned_qty,5,numeric,numeric,NO,null,NEVER,null,null
+production_job_materials,actual_used_qty,6,numeric,numeric,YES,null,NEVER,null,null
+production_job_materials,cost_price_snapshot,7,numeric,numeric,YES,null,NEVER,null,null
+production_job_operations,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+production_job_operations,job_id,2,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+production_job_operations,operation_name,3,character varying,varchar,NO,null,NEVER,null,null
+production_job_operations,technician_id,4,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+production_job_operations,wage_cost,5,numeric,numeric,YES,0,NEVER,null,null
+production_job_operations,technician_bill_id,6,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+production_job_operations,status,7,character varying,varchar,YES,'PENDING'::character varying,NEVER,null,null
+production_job_operations,created_at,8,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+production_job_operations,updated_at,9,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+production_job_operations,confirmed_qty,10,numeric,numeric,YES,1,NEVER,null,null
+production_job_operations,unit_wage,11,numeric,numeric,YES,0,NEVER,null,null
+production_job_operations,remark,12,text,text,YES,null,NEVER,null,null
+production_jobs,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+production_jobs,job_no,2,character varying,varchar,NO,null,NEVER,null,UNIQUE
+production_jobs,ref_document_id,3,uuid,uuid,YES,null,NEVER,null,null
+production_jobs,finished_model_id,4,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+production_jobs,target_quantity,5,integer,int4,NO,null,NEVER,null,null
+production_jobs,status,6,character varying,varchar,NO,'PLANNED'::character varying,NEVER,null,null
+production_jobs,start_date,7,date,date,YES,null,NEVER,null,null
+production_jobs,estimated_completion_date,8,date,date,YES,null,NEVER,null,null
+production_jobs,created_at,9,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+production_jobs,updated_at,10,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+production_jobs,created_by,11,uuid,uuid,YES,null,NEVER,null,null
+production_jobs,mockup_image_url,12,text,text,YES,null,NEVER,null,null
+production_jobs,remark,13,text,text,YES,null,NEVER,null,null
+products,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+products,model_id,2,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+products,sku,3,character varying,varchar,NO,null,NEVER,null,UNIQUE
+products,barcode,4,character varying,varchar,YES,null,NEVER,null,null
+products,name,5,character varying,varchar,NO,null,NEVER,null,null
+products,short_name,6,character varying,varchar,YES,null,NEVER,null,null
+products,color,7,character varying,varchar,YES,null,NEVER,null,null
+products,size,8,character varying,varchar,YES,null,NEVER,null,null
+products,gender,9,character varying,varchar,YES,'ทั่วไป'::character varying,NEVER,null,null
+products,description,10,text,text,YES,null,NEVER,null,null
+products,category,11,character varying,varchar,YES,null,NEVER,null,null
+products,tax_type,12,character varying,varchar,YES,'INC_VAT'::character varying,NEVER,null,null
+products,base_uom,13,character varying,varchar,YES,'ตัว'::character varying,NEVER,null,null
+products,cost_price,14,numeric,numeric,YES,0.00,NEVER,null,null
+products,retail_price,15,numeric,numeric,YES,0.00,NEVER,null,null
+products,wholesale_price,16,numeric,numeric,YES,0.00,NEVER,null,null
+products,is_active,17,boolean,bool,YES,true,NEVER,null,null
+products,created_at,18,timestamp with time zone,timestamptz,YES,CURRENT_TIMESTAMP,NEVER,null,null
+service_tracking,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+service_tracking,updated_at,2,timestamp with time zone,timestamptz,YES,CURRENT_TIMESTAMP,NEVER,null,null
+service_tracking,doc_header_id,3,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+service_tracking,step_status,4,character varying,varchar,NO,null,NEVER,null,null
+service_tracking,updated_by,5,character varying,varchar,YES,null,NEVER,null,null
+service_tracking,notes,6,text,text,YES,null,NEVER,null,null
+system_parameters,param_key,1,character varying,varchar,NO,null,NEVER,null,PRIMARY KEY
+system_parameters,param_value,2,jsonb,jsonb,NO,null,NEVER,null,null
+system_parameters,description,3,text,text,YES,null,NEVER,null,null
+system_parameters,data_type,4,character varying,varchar,YES,'string'::character varying,NEVER,null,null
+system_parameters,updated_by,5,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+system_parameters,updated_at,6,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+system_parameters,category,7,text,text,NO,'general'::text,NEVER,null,null
+system_parameters,is_sensitive,8,boolean,bool,NO,false,NEVER,null,null
+system_parameters,created_at,9,timestamp with time zone,timestamptz,NO,now(),NEVER,null,null
+system_settings,id,1,smallint,int2,NO,1,NEVER,null,PRIMARY KEY
+system_settings,company_name,2,text,text,NO,''::text,NEVER,null,null
+system_settings,company_name_en,3,text,text,NO,''::text,NEVER,null,null
+system_settings,tax_id,4,text,text,NO,''::text,NEVER,null,null
+system_settings,branch_code,5,text,text,NO,'00000'::text,NEVER,null,null
+system_settings,address,6,text,text,NO,''::text,NEVER,null,null
+system_settings,phone,7,text,text,NO,''::text,NEVER,null,null
+system_settings,email,8,text,text,NO,''::text,NEVER,null,null
+system_settings,logo_url,9,text,text,NO,''::text,NEVER,null,null
+system_settings,vat_rate,10,numeric,numeric,NO,7.00,NEVER,null,null
+system_settings,gl_rounding_expense_acc,11,text,text,NO,'5100-99'::text,NEVER,null,null
+system_settings,gl_rounding_income_acc,12,text,text,NO,'4100-99'::text,NEVER,null,null
+system_settings,updated_at,13,timestamp with time zone,timestamptz,NO,now(),NEVER,null,null
+system_settings,updated_by,14,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+system_settings,branch_name,15,text,text,NO,'สำนักงานใหญ่'::text,NEVER,null,null
+system_settings,document_print_settings,16,jsonb,jsonb,NO,'{}'::jsonb,NEVER,null,null
+system_settings,allow_negative_inventory,17,boolean,bool,NO,false,NEVER,null,null
+technician_rates,id,1,uuid,uuid,NO,uuid_generate_v4(),NEVER,null,PRIMARY KEY
+technician_rates,created_at,7,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+technician_rates,technician_id,8,uuid,uuid,NO,null,NEVER,null,UNIQUE
+technician_rates,technician_id,8,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+technician_rates,service_model_id,9,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+technician_rates,service_model_id,9,uuid,uuid,NO,null,NEVER,null,UNIQUE
+technician_rates,default_wage,10,numeric,numeric,NO,0,NEVER,null,null
+technician_rates,updated_at,11,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+technician_rates_legacy_archive,id,1,uuid,uuid,NO,uuid_generate_v4(),NEVER,null,null
+technician_rates_legacy_archive,contact_id,2,uuid,uuid,YES,null,NEVER,null,null
+technician_rates_legacy_archive,service_name,3,text,text,NO,null,NEVER,null,null
+technician_rates_legacy_archive,cost_price,4,numeric,numeric,NO,0.00,NEVER,null,null
+technician_rates_legacy_archive,selling_price,5,numeric,numeric,NO,0.00,NEVER,null,null
+technician_rates_legacy_archive,is_active,6,boolean,bool,YES,true,NEVER,null,null
+technician_rates_legacy_archive,created_at,7,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+technician_rates_legacy_archive,technician_id,8,uuid,uuid,YES,null,NEVER,null,null
+technician_rates_legacy_archive,service_model_id,9,uuid,uuid,YES,null,NEVER,null,null
+technician_rates_legacy_archive,default_wage,10,numeric,numeric,YES,null,NEVER,null,null
+technician_rates_legacy_archive,updated_at,11,timestamp with time zone,timestamptz,YES,null,NEVER,null,null
+user_profiles,id,1,uuid,uuid,NO,null,NEVER,null,FOREIGN KEY
+user_profiles,id,1,uuid,uuid,NO,null,NEVER,null,PRIMARY KEY
+user_profiles,email,2,text,text,NO,null,NEVER,null,null
+user_profiles,full_name,3,text,text,NO,null,NEVER,null,null
+user_profiles,role_code,4,text,text,NO,'sales'::text,NEVER,null,FOREIGN KEY
+user_profiles,is_active,5,boolean,bool,YES,true,NEVER,null,null
+user_profiles,created_at,6,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+user_profiles,updated_at,7,timestamp with time zone,timestamptz,YES,now(),NEVER,null,null
+user_profiles,pin_code,8,character varying,varchar,YES,null,NEVER,null,null
+user_profiles,approval_limit,9,numeric,numeric,YES,0,NEVER,null,null
+user_profiles,data_access_scope,10,character varying,varchar,YES,'OWN'::character varying,NEVER,null,null
+vendor_product_mapping,id,1,uuid,uuid,NO,gen_random_uuid(),NEVER,null,PRIMARY KEY
+vendor_product_mapping,vendor_id,2,uuid,uuid,YES,null,NEVER,null,UNIQUE
+vendor_product_mapping,vendor_id,2,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+vendor_product_mapping,vendor_sku,3,character varying,varchar,NO,null,NEVER,null,UNIQUE
+vendor_product_mapping,vendor_product_name,4,character varying,varchar,YES,null,NEVER,null,null
+vendor_product_mapping,vendor_uom,5,character varying,varchar,YES,null,NEVER,null,null
+vendor_product_mapping,internal_product_id,6,uuid,uuid,YES,null,NEVER,null,FOREIGN KEY
+vendor_product_mapping,conversion_factor,7,numeric,numeric,YES,1.0000,NEVER,null,null
+vendor_product_mapping,created_at,8,timestamp with time zone,timestamptz,YES,CURRENT_TIMESTAMP,NEVER,null,null
+vendor_product_mapping,purchase_uom_code,9,character varying,varchar,YES,'PCS'::character varying,NEVER,null,null
+vendor_product_mapping,default_tax_type,10,character varying,varchar,YES,NULL::character varying,NEVER,null,null
+vendor_product_mapping,normalized_key,11,text,text,YES,null,NEVER,null,null
+vendor_product_mapping,size_token,12,text,text,YES,null,NEVER,null,null
+vw_carrier_freight_summary,document_id,1,uuid,uuid,YES,null,NEVER,null,null
+vw_carrier_freight_summary,doc_no,2,character varying,varchar,YES,null,NEVER,null,null
+vw_carrier_freight_summary,doc_date,3,date,date,YES,null,NEVER,null,null
+vw_carrier_freight_summary,vendor_id,4,uuid,uuid,YES,null,NEVER,null,null
+vw_carrier_freight_summary,carrier_id,5,uuid,uuid,YES,null,NEVER,null,null
+vw_carrier_freight_summary,carrier_code,6,character varying,varchar,YES,null,NEVER,null,null
+vw_carrier_freight_summary,carrier_name,7,character varying,varchar,YES,null,NEVER,null,null
+vw_carrier_freight_summary,carrier_tier,8,character varying,varchar,YES,null,NEVER,null,null
+vw_carrier_freight_summary,requires_monthly_receipt,9,boolean,bool,YES,null,NEVER,null,null
+vw_carrier_freight_summary,carrier_contact_id,10,uuid,uuid,YES,null,NEVER,null,null
+vw_carrier_freight_summary,carrier_tax_id,11,character varying,varchar,YES,null,NEVER,null,null
+vw_carrier_freight_summary,carrier_branch_code,12,character varying,varchar,YES,null,NEVER,null,null
+vw_carrier_freight_summary,carrier_tracking_no,13,character varying,varchar,YES,null,NEVER,null,null
+vw_carrier_freight_summary,dest_freight_cost,14,numeric,numeric,YES,null,NEVER,null,null
+vw_carrier_freight_summary,estimated_wht_1pct,15,numeric,numeric,YES,null,NEVER,null,null
+vw_carrier_freight_summary,dest_freight_paid_status,16,character varying,varchar,YES,null,NEVER,null,null
+vw_carrier_freight_summary,carrier_receipt_status,17,character varying,varchar,YES,null,NEVER,null,null
+vw_carrier_freight_summary,carrier_receipt_no,18,character varying,varchar,YES,null,NEVER,null,null
+vw_carrier_freight_summary,carrier_receipt_date,19,date,date,YES,null,NEVER,null,null
+vw_carrier_freight_summary,created_at,20,timestamp with time zone,timestamptz,YES,null,NEVER,null,null
+vw_monthly_profit_summary,profit_month,1,text,text,YES,null,NEVER,null,null
+vw_monthly_profit_summary,revenue,2,numeric,numeric,YES,null,NEVER,null,null
+vw_monthly_profit_summary,product_cogs,3,numeric,numeric,YES,null,NEVER,null,null
+vw_monthly_profit_summary,wage_cogs,4,numeric,numeric,YES,null,NEVER,null,null
+vw_monthly_profit_summary,cogs,5,numeric,numeric,YES,null,NEVER,null,null
+vw_monthly_profit_summary,gross_profit,6,numeric,numeric,YES,null,NEVER,null,null
+vw_monthly_profit_summary,opex,7,numeric,numeric,YES,null,NEVER,null,null
+vw_monthly_profit_summary,net_profit,8,numeric,numeric,YES,null,NEVER,null,null
+vw_sales_profit_analysis,document_id,1,uuid,uuid,YES,null,NEVER,null,null
+vw_sales_profit_analysis,document_number,2,character varying,varchar,YES,null,NEVER,null,null
+vw_sales_profit_analysis,document_date,3,date,date,YES,null,NEVER,null,null
+vw_sales_profit_analysis,doc_type,4,USER-DEFINED,document_type,YES,null,NEVER,null,null
+vw_sales_profit_analysis,contact_name,5,character varying,varchar,YES,null,NEVER,null,null
+vw_sales_profit_analysis,grand_total,6,numeric,numeric,YES,null,NEVER,null,null
+vw_sales_profit_analysis,net_revenue,7,numeric,numeric,YES,null,NEVER,null,null
+vw_sales_profit_analysis,product_cogs,8,numeric,numeric,YES,null,NEVER,null,null
+vw_sales_profit_analysis,wage_cogs,9,numeric,numeric,YES,null,NEVER,null,null
+vw_sales_profit_analysis,total_cogs,10,numeric,numeric,YES,null,NEVER,null,null

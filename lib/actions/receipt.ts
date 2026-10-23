@@ -60,9 +60,10 @@ import {
 } from "@/lib/utils/dual-freight";
 import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import {
-  matchVendorSkuCandidate,
+  matchVendorSkuWithConfidence,
   normalizeOcrSkuText,
 } from "@/lib/utils/ocr-sku";
+import type { OcrLineMatchResult, OcrLineMatchTier } from "@/types/ocr-line-match";
 import { resolveProductTaxCode } from "@/lib/utils/purchase-tax";
 import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
 import type { DocumentType } from "@/types/document";
@@ -274,6 +275,9 @@ export type ReceiptLineRow = {
   status: ReceiptMatchStatus;
   mappingId: string | null;
   matchedProduct: ReceiptProductSummary | null;
+  /** EXACT / NORMALIZED stay green. FUZZY asks the user to check color and size. */
+  matchTier?: OcrLineMatchTier | null;
+  similarityScore?: number | null;
   discountAmountPerUnit: number;
   netCost: number;
   /**
@@ -645,6 +649,9 @@ export async function matchReceiptItemsToProducts(
   vendorId: string,
   items: RawOcrLine[],
 ): Promise<MatchReceiptItemsResult> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) return { data: [], error: owner.error };
+
   const trimmedVendorId = vendorId?.trim() ?? "";
   if (!trimmedVendorId) {
     return { data: [], error: "กรุณาเลือกผู้จำหน่าย (vendor) ก่อน" };
@@ -663,7 +670,7 @@ export async function matchReceiptItemsToProducts(
 
     const rows: ReceiptLineRow[] = items.map((item, index) => {
       const normalizedSku = normalizeOcrSkuText(item.raw_vendor_sku);
-      const match = matchVendorSkuCandidate(item.raw_vendor_sku, loaded.candidates);
+      const match = matchVendorSkuWithConfidence(item.raw_vendor_sku, loaded.candidates);
       const { unitCostPrice, discountAmountPerUnit } = calculateNetUnitCost(
         item.unit_price,
         item.discount_text,
@@ -686,8 +693,10 @@ export async function matchReceiptItemsToProducts(
         unit_price: Number(item.unit_price) || 0,
         discount_text: item.discount_text ?? "",
         status: match ? "matched" : "unmatched",
-        mappingId: match?.id ?? null,
-        matchedProduct: match?.product ?? null,
+        mappingId: match?.candidate.id ?? null,
+        matchedProduct: match?.candidate.product ?? null,
+        matchTier: match?.matchTier ?? null,
+        similarityScore: match?.similarityScore ?? null,
         discountAmountPerUnit,
         netCost: baseQty > 0 ? roundTo4Decimals(unitCostPrice / conversionFactor) : 0,
         totalAmount: roundMoney(unitCostPrice * qty),
@@ -703,6 +712,164 @@ export async function matchReceiptItemsToProducts(
     const message =
       err instanceof Error ? err.message : "จับคู่รายการ OCR ไม่สำเร็จ";
     return { data: [], error: message };
+  }
+}
+
+function emptyOcrLineMatch(error: string | null = null): OcrLineMatchResult {
+  return {
+    matched: false,
+    mappingId: null,
+    internal_product_id: null,
+    sku: null,
+    product_name: null,
+    color: null,
+    size: null,
+    default_tax_type: null,
+    purchase_uom_code: null,
+    conversion_factor: null,
+    match_tier: null,
+    similarity_score: null,
+    error,
+  };
+}
+
+function isMissingOcrMatchRpc(
+  error: { code?: string; message?: string } | null,
+): boolean {
+  if (!error) return false;
+  const message = error.message ?? "";
+  return (
+    error.code === "PGRST202" ||
+    /match_vendor_ocr_line_item|does not exist|could not find the function|schema cache/i.test(
+      message,
+    )
+  );
+}
+
+function asOcrMatchTier(value: unknown): OcrLineMatchTier | null {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (raw === "EXACT" || raw === "NORMALIZED" || raw === "FUZZY") return raw;
+  return null;
+}
+
+function firstOcrRpcRow(data: unknown): Record<string, unknown> | null {
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row !== "object") return null;
+  return row as Record<string, unknown>;
+}
+
+async function findVendorMappingId(
+  supabaseAdmin: SupabaseClient,
+  vendorId: string,
+  internalProductId: string,
+  rawVendorSku: string,
+): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from("vendor_product_mapping")
+    .select("id, vendor_sku")
+    .eq("vendor_id", vendorId)
+    .eq("internal_product_id", internalProductId);
+  if (error || !data?.length) return null;
+  const exact = data.find((row) => String(row.vendor_sku ?? "").trim() === rawVendorSku);
+  return String((exact ?? data[0]).id);
+}
+
+/**
+ * Re-match one edited OCR line without scanning the whole bill again.
+ * Prefers RPC `match_vendor_ocr_line_item`. Falls back to the in-app
+ * vendor mapping matcher when that function is not deployed yet.
+ */
+export async function rematchSingleOcrLineAction(
+  vendorId: string,
+  rawVendorSku: string,
+): Promise<OcrLineMatchResult> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) return emptyOcrLineMatch(owner.error);
+
+  const trimmedVendorId = vendorId.trim();
+  const raw = rawVendorSku.trim();
+  if (!trimmedVendorId) return emptyOcrLineMatch("กรุณาเลือกผู้จำหน่าย");
+  if (!raw) return emptyOcrLineMatch("ข้อความสินค้าจากบิลว่างเปล่า");
+
+  try {
+    const supabaseAdmin = createSupabaseAdminClient();
+    const rpcClient = supabaseAdmin as unknown as {
+      rpc: (
+        fn: "match_vendor_ocr_line_item",
+        args: { p_vendor_id: string; p_raw_vendor_sku: string },
+      ) => Promise<{
+        data: unknown;
+        error: { code?: string; message?: string } | null;
+      }>;
+    };
+    const { data, error } = await rpcClient.rpc("match_vendor_ocr_line_item", {
+      p_vendor_id: trimmedVendorId,
+      p_raw_vendor_sku: raw,
+    });
+
+    if (error && !isMissingOcrMatchRpc(error)) {
+      return emptyOcrLineMatch(error.message ?? "จับคู่รายการไม่สำเร็จ");
+    }
+
+    if (!error) {
+      const row = firstOcrRpcRow(data);
+      const productId = String(row?.internal_product_id ?? "").trim();
+      if (!productId) return emptyOcrLineMatch(null);
+      const mappingId = await findVendorMappingId(
+        supabaseAdmin,
+        trimmedVendorId,
+        productId,
+        raw,
+      );
+      const factor = Number(row?.conversion_factor);
+      return {
+        matched: true,
+        mappingId,
+        internal_product_id: productId,
+        sku: row?.sku == null ? null : String(row.sku),
+        product_name: row?.product_name == null ? null : String(row.product_name),
+        color: row?.color == null ? null : String(row.color),
+        size: row?.size == null ? null : String(row.size),
+        default_tax_type: resolveProductTaxCode(
+          row?.default_tax_type == null ? null : String(row.default_tax_type),
+        ),
+        purchase_uom_code:
+          row?.purchase_uom_code == null
+            ? null
+            : String(row.purchase_uom_code).trim().toUpperCase(),
+        conversion_factor: Number.isFinite(factor) && factor > 0 ? factor : null,
+        match_tier: asOcrMatchTier(row?.match_tier),
+        similarity_score:
+          row?.similarity_score == null || !Number.isFinite(Number(row.similarity_score))
+            ? null
+            : Number(row.similarity_score),
+        error: null,
+      };
+    }
+
+    const loaded = await loadVendorMappingCandidates(supabaseAdmin, trimmedVendorId);
+    if (loaded.error) return emptyOcrLineMatch(loaded.error);
+    const scored = matchVendorSkuWithConfidence(raw, loaded.candidates);
+    if (!scored) return emptyOcrLineMatch(null);
+    const product = scored.candidate.product;
+    return {
+      matched: true,
+      mappingId: scored.candidate.id,
+      internal_product_id: product.id,
+      sku: product.sku,
+      product_name: product.name,
+      color: product.color,
+      size: product.size,
+      default_tax_type: product.tax_type,
+      purchase_uom_code: null,
+      conversion_factor: null,
+      match_tier: scored.matchTier,
+      similarity_score: scored.similarityScore,
+      error: null,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "จับคู่รายการไม่สำเร็จ";
+    return emptyOcrLineMatch(message);
   }
 }
 
@@ -825,6 +992,11 @@ export type CreateOnTheFlyReceiptMappingResult = {
 export async function createOnTheFlyReceiptMapping(
   input: CreateOnTheFlyReceiptMappingInput,
 ): Promise<CreateOnTheFlyReceiptMappingResult> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) {
+    return { mappingId: null, product: null, error: owner.error };
+  }
+
   const vendorId = input.vendorId?.trim() ?? "";
   const vendorSku = (input.vendorSku ?? "").trim();
   const normalizedKey = normalizeOcrSkuText(vendorSku);
@@ -881,12 +1053,9 @@ export async function createOnTheFlyReceiptMapping(
     if (loaded.error) {
       return { mappingId: null, product: null, error: loaded.error };
     }
-    const existing = loaded.candidates.find((candidate) => {
-      if (candidate.vendorSku.trim() === vendorSku) return true;
-      if (!normalizedKey) return false;
-      const key = candidate.normalizedKey?.trim() || normalizeOcrSkuText(candidate.vendorSku);
-      return key === normalizedKey;
-    });
+    const existing =
+      loaded.candidates.find((candidate) => candidate.vendorSku.trim() === vendorSku) ??
+      null;
     const mappingPayload: Record<string, unknown> = {
       vendor_id: vendorId,
       vendor_sku: vendorSku,
@@ -908,6 +1077,24 @@ export async function createOnTheFlyReceiptMapping(
     });
     let data = written.data;
     let error = written.error;
+
+    if (error?.code === "23505") {
+      const { data: conflict } = await supabaseAdmin
+        .from("vendor_product_mapping")
+        .select("id")
+        .eq("vendor_id", vendorId)
+        .eq("vendor_sku", vendorSku)
+        .maybeSingle();
+      if (conflict?.id) {
+        const retried = await writeVendorMappingRow(supabaseAdmin, {
+          existingId: String(conflict.id),
+          payload: mappingPayload,
+          select: mappingSelect,
+        });
+        data = retried.data;
+        error = retried.error;
+      }
+    }
 
     if (error) {
       return { mappingId: null, product: null, error: error.message, code: error.code };

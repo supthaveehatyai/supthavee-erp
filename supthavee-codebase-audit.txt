@@ -1,0 +1,847 @@
+﻿=== SUPTHAVEE ERP CODEBASE AUDIT (2026-10-23 20:56:38) ===
+
+--- 1. DIRECTORY & FILE TREE ---
+AGENTS.md
+blueprint.md
+CLAUDE.md
+database-schema.md
+eslint.config.mjs
+middleware.ts
+next-env.d.ts
+next.config.ts
+package-lock.json
+package.json
+postcss.config.mjs
+README.md
+tailwind.config.ts
+tsconfig.json
+.vscode\settings.json
+app\app-shell.tsx
+app\error.tsx
+app\layout.tsx
+app\not-found.tsx
+app\page.tsx
+app\(auth)\login\login-form.tsx
+app\(auth)\login\page.tsx
+app\(dashboard)\accounting-periods\accounting-periods-panel.tsx
+app\(dashboard)\accounting-periods\page.tsx
+app\(dashboard)\accounting-periods\run-depreciation-button.tsx
+app\(dashboard)\approvals\approval-center-panel.tsx
+app\(dashboard)\approvals\document-preview-content.tsx
+app\(dashboard)\approvals\expense-approval-review-content.tsx
+app\(dashboard)\approvals\expense-approval-review-sheet.tsx
+app\(dashboard)\approvals\page.tsx
+app\(dashboard)\settings\parameters\page.tsx
+app\(dashboard)\settings\parameters\parameter-approval-table.tsx
+app\(dashboard)\settings\parameters\parameter-settings-form.tsx
+app\(dashboard)\settings\parameters\wht-rates-table.tsx
+app\(erp)\dashboard\executive-dashboard.tsx
+app\(erp)\dashboard\page.tsx
+app\(erp)\expenses\page.tsx
+app\(erp)\expenses\create\expense-category-combobox.tsx
+app\(erp)\expenses\create\expense-create-workspace.tsx
+app\(erp)\expenses\create\page.tsx
+app\(erp)\expenses\[id]\expense-attachment-preview.tsx
+app\(erp)\expenses\[id]\expense-detail-actions.tsx
+app\(erp)\expenses\[id]\expense-receipt-preview.tsx
+app\(erp)\expenses\[id]\page.tsx
+app\(erp)\expenses\[id]\pay-installment-dialog.tsx
+app\(erp)\expenses\[id]\edit\page.tsx
+app\(erp)\expenses\[id]\print-wht\auto-print.tsx
+app\(erp)\expenses\[id]\print-wht\page.tsx
+app\(erp)\expenses\[id]\print-wht\wht-50tawi-certificate.tsx
+app\(erp)\finance\ap-ar\ap-ar-dashboard.tsx
+app\(erp)\finance\ap-ar\page.tsx
+app\(erp)\finance\ap-payment\page.tsx
+app\(erp)\finance\ap-payment\components\APPaymentClient.tsx
+app\(erp)\finance\ap-writeoff\page.tsx
+app\(erp)\finance\ap-writeoff\create\page.tsx
+app\(erp)\finance\ar-writeoff\page.tsx
+app\(erp)\finance\ar-writeoff\create\page.tsx
+app\(erp)\finance\bank-accounts\create-bank-account-form.tsx
+app\(erp)\finance\bank-accounts\page.tsx
+app\(erp)\finance\billing-notes\page.tsx
+app\(erp)\finance\billing-notes\create\page.tsx
+app\(erp)\finance\billing-notes\[id]\page.tsx
+app\(erp)\finance\deposits\page.tsx
+app\(erp)\finance\deposits\create\deposit-create-form.tsx
+app\(erp)\finance\deposits\create\page.tsx
+app\(erp)\finance\payments\page.tsx
+app\(erp)\finance\payments\components\ARPaymentClient.tsx
+app\(erp)\finance\refunds\create\page.tsx
+app\(erp)\finance\refunds\create\refund-create-form.tsx
+app\(erp)\finance\tax-reports\page.tsx
+app\(erp)\finance\tax-reports\tax-reports-panel.tsx
+app\(erp)\fixed-assets\asset-detail-sheet.tsx
+app\(erp)\fixed-assets\fixed-asset-attachment-uploader.tsx
+app\(erp)\fixed-assets\fixed-asset-filter.tsx
+app\(erp)\fixed-assets\fixed-asset-form-sheet.tsx
+app\(erp)\fixed-assets\fixed-assets-workspace.tsx
+app\(erp)\fixed-assets\page.tsx
+app\(erp)\inventory\adjustments\adjustments-workspace.tsx
+app\(erp)\inventory\adjustments\page.tsx
+app\(erp)\inventory\ledger\page.tsx
+app\(erp)\knowledge-base\document-standards\document-paper-size-select.tsx
+app\(erp)\knowledge-base\document-standards\page.tsx
+app\(erp)\production\kanban\page.tsx
+app\(erp)\profit-analysis\loading.tsx
+app\(erp)\profit-analysis\page.tsx
+app\(erp)\profit-analysis\profit-analysis-dashboard.tsx
+app\(erp)\profit-analysis\profit-analysis-month-picker.tsx
+app\(erp)\purchases\page.tsx
+app\(erp)\purchases\manual-receipt\manual-receipt-preview-dialog.tsx
+app\(erp)\purchases\manual-receipt\manual-receipt-workspace.tsx
+app\(erp)\purchases\manual-receipt\page.tsx
+app\(erp)\purchases\[doc_no]\page.tsx
+app\(erp)\purchases\[doc_no]\purchase-document-controls.tsx
+app\(erp)\sales\page.tsx
+app\(erp)\sales\cn\create\credit-note-create-workspace.tsx
+app\(erp)\sales\cn\create\page.tsx
+app\(erp)\sales\create\contact-person-combobox.tsx
+app\(erp)\sales\create\customer-combobox.tsx
+app\(erp)\sales\create\page.tsx
+app\(erp)\sales\create\sales-create-workspace.tsx
+app\(erp)\sales\edit\[id]\page.tsx
+app\(erp)\sales\edit\[id]\sales-edit-workspace.tsx
+app\(erp)\sales\orders\page.tsx
+app\(erp)\sales\orders\create\page.tsx
+app\(erp)\sales\orders\create\sales-order-workspace.tsx
+app\(erp)\sales\orders\edit\[id]\page.tsx
+app\(erp)\sales\[doc_no]\convert-document-dropdown.tsx
+app\(erp)\sales\[doc_no]\delete-draft-document-button.tsx
+app\(erp)\sales\[doc_no]\duplicate-document-button.tsx
+app\(erp)\sales\[doc_no]\issue-credit-note-button.tsx
+app\(erp)\sales\[doc_no]\issue-document-button.tsx
+app\(erp)\sales\[doc_no]\page.tsx
+app\(erp)\sales\[doc_no]\print-document-button.tsx
+app\(erp)\sales\[doc_no]\void-document-actions.tsx
+app\(erp)\settings\page.tsx
+app\(erp)\settings\company\page.tsx
+app\(erp)\settings\master-data\category-management.tsx
+app\(erp)\settings\master-data\master-data-hub.tsx
+app\(erp)\settings\master-data\page.tsx
+app\(erp)\settings\master-data\sizes\page.tsx
+app\(erp)\settings\master-data\sizes\sizes-manager.tsx
+app\(erp)\settings\users\create-user-dialog.tsx
+app\(erp)\settings\users\page.tsx
+app\(erp)\settings\users\role-permissions-panel.tsx
+app\(erp)\settings\users\user-abac-fields.tsx
+app\(erp)\settings\users\user-profile-form-sheet.tsx
+app\(erp)\settings\users\user-row-actions.tsx
+app\(erp)\tax\wht-report\error.tsx
+app\(erp)\tax\wht-report\page.tsx
+app\(erp)\tax\wht-report\wht-document-preview-content.tsx
+app\(erp)\tax\wht-report\wht-document-preview-sheet.tsx
+app\(erp)\tax\wht-report\wht-document-preview-utils.ts
+app\(erp)\tax\wht-report\wht-period-picker.tsx
+app\(erp)\tax\wht-report\wht-report-client.tsx
+app\(erp)\tax\wht-report\wht-report-dashboard.tsx
+app\(erp)\tax\wht-report\wht-tb-preview-content.tsx
+app\(erp)\tax\wht-report\print-50tawi\page.tsx
+app\actions\accounting-period.ts
+app\actions\ap-writeoff.ts
+app\actions\approval.ts
+app\actions\billing.ts
+app\actions\contacts.ts
+app\actions\dashboard.ts
+app\actions\depreciation.ts
+app\actions\documents.ts
+app\actions\expenses.ts
+app\actions\fixed-assets.ts
+app\actions\inventory-actions.ts
+app\actions\kanban-actions.ts
+app\actions\payment-slips.ts
+app\actions\payments.ts
+app\actions\refunds.ts
+app\actions\tax-actions.ts
+app\actions\technician-billing.ts
+app\actions\expense\ocr-action.ts
+app\actions\finance\ap-actions.ts
+app\actions\finance\deposit-actions.ts
+app\api\finance\export-tax\route.ts
+app\api\tax\export-wht\route.ts
+app\contacts\contacts-client.tsx
+app\contacts\contacts.ts
+app\contacts\page.tsx
+app\contacts\VendorForm.tsx
+app\dashboard\procurement\goods-receipt\GoodsReceiptUI.tsx
+app\dashboard\procurement\goods-receipt\page.tsx
+app\dashboard\procurement\goods-receipt\components\InvoiceDropzone.tsx
+app\dashboard\procurement\goods-receipt\components\SaveToLedgerDialog.tsx
+app\dashboard\procurement\vendor-mapping\page.tsx
+app\forbidden\page.tsx
+app\procurement\goods-receipt\page.tsx
+app\procurement\vendor-mapping\page.tsx
+app\products\brand-combobox.tsx
+app\products\category-combobox.tsx
+app\products\model-load-combobox.tsx
+app\products\page.tsx
+app\products\product-sku.ts
+app\products\ProductMatrixForm.tsx
+app\products\products-client.tsx
+app\products\vendor-combobox.tsx
+app\products\zod-schemas.ts
+app\products\actions\product-matrix.ts
+components\auth\access-context.tsx
+components\auth\forbidden-screen.tsx
+components\auth\sign-out-button.tsx
+components\contacts\contact-modal.tsx
+components\contacts\ManageContactDialog.tsx
+components\contacts\QuickEditContactButton.tsx
+components\contacts\skill-rate-card.tsx
+components\contacts\ViewContactDialog.tsx
+components\dashboard\audit-trail-table.tsx
+components\dashboard\sales-by-channel-chart.tsx
+components\documents\document-filter.tsx
+components\expenses\expense-print-button.tsx
+components\expenses\PrintExpenseTemplate.tsx
+components\finance\AllocatedAmountCell.tsx
+components\finance\AllocatedDocumentsTable.tsx
+components\finance\ApWriteoffForm.tsx
+components\finance\ApWriteoffPreviewContent.tsx
+components\finance\ApWriteoffQueryFilter.tsx
+components\finance\ApWriteoffRowActions.tsx
+components\finance\ArWriteoffForm.tsx
+components\finance\BillingNoteDetail.tsx
+components\finance\BillingNoteList.tsx
+components\finance\BillingNotePrintTemplate.tsx
+components\finance\CreateBillingNoteForm.tsx
+components\finance\DepositAllocationHistoryTable.tsx
+components\finance\DepositBalanceActions.tsx
+components\finance\DocumentPreviewSheet.tsx
+components\finance\OriginalReceiptStatusToggle.tsx
+components\finance\OutstandingPartyCombobox.tsx
+components\finance\OutstandingSummaryTable.tsx
+components\finance\PaymentKnockoffForm.tsx
+components\finance\PrintDocumentButton.tsx
+components\finance\PrintPaymentReceiptTemplate.tsx
+components\finance\PrintSettlementVoucherTemplate.tsx
+components\finance\ReferenceDocumentsSection.tsx
+components\finance\TechnicianBillingPanel.tsx
+components\inventory\adjustment-detail-sheet.tsx
+components\inventory\adjustment-form-dialog.tsx
+components\inventory\adjustment-matrix-picker.tsx
+components\inventory\ledger-filter.tsx
+components\inventory\ledger-sheet.tsx
+components\inventory\stock-card-matrix.tsx
+components\master\SizeFormDialog.tsx
+components\procurement\bill-attachment-picker.tsx
+components\procurement\bill-gallery-dialog.tsx
+components\procurement\BulkMatrixMappingUI.tsx
+components\procurement\CarrierFreightSummaryDialog.tsx
+components\procurement\DualFreightFields.tsx
+components\procurement\FullMatrixDialog.tsx
+components\procurement\goods-receipt-print-template.tsx
+components\procurement\InternalProductCombobox.tsx
+components\procurement\PatternGeneratorModal.tsx
+components\procurement\PurchaseUomCell.tsx
+components\procurement\QuickCreateDialog.tsx
+components\procurement\VendorCombobox.tsx
+components\production\create-job-modal.tsx
+components\production\create-mto-job-dialog.tsx
+components\production\job-detail-sheet.tsx
+components\production\job-operations-section.tsx
+components\production\kanban-board.tsx
+components\production\production-job-detail-sheet.tsx
+components\production\send-to-production-button.tsx
+components\products\BOMSetupPanel.tsx
+components\products\ProductModelImageUpload.tsx
+components\products\ProductModelPreviewSheet.tsx
+components\sales\batch-production-modal.tsx
+components\sales\LineItemProductThumb.tsx
+components\sales\model-matrix-picker.tsx
+components\sales\print-document-template.tsx
+components\sales\sales-channel-fields.tsx
+components\sales\sales-document-filter.tsx
+components\sales\smart-sku-picker.tsx
+components\sales\so-line-item-production-actions.tsx
+components\settings\CompanySettingsForm.tsx
+components\shared\attachment-sheet-viewer.tsx
+components\shared\page-mode-tabs.tsx
+components\shared\SmartColorCombobox.tsx
+components\shared\tiered-storage-image.tsx
+components\shared\document\issue-document-button.tsx
+components\shared\document\void-document-button.tsx
+components\shared\document\voided-document-alert.tsx
+components\shared\print\DocumentPrintFooter.tsx
+components\shared\print\DocumentPrintHeader.tsx
+components\shared\print\DocumentPrintSummary.tsx
+components\shared\print\GoodsReceiptSheetHeader.tsx
+components\shared\print\PrintLayout.tsx
+components\tax\TaxValidationModal.tsx
+components\tax\wht-50tawi-auto-print.tsx
+components\tax\wht-50tawi-certificate.tsx
+components\tax\wht-50tawi-print-layout.tsx
+components\ui\accordion.tsx
+components\ui\alert-dialog.tsx
+components\ui\alert.tsx
+components\ui\badge.tsx
+components\ui\button.tsx
+components\ui\card.tsx
+components\ui\command.tsx
+components\ui\dialog.tsx
+components\ui\dropdown-menu.tsx
+components\ui\input.tsx
+components\ui\label.tsx
+components\ui\popover.tsx
+components\ui\select.tsx
+components\ui\sheet.tsx
+components\ui\switch.tsx
+components\ui\table.tsx
+components\ui\tabs.tsx
+components\ui\textarea.tsx
+components\ui\tooltip.tsx
+docs\database-schema.md
+lib\supabase-server.ts
+lib\supabase.ts
+lib\utils.ts
+lib\actions\account-receivables.ts
+lib\actions\audit-actions.ts
+lib\actions\auth.actions.ts
+lib\actions\auth.ts
+lib\actions\bank-accounts.ts
+lib\actions\bom-actions.ts
+lib\actions\carrier-actions.ts
+lib\actions\contacts.ts
+lib\actions\credit-note-actions.ts
+lib\actions\dashboard-actions.ts
+lib\actions\document-actions.ts
+lib\actions\document-preview.ts
+lib\actions\gemini-model-actions.ts
+lib\actions\inventory-adjustment.ts
+lib\actions\inventory.ts
+lib\actions\manual-receipt-context.ts
+lib\actions\mapping.ts
+lib\actions\master-data-actions.ts
+lib\actions\master.ts
+lib\actions\parameter-actions.ts
+lib\actions\procurement-bills.ts
+lib\actions\product-actions.ts
+lib\actions\product.actions.ts
+lib\actions\product.ts
+lib\actions\production-actions.ts
+lib\actions\profit-analysis.actions.ts
+lib\actions\purchase-document-control.ts
+lib\actions\receipt.ts
+lib\actions\role-permissions.ts
+lib\actions\sales-order-actions.ts
+lib\actions\settings.ts
+lib\actions\technician-rates.ts
+lib\actions\uom-actions.ts
+lib\actions\user.actions.ts
+lib\actions\wht-rate-actions.ts
+lib\actions\finance\allocations.ts
+lib\actions\finance\ar.ts
+lib\actions\finance\attachments.ts
+lib\actions\finance\available-deposits.ts
+lib\actions\finance\billing-note-status.ts
+lib\actions\finance\create-ap-writeoff.ts
+lib\actions\finance\create-writeoff.ts
+lib\actions\finance\expense-cash-settlement.ts
+lib\actions\finance\payment.ts
+lib\actions\production\batch-send-to-production.ts
+lib\actions\production\job-operations-actions.ts
+lib\actions\production\send-to-production-action.ts
+lib\ai\gemini-client.ts
+lib\ai\goods-receipt-ocr.ts
+lib\approval\approval-rules.ts
+lib\approval\revalidate-approval.ts
+lib\audit\parse-audit-change.ts
+lib\auth\current-user.ts
+lib\auth\module-access.ts
+lib\auth\require-admin.ts
+lib\constants\accounting.ts
+lib\constants\document-actions.ts
+lib\constants\document-print-heading.ts
+lib\constants\document.ts
+lib\constants\expense-constants.ts
+lib\constants\print-paper-size.ts
+lib\contacts\duplicate-check.ts
+lib\finance\invoice-allocation-summary.ts
+lib\finance\refund-print-vat.ts
+lib\finance\refund-settlement.ts
+lib\inventory\landed-cost.ts
+lib\inventory\ledger-balances.ts
+lib\inventory\stock-availability.ts
+lib\master\category-hierarchy.ts
+lib\master\size-sort.ts
+lib\print\company-profile.ts
+lib\print\taxonomy-storage.ts
+lib\procurement\bill-notes.ts
+lib\procurement\compress-bill-image.ts
+lib\procurement\upload-bill-files.ts
+lib\sales\resolve-one-time-contact.ts
+lib\supabase\auditService.ts
+lib\supabase\fetch-all-pages.ts
+lib\supabase\server-admin.ts
+lib\supabase\ssr-server.ts
+lib\supabase\update-session.ts
+lib\tax\document-register-data.ts
+lib\tax\document-register-excel.ts
+lib\tax\monthly-wht-report-data.ts
+lib\tax\report-center-data.ts
+lib\tax\vat-ledger-data.ts
+lib\tax\vat-ledger-excel.ts
+lib\tax\wht-50tawi-data.ts
+lib\tax\wht-50tawi-format.ts
+lib\tax\wht-export.ts
+lib\utils\accounting.ts
+lib\utils\credit-note-line.ts
+lib\utils\currency.ts
+lib\utils\date-formatter.ts
+lib\utils\deposit-apply.ts
+lib\utils\document-summary.ts
+lib\utils\draft-document-no.ts
+lib\utils\dual-freight.ts
+lib\utils\expense-capitalize.ts
+lib\utils\expense-knockoff.ts
+lib\utils\image-compression.ts
+lib\utils\landed-cost.ts
+lib\utils\ocr-sku.ts
+lib\utils\outstanding-summary.ts
+lib\utils\payment-fifo.ts
+lib\utils\pricing.ts
+lib\utils\purchase-tax.ts
+lib\utils\purchase-uom.ts
+lib\utils\purchase-vat-revise.ts
+lib\utils\rec-payment-summary.ts
+lib\utils\skuGenerator.ts
+lib\utils\storage-tier.ts
+lib\utils\test-accounting.ts
+lib\utils\thai-baht-text.ts
+lib\utils\uom-conversion.ts
+lib\utils\void-remark.ts
+lib\validations\ap-writeoff.ts
+lib\validations\ar-writeoff.ts
+lib\validations\contacts.ts
+lib\validations\credit-note.ts
+lib\validations\master-category.ts
+lib\validations\master-size.ts
+lib\validations\payment-knockoff.ts
+lib\validations\refund.ts
+lib\validations\sales-document.ts
+lib\validations\system-settings.ts
+scripts\generate-cloud-seed.mjs
+scripts\generate-seed.mjs
+scripts\nas-archiver.mjs
+scripts\run-seed-to-cloud.mjs
+scripts\seed-uat-data.ts
+src\types\supabase.ts
+supabase\.temp\linked-project.json
+supabase\.temp\pgdelta\catalog-local-migrations-832d81bdc29e745a55191d608039b80d574d7957dd62d7af9d5b856f0d9d538a-1785729843296.json
+supabase\.temp\pgdelta\catalog-local-migrations-a8de363a5e6e5448659192df41ce470ec5bb9df6767c5d7f7f251873b23348ac-1786339054787.json
+supabase\functions\ocr-expense\deno.json
+supabase\functions\ocr-expense\index.ts
+supabase\functions\process-receipt-ocr\deno.json
+supabase\functions\process-receipt-ocr\index.ts
+supabase\functions\_shared\gemini-model.ts
+types\account-receivable.ts
+types\accounting-period.ts
+types\ap-payment.ts
+types\ap-writeoff.ts
+types\approval.ts
+types\ar-writeoff.ts
+types\audit.ts
+types\auth.ts
+types\available-deposit.ts
+types\bank-account.ts
+types\billing.ts
+types\bom.ts
+types\carrier.ts
+types\contact.ts
+types\credit-note.ts
+types\dashboard.ts
+types\database.types.ts
+types\deposit.ts
+types\depreciation.ts
+types\document-allocation.ts
+types\document-preview.ts
+types\document.ts
+types\expense.ts
+types\finance-report.ts
+types\fixed-asset.ts
+types\fixed-assets.ts
+types\gemini-model.ts
+types\inventory-adjustment.ts
+types\kanban.ts
+types\manual-receipt.ts
+types\master-category.ts
+types\master-size.ts
+types\parameter.ts
+types\payment-transaction-meta.ts
+types\payment.ts
+types\print-document.ts
+types\procurement-bills.ts
+types\product-matrix.ts
+types\product-preview.ts
+types\product-sale.ts
+types\production.ts
+types\profit-analysis.ts
+types\purchase-document-control.ts
+types\rbac.ts
+types\refund.ts
+types\sales-order.ts
+types\storage-tier.ts
+types\supabase.ts
+types\system-settings.ts
+types\tax-ledger.ts
+types\tax-wht-print.ts
+types\tax.ts
+types\technician-billing.ts
+types\technician-rate.ts
+types\user.ts
+types\wht-rate.ts
+utils\supabase\server.ts
+
+--- 2. SERVER ACTIONS & EXPORTED FUNCTIONS ---
+app\(dashboard)\approvals\document-preview-content.tsx:78: export async function DocumentPreviewContent({
+app\(dashboard)\approvals\expense-approval-review-content.tsx:140: export async function ExpenseApprovalReviewContent({
+app\(erp)\expenses\[id]\edit\page.tsx:21: export async function generateMetadata({
+app\(erp)\expenses\[id]\print-wht\page.tsx:12: export async function generateMetadata({
+app\(erp)\expenses\[id]\page.tsx:87: export async function generateMetadata({
+app\(erp)\finance\billing-notes\[id]\page.tsx:13: export async function generateMetadata({
+app\(erp)\purchases\[doc_no]\page.tsx:128: export async function generateMetadata({
+app\(erp)\sales\edit\[id]\page.tsx:15: export async function generateMetadata({
+app\(erp)\sales\orders\edit\[id]\page.tsx:16: export async function generateMetadata({
+app\(erp)\sales\[doc_no]\page.tsx:240: export async function generateMetadata({
+app\(erp)\tax\wht-report\print-50tawi\page.tsx:37: export async function generateMetadata({
+app\(erp)\tax\wht-report\wht-document-preview-content.tsx:9: export async function WhtDocumentPreviewContent({
+app\(erp)\tax\wht-report\wht-tb-preview-content.tsx:41: export async function WhtTbPreviewContent({
+app\actions\expense\ocr-action.ts:7: * Next.js requires `"use server"` modules to export async functions only.
+app\actions\expense\ocr-action.ts:602: export async function processExpenseOCR(
+app\actions\finance\ap-actions.ts:142: export async function getOutstandingSummary(): Promise<ApVendorOption[]> {
+app\actions\finance\ap-actions.ts:150: export async function getVendors(): Promise<ApVendorOption[]> {
+app\actions\finance\ap-actions.ts:245: export async function getOutstandingAP(
+app\actions\finance\ap-actions.ts:448: export async function submitAPPayment(
+app\actions\finance\deposit-actions.ts:123: export async function getDepositDocuments(
+app\actions\finance\deposit-actions.ts:345: export async function createDepositDocument(
+app\actions\finance\deposit-actions.ts:745: export async function manageDepositBalance(
+app\actions\finance\deposit-actions.ts:794: const { data: periodClosed, error: periodError } = await supabase.rpc(
+app\actions\accounting-period.ts:134: export async function getAccountingPeriods(): Promise<GetAccountingPeriodsResult> {
+app\actions\accounting-period.ts:170: export async function togglePeriodStatus(
+app\actions\accounting-period.ts:249: export async function createAccountingPeriod(
+app\actions\ap-writeoff.ts:198: export async function getOutstandingAP(): Promise<GetOutstandingApResult> {
+app\actions\ap-writeoff.ts:282: export async function createAPWriteOff(
+app\actions\ap-writeoff.ts:764: export async function listApWriteoffs(
+app\actions\ap-writeoff.ts:848: export async function getApWriteoffPreview(
+app\actions\ap-writeoff.ts:959: export async function deleteApWriteoffDraft(
+app\actions\ap-writeoff.ts:1039: export async function voidApWriteoff(
+app\actions\approval.ts:242: export async function getPendingApprovals(): Promise<GetPendingApprovalsResult> {
+app\actions\approval.ts:457: export async function processApproval(
+app\actions\billing.ts:126: export async function getBillingNotes(
+app\actions\billing.ts:245: export async function getBillingNoteById(
+app\actions\billing.ts:519: export async function getUnbilledInvoices(
+app\actions\billing.ts:645: export async function getOutstandingContactsSummary(
+app\actions\billing.ts:751: export async function createBillingNote(
+app\actions\billing.ts:968: const { data: docNoRaw, error: rpcError } = await supabase.rpc(
+app\actions\billing.ts:1059: export async function getOpenBillingNotesForContact(
+app\actions\billing.ts:1125: export async function getInvoicesByBillingNote(
+app\actions\contacts.ts:39: export async function getServiceModels(): Promise<GetServiceModelsResult> {
+app\actions\contacts.ts:43: export async function getTechnicianRates(
+app\actions\contacts.ts:49: export async function upsertTechnicianRate(
+app\actions\contacts.ts:55: export async function updateTechnicianRate(
+app\actions\contacts.ts:62: export async function deleteTechnicianRate(
+app\actions\contacts.ts:71: export async function getContactDetails(
+app\actions\contacts.ts:131: export async function updateContact(
+app\actions\contacts.ts:221: export async function addContactPerson(
+app\actions\contacts.ts:310: export async function listContactPersons(
+app\actions\dashboard.ts:109: export async function getPendingAR(): Promise<KpiMoneyResult> {
+app\actions\dashboard.ts:143: export async function getPendingAP(): Promise<KpiMoneyResult> {
+app\actions\dashboard.ts:177: export async function getYTDSales(): Promise<KpiMoneyResult> {
+app\actions\dashboard.ts:215: export async function getYTDExpenses(): Promise<KpiMoneyResult> {
+app\actions\dashboard.ts:250: export async function getTrueNetProfit(): Promise<ProfitabilityKpiResult> {
+app\actions\depreciation.ts:108: export async function calculateDepreciationAction(
+app\actions\depreciation.ts:202: export async function getAssetDepreciationLedger(
+app\actions\documents.ts:21: export async function deleteDraftDocument(
+app\actions\expenses.ts:460: export async function getExpenses(
+app\actions\expenses.ts:529: export async function getExpenseVendors(): Promise<GetExpenseVendorsResult> {
+app\actions\expenses.ts:562: export async function getExpenseCategories(): Promise<GetExpenseCategoriesResult> {
+app\actions\expenses.ts:600: export async function getBankAccounts(): Promise<GetExpenseBankAccountsResult> {
+app\actions\expenses.ts:640: export async function createExpenseCategory(
+app\actions\expenses.ts:820: export async function uploadExpenseReceipt(
+app\actions\expenses.ts:958: export async function createDraftExpense(
+app\actions\expenses.ts:1318: export async function updateDraftExpense(
+app\actions\expenses.ts:1496: export async function getExpenseById(
+app\actions\expenses.ts:1647: export async function sendExpenseForApproval(
+app\actions\expenses.ts:1786: export async function issueExpense(id: string): Promise<MutateExpenseResult> {
+app\actions\expenses.ts:1974: export async function deleteDraftExpense(
+app\actions\expenses.ts:2074: export async function voidExpense(
+app\actions\expenses.ts:2170: export async function payExpenseInstallment(
+app\actions\fixed-assets.ts:9: * `"use server"` modules may only export async functions (Turbopack / Vercel).
+app\actions\fixed-assets.ts:205: export async function getAssetCategories(options?: {
+app\actions\fixed-assets.ts:250: export async function getLinkableExpenses(
+app\actions\fixed-assets.ts:291: export async function getLinkedExpenseDocumentNo(
+app\actions\fixed-assets.ts:330: export async function uploadFixedAssetAttachment(
+app\actions\fixed-assets.ts:408: export async function getFixedAssets(
+app\actions\fixed-assets.ts:456: export async function createFixedAsset(
+app\actions\fixed-assets.ts:594: export async function updateFixedAsset(
+app\actions\fixed-assets.ts:723: export async function hasFixedAssetForExpense(
+app\actions\fixed-assets.ts:761: export async function getFixedAssetById(
+app\actions\fixed-assets.ts:801: export async function disposeFixedAsset(
+app\actions\kanban-actions.ts:393: export async function getProductionJobs(): Promise<GetProductionJobsResult> {
+app\actions\kanban-actions.ts:445: export async function getKanbanBoardData(): Promise<GetProductionJobsResult> {
+app\actions\kanban-actions.ts:455: export async function createProductionJob(
+app\actions\kanban-actions.ts:648: export async function updateJobStatus(
+app\actions\kanban-actions.ts:758: export async function getJobDetails(
+app\actions\kanban-actions.ts:996: export async function cancelProductionJob(
+app\actions\kanban-actions.ts:1221: export async function lookupTechnicianWageForService(
+app\actions\kanban-actions.ts:1294: export async function getTechnicianOptions(
+app\actions\kanban-actions.ts:1381: export async function updateProductionJobAssignment(
+app\actions\payment-slips.ts:72: export async function getPaymentSlipStorageMeta(
+app\actions\payment-slips.ts:98: export async function getPaymentTransactionStorageMetaByDocumentId(
+app\actions\refunds.ts:486: export async function getAvailableDeposits(
+app\actions\refunds.ts:591: export async function getRefundParties(
+app\actions\refunds.ts:738: export async function createRefundDocument(
+app\actions\tax-actions.ts:84: export async function getMonthlyWHTReport(
+app\actions\tax-actions.ts:120: export async function updateVendorTaxInfo(
+app\actions\technician-billing.ts:226: export async function getUnbilledTechnicianJobs(
+app\actions\technician-billing.ts:657: export async function createTechnicianBill(
+app\actions\technician-billing.ts:1024: const { data: docNoRaw, error: rpcError } = await supabase.rpc(
+app\api\backup\export\route.ts:56: export async function GET(request: NextRequest) {
+app\api\backup\restore\route.ts:67: export async function POST(request: NextRequest) {
+app\api\finance\export-tax\route.ts:30: export async function GET(request: NextRequest) {
+app\api\tax\export-wht\route.ts:32: export async function GET(request: NextRequest) {
+app\products\actions\product-matrix.ts:132: export async function uploadProductModelImage(
+app\products\actions\product-matrix.ts:210: export async function findProductModelByCode(
+app\products\actions\product-matrix.ts:242: export async function getProductModelById(
+app\products\actions\product-matrix.ts:281: export async function listLoadableProductModels(): Promise<{
+app\products\actions\product-matrix.ts:365: export async function insertDraftProductModel(
+app\products\actions\product-matrix.ts:400: export async function overwriteDraftProductModel(
+app\products\actions\product-matrix.ts:441: export async function saveDraftProductModel(
+app\products\actions\product-matrix.ts:451: export async function generateSkusFromModel(
+app\products\actions\product-matrix.ts:661: export async function getProductModelPreview(
+app\products\actions\product-matrix.ts:788: export async function updateProductModel(
+components\finance\ApWriteoffPreviewContent.tsx:37: export async function ApWriteoffPreviewContent({
+components\shared\print\DocumentPrintHeader.tsx:66: export async function DocumentPrintHeader({
+components\shared\print\PrintLayout.tsx:45: export async function PrintLayout({
+lib\actions\finance\allocations.ts:373: export async function getDocumentAllocationsByReceiptId(
+lib\actions\finance\allocations.ts:715: export async function getDepositAllocationHistory(
+lib\actions\finance\allocations.ts:860: export async function updateReceiptStatus(
+lib\actions\finance\ar.ts:139: export async function getAccountReceivables(): Promise<GetAccountReceivablesResult> {
+lib\actions\finance\ar.ts:195: export async function getAccountPayables(): Promise<GetAccountPayablesResult> {
+lib\actions\finance\attachments.ts:116: export async function uploadDocumentAttachment(
+lib\actions\finance\available-deposits.ts:39: export async function getAvailableDepositsForContact(
+lib\actions\finance\billing-note-status.ts:28: export async function syncBillingNotesAfterInvoicePayment(
+lib\actions\finance\create-ap-writeoff.ts:14: export async function getApWriteoffVendors(): Promise<ApVendorOption[]> {
+lib\actions\finance\create-ap-writeoff.ts:64: export async function getUnpaidApInvoicesByVendor(
+lib\actions\finance\create-ap-writeoff.ts:91: export async function createApWriteOff(
+lib\actions\finance\create-writeoff.ts:109: export async function createWriteOff(
+lib\actions\finance\expense-cash-settlement.ts:29: export async function settleExpenseCashPurchase(
+lib\actions\finance\payment.ts:115: export async function getOutstandingSummary(): Promise<DebtorOption[]> {
+lib\actions\finance\payment.ts:123: export async function getDebtorsList(): Promise<DebtorOption[]> {
+lib\actions\finance\payment.ts:224: export async function getUnpaidInvoicesByCustomer(
+lib\actions\finance\payment.ts:529: export async function processPaymentKnockoff(
+lib\actions\finance\payment.ts:893: const { data: rpcData, error: rpcError } = await supabase.rpc(
+lib\actions\production\batch-send-to-production.ts:64: export async function uploadBatchModelMockup(
+lib\actions\production\batch-send-to-production.ts:370: export async function batchSendToProduction(
+lib\actions\production\job-operations-actions.ts:130: export async function getJobOperations(
+lib\actions\production\job-operations-actions.ts:219: export async function upsertJobOperation(
+lib\actions\production\job-operations-actions.ts:433: export async function deleteJobOperation(
+lib\actions\production\job-operations-actions.ts:493: export async function getRoutingActivityRates(): Promise<GetRoutingActivityRatesResult> {
+lib\actions\production\send-to-production-action.ts:7: * Next.js rule: a `"use server"` file may ONLY export async functions.
+lib\actions\production\send-to-production-action.ts:810: export async function sendToProduction(
+lib\actions\production\send-to-production-action.ts:894: export async function uploadDocumentItemMockup(
+lib\actions\account-receivables.ts:71: export async function getAccountReceivables(): Promise<GetAccountReceivablesResult> {
+lib\actions\audit-actions.ts:122: export async function getRecentAuditLogs(): Promise<GetRecentAuditLogsResult> {
+lib\actions\auth.actions.ts:146: export async function signInWithPin(
+lib\actions\auth.actions.ts:235: export async function signOut(): Promise<SignOutResult> {
+lib\actions\auth.ts:47: export async function getAllRoles(): Promise<GetAllRolesResult> {
+lib\actions\backup-actions.ts:25: export async function triggerManualBackup(): Promise<TriggerManualBackupResult> {
+lib\actions\bank-accounts.ts:67: export async function getBankAccounts(): Promise<GetBankAccountsResult> {
+lib\actions\bank-accounts.ts:99: export async function createBankAccount(
+lib\actions\bank-accounts.ts:175: export async function createBankAccountFormAction(
+lib\actions\bank-accounts.ts:189: export async function toggleBankAccountStatus(
+lib\actions\bank-accounts.ts:223: export async function toggleBankAccountStatusFormAction(
+lib\actions\bom-actions.ts:99: export async function searchRawMaterialModels(
+lib\actions\bom-actions.ts:238: export async function getBOMByModelId(
+lib\actions\bom-actions.ts:412: export async function addBOMItem(
+lib\actions\bom-actions.ts:565: export async function removeBOMItem(bomId: string): Promise<MutateBOMItemResult> {
+lib\actions\carrier-actions.ts:71: export async function getActiveCarriers(): Promise<GetCarriersResult> {
+lib\actions\carrier-actions.ts:93: export async function createCarrier(input: {
+lib\actions\carrier-actions.ts:280: export async function listDestFreightSummary(input: {
+lib\actions\carrier-actions.ts:325: export async function confirmCarrierReceipt(input: {
+lib\actions\contacts.ts:82: export async function getContacts(): Promise<GetContactsResult> {
+lib\actions\contacts.ts:118: export async function createContact(
+lib\actions\contacts.ts:241: export async function toggleContactStatus(
+lib\actions\contacts.ts:278: export async function importContacts(
+lib\actions\credit-note-actions.ts:209: export async function getCreditNoteSourceAction(
+lib\actions\credit-note-actions.ts:384: export async function createCreditNoteAction(
+lib\actions\dashboard-actions.ts:7: * Next.js: a `"use server"` file may ONLY export async functions.
+lib\actions\dashboard-actions.ts:82: export async function getSalesByChannel(
+lib\actions\document-actions.ts:6: * Next.js rule: a `"use server"` file may ONLY export async functions.
+lib\actions\document-actions.ts:196: export async function generateDocumentNumber(
+lib\actions\document-actions.ts:212: const { data, error } = await supabase.rpc("generate_document_no", {
+lib\actions\document-actions.ts:309: export async function createDraftDocument(
+lib\actions\document-actions.ts:561: export async function createDocument(
+lib\actions\document-actions.ts:699: export async function listActiveCustomers(): Promise<GetCustomersResult> {
+lib\actions\document-actions.ts:722: export async function getContactPersons(
+lib\actions\document-actions.ts:832: export async function searchProductsForSales(
+lib\actions\document-actions.ts:842: export async function searchProductsForPurchases(
+lib\actions\document-actions.ts:1109: export async function completeDocument(
+lib\actions\document-actions.ts:1259: const { data: rpcData, error: rpcError } = await supabase.rpc(
+lib\actions\document-actions.ts:1403: export async function getDocumentByNo(
+lib\actions\document-actions.ts:1766: export async function getDocumentById(
+lib\actions\document-actions.ts:1805: export async function updateDraftDocument(
+lib\actions\document-actions.ts:2129: export async function issueDocument(
+lib\actions\document-actions.ts:2310: const { data: rpcData, error: rpcError } = await supabase.rpc(
+lib\actions\document-actions.ts:2482: export async function issueCreditNoteAction(
+lib\actions\document-actions.ts:2603: export async function getSalesDocuments(
+lib\actions\document-actions.ts:2710: export async function getPurchaseDocuments(
+lib\actions\document-actions.ts:2844: export async function convertDocument(
+lib\actions\document-actions.ts:3432: export async function voidDocumentAction(
+lib\actions\document-actions.ts:3566: export async function voidDocument(
+lib\actions\document-actions.ts:3586: const { data: rpcData, error: rpcError } = await supabase.rpc(
+lib\actions\document-actions.ts:3650: export async function cloneDocumentToNewDraft(
+lib\actions\document-actions.ts:3865: export async function duplicateDocument(
+lib\actions\document-actions.ts:4065: export async function uploadDocumentImage(
+lib\actions\document-preview.ts:50: export async function getDocumentPreview(
+lib\actions\gemini-model-actions.ts:86: export async function listAvailableGeminiModels(): Promise<ListGeminiModelsResult> {
+lib\actions\inventory-adjustment.ts:140: export async function getInventoryAdjustments(): Promise<GetInventoryAdjustmentsResult> {
+lib\actions\inventory-adjustment.ts:231: export async function adjustInventory(
+lib\actions\inventory-adjustment.ts:641: export async function getAdjustmentDetail(
+lib\actions\inventory.ts:349: export async function searchModelsForStockCard(
+lib\actions\inventory.ts:439: export async function searchBrandsForStockCard(
+lib\actions\inventory.ts:522: export async function getInventoryOverview(
+lib\actions\inventory.ts:939: export async function getInventoryOverviewByBrand(
+lib\actions\inventory.ts:962: export async function getStockCardByModel(
+lib\actions\inventory.ts:1202: export async function getProductStockCard(
+lib\actions\manual-receipt-context.ts:83: export async function getManualReceiptVendorContext(
+lib\actions\mapping.ts:264: export async function getActiveVendors(): Promise<GetActiveVendorsResult> {
+lib\actions\mapping.ts:308: export async function getVendorMappingData(
+lib\actions\mapping.ts:439: export async function getModelsByVendor(
+lib\actions\mapping.ts:502: export async function bulkUpsertVendorMapping(
+lib\actions\master-data-actions.ts:187: export async function getSizes(): Promise<GetSizesResult> {
+lib\actions\master-data-actions.ts:216: export async function createSize(
+lib\actions\master-data-actions.ts:266: export async function updateSize(
+lib\actions\master-data-actions.ts:314: export async function toggleSizeStatus(id: string): Promise<MutateSizeResult> {
+lib\actions\master-data-actions.ts:369: export async function getCategories(): Promise<GetCategoriesResult> {
+lib\actions\master-data-actions.ts:398: export async function createCategory(
+lib\actions\master-data-actions.ts:458: export async function updateCategory(
+lib\actions\master-data-actions.ts:552: export async function toggleCategoryStatus(
+lib\actions\master.ts:136: export async function getBrands(): Promise<GetBrandsResult> {
+lib\actions\master.ts:153: export async function getCategories(): Promise<GetCategoriesResult> {
+lib\actions\master.ts:177: export async function getUoms(): Promise<GetUomsResult> {
+lib\actions\master.ts:193: export async function getGenders(): Promise<GetGendersResult> {
+lib\actions\master.ts:210: export async function getVendors(): Promise<GetVendorsResult> {
+lib\actions\master.ts:238: export async function getColors(): Promise<GetColorsResult> {
+lib\actions\master.ts:286: export async function getSizesByBrand(brandId: string): Promise<GetSizesResult> {
+lib\actions\master.ts:319: export async function getGlobalSizes(): Promise<GetSizesResult> {
+lib\actions\master.ts:375: export async function getSizeSortCatalog(): Promise<GetSizeSortCatalogResult> {
+lib\actions\master.ts:403: export async function getAllSizesByBrand(brandId: string): Promise<GetSizesResult> {
+lib\actions\master.ts:437: export async function createSize(
+lib\actions\master.ts:495: export async function updateSize(
+lib\actions\master.ts:560: export async function createSizesBulk(
+lib\actions\master.ts:624: export async function getVendorMappingsByProductIds(
+lib\actions\master.ts:717: export async function getMasterDataForMatrix(): Promise<GetMasterDataResult> {
+lib\actions\master.ts:775: export async function createBrand(
+lib\actions\master.ts:830: export async function createVendor(
+lib\actions\master.ts:896: export async function createColor(
+lib\actions\master.ts:955: export async function createCategory(
+lib\actions\parameter-actions.ts:155: export async function getSystemParameter<K extends KnownSystemParameterKey>(
+lib\actions\parameter-actions.ts:158: export async function getSystemParameter(
+lib\actions\parameter-actions.ts:161: export async function getSystemParameter(
+lib\actions\parameter-actions.ts:268: export async function getParameterSettingsPageData(): Promise<GetParameterSettingsPageDataResult> {
+lib\actions\parameter-actions.ts:388: export async function requestParameterChange(
+lib\actions\parameter-actions.ts:516: export async function approveParameterChange(
+lib\actions\parameter-actions.ts:739: export async function rejectParameterChange(
+lib\actions\procurement-bills.ts:56: export async function uploadProcurementBillFile(
+lib\actions\procurement-bills.ts:116: export async function saveDocumentProcurementBills(input: {
+lib\actions\product-actions.ts:54: export async function deleteProductModel(
+lib\actions\product-actions.ts:186: export async function getProductsForCatalog() {
+lib\actions\product-actions.ts:215: export async function deactivateProductsByIds(productIds: string[]) {
+lib\actions\product.actions.ts:82: export async function searchProductModels(
+lib\actions\product.actions.ts:171: export async function getModelMatrixForSale(
+lib\actions\product.ts:89: export async function getModelsByVendorForQuickCreate(
+lib\actions\product.ts:180: export async function getSizesByBrand(
+lib\actions\product.ts:243: export async function quickCreateSKU(
+lib\actions\production-actions.ts:7: * Next.js rule: a `"use server"` file may ONLY export async functions.
+lib\actions\production-actions.ts:346: export async function getProductionJobs(): Promise<GetProductionJobsResult> {
+lib\actions\production-actions.ts:480: export async function updateJobStatus(
+lib\actions\production-actions.ts:623: export async function createProductionJob(
+lib\actions\production-actions.ts:816: export async function createProductionJobFromSO(
+lib\actions\production-actions.ts:1211: export async function searchManufacturedModels(
+lib\actions\production-actions.ts:1309: export async function getProductionJobDetails(
+lib\actions\production-actions.ts:1803: export async function executeMaterialBackflush(
+lib\actions\profit-analysis.actions.ts:66: export async function getMonthlyProfitKpi(
+lib\actions\profit-analysis.actions.ts:115: export async function getSalesProfitRows(
+lib\actions\profit-analysis.actions.ts:174: export async function getProfitAnalysisDashboard(
+lib\actions\purchase-document-control.ts:39: export async function revisePurchaseVatMode(input: {
+lib\actions\purchase-document-control.ts:180: export async function voidAndClonePurchaseDocument(input: {
+lib\actions\purchase-document-control.ts:233: export async function requestPurchaseDocumentControl(input: {
+lib\actions\purchase-document-control.ts:304: export async function loadVoidedPurchaseClone(docNo: string): Promise<{
+lib\actions\receipt.ts:431: export async function parseReceiptOcr(
+lib\actions\receipt.ts:644: export async function matchReceiptItemsToProducts(
+lib\actions\receipt.ts:719: export async function getInternalProductsForMatching(): Promise<GetInternalProductsResult> {
+lib\actions\receipt.ts:825: export async function createOnTheFlyReceiptMapping(
+lib\actions\receipt.ts:998: export async function checkDuplicateInvoice(
+lib\actions\receipt.ts:1145: export async function saveGoodsReceiptToLedger(
+lib\actions\receipt.ts:1918: export async function saveManualGoodsReceipt(
+lib\actions\role-permissions.ts:96: export async function getRolePermissions(): Promise<GetRolePermissionsResult> {
+lib\actions\role-permissions.ts:127: export async function updateRoleAccessibleModules(
+lib\actions\sales-order-actions.ts:7: * Next.js: a `"use server"` file may ONLY export async functions.
+lib\actions\sales-order-actions.ts:107: export async function saveSalesOrderDraft(
+lib\actions\sales-order-actions.ts:209: export async function uploadSalesOrderMockup(
+lib\actions\sales-order-actions.ts:285: export async function sendSalesOrderToProduction(
+lib\actions\sales-order-actions.ts:456: export async function getSalesOrders(
+lib\actions\settings.ts:228: export async function getDocumentPrintPaperSize(
+lib\actions\settings.ts:244: export async function updateSystemSettings(
+lib\actions\settings.ts:308: export async function updateDocumentPrintSetting(
+lib\actions\settings.ts:385: export async function uploadCompanyLogo(
+lib\actions\technician-rates.ts:34: export async function getServiceModels(): Promise<GetServiceModelsResult> {
+lib\actions\technician-rates.ts:77: export async function getTechnicianRates(
+lib\actions\technician-rates.ts:166: export async function upsertTechnicianRate(
+lib\actions\technician-rates.ts:267: export async function updateTechnicianRate(
+lib\actions\technician-rates.ts:314: export async function deleteTechnicianRate(
+lib\actions\uom-actions.ts:27: export async function getPurchaseUoms(): Promise<GetPurchaseUomsResult> {
+lib\actions\user.actions.ts:194: export async function getUsers(): Promise<GetUsersResult> {
+lib\actions\user.actions.ts:242: export async function getAppRoles(): Promise<GetAppRolesResult> {
+lib\actions\user.actions.ts:277: export async function createUserWithPin(
+lib\actions\user.actions.ts:426: export async function deactivateUser(
+lib\actions\user.actions.ts:523: export async function reactivateUser(
+lib\actions\user.actions.ts:613: export async function updateUserProfile(
+lib\actions\user.actions.ts:751: export async function updateUserAbacSettings(
+lib\actions\wht-rate-actions.ts:47: export async function getActiveWhtRates(): Promise<GetWhtRatesResult> {
+lib\actions\wht-rate-actions.ts:78: export async function getAllWhtRates(): Promise<GetWhtRatesResult> {
+lib\actions\wht-rate-actions.ts:108: export async function createWhtRate(
+lib\actions\wht-rate-actions.ts:163: export async function setWhtRateActive(
+lib\ai\gemini-client.ts:119: export async function listGeminiGenerateModels(
+lib\ai\gemini-client.ts:240: export async function generateGeminiContent(options: {
+lib\ai\goods-receipt-ocr.ts:231: export async function runGoodsReceiptOcr(input: {
+lib\auth\current-user.ts:52: export async function getCurrentAuthUser(): Promise<CurrentAuthUser | null> {
+lib\auth\current-user.ts:125: export async function requireSessionUserId(): Promise<RequireSessionUserIdResult> {
+lib\auth\require-admin.ts:128: export async function requireAdmin(
+lib\backup\backup-file.ts:91: export async function readBackupFileText(file: File): Promise<string> {
+lib\backup\manual-backup-auth.ts:39: export async function resolveManualBackupAuth(): Promise<
+lib\backup\restore-rows.ts:131: export async function upsertChunkWithAutoStrip(
+lib\contacts\duplicate-check.ts:27: export async function findDuplicateContactError(
+lib\finance\refund-print-vat.ts:52: export async function loadSourceDepositVat(
+lib\finance\refund-settlement.ts:22: export async function reverseRefundSettlementOnReject(
+lib\inventory\ledger-balances.ts:26: export async function fetchOnHandQtyByProductIds(
+lib\inventory\ledger-balances.ts:41: const rpc = await supabase.rpc("get_on_hand_qty_by_product_ids", {
+lib\inventory\stock-availability.ts:24: export async function loadServiceProductIdSet(
+lib\inventory\stock-availability.ts:76: export async function getCommittedStockByProducts(
+lib\inventory\stock-availability.ts:169: export async function assertStockOutAvailability(
+lib\procurement\compress-bill-image.ts:34: export async function compressBillFile(file: File): Promise<File> {
+lib\procurement\upload-bill-files.ts:5: export async function uploadProcurementBills(
+lib\sales\resolve-one-time-contact.ts:73: export async function resolveOneTimeCustomerContactId(input: {
+lib\supabase\auditService.ts:119: export async function logAuditTrail(
+lib\supabase\auditService.ts:195: export async function logAuditTrailFromParams(
+lib\supabase\auditService.ts:216: export async function insertAuditLog(
+lib\supabase\fetch-all-pages.ts:19: export async function fetchAllPages<T>(
+lib\supabase\ssr-server.ts:10: export async function createSupabaseSSRClient() {
+lib\supabase\update-session.ts:29: export async function updateSession(request: NextRequest): Promise<NextResponse> {
+lib\tax\document-register-data.ts:281: export async function loadDocumentRegisterReport(input: {
+lib\tax\document-register-excel.ts:55: export async function buildDocumentRegisterWorkbook(
+lib\tax\monthly-wht-report-data.ts:345: export async function loadMonthlyWhtReportRows(
+lib\tax\report-center-data.ts:44: export async function loadReportCenterPreview(input: {
+lib\tax\vat-ledger-data.ts:224: export async function loadVatLedgerReport(input: {
+lib\tax\vat-ledger-excel.ts:41: export async function buildVatLedgerWorkbook(
+lib\tax\wht-50tawi-data.ts:53: export async function loadWht50TawiPayer(): Promise<Wht50TawiPayer> {
+lib\tax\wht-50tawi-data.ts:209: export async function loadWht50TawiPrintData(
+lib\utils\image-compression.ts:48: export async function compressImageForOcr(file: File): Promise<File> {
+lib\utils\image-compression.ts:65: export async function compressImage(file: File): Promise<File> {
+lib\utils\image-compression.ts:82: export async function compressImages(files: File[]): Promise<File[]> {
+supabase\functions\_shared\gemini-model.ts:65: export async function listGeminiModelCatalog(
+supabase\functions\_shared\gemini-model.ts:181: export async function loadGeminiModelVersion(
+supabase\functions\_shared\gemini-model.ts:206: export async function generateGeminiContent(options: {
+middleware.ts:13: export async function middleware(request: NextRequest) {

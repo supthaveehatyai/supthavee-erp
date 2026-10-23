@@ -37,6 +37,8 @@ import {
   Check,
   CheckCircle2,
   PackageCheck,
+  Pencil,
+  RefreshCw,
   Sparkles,
   UploadCloud,
   X,
@@ -49,6 +51,7 @@ import {
   getInternalProductsForMatching,
   matchReceiptItemsToProducts,
   parseReceiptOcr,
+  rematchSingleOcrLineAction,
   saveGoodsReceiptToLedger,
   type ReceiptLineRow,
   type ReceiptProductSummary,
@@ -207,7 +210,21 @@ function VerificationRow({
   );
 }
 
-function StatusBadge({ status }: { status: ReceiptLineRow["status"] }) {
+function StatusBadge({
+  status,
+  matchTier,
+}: {
+  status: ReceiptLineRow["status"];
+  matchTier?: ReceiptLineRow["matchTier"];
+}) {
+  if (status === "matched" && matchTier === "FUZZY") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+        <AlertTriangle className="size-3" aria-hidden />
+        Fuzzy Matched - โปรดตรวจสี/ไซส์
+      </span>
+    );
+  }
   if (status === "matched") {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
@@ -293,6 +310,10 @@ export default function GoodsReceiptUI({
   const [draftProductByLineKey, setDraftProductByLineKey] = useState<
     Record<string, string>
   >({});
+  const [editingRawKey, setEditingRawKey] = useState<string | null>(null);
+  const [rawDraft, setRawDraft] = useState("");
+  const [rematchingKey, setRematchingKey] = useState<string | null>(null);
+  const [overrideLineKey, setOverrideLineKey] = useState<string | null>(null);
   const [confirmingLineKey, setConfirmingLineKey] = useState<string | null>(
     null,
   );
@@ -572,7 +593,88 @@ export default function GoodsReceiptUI({
     void refreshInternalProducts();
   }
 
-  /** "Confirm Mapping" — saves `raw_vendor_sku` as Ground Truth, then refreshes the row. */
+  function beginRawEdit(row: ReceiptLineRow) {
+    setEditingRawKey(row.lineKey);
+    setRawDraft(row.raw_vendor_sku);
+  }
+
+  async function saveRawAndRematch(row: ReceiptLineRow) {
+    if (rematchingKey || !vendorId) return;
+    const nextRaw = rawDraft.trim();
+    if (!nextRaw) {
+      toast.error("ข้อความสินค้าจากบิลว่างเปล่า");
+      return;
+    }
+
+    setRematchingKey(row.lineKey);
+    const result = await rematchSingleOcrLineAction(vendorId, nextRaw);
+    setRematchingKey(null);
+
+    if (result.error) {
+      toast.error(result.error);
+      return;
+    }
+
+    setEditingRawKey(null);
+    setRows((current) =>
+      current.map((item) => {
+        if (item.lineKey !== row.lineKey) return item;
+        if (!result.matched || !result.internal_product_id || !result.mappingId) {
+          return {
+            ...item,
+            raw_vendor_sku: nextRaw,
+            status: "unmatched" as const,
+            mappingId: null,
+            matchedProduct: null,
+            matchTier: null,
+            similarityScore: null,
+          };
+        }
+        return {
+          ...item,
+          raw_vendor_sku: nextRaw,
+          status: "matched" as const,
+          mappingId: result.mappingId,
+          matchedProduct: {
+            id: result.internal_product_id,
+            sku: result.sku ?? "",
+            name: result.product_name ?? result.sku ?? "สินค้า",
+            color: result.color,
+            size: result.size,
+            tax_type: result.default_tax_type,
+          },
+          matchTier: result.match_tier,
+          similarityScore: result.similarity_score,
+          purchaseUomCode: result.purchase_uom_code || item.purchaseUomCode,
+          conversionFactor:
+            result.conversion_factor && result.conversion_factor > 0
+              ? result.conversion_factor
+              : item.conversionFactor,
+        };
+      }),
+    );
+
+    if (result.matched && result.internal_product_id && result.mappingId) {
+      toast.success("จับคู่สินค้าใหม่อัตโนมัติสำเร็จ");
+      return;
+    }
+    toast.message("ยังไม่พบคู่ที่ตรงกัน — ข้อความที่แก้แล้วพร้อมให้กด Confirm");
+  }
+
+  function beginSkuOverride(row: ReceiptLineRow) {
+    setOverrideLineKey(row.lineKey);
+    setDraftProductByLineKey((current) => ({
+      ...current,
+      [row.lineKey]: row.matchedProduct?.id ?? "",
+    }));
+  }
+
+  function cancelSkuOverride(lineKey: string) {
+    setOverrideLineKey((current) => (current === lineKey ? null : current));
+    handleClearDraft(lineKey);
+  }
+
+  /** "Confirm Mapping" — saves the latest trimmed `raw_vendor_sku`, then refreshes the row. */
   async function handleConfirmMapping(row: ReceiptLineRow) {
     if (confirmingLineKey || !vendorId) return;
 
@@ -622,6 +724,8 @@ export default function GoodsReceiptUI({
         status: "matched" as const,
         mappingId: result.mappingId,
         matchedProduct: result.product,
+        matchTier: "EXACT" as const,
+        similarityScore: 1,
       };
     });
     setRows(nextRows);
@@ -646,6 +750,7 @@ export default function GoodsReceiptUI({
       for (const lineKey of siblingKeys) delete next[lineKey];
       return next;
     });
+    setOverrideLineKey((current) => (current === row.lineKey ? null : current));
     toast.success(
       siblingKeys.size > 0
         ? `บันทึก Ground Truth แล้ว: ${row.raw_vendor_sku} ↔ ${result.product.sku} · จับคู่เพิ่ม ${siblingKeys.size.toLocaleString("th-TH")} แถวที่ข้อความตรงกัน`
@@ -1274,7 +1379,11 @@ export default function GoodsReceiptUI({
                 <TableBody>
                   {rows.map((row) => {
                     const isMatched = row.status === "matched";
-                    const isBusy = confirmingLineKey === row.lineKey;
+                    const isFuzzy = isMatched && row.matchTier === "FUZZY";
+                    const isOverriding = overrideLineKey === row.lineKey;
+                    const isEditingRaw = editingRawKey === row.lineKey;
+                    const isBusy =
+                      confirmingLineKey === row.lineKey || rematchingKey === row.lineKey;
                     const draftProductId = draftProductByLineKey[row.lineKey] ?? "";
                     const qty = Math.max(0, Number(row.qty) || 0);
                     const factor = resolveConversionFactor(row.conversionFactor);
@@ -1295,7 +1404,8 @@ export default function GoodsReceiptUI({
                       <TableRow
                         key={row.lineKey}
                         className={cn(
-                          isMatched && "bg-emerald-50/40",
+                          isMatched && !isFuzzy && "bg-emerald-50/40",
+                          isFuzzy && "border-l-4 border-l-amber-400 bg-amber-50/50",
                           !isMatched &&
                             "border-l-4 border-l-amber-400 bg-amber-50/60 hover:bg-amber-50",
                           row.isFoc && "bg-slate-50/80 text-slate-400",
@@ -1303,7 +1413,7 @@ export default function GoodsReceiptUI({
                       >
                         <TableCell>
                           <div className="flex flex-col gap-1">
-                            <StatusBadge status={row.status} />
+                            <StatusBadge status={row.status} matchTier={row.matchTier} />
                             {row.isFoc ? (
                               <span className="inline-flex w-fit items-center rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
                                 ของแถม (FOC)
@@ -1312,16 +1422,63 @@ export default function GoodsReceiptUI({
                           </div>
                         </TableCell>
 
-                        {/* OCR Raw Text — Ground Truth, never edited/predicted */}
                         <TableCell>
-                          <p
-                            className={cn(
-                              "font-mono text-xs font-semibold",
-                              row.isFoc ? "text-slate-400 line-through" : "text-slate-800",
-                            )}
-                          >
-                            {row.raw_vendor_sku || "—"}
-                          </p>
+                          {isEditingRaw ? (
+                            <div className="flex items-center gap-1.5">
+                              <Input
+                                value={rawDraft}
+                                autoFocus
+                                disabled={isBusy}
+                                className="h-8 font-mono text-xs"
+                                aria-label={`แก้ข้อความ OCR ${row.raw_vendor_sku}`}
+                                onChange={(event) => setRawDraft(event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    void saveRawAndRematch(row);
+                                  }
+                                  if (event.key === "Escape") setEditingRawKey(null);
+                                }}
+                              />
+                              <Button
+                                type="button"
+                                size="icon"
+                                className="h-8 w-8 shrink-0"
+                                disabled={isBusy}
+                                title="บันทึกและจับคู่ใหม่"
+                                onClick={() => void saveRawAndRematch(row)}
+                              >
+                                {rematchingKey === row.lineKey ? (
+                                  <RefreshCw className="size-3.5 animate-spin" aria-hidden />
+                                ) : (
+                                  <Check className="size-3.5" aria-hidden />
+                                )}
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="flex items-start gap-1">
+                              <p
+                                className={cn(
+                                  "font-mono text-xs font-semibold",
+                                  row.isFoc ? "text-slate-400 line-through" : "text-slate-800",
+                                )}
+                              >
+                                {row.raw_vendor_sku || "—"}
+                              </p>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="size-6 shrink-0 text-slate-500"
+                                disabled={isBusy}
+                                title="แก้ข้อความ OCR"
+                                aria-label={`แก้ข้อความ OCR ${row.raw_vendor_sku}`}
+                                onClick={() => beginRawEdit(row)}
+                              >
+                                <Pencil className="size-3.5" aria-hidden />
+                              </Button>
+                            </div>
+                          )}
                           {row.raw_description ? (
                             <p className="mt-0.5 max-w-[200px] truncate text-[11px] text-slate-400">
                               {row.raw_description}
@@ -1331,17 +1488,24 @@ export default function GoodsReceiptUI({
 
                         {/* Matched Internal Product */}
                         <TableCell>
-                          {isMatched && row.matchedProduct ? (
+                          {isMatched && row.matchedProduct && !isOverriding ? (
                             <div className="flex items-start gap-1.5">
                               <CheckCircle2
-                                className="mt-0.5 size-4 shrink-0 text-emerald-600"
+                                className={cn(
+                                  "mt-0.5 size-4 shrink-0",
+                                  isFuzzy ? "text-amber-600" : "text-emerald-600",
+                                )}
                                 aria-hidden
                               />
-                              <div className="min-w-0">
+                              <div className="min-w-0 flex-1">
                                 <p
                                   className={cn(
                                     "truncate text-sm font-semibold",
-                                    row.isFoc ? "text-slate-400" : "text-emerald-700",
+                                    row.isFoc
+                                      ? "text-slate-400"
+                                      : isFuzzy
+                                        ? "text-amber-800"
+                                        : "text-emerald-700",
                                   )}
                                 >
                                   {row.matchedProduct.name}
@@ -1362,12 +1526,25 @@ export default function GoodsReceiptUI({
                                   </span>
                                 ) : null}
                               </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 shrink-0 gap-1 px-2 text-[11px]"
+                                disabled={isBusy}
+                                onClick={() => beginSkuOverride(row)}
+                              >
+                                <RefreshCw className="size-3" aria-hidden />
+                                เปลี่ยน SKU
+                              </Button>
                             </div>
                           ) : (
                             <div className="space-y-1.5 rounded-lg border border-amber-300 bg-amber-100/70 p-2">
                               <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800">
                                 <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
-                                ไม่พบสินค้าที่ตรงกัน — เลือกสินค้าภายใน
+                                {isOverriding
+                                  ? "เปลี่ยนสินค้าภายใน — เลือก SKU ใหม่แล้วกด Confirm"
+                                  : "ไม่พบสินค้าที่ตรงกัน — เลือกสินค้าภายใน"}
                               </div>
                               <div className="flex items-center gap-1.5">
                                 <div className="min-w-0 flex-1">
@@ -1413,7 +1590,20 @@ export default function GoodsReceiptUI({
                                     </>
                                   )}
                                 </Button>
+                                {isOverriding ? (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-9 shrink-0"
+                                    disabled={isBusy}
+                                    onClick={() => cancelSkuOverride(row.lineKey)}
+                                  >
+                                    ยกเลิก
+                                  </Button>
+                                ) : null}
                               </div>
+                              {isOverriding ? null : (
                               <Button
                                 type="button"
                                 variant="outline"
@@ -1424,6 +1614,7 @@ export default function GoodsReceiptUI({
                               >
                                 🚚 ย้ายไปค่าส่งต้นทาง
                               </Button>
+                              )}
                             </div>
                           )}
                         </TableCell>

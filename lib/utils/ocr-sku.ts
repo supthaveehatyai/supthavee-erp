@@ -115,26 +115,38 @@ function candidateKey(candidate: VendorSkuCandidate): string {
   return stored || normalizeOcrSkuText(candidate.vendorSku);
 }
 
+export type VendorSkuMatchTier = "EXACT" | "NORMALIZED" | "FUZZY";
+
+export type VendorSkuMatch<T extends VendorSkuCandidate> = {
+  candidate: T;
+  matchTier: VendorSkuMatchTier;
+  similarityScore: number;
+};
+
 /**
  * 1. Exact trimmed text.
  * 2. Canonical normalized text, including a stored `normalized_key`.
  * 3. Dice >= 0.88 only when size and color tokens are identical.
  * A tied fuzzy score is left unmatched.
  */
-export function matchVendorSkuCandidate<T extends VendorSkuCandidate>(
+export function matchVendorSkuWithConfidence<T extends VendorSkuCandidate>(
   ocrRawText: string,
   candidates: T[],
-): T | null {
+): VendorSkuMatch<T> | null {
   const raw = (ocrRawText ?? "").trim();
   const exact = candidates.find((candidate) => candidate.vendorSku.trim() === raw);
-  if (exact) return exact;
+  if (exact) {
+    return { candidate: exact, matchTier: "EXACT", similarityScore: 1 };
+  }
 
   const normalized = normalizeOcrSkuText(ocrRawText);
   if (normalized) {
     const canonical = candidates.find(
       (candidate) => candidateKey(candidate) === normalized,
     );
-    if (canonical) return canonical;
+    if (canonical) {
+      return { candidate: canonical, matchTier: "NORMALIZED", similarityScore: 1 };
+    }
   }
 
   if (normalized.length < 2) return null;
@@ -160,5 +172,16 @@ export function matchVendorSkuCandidate<T extends VendorSkuCandidate>(
   }
 
   if (!best || best.score <= runnerUp) return null;
-  return best.candidate;
+  return {
+    candidate: best.candidate,
+    matchTier: "FUZZY",
+    similarityScore: best.score,
+  };
+}
+
+export function matchVendorSkuCandidate<T extends VendorSkuCandidate>(
+  ocrRawText: string,
+  candidates: T[],
+): T | null {
+  return matchVendorSkuWithConfidence(ocrRawText, candidates)?.candidate ?? null;
 }
