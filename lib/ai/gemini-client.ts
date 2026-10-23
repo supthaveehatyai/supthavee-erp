@@ -5,6 +5,7 @@
 
 import {
   buildOcrModelCascade,
+  isGeminiCascadeFallbackError,
   isGeminiQuotaError,
   OCR_QUOTA_EXHAUSTED_MESSAGE,
 } from "@/lib/ai/ocr-quota";
@@ -171,67 +172,53 @@ async function generateWithModel(
   parts: GeminiPart[],
 ): Promise<string> {
   const url = `${MODELS_URL}/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  let lastMessage = "Gemini request failed";
-
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: parts.map((part) =>
-              "text" in part
-                ? { text: part.text }
-                : {
-                    inline_data: {
-                      mime_type: part.inlineData.mimeType,
-                      data: part.inlineData.data,
-                    },
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [
+        {
+          role: "user",
+          parts: parts.map((part) =>
+            "text" in part
+              ? { text: part.text }
+              : {
+                  inline_data: {
+                    mime_type: part.inlineData.mimeType,
+                    data: part.inlineData.data,
                   },
-            ),
-          },
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: "application/json",
+                },
+          ),
         },
-      }),
-    });
+      ],
+      generationConfig: {
+        temperature: 0.1,
+        responseMimeType: "application/json",
+      },
+    }),
+  });
 
-    if (response.ok) {
-      const body = (await response.json()) as {
-        candidates?: Array<{
-          content?: { parts?: Array<{ text?: string }> };
-        }>;
-      };
-      const text = (body.candidates?.[0]?.content?.parts ?? [])
-        .map((part) => part.text ?? "")
-        .join("")
-        .trim();
-      if (!text) {
-        throw Object.assign(new Error("Gemini returned empty response"), {
-          status: 502,
-        });
-      }
-      return text;
+  if (response.ok) {
+    const body = (await response.json()) as {
+      candidates?: Array<{
+        content?: { parts?: Array<{ text?: string }> };
+      }>;
+    };
+    const text = (body.candidates?.[0]?.content?.parts ?? [])
+      .map((part) => part.text ?? "")
+      .join("")
+      .trim();
+    if (!text) {
+      throw Object.assign(new Error("Gemini returned empty response"), {
+        status: 502,
+      });
     }
-
-    const error = await readGoogleError(response);
-    lastMessage = error.message;
-    if (isGeminiQuotaError(error.status, error.message)) {
-      throw Object.assign(new Error(error.message), { status: 429 });
-    }
-    if (error.status === 503 && attempt < 3) {
-      await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
-      continue;
-    }
-
-    throw Object.assign(new Error(error.message), { status: error.status });
+    return text;
   }
 
-  throw Object.assign(new Error(lastMessage), { status: 503 });
+  const error = await readGoogleError(response);
+  const status = isGeminiQuotaError(error.status, error.message) ? 429 : error.status;
+  throw Object.assign(new Error(error.message), { status });
 }
 
 function errorStatus(error: unknown): number | undefined {
@@ -250,22 +237,33 @@ export class GeminiQuotaExhaustedError extends Error {
 }
 
 /**
- * One generateContent call per invoice.
- * On daily quota (429) the same model is not retried — the next id in the
- * cascade is used immediately.
+ * One generateContent call per invoice. Models already at quota are skipped.
+ * 429, 404, and 503 mark that model exhausted and try the next id.
  */
 export async function generateGeminiContent(options: {
   apiKey: string;
   preferredModel: string;
   parts: GeminiPart[];
+  modelCascade?: string[] | null;
+  skipModels?: string[] | null;
   onModelOutcome?: (outcome: { model: string; exhausted: boolean }) => Promise<void>;
 }): Promise<GeminiGenerateResult> {
   const preferred = cleanGeminiModelId(options.preferredModel);
-  const cascade = buildOcrModelCascade(preferred);
-  let quotaFailures = 0;
+  const cascade = buildOcrModelCascade(preferred, options.modelCascade);
+  const skipped = new Set(
+    (options.skipModels ?? []).map((model) => model.replace(/^models\//, "").trim()),
+  );
+  let fallbackFailures = 0;
   let lastError: unknown = null;
+  let attempted = 0;
 
   for (const modelName of cascade) {
+    if (skipped.has(modelName)) {
+      console.warn(`[gemini] skip ${modelName} — quota already full`);
+      fallbackFailures += 1;
+      continue;
+    }
+    attempted += 1;
     try {
       const text = await generateWithModel(
         options.apiKey,
@@ -273,9 +271,9 @@ export async function generateGeminiContent(options: {
         options.parts,
       );
       await options.onModelOutcome?.({ model: modelName, exhausted: false });
-      const fellBack = Boolean(preferred) && modelName !== preferred;
+      const fellBack = Boolean(preferred) && modelName !== cascade[0];
       const notice = fellBack
-        ? `โควตาโมเดลก่อนหน้าเต็ม ระบบใช้ ${modelName} แทน`
+        ? `โมเดลก่อนหน้าใช้ไม่ได้ ระบบใช้ ${modelName} แทน`
         : null;
       console.log(`[gemini] using ${modelName}`);
       return { text, modelUsed: modelName, fellBack, notice };
@@ -283,21 +281,19 @@ export async function generateGeminiContent(options: {
       lastError = error;
       const status = errorStatus(error);
       const message = error instanceof Error ? error.message : "";
-      if (isGeminiQuotaError(status, message)) {
-        quotaFailures += 1;
-        console.warn(`[gemini] ${modelName} quota exhausted — next model`);
+      const fallback = isGeminiCascadeFallbackError(status, message);
+      if (fallback) fallbackFailures += 1;
+      console.warn(
+        `[gemini] ${modelName} failed (${status ?? "unknown"}) — next model`,
+      );
+      if (fallback) {
         await options.onModelOutcome?.({ model: modelName, exhausted: true });
-        continue;
       }
-      if (status === 404) {
-        console.warn(`[gemini] ${modelName} returned 404 — next model`);
-        continue;
-      }
-      throw error;
+      continue;
     }
   }
 
-  if (quotaFailures > 0 && quotaFailures === cascade.length) {
+  if (attempted === 0 || fallbackFailures > 0) {
     throw new GeminiQuotaExhaustedError();
   }
 

@@ -28,6 +28,8 @@ import {
   normalizeOcrQuotaPayload,
   OCR_QUOTA_EXHAUSTED_MESSAGE,
   OCR_QUOTA_RESET_NOTE,
+  parseModelCascadeOrder,
+  modelsAtQuota,
 } from "@/lib/ai/ocr-quota";
 import { runGoodsReceiptOcr } from "@/lib/ai/goods-receipt-ocr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -501,12 +503,24 @@ export async function parseReceiptOcr(
       console.warn("[parseReceiptOcr] GEMINI_MODEL_VERSION:", paramError.message);
     }
 
+    const { data: cascadeRow, error: cascadeError } = await supabaseAdmin
+      .from("system_parameters")
+      .select("param_value")
+      .eq("param_key", "model_cascade_order")
+      .maybeSingle();
+    if (cascadeError) {
+      console.warn("[parseReceiptOcr] model_cascade_order:", cascadeError.message);
+    }
+
+    const quotaSnapshot = await recordOcrQuota(supabaseAdmin, null, false);
     const extraction = await runGoodsReceiptOcr({
       apiKey,
       preferredModel: cleanGeminiModelId(paramRow?.param_value),
       vendorName: vendor.company_name || vendorId,
       ocrPatternConfig: vendor.ocr_pattern_config,
       images,
+      modelCascade: parseModelCascadeOrder(cascadeRow?.param_value),
+      skipModels: modelsAtQuota(quotaSnapshot),
       onModelOutcome: async ({ model, exhausted }) => {
         await recordOcrQuota(supabaseAdmin, model, exhausted);
       },

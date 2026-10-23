@@ -21,6 +21,8 @@ import {
   generateGeminiContent,
   listGeminiModelCatalog,
   loadGeminiModelVersion,
+  modelsAtQuotaFromPayload,
+  parseEdgeModelCascade,
 } from "../_shared/gemini-model.ts";
 
 const corsHeaders = {
@@ -399,6 +401,15 @@ serve(async (req: Request) => {
     }
 
     const geminiModel = await loadGeminiModelVersion(supabaseAdmin);
+    const { data: cascadeRow } = await supabaseAdmin
+      .from("system_parameters")
+      .select("param_value")
+      .eq("param_key", "model_cascade_order")
+      .maybeSingle();
+    const { data: quotaData } = await supabaseAdmin.rpc("record_and_get_ocr_quota", {
+      p_model_used: null,
+      p_is_exhausted: false,
+    });
     const systemPrompt = buildOcrSystemPrompt(
       vendor.company_name ?? vendorId,
       vendor.ocr_pattern_config,
@@ -407,6 +418,8 @@ serve(async (req: Request) => {
     const generated = await generateGeminiContent({
       apiKey: geminiApiKey,
       preferredModel: geminiModel,
+      modelCascade: parseEdgeModelCascade(cascadeRow?.param_value),
+      skipModels: modelsAtQuotaFromPayload(quotaData),
       onModelOutcome: async ({ model, exhausted }) => {
         const { error } = await supabaseAdmin.rpc("record_and_get_ocr_quota", {
           p_model_used: model,
