@@ -5,7 +5,7 @@
  * Persistence via `saveManualGoodsReceipt` Server Action only (no client Supabase).
  */
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -46,7 +46,9 @@ import { CarrierFreightSummaryDialog } from "@/components/procurement/CarrierFre
 import type { SalesProductSearchItem } from "@/types/document";
 import type { VendorMappedReceiptProduct } from "@/types/manual-receipt";
 import { ManualReceiptPreviewDialog } from "@/app/(erp)/purchases/manual-receipt/manual-receipt-preview-dialog";
-import SmartSkuPicker from "@/components/sales/smart-sku-picker";
+import SmartSkuPicker, {
+  type SmartSkuPickerHandle,
+} from "@/components/sales/smart-sku-picker";
 import VendorCombobox from "@/components/procurement/VendorCombobox";
 import { Button } from "@/components/ui/button";
 import {
@@ -146,6 +148,10 @@ export default function ManualReceiptWorkspace({
   cloneError = null,
 }: ManualReceiptWorkspaceProps) {
   const router = useRouter();
+  const skuPickerRef = useRef<SmartSkuPickerHandle>(null);
+  const lastRowRef = useRef<HTMLTableRowElement>(null);
+  const qtyInputRef = useRef<HTMLInputElement>(null);
+  const [focusLineKey, setFocusLineKey] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [, startDefaults] = useTransition();
   const [billFiles, setBillFiles] = useState<File[]>([]);
@@ -192,6 +198,29 @@ export default function ManualReceiptWorkspace({
   useEffect(() => {
     if (cloneError) toast.error(cloneError);
   }, [cloneError]);
+
+  useEffect(() => {
+    if (!focusLineKey) return;
+    const frame = window.requestAnimationFrame(() => {
+      lastRowRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      qtyInputRef.current?.focus();
+      qtyInputRef.current?.select();
+      setFocusLineKey(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusLineKey, lines]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.altKey !== true || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.code !== "KeyA") return;
+      if (isPending || previewOpen || freightSummaryOpen) return;
+      event.preventDefault();
+      skuPickerRef.current?.openAndFocus();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [freightSummaryOpen, isPending, previewOpen]);
 
   useEffect(() => {
     const vendor = cloneDraft?.vendorId;
@@ -354,9 +383,11 @@ export default function ManualReceiptWorkspace({
       return;
     }
 
+    let nextFocusKey = "";
     setLines((current) => {
       const existing = current.find((row) => row.product_id === product.id);
       if (existing) {
+        nextFocusKey = existing.key;
         return current.map((row) =>
           row.product_id === product.id
             ? { ...row, qty: row.qty + 1 }
@@ -375,10 +406,11 @@ export default function ManualReceiptWorkspace({
             ),
           }
         : defaultPurchaseUom(purchaseUoms, product.base_uom);
+      nextFocusKey = `${product.id}-${Date.now()}`;
       return [
         ...current,
         {
-          key: `${product.id}-${Date.now()}`,
+          key: nextFocusKey,
           product_id: product.id,
           sku: product.sku,
           name: product.display_name,
@@ -391,6 +423,7 @@ export default function ManualReceiptWorkspace({
         },
       ];
     });
+    if (nextFocusKey) setFocusLineKey(nextFocusKey);
     toast.success(`เพิ่ม ${product.sku} ลงรายการแล้ว`);
   }
 
@@ -683,7 +716,7 @@ export default function ManualReceiptWorkspace({
         </Card>
       </div>
 
-      <Card className="border-slate-200 shadow-sm">
+      <Card className="sticky top-[4.5rem] z-30 border-slate-200 bg-white/95 shadow-sm backdrop-blur">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">เพิ่มสินค้า (Smart SKU Picker)</CardTitle>
           <CardDescription>
@@ -694,6 +727,7 @@ export default function ManualReceiptWorkspace({
         </CardHeader>
         <CardContent>
           <SmartSkuPicker
+            ref={skuPickerRef}
             mode="purchases"
             disabled={isPending}
             vendorCatalog={vendorProducts}
@@ -723,8 +757,9 @@ export default function ManualReceiptWorkspace({
           </Button>
         </CardHeader>
         <CardContent className="px-3 sm:px-4">
+          <div className="max-h-[58vh] overflow-y-auto">
           <Table
-            wrapperClassName="overflow-x-visible"
+            wrapperClassName="overflow-x-visible overflow-y-visible"
             className="w-full table-fixed border-collapse"
           >
             <colgroup>
@@ -738,7 +773,7 @@ export default function ManualReceiptWorkspace({
               <col className="w-[8%]" />
               <col className="w-[3%]" />
             </colgroup>
-            <TableHeader>
+            <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-xs [&_th]:sticky [&_th]:top-0 [&_th]:z-20 [&_th]:bg-slate-50">
               <TableRow>
                 <TableHead className="h-auto w-[4%] px-2 py-2.5 text-center normal-case tracking-normal">
                   #
@@ -789,7 +824,10 @@ export default function ManualReceiptWorkspace({
                     resolveConversionFactor(line.conversionFactor),
                   );
                   return (
-                    <TableRow key={line.key}>
+                    <TableRow
+                      key={line.key}
+                      ref={line.key === focusLineKey ? lastRowRef : undefined}
+                    >
                       <TableCell className="px-2 py-2.5 text-center">
                         <span className="inline-flex rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
                           {index + 1}
@@ -810,6 +848,7 @@ export default function ManualReceiptWorkspace({
                       </TableCell>
                       <TableCell className="px-2 py-2.5 text-right">
                         <Input
+                          ref={line.key === focusLineKey ? qtyInputRef : undefined}
                           type="number"
                           min={0}
                           step="0.0001"
@@ -891,6 +930,15 @@ export default function ManualReceiptWorkspace({
               )}
             </TableBody>
           </Table>
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => skuPickerRef.current?.openAndFocus()}
+            className="mt-2 w-full rounded-lg border border-dashed border-slate-300 py-2 text-sm font-medium text-slate-600 hover:border-blue-500 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            + เพิ่มรายการสินค้า (คลิกที่นี่ หรือกด Alt+A เพื่อค้นหา SKU)
+          </button>
+          </div>
         </CardContent>
       </Card>
 

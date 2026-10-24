@@ -6,7 +6,15 @@
  * Zero Client-Side Fetching: debounced `searchProductsForSales` (Service Role).
  */
 
-import { useEffect, useId, useRef, useState, useTransition } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { ChevronsUpDown, Loader2, PackageSearch } from "lucide-react";
 import {
   searchProductsForSales,
@@ -49,6 +57,10 @@ export type SmartSkuPickerProps = {
   vendorCatalog?: VendorMappedReceiptProduct[];
 };
 
+export type SmartSkuPickerHandle = {
+  openAndFocus: () => void;
+};
+
 function formatMoney(value: number): string {
   return value.toLocaleString("th-TH", {
     minimumFractionDigits: 2,
@@ -69,14 +81,18 @@ function toSmartSkuSearchItem(
   };
 }
 
-export default function SmartSkuPicker({
-  disabled = false,
-  className,
-  placeholder = "ค้นหา SKU หรือชื่อรุ่น...",
-  mode = "sales",
-  onSelectProduct,
-  vendorCatalog = [],
-}: SmartSkuPickerProps) {
+const SmartSkuPicker = forwardRef<SmartSkuPickerHandle, SmartSkuPickerProps>(
+  function SmartSkuPicker(
+    {
+      disabled = false,
+      className,
+      placeholder = "ค้นหา SKU หรือชื่อรุ่น...",
+      mode = "sales",
+      onSelectProduct,
+      vendorCatalog = [],
+    },
+    ref,
+  ) {
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
@@ -87,6 +103,21 @@ export default function SmartSkuPicker({
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      openAndFocus() {
+        if (disabled) return;
+        setOpen(true);
+        window.setTimeout(() => {
+          inputRef.current?.focus();
+        }, 30);
+      },
+    }),
+    [disabled],
+  );
+
   const vendorIds = new Set(vendorCatalog.map((item) => item.id));
   const vendorMatches = vendorCatalog
     .filter((item) => matchesSmartSkuSearch(toSmartSkuSearchItem(item), query))
@@ -393,4 +424,7 @@ export default function SmartSkuPicker({
       </Popover>
     </div>
   );
-}
+},
+);
+
+export default SmartSkuPicker;
