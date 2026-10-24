@@ -9,11 +9,12 @@
 import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { ChevronsUpDown, Loader2, PackageSearch } from "lucide-react";
 import {
-  searchProductsForPurchases,
   searchProductsForSales,
 } from "@/lib/actions/document-actions";
+import { getSmartSkuPickerAllProducts } from "@/lib/actions/manual-receipt-context";
 import type { SalesProductSearchItem } from "@/types/document";
 import type { VendorMappedReceiptProduct } from "@/types/manual-receipt";
+import { matchesSmartSkuSearch } from "@/lib/utils/smart-sku-search";
 import { cn } from "@/lib/utils";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import { Badge } from "@/components/ui/badge";
@@ -55,6 +56,19 @@ function formatMoney(value: number): string {
   });
 }
 
+function toSmartSkuSearchItem(
+  item: SalesProductSearchItem & { vendor_sku?: string | null },
+) {
+  return {
+    sku: item.sku,
+    name: item.display_name,
+    product_name: item.model_name ?? item.display_name,
+    color: item.color_name,
+    size: item.size_label,
+    vendor_sku: item.vendor_sku ?? null,
+  };
+}
+
 export default function SmartSkuPicker({
   disabled = false,
   className,
@@ -69,16 +83,24 @@ export default function SmartSkuPicker({
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [results, setResults] = useState<SalesProductSearchItem[]>([]);
+  const [catalog, setCatalog] = useState<SalesProductSearchItem[]>([]);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const vendorIds = new Set(vendorCatalog.map((item) => item.id));
   const vendorMatches = vendorCatalog
-    .filter((item) => {
-      if (!debouncedQuery) return true;
-      const haystack = `${item.vendor_sku} ${item.sku} ${item.display_name}`.toLowerCase();
-      return haystack.includes(debouncedQuery.toLowerCase());
-    })
-    .slice(0, 24);
-  const vendorIds = new Set(vendorMatches.map((item) => item.id));
+    .filter((item) => matchesSmartSkuSearch(toSmartSkuSearchItem(item), query))
+    .slice(0, 100);
+  const warehouseMatches =
+    mode === "purchases" && query.trim().length > 0
+      ? catalog
+          .filter(
+            (item) =>
+              !vendorIds.has(item.id) &&
+              matchesSmartSkuSearch(toSmartSkuSearchItem(item), query),
+          )
+          .slice(0, 100)
+      : [];
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -96,7 +118,34 @@ export default function SmartSkuPicker({
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (mode !== "purchases") return;
+    let active = true;
+    startTransition(async () => {
+      try {
+        const result = await getSmartSkuPickerAllProducts();
+        if (!active) return;
+        if (result.error) {
+          setCatalogError(result.error);
+          setCatalog([]);
+          return;
+        }
+        setCatalogError(null);
+        setCatalog(Array.isArray(result.data) ? result.data : []);
+      } catch (err) {
+        if (!active) return;
+        setCatalogError(
+          err instanceof Error ? err.message : "โหลดสินค้าทั้งคลังไม่สำเร็จ",
+        );
+        setCatalog([]);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [mode]);
+
+  useEffect(() => {
+    if (!open || mode === "purchases") return;
 
     if (debouncedQuery.length < 1) {
       setResults([]);
@@ -105,10 +154,7 @@ export default function SmartSkuPicker({
     }
 
     let active = true;
-    const searchProducts =
-      mode === "purchases"
-        ? searchProductsForPurchases
-        : searchProductsForSales;
+    const searchProducts = searchProductsForSales;
     startTransition(async () => {
       try {
         const result = await searchProducts(debouncedQuery);
@@ -151,6 +197,16 @@ export default function SmartSkuPicker({
     setError(null);
   }
 
+  const visibleError = error || catalogError;
+  const salesSearching = mode !== "purchases" && isPending && debouncedQuery.length > 0;
+  const catalogLoading =
+    mode === "purchases" && isPending && catalog.length === 0 && !catalogError;
+  const otherMatches =
+    mode === "purchases"
+      ? warehouseMatches
+      : results.filter((product) => !vendorIds.has(product.id));
+  const queryText = query.trim();
+
   return (
     <div className={cn("space-y-1.5", className)}>
       <Popover
@@ -176,7 +232,7 @@ export default function SmartSkuPicker({
               <PackageSearch className="size-4 shrink-0 text-blue-600" />
               <span className="truncate">{placeholder}</span>
             </span>
-            {isPending ? (
+            {isPending && mode !== "purchases" ? (
               <Loader2 className="size-4 shrink-0 animate-spin text-slate-400" />
             ) : (
               <ChevronsUpDown className="size-4 shrink-0 text-slate-400" />
@@ -201,22 +257,30 @@ export default function SmartSkuPicker({
               disabled={disabled}
             />
             <CommandList>
-              {error ? (
+              {visibleError ? (
                 <div className="px-3 py-4 text-center text-xs text-red-600">
-                  {error}
+                  {visibleError}
                 </div>
               ) : null}
 
-              {!error && isPending && debouncedQuery.length > 0 ? (
+              {!visibleError && salesSearching ? (
                 <div className="flex items-center justify-center gap-2 px-3 py-6 text-xs text-slate-400">
                   <Loader2 className="size-3.5 animate-spin" />
                   กำลังค้นหาผ่าน Server Action...
                 </div>
               ) : null}
 
-              {!error &&
-              !isPending &&
-              debouncedQuery.length === 0 &&
+              {!visibleError && catalogLoading ? (
+                <div className="flex items-center justify-center gap-2 px-3 py-6 text-xs text-slate-400">
+                  <Loader2 className="size-3.5 animate-spin" />
+                  กำลังโหลดสินค้าทั้งคลัง...
+                </div>
+              ) : null}
+
+              {!visibleError &&
+              !salesSearching &&
+              !catalogLoading &&
+              queryText.length === 0 &&
               vendorMatches.length === 0 ? (
                 <div className="px-3 py-6 text-center text-xs text-slate-400">
                   {vendorCatalog.length > 0
@@ -225,15 +289,16 @@ export default function SmartSkuPicker({
                 </div>
               ) : null}
 
-              {!error &&
-              !isPending &&
-              debouncedQuery.length > 0 &&
-              results.length === 0 &&
+              {!visibleError &&
+              !salesSearching &&
+              !catalogLoading &&
+              (mode === "purchases" ? queryText.length > 0 : debouncedQuery.length > 0) &&
+              otherMatches.length === 0 &&
               vendorMatches.length === 0 ? (
                 <CommandEmpty>ไม่พบสินค้าที่ตรงกับคำค้น</CommandEmpty>
               ) : null}
 
-              {!error && vendorMatches.length > 0 ? (
+              {!visibleError && vendorMatches.length > 0 ? (
                 <CommandGroup heading={`สินค้าของผู้จำหน่ายนี้ (${vendorMatches.length})`}>
                   {vendorMatches.map((product) => (
                     <CommandItem
@@ -249,12 +314,16 @@ export default function SmartSkuPicker({
                       <LineItemProductThumb imageUrl={product.image_url} alt={product.sku} />
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-mono text-xs font-semibold text-slate-900">
-                          {product.vendor_sku}
-                          <span className="ml-1.5 font-sans font-normal text-slate-400">
-                            {product.sku}
-                          </span>
+                          {product.vendor_sku || product.sku}
+                          {product.vendor_sku ? (
+                            <span className="ml-1.5 font-sans font-normal text-slate-400">
+                              {product.sku}
+                            </span>
+                          ) : null}
                         </p>
-                        <p className="truncate text-sm text-slate-700">{product.display_name}</p>
+                        <p className="whitespace-normal break-words text-sm leading-snug text-slate-700">
+                          {product.display_name}
+                        </p>
                         <p className="mt-0.5 text-[11px] font-medium text-emerald-700">
                           LPP {formatMoney(product.cost_price)} ฿
                           {product.base_uom ? ` · ${product.base_uom}` : ""}
@@ -265,11 +334,11 @@ export default function SmartSkuPicker({
                 </CommandGroup>
               ) : null}
 
-              {!error && results.some((product) => !vendorIds.has(product.id)) ? (
+              {!visibleError && otherMatches.length > 0 ? (
                 <CommandGroup
-                  heading={`สินค้าทั้งหมดในคลัง (${results.filter((product) => !vendorIds.has(product.id)).length})`}
+                  heading={`สินค้าทั้งหมดในคลัง (${otherMatches.length})`}
                 >
-                  {results.filter((product) => !vendorIds.has(product.id)).map((product) => (
+                  {otherMatches.map((product) => (
                     <CommandItem
                       key={product.id}
                       value={`${product.sku} ${product.display_name}`}
@@ -305,7 +374,7 @@ export default function SmartSkuPicker({
                             </Badge>
                           ) : null}
                         </p>
-                        <p className="truncate text-sm text-slate-700">
+                        <p className="whitespace-normal break-words text-sm leading-snug text-slate-700">
                           {product.display_name}
                         </p>
                         <p className="mt-0.5 text-[11px] text-slate-500">

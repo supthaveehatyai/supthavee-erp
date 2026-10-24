@@ -21,3 +21,8 @@ export type GetManualReceiptVendorContextResult = {
   data: ManualReceiptVendorContext | null;
   error: string | null;
 };
+
+export type GetSmartSkuPickerCatalogResult = {
+  data: SalesProductSearchItem[];
+  error: string | null;
+};
