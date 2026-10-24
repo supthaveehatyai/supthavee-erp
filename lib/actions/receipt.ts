@@ -1596,6 +1596,26 @@ async function rollbackOcrGoodsReceipt(
   await supabaseAdmin.from("documents").delete().eq("id", id);
 }
 
+async function stampReceiptTaxInvoiceStatus(
+  supabaseAdmin: SupabaseClient,
+  documentId: string,
+  taxInvoiceStatus: string | null | undefined,
+): Promise<string | null> {
+  const id = documentId.trim();
+  if (!id) return null;
+  const taxStatus =
+    String(taxInvoiceStatus ?? "").trim().toUpperCase() === "PENDING_TAX_INVOICE"
+      ? "PENDING_TAX_INVOICE"
+      : "TAX_READY";
+  const { error } = await supabaseAdmin
+    .from("documents")
+    .update({ tax_invoice_status: taxStatus } as never)
+    .eq("id", id);
+  if (!error) return null;
+  if (/tax_invoice_status|schema cache|42703|could not find/i.test(error.message)) return null;
+  return error.message;
+}
+
 async function linkProcurementBills(
   supabaseAdmin: SupabaseClient,
   input: {
@@ -1664,6 +1684,7 @@ export async function saveGoodsReceiptToLedger(
     carrierTrackingNo?: string | null;
   } | null,
   billAttachments?: ProcurementBillSet | null,
+  taxInvoiceStatus?: string | null,
 ): Promise<SaveGoodsReceiptToLedgerResult> {
   if (!Array.isArray(rows) || rows.length === 0) {
     return { docHeaderId: null, docNo: null, error: "ไม่มีรายการให้บันทึกรับสินค้า" };
@@ -2287,6 +2308,11 @@ export async function saveGoodsReceiptToLedger(
       }
     }
 
+    const taxStatusWarning = await stampReceiptTaxInvoiceStatus(
+      supabaseAdmin,
+      headerId,
+      taxInvoiceStatus,
+    );
     const billError = await linkProcurementBills(supabaseAdmin, {
       documentId: headerId,
       docNo: persistedDocNo,
@@ -2301,9 +2327,7 @@ export async function saveGoodsReceiptToLedger(
     return {
       docHeaderId: headerId,
       docNo: persistedDocNo,
-      error: billError
-        ? `เอกสารถูกบันทึกแล้ว แต่ผูกไฟล์บิลไม่สำเร็จ: ${billError}`
-        : null,
+      error: [billError, taxStatusWarning].filter(Boolean).join(" · ") || null,
     };
   } catch (err) {
     const message =
@@ -2360,6 +2384,7 @@ export type SaveManualGoodsReceiptInput = {
   status?: "DRAFT" | "ISSUED" | "PAID";
   lines: ManualGoodsReceiptLineInput[];
   bills?: ProcurementBillSet | null;
+  taxInvoiceStatus?: string | null;
 };
 
 export type SaveManualGoodsReceiptResult = {
@@ -2977,6 +3002,11 @@ export async function saveManualGoodsReceipt(
       console.error("saveManualGoodsReceipt reference_no:", referenceError.message);
     }
 
+    const taxStatusWarning = await stampReceiptTaxInvoiceStatus(
+      supabaseAdmin,
+      parsed.documentId,
+      input.taxInvoiceStatus,
+    );
     const billError = await linkProcurementBills(supabaseAdmin, {
       documentId: parsed.documentId,
       bills: input.bills,
@@ -2993,7 +3023,9 @@ export async function saveManualGoodsReceipt(
           doc_no: parsed.docNo,
           ledger_count: parsed.ledgerCount,
         },
-        error: `เอกสารถูกบันทึกแล้ว แต่ผูกไฟล์บิลไม่สำเร็จ: ${billError}`,
+        error: [`เอกสารถูกบันทึกแล้ว แต่ผูกไฟล์บิลไม่สำเร็จ: ${billError}`, taxStatusWarning]
+          .filter(Boolean)
+          .join(" · "),
       };
     }
 
@@ -3003,7 +3035,7 @@ export async function saveManualGoodsReceipt(
         doc_no: parsed.docNo,
         ledger_count: parsed.ledgerCount,
       },
-      error: null,
+      error: taxStatusWarning,
     };
   } catch (err) {
     const message =

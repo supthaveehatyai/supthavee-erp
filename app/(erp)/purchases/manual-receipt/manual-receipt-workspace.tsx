@@ -18,8 +18,14 @@ import { toast } from "sonner";
 import type { VendorOption } from "@/lib/actions/mapping";
 import { getManualReceiptVendorContext } from "@/lib/actions/manual-receipt-context";
 import { checkDuplicateInvoice, saveManualGoodsReceipt } from "@/lib/actions/receipt";
+import { loadVendorUsesTemporaryBill } from "@/lib/actions/vendor-tax-invoice";
 import { uploadProcurementBills } from "@/lib/procurement/upload-bill-files";
 import { BillAttachmentPicker } from "@/components/procurement/bill-attachment-picker";
+import { TaxInvoiceStatusPicker } from "@/components/procurement/tax-invoice-status-picker";
+import {
+  suggestReceiptTaxInvoiceStatus,
+  type ReceiptTaxInvoiceChoice,
+} from "@/lib/utils/tax-invoice-status";
 import type { GoodsReceiptDocType } from "@/lib/constants/document";
 import {
   calculateNetCostApportionment,
@@ -196,6 +202,11 @@ export default function ManualReceiptWorkspace({
   const [docType, setDocType] = useState<GoodsReceiptDocType>(
     cloneDraft?.docType ?? "AP_TAX",
   );
+  const [taxInvoiceStatus, setTaxInvoiceStatus] = useState<ReceiptTaxInvoiceChoice>(
+    suggestReceiptTaxInvoiceStatus({ referenceNo: cloneDraft?.documentRef }),
+  );
+  const [taxStatusLocked, setTaxStatusLocked] = useState(false);
+  const [vendorUsesTemporaryBill, setVendorUsesTemporaryBill] = useState(false);
   const [vatType, setVatType] = useState<VatCalculationType>(
     cloneDraft?.vatType ?? "NONE",
   );
@@ -412,6 +423,13 @@ export default function ManualReceiptWorkspace({
     setVendorProducts([]);
     setDefaultHint("");
     setTaxModeLocked(false);
+    setTaxStatusLocked(false);
+    setVendorUsesTemporaryBill(false);
+    if (nextId) {
+      void loadVendorUsesTemporaryBill(nextId).then((result) => {
+        setVendorUsesTemporaryBill(result.usesTemporaryBill);
+      });
+    }
     if (!nextId) return;
     startDefaults(async () => {
       const result = await getManualReceiptVendorContext(nextId);
@@ -579,6 +597,7 @@ export default function ManualReceiptWorkspace({
         carrierId: carrierId || null,
         carrierTrackingNo: carrierTrackingNo || null,
         status: "ISSUED",
+        taxInvoiceStatus,
         lines: lines.map((line, index) => ({
           product_id: line.product_id,
           qty: line.qty,
@@ -700,6 +719,17 @@ export default function ManualReceiptWorkspace({
       clearTimeout(timer);
     };
   }, [vendorId, documentRef, docDate]);
+
+  useEffect(() => {
+    if (taxStatusLocked) return;
+    setTaxInvoiceStatus(
+      suggestReceiptTaxInvoiceStatus({
+        referenceNo: documentRef,
+        vendorName: selectedVendor?.company_name,
+        vendorUsesTemporaryBill,
+      }),
+    );
+  }, [documentRef, selectedVendor?.company_name, vendorUsesTemporaryBill, taxStatusLocked]);
 
   function handleReview() {
     if (!validateForm()) return;
@@ -832,6 +862,16 @@ export default function ManualReceiptWorkspace({
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="sm:col-span-2">
+              <TaxInvoiceStatusPicker
+                value={taxInvoiceStatus}
+                disabled={isPending}
+                onChange={(next) => {
+                  setTaxStatusLocked(true);
+                  setTaxInvoiceStatus(next);
+                }}
+              />
             </div>
           </CardContent>
         </Card>

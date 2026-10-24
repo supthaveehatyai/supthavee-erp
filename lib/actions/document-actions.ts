@@ -2737,68 +2737,102 @@ export async function getPurchaseDocuments(
       contactIds = (matchedContacts ?? []).map((c) => c.id as string);
     }
 
-    // Base query — purchase allow-list ONLY (blocks sales INV_DO/TAX_INV leakage).
-    let query = supabase
-      .from("documents")
-      .select(
-        `
+    const listSelect = (includeTax: boolean) =>
+      `
         id,
         doc_no,
         notes,
         attachment_url,
+        reference_no,
         doc_type,
         status,
         doc_date,
         created_at,
         grand_total,
         contact_id,
+        ${includeTax ? "tax_invoice_status, tax_invoice_no," : ""}
         contacts:contact_id (
           company_name
         )
-      `,
-      )
-      .in("doc_type", [...PURCHASE_DOC_TYPES]);
+      `;
 
-    if (search) {
-      const pattern = `%${search}%`;
-      // doc_no only (+ vendor name) — no reference_no column on documents yet
-      if (contactIds.length > 0) {
-        query = query.or(
-          `doc_no.ilike.${pattern},contact_id.in.(${contactIds.join(",")})`,
-        );
-      } else {
-        query = query.ilike("doc_no", pattern);
+    const runList = (includeTax: boolean) => {
+      let query = supabase
+        .from("documents")
+        .select(listSelect(includeTax))
+        .in("doc_type", [...PURCHASE_DOC_TYPES]);
+
+      if (search) {
+        const pattern = `%${search}%`;
+        if (contactIds.length > 0) {
+          query = query.or(
+            `doc_no.ilike.${pattern},contact_id.in.(${contactIds.join(",")})`,
+          );
+        } else {
+          query = query.ilike("doc_no", pattern);
+        }
       }
-    }
+      if (from) query = query.gte("doc_date", from);
+      if (to) query = query.lte("doc_date", to);
+      return query.order("created_at", { ascending: false }).limit(safeLimit);
+    };
 
-    if (from) {
-      query = query.gte("doc_date", from);
+    let { data, error } = await runList(true);
+    if (error && /tax_invoice_status|tax_invoice_no|schema cache|42703/i.test(error.message)) {
+      const fallback = await runList(false);
+      data = fallback.data;
+      error = fallback.error;
     }
-    if (to) {
-      query = query.lte("doc_date", to);
-    }
-
-    const { data, error } = await query
-      .order("created_at", { ascending: false })
-      .limit(safeLimit);
 
     if (error) {
       return { data: [], error: error.message };
     }
 
-    const rows: PurchaseDocumentListItem[] = (data ?? []).map((row) => {
+    const rows: PurchaseDocumentListItem[] = ((data ?? []) as unknown as Array<{
+      id: string;
+      doc_no: string;
+      notes: string | null;
+      attachment_url: string | null;
+      reference_no?: string | null;
+      doc_type: string;
+      status: string;
+      doc_date: string;
+      created_at: string;
+      grand_total: number | null;
+      contact_id: string;
+      tax_invoice_status?: string | null;
+      tax_invoice_no?: string | null;
+      contacts:
+        | { company_name?: string | null }
+        | { company_name?: string | null }[]
+        | null;
+    }>).map((row) => {
       const contact = Array.isArray(row.contacts)
         ? row.contacts[0]
         : row.contacts;
       const notes = (row.notes as string | null) ?? null;
       const visibleNotes = splitBillNotes(notes).notes;
       const vendorRefMatch = visibleNotes.match(/อ้างอิงบิลซัพพลายเออร์:\s*(.+)$/m);
-      const vendorRef = vendorRefMatch?.[1]?.trim() || null;
+      const columnRef = String((row as { reference_no?: string | null }).reference_no ?? "").trim();
+      const vendorRef = columnRef || vendorRefMatch?.[1]?.trim() || null;
+      const taxStatus = String(
+        (row as { tax_invoice_status?: string | null }).tax_invoice_status ?? "",
+      ).trim().toUpperCase();
+      const taxInvoiceNo = String(
+        (row as { tax_invoice_no?: string | null }).tax_invoice_no ?? "",
+      ).trim();
 
       return {
         id: row.id as string,
         doc_no: row.doc_no as string,
         reference_no: vendorRef,
+        tax_invoice_status:
+          taxStatus === "TAX_READY" ||
+          taxStatus === "PENDING_TAX_INVOICE" ||
+          taxStatus === "CONSOLIDATED_CHILD"
+            ? taxStatus
+            : null,
+        tax_invoice_no: taxInvoiceNo || null,
         doc_type: row.doc_type as DocumentType,
         status: row.status as DocumentStatus,
         doc_date: row.doc_date as string,

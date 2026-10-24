@@ -500,6 +500,8 @@ export type PurchaseDocumentListItem = {
   contact_id: string;
   vendor_name: string | null;
   bill_attachment_urls?: string[];
+  tax_invoice_status?: "TAX_READY" | "PENDING_TAX_INVOICE" | "CONSOLIDATED_CHILD" | null;
+  tax_invoice_no?: string | null;
 };
 
 export type GetPurchaseDocumentsResult = {

@@ -12,9 +12,15 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Loader2, PackageCheck } from "lucide-react";
 import { checkDuplicateInvoice } from "@/lib/actions/receipt";
+import { loadVendorUsesTemporaryBill } from "@/lib/actions/vendor-tax-invoice";
 import type { GoodsReceiptDocType } from "@/lib/constants/document";
 import { VAT_OPTIONS } from "@/lib/constants/accounting";
 import type { VatCalculationType } from "@/lib/utils/document-summary";
+import {
+  suggestReceiptTaxInvoiceStatus,
+  type ReceiptTaxInvoiceChoice,
+} from "@/lib/utils/tax-invoice-status";
+import { TaxInvoiceStatusPicker } from "@/components/procurement/tax-invoice-status-picker";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -34,12 +40,15 @@ export type SaveToLedgerConfirmPayload = {
   billDiscountText: string;
   docType: GoodsReceiptDocType;
   vatType: VatCalculationType;
+  taxInvoiceStatus: ReceiptTaxInvoiceChoice;
 };
 
 export type SaveToLedgerDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   vendorId: string;
+  vendorName?: string | null;
+  vendorUsesTemporaryBill?: boolean;
   initialDocNumber: string;
   initialDocDate: string;
   initialBillDiscountText: string;
@@ -78,6 +87,8 @@ export default function SaveToLedgerDialog({
   open,
   onOpenChange,
   vendorId,
+  vendorName = "",
+  vendorUsesTemporaryBill = false,
   initialDocNumber,
   initialDocDate,
   initialBillDiscountText,
@@ -98,6 +109,10 @@ export default function SaveToLedgerDialog({
       : "AP_TAX",
   );
   const [vatType, setVatType] = useState<VatCalculationType>(initialVatType);
+  const [taxInvoiceStatus, setTaxInvoiceStatus] = useState<ReceiptTaxInvoiceChoice>("TAX_READY");
+  const [taxStatusLocked, setTaxStatusLocked] = useState(false);
+  const [loadedTemporaryBill, setLoadedTemporaryBill] = useState(vendorUsesTemporaryBill);
+  const temporaryBillVendor = vendorUsesTemporaryBill || loadedTemporaryBill;
 
   const [duplicateCheck, setDuplicateCheck] = useState<{
     isDuplicate: boolean;
@@ -120,6 +135,14 @@ export default function SaveToLedgerDialog({
           : "AP_TAX",
       );
       setVatType(initialVatType);
+      setTaxStatusLocked(false);
+      setTaxInvoiceStatus(
+        suggestReceiptTaxInvoiceStatus({
+          referenceNo: initialDocNumber,
+          vendorName,
+          vendorUsesTemporaryBill: temporaryBillVendor,
+        }),
+      );
     }
   }
 
@@ -159,6 +182,28 @@ export default function SaveToLedgerDialog({
     };
   }, [open, vendorId, docNumber, docDate]);
 
+  useEffect(() => {
+    if (!open || !vendorId) return;
+    let cancelled = false;
+    void loadVendorUsesTemporaryBill(vendorId).then((result) => {
+      if (!cancelled) setLoadedTemporaryBill(result.usesTemporaryBill);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, vendorId]);
+
+  useEffect(() => {
+    if (!open || taxStatusLocked) return;
+    setTaxInvoiceStatus(
+      suggestReceiptTaxInvoiceStatus({
+        referenceNo: docNumber,
+        vendorName,
+        vendorUsesTemporaryBill: temporaryBillVendor,
+      }),
+    );
+  }, [open, docNumber, vendorName, temporaryBillVendor, taxStatusLocked]);
+
   const isDuplicate = duplicateCheck.isDuplicate;
   const canConfirm =
     !isSaving &&
@@ -175,6 +220,7 @@ export default function SaveToLedgerDialog({
       billDiscountText: billDiscountText.trim(),
       docType,
       vatType,
+      taxInvoiceStatus,
     });
   }
 
@@ -213,6 +259,17 @@ export default function SaveToLedgerDialog({
               className={isDuplicate ? "border-red-400 focus-visible:ring-red-400" : ""}
             />
           </div>
+        </div>
+
+        <div className="mt-3">
+          <TaxInvoiceStatusPicker
+            value={taxInvoiceStatus}
+            disabled={isSaving}
+            onChange={(next) => {
+              setTaxStatusLocked(true);
+              setTaxInvoiceStatus(next);
+            }}
+          />
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-3">

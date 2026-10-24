@@ -37,6 +37,12 @@ type DocumentTaxRow = {
   sub_total: number | null;
   total_amount: number | null;
   ecommerce_buyer_name: string | null;
+  reference_no?: string | null;
+  tax_invoice_status?: string | null;
+  tax_invoice_no?: string | null;
+  tax_invoice_date?: string | null;
+  tax_reported_base?: number | null;
+  tax_reported_vat?: number | null;
   contacts: ContactJoin | ContactJoin[] | null;
 };
 
@@ -142,12 +148,8 @@ async function loadDocuments(input: {
   const pageSize = 1000;
   const rows: DocumentTaxRow[] = [];
   let from = 0;
-
-  while (true) {
-    const { data, error } = await supabase
-      .from("documents")
-      .select(
-        `
+  let legacyInput = input.reportType !== "INPUT_TAX";
+  const baseSelect = `
         id,
         doc_no,
         doc_type,
@@ -165,15 +167,79 @@ async function loadDocuments(input: {
           tax_id,
           branch_code
         )
-      `,
-      )
+      `;
+  const inputSelect = `
+        id,
+        doc_no,
+        reference_no,
+        doc_type,
+        doc_date,
+        status,
+        net_before_vat,
+        vat_amount,
+        tax_amount,
+        grand_total,
+        sub_total,
+        total_amount,
+        ecommerce_buyer_name,
+        tax_invoice_status,
+        tax_invoice_no,
+        tax_invoice_date,
+        tax_reported_base,
+        tax_reported_vat,
+        contacts:contact_id (
+          company_name,
+          tax_id,
+          branch_code
+        )
+      `;
+
+  type TaxQuery = {
+    in: (column: string, values: readonly string[]) => TaxQuery;
+    or: (filters: string) => TaxQuery;
+    gte: (column: string, value: string) => TaxQuery;
+    lte: (column: string, value: string) => TaxQuery;
+    order: (column: string, options: { ascending: boolean }) => TaxQuery;
+    range: (from: number, to: number) => Promise<{
+      data: DocumentTaxRow[] | null;
+      error: { message: string } | null;
+    }>;
+  };
+  const documents = supabase.from("documents") as unknown as {
+    select: (columns: string) => TaxQuery;
+  };
+
+  while (true) {
+    let query: TaxQuery = documents
+      .select(legacyInput ? baseSelect : inputSelect)
       .in("doc_type", docTypes)
-      .in("status", statuses)
-      .gte("doc_date", start)
-      .lte("doc_date", end)
+      .in("status", statuses);
+
+    if (!legacyInput) {
+      query = query
+        .or("tax_invoice_status.eq.TAX_READY,tax_invoice_status.is.null")
+        .or(
+          `and(tax_invoice_date.gte.${start},tax_invoice_date.lte.${end}),and(tax_invoice_date.is.null,doc_date.gte.${start},doc_date.lte.${end})`,
+        );
+    } else {
+      query = query.gte("doc_date", start).lte("doc_date", end);
+    }
+
+    const { data, error } = await query
       .order("doc_date", { ascending: true })
       .order("doc_no", { ascending: true })
       .range(from, from + pageSize - 1);
+
+    if (
+      error &&
+      !legacyInput &&
+      /tax_invoice_|tax_reported_|schema cache|42703/i.test(error.message)
+    ) {
+      legacyInput = true;
+      rows.length = 0;
+      from = 0;
+      continue;
+    }
 
     if (error) {
       throw new Error(error.message);
@@ -201,14 +267,37 @@ function mapDocumentRow(
       ? buyerName
       : trimText(contact?.company_name, "—");
 
-  const goodsAmount = isVoid ? 0 : resolveGoodsAmount(row);
-  const vatAmount = isVoid ? 0 : resolveVatAmount(row);
-  const grandTotal = isVoid ? 0 : roundMoney(Number(row.grand_total ?? 0));
+  const inputTax = reportType === "INPUT_TAX";
+  const goodsAmount = isVoid
+    ? 0
+    : inputTax
+      ? roundMoney(
+          row.tax_reported_base != null
+            ? Number(row.tax_reported_base)
+            : Number(row.sub_total ?? 0),
+        )
+      : resolveGoodsAmount(row);
+  const vatAmount = isVoid
+    ? 0
+    : inputTax
+      ? roundMoney(
+          row.tax_reported_vat != null ? Number(row.tax_reported_vat) : Number(row.vat_amount ?? 0),
+        )
+      : resolveVatAmount(row);
+  const grandTotal = isVoid
+    ? 0
+    : inputTax
+      ? roundMoney(goodsAmount + vatAmount)
+      : roundMoney(Number(row.grand_total ?? 0));
+  const invoiceDate = inputTax ? row.tax_invoice_date || row.doc_date : row.doc_date;
+  const invoiceNo = inputTax
+    ? trimText(row.tax_invoice_no) || trimText(row.reference_no) || trimText(row.doc_no)
+    : trimText(row.doc_no);
 
   return {
     seq: index + 1,
-    invoice_date: formatThaiDate(row.doc_date, "short"),
-    invoice_no: trimText(row.doc_no),
+    invoice_date: formatThaiDate(invoiceDate, "short"),
+    invoice_no: invoiceNo,
     party_name: partyName,
     tax_id: trimText(contact?.tax_id),
     branch_office: formatBranchOffice(contact?.branch_code),

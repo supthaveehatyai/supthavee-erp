@@ -1508,6 +1508,7 @@ export default function GoodsReceiptUI({
           carrierTrackingNo,
         },
         null,
+        payload.taxInvoiceStatus,
       );
       if (!result.docHeaderId || !result.docNo) {
         toast.error(result.error ?? "บันทึกรับสินค้าเข้าคลังไม่สำเร็จ");
@@ -2568,6 +2569,7 @@ export default function GoodsReceiptUI({
         open={isSaveDialogOpen}
         onOpenChange={setIsSaveDialogOpen}
         vendorId={vendorId}
+        vendorName={vendors.find((vendor) => vendor.id === vendorId)?.company_name ?? ""}
         initialDocNumber={ocrDocNumber}
         initialDocDate={ocrDocDate}
         initialBillDiscountText={billDiscountText}
