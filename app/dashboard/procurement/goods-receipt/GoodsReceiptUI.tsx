@@ -103,7 +103,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { InvoiceDropzone } from "./components/InvoiceDropzone";
-import { PurchaseUomCell } from "@/components/procurement/PurchaseUomCell";
 import { calculateLandedCost, resolveFreightExVat } from "@/lib/utils/landed-cost";
 import {
   resolveConversionFactor,
@@ -1509,36 +1508,54 @@ export default function GoodsReceiptUI({
                 </div>
               ) : null}
 
-              <Table className="min-w-[1320px]">
+              <Table
+                wrapperClassName="overflow-x-hidden"
+                className="w-full table-fixed border-collapse"
+              >
+                <colgroup>
+                  <col className="w-[4%]" />
+                  <col className="w-[43%]" />
+                  <col className="w-[4%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[6%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[5%]" />
+                </colgroup>
                 <TableHeader>
-                  <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
-                    <TableHead>สถานะ</TableHead>
-                    <TableHead>OCR Raw Text</TableHead>
-                    <TableHead className="min-w-[280px]">
-                      Matched Internal Product
+                  <TableRow className="bg-slate-50 hover:bg-slate-50">
+                    <TableHead className="h-auto w-[4%] px-1.5 py-2 text-center normal-case tracking-normal">
+                      #
                     </TableHead>
-                    <TableHead className="text-center">ของแถม</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="min-w-[180px]">หน่วยรับเข้า (UOM)</TableHead>
-                    <TableHead className="text-right">Unit Price</TableHead>
-                    <TableHead>Discount</TableHead>
-                    <TableHead className="text-right">
-                      Net Unit Cost
-                      <span className="block text-[10px] font-normal text-slate-400">
-                        บาท/หน่วยย่อย
-                      </span>
+                    <TableHead className="h-auto w-[43%] px-1.5 py-2 text-left normal-case tracking-normal">
+                      รายการสินค้าภายใน & ข้อมูลบิล OCR
                     </TableHead>
-                    <TableHead className="text-right">
-                      Total Amount
-                      <span className="block text-[10px] font-normal text-slate-400">
-                        แก้ได้ตามกระดาษ
-                      </span>
+                    <TableHead className="h-auto w-[4%] px-1.5 py-2 text-center normal-case tracking-normal">
+                      ของแถม
                     </TableHead>
-                    <TableHead className="text-right">จัดการ</TableHead>
+                    <TableHead className="h-auto w-[13%] px-1.5 py-2 text-center normal-case tracking-normal">
+                      จำนวน / หน่วย
+                    </TableHead>
+                    <TableHead className="h-auto w-[9%] px-1.5 py-2 text-right normal-case tracking-normal">
+                      ราคา/หน่วย
+                    </TableHead>
+                    <TableHead className="h-auto w-[6%] px-1.5 py-2 text-center normal-case tracking-normal">
+                      ส่วนลด
+                    </TableHead>
+                    <TableHead className="h-auto w-[8%] px-1.5 py-2 text-right normal-case tracking-normal">
+                      ทุนสุทธิ
+                    </TableHead>
+                    <TableHead className="h-auto w-[8%] px-1.5 py-2 text-right normal-case tracking-normal">
+                      รวมเงิน
+                    </TableHead>
+                    <TableHead className="h-auto w-[5%] px-1.5 py-2 text-center normal-case tracking-normal">
+                      จัดการ
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((row) => {
+                  {rows.map((row, index) => {
                     const isMatched = row.status === "matched";
                     const isFuzzy = isMatched && row.matchTier === "FUZZY";
                     const isOverriding = overrideLineKey === row.lineKey;
@@ -1560,154 +1577,33 @@ export default function GoodsReceiptUI({
                       : baseQty > 0
                         ? roundMoney2((goodsExVat + freightShare) / baseQty)
                         : 0;
+                    const uom = purchaseUoms.find(
+                      (item) => item.uom_code === (row.purchaseUomCode || "PCS"),
+                    );
+                    const showSkuPicker = !isMatched || !row.matchedProduct || isOverriding;
 
                     return (
                       <TableRow
                         key={row.lineKey}
                         className={cn(
-                          isMatched && !isFuzzy && "bg-emerald-50/40",
-                          isFuzzy && "border-l-4 border-l-amber-400 bg-amber-50/50",
-                          !isMatched &&
-                            "border-l-4 border-l-amber-400 bg-amber-50/60 hover:bg-amber-50",
-                          row.isFoc && "bg-slate-50/80 text-slate-400",
+                          "border-b transition-colors",
+                          showSkuPicker
+                            ? "border-b-amber-200 border-l-4 border-l-amber-500 bg-amber-50/80"
+                            : index % 2 === 0
+                              ? "border-slate-200/80 bg-white hover:bg-blue-50/40"
+                              : "border-slate-200/80 bg-slate-50/90 hover:bg-blue-50/40",
                         )}
                       >
-                        <TableCell>
-                          <div className="flex flex-col gap-1">
-                            <StatusBadge status={row.status} matchTier={row.matchTier} />
-                            {row.isFoc ? (
-                              <span className="inline-flex w-fit items-center rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
-                                ของแถม (FOC)
-                              </span>
-                            ) : null}
-                          </div>
+                        <TableCell className="px-1.5 py-2 text-center">
+                          <span className="inline-flex rounded bg-slate-200/70 px-1.5 py-0.5 text-xs font-semibold text-slate-700">
+                            {index + 1}
+                          </span>
                         </TableCell>
 
-                        <TableCell>
-                          {isEditingRaw ? (
-                            <div className="flex items-center gap-1.5">
-                              <Input
-                                value={rawDraft}
-                                autoFocus
-                                disabled={isBusy}
-                                className="h-8 font-mono text-xs"
-                                aria-label={`แก้ข้อความ OCR ${row.raw_vendor_sku}`}
-                                onChange={(event) => setRawDraft(event.target.value)}
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter") {
-                                    event.preventDefault();
-                                    void saveRawAndRematch(row);
-                                  }
-                                  if (event.key === "Escape") setEditingRawKey(null);
-                                }}
-                              />
-                              <Button
-                                type="button"
-                                size="icon"
-                                className="h-8 w-8 shrink-0"
-                                disabled={isBusy}
-                                title="บันทึกและจับคู่ใหม่"
-                                onClick={() => void saveRawAndRematch(row)}
-                              >
-                                {rematchingKey === row.lineKey ? (
-                                  <RefreshCw className="size-3.5 animate-spin" aria-hidden />
-                                ) : (
-                                  <Check className="size-3.5" aria-hidden />
-                                )}
-                              </Button>
-                            </div>
-                          ) : (
-                            <div className="flex items-start gap-1">
-                              <p
-                                className={cn(
-                                  "font-mono text-xs font-semibold",
-                                  row.isFoc ? "text-slate-400 line-through" : "text-slate-800",
-                                )}
-                              >
-                                {row.raw_vendor_sku || "—"}
-                              </p>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="size-6 shrink-0 text-slate-500"
-                                disabled={isBusy}
-                                title="แก้ข้อความ OCR"
-                                aria-label={`แก้ข้อความ OCR ${row.raw_vendor_sku}`}
-                                onClick={() => beginRawEdit(row)}
-                              >
-                                <Pencil className="size-3.5" aria-hidden />
-                              </Button>
-                            </div>
-                          )}
-                          {row.raw_description ? (
-                            <p className="mt-0.5 max-w-[200px] truncate text-[11px] text-slate-400">
-                              {row.raw_description}
-                            </p>
-                          ) : null}
-                        </TableCell>
-
-                        {/* Matched Internal Product */}
-                        <TableCell>
-                          {isMatched && row.matchedProduct && !isOverriding ? (
-                            <div className="flex items-start gap-1.5">
-                              <CheckCircle2
-                                className={cn(
-                                  "mt-0.5 size-4 shrink-0",
-                                  isFuzzy ? "text-amber-600" : "text-emerald-600",
-                                )}
-                                aria-hidden
-                              />
-                              <div className="min-w-0 flex-1">
-                                <p
-                                  className={cn(
-                                    "truncate text-sm font-semibold",
-                                    row.isFoc
-                                      ? "text-slate-400"
-                                      : isFuzzy
-                                        ? "text-amber-800"
-                                        : "text-emerald-700",
-                                  )}
-                                >
-                                  {row.matchedProduct.name}
-                                </p>
-                                <p className="truncate font-mono text-[11px] text-slate-400">
-                                  {row.matchedProduct.sku}
-                                  {[row.matchedProduct.color, row.matchedProduct.size]
-                                    .filter(Boolean)
-                                    .length > 0
-                                    ? ` · ${[row.matchedProduct.color, row.matchedProduct.size]
-                                        .filter(Boolean)
-                                        .join(" / ")}`
-                                    : ""}
-                                </p>
-                                {row.matchedProduct.tax_type ? (
-                                  <span className="mt-1 inline-flex w-fit rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-violet-700">
-                                    {row.matchedProduct.tax_type}
-                                  </span>
-                                ) : null}
-                              </div>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-7 shrink-0 gap-1 px-2 text-[11px]"
-                                disabled={isBusy}
-                                onClick={() => beginSkuOverride(row)}
-                              >
-                                <RefreshCw className="size-3" aria-hidden />
-                                เปลี่ยน SKU
-                              </Button>
-                            </div>
-                          ) : (
-                            <div className="space-y-1.5 rounded-lg border border-amber-300 bg-amber-100/70 p-2">
-                              <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800">
-                                <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
-                                {isOverriding
-                                  ? "เปลี่ยนสินค้าภายใน — เลือก SKU ใหม่แล้วกด Confirm"
-                                  : "ไม่พบสินค้าที่ตรงกัน — เลือกสินค้าภายใน"}
-                              </div>
-                              <div className="flex items-center gap-1.5">
+                        <TableCell className="min-w-0 px-1.5 py-2 text-left">
+                          {showSkuPicker ? (
+                            <div className="space-y-1.5">
+                              <div className="flex min-w-0 items-center gap-1.5">
                                 <div className="min-w-0 flex-1">
                                   <InternalProductCombobox
                                     products={getAvailableProductsForRow(row)}
@@ -1721,12 +1617,12 @@ export default function GoodsReceiptUI({
                                     placeholder="ค้นหา SKU ภายใน..."
                                   />
                                 </div>
-                                {draftProductId && (
+                                {draftProductId ? (
                                   <Button
                                     type="button"
                                     variant="outline"
                                     size="icon"
-                                    className="h-9 w-9 shrink-0 border-slate-300 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                                    className="h-8 w-8 shrink-0 border-slate-300 text-slate-500"
                                     disabled={isBusy}
                                     onClick={() => handleClearDraft(row.lineKey)}
                                     aria-label="ล้างการเลือกสินค้า"
@@ -1734,29 +1630,22 @@ export default function GoodsReceiptUI({
                                   >
                                     <X className="size-3.5" aria-hidden />
                                   </Button>
-                                )}
+                                ) : null}
                                 <Button
                                   type="button"
                                   size="sm"
-                                  className="h-9 shrink-0 bg-emerald-600 hover:bg-emerald-700 focus-visible:ring-emerald-500"
+                                  className="h-8 shrink-0 bg-emerald-600 px-2 hover:bg-emerald-700"
                                   disabled={!draftProductId || isBusy}
                                   onClick={() => void handleConfirmMapping(row)}
                                 >
-                                  {isBusy ? (
-                                    "กำลังบันทึก..."
-                                  ) : (
-                                    <>
-                                      <Check className="size-3.5" aria-hidden />
-                                      Confirm
-                                    </>
-                                  )}
+                                  {isBusy ? "..." : "Confirm"}
                                 </Button>
                                 {isOverriding ? (
                                   <Button
                                     type="button"
                                     variant="outline"
                                     size="sm"
-                                    className="h-9 shrink-0"
+                                    className="h-8 shrink-0 px-2"
                                     disabled={isBusy}
                                     onClick={() => cancelSkuOverride(row.lineKey)}
                                   >
@@ -1765,70 +1654,172 @@ export default function GoodsReceiptUI({
                                 ) : null}
                               </div>
                               {isOverriding ? null : (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 px-2 text-[11px]"
+                                  disabled={isBusy}
+                                  onClick={() => moveUnmatchedRowToOriginFreight(row)}
+                                >
+                                  ย้ายไปค่าส่งต้นทาง
+                                </Button>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="flex items-start gap-1.5">
+                              <CheckCircle2
+                                className={cn(
+                                  "mt-0.5 size-3.5 shrink-0",
+                                  isFuzzy ? "text-amber-600" : "text-emerald-600",
+                                )}
+                                aria-hidden
+                              />
+                              <p className="min-w-0 flex-1 whitespace-normal break-words text-sm font-semibold leading-snug text-slate-900">
+                                {row.matchedProduct?.name}
+                                <span className="ml-1.5 inline-block rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-normal text-slate-600">
+                                  {row.matchedProduct?.sku}
+                                </span>
+                                {row.matchedProduct?.tax_type ? (
+                                  <span className="ml-1.5 inline-block rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">
+                                    {row.matchedProduct.tax_type}
+                                  </span>
+                                ) : null}
+                              </p>
                               <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                className="h-8"
+                                className="h-6 shrink-0 px-2 text-[11px]"
                                 disabled={isBusy}
-                                onClick={() => moveUnmatchedRowToOriginFreight(row)}
+                                onClick={() => beginSkuOverride(row)}
                               >
-                                🚚 ย้ายไปค่าส่งต้นทาง
+                                <RefreshCw className="size-3" aria-hidden />
+                                เปลี่ยน
                               </Button>
-                              )}
+                            </div>
+                          )}
+
+                          {isEditingRaw ? (
+                            <div className="mt-1 flex items-center gap-1.5">
+                              <Input
+                                value={rawDraft}
+                                autoFocus
+                                disabled={isBusy}
+                                className="h-7 font-mono text-xs"
+                                aria-label={`แก้ข้อความ OCR ${row.raw_vendor_sku}`}
+                                onChange={(event) => setRawDraft(event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    void saveRawAndRematch(row);
+                                  }
+                                  if (event.key === "Escape") setEditingRawKey(null);
+                                }}
+                              />
+                              <Button
+                                type="button"
+                                size="icon"
+                                className="h-7 w-7 shrink-0 p-0"
+                                disabled={isBusy}
+                                title="บันทึกและจับคู่ใหม่"
+                                onClick={() => void saveRawAndRematch(row)}
+                              >
+                                {rematchingKey === row.lineKey ? (
+                                  <RefreshCw className="size-3.5 animate-spin" aria-hidden />
+                                ) : (
+                                  <Check className="size-3.5" aria-hidden />
+                                )}
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                              <span className="font-semibold text-slate-400">OCR:</span>
+                              <span className={cn(row.isFoc && "line-through")}>
+                                {row.raw_vendor_sku || "—"}
+                              </span>
+                              {row.raw_description ? (
+                                <span className="whitespace-normal break-words">
+                                  {row.raw_description}
+                                </span>
+                              ) : null}
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 shrink-0 p-0 text-slate-500"
+                                disabled={isBusy}
+                                title="แก้ข้อความ OCR"
+                                aria-label={`แก้ข้อความ OCR ${row.raw_vendor_sku}`}
+                                onClick={() => beginRawEdit(row)}
+                              >
+                                <Pencil className="h-3.5 w-3.5" aria-hidden />
+                              </Button>
                             </div>
                           )}
                         </TableCell>
 
-                        <TableCell className="text-center">
-                          <label className="inline-flex cursor-pointer flex-col items-center gap-1">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(row.isFoc)}
-                              onChange={(event) =>
-                                handleToggleFoc(row.lineKey, event.target.checked)
-                              }
-                              className="size-4 rounded border-slate-300 text-slate-700 focus:ring-slate-400"
-                              aria-label={`ของแถม ${row.raw_vendor_sku}`}
-                            />
-                            <span className="text-[10px] font-medium text-slate-500">
-                              ของแถม
-                            </span>
-                          </label>
+                        <TableCell className="px-1 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(row.isFoc)}
+                            onChange={(event) =>
+                              handleToggleFoc(row.lineKey, event.target.checked)
+                            }
+                            className="mx-auto block size-4 rounded border-slate-300 text-slate-700 focus:ring-slate-400"
+                            aria-label={`ของแถม ${row.raw_vendor_sku}`}
+                          />
                         </TableCell>
 
-                        <TableCell className="text-right">
-                          <Input
-                            type="number"
-                            inputMode="decimal"
-                            min="0.0001"
-                            step="any"
-                            value={Number.isFinite(qty) ? qty : 0}
-                            disabled={isBusy}
-                            onChange={(event) =>
-                              handleQtyChange(row.lineKey, event.target.value)
-                            }
-                            className="ml-auto h-8 w-[6.5rem] text-right font-mono tabular-nums"
-                            aria-label={`จำนวน ${row.raw_vendor_sku || "รายการ"}`}
-                          />
+                        <TableCell className="px-1 py-2 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <Input
+                              type="number"
+                              inputMode="decimal"
+                              min="0.0001"
+                              step="any"
+                              value={Number.isFinite(qty) ? qty : 0}
+                              disabled={isBusy}
+                              onChange={(event) =>
+                                handleQtyChange(row.lineKey, event.target.value)
+                              }
+                              className="h-8 w-16 px-2 text-right text-sm font-semibold"
+                              aria-label={`จำนวน ${row.raw_vendor_sku || "รายการ"}`}
+                            />
+                            {purchaseUoms.length > 0 ? (
+                              <Select
+                                aria-label="หน่วยรับเข้า"
+                                value={row.purchaseUomCode || "PCS"}
+                                disabled={isBusy}
+                                title={factor > 1 ? `ตัวคูณ x${factor}` : undefined}
+                                className="h-8 max-w-[4.5rem] truncate rounded bg-slate-100 px-1 text-xs"
+                                onChange={(event) => {
+                                  const next = purchaseUoms.find(
+                                    (item) => item.uom_code === event.target.value,
+                                  );
+                                  handlePurchaseUomChange(
+                                    row.lineKey,
+                                    event.target.value,
+                                    resolveConversionFactor(next?.default_multiplier),
+                                  );
+                                }}
+                              >
+                                {purchaseUoms.map((item) => (
+                                  <option key={item.uom_code} value={item.uom_code}>
+                                    {item.uom_code}·{item.uom_name}
+                                  </option>
+                                ))}
+                              </Select>
+                            ) : (
+                              <span className="rounded bg-slate-100 px-2 py-1 text-xs">
+                                {uom
+                                  ? `${uom.uom_code}·${uom.uom_name}`
+                                  : row.purchaseUomCode || "PCS"}
+                              </span>
+                            )}
+                          </div>
                         </TableCell>
-                        <TableCell>
-                          <PurchaseUomCell
-                            catalog={purchaseUoms}
-                            uomCode={row.purchaseUomCode || "PCS"}
-                            conversionFactor={row.conversionFactor || 1}
-                            qty={qty}
-                            disabled={isBusy}
-                            onChange={({ uomCode, conversionFactor }) =>
-                              handlePurchaseUomChange(
-                                row.lineKey,
-                                uomCode,
-                                conversionFactor,
-                              )
-                            }
-                          />
-                        </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="px-1 py-2 text-right">
                           <Input
                             type="number"
                             inputMode="decimal"
@@ -1839,66 +1830,32 @@ export default function GoodsReceiptUI({
                             onChange={(event) =>
                               handleUnitPriceChange(row.lineKey, event.target.value)
                             }
-                            className={cn(
-                              "ml-auto h-8 w-[7rem] text-right font-mono tabular-nums",
-                              row.isFoc && "text-slate-400",
-                            )}
+                            className="h-8 w-full px-2 text-right text-sm"
                             aria-label={`ราคาต่อหน่วย ${row.raw_vendor_sku || "รายการ"}`}
                           />
                         </TableCell>
-                        <TableCell
-                          className={cn(
-                            "font-mono text-xs",
-                            row.isFoc ? "text-slate-400" : "text-slate-600",
-                          )}
-                        >
-                          {row.discount_text?.trim() || "—"}
+                        <TableCell className="px-1 py-2 text-center text-xs font-medium text-amber-700">
+                          {row.discount_text?.trim() || "-"}
                         </TableCell>
                         <TableCell
                           className={cn(
-                            "text-right font-semibold tabular-nums",
-                            row.isFoc
-                              ? "text-slate-400"
-                              : isMatched
-                                ? "text-emerald-700"
-                                : "text-amber-800",
+                            "px-1 py-2 text-right text-sm font-semibold tabular-nums",
+                            row.isFoc ? "text-slate-400" : "text-emerald-600",
                           )}
-                          title="Net Unit Cost = ยอดก่อน VAT (+ Freight) ÷ จำนวนหน่วยย่อย"
+                          title="ทุนสุทธิต่อหน่วยย่อยหลังหักส่วนลดและปันส่วนขนส่ง"
                         >
                           {row.isFoc ? "0.00" : formatMoney(displayNetUnitCost)}
                         </TableCell>
-                        <TableCell className="text-right">
-                          {row.isFoc ? (
-                            <span className="font-bold tabular-nums text-slate-400">
-                              0.00
-                            </span>
-                          ) : (
-                            <Input
-                              type="number"
-                              inputMode="decimal"
-                              step="0.01"
-                              min="0"
-                              value={Number.isFinite(displayTotalAmount) ? displayTotalAmount : 0}
-                              onChange={(e) =>
-                                handleTotalAmountChange(row.lineKey, e.target.value)
-                              }
-                              className={cn(
-                                "ml-auto h-8 w-[7.5rem] text-right font-bold tabular-nums",
-                                isMatched ? "text-slate-900" : "text-amber-900",
-                                row.totalAmountManual &&
-                                  "border-blue-300 bg-blue-50/50",
-                              )}
-                              aria-label={`Total Amount ${row.raw_vendor_sku}`}
-                            />
-                          )}
+                        <TableCell className="px-1 py-2 text-right text-sm font-bold tabular-nums text-slate-900">
+                          {formatMoney(displayTotalAmount)}
                         </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
+                        <TableCell className="px-0.5 py-2 text-center">
+                          <div className="flex items-center justify-center gap-0.5">
                             <Button
                               type="button"
-                              variant="outline"
+                              variant="ghost"
                               size="icon"
-                              className="size-8"
+                              className="h-7 w-7 p-0"
                               disabled={isBusy}
                               title="คัดลอกแถว"
                               aria-label={`คัดลอกแถว ${row.raw_vendor_sku || "รายการ"}`}
@@ -1908,9 +1865,9 @@ export default function GoodsReceiptUI({
                             </Button>
                             <Button
                               type="button"
-                              variant="outline"
+                              variant="ghost"
                               size="icon"
-                              className="size-8 text-red-600 hover:bg-red-50 hover:text-red-700"
+                              className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 hover:text-red-700"
                               disabled={isBusy}
                               title="ลบแถว"
                               aria-label={`ลบแถว ${row.raw_vendor_sku || "รายการ"}`}

@@ -1461,6 +1461,24 @@ async function linkProcurementBills(
   return saved.success ? null : saved.error;
 }
 
+/** Header discount is the end-of-bill box only. Line discounts stay on each item. */
+function billHeaderDiscountAmount(
+  baseAfterLineDiscount: number,
+  billDiscountText: string | null | undefined,
+): number {
+  const text = billDiscountText?.trim() ?? "";
+  if (!text || baseAfterLineDiscount <= 0) return 0;
+  const clean = text.replace(/\s|บาท|B|-/gi, "").trim();
+  const match = clean.match(/[\d.]+/);
+  if (!match) return 0;
+  const value = Number.parseFloat(match[0]);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  const amount = clean.includes("%")
+    ? baseAfterLineDiscount * (value / 100)
+    : value;
+  return roundMoney(Math.max(0, Math.min(amount, baseAfterLineDiscount)));
+}
+
 export async function saveGoodsReceiptToLedger(
   rows: ReceiptLineRow[],
   documentRef: string,
@@ -1654,8 +1672,9 @@ export async function saveGoodsReceiptToLedger(
       lines.map((line) => line.lineTotal),
       freightCostNormalized,
     );
-    const discountAmount = roundMoney(
-      lines.reduce((sum, line) => sum + line.discountAmount, 0),
+    const discountAmount = billHeaderDiscountAmount(
+      lines.reduce((sum, line) => sum + (line.row.isFoc ? 0 : line.lineTotal), 0),
+      billDiscountText,
     );
 
     const freightTaxMode = normalizeFreightTaxMode(freightContext?.freightTaxMode);
@@ -1887,7 +1906,7 @@ export async function saveGoodsReceiptToLedger(
         discount_amount: line.discountAmount,
         line_total: line.lineTotal,
         prorated_freight: proratedFreightByLineKey.get(line.row.lineKey) ?? 0,
-        sort_order: index,
+        sort_order: index + 1,
       };
     });
 
