@@ -30,8 +30,16 @@ import { numberToThaiBaht } from "@/lib/utils/thai-baht-text";
 import {
   vatTypeToPurchaseTaxMode,
   purchaseTaxModeToVatType,
+  analyzeLineItemsTaxConsensus,
+  minorityTaxModes,
+  normalizePurchaseTaxMode,
+  purchaseTaxModeLabel,
   type PurchaseTaxMode,
 } from "@/lib/utils/purchase-tax";
+import {
+  MixedTaxConflictBanner,
+  TaxModeMismatchBanner,
+} from "@/components/procurement/purchase-tax-guardrails";
 import { calculateLandedCost, resolveFreightExVat } from "@/lib/utils/landed-cost";
 import {
   computeVendorPayable,
@@ -89,6 +97,7 @@ export type ManualReceiptLine = {
   conversionFactor: number;
   isFoc: boolean;
   vendorSku: string;
+  taxType?: string | null;
 };
 
 export type ManualReceiptWorkspaceProps = {
@@ -173,6 +182,8 @@ export default function ManualReceiptWorkspace({
   const [vatType, setVatType] = useState<VatCalculationType>(
     cloneDraft?.vatType ?? "NONE",
   );
+  const [taxModeLocked, setTaxModeLocked] = useState(false);
+  const [mixedTaxConfirmed, setMixedTaxConfirmed] = useState(false);
   const [discountText, setDiscountText] = useState(cloneDraft?.discountText ?? "");
   const [freightCostInput, setFreightCostInput] = useState(
     cloneDraft && cloneDraft.freightCost > 0 ? String(cloneDraft.freightCost) : "",
@@ -360,6 +371,7 @@ export default function ManualReceiptWorkspace({
     setVendorId(nextId);
     setVendorProducts([]);
     setDefaultHint("");
+    setTaxModeLocked(false);
     if (!nextId) return;
     startDefaults(async () => {
       const result = await getManualReceiptVendorContext(nextId);
@@ -420,6 +432,7 @@ export default function ManualReceiptWorkspace({
           conversionFactor: purchaseUom.conversionFactor,
           isFoc: false,
           vendorSku: mapped.vendor_sku ?? "",
+          taxType: product.tax_type ?? null,
         },
       ];
     });
@@ -553,8 +566,45 @@ export default function ManualReceiptWorkspace({
     });
   }
 
+  const taxConsensus = useMemo(
+    () =>
+      analyzeLineItemsTaxConsensus(
+        lines.map((line, index) => ({
+          lineNo: index + 1,
+          taxType: line.taxType,
+          matched: true,
+        })),
+      ),
+    [lines],
+  );
+  const minorityModes = useMemo(
+    () => new Set(minorityTaxModes(taxConsensus.groups)),
+    [taxConsensus.groups],
+  );
+  const conflictKey = taxConsensus.groups
+    .map((group) => `${group.mode}:${group.lineNos.join(",")}`)
+    .join("|");
+
+  useEffect(() => {
+    setMixedTaxConfirmed(false);
+  }, [conflictKey]);
+
+  useEffect(() => {
+    if (taxModeLocked) return;
+    if (!taxConsensus.hasUnanimousConsensus || !taxConsensus.consensusTaxType) return;
+    const nextVat = purchaseTaxModeToVatType(taxConsensus.consensusTaxType);
+    if (nextVat !== vatType) setVatType(nextVat);
+  }, [taxConsensus, taxModeLocked, vatType]);
+
+  function applyProductTaxConsensus() {
+    if (!taxConsensus.consensusTaxType) return;
+    setVatType(purchaseTaxModeToVatType(taxConsensus.consensusTaxType));
+    setTaxModeLocked(false);
+  }
+
   function handleReview() {
     if (!validateForm()) return;
+    if (taxConsensus.hasMixedTaxConflict && !mixedTaxConfirmed) return;
     setPreviewOpen(true);
   }
 
@@ -562,7 +612,8 @@ export default function ManualReceiptWorkspace({
     Boolean(vendorId) &&
     Boolean(documentRef.trim()) &&
     lines.length > 0 &&
-    !isPending;
+    !isPending &&
+    (!taxConsensus.hasMixedTaxConflict || mixedTaxConfirmed);
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 sm:p-6">
@@ -839,6 +890,18 @@ export default function ManualReceiptWorkspace({
                           <span className="ml-1.5 inline-block rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-normal text-slate-600">
                             {line.sku}
                           </span>
+                          {normalizePurchaseTaxMode(line.taxType) ? (
+                            <span
+                              className={cn(
+                                "ml-1.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold",
+                                minorityModes.has(normalizePurchaseTaxMode(line.taxType)!)
+                                  ? "animate-pulse bg-red-100 text-red-800 ring-2 ring-red-500"
+                                  : "bg-violet-100 text-violet-700",
+                              )}
+                            >
+                              {normalizePurchaseTaxMode(line.taxType)}
+                            </span>
+                          ) : null}
                         </p>
                         {line.vendorSku ? (
                           <p className="mt-0.5 whitespace-normal break-words text-xs text-slate-500">
@@ -905,7 +968,14 @@ export default function ManualReceiptWorkspace({
                           }
                         />
                       </TableCell>
-                      <TableCell className="px-2 py-2.5 text-right text-sm font-semibold tabular-nums text-emerald-600">
+                      <TableCell
+                        className="px-2 py-2.5 text-right text-sm font-semibold tabular-nums text-emerald-600"
+                        title={
+                          vatType === "INCLUSIVE"
+                            ? "ทุนสุทธิต่อหน่วยฐานหลังถอด VAT 7% ตาม TAS 2"
+                            : "ทุนสุทธิต่อหน่วยฐาน"
+                        }
+                      >
                         {formatMoney(line.isFoc ? 0 : baseUnitCost)}
                       </TableCell>
                       <TableCell className="px-2 py-2.5 text-right text-sm font-bold tabular-nums text-slate-900">
@@ -963,6 +1033,11 @@ export default function ManualReceiptWorkspace({
       {lines.length > 0 ? (
         <Card className="border-violet-200 bg-violet-50/40">
           <CardContent className="p-4">
+            <MixedTaxConflictBanner
+              consensus={taxConsensus}
+              confirmed={mixedTaxConfirmed}
+              onConfirmedChange={setMixedTaxConfirmed}
+            />
             <div className="max-w-md">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-500">
                 ตรวจสอบโหมดภาษี (VAT Mode)
@@ -973,9 +1048,10 @@ export default function ManualReceiptWorkspace({
               <select
                 id="manual-receipt-tax-mode"
                 value={vatTypeToPurchaseTaxMode(vatType)}
-                onChange={(event) =>
-                  setVatType(purchaseTaxModeToVatType(event.target.value as PurchaseTaxMode))
-                }
+                onChange={(event) => {
+                  setTaxModeLocked(true);
+                  setVatType(purchaseTaxModeToVatType(event.target.value as PurchaseTaxMode));
+                }}
                 disabled={isPending}
                 className={cn(selectClassName, "mt-1")}
               >
@@ -983,11 +1059,31 @@ export default function ManualReceiptWorkspace({
                 <option value="INC_VAT">INC_VAT — ราคารวมภาษี (ถอด VAT 7% ในตัว)</option>
                 <option value="NON_VAT">NONE — ไม่มีภาษี (0%)</option>
               </select>
-              <p className="mt-2 text-[11px] leading-relaxed text-violet-700">
-                {defaultHint || "เลือกผู้จำหน่ายเพื่อดึงโหมดภาษีจากเอกสารล่าสุดหรือสินค้าที่ผูกไว้"}
+              <p
+                className={cn(
+                  "mt-2 text-[11px] leading-relaxed",
+                  taxConsensus.hasUnanimousConsensus &&
+                    taxConsensus.consensusTaxType &&
+                    vatTypeToPurchaseTaxMode(vatType) === taxConsensus.consensusTaxType
+                    ? "text-emerald-700"
+                    : "text-violet-700",
+                )}
+              >
+                {taxConsensus.hasUnanimousConsensus &&
+                taxConsensus.consensusTaxType &&
+                vatTypeToPurchaseTaxMode(vatType) === taxConsensus.consensusTaxType
+                  ? `✓ ตั้งค่าอัตโนมัติตามประเภทภาษีของสินค้าในบิล (${purchaseTaxModeLabel(taxConsensus.consensusTaxType)} ครบทุกบรรทัด)`
+                  : defaultHint || "เลือกผู้จำหน่ายเพื่อดึงโหมดภาษีจากเอกสารล่าสุดหรือสินค้าที่ผูกไว้"}
                 {" • เอกสาร: "}
                 {docType}
               </p>
+              {taxConsensus.hasUnanimousConsensus && taxConsensus.consensusTaxType ? (
+                <TaxModeMismatchBanner
+                  documentMode={vatTypeToPurchaseTaxMode(vatType)}
+                  consensusTaxType={taxConsensus.consensusTaxType}
+                  onApplyConsensus={applyProductTaxConsensus}
+                />
+              ) : null}
             </div>
 
             <div className="mt-4 grid grid-cols-1 gap-4 border-t border-dashed border-violet-200 pt-4 lg:grid-cols-2">
@@ -1083,16 +1179,24 @@ export default function ManualReceiptWorkspace({
               </p>
             </div>
           </div>
-          <Button
-            type="button"
-            size="lg"
-            disabled={!canSave}
-            onClick={handleReview}
-            className="gap-2 bg-emerald-600 hover:bg-emerald-700"
-          >
-            <PackagePlus className="size-4" />
-            {isPending ? "กำลังบันทึก..." : "ตรวจสอบและบันทึกรับสินค้า"}
-          </Button>
+          <div className="flex flex-col items-stretch gap-2">
+            <MixedTaxConflictBanner
+              consensus={taxConsensus}
+              confirmed={mixedTaxConfirmed}
+              onConfirmedChange={setMixedTaxConfirmed}
+              showConfirm={false}
+            />
+            <Button
+              type="button"
+              size="lg"
+              disabled={!canSave}
+              onClick={handleReview}
+              className="gap-2 bg-emerald-600 hover:bg-emerald-700"
+            >
+              <PackagePlus className="size-4" />
+              {isPending ? "กำลังบันทึก..." : "ตรวจสอบและบันทึกรับสินค้า"}
+            </Button>
+          </div>
         </div>
       ) : null}
 

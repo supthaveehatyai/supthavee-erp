@@ -106,6 +106,7 @@ function toReceiptProduct(
     image_url: model?.image_url ?? null,
     is_service: false,
     is_raw_material: model?.is_raw_material === true,
+    tax_type: product.tax_type || model?.tax_type || null,
     vendor_sku: vendorSku,
     purchase_uom_code: purchaseUomCode,
     conversion_factor: conversionFactor,
@@ -149,6 +150,11 @@ function mapRpcVendorProduct(row: Record<string, unknown>): VendorMappedReceiptP
     image_url: textValue(row.image_url) || model?.image_url || null,
     is_service: false,
     is_raw_material: row.is_raw_material === true || model?.is_raw_material === true,
+    tax_type:
+      textValue(row.tax_type) ||
+      textValue(nested?.tax_type) ||
+      model?.tax_type ||
+      null,
     vendor_sku: textValue(row.vendor_sku) || "",
     purchase_uom_code: textValue(row.purchase_uom_code),
     conversion_factor:
@@ -493,6 +499,7 @@ export async function getSmartSkuPickerAllProducts(): Promise<GetSmartSkuPickerC
       image_url: product.image_url,
       is_service: product.is_service,
       is_raw_material: product.is_raw_material,
+      tax_type: product.tax_type,
     }));
     return { data: catalog, error: null };
   } catch (error: unknown) {

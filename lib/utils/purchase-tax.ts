@@ -149,6 +149,104 @@ export function exVatGoodsAmount(
   return amount;
 }
 
+export type LineTaxVote = {
+  /** 1-based line number shown in the receipt table. */
+  lineNo: number;
+  taxType?: string | null;
+  /** Unmatched OCR rows are ignored until an internal SKU is confirmed. */
+  matched?: boolean;
+};
+
+export type TaxConsensusGroup = {
+  mode: PurchaseTaxMode;
+  lineNos: number[];
+};
+
+export type LineItemsTaxConsensus = {
+  consensusTaxType: PurchaseTaxMode | null;
+  hasUnanimousConsensus: boolean;
+  hasMixedTaxConflict: boolean;
+  groups: TaxConsensusGroup[];
+};
+
+/**
+ * Product-first tax vote. Matched lines only.
+ * Unanimous when every matched line carries the same INC_VAT / EXC_VAT / NON_VAT.
+ * Mixed when two or more of those modes appear on one bill.
+ */
+export function analyzeLineItemsTaxConsensus(
+  items: LineTaxVote[],
+): LineItemsTaxConsensus {
+  const considered = items.filter((item) => item.matched !== false);
+  const votes = considered
+    .map((item) => ({
+      lineNo: item.lineNo,
+      mode: normalizePurchaseTaxMode(item.taxType),
+    }))
+    .filter((item): item is { lineNo: number; mode: PurchaseTaxMode } => item.mode != null);
+
+  const grouped = new Map<PurchaseTaxMode, number[]>();
+  for (const vote of votes) {
+    const lineNos = grouped.get(vote.mode) ?? [];
+    lineNos.push(vote.lineNo);
+    grouped.set(vote.mode, lineNos);
+  }
+  const groups = [...grouped.entries()].map(([mode, lineNos]) => ({
+    mode,
+    lineNos,
+  }));
+
+  if (groups.length > 1) {
+    return {
+      consensusTaxType: null,
+      hasUnanimousConsensus: false,
+      hasMixedTaxConflict: true,
+      groups,
+    };
+  }
+
+  if (groups.length === 1 && votes.length === considered.length && votes.length > 0) {
+    return {
+      consensusTaxType: groups[0]!.mode,
+      hasUnanimousConsensus: true,
+      hasMixedTaxConflict: false,
+      groups,
+    };
+  }
+
+  return {
+    consensusTaxType: null,
+    hasUnanimousConsensus: false,
+    hasMixedTaxConflict: false,
+    groups,
+  };
+}
+
+/** Dropdown and banners say NONE; the stored purchase mode stays NON_VAT. */
+export function purchaseTaxModeLabel(mode: PurchaseTaxMode): string {
+  return mode === "NON_VAT" ? "NONE" : mode;
+}
+
+export function formatMixedTaxGroups(groups: TaxConsensusGroup[]): string {
+  return groups
+    .map(
+      (group) =>
+        `${purchaseTaxModeLabel(group.mode)}: รายการ ${group.lineNos.map((lineNo) => `#${lineNo}`).join(", ")}`,
+    )
+    .join(" | ");
+}
+
+/** Modes that are not a strict majority — those row badges are highlighted. */
+export function minorityTaxModes(groups: TaxConsensusGroup[]): PurchaseTaxMode[] {
+  if (groups.length < 2) return [];
+  const largest = Math.max(...groups.map((group) => group.lineNos.length));
+  const leaders = groups.filter((group) => group.lineNos.length === largest);
+  if (leaders.length !== 1) return groups.map((group) => group.mode);
+  return groups
+    .filter((group) => group.mode !== leaders[0]!.mode)
+    .map((group) => group.mode);
+}
+
 export function purchaseTaxModeHint(
   source: TaxModeSource,
   mode: PurchaseTaxMode,

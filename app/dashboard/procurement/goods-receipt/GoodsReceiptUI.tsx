@@ -110,14 +110,21 @@ import {
   type PurchaseUomOption,
 } from "@/lib/utils/purchase-uom";
 import {
+  analyzeLineItemsTaxConsensus,
   exVatGoodsAmount,
-  inheritVatTypeFromMatchedProducts,
+  minorityTaxModes,
+  normalizePurchaseTaxMode,
   purchaseTaxModeHint,
+  purchaseTaxModeLabel,
   purchaseTaxModeToVatType,
   vatTypeToPurchaseTaxMode,
   type PurchaseTaxMode,
   type TaxModeSource,
 } from "@/lib/utils/purchase-tax";
+import {
+  MixedTaxConflictBanner,
+  TaxModeMismatchBanner,
+} from "@/components/procurement/purchase-tax-guardrails";
 import {
   computeVendorPayable,
   originFreightLineAmount,
@@ -286,6 +293,7 @@ export default function GoodsReceiptUI({
   /** AI-classified VAT type — seeds Save to Ledger (human or product master can override). */
   const [aiVatType, setAiVatType] = useState<VatCalculationType>("NONE");
   const [taxModeSource, setTaxModeSource] = useState<TaxModeSource>("ai");
+  const [mixedTaxConfirmed, setMixedTaxConfirmed] = useState(false);
   /** User typed VAT Amount — keep that figure instead of the automatic 7%. */
   const [vatAmountTouched, setVatAmountTouched] = useState(false);
   /** User edited Grand Total away from the formula (rounding). */
@@ -492,14 +500,22 @@ export default function GoodsReceiptUI({
       }
 
       const reviewRows = applyApportionedTotals(matched.data, "");
-      const inherited = inheritVatTypeFromMatchedProducts({
-        currentVatType: parsed.vatType,
-        productTaxCodes: reviewRows.map((row) =>
-          row.status === "matched" ? row.matchedProduct?.tax_type : null,
-        ),
-      });
-      setAiVatType(inherited.vatType);
-      setTaxModeSource(inherited.inherited ? "product" : "ai");
+      const consensus = analyzeLineItemsTaxConsensus(
+        reviewRows.map((row, index) => ({
+          lineNo: index + 1,
+          taxType: row.status === "matched" ? row.matchedProduct?.tax_type : null,
+          matched: row.status === "matched",
+        })),
+      );
+      const nextVatType =
+        consensus.hasUnanimousConsensus && consensus.consensusTaxType
+          ? purchaseTaxModeToVatType(consensus.consensusTaxType)
+          : parsed.vatType;
+      setAiVatType(nextVatType);
+      setTaxModeSource(
+        consensus.hasUnanimousConsensus ? "product" : "ai",
+      );
+      setMixedTaxConfirmed(false);
       setVatAmountTouched(false);
       setGrandTouched(false);
       setRows(reviewRows);
@@ -523,7 +539,7 @@ export default function GoodsReceiptUI({
       const docDateSuffix = parsed.documentDate
         ? ` ลงวันที่ ${parsed.documentDate}`
         : "";
-      const typeSuffix = ` · ${parsed.docType} / VAT ${inherited.vatType}`;
+      const typeSuffix = ` · ${parsed.docType} / VAT ${nextVatType}`;
       toast.success(
         (unmatchedCount > 0
           ? `AI วิเคราะห์สำเร็จ — พบ ${matched.data.length} รายการ (${unmatchedCount} ยังไม่จับคู่)`
@@ -753,21 +769,6 @@ export default function GoodsReceiptUI({
       };
     });
     setRows(nextRows);
-    if (taxModeSource === "ai" || taxModeSource === "product") {
-      const inherited = inheritVatTypeFromMatchedProducts({
-        currentVatType: aiVatType,
-        productTaxCodes: nextRows.map((item) =>
-          item.status === "matched" ? item.matchedProduct?.tax_type : null,
-        ),
-      });
-      if (inherited.inherited) {
-        setAiVatType(inherited.vatType);
-        setTaxModeSource("product");
-        setVatAmountTouched(false);
-        setGrandTouched(false);
-        setVatTotalsManual(false);
-      }
-    }
     setDraftProductByLineKey((current) => {
       const next = { ...current };
       delete next[row.lineKey];
@@ -1133,6 +1134,15 @@ export default function GoodsReceiptUI({
     toast.success(`ย้าย ${formatMoney(amount)} บาท ไปค่าขนส่งต้นทางแล้ว`);
   }
 
+  function applyProductTaxConsensus() {
+    if (!taxConsensus.consensusTaxType) return;
+    setAiVatType(purchaseTaxModeToVatType(taxConsensus.consensusTaxType));
+    setTaxModeSource("product");
+    setVatAmountTouched(false);
+    setGrandTouched(false);
+    setVatTotalsManual(false);
+  }
+
   function handleTaxModeChange(mode: PurchaseTaxMode) {
     setAiVatType(purchaseTaxModeToVatType(mode));
     setTaxModeSource("manual");
@@ -1163,8 +1173,50 @@ export default function GoodsReceiptUI({
     return roundMoney2(manualGrand - calculatedGrand);
   }, [grandTotalInput, receiptVat.grandTotal]);
 
+  const taxConsensus = useMemo(
+    () =>
+      analyzeLineItemsTaxConsensus(
+        rows.map((row, index) => ({
+          lineNo: index + 1,
+          taxType: row.status === "matched" ? row.matchedProduct?.tax_type : null,
+          matched: row.status === "matched",
+        })),
+      ),
+    [rows],
+  );
+  const minorityModes = useMemo(
+    () => new Set(minorityTaxModes(taxConsensus.groups)),
+    [taxConsensus.groups],
+  );
+  const conflictKey = taxConsensus.groups
+    .map((group) => `${group.mode}:${group.lineNos.join(",")}`)
+    .join("|");
+
+  useEffect(() => {
+    setMixedTaxConfirmed(false);
+  }, [conflictKey]);
+
+  useEffect(() => {
+    if (taxModeSource === "manual" || taxModeSource === "vat-input") return;
+    if (!taxConsensus.hasUnanimousConsensus || !taxConsensus.consensusTaxType) return;
+    const nextVat = purchaseTaxModeToVatType(taxConsensus.consensusTaxType);
+    if (nextVat === aiVatType) {
+      if (taxModeSource !== "product") setTaxModeSource("product");
+      return;
+    }
+    setAiVatType(nextVat);
+    setTaxModeSource("product");
+    setVatAmountTouched(false);
+    setGrandTouched(false);
+    setVatTotalsManual(false);
+  }, [aiVatType, taxConsensus, taxModeSource]);
+
   const canSaveToLedger =
-    rows.length > 0 && stats.unmatched === 0 && !isSavingToLedger && !isOcrRunning;
+    rows.length > 0 &&
+    stats.unmatched === 0 &&
+    !isSavingToLedger &&
+    !isOcrRunning &&
+    (!taxConsensus.hasMixedTaxConflict || mixedTaxConfirmed);
 
   /** "Save to Ledger" button — opens the confirmation dialog (Invoice No + Date review + Early Warning check). */
   function handleOpenSaveDialog() {
@@ -1681,8 +1733,19 @@ export default function GoodsReceiptUI({
                                   {row.matchedProduct?.sku}
                                 </span>
                                 {row.matchedProduct?.tax_type ? (
-                                  <span className="ml-1.5 inline-block rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">
-                                    {row.matchedProduct.tax_type}
+                                  <span
+                                    className={cn(
+                                      "ml-1.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold",
+                                      normalizePurchaseTaxMode(row.matchedProduct.tax_type) &&
+                                        minorityModes.has(
+                                          normalizePurchaseTaxMode(row.matchedProduct.tax_type)!,
+                                        )
+                                        ? "animate-pulse bg-red-100 text-red-800 ring-2 ring-red-500"
+                                        : "bg-violet-100 text-violet-700",
+                                    )}
+                                  >
+                                    {normalizePurchaseTaxMode(row.matchedProduct.tax_type) ??
+                                      row.matchedProduct.tax_type}
                                   </span>
                                 ) : null}
                               </p>
@@ -1842,7 +1905,11 @@ export default function GoodsReceiptUI({
                             "px-1 py-2 text-right text-sm font-semibold tabular-nums",
                             row.isFoc ? "text-slate-400" : "text-emerald-600",
                           )}
-                          title="ทุนสุทธิต่อหน่วยย่อยหลังหักส่วนลดและปันส่วนขนส่ง"
+                          title={
+                            aiVatType === "INCLUSIVE"
+                              ? "ทุนสุทธิต่อหน่วยฐานหลังถอด VAT 7% ตาม TAS 2"
+                              : "ทุนสุทธิต่อหน่วยฐาน"
+                          }
                         >
                           {row.isFoc ? "0.00" : formatMoney(displayNetUnitCost)}
                         </TableCell>
@@ -1927,6 +1994,11 @@ export default function GoodsReceiptUI({
       {rows.length > 0 ? (
         <Card className="border-violet-200 bg-violet-50/40">
           <CardContent className="space-y-0 p-4">
+            <MixedTaxConflictBanner
+              consensus={taxConsensus}
+              confirmed={mixedTaxConfirmed}
+              onConfirmedChange={setMixedTaxConfirmed}
+            />
             <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
               <div className="lg:col-span-4">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-500">
@@ -1948,17 +2020,28 @@ export default function GoodsReceiptUI({
                   <option value="INC_VAT">INC_VAT — ราคารวมภาษี (ถอด VAT 7% ในตัว)</option>
                   <option value="NON_VAT">NON_VAT — ไม่มีภาษี (0%)</option>
                 </Select>
-                <p className="mt-2 text-[11px] leading-relaxed text-violet-700">
-                  {taxModeSource === "product"
-                    ? `ดึงอัตโนมัติจากสินค้า: ${vatTypeToPurchaseTaxMode(aiVatType)}`
-                    : purchaseTaxModeHint(
-                        taxModeSource,
-                        vatTypeToPurchaseTaxMode(aiVatType),
-                      )}
+                <p className="mt-2 text-[11px] leading-relaxed text-emerald-700">
+                  {taxConsensus.hasUnanimousConsensus &&
+                  taxConsensus.consensusTaxType &&
+                  vatTypeToPurchaseTaxMode(aiVatType) === taxConsensus.consensusTaxType
+                    ? `✓ ตั้งค่าอัตโนมัติตามประเภทภาษีของสินค้าในบิล (${purchaseTaxModeLabel(taxConsensus.consensusTaxType)} ครบทุกบรรทัด)`
+                    : taxModeSource === "product"
+                      ? `ดึงอัตโนมัติจากสินค้า: ${vatTypeToPurchaseTaxMode(aiVatType)}`
+                      : purchaseTaxModeHint(
+                          taxModeSource,
+                          vatTypeToPurchaseTaxMode(aiVatType),
+                        )}
                   {" • เอกสาร: "}
                   {aiDocType}
                   {vatTotalsManual ? " • ใช้ยอดที่พิมพ์ทับ" : ""}
                 </p>
+                {taxConsensus.hasUnanimousConsensus && taxConsensus.consensusTaxType ? (
+                  <TaxModeMismatchBanner
+                    documentMode={vatTypeToPurchaseTaxMode(aiVatType)}
+                    consensusTaxType={taxConsensus.consensusTaxType}
+                    onApplyConsensus={applyProductTaxConsensus}
+                  />
+                ) : null}
               </div>
 
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5 lg:col-span-8">
@@ -2204,8 +2287,14 @@ export default function GoodsReceiptUI({
               </span>
             )}
           </div>
-
-          <Button
+          <div className="flex flex-col items-stretch gap-2">
+            <MixedTaxConflictBanner
+              consensus={taxConsensus}
+              confirmed={mixedTaxConfirmed}
+              onConfirmedChange={setMixedTaxConfirmed}
+              showConfirm={false}
+            />
+            <Button
             type="button"
             size="lg"
             className="bg-emerald-600 hover:bg-emerald-700 focus-visible:ring-emerald-500 sm:w-auto"
@@ -2215,6 +2304,7 @@ export default function GoodsReceiptUI({
             <PackageCheck className="size-4" aria-hidden />
             บันทึกรับสินค้าเข้าคลัง (Save to Ledger)
           </Button>
+          </div>
         </div>
       )}
 

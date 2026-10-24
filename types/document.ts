@@ -210,6 +210,8 @@ export type SalesProductSearchItem = {
   base_uom: string | null;
   /** Public URL จาก `product_models.image_url` (Visual Verification). */
   image_url: string | null;
+  /** `products.tax_type`, falling back to `product_models.tax_type`. */
+  tax_type?: string | null;
   /** `product_models.is_service` — งานบริการ (ไม่ตัดสต็อก) */
   is_service: boolean;
   /** `product_models.is_raw_material` — วัตถุดิบ (รับเข้าคลัง AP) */
