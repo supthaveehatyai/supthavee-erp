@@ -2135,6 +2135,8 @@ export type ManualGoodsReceiptLineInput = {
   conversionFactor?: number | null;
   /** ของแถม — ตั้งหนี้เป็น 0 แต่จำนวนยังเข้าฐานต้นทุนเฉลี่ย TAS 2 */
   isFoc?: boolean;
+  /** ลำดับที่แสดงบนหน้าจอ เริ่มที่ 1 — บันทึกลง document_items.sort_order */
+  sort_order?: number | null;
 };
 
 export type SaveManualGoodsReceiptInput = {
@@ -2400,7 +2402,12 @@ export async function saveManualGoodsReceipt(
           DEFAULT_PURCHASE_UOM_CODE,
         conversionFactor: resolveConversionFactor(line.conversionFactor ?? 1),
         unitPrice,
-        sort_order: index,
+        sort_order: (() => {
+          const requested = Number(line.sort_order);
+          return Number.isInteger(requested) && requested > 0
+            ? requested
+            : index + 1;
+        })(),
         is_service: modelJoin?.is_service === true,
       };
     });

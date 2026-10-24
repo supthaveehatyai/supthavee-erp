@@ -112,10 +112,21 @@ export function ManualReceiptPreviewDialog({
           <p className="mt-1 text-[10px] text-neutral-500">
             {docTypeLabel} · ภาษี {vatLabel} · เลขที่เอกสารจริงจะออกเมื่อยืนยันบันทึก
           </p>
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[640px] border-collapse text-sm">
+          <div className="mt-3">
+            <table className="w-full table-fixed border-collapse text-sm">
+              <colgroup>
+                <col className="w-[8%]" />
+                <col className="w-[18%]" />
+                <col className="w-[28%]" />
+                <col className="w-[10%]" />
+                <col className="w-[10%]" />
+                <col className="w-[8%]" />
+                <col className="w-[9%]" />
+                <col className="w-[9%]" />
+              </colgroup>
               <thead>
                 <tr className="border-y border-slate-300 bg-slate-50 text-left text-xs text-slate-500">
+                  <th className="px-2 py-2 text-center">#</th>
                   <th className="px-2 py-2">รหัส</th>
                   <th className="px-2 py-2">สินค้า</th>
                   <th className="px-2 py-2 text-right">จำนวน</th>
@@ -126,9 +137,14 @@ export function ManualReceiptPreviewDialog({
                 </tr>
               </thead>
               <tbody>
-                {lines.map((line) => (
+                {lines.map((line, index) => (
                   <tr key={line.key} className="border-b border-slate-100">
-                    <td className="px-2 py-2 font-mono text-xs">{line.sku}</td>
+                    <td className="px-2 py-2 text-center">
+                      <span className="inline-flex rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                        {index + 1}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 font-mono text-xs break-words">{line.sku}</td>
                     <td className="px-2 py-2">
                       {line.name}
                       {line.isFoc ? (

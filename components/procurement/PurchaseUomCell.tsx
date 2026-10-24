@@ -18,6 +18,7 @@ type PurchaseUomCellProps = {
   qty: number;
   disabled?: boolean;
   baseUnitLabel?: string;
+  compact?: boolean;
   onChange: (next: { uomCode: string; conversionFactor: number }) => void;
 };
 
@@ -28,6 +29,7 @@ export function PurchaseUomCell({
   qty,
   disabled = false,
   baseUnitLabel = "ตัว",
+  compact = false,
   onChange,
 }: PurchaseUomCellProps) {
   const selected = findPurchaseUom(catalog, uomCode);
@@ -37,11 +39,18 @@ export function PurchaseUomCell({
 
   return (
     <div className="space-y-1">
-      <Select
-        aria-label="หน่วยรับเข้า"
+          <Select
+            aria-label="หน่วยรับเข้า"
+            title={
+              factor > 1
+                ? `รับเข้าคลัง ${received.toLocaleString("th-TH")} ${baseUnitLabel}`
+                : selected
+                  ? uomOptionLabel(selected)
+                  : uomCode
+            }
         disabled={disabled}
         value={uomCode}
-        className="h-8 text-xs"
+        className={compact ? "h-8 w-full truncate px-2 text-xs" : "h-8 text-xs"}
         onChange={(event) => {
           const next = findPurchaseUom(catalog, event.target.value);
           onChange({
@@ -67,7 +76,7 @@ export function PurchaseUomCell({
             disabled={disabled}
             value={factor}
             aria-label="ตัวคูณแปลงหน่วย"
-            className="h-7 w-16 text-right text-xs tabular-nums"
+            className={compact ? "h-7 w-full px-1 text-right text-xs tabular-nums" : "h-7 w-16 text-right text-xs tabular-nums"}
             onChange={(event) =>
               onChange({
                 uomCode,
@@ -77,7 +86,7 @@ export function PurchaseUomCell({
           />
         </label>
       ) : null}
-      {factor > 1 ? (
+      {factor > 1 && !compact ? (
         <p className="text-[10px] font-medium text-blue-700">
           รับเข้าคลัง: {received.toLocaleString("th-TH")} {baseUnitLabel}
         </p>

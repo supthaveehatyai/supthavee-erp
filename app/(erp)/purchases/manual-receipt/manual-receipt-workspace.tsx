@@ -488,7 +488,7 @@ export default function ManualReceiptWorkspace({
         carrierId: carrierId || null,
         carrierTrackingNo: carrierTrackingNo || null,
         status: "ISSUED",
-        lines: lines.map((line) => ({
+        lines: lines.map((line, index) => ({
           product_id: line.product_id,
           qty: line.qty,
           unit_cost: line.unit_cost,
@@ -497,6 +497,7 @@ export default function ManualReceiptWorkspace({
           purchaseUomCode: line.purchaseUomCode,
           conversionFactor: line.conversionFactor,
           isFoc: line.isFoc,
+          sort_order: index + 1,
         })),
       });
 
@@ -721,141 +722,175 @@ export default function ManualReceiptWorkspace({
             ล้างรายการทั้งหมด
           </Button>
         </CardHeader>
-        <CardContent className="px-0 sm:px-6">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
+        <CardContent className="px-3 sm:px-4">
+          <Table
+            wrapperClassName="overflow-x-visible"
+            className="w-full table-fixed border-collapse"
+          >
+            <colgroup>
+              <col className="w-[4%]" />
+              <col className="w-[40%]" />
+              <col className="w-[10%]" />
+              <col className="w-[11%]" />
+              <col className="w-[11%]" />
+              <col className="w-[5%]" />
+              <col className="w-[8%]" />
+              <col className="w-[8%]" />
+              <col className="w-[3%]" />
+            </colgroup>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="h-auto w-[4%] px-2 py-2.5 text-center normal-case tracking-normal">
+                  #
+                </TableHead>
+                <TableHead className="h-auto w-[40%] px-2 py-2.5 text-left normal-case tracking-normal">
+                  รายการสินค้า (ชื่อสินค้า / รหัส SKU)
+                </TableHead>
+                <TableHead className="h-auto w-[10%] px-2 py-2.5 text-right normal-case tracking-normal">
+                  จำนวน
+                </TableHead>
+                <TableHead className="h-auto w-[11%] px-2 py-2.5 text-center normal-case tracking-normal">
+                  หน่วยรับเข้า
+                </TableHead>
+                <TableHead className="h-auto w-[11%] px-2 py-2.5 text-right normal-case tracking-normal">
+                  ต้นทุน/หน่วย
+                </TableHead>
+                <TableHead className="h-auto w-[5%] px-2 py-2.5 text-center normal-case tracking-normal">
+                  ของแถม
+                </TableHead>
+                <TableHead className="h-auto w-[8%] px-2 py-2.5 text-right normal-case tracking-normal">
+                  NET UNIT COST
+                </TableHead>
+                <TableHead className="h-auto w-[8%] px-2 py-2.5 text-right normal-case tracking-normal">
+                  TOTAL AMOUNT
+                </TableHead>
+                <TableHead className="h-auto w-[3%] px-2 py-2.5 text-center normal-case tracking-normal">
+                  ลบ
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {lines.length === 0 ? (
                 <TableRow>
-                  <TableHead className="whitespace-nowrap">รหัสสินค้า</TableHead>
-                  <TableHead>ชื่อสินค้า</TableHead>
-                  <TableHead className="w-[110px] text-right">จำนวน</TableHead>
-                  <TableHead className="min-w-[180px]">หน่วยรับเข้า (UOM)</TableHead>
-                  <TableHead className="w-[140px] text-right">ต้นทุน/หน่วย</TableHead>
-                  <TableHead className="w-[88px] text-center">ของแถม</TableHead>
-                  <TableHead className="w-[130px] text-right">Net Unit Cost</TableHead>
-                  <TableHead className="w-[120px] text-right">Total Amount</TableHead>
-                  <TableHead className="w-[56px]" />
+                  <TableCell colSpan={9} className="h-24 px-2 py-2.5 text-center text-slate-500">
+                    ยังไม่มีรายการ — ใช้ช่องค้นหาด้านบนเพื่อเพิ่มสินค้า
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {lines.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={9} className="h-24 text-center text-slate-500">
-                      ยังไม่มีรายการ — ใช้ช่องค้นหาด้านบนเพื่อเพิ่มสินค้า
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  lines.map((line) => {
-                    const cost = costPreviewByKey.get(line.key);
-                    const invoice = invoicePreviewByKey.get(line.key);
-                    const allocated =
-                      Number(cost?.finalLineTotal ?? 0) +
-                      Number(freightByKey.get(line.key) ?? 0);
-                    const baseUnitCost = netUnitCostPerBase(
-                      allocated,
-                      line.qty,
-                      resolveConversionFactor(line.conversionFactor),
-                    );
-                    const baseQty = stockBaseQty(line.qty, line.conversionFactor);
-                    return (
-                      <TableRow key={line.key}>
-                        <TableCell className="whitespace-nowrap font-mono text-sm font-semibold text-slate-900">
-                          {line.vendorSku || line.sku}
-                          {line.vendorSku ? (
-                            <p className="font-sans text-[10px] font-normal text-slate-400">
-                              {line.sku}
-                            </p>
-                          ) : null}
-                        </TableCell>
-                        <TableCell className="max-w-[240px] truncate text-slate-700">
+              ) : (
+                lines.map((line, index) => {
+                  const cost = costPreviewByKey.get(line.key);
+                  const invoice = invoicePreviewByKey.get(line.key);
+                  const allocated =
+                    Number(cost?.finalLineTotal ?? 0) +
+                    Number(freightByKey.get(line.key) ?? 0);
+                  const baseUnitCost = netUnitCostPerBase(
+                    allocated,
+                    line.qty,
+                    resolveConversionFactor(line.conversionFactor),
+                  );
+                  return (
+                    <TableRow key={line.key}>
+                      <TableCell className="px-2 py-2.5 text-center">
+                        <span className="inline-flex rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                          {index + 1}
+                        </span>
+                      </TableCell>
+                      <TableCell className="min-w-0 px-2 py-2.5 text-left">
+                        <p className="whitespace-normal break-words text-sm font-semibold leading-snug text-slate-900">
                           {line.name}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Input
-                            type="number"
-                            min={0}
-                            step="0.0001"
-                            value={line.qty}
-                            disabled={isPending}
-                            className="ml-auto h-9 w-[96px] text-right tabular-nums"
-                            onChange={(e) =>
-                              updateLine(line.key, {
-                                qty: Math.max(0, Number(e.target.value) || 0),
-                              })
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <PurchaseUomCell
-                            catalog={purchaseUoms}
-                            uomCode={line.purchaseUomCode}
-                            conversionFactor={line.conversionFactor}
-                            qty={line.qty}
-                            disabled={isPending}
-                            onChange={({ uomCode, conversionFactor }) =>
-                              updateLine(line.key, {
-                                purchaseUomCode: uomCode,
-                                conversionFactor,
-                              })
-                            }
-                          />
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Input
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            value={line.isFoc ? 0 : line.unit_cost}
-                            disabled={isPending || line.isFoc}
-                            className="ml-auto h-9 w-[128px] text-right tabular-nums"
-                            onChange={(e) =>
-                              updateLine(line.key, {
-                                unit_cost: roundMoney(Number(e.target.value) || 0),
-                              })
-                            }
-                          />
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <input
-                            type="checkbox"
-                            checked={line.isFoc}
-                            disabled={isPending}
-                            aria-label={`ของแถม ${line.sku}`}
-                            onChange={(event) =>
-                              updateLine(line.key, { isFoc: event.target.checked })
-                            }
-                          />
-                        </TableCell>
-                        <TableCell className="text-right font-medium tabular-nums text-emerald-700">
-                          <div>{formatMoney(line.isFoc ? 0 : baseUnitCost)}</div>
-                          {resolveConversionFactor(line.conversionFactor) > 1 ? (
-                            <p className="text-[10px] font-normal text-blue-700">
-                              = {baseQty.toLocaleString("th-TH")} ตัว
-                            </p>
-                          ) : null}
-                        </TableCell>
-                        <TableCell className="text-right font-medium tabular-nums text-slate-900">
-                          {formatMoney(line.isFoc ? 0 : Number(invoice?.finalLineTotal ?? 0))}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            disabled={isPending}
-                            onClick={() => removeLine(line.key)}
-                            aria-label="ลบรายการ"
-                          >
-                            <Trash2 className="size-4 text-slate-400" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                          <span className="ml-1.5 inline-block rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-normal text-slate-600">
+                            {line.sku}
+                          </span>
+                        </p>
+                        {line.vendorSku ? (
+                          <p className="mt-0.5 whitespace-normal break-words text-xs text-slate-500">
+                            {line.vendorSku}
+                          </p>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-right">
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.0001"
+                          value={line.qty}
+                          disabled={isPending}
+                          className="h-8 w-full px-2 text-right text-sm font-medium"
+                          onChange={(e) =>
+                            updateLine(line.key, {
+                              qty: Math.max(0, Number(e.target.value) || 0),
+                            })
+                          }
+                        />
+                      </TableCell>
+                      <TableCell className="min-w-0 px-2 py-2.5 text-center">
+                        <PurchaseUomCell
+                          compact
+                          catalog={purchaseUoms}
+                          uomCode={line.purchaseUomCode}
+                          conversionFactor={line.conversionFactor}
+                          qty={line.qty}
+                          disabled={isPending}
+                          onChange={({ uomCode, conversionFactor }) =>
+                            updateLine(line.key, {
+                              purchaseUomCode: uomCode,
+                              conversionFactor,
+                            })
+                          }
+                        />
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-right">
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={line.isFoc ? 0 : line.unit_cost}
+                          disabled={isPending || line.isFoc}
+                          className="h-8 w-full px-2 text-right text-sm font-medium"
+                          onChange={(e) =>
+                            updateLine(line.key, {
+                              unit_cost: roundMoney(Number(e.target.value) || 0),
+                            })
+                          }
+                        />
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-center">
+                        <input
+                          type="checkbox"
+                          checked={line.isFoc}
+                          disabled={isPending}
+                          className="mx-auto block"
+                          aria-label={`ของแถม ${line.sku}`}
+                          onChange={(event) =>
+                            updateLine(line.key, { isFoc: event.target.checked })
+                          }
+                        />
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-right text-sm font-semibold tabular-nums text-emerald-600">
+                        {formatMoney(line.isFoc ? 0 : baseUnitCost)}
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-right text-sm font-bold tabular-nums text-slate-900">
+                        {formatMoney(line.isFoc ? 0 : Number(invoice?.finalLineTotal ?? 0))}
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-center">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-7"
+                          disabled={isPending}
+                          onClick={() => removeLine(line.key)}
+                          aria-label="ลบรายการ"
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
