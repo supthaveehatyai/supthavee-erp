@@ -1442,6 +1442,7 @@ export async function getDocumentByNo(
         wht_amount,
         payment_status,
         notes,
+        reference_no,
         remark,
         void_reason,
         attachment_url,
@@ -1684,7 +1685,10 @@ export async function getDocumentByNo(
     const notes = (data.notes as string | null) ?? null;
     const visibleNotes = splitBillNotes(notes).notes;
     const vendorRefMatch = visibleNotes.match(/อ้างอิงบิลซัพพลายเออร์:\s*(.+)$/m);
-    const referenceNo = vendorRefMatch?.[1]?.trim() || null;
+    const columnReference = String(
+      (data as { reference_no?: string | null }).reference_no ?? "",
+    ).trim();
+    const referenceNo = columnReference || vendorRefMatch?.[1]?.trim() || null;
     const billAttachmentUrls = billUrlsFromNotes(
       notes,
       (data.attachment_url as string | null) ?? null,

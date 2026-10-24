@@ -22,10 +22,10 @@ export const metadata: Metadata = {
 export default async function ManualGoodsReceiptPage({
   searchParams,
 }: {
-  searchParams: Promise<{ clone?: string }>;
+  searchParams: Promise<{ clone?: string; clone_from?: string }>;
 }) {
   const params = await searchParams;
-  const cloneNo = params.clone?.trim() ?? "";
+  const cloneNo = params.clone_from?.trim() || params.clone?.trim() || "";
   const [vendorsResult, uomResult, carrierResult, settingsResult, cloneResult] =
     await Promise.all([
     getActiveVendors(),

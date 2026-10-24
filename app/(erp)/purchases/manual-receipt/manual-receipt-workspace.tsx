@@ -17,7 +17,7 @@ import {
 import { toast } from "sonner";
 import type { VendorOption } from "@/lib/actions/mapping";
 import { getManualReceiptVendorContext } from "@/lib/actions/manual-receipt-context";
-import { saveManualGoodsReceipt } from "@/lib/actions/receipt";
+import { checkDuplicateInvoice, saveManualGoodsReceipt } from "@/lib/actions/receipt";
 import { uploadProcurementBills } from "@/lib/procurement/upload-bill-files";
 import { BillAttachmentPicker } from "@/components/procurement/bill-attachment-picker";
 import type { GoodsReceiptDocType } from "@/lib/constants/document";
@@ -176,6 +176,11 @@ export default function ManualReceiptWorkspace({
     cloneDraft?.docDate?.slice(0, 10) || todayIsoDate(),
   );
   const [documentRef, setDocumentRef] = useState(cloneDraft?.documentRef ?? "");
+  const [invoiceGuard, setInvoiceGuard] = useState<{
+    isDuplicate: boolean;
+    isChecking: boolean;
+    voidedDocNo: string | null;
+  }>({ isDuplicate: false, isChecking: false, voidedDocNo: null });
   const [docType, setDocType] = useState<GoodsReceiptDocType>(
     cloneDraft?.docType ?? "AP_TAX",
   );
@@ -602,8 +607,40 @@ export default function ManualReceiptWorkspace({
     setTaxModeLocked(false);
   }
 
+  useEffect(() => {
+    const trimmedRef = documentRef.trim();
+    const trimmedDate = docDate.trim();
+    if (!vendorId || !trimmedRef || !trimmedDate) {
+      setInvoiceGuard({ isDuplicate: false, isChecking: false, voidedDocNo: null });
+      return;
+    }
+
+    let cancelled = false;
+    setInvoiceGuard((current) => ({ ...current, isChecking: true }));
+    const timer = setTimeout(() => {
+      void checkDuplicateInvoice(vendorId, trimmedRef, trimmedDate).then((result) => {
+        if (cancelled) return;
+        if (result.error) {
+          setInvoiceGuard({ isDuplicate: false, isChecking: false, voidedDocNo: null });
+          return;
+        }
+        setInvoiceGuard({
+          isDuplicate: result.isDuplicate,
+          isChecking: false,
+          voidedDocNo: result.voidedDocNo,
+        });
+      });
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [vendorId, documentRef, docDate]);
+
   function handleReview() {
     if (!validateForm()) return;
+    if (invoiceGuard.isDuplicate || invoiceGuard.isChecking) return;
     if (taxConsensus.hasMixedTaxConflict && !mixedTaxConfirmed) return;
     setPreviewOpen(true);
   }
@@ -613,6 +650,8 @@ export default function ManualReceiptWorkspace({
     Boolean(documentRef.trim()) &&
     lines.length > 0 &&
     !isPending &&
+    !invoiceGuard.isDuplicate &&
+    !invoiceGuard.isChecking &&
     (!taxConsensus.hasMixedTaxConflict || mixedTaxConfirmed);
 
   return (
@@ -705,6 +744,15 @@ export default function ManualReceiptWorkspace({
                 autoComplete="off"
                 required
               />
+              {invoiceGuard.isDuplicate ? (
+                <p className="text-xs font-semibold text-red-700">
+                  ⚠️ บิลเลขที่และวันที่นี้ ถูกบันทึกเข้าระบบแล้ว
+                </p>
+              ) : invoiceGuard.voidedDocNo ? (
+                <p className="text-xs font-medium text-sky-700">
+                  ℹ️ พบบิลเลขที่นี้ที่ถูกยกเลิกไปแล้ว ({invoiceGuard.voidedDocNo}) ระบบพร้อมออกเอกสารใบใหม่ทดแทน
+                </p>
+              ) : null}
             </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="manual-receipt-doc-type">ประเภทเอกสาร</Label>

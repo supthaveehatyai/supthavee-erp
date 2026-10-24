@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Eye, FileInput } from "lucide-react";
+import { ArrowLeft, Eye, FileInput, RefreshCw } from "lucide-react";
 import { getDocumentByNo, voidDocumentAction } from "@/lib/actions/document-actions";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { isAdminRoleCode } from "@/lib/auth/module-access";
@@ -323,6 +323,15 @@ export default async function PurchaseDocumentDetailPage({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {doc.status === "VOID" && isGoodsReceipt ? (
+            <Link
+              href={`/purchases/manual-receipt?clone_from=${encodeURIComponent(doc.doc_no)}`}
+              className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+            >
+              <RefreshCw className="size-4" />
+              คัดลอกไปออกบิลใหม่ (แก้ประเภทเอกสาร/ภาษี)
+            </Link>
+          ) : null}
           <BillGalleryButton urls={doc.bill_attachment_urls ?? []} />
           <BillAttachmentAppender
             documentId={doc.id}

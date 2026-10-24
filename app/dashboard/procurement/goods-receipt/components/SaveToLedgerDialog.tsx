@@ -102,7 +102,8 @@ export default function SaveToLedgerDialog({
   const [duplicateCheck, setDuplicateCheck] = useState<{
     isDuplicate: boolean;
     isChecking: boolean;
-  }>({ isDuplicate: false, isChecking: false });
+    voidedDocNo: string | null;
+  }>({ isDuplicate: false, isChecking: false, voidedDocNo: null });
 
   const [wasOpen, setWasOpen] = useState(open);
   if (wasOpen !== open) {
@@ -128,7 +129,7 @@ export default function SaveToLedgerDialog({
     const trimmedDocNumber = docNumber.trim();
     const trimmedDocDate = docDate.trim();
     if (!vendorId || !trimmedDocNumber || !trimmedDocDate) {
-      setDuplicateCheck({ isDuplicate: false, isChecking: false });
+      setDuplicateCheck({ isDuplicate: false, isChecking: false, voidedDocNo: null });
       return;
     }
 
@@ -140,10 +141,14 @@ export default function SaveToLedgerDialog({
         (result) => {
           if (cancelled) return;
           if (result.error) {
-            setDuplicateCheck({ isDuplicate: false, isChecking: false });
+            setDuplicateCheck({ isDuplicate: false, isChecking: false, voidedDocNo: null });
             return;
           }
-          setDuplicateCheck({ isDuplicate: result.isDuplicate, isChecking: false });
+          setDuplicateCheck({
+            isDuplicate: result.isDuplicate,
+            isChecking: false,
+            voidedDocNo: result.voidedDocNo,
+          });
         },
       );
     }, 400);
@@ -268,6 +273,11 @@ export default function SaveToLedgerDialog({
             <span>⚠️ บิลเลขที่และวันที่นี้ ถูกบันทึกเข้าระบบแล้ว</span>
           </div>
         )}
+        {!isDuplicate && duplicateCheck.voidedDocNo ? (
+          <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3.5 py-2.5 text-sm font-medium text-sky-800">
+            ℹ️ พบบิลเลขที่นี้ที่ถูกยกเลิกไปแล้ว ({duplicateCheck.voidedDocNo}) ระบบพร้อมออกเอกสารใบใหม่ทดแทน
+          </div>
+        ) : null}
 
         <DialogFooter>
           <Button

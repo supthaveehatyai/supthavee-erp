@@ -1297,22 +1297,175 @@ export async function createOnTheFlyReceiptMapping(
 /* -------------------------------------------------------------------------- */
 
 export type CheckDuplicateInvoiceResult = {
-  /** true if a `doc_headers` row already exists for this exact (vendor, doc_no, doc_date) combo. */
+  /** True only when a non-void purchase document already uses this vendor invoice. */
   isDuplicate: boolean;
+  /** Official `documents.doc_no` when the only matches are VOID. */
+  voidedDocNo: string | null;
   error: string | null;
 };
 
+const VENDOR_INVOICE_NOTE_MARKER = "อ้างอิงบิลซัพพลายเออร์:";
+
+function isVoidedPurchaseDocument(row: {
+  status?: string | null;
+  is_voided?: boolean | null;
+}): boolean {
+  return String(row.status ?? "").toUpperCase() === "VOID" || row.is_voided === true;
+}
+
+function vendorInvoiceFromNotes(notes: string | null | undefined): string {
+  const text = notes ?? "";
+  const index = text.lastIndexOf(VENDOR_INVOICE_NOTE_MARKER);
+  if (index < 0) return "";
+  return text.slice(index + VENDOR_INVOICE_NOTE_MARKER.length).trim();
+}
+
+function voidedHeaderDocNo(referenceNo: string, headerId: string): string {
+  const suffix = `-VOID-${headerId.replace(/-/g, "").slice(0, 8)}`;
+  const base = referenceNo.trim().slice(0, Math.max(1, 50 - suffix.length));
+  return `${base}${suffix}`;
+}
+
+type PurchaseInvoiceMatch = {
+  id: string;
+  docNo: string;
+  voided: boolean;
+};
+
+async function listPurchaseInvoiceMatches(
+  supabaseAdmin: SupabaseClient,
+  vendorId: string,
+  referenceNo: string,
+  docDate: string,
+): Promise<{ matches: PurchaseInvoiceMatch[]; error: string | null }> {
+  const { data, error } = await supabaseAdmin
+    .from("documents")
+    .select("id, doc_no, status, is_voided, reference_no, notes")
+    .eq("contact_id", vendorId)
+    .eq("doc_date", docDate);
+
+  if (error) return { matches: [], error: error.message };
+
+  const needle = referenceNo.trim();
+  const matches = (data ?? [])
+    .filter((row) => {
+      const reference = String(row.reference_no ?? "").trim();
+      if (reference === needle) return true;
+      return vendorInvoiceFromNotes(row.notes) === needle;
+    })
+    .map((row) => ({
+      id: String(row.id),
+      docNo: String(row.doc_no ?? ""),
+      voided: isVoidedPurchaseDocument(row),
+    }));
+
+  return { matches, error: null };
+}
+
+function classifyPurchaseInvoiceMatches(matches: PurchaseInvoiceMatch[]): {
+  isDuplicate: boolean;
+  voidedDocNo: string | null;
+} {
+  const live = matches.filter((row) => !row.voided);
+  if (live.length > 0) return { isDuplicate: true, voidedDocNo: null };
+  const voidedNos = [
+    ...new Set(matches.map((row) => row.docNo).filter((docNo) => docNo.length > 0)),
+  ];
+  return {
+    isDuplicate: false,
+    voidedDocNo: voidedNos.length > 0 ? voidedNos.join(", ") : null,
+  };
+}
+
 /**
- * Early-warning check for `saveGoodsReceiptToLedger`'s
- * `doc_headers_contact_doc_no_date_key` UNIQUE constraint — run this right
- * after OCR extracts the invoice number/date (or on manual edit) so the
- * user finds out BEFORE hitting the DB error.
- *
- * Business rule: a duplicate invoice = the EXACT combination of
- * `vendor_id` + `document_number` + `document_date`. Many vendors reset
- * their own invoice numbering every month, so the same `doc_no` legitimately
- * recurs for the same vendor across different months — this check (and the
- * matching DB constraint) intentionally does NOT flag that as a duplicate.
+ * Free `doc_headers (contact_id, doc_no, doc_date)` when the only purchase
+ * documents for that vendor invoice are VOID. Live headers are left untouched.
+ */
+async function releaseVoidedDocHeaderInvoiceKey(
+  supabaseAdmin: SupabaseClient,
+  vendorId: string,
+  referenceNo: string,
+  docDate: string,
+  matches: PurchaseInvoiceMatch[],
+): Promise<string | null> {
+  if (matches.some((row) => !row.voided)) return null;
+
+  const { data: headers, error: headerError } = await supabaseAdmin
+    .from("doc_headers")
+    .select("id, doc_no")
+    .eq("contact_id", vendorId)
+    .eq("doc_no", referenceNo)
+    .eq("doc_date", docDate);
+  if (headerError) return headerError.message;
+  if (!headers?.length) return null;
+
+  const headerIds = headers.map((row) => String(row.id));
+  const { data: linkedDocs, error: linkedError } = await supabaseAdmin
+    .from("documents")
+    .select("id, status, is_voided")
+    .in("id", headerIds);
+  if (linkedError) return linkedError.message;
+
+  const linkedById = new Map(
+    (linkedDocs ?? []).map((row) => [String(row.id), row]),
+  );
+  const voidedDocumentIds = new Set(
+    matches.filter((row) => row.voided).map((row) => row.id),
+  );
+  const hasVoidedDocument = voidedDocumentIds.size > 0;
+
+  for (const header of headers) {
+    const headerId = String(header.id);
+    const linked = linkedById.get(headerId);
+    const linkedIsVoid = linked ? isVoidedPurchaseDocument(linked) : false;
+    const linkedIsLive = linked ? !linkedIsVoid : false;
+    if (linkedIsLive) continue;
+    const orphanOfVoidedBill = !linked && hasVoidedDocument;
+    if (!linkedIsVoid && !voidedDocumentIds.has(headerId) && !orphanOfVoidedBill) {
+      continue;
+    }
+    const renamed = voidedHeaderDocNo(referenceNo, headerId);
+    const { error: updateError } = await supabaseAdmin
+      .from("doc_headers")
+      .update({ doc_no: renamed })
+      .eq("id", headerId)
+      .eq("doc_no", referenceNo);
+    if (updateError) return updateError.message;
+  }
+
+  return null;
+}
+
+async function assertPurchaseInvoiceAvailable(
+  supabaseAdmin: SupabaseClient,
+  vendorId: string,
+  referenceNo: string,
+  docDate: string,
+): Promise<string | null> {
+  const listed = await listPurchaseInvoiceMatches(
+    supabaseAdmin,
+    vendorId,
+    referenceNo,
+    docDate,
+  );
+  if (listed.error) return listed.error;
+  const classified = classifyPurchaseInvoiceMatches(listed.matches);
+  if (classified.isDuplicate) {
+    return `เลขที่เอกสาร "${referenceNo}" ลงวันที่ ${docDate} ถูกบันทึกเข้าระบบแล้วสำหรับผู้จำหน่ายรายนี้ — กรุณาตรวจสอบอีกครั้ง`;
+  }
+  return releaseVoidedDocHeaderInvoiceKey(
+    supabaseAdmin,
+    vendorId,
+    referenceNo,
+    docDate,
+    listed.matches,
+  );
+}
+
+/**
+ * Early-warning check for a vendor invoice already stored on `documents`.
+ * VOID / `is_voided` rows do not count. Same vendor invoice on another date
+ * is not a duplicate.
  */
 export async function checkDuplicateInvoice(
   vendorId: string,
@@ -1324,29 +1477,30 @@ export async function checkDuplicateInvoice(
   const trimmedDocDate = docDate?.trim() ?? "";
 
   if (!trimmedVendorId || !trimmedDocNumber || !trimmedDocDate) {
-    return { isDuplicate: false, error: null };
+    return { isDuplicate: false, voidedDocNo: null, error: null };
+  }
+
+  const owner = await requireSessionUserId();
+  if (!owner.ok) {
+    return { isDuplicate: false, voidedDocNo: null, error: owner.error };
   }
 
   try {
     const supabaseAdmin = createSupabaseAdminClient();
-
-    const { data, error } = await supabaseAdmin
-      .from("doc_headers")
-      .select("id")
-      .eq("contact_id", trimmedVendorId)
-      .eq("doc_no", trimmedDocNumber)
-      .eq("doc_date", trimmedDocDate)
-      .maybeSingle();
-
-    if (error) {
-      return { isDuplicate: false, error: error.message };
+    const listed = await listPurchaseInvoiceMatches(
+      supabaseAdmin,
+      trimmedVendorId,
+      trimmedDocNumber,
+      trimmedDocDate,
+    );
+    if (listed.error) {
+      return { isDuplicate: false, voidedDocNo: null, error: listed.error };
     }
-
-    return { isDuplicate: Boolean(data), error: null };
+    return { ...classifyPurchaseInvoiceMatches(listed.matches), error: null };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "ตรวจสอบเลขที่เอกสารซ้ำไม่สำเร็จ";
-    return { isDuplicate: false, error: message };
+    return { isDuplicate: false, voidedDocNo: null, error: message };
   }
 }
 
@@ -1742,6 +1896,16 @@ export async function saveGoodsReceiptToLedger(
     const owner = await requireSessionUserId();
     if (!owner.ok) {
       return { docHeaderId: null, docNo: null, error: owner.error };
+    }
+
+    const invoiceConflict = await assertPurchaseInvoiceAvailable(
+      supabaseAdmin,
+      vendorId,
+      docNo,
+      docDate,
+    );
+    if (invoiceConflict) {
+      return { docHeaderId: null, docNo: null, error: invoiceConflict };
     }
 
     const runningPrefix =
@@ -2332,6 +2496,16 @@ export async function saveManualGoodsReceipt(
       return { data: null, error: owner.error };
     }
 
+    const invoiceConflict = await assertPurchaseInvoiceAvailable(
+      supabaseAdmin,
+      vendorId,
+      documentRef,
+      docDate,
+    );
+    if (invoiceConflict) {
+      return { data: null, error: invoiceConflict };
+    }
+
     const { data: vendor, error: vendorError } = await supabaseAdmin
       .from("contacts")
       .select("id")
@@ -2680,6 +2854,7 @@ export async function saveManualGoodsReceipt(
           payment_status: paymentStatus,
           paid_amount: paymentStatus === "PAID" ? grandTotal : 0,
           notes,
+          reference_no: documentRef,
           created_by: owner.userId,
         },
         p_items: receiptLines.map((line) => ({
@@ -2709,6 +2884,14 @@ export async function saveManualGoodsReceipt(
           parsed.error ??
           "บันทึกรับสินค้าแบบ Manual ไม่สำเร็จ",
       };
+    }
+
+    const { error: referenceError } = await supabaseAdmin
+      .from("documents")
+      .update({ reference_no: documentRef })
+      .eq("id", parsed.documentId);
+    if (referenceError) {
+      console.error("saveManualGoodsReceipt reference_no:", referenceError.message);
     }
 
     const billError = await linkProcurementBills(supabaseAdmin, {
