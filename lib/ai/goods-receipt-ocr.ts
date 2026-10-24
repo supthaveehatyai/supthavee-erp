@@ -28,6 +28,10 @@ export type GoodsReceiptOcrExtraction = {
   vat_type: "NONE" | "INCLUSIVE" | "EXCLUSIVE";
   /** Origin freight pulled out of product lines (ค่าส่ง / ค่าขนส่ง). */
   freight_cost: number;
+  /** Printed amount after discount and before VAT. Null when the paper has no such figure. */
+  subtotal: number | null;
+  /** Printed payable total (ยอดสุทธิ). Null when it cannot be read. */
+  grand_total: number | null;
   items: GoodsReceiptOcrLine[];
   modelUsed: string;
   modelNotice: string | null;
@@ -99,11 +103,13 @@ Other rules:
 - "raw_vendor_sku" = the factory/vendor product code exactly as printed, flattened per the rule above — this is Ground Truth, NEVER invent or guess an internal SKU.
 - "raw_description" = short description of the item as printed (Thai or English), or "" if none.
 - "discount_text" examples: "40%", "41.8%", "40+5%", "50", or "" if no discount.
-- "qty" and "unit_price" MUST be plain numbers — no currency symbols, no thousands separators. "qty" is the quantity printed in the purchase unit (5 โหล → qty 5, not 60).
+- "qty" and "unit_price" MUST be plain numbers — no currency symbols, no thousands separators. Keep up to 4 decimal places when the paper prints them (185.9813). "qty" is the quantity printed in the purchase unit (5 โหล → qty 5, not 60).
+- "subtotal" = the printed amount AFTER the bill discount and BEFORE VAT (ฐานภาษี / ยอดหลังส่วนลด). Copy the printed number. Use 0 if that figure is not printed.
+- "grand_total" = the printed payable total (ยอดสุทธิ / รวมทั้งสิ้น / Grand Total). Copy the printed number. Use 0 if it is not printed. Do not calculate it from the lines.
 - PURCHASE UOM: if the quantity cell ends with "ล" or "โหล" (dozen), set "purchase_uom_code" to "DZN" and "conversion_factor" to 12. Otherwise set "purchase_uom_code" to "PCS" and "conversion_factor" to 1.
 - ORIGIN FREIGHT: a line whose description or code is a delivery charge (ค่าส่ง, ค่าขนส่ง, ค่าจัดส่ง, "ค่าส่ง รวมกับบิลแรก", freight) is NOT a product. Do NOT put it in "items". Sum those amounts into root "freight_cost". Example: code 34223, description ค่าส่ง, amount 70 → freight_cost 70 and no item row, so received quantity is not inflated.
 - Respond with ONLY a valid JSON OBJECT — no markdown code fences, no commentary, no trailing text — matching EXACTLY this shape:
-{"document_number": "", "document_date": "", "doc_type": "AP_TAX", "vat_type": "NONE", "freight_cost": 0, "items": [{"raw_vendor_sku": "", "raw_description": "", "qty": 0, "unit_price": 0, "discount_text": "", "purchase_uom_code": "PCS", "conversion_factor": 1}]}
+{"document_number": "", "document_date": "", "doc_type": "AP_TAX", "vat_type": "NONE", "freight_cost": 0, "subtotal": 0, "grand_total": 0, "items": [{"raw_vendor_sku": "", "raw_description": "", "qty": 0, "unit_price": 0, "discount_text": "", "purchase_uom_code": "PCS", "conversion_factor": 1}]}
 `.trim();
 }
 
@@ -196,6 +202,8 @@ export function parseGoodsReceiptOcrJson(
   const documentNumber =
     typeof root.document_number === "string" ? root.document_number.trim() : "";
   const headerFreight = Number(root.freight_cost);
+  const subtotal = Number(root.subtotal);
+  const grandTotal = Number(root.grand_total);
   const split = splitOriginFreightLines(
     items,
     Number.isFinite(headerFreight) ? headerFreight : 0,
@@ -209,6 +217,8 @@ export function parseGoodsReceiptOcrJson(
     doc_type: normalizeDocType(root.doc_type),
     vat_type: normalizeVatType(root.vat_type),
     freight_cost: split.freightCost,
+    subtotal: Number.isFinite(subtotal) && subtotal > 0 ? subtotal : null,
+    grand_total: Number.isFinite(grandTotal) && grandTotal > 0 ? grandTotal : null,
     items: split.items,
     modelUsed: meta.modelUsed,
     modelNotice: meta.notice,

@@ -76,6 +76,10 @@ import {
 import type { OcrLineMatchResult, OcrLineMatchTier } from "@/types/ocr-line-match";
 import type { OcrQuotaStatus } from "@/lib/ai/ocr-quota";
 import { resolveProductTaxCode } from "@/lib/utils/purchase-tax";
+import {
+  calculateVendorLineTotals,
+  normalizeVendorCalcMode,
+} from "@/lib/utils/vendor-calc-mode";
 import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
 import type { DocumentType } from "@/types/document";
 import { requireSessionUserId } from "@/lib/auth/current-user";
@@ -367,6 +371,10 @@ export type ParseReceiptOcrResult = {
   vatType: VatCalculationType;
   /** Origin freight extracted from ค่าส่ง lines, excluded from product qty. */
   freightCost: number;
+  /** Printed post-discount pre-VAT amount, when OCR could read it. */
+  subtotal: number | null;
+  /** Printed payable total, when OCR could read it. */
+  grandTotal: number | null;
   /** Model id that actually produced this OCR result. */
   modelUsed: string | null;
   /** Set when the configured model 404'd and a live Google model was used. */
@@ -384,6 +392,8 @@ function emptyParseReceiptOcrResult(
     docType: "AP_TAX",
     vatType: "NONE",
     freightCost: 0,
+    subtotal: null,
+    grandTotal: null,
     modelUsed: null,
     modelNotice: null,
     error,
@@ -533,6 +543,8 @@ export async function parseReceiptOcr(
       docType: normalizeGoodsReceiptDocType(extraction.doc_type),
       vatType: normalizeOcrVatType(extraction.vat_type),
       freightCost: Number(extraction.freight_cost) || 0,
+      subtotal: extraction.subtotal,
+      grandTotal: extraction.grand_total,
       modelUsed: extraction.modelUsed,
       modelNotice: extraction.modelNotice,
       error: null,
@@ -2332,6 +2344,12 @@ export type SaveManualGoodsReceiptInput = {
   vatType?: VatCalculationType;
   /** Bill discount text e.g. "10%" or "500". */
   discountText?: string | null;
+  /** Vendor rounding formula. LINE_2DEC keeps the historical per-line round. */
+  calcMode?: "LINE_2DEC" | "HEADER_2DEC" | "UNIT_4DEC" | null;
+  /** Cent adjustment already applied to the last goods line. */
+  pennyDelta?: number | null;
+  /** Paper grand minus the unadjusted formula, stored on documents.rounding_difference. */
+  roundingDifference?: number | null;
   /** ค่าขนส่งต้นทาง (Freight-In) — รวมในหนี้ผู้ขาย และกระจายลงต้นทุน */
   freightCost?: number | null;
   freightTaxMode?: FreightTaxMode | null;
@@ -2643,7 +2661,7 @@ export async function saveManualGoodsReceipt(
         qty: line.qty,
         uom_used: line.uom_used,
         conversionFactor: line.conversionFactor,
-        unit_price: roundMoney(line.unitPrice),
+        unit_price: roundTo4Decimals(line.unitPrice),
         unit_cost: unitCostPrice,
         discount_amount: discountAmount,
         line_total: invoiceLineTotal,
@@ -2684,11 +2702,73 @@ export async function saveManualGoodsReceipt(
       ]),
     );
 
-    const receiptLines = normalizedLines.map((line) => {
-      const landed = landedCostByLineKey.get(line.lineKey);
+    const vendorCalcMode = normalizeVendorCalcMode(input?.calcMode);
+    const modeTotals =
+      vendorCalcMode === "LINE_2DEC"
+        ? null
+        : new Map(
+            calculateVendorLineTotals(
+              preparedLines.map((item) => ({
+                id: item.lineKey,
+                unitPrice: item.unitPrice,
+                qty: item.qty,
+                isFoc: item.isFoc,
+              })),
+              discountText,
+              vendorCalcMode,
+            ).map((item) => [item.id, item.lineTotal]),
+          );
+    const pricedLines = normalizedLines.map((line) => {
+      const lineTotal = modeTotals?.get(line.lineKey) ?? line.line_total;
+      if (modeTotals == null || lineTotal === line.line_total) return line;
+      const exVat =
+        resolvedVatType === "INCLUSIVE" && vatRate > 0
+          ? lineTotal / (1 + vatRate / 100)
+          : lineTotal;
       return {
         ...line,
-        unit_cost: landed?.landedUnitCost ?? line.unit_cost,
+        line_total: lineTotal,
+        unit_cost: line.qty > 0 ? roundTo4Decimals(exVat / line.qty) : 0,
+        discount_amount: roundMoney(line.unit_price * line.qty - lineTotal),
+      };
+    });
+    const pennyDelta = roundMoney(Number(input?.pennyDelta) || 0);
+    if (pennyDelta) {
+      const lastIndex = [...pricedLines]
+        .map((line, index) => ({ line, index }))
+        .reverse()
+        .find((item) => item.line.line_total > 0)?.index;
+      if (lastIndex != null) {
+        const last = pricedLines[lastIndex];
+        if (last) {
+          const lineTotal = roundMoney(last.line_total + pennyDelta);
+          const exVat =
+            resolvedVatType === "INCLUSIVE" && vatRate > 0
+              ? lineTotal / (1 + vatRate / 100)
+              : lineTotal;
+          pricedLines[lastIndex] = {
+            ...last,
+            line_total: lineTotal,
+            unit_cost: last.qty > 0 ? roundTo4Decimals(exVat / last.qty) : 0,
+            discount_amount: roundMoney(last.unit_price * last.qty - lineTotal),
+          };
+        }
+      }
+    }
+
+    const receiptLines = pricedLines.map((line) => {
+      if (vendorCalcMode === "LINE_2DEC" && !pennyDelta) {
+        const landed = landedCostByLineKey.get(line.lineKey);
+        return {
+          ...line,
+          unit_cost: landed?.landedUnitCost ?? line.unit_cost,
+        };
+      }
+      const freight = proratedFreightByLineKey.get(line.lineKey) ?? 0;
+      const freightUnit = line.qty > 0 ? freight / line.qty : 0;
+      return {
+        ...line,
+        unit_cost: roundTo4Decimals(line.unit_cost + freightUnit),
       };
     });
 
@@ -2888,7 +2968,10 @@ export async function saveManualGoodsReceipt(
 
     const { error: referenceError } = await supabaseAdmin
       .from("documents")
-      .update({ reference_no: documentRef })
+      .update({
+        reference_no: documentRef,
+        rounding_difference: roundMoney(Number(input?.roundingDifference) || 0),
+      })
       .eq("id", parsed.documentId);
     if (referenceError) {
       console.error("saveManualGoodsReceipt reference_no:", referenceError.message);

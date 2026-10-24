@@ -40,6 +40,18 @@ import {
   MixedTaxConflictBanner,
   TaxModeMismatchBanner,
 } from "@/components/procurement/purchase-tax-guardrails";
+import { VendorCalcModeBar } from "@/components/procurement/vendor-calc-mode-bar";
+import {
+  loadVendorRoundingCalcMode,
+  saveVendorRoundingCalcMode,
+} from "@/lib/actions/vendor-rounding";
+import {
+  calculateVendorLineTotals,
+  quoteVendorCalcModes,
+  roundMoney2,
+  vendorCalcSpread,
+  type VendorCalcMode,
+} from "@/lib/utils/vendor-calc-mode";
 import { calculateLandedCost, resolveFreightExVat } from "@/lib/utils/landed-cost";
 import {
   computeVendorPayable,
@@ -190,6 +202,9 @@ export default function ManualReceiptWorkspace({
   const [taxModeLocked, setTaxModeLocked] = useState(false);
   const [mixedTaxConfirmed, setMixedTaxConfirmed] = useState(false);
   const [discountText, setDiscountText] = useState(cloneDraft?.discountText ?? "");
+  const [calcMode, setCalcMode] = useState<VendorCalcMode>("LINE_2DEC");
+  const [pennyDelta, setPennyDelta] = useState(0);
+  const [roundingGap, setRoundingGap] = useState(0);
   const [freightCostInput, setFreightCostInput] = useState(
     cloneDraft && cloneDraft.freightCost > 0 ? String(cloneDraft.freightCost) : "",
   );
@@ -262,20 +277,40 @@ export default function ManualReceiptWorkspace({
     );
   }, [lines, discountText, vatType]);
 
+  const calcQuotes = useMemo(
+    () =>
+      quoteVendorCalcModes(
+        lines.map((line) => ({
+          id: line.key,
+          unitPrice: Number(line.unit_cost) || 0,
+          qty: Number(line.qty) || 0,
+          isFoc: line.isFoc,
+        })),
+        discountText,
+        vatType === "INCLUSIVE" || vatType === "EXCLUSIVE" ? vatType : "NONE",
+      ),
+    [lines, discountText, vatType],
+  );
+  const showCalcModes = vendorCalcSpread(calcQuotes) >= 0.01;
+
   const invoicePreviewByKey = useMemo(() => {
-    const items: ApportionmentItem[] = lines.map((line) => ({
-      id: line.key,
-      unitPrice: Number(line.unit_cost) || 0,
-      qty: Number(line.qty) || 0,
-      isFoc: line.isFoc,
-    }));
-    return new Map(
-      calculateNetCostApportionment(items, discountText || null, {
-        vatType: "NONE",
-        vatRate: 0,
-      }).map((row) => [row.id, row]),
+    const totalsById = calculateVendorLineTotals(
+      lines.map((line) => ({
+        id: line.key,
+        unitPrice: Number(line.unit_cost) || 0,
+        qty: Number(line.qty) || 0,
+        isFoc: line.isFoc,
+      })),
+      discountText,
+      calcMode,
     );
-  }, [lines, discountText]);
+    if (pennyDelta) {
+      const last = [...lines].reverse().find((line) => !line.isFoc);
+      const row = totalsById.find((item) => item.id === last?.key);
+      if (row) row.lineTotal = roundMoney2(row.lineTotal + pennyDelta);
+    }
+    return new Map(totalsById.map((row) => [row.id, { finalLineTotal: row.lineTotal }]));
+  }, [lines, discountText, calcMode, pennyDelta]);
 
   const totals = useMemo(() => {
     let qty = 0;
@@ -389,6 +424,8 @@ export default function ManualReceiptWorkspace({
       if (result.data.vatType) setVatType(result.data.vatType);
       if (result.data.freightTaxMode) setFreightTaxMode(result.data.freightTaxMode);
       setDefaultHint(result.data.source);
+      const remembered = await loadVendorRoundingCalcMode(nextId);
+      if (!remembered.error) setCalcMode(remembered.mode);
     });
   }
 
@@ -533,6 +570,9 @@ export default function ManualReceiptWorkspace({
         docType,
         vatType,
         discountText: discountText.trim() || null,
+        calcMode,
+        pennyDelta,
+        roundingDifference: roundingGap,
         freightCost: freightCostNormalized,
         freightTaxMode,
         destFreightCost: destFreightNormalized,
@@ -564,6 +604,8 @@ export default function ManualReceiptWorkspace({
         `รับสินค้าเข้าคลังสำเร็จ — ${result.data.doc_no}` +
           ` · ตัดเข้า ${result.data.ledger_count} รายการ · อัปเดต LPP (Net Cost) แล้ว`,
       );
+      const remembered = await saveVendorRoundingCalcMode(vendorId, calcMode);
+      if (remembered.error) toast.error(remembered.error);
       setPreviewOpen(false);
       router.push(
         `/purchases/${encodeURIComponent(result.data.doc_no)}?view=form&paper=A5-Portrait`,
@@ -600,6 +642,27 @@ export default function ManualReceiptWorkspace({
     const nextVat = purchaseTaxModeToVatType(taxConsensus.consensusTaxType);
     if (nextVat !== vatType) setVatType(nextVat);
   }, [taxConsensus, taxModeLocked, vatType]);
+
+  function handleCalcModeChange(mode: VendorCalcMode) {
+    setCalcMode(mode);
+    setPennyDelta(0);
+    setRoundingGap(0);
+    if (!vendorId) return;
+    void saveVendorRoundingCalcMode(vendorId, mode).then((result) => {
+      if (result.error) toast.error(result.error);
+    });
+  }
+
+  function balanceManualPenny(delta: number, gap: number) {
+    const pennies = roundMoney2(delta);
+    if (!pennies) return;
+    if (Math.abs(pennies) > 0.1) {
+      toast.warning("ปรับเศษได้ครั้งละไม่เกิน ±0.10 บาท");
+      return;
+    }
+    setPennyDelta(pennies);
+    setRoundingGap(roundMoney2(gap));
+  }
 
   function applyProductTaxConsensus() {
     if (!taxConsensus.consensusTaxType) return;
@@ -914,9 +977,14 @@ export default function ManualReceiptWorkspace({
                 lines.map((line, index) => {
                   const cost = costPreviewByKey.get(line.key);
                   const invoice = invoicePreviewByKey.get(line.key);
-                  const allocated =
-                    Number(cost?.finalLineTotal ?? 0) +
-                    Number(freightByKey.get(line.key) ?? 0);
+                  const invoiceTotal = Number(invoice?.finalLineTotal ?? 0);
+                  const costBase =
+                    calcMode === "LINE_2DEC"
+                      ? Number(cost?.finalLineTotal ?? 0)
+                      : vatType === "INCLUSIVE"
+                        ? invoiceTotal / 1.07
+                        : invoiceTotal;
+                  const allocated = costBase + Number(freightByKey.get(line.key) ?? 0);
                   const baseUnitCost = netUnitCostPerBase(
                     allocated,
                     line.qty,
@@ -993,15 +1061,17 @@ export default function ManualReceiptWorkspace({
                         <Input
                           type="number"
                           min={0}
-                          step="0.01"
+                          step="0.0001"
                           value={line.isFoc ? 0 : line.unit_cost}
                           disabled={isPending || line.isFoc}
                           className="h-8 w-full px-2 text-right text-sm font-medium"
-                          onChange={(e) =>
-                            updateLine(line.key, {
-                              unit_cost: roundMoney(Number(e.target.value) || 0),
-                            })
-                          }
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            if (raw.trim() === "") return;
+                            const next = Number(raw);
+                            if (!Number.isFinite(next) || next < 0) return;
+                            updateLine(line.key, { unit_cost: Math.round(next * 10000) / 10000 });
+                          }}
                         />
                       </TableCell>
                       <TableCell className="px-2 py-2.5 text-center">
@@ -1132,6 +1202,14 @@ export default function ManualReceiptWorkspace({
                   onApplyConsensus={applyProductTaxConsensus}
                 />
               ) : null}
+              {showCalcModes ? (
+                <VendorCalcModeBar
+                  mode={calcMode}
+                  quotes={calcQuotes}
+                  disabled={isPending}
+                  onChange={handleCalcModeChange}
+                />
+              ) : null}
             </div>
 
             <div className="mt-4 grid grid-cols-1 gap-4 border-t border-dashed border-violet-200 pt-4 lg:grid-cols-2">
@@ -1168,13 +1246,70 @@ export default function ManualReceiptWorkspace({
                 <SummaryRow label="รวมรายการสินค้า" amount={formatMoney(totals.gross)} />
                 <SummaryRow label="หักส่วนลดท้ายบิล" amount={formatMoney(billDiscount)} />
                 <SummaryRow label={originFreightApLabel} amount={formatMoney(freightCostNormalized)} />
-                <SummaryRow label="ฐานภาษี" amount={formatMoney(documentSummary.preVatAmount)} />
-                <SummaryRow label="VAT 7%" amount={formatMoney(documentSummary.vatAmount)} />
-                <SummaryRow
-                  label="ยอดสุทธิตั้งหนี้ผู้ขาย"
-                  amount={formatMoney(documentSummary.grandTotal)}
-                  strong
-                />
+                <label className="mt-2 flex items-center justify-between gap-3 text-sm text-slate-600">
+                  <span>ยอดก่อน VAT (ฐานภาษี)</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    defaultValue={documentSummary.preVatAmount.toFixed(2)}
+                    key={`pre-${documentSummary.preVatAmount}`}
+                    className="h-8 w-28 rounded-lg border border-slate-200 px-2 text-right text-sm"
+                    onBlur={(event) => {
+                      const typed = roundMoney2(Number(event.target.value));
+                      const freightInBase =
+                        freightTaxMode === "SEPARATE_NON_VAT" ? 0 : freightCostNormalized;
+                      const goodsNow = roundMoney2(
+                        lines.reduce(
+                          (sum, line) =>
+                            sum + Number(invoicePreviewByKey.get(line.key)?.finalLineTotal ?? 0),
+                          0,
+                        ),
+                      );
+                      const targetGoods =
+                        vatType === "INCLUSIVE"
+                          ? roundMoney2(roundMoney2(typed * 1.07) - freightInBase)
+                          : roundMoney2(typed - freightInBase);
+                      const delta = roundMoney2(targetGoods - (goodsNow - pennyDelta));
+                      const nextGrand =
+                        vatType === "EXCLUSIVE"
+                          ? roundMoney2(typed + roundMoney2(typed * 0.07))
+                          : vatType === "INCLUSIVE"
+                            ? roundMoney2(typed * 1.07)
+                            : typed;
+                      balanceManualPenny(delta, roundMoney2(nextGrand - documentSummary.grandTotal));
+                    }}
+                  />
+                </label>
+                <label className="mt-2 flex items-center justify-between gap-3 text-sm text-slate-600">
+                  <span>VAT Amount (7%)</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    defaultValue={documentSummary.vatAmount.toFixed(2)}
+                    key={`vat-${documentSummary.vatAmount}`}
+                    className="h-8 w-28 rounded-lg border border-slate-200 px-2 text-right text-sm"
+                    onBlur={(event) => {
+                      const typed = roundMoney2(Number(event.target.value));
+                      setRoundingGap(roundMoney2(typed - documentSummary.vatAmount + roundingGap));
+                    }}
+                  />
+                </label>
+                <label className="mt-2 flex items-center justify-between gap-3 text-sm font-semibold text-slate-800">
+                  <span>Grand Total (เจ้าหนี้ผู้ขาย)</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    defaultValue={documentSummary.grandTotal.toFixed(2)}
+                    key={`grand-${documentSummary.grandTotal}`}
+                    className="h-8 w-28 rounded-lg border border-slate-200 px-2 text-right text-sm font-semibold"
+                    onBlur={(event) => {
+                      const typed = roundMoney2(Number(event.target.value));
+                      const gap = roundMoney2(typed - documentSummary.grandTotal);
+                      const delta = vatType === "EXCLUSIVE" ? roundMoney2(gap / 1.07) : gap;
+                      balanceManualPenny(roundMoney2(pennyDelta + delta), roundMoney2(roundingGap + gap));
+                    }}
+                  />
+                </label>
                 <p className="text-right text-[11px] text-slate-500">
                   ({numberToThaiBaht(documentSummary.grandTotal)})
                 </p>

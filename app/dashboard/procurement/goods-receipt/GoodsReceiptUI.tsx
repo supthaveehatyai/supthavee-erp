@@ -69,6 +69,7 @@ import {
 } from "@/lib/ai/ocr-quota";
 import {
   calculateNetCostApportionment,
+  roundTo4Decimals,
   type ApportionmentItem,
 } from "@/lib/utils/accounting";
 import type { GoodsReceiptDocType } from "@/lib/constants/document";
@@ -134,6 +135,19 @@ import type { CarrierOption } from "@/types/carrier";
 import { DualFreightFields } from "@/components/procurement/DualFreightFields";
 import { CarrierFreightSummaryDialog } from "@/components/procurement/CarrierFreightSummaryDialog";
 import { Select } from "@/components/ui/select";
+import { VendorCalcModeBar } from "@/components/procurement/vendor-calc-mode-bar";
+import {
+  loadVendorRoundingCalcMode,
+  saveVendorRoundingCalcMode,
+} from "@/lib/actions/vendor-rounding";
+import {
+  calculateVendorLineTotals,
+  matchVendorCalcMode,
+  quoteVendorCalcModes,
+  vendorCalcModeLabel,
+  vendorCalcSpread,
+  type VendorCalcMode,
+} from "@/lib/utils/vendor-calc-mode";
 
 function roundMoney2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -147,9 +161,33 @@ function parseMoneyInput(raw: string): number {
 }
 
 /** Seed / refresh Total Amount from apportionment (skip manually edited lines). */
+function applyPennyToLastLine(rows: ReceiptLineRow[], pennyDelta: number): ReceiptLineRow[] {
+  const delta = roundMoney2(pennyDelta);
+  if (!delta) return rows;
+  const index = [...rows]
+    .map((row, rowIndex) => ({ row, rowIndex }))
+    .reverse()
+    .find((item) => !item.row.isFoc && (Number(item.row.qty) || 0) > 0)?.rowIndex;
+  if (index == null) return rows;
+  return rows.map((row, rowIndex) => {
+    if (rowIndex !== index) return row;
+    const total = roundMoney2((Number(row.totalAmount) || 0) + delta);
+    const qty = Math.max(0, Number(row.qty) || 0);
+    const factor = resolveConversionFactor(row.conversionFactor);
+    const baseQty = stockBaseQty(qty, factor);
+    return {
+      ...row,
+      totalAmount: total,
+      netCost: baseQty > 0 ? roundMoney2(total / baseQty) : 0,
+    };
+  });
+}
+
 function applyApportionedTotals(
   rows: ReceiptLineRow[],
   billDiscountText: string,
+  calcMode: VendorCalcMode = "LINE_2DEC",
+  pennyDelta = 0,
 ): ReceiptLineRow[] {
   const items: ApportionmentItem[] = rows.map((row) => ({
     id: row.lineKey,
@@ -165,7 +203,7 @@ function applyApportionedTotals(
     ]),
   );
 
-  return rows.map((row) => {
+  const seeded = rows.map((row) => {
     if (row.isFoc) {
       return { ...row, totalAmount: 0, netCost: 0 };
     }
@@ -190,6 +228,37 @@ function applyApportionedTotals(
       netCost: baseQty > 0 ? roundMoney2(total / baseQty) : 0,
     };
   });
+
+  if (calcMode === "LINE_2DEC" && !pennyDelta) return seeded;
+
+  const adjusted = new Map(
+    calculateVendorLineTotals(
+      rows.map((row) => ({
+        id: row.lineKey,
+        unitPrice: Number(row.unit_price) || 0,
+        qty: Math.max(0, Number(row.qty) || 0),
+        discountText: row.discount_text,
+        isFoc: Boolean(row.isFoc),
+      })),
+      billDiscountText,
+      calcMode,
+    ).map((line) => [line.id, line.lineTotal]),
+  );
+
+  const priced = seeded.map((row) => {
+    if (row.isFoc || row.totalAmountManual || calcMode === "LINE_2DEC") return row;
+    const total = adjusted.get(row.lineKey);
+    if (total == null) return row;
+    const qty = Math.max(0, Number(row.qty) || 0);
+    const factor = resolveConversionFactor(row.conversionFactor);
+    const baseQty = stockBaseQty(qty, factor);
+    return {
+      ...row,
+      totalAmount: total,
+      netCost: baseQty > 0 ? roundMoney2(total / baseQty) : 0,
+    };
+  });
+  return applyPennyToLastLine(priced, pennyDelta);
 }
 
 function formatMoney(value: number): string {
@@ -301,6 +370,12 @@ export default function GoodsReceiptUI({
 
   /** End-of-bill discount text (e.g. "40%", "1500") — fed into calculateNetCostApportionment. */
   const [billDiscountText, setBillDiscountText] = useState("");
+  const [calcMode, setCalcMode] = useState<VendorCalcMode>("LINE_2DEC");
+  const [pennyDelta, setPennyDelta] = useState(0);
+  const [roundingGap, setRoundingGap] = useState(0);
+  const [paperSubtotal, setPaperSubtotal] = useState<number | null>(null);
+  const [paperGrand, setPaperGrand] = useState<number | null>(null);
+  const [netBeforeTouched, setNetBeforeTouched] = useState(false);
 
   /** ค่าขนส่งต้นทาง (ผู้ขายเรียกเก็บ) */
   const [freightCostInput, setFreightCostInput] = useState("");
@@ -384,9 +459,16 @@ export default function GoodsReceiptUI({
 
   function handleVendorChange(nextId: string) {
     setVendorId(nextId);
+    setCalcMode("LINE_2DEC");
+    setPennyDelta(0);
+    setRoundingGap(0);
     // Mapping differs per vendor — clear stale review rows
     setRows([]);
     setDraftProductByLineKey({});
+    if (!nextId) return;
+    void loadVendorRoundingCalcMode(nextId).then((result) => {
+      if (!result.error) setCalcMode(result.mode);
+    });
   }
 
   const clearInvoice = useCallback(() => {
@@ -404,6 +486,11 @@ export default function GoodsReceiptUI({
     setVatAmountTouched(false);
     setGrandTouched(false);
     setBillDiscountText("");
+    setPennyDelta(0);
+    setRoundingGap(0);
+    setPaperSubtotal(null);
+    setPaperGrand(null);
+    setNetBeforeTouched(false);
     setFreightCostInput("");
     setFreightTaxMode("INCLUDED_IN_TAX");
     setDestFreightInput("");
@@ -499,7 +586,34 @@ export default function GoodsReceiptUI({
         toast.warning(parsed.modelNotice);
       }
 
-      const reviewRows = applyApportionedTotals(matched.data, "");
+      const quoteLines = matched.data.map((row) => ({
+        id: row.lineKey,
+        unitPrice: Number(row.unit_price) || 0,
+        qty: Math.max(0, Number(row.qty) || 0),
+        discountText: row.discount_text,
+        isFoc: Boolean(row.isFoc),
+      }));
+      const quoteVat =
+        parsed.vatType === "INCLUSIVE" || parsed.vatType === "EXCLUSIVE"
+          ? parsed.vatType
+          : "NONE";
+      const quotes = quoteVendorCalcModes(quoteLines, "", quoteVat);
+      const nextCalcMode = matchVendorCalcMode({
+        preferred: calcMode,
+        quotes,
+        paperSubtotal: parsed.subtotal,
+        paperGrand: parsed.grandTotal,
+        freight: parsed.freightCost,
+      });
+      setCalcMode(nextCalcMode);
+      setPaperSubtotal(parsed.subtotal);
+      setPaperGrand(parsed.grandTotal);
+      setPennyDelta(0);
+      setRoundingGap(0);
+      const reviewRows = applyApportionedTotals(matched.data, "", nextCalcMode, 0);
+      if (nextCalcMode !== calcMode) {
+        toast.message(`สลับวิธีคิดเป็น${vendorCalcModeLabel(nextCalcMode)} ให้ตรงกับยอดบนกระดาษ`);
+      }
       const consensus = analyzeLineItemsTaxConsensus(
         reviewRows.map((row, index) => ({
           lineNo: index + 1,
@@ -800,7 +914,7 @@ export default function GoodsReceiptUI({
         }
         return { ...row, isFoc: false, totalAmountManual: false };
       });
-      return applyApportionedTotals(next, billDiscountText);
+      return applyApportionedTotals(next, billDiscountText, calcMode, pennyDelta);
     });
     setVatTotalsManual(false);
   }
@@ -814,6 +928,8 @@ export default function GoodsReceiptUI({
             : row,
         ),
         billDiscountText,
+        calcMode,
+        pennyDelta,
       ),
     );
     setVatTotalsManual(false);
@@ -828,9 +944,10 @@ export default function GoodsReceiptUI({
   }
 
   function handleUnitPriceChange(lineKey: string, raw: string) {
+    if (raw.trim() === "") return;
     const unitPrice = Number(raw);
     if (!Number.isFinite(unitPrice) || unitPrice < 0) return;
-    patchReviewLine(lineKey, { unit_price: unitPrice });
+    patchReviewLine(lineKey, { unit_price: roundTo4Decimals(unitPrice) });
   }
 
   function duplicateReviewRow(row: ReceiptLineRow) {
@@ -859,7 +976,7 @@ export default function GoodsReceiptUI({
       const index = current.findIndex((item) => item.lineKey === row.lineKey);
       const next = [...current];
       next.splice(Math.max(index, 0) + 1, 0, copy);
-      return applyApportionedTotals(next, billDiscountText);
+      return applyApportionedTotals(next, billDiscountText, calcMode, pennyDelta);
     });
     setEditingRawKey(lineKey);
     setRawDraft(row.raw_vendor_sku);
@@ -872,6 +989,8 @@ export default function GoodsReceiptUI({
       applyApportionedTotals(
         current.filter((row) => row.lineKey !== lineKey),
         billDiscountText,
+        calcMode,
+        pennyDelta,
       ),
     );
     if (editingRawKey === lineKey) setEditingRawKey(null);
@@ -908,7 +1027,9 @@ export default function GoodsReceiptUI({
       totalAmountManual: false,
       isFoc: false,
     };
-    setRows((current) => applyApportionedTotals([...current, blank], billDiscountText));
+    setRows((current) =>
+      applyApportionedTotals([...current, blank], billDiscountText, calcMode, pennyDelta),
+    );
     setEditingRawKey(lineKey);
     setRawDraft("");
     setDraftProductByLineKey((current) => ({ ...current, [lineKey]: "" }));
@@ -949,13 +1070,17 @@ export default function GoodsReceiptUI({
             : row,
         ),
         billDiscountText,
+        calcMode,
+        pennyDelta,
       ),
     );
   }
 
   function handleBillDiscountChange(value: string) {
     setBillDiscountText(value);
-    setRows((current) => applyApportionedTotals(current, value));
+    setPennyDelta(0);
+    setRoundingGap(0);
+    setRows((current) => applyApportionedTotals(current, value, calcMode, 0));
     setVatTotalsManual(false);
   }
 
@@ -1023,6 +1148,23 @@ export default function GoodsReceiptUI({
       vatRate: aiVatType === "NONE" ? 0 : 7,
     });
   }, [rows, aiVatType, freightCostNormalized]);
+
+  const calcQuotes = useMemo(
+    () =>
+      quoteVendorCalcModes(
+        rows.map((row) => ({
+          id: row.lineKey,
+          unitPrice: Number(row.unit_price) || 0,
+          qty: Math.max(0, Number(row.qty) || 0),
+          discountText: row.discount_text,
+          isFoc: Boolean(row.isFoc),
+        })),
+        billDiscountText,
+        aiVatType === "INCLUSIVE" || aiVatType === "EXCLUSIVE" ? aiVatType : "NONE",
+      ),
+    [rows, billDiscountText, aiVatType],
+  );
+  const showCalcModes = vendorCalcSpread(calcQuotes) >= 0.01;
 
   const goodsNet = useMemo(
     () =>
@@ -1110,14 +1252,92 @@ export default function GoodsReceiptUI({
     : receiptVat.vatAmount;
 
   useEffect(() => {
-    setNetBeforeVatInput(formatMoney(receiptVat.preVatAmount));
+    if (!netBeforeTouched) {
+      setNetBeforeVatInput(roundMoney2(receiptVat.preVatAmount).toFixed(2));
+    }
     if (!vatAmountTouched) {
-      setVatAmountInput(formatMoney(receiptVat.vatAmount));
+      setVatAmountInput(roundMoney2(receiptVat.vatAmount).toFixed(2));
     }
     if (!grandTouched) {
-      setGrandTotalInput(formatMoney(receiptVat.grandTotal));
+      setGrandTotalInput(roundMoney2(receiptVat.grandTotal).toFixed(2));
     }
-  }, [receiptVat, vatAmountTouched, grandTouched]);
+  }, [receiptVat, vatAmountTouched, grandTouched, netBeforeTouched]);
+
+  function handleCalcModeChange(mode: VendorCalcMode) {
+    setCalcMode(mode);
+    setPennyDelta(0);
+    setRoundingGap(0);
+    setNetBeforeTouched(false);
+    setVatAmountTouched(false);
+    setGrandTouched(false);
+    setVatTotalsManual(false);
+    setRows((current) => applyApportionedTotals(current, billDiscountText, mode, 0));
+    if (!vendorId) return;
+    void saveVendorRoundingCalcMode(vendorId, mode).then((result) => {
+      if (result.error) toast.error(result.error);
+    });
+  }
+
+  function balanceLastLine(delta: number, gap: number) {
+    const pennies = roundMoney2(delta);
+    if (!pennies) return;
+    if (Math.abs(pennies) > 0.1) {
+      toast.warning("ปรับเศษได้ครั้งละไม่เกิน ±0.10 บาท");
+      return;
+    }
+    setPennyDelta(pennies);
+    setRoundingGap(roundMoney2(gap));
+    setNetBeforeTouched(false);
+    setVatAmountTouched(false);
+    setGrandTouched(false);
+    setRows((current) => applyApportionedTotals(current, billDiscountText, calcMode, pennies));
+  }
+
+  function handlePreVatBlur() {
+    const typed = roundMoney2(parseMoneyInput(netBeforeVatInput));
+    const freightInBase = freightTaxMode === "SEPARATE_NON_VAT" ? 0 : freightCostNormalized;
+    const targetGoods =
+      aiVatType === "INCLUSIVE"
+        ? roundMoney2(roundMoney2(typed * 1.07) - freightInBase)
+        : roundMoney2(typed - freightInBase);
+    const delta = roundMoney2(targetGoods - goodsNet);
+    const nextGrand =
+      aiVatType === "EXCLUSIVE"
+        ? roundMoney2(typed + roundMoney2(typed * 0.07))
+        : aiVatType === "INCLUSIVE"
+          ? roundMoney2(typed * 1.07)
+          : typed;
+    balanceLastLine(delta, roundMoney2(nextGrand - receiptVat.grandTotal));
+  }
+
+  function handleGrandBlur() {
+    const typed = roundMoney2(parseMoneyInput(grandTotalInput));
+    const gap = roundMoney2(typed - receiptVat.grandTotal);
+    if (!gap) return;
+    if (Math.abs(gap) > 0.1) {
+      toast.warning("ปรับเศษได้ครั้งละไม่เกิน ±0.10 บาท");
+      return;
+    }
+    const freightInBase = freightTaxMode === "SEPARATE_NON_VAT" ? 0 : freightCostNormalized;
+    let delta = gap;
+    if (aiVatType === "EXCLUSIVE") {
+      delta = roundMoney2(gap / 1.07);
+    } else if (aiVatType === "INCLUSIVE") {
+      delta = gap;
+    }
+    const targetGoods = roundMoney2(goodsNet + delta);
+    const payable = roundMoney2(
+      aiVatType === "EXCLUSIVE"
+        ? roundMoney2((targetGoods + freightInBase) * 1.07)
+        : targetGoods + freightInBase,
+    );
+    if (Math.abs(payable - typed) > 0.02) {
+      setRoundingGap(gap);
+      setGrandTouched(true);
+      return;
+    }
+    balanceLastLine(delta, gap);
+  }
 
   function moveUnmatchedRowToOriginFreight(row: ReceiptLineRow) {
     const amount = row.isFoc
@@ -1233,7 +1453,12 @@ export default function GoodsReceiptUI({
   async function handleConfirmSaveToLedger(payload: SaveToLedgerConfirmPayload) {
     setIsSavingToLedger(true);
     // Sync bill discount from dialog → re-seed non-manual line totals only
-    const rowsForSave = applyApportionedTotals(rows, payload.billDiscountText);
+    const rowsForSave = applyApportionedTotals(
+      rows,
+      payload.billDiscountText,
+      calcMode,
+      pennyDelta,
+    );
     setBillDiscountText(payload.billDiscountText);
     setRows(rowsForSave);
     try {
@@ -1273,7 +1498,7 @@ export default function GoodsReceiptUI({
           netBeforeVat: saveVat.preVatAmount,
           vatAmount: saveVat.vatAmount,
           grandTotal,
-          roundingDifference: roundMoney2(grandTotal - saveVat.grandTotal),
+          roundingDifference: roundingGap || roundMoney2(grandTotal - saveVat.grandTotal),
         },
         freightCostNormalized,
         {
@@ -1310,6 +1535,10 @@ export default function GoodsReceiptUI({
       toast.success(
         `บันทึกรับสินค้าเข้าคลังสำเร็จ — เอกสาร ${result.docNo} (${stats.matched.toLocaleString("th-TH")} รายการ)`,
       );
+      if (vendorId) {
+        const remembered = await saveVendorRoundingCalcMode(vendorId, calcMode);
+        if (remembered.error) toast.error(remembered.error);
+      }
       if (billWarning) {
         toast.error(`เอกสารถูกบันทึกแล้ว แต่ผูกไฟล์บิลไม่สำเร็จ: ${billWarning}`);
       }
@@ -1887,7 +2116,7 @@ export default function GoodsReceiptUI({
                             type="number"
                             inputMode="decimal"
                             min="0"
-                            step="0.01"
+                            step="0.0001"
                             value={row.isFoc ? 0 : Number(row.unit_price) || 0}
                             disabled={isBusy || row.isFoc}
                             onChange={(event) =>
@@ -2035,6 +2264,21 @@ export default function GoodsReceiptUI({
                   {aiDocType}
                   {vatTotalsManual ? " • ใช้ยอดที่พิมพ์ทับ" : ""}
                 </p>
+                {showCalcModes ? (
+                  <VendorCalcModeBar
+                    mode={calcMode}
+                    quotes={calcQuotes}
+                    disabled={isSavingToLedger || isOcrRunning}
+                    onChange={handleCalcModeChange}
+                  />
+                ) : null}
+                {paperGrand || paperSubtotal ? (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    ยอดบนกระดาษ
+                    {paperSubtotal ? ` ฐาน ${formatMoney(paperSubtotal)}` : ""}
+                    {paperGrand ? ` สุทธิ ${formatMoney(paperGrand)}` : ""}
+                  </p>
+                ) : null}
                 {taxConsensus.hasUnanimousConsensus && taxConsensus.consensusTaxType ? (
                   <TaxModeMismatchBanner
                     documentMode={vatTypeToPurchaseTaxMode(aiVatType)}
@@ -2064,13 +2308,16 @@ export default function GoodsReceiptUI({
                     </span>
                     <Input
                       id="vat-net-before"
-                      type="text"
+                      type="number"
                       inputMode="decimal"
+                      step="0.01"
                       value={netBeforeVatInput}
                       onChange={(e) => {
                         setVatTotalsManual(true);
+                        setNetBeforeTouched(true);
                         setNetBeforeVatInput(e.target.value);
                       }}
+                      onBlur={handlePreVatBlur}
                       className={cn(
                         VAT_MONEY_INPUT_CLASS,
                         "pl-7",
@@ -2089,8 +2336,9 @@ export default function GoodsReceiptUI({
                     </span>
                     <Input
                       id="vat-amount"
-                      type="text"
+                      type="number"
                       inputMode="decimal"
+                      step="0.01"
                       value={vatAmountInput}
                       onChange={(e) => handleVatAmountChange(e.target.value)}
                       className={cn(
@@ -2118,14 +2366,16 @@ export default function GoodsReceiptUI({
                     </span>
                     <Input
                       id="vat-grand-total"
-                      type="text"
+                      type="number"
                       inputMode="decimal"
+                      step="0.01"
                       value={grandTotalInput}
                       onChange={(e) => {
                         setGrandTouched(true);
                         setVatTotalsManual(true);
                         setGrandTotalInput(e.target.value);
                       }}
+                      onBlur={handleGrandBlur}
                       className={cn(
                         VAT_MONEY_INPUT_CLASS,
                         "pl-7",
