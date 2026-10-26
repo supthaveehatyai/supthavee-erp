@@ -28,6 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { formatThaiDate } from "@/lib/utils/date-formatter";
 import { roundTaxMoney } from "@/lib/utils/tax-invoice-status";
 import type { DocumentStatus, DocumentType, PurchaseDocumentListItem } from "@/types/document";
 
@@ -40,78 +41,79 @@ function formatMoney(value: number): string {
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("th-TH", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return formatThaiDate(value, "long");
 }
 
 function docTypeLabel(docType: DocumentType): string {
   const labels: Partial<Record<DocumentType, string>> = {
     PO: "ใบสั่งซื้อ",
-    AP_TAX: "ใบส่งของ/ใบกำกับ (ตั้งหนี้)",
-    AP_INV: "บิลธรรมดา (ตั้งหนี้ Non-VAT)",
-    AP_CASH: "บิลเงินสด/ใบกำกับ (จ่ายทันที)",
-    TB: "สรุปวางบิลช่าง (Technician Bill)",
+    AP_TAX: "ใบส่งของ/ใบกำกับ",
+    AP_INV: "บิลธรรมดา",
+    AP_CASH: "บิลเงินสด/ใบกำกับ",
+    TB: "สรุปวางบิลช่าง",
     DEP_OUT: "มัดจำจ่าย",
     PAY: "ใบจ่ายชำระ",
-    AP_REFUND: "ใบสำคัญรับเงินคืน (Refund Receipt)",
-    AP_WRITEOFF: "ใบสำคัญปรับปรุงบัญชี - ตัดเป็นค่าใช้จ่าย (Write-off Expense)",
+    AP_REFUND: "ใบรับเงินคืน",
+    AP_WRITEOFF: "ตัดเป็นค่าใช้จ่าย",
   };
   return labels[docType] ?? docType;
 }
 
+const compactBadge = "px-1.5 py-0.5 text-[11px] font-semibold";
+
 function statusBadge(status: DocumentStatus) {
   if (status === "COMPLETED" || status === "ISSUED") {
     return (
-      <Badge className="border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
+      <Badge className={cn(compactBadge, "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-50")}>
         {status === "COMPLETED" ? "COMPLETED" : status}
       </Badge>
     );
   }
   if (status === "DRAFT") {
     return (
-      <Badge className="border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-50">
+      <Badge className={cn(compactBadge, "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-50")}>
         DRAFT
       </Badge>
     );
   }
   if (status === "CANCELLED" || status === "VOID") {
     return (
-      <Badge className="border-red-200 bg-red-50 text-red-700 hover:bg-red-50">
+      <Badge className={cn(compactBadge, "border-red-200 bg-red-50 text-red-700 hover:bg-red-50")}>
         {status}
       </Badge>
     );
   }
   return (
-    <Badge variant="slate" className="font-semibold">
+    <Badge variant="slate" className={compactBadge}>
       {status}
     </Badge>
   );
 }
 
 function TaxInvoiceBadge({ doc }: { doc: PurchaseDocumentListItem }) {
+  const badgeClass =
+    "mt-0.5 inline-flex max-w-full items-center gap-1 break-all rounded-full px-2 py-0.5 text-[11px] font-semibold leading-snug";
   if (doc.tax_invoice_status === "PENDING_TAX_INVOICE") {
     return (
-      <span className="mt-1 inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-semibold text-orange-800">
+      <span className={cn(badgeClass, "bg-orange-100 text-orange-800")}>
         🟠 รอใบกำกับภาษีตัวจริง
       </span>
     );
   }
-  if (doc.tax_invoice_status === "TAX_READY" && doc.tax_invoice_no) {
+  if (doc.tax_invoice_status === "CONSOLIDATED_CHILD") {
+    const displayTaxInvNo = doc.tax_invoice_no || doc.reference_no || doc.doc_no;
     return (
-      <span className="mt-1 inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
-        🟢 ใบกำกับภาษี: {doc.tax_invoice_no}
+      <span className={cn(badgeClass, "bg-violet-100 text-violet-800")}>
+        🔗 รวบในใบกำกับภาษี: {displayTaxInvNo}
       </span>
     );
   }
-  if (doc.tax_invoice_status === "CONSOLIDATED_CHILD" && doc.tax_invoice_no) {
+  const taxableDoc = doc.doc_type === "AP_TAX" || doc.doc_type === "AP_CASH";
+  if (taxableDoc) {
+    const displayTaxInvNo = doc.tax_invoice_no || doc.reference_no || doc.doc_no;
     return (
-      <span className="mt-1 inline-flex rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-800">
-        🔗 รวบในใบกำกับภาษี: {doc.tax_invoice_no}
+      <span className={cn(badgeClass, "bg-emerald-100 text-emerald-800")}>
+        🟢 ใบกำกับภาษี: {displayTaxInvNo}
       </span>
     );
   }
@@ -250,103 +252,127 @@ export function PurchaseTaxMatchTable({
         </Button>
       </div>
 
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
+      <Table
+        wrapperClassName="overflow-x-visible overflow-y-visible"
+        className="w-full table-fixed border-collapse"
+      >
+        <colgroup>
+          <col className="w-[4%]" />
+          <col className="w-[11%]" />
+          <col className="w-[25%]" />
+          <col className="w-[14%]" />
+          <col className="w-[19%]" />
+          <col className="w-[10%]" />
+          <col className="w-[6%]" />
+          <col className="w-[11%]" />
+        </colgroup>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-[4%] px-1 text-center normal-case" />
+            <TableHead className="w-[11%] px-2 text-left normal-case">วันที่</TableHead>
+            <TableHead className="w-[25%] px-2 text-left normal-case">เลขที่เอกสาร / ใบกำกับภาษี</TableHead>
+            <TableHead className="w-[14%] px-2 text-left normal-case">ประเภท</TableHead>
+            <TableHead className="w-[19%] px-2 text-left normal-case">ชื่อซัพพลายเออร์</TableHead>
+            <TableHead className="w-[10%] px-2 text-right normal-case">ยอดสุทธิ</TableHead>
+            <TableHead className="w-[6%] px-1 text-center normal-case">สถานะ</TableHead>
+            <TableHead className="w-[11%] px-2 text-right normal-case">การดำเนินการ</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {visible.length === 0 ? (
             <TableRow>
-              <TableHead className="w-10" />
-              <TableHead className="whitespace-nowrap">วันที่</TableHead>
-              <TableHead className="whitespace-nowrap">เลขที่เอกสาร</TableHead>
-              <TableHead className="whitespace-nowrap">ประเภท</TableHead>
-              <TableHead>ชื่อซัพพลายเออร์</TableHead>
-              <TableHead className="whitespace-nowrap text-right">ยอดสุทธิ</TableHead>
-              <TableHead className="whitespace-nowrap">สถานะ</TableHead>
-              <TableHead className="whitespace-nowrap text-right">การดำเนินการ</TableHead>
+              <TableCell colSpan={8} className="h-24 px-2 text-center text-slate-500">
+                {error
+                  ? "ไม่สามารถโหลดข้อมูลได้"
+                  : filter === "pending"
+                    ? "ไม่มีเอกสารที่รอใบกำกับภาษีตัวจริง"
+                    : hasActiveFilters
+                      ? "ไม่พบเอกสารที่ตรงกับเงื่อนไขการค้นหา"
+                      : "ยังไม่มีเอกสารซื้อ — ใช้ «รับสินค้าอัจฉริยะ (OCR)» เพื่อรับของเข้า"}
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {visible.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="h-24 text-center text-slate-500">
-                  {error
-                    ? "ไม่สามารถโหลดข้อมูลได้"
-                    : filter === "pending"
-                      ? "ไม่มีเอกสารที่รอใบกำกับภาษีตัวจริง"
-                      : hasActiveFilters
-                        ? "ไม่พบเอกสารที่ตรงกับเงื่อนไขการค้นหา"
-                        : "ยังไม่มีเอกสารซื้อ — ใช้ «รับสินค้าอัจฉริยะ (OCR)» เพื่อรับของเข้า"}
-                </TableCell>
-              </TableRow>
-            ) : (
-              visible.map((doc) => {
-                const pending = doc.tax_invoice_status === "PENDING_TAX_INVOICE";
-                const checked = selectedIds.includes(doc.id);
-                const otherVendor = Boolean(selectedVendorId && selectedVendorId !== doc.contact_id);
-                return (
-                  <TableRow key={doc.id}>
-                    <TableCell>
-                      {pending ? (
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          disabled={otherVendor && !checked}
-                          onChange={() => toggle(doc)}
-                          aria-label={`เลือก ${doc.doc_no}`}
-                        />
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-slate-700">
+          ) : (
+            visible.map((doc) => {
+              const pending = doc.tax_invoice_status === "PENDING_TAX_INVOICE";
+              const checked = selectedIds.includes(doc.id);
+              const otherVendor = Boolean(selectedVendorId && selectedVendorId !== doc.contact_id);
+              const billCount = doc.bill_attachment_urls?.length ?? 0;
+              return (
+                <TableRow key={doc.id} className="even:bg-slate-50/70 hover:bg-blue-50/40">
+                  <TableCell className="w-[4%] px-1 py-2 text-center">
+                    {pending ? (
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={otherVendor && !checked}
+                        onChange={() => toggle(doc)}
+                        aria-label={`เลือก ${doc.doc_no}`}
+                      />
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="w-[11%] px-2 py-2 text-left">
+                    <span className="whitespace-nowrap text-xs font-medium text-slate-700">
                       {formatDate(doc.doc_date || doc.created_at)}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap font-mono text-sm font-semibold text-slate-900">
-                      <div>{doc.doc_no}</div>
+                    </span>
+                  </TableCell>
+                  <TableCell className="w-[25%] px-2 py-2 text-left">
+                    <div className="break-words leading-snug">
+                      <span className="text-sm font-bold text-slate-900">{doc.doc_no}</span>
                       {doc.reference_no ? (
-                        <div className="mt-0.5 text-xs font-normal text-slate-500">
-                          Ref: {doc.reference_no}
-                        </div>
+                        <span className="ml-1.5 text-xs text-slate-500">Ref: {doc.reference_no}</span>
                       ) : null}
-                      <div>
-                        <TaxInvoiceBadge doc={doc} />
-                      </div>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap">
-                      <span className="text-sm text-slate-700">{docTypeLabel(doc.doc_type)}</span>
-                      <span className="ml-1.5 font-mono text-xs text-slate-400">({doc.doc_type})</span>
-                    </TableCell>
-                    <TableCell className="max-w-[220px] truncate text-slate-700">
+                    </div>
+                    <TaxInvoiceBadge doc={doc} />
+                  </TableCell>
+                  <TableCell className="w-[14%] px-2 py-2 text-left">
+                    <div className="text-xs font-medium leading-snug text-slate-700">
+                      {docTypeLabel(doc.doc_type)}
+                    </div>
+                    <div className="font-mono text-[11px] text-slate-400">{doc.doc_type}</div>
+                  </TableCell>
+                  <TableCell className="w-[19%] px-2 py-2 text-left">
+                    <span className="break-words text-xs font-medium leading-snug text-slate-800 whitespace-normal">
                       {doc.vendor_name ?? "—"}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-right font-medium tabular-nums text-slate-900">
+                    </span>
+                  </TableCell>
+                  <TableCell className="w-[10%] px-2 py-2 text-right">
+                    <span className="text-sm font-bold tabular-nums text-slate-900">
                       {formatMoney(doc.grand_total)}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap">{statusBadge(doc.status)}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right">
-                      <div className="flex justify-end gap-2">
-                        {pending ? (
-                          <button
-                            type="button"
-                            onClick={() => openMatch([doc.id])}
-                            className="inline-flex h-8 items-center rounded-xl border border-orange-200 bg-orange-50 px-3 text-xs font-semibold text-orange-800"
-                          >
-                            📎 ประกบใบกำกับภาษี
-                          </button>
-                        ) : null}
-                        <BillGalleryButton urls={doc.bill_attachment_urls ?? []} />
-                        <Link
-                          href={`/purchases/${encodeURIComponent(doc.doc_no)}`}
-                          className="inline-flex h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                    </span>
+                  </TableCell>
+                  <TableCell className="w-[6%] px-1 py-2 text-center">
+                    {statusBadge(doc.status)}
+                  </TableCell>
+                  <TableCell className="w-[11%] px-2 py-2 text-right">
+                    <div className="flex flex-col items-end gap-1">
+                      {pending ? (
+                        <button
+                          type="button"
+                          onClick={() => openMatch([doc.id])}
+                          className="inline-flex h-7 items-center rounded-lg border border-orange-200 bg-orange-50 px-2 text-xs font-semibold text-orange-800"
                         >
-                          ดูรายละเอียด
-                        </Link>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </div>
+                          📎 ประกบ
+                        </button>
+                      ) : null}
+                      <BillGalleryButton
+                        urls={doc.bill_attachment_urls ?? []}
+                        label={`🖼️ รูป (${billCount.toLocaleString("th-TH")})`}
+                        className="h-7 rounded-lg px-2"
+                      />
+                      <Link
+                        href={`/purchases/${encodeURIComponent(doc.doc_no)}`}
+                        className="inline-flex h-7 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                      >
+                        ดูบิล
+                      </Link>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })
+          )}
+        </TableBody>
+      </Table>
 
       <Dialog open={open} onOpenChange={(next) => !isPending && setOpen(next)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">

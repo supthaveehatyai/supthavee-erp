@@ -1600,19 +1600,27 @@ async function stampReceiptTaxInvoiceStatus(
   supabaseAdmin: SupabaseClient,
   documentId: string,
   taxInvoiceStatus: string | null | undefined,
+  referenceNo?: string | null,
+  docDate?: string | null,
 ): Promise<string | null> {
   const id = documentId.trim();
   if (!id) return null;
-  const taxStatus =
-    String(taxInvoiceStatus ?? "").trim().toUpperCase() === "PENDING_TAX_INVOICE"
-      ? "PENDING_TAX_INVOICE"
-      : "TAX_READY";
+  const pending =
+    String(taxInvoiceStatus ?? "").trim().toUpperCase() === "PENDING_TAX_INVOICE";
+  const taxStatus = pending ? "PENDING_TAX_INVOICE" : "TAX_READY";
+  const payload: Record<string, string> = { tax_invoice_status: taxStatus };
+  if (!pending) {
+    const taxNo = String(referenceNo ?? "").trim();
+    const taxDate = String(docDate ?? "").trim().slice(0, 10);
+    if (taxNo) payload.tax_invoice_no = taxNo;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(taxDate)) payload.tax_invoice_date = taxDate;
+  }
   const { error } = await supabaseAdmin
     .from("documents")
-    .update({ tax_invoice_status: taxStatus } as never)
+    .update(payload as never)
     .eq("id", id);
   if (!error) return null;
-  if (/tax_invoice_status|schema cache|42703|could not find/i.test(error.message)) return null;
+  if (/tax_invoice_|schema cache|42703|could not find/i.test(error.message)) return null;
   return error.message;
 }
 
@@ -2312,6 +2320,8 @@ export async function saveGoodsReceiptToLedger(
       supabaseAdmin,
       headerId,
       taxInvoiceStatus,
+      docNo,
+      docDate,
     );
     const billError = await linkProcurementBills(supabaseAdmin, {
       documentId: headerId,
@@ -3006,6 +3016,8 @@ export async function saveManualGoodsReceipt(
       supabaseAdmin,
       parsed.documentId,
       input.taxInvoiceStatus,
+      documentRef,
+      docDate,
     );
     const billError = await linkProcurementBills(supabaseAdmin, {
       documentId: parsed.documentId,

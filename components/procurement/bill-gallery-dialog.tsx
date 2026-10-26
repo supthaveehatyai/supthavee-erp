@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { FileImage, ImageIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -23,9 +24,11 @@ function isPdf(url: string): boolean {
 export function BillGalleryButton({
   urls,
   label,
+  className,
 }: {
   urls: string[];
   label?: string;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
@@ -40,9 +43,12 @@ export function BillGalleryButton({
           setIndex(0);
           setOpen(true);
         }}
-        className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+        className={cn(
+          "inline-flex h-8 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50",
+          className,
+        )}
       >
-        <ImageIcon className="size-3.5" />
+        {label ? null : <ImageIcon className="size-3.5" />}
         {label ?? `ดูรูปบิล (${urls.length.toLocaleString("th-TH")} หน้า)`}
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
