@@ -7,11 +7,12 @@
  */
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { submitAPPayment } from "@/app/actions/finance/ap-actions";
 import { getInvoicesByBillingNote } from "@/app/actions/billing";
-import type { OpenBillingNoteOption } from "@/types/billing";
+import type { OpenBillingNoteOption, PendingBillReceipt } from "@/types/billing";
 import type {
   ApVendorOption,
   AvailableDeposit,
@@ -62,6 +63,8 @@ export type APPaymentClientProps = {
   bankAccounts: BankAccount[];
   selectedVendorId: string;
   billingNotes?: OpenBillingNoteOption[];
+  pendingReceipts?: PendingBillReceipt[];
+  initialBillingNoteId?: string;
 };
 
 function formatMoney(value: number): string {
@@ -113,6 +116,8 @@ export function APPaymentClient({
   bankAccounts,
   selectedVendorId,
   billingNotes = [],
+  pendingReceipts = [],
+  initialBillingNoteId = "",
 }: APPaymentClientProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -137,13 +142,27 @@ export function APPaymentClient({
   const [slipFile, setSlipFile] = useState<File | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     setInvoices(initialInvoices);
-    setSelectedBillingNoteId("");
     setPaymentAmounts({});
     setDepositAmounts({});
-  }, [initialInvoices]);
+    if (!initialBillingNoteId) {
+      setSelectedBillingNoteId("");
+      return;
+    }
+    void handleBillingNoteChange(initialBillingNoteId, true, () => cancelled);
+    return () => {
+      cancelled = true;
+    };
+    // Load the linked bill receipt once per vendor/note page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialInvoices, initialBillingNoteId]);
 
-  async function handleBillingNoteChange(noteId: string) {
+  async function handleBillingNoteChange(
+    noteId: string,
+    fillAmounts = false,
+    isCancelled?: () => boolean,
+  ) {
     setSelectedBillingNoteId(noteId);
     setPaymentAmounts({});
     setDepositAmounts({});
@@ -155,6 +174,7 @@ export function APPaymentClient({
     setIsLoadingBn(true);
     try {
       const result = await getInvoicesByBillingNote(noteId);
+      if (isCancelled?.()) return;
       if (result.error) {
         toast.error(result.error);
         setSelectedBillingNoteId("");
@@ -188,6 +208,15 @@ export function APPaymentClient({
         toast.success(`โหลด ${mapped.length} บิลจากใบรับวางบิลแล้ว`);
       }
       setInvoices(mapped);
+      const next: Record<string, string> = {};
+      if (fillAmounts) {
+        for (const row of mapped) {
+          if (row.remaining_balance > 0) {
+            next[row.id] = String(roundMoney(row.remaining_balance));
+          }
+        }
+      }
+      setPaymentAmounts(next);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "โหลดบิลจากใบรับวางบิลไม่สำเร็จ";
@@ -249,6 +278,16 @@ export function APPaymentClient({
       ),
     [availableDeposits, depositAmounts],
   );
+
+  const receiptsByVendor = useMemo(() => {
+    const grouped = new Map<string, PendingBillReceipt[]>();
+    for (const note of pendingReceipts) {
+      const list = grouped.get(note.contact_id) ?? [];
+      list.push(note);
+      grouped.set(note.contact_id, list);
+    }
+    return grouped;
+  }, [pendingReceipts]);
 
   const summaryGrandTotal = useMemo(
     () =>
@@ -527,10 +566,22 @@ export function APPaymentClient({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {vendors.map((vendor) => (
+                    {vendors.map((vendor) => {
+                      const notes = receiptsByVendor.get(vendor.id) ?? [];
+                      const primaryNote = notes[0];
+                      return (
                       <TableRow key={vendor.id}>
                         <TableCell className="font-medium text-slate-900">
-                          {vendor.name}
+                          <div>{vendor.name}</div>
+                          {notes.map((note) => (
+                            <div
+                              key={note.id}
+                              className="mt-1 inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-800"
+                            >
+                              📄 มีใบวางบิลรอจ่าย: {note.doc_no} (฿
+                              {formatMoney(note.grand_total)})
+                            </div>
+                          ))}
                         </TableCell>
                         <TableCell className="text-center">
                           <Badge variant="slate">{vendor.invoice_count} บิล</Badge>
@@ -551,17 +602,28 @@ export function APPaymentClient({
                           {formatDate(vendor.oldest_invoice_date ?? "")}
                         </TableCell>
                         <TableCell className="text-center">
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="gap-1.5 bg-orange-600 hover:bg-orange-700"
-                            onClick={() => handleVendorChange(vendor.id)}
-                          >
-                            ชำระเงิน
-                          </Button>
+                          <div className="flex flex-col items-center gap-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="gap-1.5 bg-orange-600 hover:bg-orange-700"
+                              onClick={() => handleVendorChange(vendor.id)}
+                            >
+                              ชำระเงิน
+                            </Button>
+                            {primaryNote ? (
+                              <Link
+                                href={`/finance/ap-payment?vendor_id=${encodeURIComponent(vendor.id)}&billing_note_id=${encodeURIComponent(primaryNote.id)}`}
+                                className="inline-flex h-8 items-center rounded-lg bg-emerald-600 px-2 text-xs font-semibold text-white hover:bg-emerald-700"
+                              >
+                                จ่ายตามใบวางบิล
+                              </Link>
+                            ) : null}
+                          </div>
                         </TableCell>
                       </TableRow>
-                    ))}
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -637,6 +699,7 @@ export function APPaymentClient({
             ) : (
               <form action={handleSubmit} className="space-y-4">
                 <input type="hidden" name="vendor_id" value={selectedVendorId} />
+                <input type="hidden" name="billing_note_id" value={selectedBillingNoteId} />
                 <input
                   type="hidden"
                   name="allocations_json"

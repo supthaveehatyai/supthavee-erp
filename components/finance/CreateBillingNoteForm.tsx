@@ -8,7 +8,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
 import { createBillingNote } from "@/app/actions/billing";
@@ -40,6 +40,15 @@ import {
 } from "@/components/ui/table";
 import type { VendorOption } from "@/lib/actions/mapping";
 import { cn } from "@/lib/utils";
+import { formatThaiDate } from "@/lib/utils/date-formatter";
+import {
+  invoiceInRange,
+  monthBounds,
+  monthKeyFromIso,
+  thaiMonthLabel,
+} from "@/lib/utils/billing-period";
+import { addDaysIso } from "@/lib/utils/outstanding-summary";
+import { ApBatchBillingPanel } from "@/components/finance/ap-batch-billing-panel";
 import type { CustomerOption } from "@/types/document";
 
 export type CreateBillingNoteFormProps = {
@@ -51,6 +60,8 @@ export type CreateBillingNoteFormProps = {
   /** Shown when contact_id is empty — contacts with outstanding unbilled invoices. */
   outstandingContacts: OutstandingContactSummary[];
   defaultDate: string;
+  creditDays?: number;
+  mode?: "single" | "batch";
 };
 
 function formatMoney(value: number): string {
@@ -62,23 +73,23 @@ function formatMoney(value: number): string {
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("th-TH", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  const labeled = formatThaiDate(value, "long");
+  return labeled === "—" ? value : labeled;
 }
 
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-function buildHref(type: BillingCategory, contactId?: string): string {
+function buildHref(
+  type: BillingCategory,
+  contactId?: string,
+  mode?: "single" | "batch",
+): string {
   const params = new URLSearchParams();
   params.set("type", type);
   if (contactId) params.set("contact_id", contactId);
+  if (type === "AP" && mode === "batch") params.set("mode", "batch");
   return `/finance/billing-notes/create?${params.toString()}`;
 }
 
@@ -90,12 +101,18 @@ export function CreateBillingNoteForm({
   invoices,
   outstandingContacts,
   defaultDate,
+  creditDays = 0,
+  mode = "single",
 }: CreateBillingNoteFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [billingDate, setBillingDate] = useState(defaultDate);
   const [dueDate, setDueDate] = useState(defaultDate);
+  const [dueTouched, setDueTouched] = useState(false);
+  const [invoiceFrom, setInvoiceFrom] = useState("");
+  const [invoiceTo, setInvoiceTo] = useState("");
+  const [periodKey, setPeriodKey] = useState("all");
   const [remark, setRemark] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -110,19 +127,62 @@ export function CreateBillingNoteForm({
     );
   }, [invoices, selectedIds]);
 
+  const monthPills = useMemo(() => {
+    const buckets = new Map<string, { count: number; total: number }>();
+    for (const invoice of invoices) {
+      const key = monthKeyFromIso(invoice.doc_date);
+      if (!/^\d{4}-\d{2}$/.test(key)) continue;
+      const current = buckets.get(key) ?? { count: 0, total: 0 };
+      current.count += 1;
+      current.total = roundMoney(current.total + invoice.outstanding_amount);
+      buckets.set(key, current);
+    }
+    return Array.from(buckets.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+  }, [invoices]);
+
+  const visibleInvoices = useMemo(
+    () => invoices.filter((invoice) => invoiceInRange(invoice.doc_date, invoiceFrom, invoiceTo)),
+    [invoices, invoiceFrom, invoiceTo],
+  );
+
   const allSelected =
-    invoices.length > 0 && invoices.every((inv) => selectedIds.has(inv.id));
+    visibleInvoices.length > 0 && visibleInvoices.every((inv) => selectedIds.has(inv.id));
+
+  useEffect(() => {
+    if (dueTouched) return;
+    setDueDate(addDaysIso(billingDate, Math.max(0, creditDays)));
+  }, [billingDate, creditDays, dueTouched]);
 
   function navigate(nextType: BillingCategory, nextContactId: string) {
     router.push(buildHref(nextType, nextContactId || undefined));
   }
 
-  function toggleAll(checked: boolean) {
-    if (!checked) {
+  function applyInvoicePeriod(from: string, to: string, key: string) {
+    setInvoiceFrom(from);
+    setInvoiceTo(to);
+    setPeriodKey(key);
+    if (!from && !to) {
       setSelectedIds(new Set());
       return;
     }
-    setSelectedIds(new Set(invoices.map((inv) => inv.id)));
+    setSelectedIds(
+      new Set(
+        invoices
+          .filter((invoice) => invoiceInRange(invoice.doc_date, from, to))
+          .map((invoice) => invoice.id),
+      ),
+    );
+  }
+
+  function toggleAll(checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const invoice of visibleInvoices) {
+        if (checked) next.add(invoice.id);
+        else next.delete(invoice.id);
+      }
+      return next;
+    });
   }
 
   function toggleOne(id: string, checked: boolean) {
@@ -248,7 +308,39 @@ export function CreateBillingNoteForm({
         </Link>
       </div>
 
-      {!contactId ? (
+      {!isAR ? (
+        <div
+          role="tablist"
+          className="inline-flex h-10 w-full max-w-2xl items-center justify-center rounded-xl bg-orange-50 p-1 text-slate-600"
+        >
+          <Link
+            role="tab"
+            aria-selected={mode !== "batch"}
+            href={buildHref("AP")}
+            className={cn(
+              "inline-flex flex-1 items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold",
+              mode !== "batch" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600",
+            )}
+          >
+            วางบิลรายเจ้า
+          </Link>
+          <Link
+            role="tab"
+            aria-selected={mode === "batch"}
+            href={buildHref("AP", undefined, "batch")}
+            className={cn(
+              "inline-flex flex-1 items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold",
+              mode === "batch" ? "bg-white text-orange-800 shadow-sm" : "text-slate-600",
+            )}
+          >
+            ⚡ รวบวางบิลประจำเดือน (หลายเจ้าพร้อมกัน)
+          </Link>
+        </div>
+      ) : null}
+
+      {!isAR && mode === "batch" ? (
+        <ApBatchBillingPanel defaultDate={defaultDate} />
+      ) : !contactId ? (
         <Card>
           <CardHeader>
             <CardTitle>
@@ -366,7 +458,7 @@ export function CreateBillingNoteForm({
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="billing_date">
-                วันที่วางบิล <span className="text-red-500">*</span>
+                วันที่เอกสารวางบิล (Billing Date) <span className="text-red-500">*</span>
               </Label>
               <Input
                 id="billing_date"
@@ -376,19 +468,28 @@ export function CreateBillingNoteForm({
                 required
                 className="h-10"
               />
+              <p className="text-xs text-slate-500">ข้อมูลหัวใบวางบิล ไม่ใช้กรองรายการบิลซื้อ</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="due_date">
-                วันครบกำหนด <span className="text-red-500">*</span>
+                วันครบกำหนดชำระ (Due Date) <span className="text-red-500">*</span>
               </Label>
               <Input
                 id="due_date"
                 type="date"
                 value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
+                onChange={(e) => {
+                  setDueTouched(true);
+                  setDueDate(e.target.value);
+                }}
                 required
                 className="h-10"
               />
+              <p className="text-xs text-slate-500">
+                {creditDays > 0
+                  ? `ค่าเริ่มต้นจากเครดิตเทอม ${creditDays} วัน`
+                  : "ข้อมูลหัวใบวางบิล"}
+              </p>
             </div>
           </div>
 
@@ -414,7 +515,87 @@ export function CreateBillingNoteForm({
               : `พบ ${invoices.length} รายการ — ติ๊กเลือกบิลที่ต้องการวางบิล`}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          {invoices.length > 0 ? (
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-sm font-semibold text-slate-800">
+                กรองงวดบิลซื้อ (Filter by Invoice Period)
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => applyInvoicePeriod("", "", "all")}
+                  className={cn(
+                    "rounded-full border px-3 py-1 text-xs font-semibold",
+                    periodKey === "all"
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-200 bg-white text-slate-700",
+                  )}
+                >
+                  ทั้งหมด ({invoices.length})
+                </button>
+                {monthPills.map(([key, bucket]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => {
+                      const bounds = monthBounds(key);
+                      if (!bounds) return;
+                      applyInvoicePeriod(bounds.from, bounds.to, key);
+                    }}
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-xs font-semibold",
+                      periodKey === key
+                        ? "border-blue-600 bg-blue-600 text-white"
+                        : "border-slate-200 bg-white text-slate-700",
+                    )}
+                  >
+                    {thaiMonthLabel(key)} ({bucket.count} ใบ • ฿{formatMoney(bucket.total)})
+                  </button>
+                ))}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="invoice-from">ตั้งแต่วันที่บิล</Label>
+                  <Input
+                    id="invoice-from"
+                    type="date"
+                    value={invoiceFrom}
+                    onChange={(event) => {
+                      const nextFrom = event.target.value;
+                      const bounds = monthBounds(monthKeyFromIso(nextFrom));
+                      const key =
+                        bounds && bounds.from === nextFrom && bounds.to === invoiceTo
+                          ? monthKeyFromIso(nextFrom)
+                          : nextFrom || invoiceTo
+                            ? "custom"
+                            : "all";
+                      applyInvoicePeriod(nextFrom, invoiceTo, key);
+                    }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="invoice-to">ถึงวันที่บิล</Label>
+                  <Input
+                    id="invoice-to"
+                    type="date"
+                    value={invoiceTo}
+                    onChange={(event) => {
+                      const nextTo = event.target.value;
+                      const bounds = monthBounds(monthKeyFromIso(invoiceFrom));
+                      const key =
+                        bounds && bounds.from === invoiceFrom && bounds.to === nextTo
+                          ? monthKeyFromIso(invoiceFrom)
+                          : invoiceFrom || nextTo
+                            ? "custom"
+                            : "all";
+                      applyInvoicePeriod(invoiceFrom, nextTo, key);
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          ) : null}
           {invoices.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
               ไม่พบบิลที่มียอดค้างชำระ หรือบิลถูกวางบิลไปแล้ว
@@ -441,8 +622,15 @@ export function CreateBillingNoteForm({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {invoices.map((inv) => {
+                {visibleInvoices.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="h-16 text-center text-slate-500">
+                      ไม่มีบิลซื้อในงวดที่เลือก
+                    </TableCell>
+                  </TableRow>
+                ) : visibleInvoices.map((inv) => {
                   const checked = selectedIds.has(inv.id);
+                  const refNo = inv.tax_invoice_no || inv.reference_no;
                   return (
                     <TableRow
                       key={inv.id}
@@ -461,9 +649,11 @@ export function CreateBillingNoteForm({
                       </TableCell>
                       <TableCell className="font-medium text-slate-900">
                         <div>{inv.doc_no}</div>
-                        <div className="text-xs text-slate-400">
-                          {inv.doc_type}
-                        </div>
+                        {refNo ? (
+                          <div className="text-xs font-normal text-slate-500">Ref: {refNo}</div>
+                        ) : (
+                          <div className="text-xs text-slate-400">{inv.doc_type}</div>
+                        )}
                       </TableCell>
                       <TableCell>{formatDate(inv.doc_date)}</TableCell>
                       <TableCell>{formatDate(inv.due_date)}</TableCell>

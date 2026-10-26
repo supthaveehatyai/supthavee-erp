@@ -883,10 +883,12 @@ export async function submitAPPayment(
       touchedInvoiceIds.push(alloc.invoice_id);
     }
 
-    if (touchedInvoiceIds.length > 0) {
+    const billingNoteId = String(formData.get("billing_note_id") ?? "").trim();
+    if (touchedInvoiceIds.length > 0 || billingNoteId) {
       const bnSync = await syncBillingNotesAfterInvoicePayment(
         supabaseAdmin,
         touchedInvoiceIds,
+        billingNoteId || null,
       );
       if (bnSync.error) {
         return {
@@ -945,6 +947,9 @@ export async function submitAPPayment(
     revalidatePath("/finance/ap-ar");
     revalidatePath("/finance/deposits");
     revalidatePath("/finance/billing-notes");
+    if (billingNoteId) {
+      revalidatePath(`/finance/billing-notes/${billingNoteId}`);
+    }
     revalidatePath("/purchases");
 
     return {

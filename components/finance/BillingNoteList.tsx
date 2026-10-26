@@ -6,7 +6,7 @@
  */
 
 import Link from "next/link";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FileSpreadsheet, Plus, Search } from "lucide-react";
 import type {
@@ -34,6 +34,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { formatThaiDate } from "@/lib/utils/date-formatter";
+import { monthKeyFromIso, thaiMonthLabel } from "@/lib/utils/billing-period";
 
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -122,6 +124,39 @@ export function BillingNoteList({
   const isBR = type === "BR";
   const isTB = type === "TB";
   const contactColumnLabel = isBN ? "ชื่อลูกค้า" : "ชื่อคู่ค้า";
+  const monthGroups = useMemo(() => {
+    const buckets = new Map<string, BillingNoteListItem[]>();
+    for (const row of rows) {
+      const key = monthKeyFromIso(row.doc_date);
+      if (!/^\d{4}-\d{2}$/.test(key)) continue;
+      const list = buckets.get(key) ?? [];
+      list.push(row);
+      buckets.set(key, list);
+    }
+    return Array.from(buckets.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, items]) => ({
+        key,
+        label: thaiMonthLabel(key),
+        count: items.length,
+        total: items.reduce((sum, item) => sum + item.grand_total, 0),
+        items,
+      }));
+  }, [rows]);
+  const [scheduleMonth, setScheduleMonth] = useState("all");
+  const visibleRows =
+    !isBR || scheduleMonth === "all"
+      ? rows
+      : rows.filter((row) => monthKeyFromIso(row.doc_date) === scheduleMonth);
+  const paidRows = visibleRows.filter((row) => {
+    const status = row.payment_status.trim().toUpperCase();
+    return status === "PAID" || status === "COMPLETED";
+  });
+  const pendingRows = visibleRows.filter((row) => !paidRows.includes(row));
+  const sumGrand = (items: BillingNoteListItem[]) =>
+    items.reduce((sum, row) => sum + row.grand_total, 0);
+  const scheduleLabel =
+    scheduleMonth === "all" ? "ทั้งหมด" : thaiMonthLabel(scheduleMonth);
 
   useEffect(() => {
     setSearch(urlSearch);
@@ -143,7 +178,14 @@ export function BillingNoteList({
   }, [search, router, startTransition]);
 
   return (
-    <div className="flex flex-col gap-6">
+    <>
+    <style>{`
+      @media print {
+        .br-screen { display: none !important; }
+        #br-payment-schedule { display: block !important; }
+      }
+    `}</style>
+    <div className="br-screen flex flex-col gap-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-2">
           <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
@@ -155,13 +197,24 @@ export function BillingNoteList({
           </p>
         </div>
         {isTB ? null : (
-          <Link
-            href={createHref(isBN ? "BN" : "BR")}
-            className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-          >
-            <Plus className="size-4" />
-            สร้างใบวางบิล
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            {isBR ? (
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+              >
+                📊 พิมพ์ใบสรุปรายจ่ายประจำเดือน
+              </button>
+            ) : null}
+            <Link
+              href={createHref(isBN ? "BN" : "BR")}
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+            >
+              <Plus className="size-4" />
+              สร้างใบวางบิล
+            </Link>
+          </div>
         )}
       </div>
 
@@ -217,6 +270,61 @@ export function BillingNoteList({
           ไม่สามารถโหลดรายการสรุปวางบิลช่างได้
         </div>
       ) : (
+        <>
+        {isBR ? (
+          <div className="br-screen space-y-3">
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setScheduleMonth("all")}
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-semibold",
+                  scheduleMonth === "all" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white",
+                )}
+              >
+                ทั้งหมด ({rows.length})
+              </button>
+              {monthGroups.map((group) => (
+                <button
+                  key={group.key}
+                  type="button"
+                  onClick={() => setScheduleMonth(group.key)}
+                  className={cn(
+                    "rounded-full border px-3 py-1 text-xs font-semibold",
+                    scheduleMonth === group.key
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : "border-slate-200 bg-white",
+                  )}
+                >
+                  {group.label} ({group.count})
+                </button>
+              ))}
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>ยอดรวมใบรับวางบิลทั้งหมดในงวด</CardDescription>
+                  <CardTitle className="text-xl tabular-nums">฿{formatMoney(sumGrand(visibleRows))}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm text-slate-500">{visibleRows.length} ใบ</CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>โอนจ่ายแล้ว</CardDescription>
+                  <CardTitle className="text-xl tabular-nums text-emerald-700">฿{formatMoney(sumGrand(paidRows))}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm text-slate-500">{paidRows.length} ใบ</CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>คงเหลือรอโอนจ่าย</CardDescription>
+                  <CardTitle className="text-xl tabular-nums text-orange-700">฿{formatMoney(sumGrand(pendingRows))}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm text-slate-500">{pendingRows.length} ใบ</CardContent>
+              </Card>
+            </div>
+          </div>
+        ) : null}
         <Card>
         <CardHeader className="gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -224,7 +332,7 @@ export function BillingNoteList({
               {isBN ? "รายการวางบิลลูกหนี้" : "รายการรับวางบิลเจ้าหนี้"}
             </CardTitle>
             <CardDescription>
-              พบ {rows.length} รายการ
+              พบ {visibleRows.length} รายการ
               {urlSearch ? ` · ค้นหา “${urlSearch}”` : null}
             </CardDescription>
           </div>
@@ -279,7 +387,12 @@ export function BillingNoteList({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((row) => (
+                  {visibleRows.map((row) => {
+                    const status = row.payment_status.trim().toUpperCase();
+                    const canPay =
+                      row.doc_type === "BR" &&
+                      (status === "PENDING" || status === "UNPAID" || status === "PARTIAL");
+                    return (
                     <TableRow key={row.id}>
                       <TableCell className="whitespace-nowrap text-slate-700">
                         {formatDate(row.doc_date)}
@@ -304,23 +417,95 @@ export function BillingNoteList({
                       <TableCell className="whitespace-nowrap">
                         {statusBadge(row.payment_status)}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-right print:hidden">
-                        <Link
-                          href={`/finance/billing-notes/${row.id}`}
-                          className="inline-flex h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                        >
-                          ดูรายละเอียด
-                        </Link>
+                      <TableCell className="whitespace-nowrap text-right">
+                        <div className="flex justify-end gap-1">
+                          {canPay ? (
+                            <Link
+                              href={`/finance/ap-payment?vendor_id=${encodeURIComponent(row.contact_id)}&billing_note_id=${encodeURIComponent(row.id)}`}
+                              className="inline-flex h-8 items-center rounded-lg bg-emerald-600 px-2 text-xs font-semibold text-white hover:bg-emerald-700"
+                            >
+                              💸 จ่ายเงิน/แนบสลิป
+                            </Link>
+                          ) : null}
+                          <Link
+                            href={`/finance/billing-notes/${row.id}`}
+                            className="inline-flex h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                          >
+                            ดูรายละเอียด
+                          </Link>
+                        </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
           )}
         </CardContent>
       </Card>
+        </>
       )}
     </div>
+    {isBR ? (
+      <article id="br-payment-schedule" className="hidden bg-white p-8 text-slate-900 print:block">
+        <h1 className="text-xl font-bold">ใบสรุปรายจ่ายประจำเดือน</h1>
+        <p className="mt-1 text-sm">
+          บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด · งวด {scheduleLabel}
+        </p>
+        <table className="mt-4 w-full border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-slate-300 text-left">
+              <th className="py-2">ลำดับ</th>
+              <th>เลขที่ใบวางบิล (BR)</th>
+              <th>ชื่อซัพพลายเออร์</th>
+              <th className="text-right">จำนวนบิลย่อย</th>
+              <th>วันครบกำหนด</th>
+              <th className="text-right">ยอดเงินที่ต้องโอน</th>
+              <th>สถานะการโอน</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row, index) => {
+              const status = row.payment_status.trim().toUpperCase();
+              const paid = status === "PAID" || status === "COMPLETED";
+              return (
+                <tr key={row.id} className="border-b border-slate-200">
+                  <td className="py-2">{index + 1}</td>
+                  <td className="font-mono">{row.doc_no}</td>
+                  <td>{row.contact_name}</td>
+                  <td className="text-right">{row.invoice_count}</td>
+                  <td>{row.due_date ? formatThaiDate(row.due_date, "long") : "—"}</td>
+                  <td className="text-right tabular-nums">{formatMoney(row.grand_total)}</td>
+                  <td>{paid ? "โอนแล้ว" : "รอโอน"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={5} className="py-3 text-right font-semibold">
+                ยอดรวมสุทธิ
+              </td>
+              <td className="text-right text-base font-bold tabular-nums">
+                {formatMoney(sumGrand(visibleRows))}
+              </td>
+              <td />
+            </tr>
+          </tfoot>
+        </table>
+        <div className="mt-16 grid grid-cols-2 gap-12 text-sm">
+          <div>
+            <div className="mb-16 border-b border-slate-400" />
+            ผู้จัดทำ
+          </div>
+          <div>
+            <div className="mb-16 border-b border-slate-400" />
+            ผู้อนุมัติจ่ายเงิน
+          </div>
+        </div>
+      </article>
+    ) : null}
+    </>
   );
 }

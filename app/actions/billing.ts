@@ -9,9 +9,16 @@
  * (doc_headers has no paid_amount column).
  */
 
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/utils/supabase/server";
+import { requireSessionUserId } from "@/lib/auth/current-user";
 import { roundMoney } from "@/lib/utils/payment-fifo";
+import { resolveDueDate } from "@/lib/utils/outstanding-summary";
 import type {
+  ApPeriodInvoice,
+  ApPeriodVendorSummary,
+  CreateBatchBillingNotesResult,
+  GetUnbilledApSummaryResult,
   BillingCategory,
   BillingNoteDocType,
   BillingNoteInvoiceLine,
@@ -20,7 +27,9 @@ import type {
   CreateBillingNoteInput,
   CreateBillingNoteResult,
   GetBillingNoteByIdResult,
+  BillingNoteSettlement,
   GetBillingNotesResult,
+  PendingBillReceipt,
   GetInvoicesByBillingNoteResult,
   GetOpenBillingNotesResult,
   GetOutstandingContactsSummaryResult,
@@ -68,6 +77,7 @@ type LedgerInvoiceRow = {
   doc_type: string | null;
   doc_date: string | null;
   due_date: string | null;
+  reference_no?: string | null;
   grand_total: number | string | null;
   paid_amount: number | string | null;
   payment_status: string | null;
@@ -76,6 +86,47 @@ type LedgerInvoiceRow = {
   is_voided?: boolean | null;
   contacts?: ContactJoin | ContactJoin[] | null;
 };
+
+async function loadTaxInvoiceNumbers(
+  supabase: SupabaseAdmin,
+  documentIds: string[],
+): Promise<Map<string, string>> {
+  const found = new Map<string, string>();
+  const ids = documentIds.filter(Boolean);
+  if (ids.length === 0) return found;
+  const loose = supabase as unknown as {
+    from: (table: string) => {
+      select: (columns: string) => {
+        in: (
+          column: string,
+          values: string[],
+        ) => Promise<{
+          data: { id: string; tax_invoice_no?: string | null }[] | null;
+          error: { message: string } | null;
+        }>;
+      };
+    };
+  };
+  for (let index = 0; index < ids.length; index += 200) {
+    const chunk = ids.slice(index, index + 200);
+    const { data, error } = await loose
+      .from("documents")
+      .select("id, tax_invoice_no")
+      .in("id", chunk);
+    if (error) return found;
+    for (const row of data ?? []) {
+      const number = String(row.tax_invoice_no ?? "").trim();
+      if (number) found.set(row.id, number);
+    }
+  }
+  return found;
+}
+
+function isMissingPeriodRpc(message: string): boolean {
+  return /get_unbilled_ap_summary_by_period|PGRST202|schema cache|does not exist|could not find the function/i.test(
+    message,
+  );
+}
 
 function toMoney(value: number | string | null | undefined): number {
   const n = Number(value ?? 0);
@@ -204,13 +255,110 @@ export async function getBillingNotes(
             contact?.company_name?.trim() || "ไม่ระบุชื่อคู่ค้า",
           grand_total: roundMoney(toMoney(row.grand_total)),
           payment_status: String(row.payment_status ?? "PENDING"),
+          invoice_count: 0,
         };
       });
+
+    const noteIds = rows.map((row) => row.id).filter(Boolean);
+    if (noteIds.length > 0) {
+      const counts = new Map<string, number>();
+      for (let index = 0; index < noteIds.length; index += 200) {
+        const chunk = noteIds.slice(index, index + 200);
+        const { data: itemRows } = await supabase
+          .from("billing_note_items")
+          .select("billing_note_id")
+          .in("billing_note_id", chunk);
+        for (const item of itemRows ?? []) {
+          const noteId = String(item.billing_note_id ?? "");
+          if (!noteId) continue;
+          counts.set(noteId, (counts.get(noteId) ?? 0) + 1);
+        }
+      }
+      for (const row of rows) {
+        row.invoice_count = counts.get(row.id) ?? 0;
+      }
+    }
 
     return { data: rows, error: null };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "ดึงรายการใบวางบิลไม่สำเร็จ";
+    return { data: [], error: message };
+  }
+}
+
+export async function getPendingBillReceipts(): Promise<{
+  data: PendingBillReceipt[];
+  error: string | null;
+}> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: [], error: owner.error };
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("doc_headers")
+      .select("id, doc_no, contact_id, grand_total, payment_status")
+      .eq("doc_type", "BR")
+      .in("payment_status", ["PENDING", "Pending", "UNPAID", "PARTIAL"])
+      .order("doc_date", { ascending: false });
+    if (error) return { data: [], error: error.message };
+    return {
+      data: (data ?? []).map((row) => ({
+        id: String(row.id),
+        doc_no: String(row.doc_no ?? ""),
+        contact_id: String(row.contact_id ?? ""),
+        grand_total: roundMoney(toMoney(row.grand_total)),
+        payment_status: String(row.payment_status ?? "PENDING"),
+      })),
+      error: null,
+    };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "ดึงใบวางบิลรอจ่ายไม่สำเร็จ";
+    return { data: [], error: message };
+  }
+}
+
+export async function getBillingNoteSettlements(billingNoteId: string): Promise<{
+  data: BillingNoteSettlement[];
+  error: string | null;
+}> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: [], error: owner.error };
+    const linked = await getInvoicesByBillingNote(billingNoteId);
+    if (linked.error) return { data: [], error: linked.error };
+    const invoiceIds = linked.data.map((row) => row.id).filter(Boolean);
+    if (invoiceIds.length === 0) return { data: [], error: null };
+
+    const supabase = createClient();
+    const { data: allocations, error } = await supabase
+      .from("document_allocations")
+      .select("receipt_doc_id")
+      .in("invoice_doc_id", invoiceIds);
+    if (error) return { data: [], error: error.message };
+    const receiptIds = Array.from(
+      new Set((allocations ?? []).map((row) => String(row.receipt_doc_id ?? "")).filter(Boolean)),
+    );
+    if (receiptIds.length === 0) return { data: [], error: null };
+
+    const { data: payments, error: paymentError } = await supabase
+      .from("documents")
+      .select("id, doc_no, doc_type, attachment_url, attached_file_url, original_receipt_url")
+      .in("id", receiptIds)
+      .eq("doc_type", "PAY");
+    if (paymentError) return { data: [], error: paymentError.message };
+
+    return {
+      data: (payments ?? []).map((row) => ({
+        doc_no: String(row.doc_no ?? ""),
+        slip_urls: [row.attachment_url, row.attached_file_url, row.original_receipt_url]
+          .map((url) => String(url ?? "").trim())
+          .filter((url, index, all) => Boolean(url) && all.indexOf(url) === index),
+      })),
+      error: null,
+    };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "ดึงหลักฐานการจ่ายไม่สำเร็จ";
     return { data: [], error: message };
   }
 }
@@ -523,10 +671,10 @@ export async function getUnbilledInvoices(
   try {
     const trimmedContactId = contactId?.trim();
     if (!trimmedContactId) {
-      return { data: [], error: "ต้องระบุผู้ติดต่อ (contactId)" };
+      return { data: [], error: "ต้องระบุผู้ติดต่อ (contactId)", creditDays: 0 };
     }
     if (category !== "AR" && category !== "AP") {
-      return { data: [], error: "หมวดหมู่ต้องเป็น AR หรือ AP" };
+      return { data: [], error: "หมวดหมู่ต้องเป็น AR หรือ AP", creditDays: 0 };
     }
 
     const supabase = createClient();
@@ -541,6 +689,7 @@ export async function getUnbilledInvoices(
         doc_type,
         doc_date,
         due_date,
+        reference_no,
         grand_total,
         paid_amount,
         payment_status,
@@ -559,17 +708,29 @@ export async function getUnbilledInvoices(
       return {
         data: [],
         error: ledgerError.message ?? "ดึงรายการบิลค้างวางบิลไม่สำเร็จ",
+        creditDays: 0,
       };
     }
 
+    const { data: contactRow } = await supabase
+      .from("contacts")
+      .select("credit_days")
+      .eq("id", trimmedContactId)
+      .maybeSingle();
+    const creditDays = Math.max(0, Number(contactRow?.credit_days ?? 0) || 0);
+
     const rows = (ledgerRows ?? []) as LedgerInvoiceRow[];
+    const taxInvoiceNoById = await loadTaxInvoiceNumbers(
+      supabase,
+      rows.map((row) => row.id),
+    );
     if (rows.length === 0) {
-      return { data: [], error: null };
+      return { data: [], error: null, creditDays };
     }
 
     const billed = await loadBilledInvoiceKeys(supabase);
     if (billed.error) {
-      return { data: [], error: billed.error };
+      return { data: [], error: billed.error, creditDays };
     }
 
     const docNos = Array.from(
@@ -620,22 +781,28 @@ export async function getUnbilledInvoices(
         id: resolvedId,
         doc_no: docNo,
         doc_type: docType,
-        doc_date: row.doc_date ? String(row.doc_date) : "",
-        due_date: row.due_date ? String(row.due_date) : null,
+        doc_date: row.doc_date ? String(row.doc_date).slice(0, 10) : "",
+        due_date: resolveDueDate(
+          row.doc_date ? String(row.doc_date) : "",
+          row.due_date ? String(row.due_date) : null,
+          creditDays,
+        ) || null,
         grand_total: grandTotal,
         paid_amount: paidAmount,
         outstanding_amount: outstanding,
         payment_status: row.payment_status,
+        reference_no: row.reference_no?.trim() || null,
+        tax_invoice_no: taxInvoiceNoById.get(row.id) ?? null,
       });
     }
 
-    return { data: unbilled, error: null };
+    return { data: unbilled, error: null, creditDays };
   } catch (err) {
     const message =
       err instanceof Error
         ? err.message
         : "ดึงรายการบิลค้างวางบิลไม่สำเร็จ";
-    return { data: [], error: message };
+    return { data: [], error: message, creditDays: 0 };
   }
 }
 
@@ -1313,5 +1480,298 @@ export async function getInvoicesByBillingNote(
         ? err.message
         : "ดึงรายการบิลจากใบวางบิลไม่สำเร็จ";
     return { data: [], error: message, billing_note: null };
+  }
+}
+
+async function queryUnbilledApByPeriod(
+  fromDate: string,
+  toDate: string,
+): Promise<GetUnbilledApSummaryResult> {
+  const supabase = createClient();
+  const rows: LedgerInvoiceRow[] = [];
+  const pageSize = 1000;
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("documents")
+      .select(
+        `
+        id,
+        doc_no,
+        doc_type,
+        doc_date,
+        due_date,
+        reference_no,
+        grand_total,
+        paid_amount,
+        payment_status,
+        status,
+        contact_id,
+        is_voided,
+        contacts:contact_id (
+          id,
+          company_name
+        )
+      `,
+      )
+      .in("doc_type", [...AP_INVOICE_TYPES])
+      .eq("status", BILLABLE_DOC_STATUS)
+      .gte("doc_date", fromDate)
+      .lte("doc_date", toDate)
+      .or("is_voided.is.null,is_voided.eq.false")
+      .order("doc_date", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) return { data: [], error: error.message };
+    const page = (data ?? []) as LedgerInvoiceRow[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  const billed = await loadBilledInvoiceKeys(supabase);
+  if (billed.error) return { data: [], error: billed.error };
+
+  const openRows = rows.filter((row) => {
+    if (row.is_voided === true) return false;
+    const docNo = row.doc_no?.trim() || "";
+    if (!docNo || billed.docNos.has(docNo) || billed.ids.has(row.id)) return false;
+    const outstanding = roundMoney(toMoney(row.grand_total) - toMoney(row.paid_amount));
+    return outstanding > MONEY_EPS;
+  });
+
+  const contactIds = Array.from(
+    new Set(openRows.map((row) => row.contact_id?.trim() || "").filter(Boolean)),
+  );
+  const creditByContact = new Map<string, number>();
+  for (let index = 0; index < contactIds.length; index += 200) {
+    const chunk = contactIds.slice(index, index + 200);
+    const { data } = await supabase
+      .from("contacts")
+      .select("id, credit_days")
+      .in("id", chunk);
+    for (const contact of data ?? []) {
+      creditByContact.set(
+        String(contact.id),
+        Math.max(0, Number(contact.credit_days ?? 0) || 0),
+      );
+    }
+  }
+
+  const headerByKey = new Map<string, string>();
+  const docNos = Array.from(
+    new Set(openRows.map((row) => row.doc_no?.trim() || "").filter(Boolean)),
+  );
+  for (let index = 0; index < docNos.length; index += 200) {
+    const chunk = docNos.slice(index, index + 200);
+    const { data } = await supabase
+      .from("doc_headers")
+      .select("id, doc_no, doc_type, contact_id")
+      .in("doc_type", [...AP_INVOICE_TYPES])
+      .in("doc_no", chunk);
+    for (const header of data ?? []) {
+      const key = `${header.contact_id}::${invoiceKey(String(header.doc_type ?? ""), String(header.doc_no ?? ""))}`;
+      headerByKey.set(key, String(header.id));
+    }
+  }
+
+  const taxInvoiceNoById = await loadTaxInvoiceNumbers(
+    supabase,
+    openRows.map((row) => row.id),
+  );
+  const grouped = new Map<string, ApPeriodVendorSummary>();
+  for (const row of openRows) {
+    const contactId = row.contact_id?.trim() || "";
+    const docNo = row.doc_no?.trim() || "";
+    const docType = row.doc_type?.trim() || "";
+    if (!contactId || !docNo || !docType) continue;
+    const headerId = headerByKey.get(`${contactId}::${invoiceKey(docType, docNo)}`);
+    const resolvedId = headerId ?? row.id;
+    if (billed.ids.has(resolvedId)) continue;
+    const contact = unwrapContact(row.contacts);
+    const creditDays = creditByContact.get(contactId) ?? 0;
+    const docDate = row.doc_date ? String(row.doc_date).slice(0, 10) : "";
+    const invoice: ApPeriodInvoice = {
+      id: resolvedId,
+      doc_no: docNo,
+      doc_type: docType,
+      doc_date: docDate,
+      due_date: resolveDueDate(docDate, row.due_date, creditDays) || null,
+      reference_no: row.reference_no?.trim() || null,
+      tax_invoice_no: taxInvoiceNoById.get(row.id) ?? null,
+      outstanding_amount: roundMoney(toMoney(row.grand_total) - toMoney(row.paid_amount)),
+    };
+    const existing = grouped.get(contactId);
+    if (!existing) {
+      grouped.set(contactId, {
+        contact_id: contactId,
+        contact_name: contact?.company_name?.trim() || "ไม่ระบุชื่อคู่ค้า",
+        credit_days: creditDays,
+        invoice_count: 1,
+        first_doc_date: docDate,
+        last_doc_date: docDate,
+        total_outstanding: invoice.outstanding_amount,
+        invoices: [invoice],
+      });
+      continue;
+    }
+    existing.invoices.push(invoice);
+    existing.invoice_count += 1;
+    existing.total_outstanding = roundMoney(
+      existing.total_outstanding + invoice.outstanding_amount,
+    );
+    if (docDate && (!existing.first_doc_date || docDate < existing.first_doc_date)) {
+      existing.first_doc_date = docDate;
+    }
+    if (docDate && docDate > existing.last_doc_date) existing.last_doc_date = docDate;
+  }
+
+  return {
+    data: Array.from(grouped.values()).sort((a, b) =>
+      a.contact_name.localeCompare(b.contact_name, "th"),
+    ),
+    error: null,
+  };
+}
+
+function normalizeApPeriodRpc(value: unknown): ApPeriodVendorSummary[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const vendors: ApPeriodVendorSummary[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") return null;
+    const row = raw as Record<string, unknown>;
+    const invoicesRaw = row.invoices;
+    if (!Array.isArray(invoicesRaw)) return null;
+    const invoices: ApPeriodInvoice[] = [];
+    for (const item of invoicesRaw) {
+      if (!item || typeof item !== "object") return null;
+      const invoice = item as Record<string, unknown>;
+      const id = String(invoice.id ?? "").trim();
+      if (!id) return null;
+      invoices.push({
+        id,
+        doc_no: String(invoice.doc_no ?? ""),
+        doc_type: String(invoice.doc_type ?? ""),
+        doc_date: String(invoice.doc_date ?? "").slice(0, 10),
+        due_date: invoice.due_date ? String(invoice.due_date).slice(0, 10) : null,
+        reference_no: invoice.reference_no ? String(invoice.reference_no) : null,
+        tax_invoice_no: invoice.tax_invoice_no ? String(invoice.tax_invoice_no) : null,
+        outstanding_amount: roundMoney(toMoney(invoice.outstanding_amount as number)),
+      });
+    }
+    vendors.push({
+      contact_id: String(row.contact_id ?? ""),
+      contact_name: String(row.contact_name ?? "ไม่ระบุชื่อคู่ค้า"),
+      credit_days: Math.max(0, Number(row.credit_days ?? 0) || 0),
+      invoice_count: invoices.length,
+      first_doc_date: String(row.first_doc_date ?? invoices[0]?.doc_date ?? ""),
+      last_doc_date: String(row.last_doc_date ?? invoices.at(-1)?.doc_date ?? ""),
+      total_outstanding: roundMoney(
+        invoices.reduce((sum, invoice) => sum + invoice.outstanding_amount, 0),
+      ),
+      invoices,
+    });
+  }
+  return vendors.filter((vendor) => vendor.contact_id && vendor.invoices.length > 0);
+}
+
+export async function loadUnbilledApSummaryByPeriod(
+  fromDate: string,
+  toDate: string,
+): Promise<GetUnbilledApSummaryResult> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: [], error: owner.error };
+    const from = fromDate.trim();
+    const to = toDate.trim();
+    if (!isIsoDate(from) || !isIsoDate(to) || from > to) {
+      return { data: [], error: "ช่วงวันที่บิลต้องเป็น YYYY-MM-DD และวันเริ่มไม่เกินวันสิ้นสุด" };
+    }
+
+    const supabase = createClient();
+    const rpc = supabase as unknown as {
+      rpc: (
+        fn: string,
+        args: { p_from_date: string; p_to_date: string },
+      ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    };
+    const { data, error } = await rpc.rpc("get_unbilled_ap_summary_by_period", {
+      p_from_date: from,
+      p_to_date: to,
+    });
+    if (!error) {
+      if (Array.isArray(data) && data.length === 0) return { data: [], error: null };
+      const parsed = normalizeApPeriodRpc(data);
+      if (parsed) return { data: parsed, error: null };
+    } else if (!isMissingPeriodRpc(error.message)) {
+      return { data: [], error: error.message };
+    }
+
+    return queryUnbilledApByPeriod(from, to);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "ดึงสรุปบิลค้างตามงวดไม่สำเร็จ";
+    return { data: [], error: message };
+  }
+}
+
+export async function createBatchBillingNotesAction(input: {
+  billingDate: string;
+  remark?: string;
+  groups: { contactId: string; invoiceIds: string[]; dueDate: string; totalBilledAmount: number }[];
+}): Promise<CreateBatchBillingNotesResult> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { success: false, created: [], error: owner.error };
+    const billingDate = input.billingDate?.trim() ?? "";
+    if (!isIsoDate(billingDate)) {
+      return { success: false, created: [], error: "วันที่เอกสารวางบิลต้องเป็น YYYY-MM-DD" };
+    }
+    const groups = (input.groups ?? []).filter(
+      (group) => group.contactId?.trim() && group.invoiceIds.length > 0,
+    );
+    if (groups.length === 0) {
+      return { success: false, created: [], error: "ยังไม่ได้เลือกผู้จำหน่ายหรือบิล" };
+    }
+
+    const created: CreateBatchBillingNotesResult["created"] = [];
+    const supabase = createClient();
+    for (const group of groups) {
+      const invoiceIds = Array.from(new Set(group.invoiceIds.map((id) => id.trim()).filter(Boolean)));
+      const result = await createBillingNote({
+        contactId: group.contactId.trim(),
+        category: "AP",
+        invoiceIds,
+        totalBilledAmount: roundMoney(toMoney(group.totalBilledAmount)),
+        documentDate: billingDate,
+        dueDate: isIsoDate(group.dueDate) ? group.dueDate : billingDate,
+        remark: input.remark?.trim() || undefined,
+      });
+      if (!result.success || !result.documentId) {
+        return {
+          success: false,
+          created,
+          error:
+            created.length > 0
+              ? `สร้างไปแล้ว ${created.length} ใบ แล้วหยุด: ${result.error ?? "สร้างใบวางบิลไม่สำเร็จ"}`
+              : (result.error ?? "สร้างใบวางบิลไม่สำเร็จ"),
+        };
+      }
+      const { data: header } = await supabase
+        .from("doc_headers")
+        .select("doc_no, grand_total")
+        .eq("id", result.documentId)
+        .maybeSingle();
+      created.push({
+        contactId: group.contactId.trim(),
+        documentId: result.documentId,
+        docNo: String(header?.doc_no ?? result.documentId),
+      });
+    }
+
+    revalidatePath("/finance/billing-notes");
+    revalidatePath("/finance/billing-notes/create");
+    return { success: true, created, error: null };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "ออกใบรับวางบิลแบบกลุ่มไม่สำเร็จ";
+    return { success: false, created: [], error: message };
   }
 }

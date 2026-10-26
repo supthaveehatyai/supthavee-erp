@@ -16,10 +16,53 @@ export type UnbilledInvoice = {
   paid_amount: number;
   outstanding_amount: number;
   payment_status: string | null;
+  reference_no: string | null;
+  tax_invoice_no: string | null;
 };
 
 export type GetUnbilledInvoicesResult = {
   data: UnbilledInvoice[];
+  error: string | null;
+  creditDays: number;
+};
+
+export type ApPeriodInvoice = {
+  id: string;
+  doc_no: string;
+  doc_type: string;
+  doc_date: string;
+  due_date: string | null;
+  reference_no: string | null;
+  tax_invoice_no: string | null;
+  outstanding_amount: number;
+};
+
+export type ApPeriodVendorSummary = {
+  contact_id: string;
+  contact_name: string;
+  credit_days: number;
+  invoice_count: number;
+  first_doc_date: string;
+  last_doc_date: string;
+  total_outstanding: number;
+  invoices: ApPeriodInvoice[];
+};
+
+export type GetUnbilledApSummaryResult = {
+  data: ApPeriodVendorSummary[];
+  error: string | null;
+};
+
+export type BatchBillingNoteGroup = {
+  contactId: string;
+  invoiceIds: string[];
+  dueDate: string;
+  totalBilledAmount: number;
+};
+
+export type CreateBatchBillingNotesResult = {
+  success: boolean;
+  created: { contactId: string; documentId: string; docNo: string }[];
   error: string | null;
 };
 
@@ -50,6 +93,20 @@ export type BillingNoteListItem = {
   contact_name: string;
   grand_total: number;
   payment_status: string;
+  invoice_count: number;
+};
+
+export type PendingBillReceipt = {
+  id: string;
+  doc_no: string;
+  contact_id: string;
+  grand_total: number;
+  payment_status: string;
+};
+
+export type BillingNoteSettlement = {
+  doc_no: string;
+  slip_urls: string[];
 };
 
 export type GetBillingNotesResult = {

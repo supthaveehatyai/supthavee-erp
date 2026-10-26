@@ -27,6 +27,7 @@ type PageProps = {
   searchParams: Promise<{
     type?: string;
     contact_id?: string;
+    mode?: string;
   }>;
 };
 
@@ -49,6 +50,7 @@ export default async function CreateBillingNotePage({ searchParams }: PageProps)
 
   let invoices: UnbilledInvoice[] = [];
   let invoicesError: string | null = null;
+  let creditDays = 0;
   let outstandingContacts: OutstandingContactSummary[] = [];
   let outstandingError: string | null = null;
 
@@ -56,6 +58,7 @@ export default async function CreateBillingNotePage({ searchParams }: PageProps)
     const result = await getUnbilledInvoices(contactId, type);
     invoices = result.data;
     invoicesError = result.error;
+    creditDays = result.creditDays;
   } else {
     const result = await getOutstandingContactsSummary(type);
     outstandingContacts = result.data;
@@ -110,6 +113,8 @@ export default async function CreateBillingNotePage({ searchParams }: PageProps)
         invoices={invoices}
         outstandingContacts={outstandingContacts}
         defaultDate={todayIsoDate()}
+        creditDays={creditDays}
+        mode={params.mode === "batch" && type === "AP" ? "batch" : "single"}
       />
     </div>
   );

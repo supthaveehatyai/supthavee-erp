@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getBillingNoteById } from "@/app/actions/billing";
+import { getBillingNoteById, getBillingNoteSettlements } from "@/app/actions/billing";
 import { BillingNoteDetail } from "@/components/finance/BillingNoteDetail";
 import BillingNotePrintTemplate from "@/components/finance/BillingNotePrintTemplate";
 
@@ -27,6 +27,10 @@ export async function generateMetadata({
 export default async function BillingNoteDetailPage({ params }: PageProps) {
   const { id } = await params;
   const { data, error } = await getBillingNoteById(id);
+  const paid =
+    data?.doc_type === "BR" &&
+    ["PAID", "COMPLETED"].includes(String(data.payment_status ?? "").trim().toUpperCase());
+  const settlements = paid ? await getBillingNoteSettlements(id) : { data: [], error: null };
 
   if (!data) {
     if (error) {
@@ -43,7 +47,7 @@ export default async function BillingNoteDetailPage({ params }: PageProps) {
 
   return (
     <div className="flex flex-col gap-6 p-6 print:gap-0 print:p-0">
-      <BillingNoteDetail document={data} />
+      <BillingNoteDetail document={data} settlements={settlements.data} />
       <BillingNotePrintTemplate document={data} />
     </div>
   );

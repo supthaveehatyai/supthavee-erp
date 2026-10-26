@@ -28,71 +28,76 @@ function toMoney(value: number | string | null | undefined): number {
 export async function syncBillingNotesAfterInvoicePayment(
   supabase: SupabaseClient,
   invoiceDocumentIds: string[],
+  billingNoteId?: string | null,
 ): Promise<SyncBillingNotesResult> {
   try {
+    const explicitNoteId = billingNoteId?.trim() ?? "";
     const ids = Array.from(
       new Set(invoiceDocumentIds.map((id) => id?.trim()).filter(Boolean)),
     );
-    if (ids.length === 0) return { updated: 0, error: null };
+    if (ids.length === 0 && !explicitNoteId) return { updated: 0, error: null };
 
-    const { data: invoices, error: invoiceError } = await supabase
-      .from("documents")
-      .select("id, doc_no, doc_type, contact_id")
-      .in("id", ids);
+    const billingNoteIds: string[] = [];
+    if (ids.length > 0) {
+      const { data: invoices, error: invoiceError } = await supabase
+        .from("documents")
+        .select("id, doc_no, doc_type, contact_id")
+        .in("id", ids);
 
-    if (invoiceError) {
-      return { updated: 0, error: invoiceError.message };
+      if (invoiceError) {
+        return { updated: 0, error: invoiceError.message };
+      }
+
+      const docNos = Array.from(
+        new Set(
+          (invoices ?? [])
+            .map((row) => String(row.doc_no ?? "").trim())
+            .filter(Boolean),
+        ),
+      );
+
+      if (docNos.length > 0) {
+        const { data: headers, error: headerError } = await supabase
+          .from("doc_headers")
+          .select("id, doc_no, doc_type, contact_id")
+          .in("doc_no", docNos);
+
+        if (headerError) {
+          return { updated: 0, error: headerError.message };
+        }
+
+        const headerIds = (headers ?? [])
+          .filter((h) => {
+            const t = String(h.doc_type ?? "");
+            return t === "INV_DO" || t === "TAX_INV" || t === "AP_INV" || t === "AP_TAX";
+          })
+          .map((h) => String(h.id));
+
+        if (headerIds.length > 0) {
+          const { data: items, error: itemsError } = await supabase
+            .from("billing_note_items")
+            .select("billing_note_id, invoice_id")
+            .in("invoice_id", headerIds);
+
+          if (itemsError) {
+            return { updated: 0, error: itemsError.message };
+          }
+
+          for (const row of items ?? []) {
+            const noteId = String(row.billing_note_id ?? "");
+            if (noteId) billingNoteIds.push(noteId);
+          }
+        }
+      }
     }
-
-    const docNos = Array.from(
-      new Set(
-        (invoices ?? [])
-          .map((row) => String(row.doc_no ?? "").trim())
-          .filter(Boolean),
-      ),
-    );
-    if (docNos.length === 0) return { updated: 0, error: null };
-
-    const { data: headers, error: headerError } = await supabase
-      .from("doc_headers")
-      .select("id, doc_no, doc_type, contact_id")
-      .in("doc_no", docNos);
-
-    if (headerError) {
-      return { updated: 0, error: headerError.message };
-    }
-
-    const headerIds = (headers ?? [])
-      .filter((h) => {
-        const t = String(h.doc_type ?? "");
-        return t === "INV_DO" || t === "TAX_INV" || t === "AP_INV" || t === "AP_TAX";
-      })
-      .map((h) => String(h.id));
-
-    if (headerIds.length === 0) return { updated: 0, error: null };
-
-    const { data: items, error: itemsError } = await supabase
-      .from("billing_note_items")
-      .select("billing_note_id, invoice_id")
-      .in("invoice_id", headerIds);
-
-    if (itemsError) {
-      return { updated: 0, error: itemsError.message };
-    }
-
-    const billingNoteIds = Array.from(
-      new Set(
-        (items ?? [])
-          .map((row) => String(row.billing_note_id ?? ""))
-          .filter(Boolean),
-      ),
-    );
-    if (billingNoteIds.length === 0) return { updated: 0, error: null };
+    if (explicitNoteId) billingNoteIds.push(explicitNoteId);
+    const uniqueNoteIds = Array.from(new Set(billingNoteIds));
+    if (uniqueNoteIds.length === 0) return { updated: 0, error: null };
 
     let updated = 0;
     const nowIso = new Date().toISOString();
 
-    for (const noteId of billingNoteIds) {
+    for (const noteId of uniqueNoteIds) {
       const { data: noteItems, error: noteItemsError } = await supabase
         .from("billing_note_items")
         .select(
@@ -171,20 +176,28 @@ export async function syncBillingNotesAfterInvoicePayment(
         if (outstanding > MONEY_EPS) allFullyPaid = false;
       }
 
-      const nextStatus = allFullyPaid
-        ? "COMPLETED"
-        : anyPaid
-          ? "PARTIAL"
-          : "PENDING";
+      const nextStatus = allFullyPaid ? "PAID" : anyPaid ? "PARTIAL" : "PENDING";
 
-      const { error: updateError } = await supabase
+      const { data: noteHeader, error: updateError } = await supabase
         .from("doc_headers")
         .update({ payment_status: nextStatus })
         .eq("id", noteId)
-        .in("doc_type", ["BN", "BR"]);
+        .in("doc_type", ["BN", "BR"])
+        .select("doc_no, doc_type")
+        .maybeSingle();
 
       if (updateError) {
         return { updated, error: updateError.message };
+      }
+      const noteNo = String(noteHeader?.doc_no ?? "").trim();
+      const noteType = String(noteHeader?.doc_type ?? "").trim();
+      if (noteNo && (noteType === "BN" || noteType === "BR")) {
+        const ledgerStatus = nextStatus === "PENDING" ? "UNPAID" : nextStatus;
+        await supabase
+          .from("documents")
+          .update({ payment_status: ledgerStatus })
+          .eq("doc_no", noteNo)
+          .eq("doc_type", noteType);
       }
       updated += 1;
       void nowIso;
