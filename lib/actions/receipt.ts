@@ -61,6 +61,7 @@ import { applyPurchaseUomConversion } from "@/lib/utils/uom-conversion";
 import {
   DEFAULT_PURCHASE_UOM_CODE,
   resolveConversionFactor,
+  resolvePurchaseUomCode,
 } from "@/lib/utils/purchase-uom";
 import {
   buildFreightDocumentColumns,
@@ -790,9 +791,7 @@ export async function matchReceiptItemsToProducts(
       );
 
       const qty = Number(item.qty) || 0;
-      const purchaseUomCode =
-        String(item.purchase_uom_code ?? "").trim().toUpperCase() ||
-        DEFAULT_PURCHASE_UOM_CODE;
+      const purchaseUomCode = resolvePurchaseUomCode(item.purchase_uom_code);
       const conversionFactor =
         purchaseUomCode === "DZN"
           ? resolveConversionFactor(item.conversion_factor ?? 12)
@@ -1171,9 +1170,7 @@ export async function createOnTheFlyReceiptMapping(
         },
       ) => Promise<{ error: { code?: string; message?: string } | null }>;
     };
-    const purchaseUomCode =
-      String(input.purchaseUomCode ?? "").trim().toUpperCase() ||
-      DEFAULT_PURCHASE_UOM_CODE;
+    const purchaseUomCode = resolvePurchaseUomCode(input.purchaseUomCode);
     const conversionFactor = resolveConversionFactor(input.conversionFactor ?? 1);
     const { error: rpcError } = await rpcClient.rpc("upsert_ocr_vendor_mapping", {
       p_vendor_id: vendorId,
@@ -2643,9 +2640,7 @@ export async function saveManualGoodsReceipt(
         ).slice(0, 255),
         sku: line.sku?.trim() || String(product.sku ?? ""),
         qty,
-        uom_used:
-          String(line.purchaseUomCode ?? "").trim().toUpperCase() ||
-          DEFAULT_PURCHASE_UOM_CODE,
+        uom_used: resolvePurchaseUomCode(line.purchaseUomCode),
         conversionFactor: resolveConversionFactor(line.conversionFactor ?? 1),
         unitPrice,
         sort_order: (() => {

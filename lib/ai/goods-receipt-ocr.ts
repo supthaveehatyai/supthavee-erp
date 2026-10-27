@@ -10,6 +10,7 @@ import {
   type GeminiGenerateResult,
 } from "@/lib/ai/gemini-client";
 import { splitOriginFreightLines } from "@/lib/utils/dual-freight";
+import { resolvePurchaseUomCode } from "@/lib/utils/purchase-uom";
 
 export type GoodsReceiptOcrLine = {
   raw_vendor_sku: string;
@@ -106,7 +107,14 @@ Other rules:
 - "qty" and "unit_price" MUST be plain numbers — no currency symbols, no thousands separators. Keep up to 4 decimal places when the paper prints them (185.9813). "qty" is the quantity printed in the purchase unit (5 โหล → qty 5, not 60).
 - "subtotal" = the printed amount AFTER the bill discount and BEFORE VAT (ฐานภาษี / ยอดหลังส่วนลด). Copy the printed number. Use 0 if that figure is not printed.
 - "grand_total" = the printed payable total (ยอดสุทธิ / รวมทั้งสิ้น / Grand Total). Copy the printed number. Use 0 if it is not printed. Do not calculate it from the lines.
-- PURCHASE UOM: if the quantity cell ends with "ล" or "โหล" (dozen), set "purchase_uom_code" to "DZN" and "conversion_factor" to 12. Otherwise set "purchase_uom_code" to "PCS" and "conversion_factor" to 1.
+- PURCHASE UOM: read the unit printed beside the quantity and set "purchase_uom_code" to the code below. "conversion_factor" is 12 only for dozen, otherwise 1.
+  - "ล" or "โหล" → "DZN"
+  - "ใบ" → "CUP"
+  - "เหรียญ" → "MDL"
+  - "แผ่น" or "ป้าย" → "PLT"
+  - "อัน" → "UNT"
+  - "ตัว", "ชิ้น", or any other unit → "PCS"
+  Never invent a unit. A trophy/medal bill printed as ใบ, แผ่น, ป้าย, เหรียญ, or อัน must NOT be returned as "PCS".
 - ORIGIN FREIGHT: a line whose description or code is a delivery charge (ค่าส่ง, ค่าขนส่ง, ค่าจัดส่ง, "ค่าส่ง รวมกับบิลแรก", freight) is NOT a product. Do NOT put it in "items". Sum those amounts into root "freight_cost". Example: code 34223, description ค่าส่ง, amount 70 → freight_cost 70 and no item row, so received quantity is not inflated.
 - Respond with ONLY a valid JSON OBJECT — no markdown code fences, no commentary, no trailing text — matching EXACTLY this shape:
 {"document_number": "", "document_date": "", "doc_type": "AP_TAX", "vat_type": "NONE", "freight_cost": 0, "subtotal": 0, "grand_total": 0, "items": [{"raw_vendor_sku": "", "raw_description": "", "qty": 0, "unit_price": 0, "discount_text": "", "purchase_uom_code": "PCS", "conversion_factor": 1}]}
@@ -226,8 +234,7 @@ export function parseGoodsReceiptOcrJson(
 }
 
 function normalizePurchaseUomCode(value: unknown): string {
-  const code = String(value ?? "").trim().toUpperCase();
-  return code || "PCS";
+  return resolvePurchaseUomCode(value);
 }
 
 function normalizeOcrConversionFactor(uomCode: unknown, value: unknown): number {

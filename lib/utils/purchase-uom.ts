@@ -2,6 +2,34 @@ import { roundTo4Decimals } from "@/lib/utils/accounting";
 
 export const DEFAULT_PURCHASE_UOM_CODE = "PCS";
 
+/**
+ * Thai unit text printed on vendor bills → `mst_uom.uom_code`.
+ * Trophy / medal bills use ใบ, เหรียญ, แผ่น, ป้าย, อัน.
+ */
+const PURCHASE_UOM_TEXT_ALIASES: Record<string, string> = {
+  ใบ: "CUP",
+  เหรียญ: "MDL",
+  แผ่น: "PLT",
+  ป้าย: "PLT",
+  อัน: "UNT",
+  ตัว: "PCS",
+  ชิ้น: "PCS",
+  โหล: "DZN",
+  ล: "DZN",
+};
+
+/** Map a printed unit or code (`ใบ`, `CUP`, `pcs`) to `mst_uom.uom_code`. */
+export function resolvePurchaseUomCode(value: unknown): string {
+  const raw = String(value ?? "")
+    .trim()
+    .replace(/[.\s]+$/g, "");
+  if (!raw) return DEFAULT_PURCHASE_UOM_CODE;
+  const alias = PURCHASE_UOM_TEXT_ALIASES[raw];
+  if (alias) return alias;
+  const code = raw.toUpperCase();
+  return code || DEFAULT_PURCHASE_UOM_CODE;
+}
+
 export type PurchaseUomOption = {
   uom_code: string;
   uom_name: string;
@@ -13,6 +41,30 @@ export const FALLBACK_PURCHASE_UOMS: PurchaseUomOption[] = [
   {
     uom_code: "PCS",
     uom_name: "ตัว",
+    default_multiplier: 1,
+    allow_custom_multiplier: false,
+  },
+  {
+    uom_code: "CUP",
+    uom_name: "ใบ",
+    default_multiplier: 1,
+    allow_custom_multiplier: false,
+  },
+  {
+    uom_code: "MDL",
+    uom_name: "เหรียญ",
+    default_multiplier: 1,
+    allow_custom_multiplier: false,
+  },
+  {
+    uom_code: "PLT",
+    uom_name: "แผ่น",
+    default_multiplier: 1,
+    allow_custom_multiplier: false,
+  },
+  {
+    uom_code: "UNT",
+    uom_name: "อัน",
     default_multiplier: 1,
     allow_custom_multiplier: false,
   },

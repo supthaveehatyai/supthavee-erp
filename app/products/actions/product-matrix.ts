@@ -854,7 +854,31 @@ export async function updateProductModel(
     const taxType = normalizeTaxType(input.taxType);
     const needsPurchaseUom =
       input.isRawMaterial === true || input.isManufactured === true;
+    const baseUomId = toNullableUuid(input.baseUomId);
+    const conversionFactor = needsPurchaseUom ? input.uomConversionFactor : 1;
+    const oneToOne = Math.abs(conversionFactor - 1) < 0.00005;
+    const purchasingUomId = oneToOne
+      ? baseUomId
+      : needsPurchaseUom
+        ? toNullableUuid(input.purchasingUomId ?? "")
+        : null;
     const supabaseAdmin = createSupabaseServerClient();
+
+    if (!baseUomId) {
+      return { ok: false, error: "ต้องเลือกหน่วยนับ (base_uom_id)" };
+    }
+    const { data: uomRow, error: uomLookupError } = await supabaseAdmin
+      .from("mst_uom")
+      .select("uom_name")
+      .eq("uom_id", baseUomId)
+      .maybeSingle();
+    if (uomLookupError) {
+      return { ok: false, error: uomLookupError.message };
+    }
+    const baseUomLabel = String(uomRow?.uom_name ?? "").trim();
+    if (!baseUomLabel) {
+      return { ok: false, error: "ไม่พบชื่อหน่วยนับภาษาไทยใน mst_uom" };
+    }
 
     const { data: modelRow, error: modelLookupError } = await supabaseAdmin
       .from("product_models")
@@ -884,13 +908,9 @@ export async function updateProductModel(
         is_service: input.isService,
         is_raw_material: input.isRawMaterial,
         is_manufactured: input.isManufactured,
-        base_uom_id: toNullableUuid(input.baseUomId),
-        purchasing_uom_id: needsPurchaseUom
-          ? toNullableUuid(input.purchasingUomId ?? "")
-          : null,
-        uom_conversion_factor: needsPurchaseUom
-          ? input.uomConversionFactor
-          : 1,
+        base_uom_id: baseUomId,
+        purchasing_uom_id: purchasingUomId,
+        uom_conversion_factor: conversionFactor,
       })
       .eq("id", input.modelId);
 
@@ -898,6 +918,19 @@ export async function updateProductModel(
       return {
         ok: false,
         error: `อัปเดต product_models ไม่สำเร็จ: ${modelUpdateError.message}`,
+      };
+    }
+
+    const { error: skuUomError } = await supabaseAdmin
+      .from("products")
+      .update({ base_uom: baseUomLabel })
+      .eq("model_id", input.modelId);
+    if (skuUomError) {
+      revalidatePath("/products");
+      return {
+        ok: false,
+        modelId: input.modelId,
+        error: `อัปเดตหน่วยนับของ SKU ไม่สำเร็จ: ${skuUomError.message}`,
       };
     }
 
