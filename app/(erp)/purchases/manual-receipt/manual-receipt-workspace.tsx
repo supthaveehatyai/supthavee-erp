@@ -95,7 +95,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { InventoryLandedCostCard } from "@/components/procurement/inventory-landed-cost-card";
 import { PurchaseUomCell } from "@/components/procurement/PurchaseUomCell";
+import { buildReceiptQtySummary } from "@/lib/utils/receipt-qty-groups";
 import {
   defaultPurchaseUom,
   netUnitCostPerBase,
@@ -116,6 +118,9 @@ export type ManualReceiptLine = {
   isFoc: boolean;
   vendorSku: string;
   taxType?: string | null;
+  baseUom?: string | null;
+  sizeLabel?: string | null;
+  isRawMaterial?: boolean | null;
 };
 
 export type ManualReceiptWorkspaceProps = {
@@ -408,7 +413,31 @@ export default function ManualReceiptWorkspace({
   const landedCostPool = roundMoney(
     goodsExVatTotal + originFreightInventory + destFreightNormalized,
   );
-  const landedUnitAverage = totals.qty > 0 ? landedCostPool / totals.qty : 0;
+  const qtySummary = useMemo(
+    () =>
+      buildReceiptQtySummary(
+        lines.map((line) => {
+          const grossLine = line.isFoc
+            ? 0
+            : Number(invoicePreviewByKey.get(line.key)?.finalLineTotal ?? 0);
+          const uom = purchaseUoms.find((item) => item.uom_code === line.purchaseUomCode);
+          return {
+            qty: line.qty,
+            conversionFactor: line.conversionFactor,
+            purchaseUomCode: line.purchaseUomCode,
+            purchaseUomName: uom?.uom_name ?? null,
+            baseUom: line.baseUom ?? uom?.uom_name ?? null,
+            size: line.sizeLabel ?? null,
+            isRawMaterial: line.isRawMaterial,
+            exVatAmount: vatType === "INCLUSIVE" ? grossLine / 1.07 : grossLine,
+            freightShare: freightByKey.get(line.key) ?? 0,
+          };
+        }),
+        formatMoney,
+        goodsExVatTotal,
+      ),
+    [lines, invoicePreviewByKey, purchaseUoms, vatType, freightByKey, goodsExVatTotal],
+  );
   const selectedVendor = vendors.find((vendor) => vendor.id === vendorId);
   const destCarrierName =
     carriers.find((carrier) => carrier.carrier_id === carrierId)?.carrier_name ??
@@ -493,6 +522,9 @@ export default function ManualReceiptWorkspace({
           isFoc: false,
           vendorSku: mapped.vendor_sku ?? "",
           taxType: product.tax_type ?? null,
+          baseUom: product.base_uom,
+          sizeLabel: product.size_label,
+          isRawMaterial: product.is_raw_material ?? null,
         },
       ];
     });
@@ -944,8 +976,8 @@ export default function ManualReceiptWorkspace({
           <div>
             <CardTitle className="text-base">รายการรับเข้า</CardTitle>
             <CardDescription>
-              {lines.length} รายการ · จำนวนฐาน {totals.qty.toLocaleString("th-TH")} ·
-              ยอดสินค้า {formatMoney(totals.gross)}
+              {lines.length} รายการ • จำนวนรับเข้า: {qtySummary.receivedQtyLabel} • ยอดสินค้า{" "}
+              {formatMoney(totals.gross)}
             </CardDescription>
           </div>
           <Button
@@ -1088,6 +1120,12 @@ export default function ManualReceiptWorkspace({
                           uomCode={line.purchaseUomCode}
                           conversionFactor={line.conversionFactor}
                           qty={line.qty}
+                          baseUnitLabel={
+                            line.baseUom ||
+                            purchaseUoms.find((item) => item.uom_code === line.purchaseUomCode)
+                              ?.uom_name ||
+                            ""
+                          }
                           disabled={isPending}
                           onChange={({ uomCode, conversionFactor }) =>
                             updateLine(line.key, {
@@ -1253,31 +1291,16 @@ export default function ManualReceiptWorkspace({
             </div>
 
             <div className="mt-4 grid grid-cols-1 gap-4 border-t border-dashed border-violet-200 pt-4 lg:grid-cols-2">
-              <div className="rounded-xl border border-slate-200 bg-white p-3">
-                <p className="text-xs font-semibold text-slate-800">
-                  สรุปต้นทุนรับเข้าคลังตามมาตรฐาน TAS 2 — Inventory Landed Cost
-                </p>
-                <SummaryRow
-                  label={`มูลค่าสินค้าสุทธิ (ก่อน VAT) • ${totals.qty.toLocaleString("th-TH")} ตัว`}
-                  amount={`฿${formatMoney(goodsExVatTotal)}`}
-                />
-                <SummaryRow
-                  label="+ ค่าขนส่งต้นทาง (เข้าต้นทุนสินค้า)"
-                  amount={`฿${formatMoney(originFreightInventory)}`}
-                />
-                <SummaryRow
-                  label={`+ ค่าขนส่งเก็บปลายทาง (${destCarrierName})`}
-                  amount={`฿${formatMoney(destFreightNormalized)}`}
-                />
-                <SummaryRow
-                  label="รวมฐานต้นทุนเข้าคลังสุทธิ (Landed Cost Pool)"
-                  amount={`฿${formatMoney(landedCostPool)}`}
-                  strong
-                />
-                <p className="text-right text-[11px] text-slate-500">
-                  เฉลี่ย ฿{formatMoney(landedUnitAverage)} / ตัว
-                </p>
-              </div>
+              <InventoryLandedCostCard
+                finished={qtySummary.finished}
+                raw={qtySummary.raw}
+                originFreight={originFreightInventory}
+                destFreight={destFreightNormalized}
+                destCarrierName={destCarrierName}
+                pool={landedCostPool}
+                poolAverage={qtySummary.poolAverage}
+                formatMoney={formatMoney}
+              />
 
               <div className="rounded-xl border border-slate-200 bg-white p-3">
                 <p className="text-xs font-semibold text-slate-800">
@@ -1373,8 +1396,7 @@ export default function ManualReceiptWorkspace({
                 Total Received Qty
               </p>
               <p className="text-lg font-bold text-slate-900">
-                {totals.qty.toLocaleString("th-TH")}{" "}
-                <span className="text-xs font-medium text-slate-400">ตัว</span>
+                {qtySummary.receivedQtyCompact}
               </p>
             </div>
             <div className="w-44">

@@ -3,9 +3,9 @@
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import {
-  allowsCustomMultiplier,
   findPurchaseUom,
   resolveConversionFactor,
+  showsPurchaseMultiplierInput,
   stockBaseQty,
   uomOptionLabel,
   type PurchaseUomOption,
@@ -34,7 +34,7 @@ export function PurchaseUomCell({
 }: PurchaseUomCellProps) {
   const selected = findPurchaseUom(catalog, uomCode);
   const factor = resolveConversionFactor(conversionFactor);
-  const showMultiplier = allowsCustomMultiplier(selected);
+  const showMultiplier = showsPurchaseMultiplierInput(selected, factor, baseUnitLabel);
   const received = stockBaseQty(qty, factor);
 
   return (

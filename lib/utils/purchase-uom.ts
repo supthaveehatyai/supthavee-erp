@@ -85,6 +85,7 @@ export const FALLBACK_PURCHASE_UOMS: PurchaseUomOption[] = [
 ];
 
 const CUSTOM_MULTIPLIER_CODES = new Set(["CTN", "BOX", "PAC", "PACK"]);
+const PACK_MULTIPLIER_CODES = new Set(["DZN", "CTN", "BOX", "PAC", "PACK"]);
 
 export function resolveConversionFactor(
   value: number | string | null | undefined,
@@ -115,6 +116,46 @@ export function allowsCustomMultiplier(uom: PurchaseUomOption | undefined): bool
   if (!uom) return false;
   if (uom.allow_custom_multiplier) return true;
   return CUSTOM_MULTIPLIER_CODES.has(uom.uom_code.trim().toUpperCase());
+}
+
+function unitFamily(value: string | null | undefined): string {
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\./g, "");
+  if (!raw) return "";
+  if (raw === "kgs" || raw === "kg" || raw === "กก" || raw === "กิโล" || raw === "กิโลกรัม") {
+    return "kgs";
+  }
+  if (raw === "pcs" || raw === "ตัว" || raw === "ชิ้น") return "pcs";
+  if (raw === "cup" || raw === "ใบ") return "cup";
+  if (raw === "mdl" || raw === "เหรียญ") return "mdl";
+  if (raw === "plt" || raw === "แผ่น" || raw === "ป้าย") return "plt";
+  if (raw === "unt" || raw === "อัน") return "unt";
+  if (raw === "dzn" || raw === "โหล") return "dzn";
+  return raw;
+}
+
+/**
+ * Show the conversion box only for pack units (โหล / กล่อง).
+ * A 1:1 purchase unit that already matches the stock unit (KGS → กิโลกรัม) stays hidden.
+ */
+export function showsPurchaseMultiplierInput(
+  uom: PurchaseUomOption | undefined,
+  conversionFactor: number,
+  baseUnitLabel?: string | null,
+): boolean {
+  if (!uom) return false;
+  const code = uom.uom_code.trim().toUpperCase();
+  const factor = resolveConversionFactor(conversionFactor);
+  const oneToOne = Math.abs(factor - 1) < 0.00005;
+  const baseFamily = unitFamily(baseUnitLabel);
+  const matchesBase =
+    Boolean(baseFamily) &&
+    (baseFamily === unitFamily(uom.uom_name) || baseFamily === unitFamily(code));
+  if (PACK_MULTIPLIER_CODES.has(code)) return true;
+  if (oneToOne && (matchesBase || !baseFamily)) return false;
+  return allowsCustomMultiplier(uom);
 }
 
 export function uomOptionLabel(uom: PurchaseUomOption): string {

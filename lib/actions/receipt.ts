@@ -276,6 +276,8 @@ export type ReceiptProductSummary = {
   size: string | null;
   /** Normalized product tax mode: EXC_VAT / INC_VAT / NON_VAT. */
   tax_type: string | null;
+  base_uom?: string | null;
+  is_raw_material?: boolean | null;
 };
 
 export type ReceiptMatchStatus = "matched" | "unmatched";
@@ -648,9 +650,10 @@ type MappingProductJoin = {
   color: string | null;
   size: string | null;
   tax_type: string | null;
+  base_uom?: string | null;
   product_models:
-    | { is_service?: boolean | null; tax_type?: string | null }
-    | { is_service?: boolean | null; tax_type?: string | null }[]
+    | { is_service?: boolean | null; tax_type?: string | null; is_raw_material?: boolean | null }
+    | { is_service?: boolean | null; tax_type?: string | null; is_raw_material?: boolean | null }[]
     | null;
 };
 
@@ -668,7 +671,8 @@ const VENDOR_MAPPING_PRODUCT_SELECT = `
   color,
   size,
   tax_type,
-  product_models!inner ( is_service, tax_type )
+  base_uom,
+  product_models!inner ( is_service, tax_type, is_raw_material )
 `;
 
 function toReceiptProduct(productRaw: MappingProductJoin): ReceiptProductSummary | null {
@@ -686,6 +690,8 @@ function toReceiptProduct(productRaw: MappingProductJoin): ReceiptProductSummary
       productRaw.tax_type,
       modelJoin && "tax_type" in modelJoin ? modelJoin.tax_type : null,
     ),
+    base_uom: productRaw.base_uom ? String(productRaw.base_uom) : null,
+    is_raw_material: modelJoin?.is_raw_material === true,
   };
 }
 
@@ -972,6 +978,8 @@ export async function rematchSingleOcrLineAction(
       product_name: product.name,
       color: product.color,
       size: product.size,
+      base_uom: product.base_uom ?? null,
+      is_raw_material: product.is_raw_material ?? null,
       default_tax_type: product.tax_type,
       purchase_uom_code: null,
       conversion_factor: null,
@@ -1011,6 +1019,7 @@ export async function getInternalProductsForMatching(): Promise<GetInternalProdu
       color: string | null;
       size: string | null;
       tax_type: string | null;
+      base_uom: string | null;
       product_models:
         | { is_raw_material?: boolean | null; is_service?: boolean | null; tax_type?: string | null }
         | { is_raw_material?: boolean | null; is_service?: boolean | null; tax_type?: string | null }[]
@@ -1026,6 +1035,7 @@ export async function getInternalProductsForMatching(): Promise<GetInternalProdu
         color,
         size,
         tax_type,
+        base_uom,
         product_models!inner (
           is_raw_material,
           is_service,
@@ -1055,6 +1065,8 @@ export async function getInternalProductsForMatching(): Promise<GetInternalProdu
         color: row.color ? String(row.color) : null,
         size: row.size ? String(row.size) : null,
         tax_type: resolveProductTaxCode(row.tax_type, modelJoin?.tax_type),
+        base_uom: row.base_uom ? String(row.base_uom) : null,
+        is_raw_material: modelJoin?.is_raw_material === true,
       } satisfies ReceiptProductSummary;
     });
 
@@ -1133,7 +1145,8 @@ export async function createOnTheFlyReceiptMapping(
         color,
         size,
         tax_type,
-        product_models!inner ( is_service, tax_type )
+        base_uom,
+        product_models!inner ( is_service, tax_type, is_raw_material )
       `,
       )
       .eq("id", internalProductId)
@@ -1248,9 +1261,10 @@ export async function createOnTheFlyReceiptMapping(
       color: string | null;
       size: string | null;
       tax_type: string | null;
+      base_uom?: string | null;
       product_models:
-        | { is_service?: boolean | null; tax_type?: string | null }
-        | { is_service?: boolean | null; tax_type?: string | null }[]
+        | { is_service?: boolean | null; tax_type?: string | null; is_raw_material?: boolean | null }
+        | { is_service?: boolean | null; tax_type?: string | null; is_raw_material?: boolean | null }[]
         | null;
     };
     const eligible = eligibleProduct as EligibleProduct;
@@ -1291,6 +1305,8 @@ export async function createOnTheFlyReceiptMapping(
         color: source.color ? String(source.color) : null,
         size: source.size ? String(source.size) : null,
         tax_type: resolveProductTaxCode(source.tax_type, eligibleModel?.tax_type) ?? resolvedTax,
+        base_uom: eligible.base_uom ? String(eligible.base_uom) : null,
+        is_raw_material: eligibleModel?.is_raw_material === true,
       },
       error: null,
     };

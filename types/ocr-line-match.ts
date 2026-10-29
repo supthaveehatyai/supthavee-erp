@@ -9,6 +9,8 @@ export type OcrLineMatchResult = {
   product_name: string | null;
   color: string | null;
   size: string | null;
+  base_uom?: string | null;
+  is_raw_material?: boolean | null;
   default_tax_type: string | null;
   purchase_uom_code: string | null;
   conversion_factor: number | null;

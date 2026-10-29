@@ -104,7 +104,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { InvoiceDropzone } from "./components/InvoiceDropzone";
+import { InventoryLandedCostCard } from "@/components/procurement/inventory-landed-cost-card";
 import { calculateLandedCost, resolveFreightExVat } from "@/lib/utils/landed-cost";
+import { buildReceiptQtySummary } from "@/lib/utils/receipt-qty-groups";
 import {
   resolveConversionFactor,
   stockBaseQty,
@@ -790,6 +792,8 @@ export default function GoodsReceiptUI({
             color: result.color,
             size: result.size,
             tax_type: result.default_tax_type,
+            base_uom: result.base_uom ?? null,
+            is_raw_material: result.is_raw_material ?? null,
           },
           matchTier: result.match_tier,
           similarityScore: result.similarity_score,
@@ -1210,7 +1214,29 @@ export default function GoodsReceiptUI({
   const landedCostPool = roundMoney2(
     goodsExVatTotal + originFreightInventory + destFreightNormalized,
   );
-  const landedUnitAverage = totals.qty > 0 ? landedCostPool / totals.qty : 0;
+  const qtySummary = useMemo(
+    () =>
+      buildReceiptQtySummary(
+        rows.map((row) => {
+          const uom = purchaseUoms.find((item) => item.uom_code === row.purchaseUomCode);
+          const amount = row.isFoc ? 0 : Math.max(0, Number(row.totalAmount) || 0);
+          return {
+            qty: row.qty,
+            conversionFactor: row.conversionFactor,
+            purchaseUomCode: row.purchaseUomCode,
+            purchaseUomName: uom?.uom_name ?? null,
+            baseUom: row.matchedProduct?.base_uom ?? uom?.uom_name ?? null,
+            size: row.matchedProduct?.size ?? null,
+            isRawMaterial: row.matchedProduct?.is_raw_material,
+            exVatAmount: exVatGoodsAmount(amount, aiVatType),
+            freightShare: landedByLineKey.get(row.lineKey)?.proratedFreight ?? 0,
+          };
+        }),
+        formatMoney,
+        goodsExVatTotal,
+      ),
+    [rows, purchaseUoms, aiVatType, landedByLineKey, goodsExVatTotal],
+  );
   const destCarrierName =
     carriers.find((carrier) => carrier.carrier_id === carrierId)?.carrier_name ??
     "ยังไม่เลือกบริษัทขนส่ง";
@@ -1717,7 +1743,9 @@ export default function GoodsReceiptUI({
               ตารางตรวจทานรายการ (OCR Ground Truth)
             </h2>
             <p className="mt-0.5 pl-8 text-xs text-slate-500">
-              <code className="text-xs">raw_vendor_sku</code> คือค่าจริงเสมอ — เลือกสินค้าภายในแล้วกด Confirm Mapping เพื่อบันทึก
+              {rows.length > 0
+                ? `${rows.length} รายการ • จำนวนรับเข้า: ${qtySummary.receivedQtyLabel} • ยอดสินค้า ${formatMoney(totals.value)}`
+                : "raw_vendor_sku คือค่าจริงเสมอ — เลือกสินค้าภายในแล้วกด Confirm Mapping เพื่อบันทึก"}
             </p>
           </div>
 
@@ -2400,33 +2428,16 @@ export default function GoodsReceiptUI({
             </div>
 
             <div className="mt-4 grid grid-cols-1 gap-4 border-t border-dashed border-violet-200 pt-4 lg:grid-cols-2">
-              <div className="rounded-xl border border-slate-200 bg-white p-3">
-                <p className="text-xs font-semibold text-slate-800">
-                  สรุปต้นทุนรับเข้าคลังตามมาตรฐาน TAS 2 — Inventory Landed Cost
-                </p>
-                <div className="mt-2">
-                  <VerificationRow
-                    label={`มูลค่าสินค้าสุทธิ (ก่อน VAT) • ${totals.qty.toLocaleString("th-TH")} ตัว`}
-                    amount={`฿${formatMoney(goodsExVatTotal)}`}
-                  />
-                  <VerificationRow
-                    label="+ ค่าขนส่งต้นทาง (เข้าต้นทุนสินค้า)"
-                    amount={`฿${formatMoney(originFreightInventory)}`}
-                  />
-                  <VerificationRow
-                    label={`+ ค่าขนส่งเก็บปลายทาง (${destCarrierName})`}
-                    amount={`฿${formatMoney(destFreightNormalized)}`}
-                  />
-                  <VerificationRow
-                    label="รวมฐานต้นทุนเข้าคลังสุทธิ (Landed Cost Pool)"
-                    amount={`฿${formatMoney(landedCostPool)}`}
-                    strong
-                  />
-                  <p className="text-right text-[11px] text-slate-500">
-                    เฉลี่ย ฿{formatMoney(landedUnitAverage)} / ตัว
-                  </p>
-                </div>
-              </div>
+              <InventoryLandedCostCard
+                finished={qtySummary.finished}
+                raw={qtySummary.raw}
+                originFreight={originFreightInventory}
+                destFreight={destFreightNormalized}
+                destCarrierName={destCarrierName}
+                pool={landedCostPool}
+                poolAverage={qtySummary.poolAverage}
+                formatMoney={formatMoney}
+              />
 
               <div className="rounded-xl border border-slate-200 bg-white p-3">
                 <p className="text-xs font-semibold text-slate-800">
@@ -2479,8 +2490,7 @@ export default function GoodsReceiptUI({
                 Total Received Qty
               </p>
               <p className="text-lg font-bold text-slate-900">
-                {totals.qty.toLocaleString("th-TH")}{" "}
-                <span className="text-xs font-medium text-slate-400">ตัว</span>
+                {qtySummary.receivedQtyCompact}
               </p>
             </div>
             <div className="h-8 w-px bg-slate-200" />
