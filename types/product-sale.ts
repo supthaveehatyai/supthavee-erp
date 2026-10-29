@@ -3,9 +3,17 @@
  * Keep outside `"use server"` modules.
  */
 
+export type ProductStockKind = "all" | "finished" | "raw";
+
 export type SearchProductModelsOptions = {
   /** จำกัดเฉพาะรุ่นผลิตเอง (Make-to-Order) */
   manufacturedOnly?: boolean;
+  /**
+   * STK_ADJ quick filter.
+   * `raw` = product_models.is_raw_material, `finished` = not raw, `all` = both.
+   * Omitted keeps the existing sales search.
+   */
+  stockKind?: ProductStockKind;
 };
 
 export type ProductModelSearchItem = {
@@ -20,6 +28,8 @@ export type ProductModelSearchItem = {
   is_service: boolean;
   /** product_models.is_manufactured — สินค้าผลิตเอง (MTO) */
   is_manufactured?: boolean;
+  /** product_models.is_raw_material — วัตถุดิบ / วัสดุสิ้นเปลือง */
+  is_raw_material?: boolean;
 };
 
 export type SearchProductModelsResult =

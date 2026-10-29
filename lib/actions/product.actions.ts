@@ -35,7 +35,7 @@ function toMoney(value: unknown): number {
 function toQty(value: number | string | null | undefined): number {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n)) return 0;
-  return Math.trunc(n);
+  return Math.round((n + Number.EPSILON) * 10000) / 10000;
 }
 
 function signedLedgerQty(
@@ -90,6 +90,7 @@ export async function searchProductModels(
     }
 
     const manufacturedOnly = options?.manufacturedOnly === true;
+    const stockKind = options?.stockKind;
     const pattern = `%${escapeIlikePattern(trimmed)}%`;
     const supabase = getUntypedAdmin();
 
@@ -115,6 +116,19 @@ export async function searchProductModels(
         .eq("is_manufactured", true)
         .neq("is_raw_material", true)
         .neq("is_service", true);
+    } else if (stockKind === "raw") {
+      nameQuery = nameQuery.eq("is_raw_material", true).neq("is_service", true);
+      codeQuery = codeQuery.eq("is_raw_material", true).neq("is_service", true);
+    } else if (stockKind === "finished") {
+      nameQuery = nameQuery
+        .or("is_raw_material.is.null,is_raw_material.eq.false")
+        .neq("is_service", true);
+      codeQuery = codeQuery
+        .or("is_raw_material.is.null,is_raw_material.eq.false")
+        .neq("is_service", true);
+    } else if (stockKind === "all") {
+      nameQuery = nameQuery.neq("is_service", true);
+      codeQuery = codeQuery.neq("is_service", true);
     }
 
     const [byName, byCode] = await Promise.all([nameQuery, codeQuery]);
@@ -134,6 +148,9 @@ export async function searchProductModels(
       if (manufacturedOnly && row.is_raw_material === true) continue;
       if (manufacturedOnly && row.is_service === true) continue;
       if (manufacturedOnly && row.is_manufactured !== true) continue;
+      if (stockKind === "raw" && row.is_raw_material !== true) continue;
+      if (stockKind === "finished" && row.is_raw_material === true) continue;
+      if (stockKind && row.is_service === true) continue;
       byId.set(row.id, row as ProductModelSearchRow);
     }
 
@@ -154,6 +171,7 @@ export async function searchProductModels(
         display_name: [row.model_code, row.name].filter(Boolean).join(" · "),
         is_service: Boolean(row.is_service),
         is_manufactured: Boolean(row.is_manufactured),
+        is_raw_material: Boolean(row.is_raw_material),
       }));
 
     return { success: true, data };

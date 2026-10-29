@@ -47,6 +47,8 @@ function todayIsoLocal(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+const CONSUMABLE_ISSUE_REMARK = "เบิกใช้วัสดุสิ้นเปลือง/แพ็คกิ้ง";
+
 function docTypeLabel(docType: InventoryDocType): string {
   return docType === "STK_OB"
     ? "ยอดยกมา (STK_OB)"
@@ -86,6 +88,16 @@ export function AdjustmentFormDialog({
       }
       return [...map.values()];
     });
+  }
+
+  function issueConsumable(incoming: AdjustmentFormLine[]) {
+    mergeLines(incoming);
+    setRemark((current) => {
+      if (!current.trim()) return CONSUMABLE_ISSUE_REMARK;
+      if (current.includes(CONSUMABLE_ISSUE_REMARK)) return current;
+      return `${current.trim()} · ${CONSUMABLE_ISSUE_REMARK}`;
+    });
+    toast.message("ตั้งคงเหลือเป็น 0 และเติมหมายเหตุเบิกใช้วัสดุแล้ว");
   }
 
   function removeLine(productId: string) {
@@ -212,6 +224,7 @@ export function AdjustmentFormDialog({
               docType={docType}
               disabled={isPending}
               onAddLines={mergeLines}
+              onIssueConsumable={isAdj ? issueConsumable : undefined}
             />
           ) : null}
 

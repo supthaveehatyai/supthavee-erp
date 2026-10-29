@@ -113,6 +113,7 @@ Other rules:
   - "เหรียญ" → "MDL"
   - "แผ่น" or "ป้าย" → "PLT"
   - "อัน" → "UNT"
+  - "กิโล", "กิโลกรัม", "กก", "กก.", "ก.ก.", "kg", or "kgs" → "KGS"
   - "ตัว", "ชิ้น", or any other unit → "PCS"
   Never invent a unit. A trophy/medal bill printed as ใบ, แผ่น, ป้าย, เหรียญ, or อัน must NOT be returned as "PCS".
 - ORIGIN FREIGHT: a line whose description or code is a delivery charge (ค่าส่ง, ค่าขนส่ง, ค่าจัดส่ง, "ค่าส่ง รวมกับบิลแรก", freight) is NOT a product. Do NOT put it in "items". Sum those amounts into root "freight_cost". Example: code 34223, description ค่าส่ง, amount 70 → freight_cost 70 and no item row, so received quantity is not inflated.

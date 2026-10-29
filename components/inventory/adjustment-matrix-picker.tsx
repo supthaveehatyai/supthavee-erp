@@ -26,6 +26,7 @@ import type {
   ModelMatrixForSale,
   ModelMatrixSkuRow,
   ProductModelSearchItem,
+  ProductStockKind,
 } from "@/types/product-sale";
 import type { AdjustmentFormLine } from "@/types/inventory-adjustment";
 import type { InventoryDocType } from "@/lib/constants/document";
@@ -48,7 +49,19 @@ export type AdjustmentMatrixPickerProps = {
   docType: InventoryDocType;
   disabled?: boolean;
   onAddLines: (lines: AdjustmentFormLine[]) => void;
+  /** STK_ADJ raw-material shortcut: zero the on-hand balance and stamp the remark. */
+  onIssueConsumable?: (lines: AdjustmentFormLine[]) => void;
 };
+
+const STOCK_KIND_FILTERS: { id: ProductStockKind; label: string }[] = [
+  { id: "all", label: "ทั้งหมด" },
+  { id: "finished", label: "สินค้าสำเร็จรูป" },
+  { id: "raw", label: "📦 วัตถุดิบ / วัสดุสิ้นเปลืองแพ็คกิ้ง" },
+];
+
+function roundQty(value: number): number {
+  return Math.round((value + Number.EPSILON) * 10000) / 10000;
+}
 
 function formatMoney(value: number): string {
   return value.toLocaleString("th-TH", {
@@ -58,7 +71,10 @@ function formatMoney(value: number): string {
 }
 
 function formatStock(value: number): string {
-  return value.toLocaleString("th-TH", { maximumFractionDigits: 0 });
+  return value.toLocaleString("th-TH", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4,
+  });
 }
 
 function skuLabel(sku: ModelMatrixSkuRow, modelName: string): string {
@@ -74,6 +90,7 @@ export function AdjustmentMatrixPicker({
   docType,
   disabled = false,
   onAddLines,
+  onIssueConsumable,
 }: AdjustmentMatrixPickerProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const isOpeningBalance = docType === "STK_OB";
@@ -100,6 +117,7 @@ export function AdjustmentMatrixPicker({
     Record<string, string>
   >({});
   const [isMatrixPending, startMatrixTransition] = useTransition();
+  const [stockKind, setStockKind] = useState<ProductStockKind>("all");
 
   /* ── Debounce ── */
   useEffect(() => {
@@ -120,7 +138,10 @@ export function AdjustmentMatrixPicker({
     let active = true;
     startSearchTransition(async () => {
       try {
-        const result = await searchProductModels(debouncedQuery);
+        const result = await searchProductModels(
+          debouncedQuery,
+          isOpeningBalance ? undefined : { stockKind },
+        );
         if (!active) return;
         if (!result.success) {
           setSearchError(result.error);
@@ -141,7 +162,7 @@ export function AdjustmentMatrixPicker({
     return () => {
       active = false;
     };
-  }, [debouncedQuery]);
+  }, [debouncedQuery, isOpeningBalance, stockKind]);
 
   function openMatrixForModel(model: ProductModelSearchItem) {
     if (model.is_service) return;
@@ -220,9 +241,8 @@ export function AdjustmentMatrixPicker({
           unit_cost_price: Number.isFinite(cost) ? String(cost) : "",
         });
       } else {
-        const variance =
-          Math.trunc(inputQty) - Math.trunc(sku.stock_balance);
-        if (variance === 0) continue;
+        const variance = roundQty(inputQty - sku.stock_balance);
+        if (Math.abs(variance) < 0.00005) continue;
         lines.push({
           product_id: sku.product_id,
           sku: sku.sku,
@@ -239,18 +259,60 @@ export function AdjustmentMatrixPicker({
     closeMatrix();
   }
 
+  function issueConsumable(sku: ModelMatrixSkuRow) {
+    if (!matrix || isOpeningBalance || !onIssueConsumable) return;
+    if (sku.stock_balance <= 0.00005) return;
+    setQtyByProductId((current) => ({
+      ...current,
+      [sku.product_id]: "0",
+    }));
+    onIssueConsumable([
+      {
+        product_id: sku.product_id,
+        sku: sku.sku,
+        display_name: skuLabel(sku, matrix.model_name),
+        stock_balance: sku.stock_balance,
+        qty: String(roundQty(-sku.stock_balance)),
+        unit_cost_price: "",
+      },
+    ]);
+  }
+
   const selectedCount = matrix
     ? matrix.skus.filter((sku) => {
         const input = Number.parseFloat(qtyByProductId[sku.product_id] ?? "");
         if (!Number.isFinite(input)) return false;
         if (isOpeningBalance) return input > 0;
-        const variance = Math.trunc(input) - Math.trunc(sku.stock_balance);
-        return variance !== 0;
+        const variance = roundQty(input - sku.stock_balance);
+        return Math.abs(variance) >= 0.00005;
       }).length
     : 0;
 
+  const showIssueColumn =
+    !isOpeningBalance && matrix?.is_raw_material === true;
+
   return (
     <div className="space-y-3">
+      {!isOpeningBalance ? (
+        <div className="flex flex-wrap gap-2">
+          {STOCK_KIND_FILTERS.map((filter) => (
+            <button
+              key={filter.id}
+              type="button"
+              disabled={disabled}
+              onClick={() => setStockKind(filter.id)}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs font-semibold",
+                stockKind === filter.id
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+              )}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
       {/* ── Inline Search ── */}
       <div className="relative">
         <div className="relative">
@@ -258,7 +320,11 @@ export function AdjustmentMatrixPicker({
           <Input
             ref={inputRef}
             type="text"
-            placeholder="ค้นหารุ่นสินค้า (Smart Matrix Selection)..."
+            placeholder={
+              !isOpeningBalance && stockKind === "raw"
+                ? "ค้นหาวัตถุดิบ / วัสดุสิ้นเปลือง..."
+                : "ค้นหารุ่นสินค้า (Smart Matrix Selection)..."
+            }
             value={query}
             disabled={disabled}
             onChange={(e) => setQuery(e.target.value)}
@@ -313,6 +379,11 @@ export function AdjustmentMatrixPicker({
                         <p className="truncate text-sm text-slate-700">
                           {model.name}
                         </p>
+                        {model.is_raw_material ? (
+                          <p className="text-[11px] font-semibold text-amber-700">
+                            วัตถุดิบ / วัสดุสิ้นเปลือง
+                          </p>
+                        ) : null}
                       </div>
                     </button>
                   </li>
@@ -393,6 +464,9 @@ export function AdjustmentMatrixPicker({
                             ต้นทุน/หน่วย
                           </TableHead>
                         ) : null}
+                        {showIssueColumn ? (
+                          <TableHead className="px-3 text-xs">เบิกใช้</TableHead>
+                        ) : null}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -442,7 +516,7 @@ export function AdjustmentMatrixPicker({
                               );
                               const hasInput = Number.isFinite(counted);
                               const variance = hasInput
-                                ? Math.trunc(counted) - Math.trunc(sku.stock_balance)
+                                ? roundQty(counted - sku.stock_balance)
                                 : null;
                               return (
                                 <TableCell
@@ -459,11 +533,11 @@ export function AdjustmentMatrixPicker({
                                 >
                                   {variance === null
                                     ? "—"
-                                    : variance > 0
-                                      ? `+${variance}`
-                                      : variance === 0
-                                        ? "0"
-                                        : `${variance}`}
+                                    : Math.abs(variance) < 0.00005
+                                      ? "0"
+                                      : variance > 0
+                                        ? `+${formatStock(variance)}`
+                                        : formatStock(variance)}
                                 </TableCell>
                               );
                             })() : null}
@@ -486,6 +560,22 @@ export function AdjustmentMatrixPicker({
                                   }
                                   className="h-9 text-right tabular-nums"
                                 />
+                              </TableCell>
+                            ) : null}
+                            {showIssueColumn ? (
+                              <TableCell className="px-3">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={
+                                    disabled || sku.stock_balance <= 0.00005
+                                  }
+                                  className="h-8 whitespace-nowrap border-orange-200 text-xs text-orange-800 hover:bg-orange-50"
+                                  onClick={() => issueConsumable(sku)}
+                                >
+                                  ตัดเบิกใช้ทั้งหมด (ตั้งคงเหลือ = 0)
+                                </Button>
                               </TableCell>
                             ) : null}
                           </TableRow>

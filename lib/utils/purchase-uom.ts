@@ -16,6 +16,12 @@ const PURCHASE_UOM_TEXT_ALIASES: Record<string, string> = {
   ชิ้น: "PCS",
   โหล: "DZN",
   ล: "DZN",
+  กิโล: "KGS",
+  กิโลกรัม: "KGS",
+  กก: "KGS",
+  "ก.ก": "KGS",
+  kg: "KGS",
+  kgs: "KGS",
 };
 
 /** Map a printed unit or code (`ใบ`, `CUP`, `pcs`) to `mst_uom.uom_code`. */
@@ -24,7 +30,9 @@ export function resolvePurchaseUomCode(value: unknown): string {
     .trim()
     .replace(/[.\s]+$/g, "");
   if (!raw) return DEFAULT_PURCHASE_UOM_CODE;
-  const alias = PURCHASE_UOM_TEXT_ALIASES[raw];
+  const alias =
+    PURCHASE_UOM_TEXT_ALIASES[raw] ??
+    PURCHASE_UOM_TEXT_ALIASES[raw.toLowerCase()];
   if (alias) return alias;
   const code = raw.toUpperCase();
   return code || DEFAULT_PURCHASE_UOM_CODE;
@@ -65,6 +73,12 @@ export const FALLBACK_PURCHASE_UOMS: PurchaseUomOption[] = [
   {
     uom_code: "UNT",
     uom_name: "อัน",
+    default_multiplier: 1,
+    allow_custom_multiplier: false,
+  },
+  {
+    uom_code: "KGS",
+    uom_name: "กิโลกรัม",
     default_multiplier: 1,
     allow_custom_multiplier: false,
   },

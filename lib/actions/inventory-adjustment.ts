@@ -49,6 +49,10 @@ function roundCost(value: number): number {
   return Math.round((value + Number.EPSILON) * 10000) / 10000;
 }
 
+function roundQty(value: number): number {
+  return Math.round((value + Number.EPSILON) * 10000) / 10000;
+}
+
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
@@ -93,15 +97,15 @@ function normalizeLines(
       continue;
     }
 
-    // STK_ADJ — signed qty
-    const qty = Math.trunc(qtyRaw);
-    if (qty === 0) continue;
+    // STK_ADJ — signed qty, keep kilograms (NUMERIC 14,4)
+    const qty = roundQty(qtyRaw);
+    if (Math.abs(qty) < 0.00005) continue;
 
     const existing = merged.get(productId);
     if (existing) {
       merged.set(productId, {
         ...existing,
-        qty: existing.qty + qty,
+        qty: roundQty(existing.qty + qty),
         unit_cost_price:
           qty > 0 && row.unit_cost_price != null
             ? roundCost(Number(row.unit_cost_price))
@@ -196,7 +200,7 @@ export async function getInventoryAdjustments(): Promise<GetInventoryAdjustments
         let totalIn = 0;
         let totalOut = 0;
         for (const item of items) {
-          const q = Math.trunc(Number(item.qty ?? 0));
+          const q = roundQty(Number(item.qty ?? 0));
           if (q > 0) totalIn += q;
           else if (q < 0) totalOut += Math.abs(q);
         }
@@ -727,7 +731,7 @@ export async function getAdjustmentDetail(
             String(product?.name ?? item.description ?? "").trim() || "—",
           color: product?.color ?? null,
           size: product?.size ?? null,
-          qty: Math.trunc(Number(item.qty ?? 0)),
+          qty: roundQty(Number(item.qty ?? 0)),
           unit_cost_price: roundCost(Number(item.unit_cost_price ?? 0)),
           line_total: roundMoney(Number(item.line_total ?? 0)),
           sort_order: Number(item.sort_order ?? 0),
