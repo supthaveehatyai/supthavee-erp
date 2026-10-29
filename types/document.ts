@@ -390,6 +390,7 @@ export type DocumentDetail = {
   void_reason?: string | null;
   /** Vendor invoice / external reference — parsed from notes when no DB column. */
   reference_no: string | null;
+  tax_invoice_status?: "TAX_READY" | "PENDING_TAX_INVOICE" | "CONSOLIDATED_CHILD" | null;
   attachment_url: string | null;
   attached_file_url: string | null;
   /** Scanned WHT certificate (REC). */

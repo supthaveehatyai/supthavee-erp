@@ -112,6 +112,7 @@ export default function SaveToLedgerDialog({
   const [taxInvoiceStatus, setTaxInvoiceStatus] = useState<ReceiptTaxInvoiceChoice>("TAX_READY");
   const [taxStatusLocked, setTaxStatusLocked] = useState(false);
   const [loadedTemporaryBill, setLoadedTemporaryBill] = useState(vendorUsesTemporaryBill);
+  const [loadedDefaultStatus, setLoadedDefaultStatus] = useState<string | null>(null);
   const temporaryBillVendor = vendorUsesTemporaryBill || loadedTemporaryBill;
 
   const [duplicateCheck, setDuplicateCheck] = useState<{
@@ -141,6 +142,7 @@ export default function SaveToLedgerDialog({
           referenceNo: initialDocNumber,
           vendorName,
           vendorUsesTemporaryBill: temporaryBillVendor,
+          defaultTaxInvoiceStatus: loadedDefaultStatus,
         }),
       );
     }
@@ -186,7 +188,9 @@ export default function SaveToLedgerDialog({
     if (!open || !vendorId) return;
     let cancelled = false;
     void loadVendorUsesTemporaryBill(vendorId).then((result) => {
-      if (!cancelled) setLoadedTemporaryBill(result.usesTemporaryBill);
+      if (cancelled) return;
+      setLoadedTemporaryBill(result.usesTemporaryBill);
+      setLoadedDefaultStatus(result.defaultTaxInvoiceStatus);
     });
     return () => {
       cancelled = true;
@@ -200,9 +204,10 @@ export default function SaveToLedgerDialog({
         referenceNo: docNumber,
         vendorName,
         vendorUsesTemporaryBill: temporaryBillVendor,
+        defaultTaxInvoiceStatus: loadedDefaultStatus,
       }),
     );
-  }, [open, docNumber, vendorName, temporaryBillVendor, taxStatusLocked]);
+  }, [open, docNumber, vendorName, temporaryBillVendor, loadedDefaultStatus, taxStatusLocked]);
 
   const isDuplicate = duplicateCheck.isDuplicate;
   const canConfirm =

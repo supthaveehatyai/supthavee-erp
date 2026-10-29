@@ -22,19 +22,31 @@ export function normalizeTaxInvoiceStatus(value: unknown): TaxInvoiceStatus | nu
   return null;
 }
 
-/** ORNC (กมลกิจ) and vendors flagged as temporary-bill suppliers start as pending. */
+/** ORNC (กมลกิจ) and the vendor's remembered status start the receipt picker. */
 export function suggestReceiptTaxInvoiceStatus(input: {
   referenceNo?: string | null;
   vendorName?: string | null;
   vendorUsesTemporaryBill?: boolean | null;
+  defaultTaxInvoiceStatus?: string | null;
 }): ReceiptTaxInvoiceChoice {
   const reference = String(input.referenceNo ?? "")
     .trim()
     .toUpperCase();
   if (reference.startsWith("ORNC")) return "PENDING_TAX_INVOICE";
+  const remembered = normalizeTaxInvoiceStatus(input.defaultTaxInvoiceStatus);
+  if (remembered === "PENDING_TAX_INVOICE" || remembered === "TAX_READY") {
+    return remembered;
+  }
   if (input.vendorUsesTemporaryBill) return "PENDING_TAX_INVOICE";
   const name = String(input.vendorName ?? "").replace(/\s+/g, "");
-  if (name.includes("กมลกิจ")) return "PENDING_TAX_INVOICE";
+  if (
+    name.includes("กมลกิจ") ||
+    name.includes("ซีพียู") ||
+    name.includes("โอไอซี") ||
+    name.includes("ขวัญนคร")
+  ) {
+    return "PENDING_TAX_INVOICE";
+  }
   return "TAX_READY";
 }
 

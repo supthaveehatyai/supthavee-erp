@@ -7,6 +7,7 @@ import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { isAdminRoleCode } from "@/lib/auth/module-access";
 import { documentVatToPurchaseReviseMode } from "@/lib/utils/purchase-vat-revise";
 import { PurchaseDocumentControls } from "./purchase-document-controls";
+import { PurchaseTaxInvoiceControls } from "./purchase-tax-invoice-controls";
 import {
   getDepositAllocationHistory,
   getDocumentAllocationsByReceiptId,
@@ -393,6 +394,17 @@ export default async function PurchaseDocumentDetailPage({
           </Link>
           {isPaymentDoc || isDepositDoc || isSettlementDoc ? (
             <PrintDocumentButton className="h-10 gap-2" />
+          ) : null}
+          {isGoodsReceipt && doc.status !== "VOID" ? (
+            <PurchaseTaxInvoiceControls
+              documentId={doc.id}
+              docNo={doc.doc_no}
+              docType={doc.doc_type}
+              docDate={doc.doc_date}
+              referenceNo={doc.reference_no}
+              grandTotal={Number(doc.grand_total ?? 0)}
+              taxInvoiceStatus={doc.tax_invoice_status ?? null}
+            />
           ) : null}
           {issuedUnpaid && (!isAdmin || isGoodsReceipt) ? (
             <PurchaseDocumentControls

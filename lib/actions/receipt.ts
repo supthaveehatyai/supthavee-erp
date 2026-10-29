@@ -32,6 +32,7 @@ import {
   modelsAtQuota,
 } from "@/lib/ai/ocr-quota";
 import { runGoodsReceiptOcr } from "@/lib/ai/goods-receipt-ocr";
+import { rememberVendorTaxInvoiceStatus } from "@/lib/actions/vendor-tax-invoice";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   DOCUMENT_TYPE_PREFIX,
@@ -2336,6 +2337,13 @@ export async function saveGoodsReceiptToLedger(
       docNo,
       docDate,
     );
+    if (!taxStatusWarning && vendorId) {
+      const remembered =
+        String(taxInvoiceStatus ?? "").trim().toUpperCase() === "PENDING_TAX_INVOICE"
+          ? "PENDING_TAX_INVOICE"
+          : "TAX_READY";
+      await rememberVendorTaxInvoiceStatus(vendorId, remembered);
+    }
     const billError = await linkProcurementBills(supabaseAdmin, {
       documentId: headerId,
       docNo: persistedDocNo,
@@ -3030,6 +3038,13 @@ export async function saveManualGoodsReceipt(
       documentRef,
       docDate,
     );
+    if (!taxStatusWarning && input.vendorId) {
+      const remembered =
+        String(input.taxInvoiceStatus ?? "").trim().toUpperCase() === "PENDING_TAX_INVOICE"
+          ? "PENDING_TAX_INVOICE"
+          : "TAX_READY";
+      await rememberVendorTaxInvoiceStatus(input.vendorId, remembered);
+    }
     const billError = await linkProcurementBills(supabaseAdmin, {
       documentId: parsed.documentId,
       bills: input.bills,

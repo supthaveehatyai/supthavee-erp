@@ -1689,6 +1689,30 @@ export async function getDocumentByNo(
       (data as { reference_no?: string | null }).reference_no ?? "",
     ).trim();
     const referenceNo = columnReference || vendorRefMatch?.[1]?.trim() || null;
+    const taxQuery = supabase.from("documents") as unknown as {
+      select: (columns: string) => {
+        eq: (column: string, value: string) => {
+          maybeSingle: () => Promise<{
+            data: { tax_invoice_status?: string | null } | null;
+            error: { message?: string } | null;
+          }>;
+        };
+      };
+    };
+    const taxLookup = await taxQuery
+      .select("tax_invoice_status")
+      .eq("id", documentId)
+      .maybeSingle();
+    const rawTaxStatus = String(taxLookup.data?.tax_invoice_status ?? "")
+      .trim()
+      .toUpperCase();
+    const taxInvoiceStatus =
+      !taxLookup.error &&
+      (rawTaxStatus === "TAX_READY" ||
+        rawTaxStatus === "PENDING_TAX_INVOICE" ||
+        rawTaxStatus === "CONSOLIDATED_CHILD")
+        ? rawTaxStatus
+        : null;
     const billAttachmentUrls = billUrlsFromNotes(
       notes,
       (data.attachment_url as string | null) ?? null,
@@ -1742,6 +1766,7 @@ export async function getDocumentByNo(
       remark: (data.remark as string | null) ?? null,
       void_reason: (data.void_reason as string | null) ?? null,
       reference_no: referenceNo,
+      tax_invoice_status: taxInvoiceStatus,
       attachment_url: (data.attachment_url as string | null) ?? null,
       attached_file_url: (data.attached_file_url as string | null) ?? null,
       wht_attachment_url: (data.wht_attachment_url as string | null) ?? null,

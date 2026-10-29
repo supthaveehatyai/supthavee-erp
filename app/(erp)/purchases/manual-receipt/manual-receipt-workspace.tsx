@@ -212,6 +212,7 @@ export default function ManualReceiptWorkspace({
   );
   const [taxStatusLocked, setTaxStatusLocked] = useState(false);
   const [vendorUsesTemporaryBill, setVendorUsesTemporaryBill] = useState(false);
+  const [vendorDefaultTaxStatus, setVendorDefaultTaxStatus] = useState<string | null>(null);
   const [vatType, setVatType] = useState<VatCalculationType>(
     cloneDraft?.vatType ?? "NONE",
   );
@@ -454,9 +455,11 @@ export default function ManualReceiptWorkspace({
     setTaxModeLocked(false);
     setTaxStatusLocked(false);
     setVendorUsesTemporaryBill(false);
+    setVendorDefaultTaxStatus(null);
     if (nextId) {
       void loadVendorUsesTemporaryBill(nextId).then((result) => {
         setVendorUsesTemporaryBill(result.usesTemporaryBill);
+        setVendorDefaultTaxStatus(result.defaultTaxInvoiceStatus);
       });
     }
     if (!nextId) return;
@@ -759,9 +762,16 @@ export default function ManualReceiptWorkspace({
         referenceNo: documentRef,
         vendorName: selectedVendor?.company_name,
         vendorUsesTemporaryBill,
+        defaultTaxInvoiceStatus: vendorDefaultTaxStatus,
       }),
     );
-  }, [documentRef, selectedVendor?.company_name, vendorUsesTemporaryBill, taxStatusLocked]);
+  }, [
+    documentRef,
+    selectedVendor?.company_name,
+    vendorUsesTemporaryBill,
+    vendorDefaultTaxStatus,
+    taxStatusLocked,
+  ]);
 
   function handleReview() {
     if (!validateForm()) return;

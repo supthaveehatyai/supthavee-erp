@@ -3,10 +3,24 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { matchVendorTaxInvoiceAction } from "@/lib/actions/vendor-tax-invoice";
+import {
+  matchVendorTaxInvoiceAction,
+  togglePurchaseTaxInvoiceStatusAction,
+} from "@/lib/actions/vendor-tax-invoice";
 import { uploadProcurementBills } from "@/lib/procurement/upload-bill-files";
 import { BillGalleryButton } from "@/components/procurement/bill-gallery-dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -90,7 +104,30 @@ function statusBadge(status: DocumentStatus) {
   );
 }
 
-function TaxInvoiceBadge({ doc }: { doc: PurchaseDocumentListItem }) {
+function RevertTaxButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      title="เปลี่ยนสถานะเป็น รอใบกำกับภาษีตัวจริง"
+      className="inline-flex h-4 shrink-0 items-center rounded px-0.5 text-[10px] leading-none hover:bg-white/80"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      <RotateCcw className="size-3" />
+    </button>
+  );
+}
+
+function TaxInvoiceBadge({
+  doc,
+  onRevert,
+}: {
+  doc: PurchaseDocumentListItem;
+  onRevert: (doc: PurchaseDocumentListItem) => void;
+}) {
   const badgeClass =
     "mt-0.5 inline-flex max-w-full items-center gap-1 break-all rounded-full px-2 py-0.5 text-[11px] font-semibold leading-snug";
   if (doc.tax_invoice_status === "PENDING_TAX_INVOICE") {
@@ -105,6 +142,7 @@ function TaxInvoiceBadge({ doc }: { doc: PurchaseDocumentListItem }) {
     return (
       <span className={cn(badgeClass, "bg-violet-100 text-violet-800")}>
         🔗 รวบในใบกำกับภาษี: {displayTaxInvNo}
+        <RevertTaxButton onClick={() => onRevert(doc)} />
       </span>
     );
   }
@@ -114,6 +152,7 @@ function TaxInvoiceBadge({ doc }: { doc: PurchaseDocumentListItem }) {
     return (
       <span className={cn(badgeClass, "bg-emerald-100 text-emerald-800")}>
         🟢 ใบกำกับภาษี: {displayTaxInvNo}
+        <RevertTaxButton onClick={() => onRevert(doc)} />
       </span>
     );
   }
@@ -131,7 +170,9 @@ export function PurchaseTaxMatchTable({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [isReverting, startRevert] = useTransition();
   const [filter, setFilter] = useState<"all" | "pending">("all");
+  const [revertDoc, setRevertDoc] = useState<PurchaseDocumentListItem | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const [taxNo, setTaxNo] = useState("");
@@ -216,8 +257,42 @@ export function PurchaseTaxMatchTable({
     });
   }
 
+  function confirmRevert() {
+    if (!revertDoc) return;
+    const target = revertDoc;
+    startRevert(async () => {
+      const result = await togglePurchaseTaxInvoiceStatusAction(
+        target.id,
+        "PENDING_TAX_INVOICE",
+      );
+      if (!result.success) {
+        toast.error(result.error ?? "เปลี่ยนสถานะใบกำกับภาษีไม่สำเร็จ");
+        return;
+      }
+      toast.success(`เปลี่ยน ${target.doc_no} เป็นรอใบกำกับภาษีตัวจริงแล้ว`);
+      setRevertDoc(null);
+      router.refresh();
+    });
+  }
+
   return (
     <div className="space-y-3">
+      <AlertDialog open={revertDoc != null} onOpenChange={(open) => { if (!open && !isReverting) setRevertDoc(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>เปลี่ยนสถานะใบกำกับภาษี</AlertDialogTitle>
+            <AlertDialogDescription>
+              {`เปลี่ยนสถานะเอกสาร ${revertDoc?.doc_no ?? ""} เป็น 'รอใบกำกับภาษีตัวจริง' ใช่หรือไม่? (ไม่กระทบสต็อกและยอดหนี้)`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isReverting}>ยกเลิก</AlertDialogCancel>
+            <AlertDialogAction disabled={isReverting} onClick={confirmRevert}>
+              {isReverting ? "กำลังบันทึก..." : "ยืนยัน"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div className="flex flex-wrap items-center gap-2 px-4 sm:px-0">
         <button
           type="button"
@@ -322,7 +397,7 @@ export function PurchaseTaxMatchTable({
                         <span className="ml-1.5 text-xs text-slate-500">Ref: {doc.reference_no}</span>
                       ) : null}
                     </div>
-                    <TaxInvoiceBadge doc={doc} />
+                    <TaxInvoiceBadge doc={doc} onRevert={setRevertDoc} />
                   </TableCell>
                   <TableCell className="w-[14%] px-2 py-2 text-left">
                     <div className="text-xs font-medium leading-snug text-slate-700">

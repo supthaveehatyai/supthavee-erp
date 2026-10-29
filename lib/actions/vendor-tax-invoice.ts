@@ -31,44 +31,208 @@ function isMissingTaxInvoiceStore(error: { code?: string; message?: string } | n
 
 export async function loadVendorUsesTemporaryBill(vendorId: string): Promise<{
   usesTemporaryBill: boolean;
+  defaultTaxInvoiceStatus: "TAX_READY" | "PENDING_TAX_INVOICE" | null;
   error: string | null;
 }> {
   const owner = await requireSessionUserId();
-  if (!owner.ok) return { usesTemporaryBill: false, error: owner.error };
+  if (!owner.ok) {
+    return { usesTemporaryBill: false, defaultTaxInvoiceStatus: null, error: owner.error };
+  }
   const id = vendorId.trim();
-  if (!id) return { usesTemporaryBill: false, error: null };
+  if (!id) return { usesTemporaryBill: false, defaultTaxInvoiceStatus: null, error: null };
 
   try {
     const supabase = createSupabaseAdmin();
     const { data, error } = await supabase
       .from("contacts")
-      .select("company_name, pending_tax_invoice_default")
+      .select("company_name, pending_tax_invoice_default, default_tax_invoice_status")
       .eq("id", id)
       .maybeSingle();
+    if (error && /default_tax_invoice_status|42703|schema cache/i.test(error.message)) {
+      const legacy = await supabase
+        .from("contacts")
+        .select("company_name, pending_tax_invoice_default")
+        .eq("id", id)
+        .maybeSingle();
+      if (legacy.error && isMissingTaxInvoiceStore(legacy.error)) {
+        const nameOnly = await supabase.from("contacts").select("company_name").eq("id", id).maybeSingle();
+        const status = rememberedTaxStatus(nameOnly.data?.company_name, null, null);
+        return {
+          usesTemporaryBill: status === "PENDING_TAX_INVOICE",
+          defaultTaxInvoiceStatus: status,
+          error: null,
+        };
+      }
+      if (legacy.error) {
+        return { usesTemporaryBill: false, defaultTaxInvoiceStatus: null, error: legacy.error.message };
+      }
+      const status = rememberedTaxStatus(
+        legacy.data?.company_name,
+        null,
+        (legacy.data as { pending_tax_invoice_default?: boolean | null } | null)
+          ?.pending_tax_invoice_default,
+      );
+      return {
+        usesTemporaryBill: status === "PENDING_TAX_INVOICE",
+        defaultTaxInvoiceStatus: status,
+        error: null,
+      };
+    }
     if (error) {
       if (isMissingTaxInvoiceStore(error)) {
-        const nameOnly = await supabase
-          .from("contacts")
-          .select("company_name")
-          .eq("id", id)
-          .maybeSingle();
-        const name = String(nameOnly.data?.company_name ?? "");
-        return { usesTemporaryBill: name.replace(/\s+/g, "").includes("กมลกิจ"), error: null };
+        const nameOnly = await supabase.from("contacts").select("company_name").eq("id", id).maybeSingle();
+        const status = rememberedTaxStatus(nameOnly.data?.company_name, null, null);
+        return {
+          usesTemporaryBill: status === "PENDING_TAX_INVOICE",
+          defaultTaxInvoiceStatus: status,
+          error: null,
+        };
       }
-      return { usesTemporaryBill: false, error: error.message };
+      return { usesTemporaryBill: false, defaultTaxInvoiceStatus: null, error: error.message };
     }
     const row = data as {
       company_name?: string | null;
       pending_tax_invoice_default?: boolean | null;
+      default_tax_invoice_status?: string | null;
     } | null;
-    const name = String(row?.company_name ?? "").replace(/\s+/g, "");
+    const status = rememberedTaxStatus(
+      row?.company_name,
+      row?.default_tax_invoice_status,
+      row?.pending_tax_invoice_default,
+    );
     return {
-      usesTemporaryBill: row?.pending_tax_invoice_default === true || name.includes("กมลกิจ"),
+      usesTemporaryBill: status === "PENDING_TAX_INVOICE",
+      defaultTaxInvoiceStatus: status,
       error: null,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "โหลดรูปแบบบิลผู้จำหน่ายไม่สำเร็จ";
-    return { usesTemporaryBill: false, error: message };
+    return { usesTemporaryBill: false, defaultTaxInvoiceStatus: null, error: message };
+  }
+}
+
+function rememberedTaxStatus(
+  companyName: string | null | undefined,
+  storedStatus: string | null | undefined,
+  pendingFlag: boolean | null | undefined,
+): "TAX_READY" | "PENDING_TAX_INVOICE" | null {
+  const stored = String(storedStatus ?? "").trim().toUpperCase();
+  if (stored === "TAX_READY" || stored === "PENDING_TAX_INVOICE") return stored;
+  if (pendingFlag === true) return "PENDING_TAX_INVOICE";
+  const name = String(companyName ?? "").replace(/\s+/g, "");
+  if (
+    name.includes("กมลกิจ") ||
+    name.includes("ซีพียู") ||
+    name.includes("โอไอซี") ||
+    name.includes("ขวัญนคร")
+  ) {
+    return "PENDING_TAX_INVOICE";
+  }
+  return null;
+}
+
+export async function rememberVendorTaxInvoiceStatus(
+  vendorId: string,
+  status: "TAX_READY" | "PENDING_TAX_INVOICE",
+): Promise<void> {
+  const id = vendorId.trim();
+  if (!id) return;
+  const supabase = createSupabaseAdmin();
+  await supabase
+    .from("contacts")
+    .update({ default_tax_invoice_status: status } as never)
+    .eq("id", id);
+  await supabase
+    .from("contacts")
+    .update({ pending_tax_invoice_default: status === "PENDING_TAX_INVOICE" } as never)
+    .eq("id", id);
+}
+
+export async function togglePurchaseTaxInvoiceStatusAction(
+  documentId: string,
+  targetStatus: "PENDING_TAX_INVOICE" | "TAX_READY",
+): Promise<{ success: boolean; error: string | null }> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) return { success: false, error: owner.error };
+  const userId = owner.userId;
+  const id = documentId.trim();
+  if (!id) return { success: false, error: "ไม่พบเอกสาร" };
+  if (targetStatus !== "PENDING_TAX_INVOICE" && targetStatus !== "TAX_READY") {
+    return { success: false, error: "สถานะใบกำกับภาษีไม่ถูกต้อง" };
+  }
+
+  try {
+    const supabase = createSupabaseAdmin();
+    const rpcClient = supabase as unknown as {
+      rpc: (
+        fn: "set_purchase_tax_invoice_status",
+        args: {
+          p_document_id: string;
+          p_target_status: "PENDING_TAX_INVOICE" | "TAX_READY";
+          p_actor_id: string;
+        },
+      ) => Promise<{ error: { code?: string; message?: string } | null }>;
+    };
+    const { error } = await rpcClient.rpc("set_purchase_tax_invoice_status", {
+      p_document_id: id,
+      p_target_status: targetStatus,
+      p_actor_id: userId,
+    });
+    if (error && !isMissingTaxInvoiceStore(error)) {
+      return { success: false, error: error.message ?? "เปลี่ยนสถานะใบกำกับภาษีไม่สำเร็จ" };
+    }
+    if (error) {
+      const current = await supabase
+        .from("documents")
+        .select("doc_no, doc_date, reference_no")
+        .eq("id", id)
+        .maybeSingle();
+      const currentRow = current.data as {
+        doc_no?: string | null;
+        doc_date?: string | null;
+        reference_no?: string | null;
+      } | null;
+      const patch: Record<string, string> = { tax_invoice_status: targetStatus };
+      if (targetStatus === "TAX_READY") {
+        const taxNo =
+          String(currentRow?.reference_no ?? "").trim() ||
+          String(currentRow?.doc_no ?? "").trim();
+        const taxDate = String(currentRow?.doc_date ?? "").slice(0, 10);
+        if (taxNo) patch.tax_invoice_no = taxNo;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(taxDate)) patch.tax_invoice_date = taxDate;
+      }
+      const fallback = await supabase
+        .from("documents")
+        .update(patch as never)
+        .eq("id", id);
+      if (fallback.error) {
+        if (isMissingTaxInvoiceStore(fallback.error)) {
+          return {
+            success: false,
+            error: "ยังไม่มีคอลัมน์ tax_invoice_status หรือ RPC set_purchase_tax_invoice_status บนฐานข้อมูล",
+          };
+        }
+        return { success: false, error: fallback.error.message };
+      }
+      await logAuditTrail("documents", id, "UPDATE", null, {
+        tax_invoice_status: targetStatus,
+        actor_id: userId,
+      });
+    }
+
+    const { data: header } = await supabase
+      .from("documents")
+      .select("doc_no")
+      .eq("id", id)
+      .maybeSingle();
+    revalidatePath("/purchases");
+    revalidatePath("/purchases/[docNo]", "page");
+    const docNo = String(header?.doc_no ?? "").trim();
+    if (docNo) revalidatePath(`/purchases/${docNo}`);
+    return { success: true, error: null };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "เปลี่ยนสถานะใบกำกับภาษีไม่สำเร็จ";
+    return { success: false, error: message };
   }
 }
 
