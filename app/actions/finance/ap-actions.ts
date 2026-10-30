@@ -57,6 +57,80 @@ const CASH_ACCOUNT_SENTINEL = "CASH";
  * Raw service-role client — bypasses RLS.
  * Never falls back to anon / SSR cookie clients.
  */
+async function mirrorPayDocumentHeader(
+  supabaseAdmin: SupabaseClient,
+  header: {
+    id: string;
+    docNo: string;
+    docDate: string;
+    contactId: string;
+    subTotal: number;
+    grandTotal: number;
+    slipUrl: string | null;
+    originalFileName: string | null;
+  },
+): Promise<{ id: string; error: string | null }> {
+  const row = {
+    id: header.id,
+    doc_no: header.docNo,
+    doc_type: "PAY" as const,
+    doc_date: header.docDate,
+    contact_id: header.contactId,
+    sub_total: header.subTotal,
+    discount_amount: 0,
+    grand_total: header.grandTotal,
+    payment_status: "PAID",
+    attached_file_url: header.slipUrl,
+    original_file_name: header.originalFileName,
+  };
+  const { error } = await supabaseAdmin
+    .from("doc_headers")
+    .upsert(row, { onConflict: "id" });
+  if (!error) return { id: header.id, error: null };
+  const duplicate =
+    error.code === "23505" ||
+    /doc_headers_contact_doc_no_date_key|duplicate key/i.test(error.message ?? "");
+  if (!duplicate) return { id: header.id, error: error.message };
+  const { data: existing, error: findError } = await supabaseAdmin
+    .from("doc_headers")
+    .select("id")
+    .eq("contact_id", header.contactId)
+    .eq("doc_no", header.docNo)
+    .eq("doc_date", header.docDate)
+    .eq("doc_type", "PAY")
+    .maybeSingle();
+  if (findError || !existing?.id) {
+    return { id: header.id, error: error.message };
+  }
+  const { error: updateError } = await supabaseAdmin
+    .from("doc_headers")
+    .update({
+      sub_total: header.subTotal,
+      discount_amount: 0,
+      grand_total: header.grandTotal,
+      payment_status: "PAID",
+      attached_file_url: header.slipUrl,
+      original_file_name: header.originalFileName,
+    })
+    .eq("id", existing.id);
+  return { id: String(existing.id), error: updateError?.message ?? null };
+}
+
+async function removeMirroredPayHeader(
+  supabaseAdmin: SupabaseClient,
+  documentId: string | null,
+  headerId: string | null,
+  docNo: string | null,
+) {
+  const ids = Array.from(new Set([documentId, headerId].filter((id): id is string => Boolean(id))));
+  if (ids.length > 0) {
+    await supabaseAdmin.from("doc_headers").delete().in("id", ids);
+  }
+  if (docNo) {
+    await supabaseAdmin.from("doc_headers").delete().eq("doc_no", docNo).eq("doc_type", "PAY");
+  }
+}
+
 function createSupabaseAdminClient(): SupabaseClient {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -445,7 +519,7 @@ async function uploadPaymentSlip(
  * Submit AP Payment (Knock-off):
  * A) generate PAY doc no
  * B) upload slip → Storage
- * C) insert PAY header (documents + doc_headers)
+ * C) insert PAY header on documents — doc_headers is mirrored by trg_mirror_documents_to_doc_headers
  * D) insert document_allocations
  * E) update AP invoice paid_amount / payment_status
  */
@@ -455,6 +529,7 @@ export async function submitAPPayment(
   const supabaseAdmin = createSupabaseAdminClient();
   let payDocId: string | null = null;
   let payHeaderId: string | null = null;
+  let payDocNoSaved: string | null = null;
   let slipStoragePath: string | null = null;
 
   try {
@@ -749,43 +824,25 @@ export async function submitAPPayment(
     }
 
     payDocId = payDoc.id as string;
-
-    // Legacy mirror on doc_headers (Blueprint Step C)
-    const { data: payHeader, error: payHeaderError } = await supabaseAdmin
-      .from("doc_headers")
-      .insert({
-        doc_no: payDocNo,
-        doc_type: "PAY",
-        doc_date: paymentDate,
-        contact_id: vendorId,
-        sub_total: totalPaid,
-        discount_amount: 0,
-        grand_total: totalInvoicePaid,
-        payment_status: "PAID",
-        attached_file_url: slipUrl,
-        original_file_name:
-          slipFile instanceof File && slipFile.size > 0
-            ? slipFile.name.slice(0, 255)
-            : null,
-      })
-      .select("id")
-      .single();
-
-    if (payHeaderError || !payHeader) {
-      await supabaseAdmin.from("documents").delete().eq("id", payDocId);
-      if (slipStoragePath) {
-        await supabaseAdmin.storage
-          .from(DOCUMENT_ATTACHMENTS_BUCKET)
-          .remove([slipStoragePath]);
-      }
-      return {
-        success: false,
-        error:
-          payHeaderError?.message ??
-          "สร้างหัวเอกสาร PAY (doc_headers) ไม่สำเร็จ",
-      };
+    payDocNoSaved = payDocNo;
+    payHeaderId = payDocId;
+    const mirror = await mirrorPayDocumentHeader(supabaseAdmin, {
+      id: payDocId,
+      docNo: payDocNo,
+      docDate: paymentDate,
+      contactId: vendorId,
+      subTotal: totalPaid,
+      grandTotal: totalInvoicePaid,
+      slipUrl,
+      originalFileName:
+        slipFile instanceof File && slipFile.size > 0
+          ? slipFile.name.slice(0, 255)
+          : null,
+    });
+    if (mirror.id) payHeaderId = mirror.id;
+    if (mirror.error) {
+      console.error("[submitAPPayment] doc_headers mirror", mirror.error);
     }
-    payHeaderId = payHeader.id as string;
 
     const { error: txError } = await supabaseAdmin
       .from("payment_transactions")
@@ -802,7 +859,7 @@ export async function submitAPPayment(
       });
 
     if (txError) {
-      await supabaseAdmin.from("doc_headers").delete().eq("id", payHeaderId);
+      await removeMirroredPayHeader(supabaseAdmin, payDocId, payHeaderId, payDocNo);
       await supabaseAdmin.from("documents").delete().eq("id", payDocId);
       if (slipStoragePath) {
         await supabaseAdmin.storage
@@ -844,7 +901,7 @@ export async function submitAPPayment(
         .from("payment_transactions")
         .delete()
         .eq("document_id", payDocId);
-      await supabaseAdmin.from("doc_headers").delete().eq("id", payHeaderId);
+      await removeMirroredPayHeader(supabaseAdmin, payDocId, payHeaderId, payDocNo);
       await supabaseAdmin.from("documents").delete().eq("id", payDocId);
       if (slipStoragePath) {
         await supabaseAdmin.storage
@@ -902,6 +959,9 @@ export async function submitAPPayment(
           error: `บันทึก PAY ${payDocNo} แล้ว แต่อัปเดตสถานะใบรับวางบิลไม่สำเร็จ: ${bnSync.error}`,
           payment_doc_no: payDocNo,
         };
+      }
+      for (const noteId of bnSync.noteIds) {
+        revalidatePath(`/finance/billing-notes/${noteId}`);
       }
     }
 
@@ -976,8 +1036,8 @@ export async function submitAPPayment(
         .eq("document_id", payDocId);
       await supabaseAdmin.from("documents").delete().eq("id", payDocId);
     }
-    if (payHeaderId) {
-      await supabaseAdmin.from("doc_headers").delete().eq("id", payHeaderId);
+    if (payDocId || payHeaderId || payDocNoSaved) {
+      await removeMirroredPayHeader(supabaseAdmin, payDocId, payHeaderId, payDocNoSaved);
     }
     if (slipStoragePath) {
       await supabaseAdmin.storage
