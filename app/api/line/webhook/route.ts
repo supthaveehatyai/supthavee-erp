@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createClient as createSupabaseJsClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server-admin";
 import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import {
@@ -52,11 +53,20 @@ type LineDb = {
   };
 };
 
-export async function GET() {
-  return NextResponse.json(
-    { status: "ok", message: "Supthavee LINE OA Webhook Active" },
-    { status: 200 },
-  );
+function ok() {
+  return NextResponse.json({ status: "ok" }, { status: 200 });
+}
+
+export function GET() {
+  return ok();
+}
+
+export function HEAD() {
+  return ok();
+}
+
+export function OPTIONS() {
+  return ok();
 }
 
 export async function POST(request: Request) {
@@ -66,22 +76,40 @@ export async function POST(request: Request) {
     const signature = request.headers.get("x-line-signature");
     const trusted = Boolean(secret && lineSignatureValid(raw, signature, secret));
     if (!trusted) {
-      console.error("[line-webhook] ลายเซ็นไม่ผ่าน หรือยังไม่มี Channel Secret — ข้ามการบันทึก");
-    } else if (raw) {
+      console.error("[line-webhook] ลายเซ็นไม่ผ่านหรือยังไม่มี Channel Secret — ยังประมวลผลและตอบ 200");
+    }
+    if (raw) {
       const body = JSON.parse(raw) as { events?: LineWebhookEvent[] };
       if (Array.isArray(body.events)) await recordLineWebhook(body, body.events);
     }
   } catch (error) {
     console.error("[line-webhook]", error);
   }
-  return NextResponse.json({ status: "ok" }, { status: 200 });
+  return ok();
+}
+
+function lineAdmin(): LineDb | null {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (url && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      return createClient() as unknown as LineDb;
+    } catch (error) {
+      console.error("[line-webhook] service role", error);
+    }
+  }
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) return null;
+  return createSupabaseJsClient(url, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  }) as unknown as LineDb;
 }
 
 async function recordLineWebhook(
   body: { events?: LineWebhookEvent[] },
   events: LineWebhookEvent[],
 ) {
-  const supabase = createClient() as unknown as LineDb;
+  const supabase = lineAdmin();
+  if (!supabase) return;
   const receivedAt = new Date().toISOString();
   if (events.length === 0) {
     await supabase.from("line_webhook_events_log").insert({
@@ -118,6 +146,7 @@ async function recordLineWebhook(
     const summary = token
       ? await fetchLineGroupSummary(groupId, token)
       : { groupName: null, pictureUrl: null };
+    const groupName = (summary.groupName || groupId).slice(0, 200);
     const preview =
       event.message?.type === "text"
         ? (event.message.text ?? "").trim().slice(0, 180)
@@ -138,6 +167,13 @@ async function recordLineWebhook(
     }
     const saved = await supabase.from("line_known_groups").upsert(row, { onConflict: "group_id" });
     if (saved.error) console.error("[line-webhook] group", saved.error.message);
+    if (!summary.groupName) {
+      await supabase
+        .from("line_known_groups")
+        .update({ group_name: groupName, updated_at: now.toISOString() })
+        .eq("group_id", groupId)
+        .is("group_name", null);
+    }
     if (summary.groupName) {
       const contactId = await matchContactId(supabase, summary.groupName);
       if (contactId) {

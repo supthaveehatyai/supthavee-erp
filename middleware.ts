@@ -11,16 +11,11 @@ import { isAuthPath } from "@/lib/auth/module-access";
 import { updateSession } from "@/lib/supabase/update-session";
 
 export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-
-  if (
-    pathname === "/api/line/webhook" ||
-    pathname.startsWith("/api/line/webhook/") ||
-    pathname === "/api/line/slip-image" ||
-    pathname.startsWith("/api/line/slip-image/")
-  ) {
+  if (request.nextUrl.pathname.startsWith("/api/line")) {
     return NextResponse.next();
   }
+
+  const { pathname } = request.nextUrl;
 
   if (isAuthPath(pathname)) {
     const requestHeaders = new Headers(request.headers);
@@ -39,6 +34,6 @@ export const config = {
      * Match all paths except Next.js internals and static assets.
      * Auth cookies are refreshed on every matched navigation.
      */
-    "/((?!_next/static|_next/image|_next/data|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf|eot)$).*)",
+    "/((?!_next/static|_next/image|_next/data|favicon.ico|api/line|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf|eot)$).*)",
   ],
 };
