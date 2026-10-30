@@ -16,6 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { compactRepeatedBillLabel, formatRegisterBillLabel } from "@/lib/finance/payment-register-label";
 import { monthBounds, thaiMonthLabel, todayBillingIso } from "@/lib/utils/billing-period";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
 import { paymentTimeLabel } from "@/lib/utils/payment-timestamp";
@@ -23,7 +24,13 @@ import { cn } from "@/lib/utils";
 import type {
   PaymentRegisterData,
   PaymentRegisterDirection,
+  PaymentRegisterLine,
 } from "@/types/payment-register";
+
+function displayBillLabel(row: { lines: PaymentRegisterLine[]; billLabel: string }): string {
+  const fromLines = row.lines.length > 0 ? formatRegisterBillLabel(row.lines, true) : "—";
+  return fromLines !== "—" ? fromLines : compactRepeatedBillLabel(row.billLabel);
+}
 
 function formatMoney(value: number): string {
   return value.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -283,7 +290,7 @@ export function PaymentReceiptRegister() {
                     <TableCell className="font-mono text-xs">{row.docNo}</TableCell>
                     <TableCell>{row.contactName}</TableCell>
                     <TableCell>{row.channelLabel}</TableCell>
-                    <TableCell className="max-w-[240px] text-xs">{row.billLabel}</TableCell>
+                    <TableCell className="max-w-md text-xs">{displayBillLabel(row)}</TableCell>
                     <TableCell>{row.referenceNo || "—"}</TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">
                       {formatMoney(row.amount)}

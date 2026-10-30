@@ -457,6 +457,7 @@ export function APPaymentClient({
       try {
         const compressed = await compressSlipJpeg(file);
         setSlipFile(compressed);
+        selectBankForSlip();
       } catch (err) {
         toast.error(
           err instanceof Error
@@ -469,6 +470,18 @@ export function APPaymentClient({
     }
 
     setSlipFile(file);
+    selectBankForSlip();
+  }
+
+  function selectBankForSlip() {
+    setBankAccountId((current) => {
+      if (current !== "CASH") return current;
+      const preferred =
+        activeBanks.find((bank) => bank.account_no.replace(/\D/g, "") === "9020746510") ??
+        activeBanks.find((bank) => bank.bank_name.includes("กรุงไทย")) ??
+        activeBanks[0];
+      return preferred?.id ?? current;
+    });
   }
 
   function handleSubmit(formData: FormData) {

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import { addIsoDays } from "@/lib/utils/billing-period";
+import { formatRegisterBillLabel } from "@/lib/finance/payment-register-label";
 import type {
   PaymentRegisterBank,
   PaymentRegisterChannelTotal,
@@ -47,13 +48,21 @@ function chunk<T>(rows: T[], size: number): T[][] {
 }
 
 function billLabel(lines: PaymentRegisterLine[]): string {
-  if (lines.length === 0) return "—";
-  return lines
-    .map((line) => {
-      const bill = line.invoiceDocNo || "—";
-      return line.billingNoteNo ? `${line.billingNoteNo} (${bill})` : bill;
-    })
-    .join(", ");
+  return formatRegisterBillLabel(lines, false);
+}
+
+function mapRegisterLine(raw: unknown): PaymentRegisterLine {
+  const row = (raw ?? {}) as Record<string, unknown>;
+  const reference = row.referenceNo ?? row.reference_no;
+  const note = row.billingNoteNo ?? row.billing_note_no;
+  return {
+    invoiceDocNo: String(row.invoiceDocNo ?? row.invoice_doc_no ?? "").trim(),
+    referenceNo: reference ? String(reference) : null,
+    billingNoteNo: note ? String(note) : null,
+    billAmount: money((row.billAmount ?? row.bill_amount) as number | string | null),
+    whtAmount: money((row.whtAmount ?? row.wht_amount) as number | string | null),
+    netAmount: money((row.netAmount ?? row.net_amount) as number | string | null),
+  };
 }
 
 function isMissingRegisterRpc(message: string): boolean {
@@ -335,7 +344,7 @@ function mapRpcRows(data: unknown): PaymentRegisterEntry[] | null {
   return list.map((item) => {
     const row = item as Record<string, unknown>;
     const direction = String(row.direction ?? "") === "AR" ? "AR" : "AP";
-    const lines = Array.isArray(row.lines) ? (row.lines as PaymentRegisterLine[]) : [];
+    const lines = Array.isArray(row.lines) ? row.lines.map(mapRegisterLine) : [];
     return {
       id: String(row.id ?? ""),
       direction,
