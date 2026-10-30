@@ -40,7 +40,13 @@ user_profiles (โปรไฟล์พนักงาน/ผู้ใช้ง�
 
 app_roles (สิทธิ์การใช้งาน Dynamic RBAC — PK: role_code, accessible_modules JSONB)
 
-system_settings (ตั้งค่าระบบบริษัท Singleton — PK: id = 1, company_name, company_name_en = 'Supthavee Hatyai Co., Ltd.', branch_code = '00000', allow_negative_inventory, document_print_settings)
+system_settings (ตั้งค่าระบบบริษัท Singleton — PK: id = 1, company_name, company_name_en = 'Supthavee Hatyai Co., Ltd.', branch_code = '00000', allow_negative_inventory, document_print_settings, line_channel_access_token, line_channel_secret, line_oa_account_uid, line_webhook_url, line_webhook_last_verified_at)
+
+line_known_groups (PK: group_id, group_name, picture_url, last_message_preview, last_active_at, linked_contact_id → contacts.id, last_reply_token, reply_token_expires_at, chat_room_url, created_at, updated_at)
+
+line_webhook_events_log (id, event_type, source_type, source_group_id, source_user_id, reply_token, message_text, raw_payload jsonb, received_at)
+
+public.get_line_webhook_status_summary() RETURNS jsonb (known_groups จาก line_known_groups ไม่เกิน 50 กลุ่ม และ recent_events 10 รายการล่าสุด)
 
 system_parameters (ค่า config ระบบ — PK: param_key, param_value JSONB, data_type)
 

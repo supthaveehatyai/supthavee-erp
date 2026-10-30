@@ -72,6 +72,23 @@ export async function fetchLineGroupSummary(
   };
 }
 
+export async function replyLineMessages(
+  token: string,
+  replyToken: string,
+  messages: Array<Record<string, string>>,
+): Promise<{
+  ok: boolean;
+  error: string | null;
+  errorMessage: string | null;
+  errorDetails: string | null;
+}> {
+  return postLineMessages(
+    "https://api.line.me/v2/bot/message/reply",
+    token,
+    { replyToken, messages },
+  );
+}
+
 export async function pushLineMessages(
   token: string,
   targetId: string,
@@ -82,13 +99,27 @@ export async function pushLineMessages(
   errorMessage: string | null;
   errorDetails: string | null;
 }> {
-  const response = await fetch("https://api.line.me/v2/bot/message/push", {
+  return postLineMessages("https://api.line.me/v2/bot/message/push", token, { to: targetId, messages });
+}
+
+async function postLineMessages(
+  url: string,
+  token: string,
+  body: Record<string, unknown>,
+): Promise<{
+  ok: boolean;
+  error: string | null;
+  errorMessage: string | null;
+  errorDetails: string | null;
+}> {
+  const response = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ to: targetId, messages }),
+    body: JSON.stringify(body),
+    cache: "no-store",
   });
   if (response.ok) {
     return { ok: true, error: null, errorMessage: null, errorDetails: null };

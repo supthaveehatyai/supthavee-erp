@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+  diagnoseAndSyncLineWebhookAction,
   listLineKnownGroupsAction,
   loadContactLineTargetAction,
+  registerAndVerifyLineWebhookUrlAction,
   saveContactLineOaChatUrlAction,
   sendVendorPaymentSlipLineAction,
 } from "@/app/actions/finance/line-oa";
@@ -29,7 +31,27 @@ type KnownGroup = {
   group_id: string;
   group_name: string | null;
   picture_url: string | null;
+  linkedContactId: string | null;
+  replyReady: boolean;
+  replyExpiresAt: string | null;
 };
+
+type LineDiagnosis = Awaited<ReturnType<typeof diagnoseAndSyncLineWebhookAction>>;
+
+function preferredGroupId(groups: KnownGroup[], contactId: string, savedId: string | null): string {
+  const linked = groups.find((group) => group.linkedContactId === contactId);
+  if (linked) return linked.group_id;
+  if (savedId && groups.some((group) => group.group_id === savedId)) return savedId;
+  if (groups.length === 1) return groups[0]?.group_id ?? "";
+  return "";
+}
+
+function apiGroupId(value: string): string {
+  const raw = value.trim();
+  if (!raw || /chat\.line\.biz/i.test(raw) || raw.includes("/")) return "";
+  if (!/^C[A-Za-z0-9]{10,}$/.test(raw)) return "";
+  return raw;
+}
 
 export type LinePaymentSlipDialogProps = {
   open: boolean;
@@ -59,8 +81,14 @@ export function LinePaymentSlipDialog({
   const [targetId, setTargetId] = useState("");
   const [chatInput, setChatInput] = useState("");
   const [draft, setDraft] = useState(messageText);
+  const [manualGroupId, setManualGroupId] = useState("");
   const [sending, setSending] = useState(false);
   const [copyingSlip, setCopyingSlip] = useState(false);
+  const [diagnosing, setDiagnosing] = useState(false);
+  const [diagnosis, setDiagnosis] = useState<LineDiagnosis | null>(null);
+  const [registering, setRegistering] = useState(false);
+  const [registerNote, setRegisterNote] = useState<string | null>(null);
+  const [registerOk, setRegisterOk] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -74,8 +102,7 @@ export function LinePaymentSlipDialog({
       setGroups(listed.groups);
       const accountUid = listed.oaAccountUid || LINE_OA_ACCOUNT_UID;
       if (listed.oaAccountUid) setOaUid(listed.oaAccountUid);
-      const knownGroup = listed.groups.some((group) => group.group_id === saved.lineTargetId);
-      setTargetId(knownGroup && saved.lineTargetId ? saved.lineTargetId : "");
+      setTargetId(preferredGroupId(listed.groups, contactId, saved.lineTargetId));
       const savedChat = saved.lineOaChatUrl?.trim() || "";
       setChatInput(
         savedChat || (isH3Contact(contactName) ? lineBizChatUrl(accountUid, H3_LINE_GROUP_ID) : ""),
@@ -87,19 +114,28 @@ export function LinePaymentSlipDialog({
   }, [open, contactId, contactName, messageText]);
 
   const webhookGroupId = groups.some((group) => group.group_id === targetId) ? targetId : "";
+  const manualTrimmed = manualGroupId.trim();
+  const pastedGroupId = apiGroupId(manualGroupId);
+  const sendGroupId = webhookGroupId || pastedGroupId;
+  const activeGroup = groups.find((group) => group.group_id === sendGroupId);
 
   async function sendNow() {
-    if (!webhookGroupId) {
-      toast.error("เลือก API Group ID จาก Webhook ก่อน — รหัสในลิงก์ chat.line.biz ใช้ส่ง Push ไม่ได้");
+    if (!webhookGroupId && manualTrimmed && !pastedGroupId) {
+      toast.error("API Group ID ต้องขึ้นต้นด้วย C และห้ามวางลิงก์ chat.line.biz ในช่องนี้");
+      return;
+    }
+    if (!sendGroupId) {
+      toast.error("เลือกกลุ่มจาก Dropdown ก่อน — รหัสในลิงก์ chat.line.biz ใช้ส่ง Push ไม่ได้");
       return;
     }
     setSending(true);
     const result = await sendVendorPaymentSlipLineAction({
       contactId,
       contactName,
-      lineTargetId: webhookGroupId,
+      lineTargetId: sendGroupId,
       messageText: draft,
       slipPublicUrl: slipUrl,
+      appOrigin: window.location.origin,
       billingNoteNo,
       paymentDocNo,
     });
@@ -108,13 +144,45 @@ export function LinePaymentSlipDialog({
       toast.error(result.error ?? "ส่งเข้า LINE ไม่สำเร็จ");
       return;
     }
+    const via = result.channel === "reply" ? "Reply API (ไม่เสียโควตา)" : "Push API";
     if (slipUrl?.startsWith("https://") && !result.imageSent) {
-      toast.success("ส่งข้อความเข้ากลุ่มแล้ว — LINE รับรูปไม่ได้ ระบบส่งเฉพาะข้อความให้แล้ว");
+      toast.success(`ส่งข้อความผ่าน ${via} แล้ว — LINE รับรูปไม่ได้ ระบบส่งเฉพาะข้อความให้แล้ว`);
     } else {
-      toast.success("ส่งข้อความและรูปสลิปเข้ากลุ่ม LINE แล้ว");
+      toast.success(`ส่งข้อความและรูปสลิปผ่าน ${via} แล้ว`);
     }
     onSent?.();
     onOpenChange(false);
+  }
+
+  async function registerWebhook() {
+    setRegistering(true);
+    const result = await registerAndVerifyLineWebhookUrlAction(`${window.location.origin}/api/line/webhook`);
+    setRegistering(false);
+    setGroups(result.groups);
+    setTargetId((current) =>
+      result.groups.some((group) => group.group_id === current)
+        ? current
+        : preferredGroupId(result.groups, contactId, current),
+    );
+    const connected = result.statusCode === 200 && result.active === true;
+    setRegisterOk(connected);
+    const refreshLine = `รีเฟรชรายชื่อกลุ่มใน Dropdown แล้ว ${result.groups.length} กลุ่ม`;
+    const note = connected
+      ? `✅ เชื่อมต่อ LINE Webhook สำเร็จ! (ให้ส่งสติกเกอร์หรือพิมพ์ 1 ข้อความในกลุ่มคู่ค้าเพื่อดึงชื่อกลุ่มเข้ามาในรายการ) ${refreshLine}`
+      : `${result.error ?? "ยังเชื่อมต่อ LINE Webhook ไม่สำเร็จ"} ${refreshLine}`;
+    setRegisterNote(note);
+    if (connected) toast.success("เชื่อมต่อ LINE Webhook สำเร็จ");
+    else toast.error(result.error ?? "ยังเชื่อมต่อ LINE Webhook ไม่สำเร็จ");
+  }
+
+  async function diagnoseWebhook() {
+    setDiagnosing(true);
+    const result = await diagnoseAndSyncLineWebhookAction(window.location.origin);
+    setDiagnosing(false);
+    setDiagnosis(result);
+    setGroups(result.groups);
+    if (result.error) toast.error(result.error);
+    else toast.success("ตรวจสอบสัญญาณ Webhook และรีเฟรชรายชื่อกลุ่มแล้ว");
   }
 
   async function copyAndOpenChat() {
@@ -204,13 +272,25 @@ export function LinePaymentSlipDialog({
               placeholder="https://chat.line.biz/.../chat/C..."
             />
           </div>
-          <Button
-            type="button"
-            className="bg-emerald-600 hover:bg-emerald-700"
-            onClick={() => void copyAndOpenChat()}
-          >
-            💬 คัดลอกข้อความแจ้งโอน + เปิดห้องแชท LINE OA (chat.line.biz) ทันที
-          </Button>
+          <div className="flex flex-col gap-2">
+            <Button
+              type="button"
+              className="bg-emerald-600 hover:bg-emerald-700"
+              onClick={() => void copyAndOpenChat()}
+            >
+              💬 คัดลอกข้อความแจ้งโอน + เปิดห้องแชท LINE OA (chat.line.biz) ทันที
+            </Button>
+            {groups.length > 0 ? (
+              <Button
+                type="button"
+                className="bg-blue-600 text-white hover:bg-blue-700"
+                disabled={sending || !sendGroupId}
+                onClick={() => void sendNow()}
+              >
+                {sending ? "กำลังส่ง..." : "🚀 ยิงข้อความ + รูปสลิปเข้ากลุ่มผ่าน LINE OA API ทันที"}
+              </Button>
+            ) : null}
+          </div>
           <div className="space-y-1">
             <Label htmlFor="line-message">ข้อความแจ้งโอนเงิน</Label>
             <textarea
@@ -251,30 +331,129 @@ export function LinePaymentSlipDialog({
               ส่งผ่าน LINE Push API ใช้ได้เมื่อได้ API Group ID จาก Webhook แล้วเท่านั้น
               รหัสหลัง /chat/ ของ chat.line.biz เป็นคนละรหัสกับ groupId จึงใช้ยิง Push ไม่ได้
             </p>
-            <select
-              id="line-group"
-              value={webhookGroupId}
-              onChange={(event) => setTargetId(event.target.value)}
-              className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
-            >
-              <option value="">เลือก API Group ID จาก Webhook</option>
-              {groups.map((group) => (
-                <option key={group.group_id} value={group.group_id}>
-                  {group.group_name || group.group_id}
-                </option>
-              ))}
-            </select>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <select
+                id="line-group"
+                value={webhookGroupId}
+                onChange={(event) => setTargetId(event.target.value)}
+                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
+              >
+                <option value="">เลือก API Group ID จาก Webhook ({groups.length} กลุ่ม)</option>
+                {groups.map((group) => (
+                  <option key={group.group_id} value={group.group_id}>
+                    {group.group_name || group.group_id}
+                    {group.replyReady ? " · Reply พร้อม" : ""}
+                  </option>
+                ))}
+              </select>
+              <Input
+                id="line-group-manual"
+                value={manualGroupId}
+                onChange={(event) => setManualGroupId(event.target.value)}
+                placeholder="หรือวาง API Group ID (C...)"
+              />
+            </div>
+            <p className="text-xs text-slate-500">
+              {activeGroup?.replyReady
+                ? "กลุ่มนี้มี reply token ที่ยังไม่หมดอายุ ระบบจะส่งผ่าน Reply API ก่อน (ฟรี) แล้วจึง Push หากส่งไม่ได้"
+                : "ถ้าไม่มี reply token ที่ยังไม่หมดอายุ ระบบจะส่งผ่าน Push API"}
+            </p>
             <Button
               type="button"
               variant="outline"
-              disabled={sending || !webhookGroupId}
+              disabled={sending || !sendGroupId}
               onClick={() => void sendNow()}
             >
-              {sending ? "กำลังส่ง..." : "ส่งผ่าน LINE Push API"}
+              {sending
+                ? "กำลังส่ง..."
+                : activeGroup?.replyReady
+                  ? "ส่งผ่าน Reply API ก่อน (ฟรี) แล้วสำรอง Push"
+                  : "ส่งข้อความ 4 บรรทัด + รูปสลิปผ่าน LINE OA Push API"}
             </Button>
+          </div>
+          <div className="space-y-2 rounded-lg border border-sky-200 bg-sky-50 p-3">
+            <p className="text-sm font-medium text-slate-800">📡 สถานะการเชื่อมต่อ LINE OA Push API & Webhook</p>
+            <Button
+              type="button"
+              className="h-8 bg-amber-500 px-2.5 text-xs text-white hover:bg-amber-600"
+              disabled={registering}
+              onClick={() => void registerWebhook()}
+            >
+              {registering ? "กำลังซิงก์..." : "🔄 ซิงก์ Webhook & รีเฟรชรายชื่อกลุ่ม LINE"}
+            </Button>
+            {registerNote ? (
+              <p className={registerOk ? "text-sm font-medium text-emerald-700" : "text-xs text-amber-800"}>{registerNote}</p>
+            ) : null}
+            <Button type="button" variant="outline" className="h-8 bg-white px-2.5 text-xs" disabled={diagnosing} onClick={() => void diagnoseWebhook()}>
+              {diagnosing ? "กำลังตรวจสอบ..." : "🔍 ตรวจสอบ/ทดสอบสัญญาณ Webhook & รีเฟรชรายชื่อกลุ่ม"}
+            </Button>
+            {diagnosis ? <LineWebhookStatus diagnosis={diagnosis} /> : (
+              <p className="text-xs text-slate-500">ยังไม่ได้ตรวจสอบในรอบนี้</p>
+            )}
           </div>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function LineWebhookStatus({ diagnosis }: { diagnosis: LineDiagnosis }) {
+  const active = diagnosis.webhook.active;
+  const statusCode = diagnosis.test.statusCode;
+  const testLocked = statusCode === 401 || statusCode === 403;
+  const testOk = diagnosis.test.success === true || statusCode === 200;
+  const used = diagnosis.quota.used;
+  const limit = diagnosis.quota.limit;
+  const quotaText =
+    used == null
+      ? diagnosis.quota.error ?? "ยังอ่านโควตาไม่ได้"
+      : `ใช้ไป ${used.toLocaleString("th-TH")} / ${limit == null ? "ไม่จำกัด" : limit.toLocaleString("th-TH")} ข้อความ`;
+
+  return (
+    <div className="space-y-1 text-xs leading-5 text-slate-700">
+      <p>
+        <span className="font-medium">สวิตช์ Webhook บน LINE OA: </span>
+        {active === true
+          ? "🟢 เปิดใช้งานแล้ว"
+          : active === false
+            ? "🔴 ปิดอยู่ (กรุณาไปที่หน้า LINE OA -> ตั้งค่าการตอบกลับ -> เปิดสวิตช์ Webhook)"
+            : diagnosis.webhook.error ?? "ยังอ่านสถานะสวิตช์ไม่ได้"}
+      </p>
+      <p>
+        <span className="font-medium">ผลการยิงทดสอบจาก LINE Server: </span>
+        {testOk
+          ? "🟢 เชื่อมต่อสำเร็จ (HTTP 200)"
+          : testLocked
+            ? `🟠 ติดล็อก Vercel Preview (HTTP ${statusCode}) — แนะนำให้ปิด Vercel Authentication ในหน้า Settings -> Deployment Protection ของ Vercel`
+            : (diagnosis.test.error ??
+              ([diagnosis.test.reason, diagnosis.test.detail].filter(Boolean).join(" — ") ||
+                "ยังไม่มีผลทดสอบ"))}
+      </p>
+      <p>
+        <span className="font-medium">โควตาข้อความ Push API เดือนนี้: </span>
+        {quotaText}
+      </p>
+      {diagnosis.webhook.endpoint ? (
+        <p className="text-slate-500">
+          Endpoint ที่ LINE ยิง: {diagnosis.webhook.endpoint}
+          {diagnosis.currentOrigin && !diagnosis.webhook.endpoint.startsWith(diagnosis.currentOrigin)
+            ? ` (หน้านี้คือ ${diagnosis.currentOrigin})`
+            : ""}
+        </p>
+      ) : null}
+      {diagnosis.recentEvents.length > 0 ? (
+        <ul className="list-disc pl-4 text-slate-500">
+          {diagnosis.recentEvents.map((event, index) => (
+            <li key={`${event.received_at}-${index}`}>
+              {event.event_type}
+              {event.source_group_id ? ` · ${event.source_group_id}` : ""}
+              {event.message_text ? ` · ${event.message_text}` : ""}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-slate-500">ยังไม่มีเหตุการณ์ใน line_webhook_events_log</p>
+      )}
+    </div>
   );
 }
