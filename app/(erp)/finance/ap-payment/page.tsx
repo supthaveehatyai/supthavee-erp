@@ -5,6 +5,7 @@ import {
 import { getOpenBillingNotesForContact, getPendingBillReceipts } from "@/app/actions/billing";
 import { getBankAccounts } from "@/lib/actions/bank-accounts";
 import { APPaymentClient } from "@/app/(erp)/finance/ap-payment/components/APPaymentClient";
+import { PaymentReceiptRegister } from "@/components/finance/payment-receipt-register";
 import {
   PageModeTabs,
   PAYMENT_TABS,
@@ -54,6 +55,9 @@ export default async function ApPaymentPage({
       pendingReceipts={pendingReceipts.data}
       initialBillingNoteId={billingNoteId}
     />
+      <div className="px-6 pb-6">
+        <PaymentReceiptRegister />
+      </div>
     </>
   );
 }

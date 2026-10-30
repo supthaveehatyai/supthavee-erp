@@ -15,6 +15,7 @@ import {
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { syncBillingNotesAfterInvoicePayment } from "@/lib/actions/finance/billing-note-status";
 import { roundMoney } from "@/lib/utils/payment-fifo";
+import { currentBangkokTime, paymentTimestampIso } from "@/lib/utils/payment-timestamp";
 import {
   isCreditNoteDocType,
   summarizeRecPayment,
@@ -536,6 +537,7 @@ export async function processPaymentKnockoff(
   try {
     const contactId = String(formData.get("contact_id") ?? "").trim();
     const paymentDateRaw = String(formData.get("payment_date") ?? "").trim();
+    const paymentTimeRaw = String(formData.get("payment_time") ?? "").trim();
     const bankAccountRaw = String(formData.get("bank_account_id") ?? "").trim();
     const referenceNo =
       String(formData.get("reference_no") ?? "").trim() || null;
@@ -550,6 +552,10 @@ export async function processPaymentKnockoff(
     const paymentDate = /^\d{4}-\d{2}-\d{2}$/.test(paymentDateRaw)
       ? paymentDateRaw
       : todayIsoDate();
+    const paymentTime = /^\d{2}:\d{2}$/.test(paymentTimeRaw)
+      ? paymentTimeRaw
+      : currentBangkokTime();
+    const paymentDateIso = paymentTimestampIso(paymentDate, paymentTime);
 
     if (!contactId) {
       return { success: false, error: "ไม่พบรหัสลูกค้า" };
@@ -938,6 +944,18 @@ export async function processPaymentKnockoff(
 
     receiptCommitted = true;
     const receiptDocId = parsed.receiptDocId;
+    if (receiptDocId) {
+      const stamped = await supabase
+        .from("payment_transactions")
+        .update({ payment_date: paymentDateIso })
+        .eq("document_id", receiptDocId);
+      if (stamped.error) {
+        return {
+          success: false,
+          error: `บันทึกใบเสร็จแล้ว แต่บันทึกเวลาที่รับเงินไม่สำเร็จ: ${stamped.error.message}`,
+        };
+      }
+    }
     const receiptDocNo = parsed.receiptDocNo ?? "";
     const appliedCnDocs = parsed.appliedCnDocs;
     if (!receiptDocId || !receiptDocNo) {

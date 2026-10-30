@@ -29,6 +29,7 @@ import { parseVatLedgerPeriod } from "@/lib/tax/vat-ledger-data";
 import { formatThaiCurrency } from "@/lib/utils/currency";
 import type { ReportCenterPreview } from "@/types/finance-report";
 import { ReportCenterForm } from "./tax-reports-panel";
+import { PaymentReceiptRegister } from "@/components/finance/payment-receipt-register";
 import {
   PageModeTabs,
   REPORT_TABS,
@@ -271,6 +272,7 @@ export default async function TaxReportsPage({ searchParams }: PageProps) {
           </CardContent>
         </Card>
       ) : null}
+      <PaymentReceiptRegister />
     </div>
   );
 }
