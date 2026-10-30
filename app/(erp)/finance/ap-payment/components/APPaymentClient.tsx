@@ -24,7 +24,6 @@ import {
   redistributeCheckedDeposits,
 } from "@/lib/utils/deposit-apply";
 import { compressImage } from "@/lib/utils/image-compression";
-import { currentBangkokTime } from "@/lib/utils/payment-timestamp";
 import { OutstandingPartyCombobox } from "@/components/finance/OutstandingPartyCombobox";
 import { AllocatedAmountCell } from "@/components/finance/AllocatedAmountCell";
 import { Badge } from "@/components/ui/badge";
@@ -136,7 +135,7 @@ export function APPaymentClient({
     {},
   );
   const [paymentDate, setPaymentDate] = useState(todayIsoLocal);
-  const [paymentTime, setPaymentTime] = useState(currentBangkokTime);
+  const [paymentTime, setPaymentTime] = useState("");
   const [bankAccountId, setBankAccountId] = useState(
     activeBanks[0]?.id ?? "CASH",
   );
@@ -1035,15 +1034,11 @@ export function APPaymentClient({
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="payment_time">
-                        เวลาที่โอน/ชำระ (Time){" "}
-                        <span className="text-red-500">*</span>
-                      </Label>
+                      <Label htmlFor="payment_time">เวลาที่โอน (ถ้ามีบนสลิป)</Label>
                       <Input
                         id="payment_time"
                         name="payment_time"
                         type="time"
-                        required
                         value={paymentTime}
                         onChange={(e) => setPaymentTime(e.target.value)}
                       />

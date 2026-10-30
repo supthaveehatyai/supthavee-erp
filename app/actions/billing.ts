@@ -425,36 +425,126 @@ export async function getBillingNoteSettlements(billingNoteId: string): Promise<
   try {
     const owner = await requireSessionUserId();
     if (!owner.ok) return { data: [], error: owner.error };
-    const linked = await getInvoicesByBillingNote(billingNoteId);
-    if (linked.error) return { data: [], error: linked.error };
-    const invoiceIds = linked.data.map((row) => row.id).filter(Boolean);
-    if (invoiceIds.length === 0) return { data: [], error: null };
-
     const supabase = createClient();
-    const { data: allocations, error } = await supabase
-      .from("document_allocations")
-      .select("receipt_doc_id")
-      .in("invoice_doc_id", invoiceIds);
-    if (error) return { data: [], error: error.message };
-    const receiptIds = Array.from(
-      new Set((allocations ?? []).map((row) => String(row.receipt_doc_id ?? "")).filter(Boolean)),
-    );
+    const noteId = billingNoteId.trim();
+    const { data: note, error: noteError } = await supabase
+      .from("doc_headers")
+      .select("id, contact_id, doc_date, doc_type")
+      .eq("id", noteId)
+      .maybeSingle();
+    if (noteError) return { data: [], error: noteError.message };
+    if (!note || (note.doc_type !== "BN" && note.doc_type !== "BR")) {
+      return { data: [], error: null };
+    }
+
+    const { data: items, error: itemsError } = await supabase
+      .from("billing_note_items")
+      .select("invoice_id, invoice:doc_headers!billing_note_items_invoice_id_fkey(doc_no)")
+      .eq("billing_note_id", noteId);
+    if (itemsError) return { data: [], error: itemsError.message };
+
+    const invoiceIds = new Set<string>();
+    const docNos = new Set<string>();
+    for (const row of items ?? []) {
+      const invoiceId = String(row.invoice_id ?? "").trim();
+      if (invoiceId) invoiceIds.add(invoiceId);
+      const invoice = Array.isArray(row.invoice) ? row.invoice[0] : row.invoice;
+      const docNo = String(invoice?.doc_no ?? "").trim();
+      if (docNo) docNos.add(docNo);
+    }
+    if (docNos.size > 0) {
+      const { data: ledgerDocs, error: ledgerError } = await supabase
+        .from("documents")
+        .select("id")
+        .in("doc_no", Array.from(docNos));
+      if (ledgerError) return { data: [], error: ledgerError.message };
+      for (const row of ledgerDocs ?? []) invoiceIds.add(String(row.id));
+    }
+
+    let receiptIds: string[] = [];
+    if (invoiceIds.size > 0) {
+      const { data: allocations, error } = await supabase
+        .from("document_allocations")
+        .select("receipt_doc_id")
+        .in("invoice_doc_id", Array.from(invoiceIds));
+      if (error) return { data: [], error: error.message };
+      receiptIds = Array.from(
+        new Set((allocations ?? []).map((row) => String(row.receipt_doc_id ?? "")).filter(Boolean)),
+      );
+    }
+
+    if (receiptIds.length === 0 && note.contact_id) {
+      const { data: payDocs, error: payError } = await supabase
+        .from("documents")
+        .select("id")
+        .eq("contact_id", note.contact_id)
+        .eq("doc_type", "PAY")
+        .gte("doc_date", note.doc_date ? String(note.doc_date).slice(0, 10) : "2000-01-01");
+      if (payError) return { data: [], error: payError.message };
+      receiptIds = (payDocs ?? []).map((row) => String(row.id)).filter(Boolean);
+    }
     if (receiptIds.length === 0) return { data: [], error: null };
 
     const { data: payments, error: paymentError } = await supabase
       .from("documents")
-      .select("id, doc_no, doc_type, attachment_url, attached_file_url, original_receipt_url")
+      .select("id, doc_no, doc_type, grand_total, attachment_url, attached_file_url, original_receipt_url")
       .in("id", receiptIds)
       .eq("doc_type", "PAY");
     if (paymentError) return { data: [], error: paymentError.message };
 
+    const payIds = (payments ?? []).map((row) => String(row.id));
+    const { data: transactions, error: txError } = payIds.length
+      ? await supabase
+          .from("payment_transactions")
+          .select(
+            "document_id, payment_date, payment_method, bank_account_id, reference_no, attachment_url, amount, is_voided",
+          )
+          .in("document_id", payIds)
+      : { data: [], error: null };
+    if (txError) return { data: [], error: txError.message };
+
+    const bankIds = Array.from(
+      new Set(
+        (transactions ?? [])
+          .map((row) => row.bank_account_id)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+    const bankById = new Map<string, string>();
+    if (bankIds.length > 0) {
+      const { data: banks, error: bankError } = await supabase
+        .from("mst_bank_accounts")
+        .select("id, bank_name, account_no")
+        .in("id", bankIds);
+      if (bankError) return { data: [], error: bankError.message };
+      for (const bank of banks ?? []) {
+        const name = String(bank.bank_name ?? "").trim();
+        const accountNo = String(bank.account_no ?? "").trim();
+        bankById.set(String(bank.id), name && accountNo ? `${name} • ${accountNo}` : name || "บัญชีธนาคาร");
+      }
+    }
+    const txByDoc = new Map(
+      (transactions ?? [])
+        .filter((row) => row.is_voided !== true)
+        .map((row) => [String(row.document_id), row]),
+    );
+
     return {
-      data: (payments ?? []).map((row) => ({
-        doc_no: String(row.doc_no ?? ""),
-        slip_urls: [row.attachment_url, row.attached_file_url, row.original_receipt_url]
-          .map((url) => String(url ?? "").trim())
-          .filter((url, index, all) => Boolean(url) && all.indexOf(url) === index),
-      })),
+      data: (payments ?? []).map((row) => {
+        const tx = txByDoc.get(String(row.id));
+        const bankLabel = tx?.bank_account_id ? bankById.get(String(tx.bank_account_id)) : null;
+        const method = String(tx?.payment_method ?? "").toUpperCase();
+        return {
+          doc_no: String(row.doc_no ?? ""),
+          paid_at: tx?.payment_date ? String(tx.payment_date) : null,
+          channel_label: bankLabel || (method === "CASH" || !tx?.bank_account_id ? "เงินสด (Cash)" : "บัญชีธนาคาร"),
+          reference_no: tx?.reference_no?.trim() || null,
+          amount: roundMoney(toMoney((tx?.amount as number | string | null) ?? row.grand_total)),
+          slip_urls: [tx?.attachment_url, row.attachment_url, row.attached_file_url, row.original_receipt_url]
+            .map((url) => String(url ?? "").trim())
+            .filter((url, index, all) => Boolean(url) && all.indexOf(url) === index),
+        };
+      }),
       error: null,
     };
   } catch (error: unknown) {

@@ -7,7 +7,10 @@
 
 import Link from "next/link";
 import { ArrowLeft, Printer } from "lucide-react";
+import { toast } from "sonner";
 import type { BillingNoteDetailData, BillingNoteSettlement } from "@/types/billing";
+import { formatThaiDate } from "@/lib/utils/date-formatter";
+import { paymentTimeLabel } from "@/lib/utils/payment-timestamp";
 import {
   DeleteBillingNoteButton,
   EditBillingNoteButton,
@@ -76,7 +79,8 @@ export function BillingNoteDetail({
     doc.doc_type === "BR" &&
     (paymentStatus === "PENDING" || paymentStatus === "UNPAID" || paymentStatus === "PARTIAL");
   const alreadyPaid =
-    doc.doc_type === "BR" && (paymentStatus === "PAID" || paymentStatus === "COMPLETED");
+    (doc.doc_type === "BR" || doc.doc_type === "BN") &&
+    (paymentStatus === "PAID" || paymentStatus === "COMPLETED");
 
   return (
     <div className="flex flex-wrap items-start justify-between gap-3 print:hidden">
@@ -150,33 +154,109 @@ export function BillingNoteDetail({
           </Button>
         </div>
         {alreadyPaid ? (
-          <div className="max-w-md rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-            <div className="font-semibold">✅ จ่ายชำระแล้ว (PAID)</div>
-            {settlements.length === 0 ? (
-              <p className="mt-1 text-xs">ยังไม่พบใบสำคัญจ่ายที่ผูกกับบิลในใบวางบิลนี้</p>
-            ) : (
-              <ul className="mt-1 space-y-1">
-                {settlements.map((payment) => (
-                  <li key={payment.doc_no} className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-xs">{payment.doc_no}</span>
-                    {payment.slip_urls.map((url) => (
-                      <a
-                        key={url}
-                        href={url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs font-semibold text-emerald-800 underline"
-                      >
-                        ดูสลิปโอนเงิน
-                      </a>
-                    ))}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          <PaidSettlementCard
+            billingNoteNo={doc.doc_no}
+            contactName={doc.contact?.company_name ?? "คู่ค้า"}
+            settlements={settlements}
+          />
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function paidWhen(value: string | null): string {
+  if (!value) return "—";
+  const dateLabel = formatThaiDate(value, "short");
+  const timeLabel = paymentTimeLabel(value);
+  return timeLabel && timeLabel !== "00:00" ? `${dateLabel} ${timeLabel}` : dateLabel;
+}
+
+function transferMessage(
+  billingNoteNo: string,
+  contactName: string,
+  payment: BillingNoteSettlement,
+): string {
+  const lines = [
+    `เรียน ${contactName}`,
+    "บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด ขอแจ้งโอนเงินตามใบวางบิล",
+    `ใบวางบิล: ${billingNoteNo}`,
+    `ใบสำคัญจ่าย: ${payment.doc_no}`,
+    `วันที่โอน: ${paidWhen(payment.paid_at)}`,
+    `ช่องทาง: ${payment.channel_label}`,
+    payment.reference_no ? `เลขอ้างอิงสลิป: ${payment.reference_no}` : null,
+    `ยอดโอน: ${payment.amount.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท`,
+    payment.slip_urls[0] ? `สลิป: ${payment.slip_urls[0]}` : null,
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
+function PaidSettlementCard({
+  billingNoteNo,
+  contactName,
+  settlements,
+}: {
+  billingNoteNo: string;
+  contactName: string;
+  settlements: BillingNoteSettlement[];
+}) {
+  async function copyMessage(payment: BillingNoteSettlement) {
+    try {
+      await navigator.clipboard.writeText(transferMessage(billingNoteNo, contactName, payment));
+      toast.success("คัดลอกข้อความแจ้งโอนแล้ว");
+    } catch {
+      toast.error("คัดลอกข้อความไม่สำเร็จ");
+    }
+  }
+
+  function sendLine(payment: BillingNoteSettlement) {
+    const text = transferMessage(billingNoteNo, contactName, payment);
+    window.open(`https://line.me/R/msg/text/?${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
+  }
+
+  return (
+    <div className="max-w-md rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+      <div className="font-semibold">✅ จ่ายชำระแล้ว (PAID)</div>
+      {settlements.length === 0 ? (
+        <p className="mt-1 text-xs">ยังไม่พบใบสำคัญจ่ายที่ผูกกับบิลในใบวางบิลนี้</p>
+      ) : (
+        <ul className="mt-2 space-y-3">
+          {settlements.map((payment) => (
+            <li key={payment.doc_no} className="space-y-1 border-t border-emerald-200 pt-2 first:border-t-0 first:pt-0">
+              <div className="font-mono text-xs font-semibold">{payment.doc_no}</div>
+              <div className="text-xs">วันที่โอน: {paidWhen(payment.paid_at)}</div>
+              <div className="text-xs">ช่องทาง: {payment.channel_label}</div>
+              <div className="text-xs">รหัสอ้างอิงสลิป: {payment.reference_no || "—"}</div>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {payment.slip_urls[0] ? (
+                  <a
+                    href={payment.slip_urls[0]}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-8 items-center rounded-lg bg-white px-2 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200"
+                  >
+                    🖼️ ดูรูปสลิปโอนเงิน
+                  </a>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => sendLine(payment)}
+                  className="inline-flex h-8 items-center rounded-lg bg-white px-2 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200"
+                >
+                  📲 ส่งสลิปแจ้งคู่ค้าทาง LINE
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void copyMessage(payment)}
+                  className="inline-flex h-8 items-center rounded-lg bg-white px-2 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200"
+                >
+                  📋 คัดลอกข้อความแจ้งโอน
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

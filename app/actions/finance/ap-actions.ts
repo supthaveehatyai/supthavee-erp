@@ -20,7 +20,7 @@ import {
   resolveDueDate,
   todayIsoDate,
 } from "@/lib/utils/outstanding-summary";
-import { currentBangkokTime, paymentTimestampIso } from "@/lib/utils/payment-timestamp";
+import { paymentTimestampIso } from "@/lib/utils/payment-timestamp";
 import type {
   ApAllocationInput,
   ApVendorOption,
@@ -676,9 +676,7 @@ export async function submitAPPayment(
     }
     const payDocNo = numberResult.data;
     const nowIso = new Date().toISOString();
-    const paymentTime = /^\d{2}:\d{2}$/.test(paymentTimeRaw)
-      ? paymentTimeRaw
-      : currentBangkokTime();
+    const paymentTime = /^\d{2}:\d{2}$/.test(paymentTimeRaw) ? paymentTimeRaw : "00:00";
     const paymentDateIso = paymentTimestampIso(paymentDate, paymentTime);
 
     const owner = await requireSessionUserId();

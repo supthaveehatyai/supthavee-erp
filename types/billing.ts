@@ -129,6 +129,10 @@ export type PendingBillReceipt = {
 
 export type BillingNoteSettlement = {
   doc_no: string;
+  paid_at: string | null;
+  channel_label: string;
+  reference_no: string | null;
+  amount: number;
   slip_urls: string[];
 };
 

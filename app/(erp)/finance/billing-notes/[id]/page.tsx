@@ -28,7 +28,7 @@ export default async function BillingNoteDetailPage({ params }: PageProps) {
   const { id } = await params;
   const { data, error } = await getBillingNoteById(id);
   const paid =
-    data?.doc_type === "BR" &&
+    (data?.doc_type === "BR" || data?.doc_type === "BN") &&
     ["PAID", "COMPLETED"].includes(String(data.payment_status ?? "").trim().toUpperCase());
   const settlements = paid ? await getBillingNoteSettlements(id) : { data: [], error: null };
 
