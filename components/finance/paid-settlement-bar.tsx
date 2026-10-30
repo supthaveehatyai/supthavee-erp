@@ -8,6 +8,7 @@ type PaidSettlementBarProps = {
   slipUrl?: string | null;
   onSendLine: () => void;
   onCopy: () => void;
+  onReplaceSlip?: () => void;
 };
 
 const actionClass =
@@ -21,6 +22,7 @@ export function PaidSettlementBar({
   slipUrl,
   onSendLine,
   onCopy,
+  onReplaceSlip,
 }: PaidSettlementBarProps) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50/90 px-3 py-1.5 text-xs text-emerald-950">
@@ -43,6 +45,11 @@ export function PaidSettlementBar({
           <a href={slipUrl} target="_blank" rel="noreferrer" className={actionClass}>
             🖼️ ดูสลิป
           </a>
+        ) : null}
+        {onReplaceSlip ? (
+          <button type="button" onClick={onReplaceSlip} className={actionClass}>
+            🔄 เปลี่ยนสลิป
+          </button>
         ) : null}
         <button type="button" onClick={onSendLine} className={actionClass}>
           📲 ส่งสลิปทาง LINE

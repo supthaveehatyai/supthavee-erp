@@ -14,6 +14,7 @@ import { formatThaiDate } from "@/lib/utils/date-formatter";
 import { vendorTransferNotice } from "@/lib/line/line-target";
 import { LinePaymentSlipDialog } from "@/components/finance/line-payment-slip-dialog";
 import { PaidSettlementBar } from "@/components/finance/paid-settlement-bar";
+import { ReplacePaymentSlipDialog } from "@/components/finance/replace-payment-slip-dialog";
 import {
   DeleteBillingNoteButton,
   EditBillingNoteButton,
@@ -189,6 +190,7 @@ function PaidSettlementCard({
   settlements: BillingNoteSettlement[];
 }) {
   const [linePayment, setLinePayment] = useState<BillingNoteSettlement | null>(null);
+  const [replacePayment, setReplacePayment] = useState<BillingNoteSettlement | null>(null);
   const [sentNos, setSentNos] = useState<string[]>([]);
 
   async function copyMessage(payment: BillingNoteSettlement) {
@@ -218,6 +220,7 @@ function PaidSettlementCard({
               slipUrl={payment.slip_urls[0]}
               onSendLine={() => setLinePayment(payment)}
               onCopy={() => void copyMessage(payment)}
+              onReplaceSlip={() => setReplacePayment(payment)}
             />
           ))}
         </div>
@@ -236,6 +239,15 @@ function PaidSettlementCard({
         onSent={() => {
           if (linePayment?.doc_no) setSentNos((current) => [...current, linePayment.doc_no]);
         }}
+      />
+      <ReplacePaymentSlipDialog
+        open={replacePayment != null}
+        onOpenChange={(next) => {
+          if (!next) setReplacePayment(null);
+        }}
+        voucherDocId={replacePayment?.voucher_doc_id ?? ""}
+        partyName={contactName}
+        netAmount={replacePayment?.amount ?? 0}
       />
     </>
   );

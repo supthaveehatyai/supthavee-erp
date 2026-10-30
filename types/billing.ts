@@ -128,6 +128,7 @@ export type PendingBillReceipt = {
 };
 
 export type BillingNoteSettlement = {
+  voucher_doc_id: string;
   doc_no: string;
   paid_at: string | null;
   channel_label: string;

@@ -564,6 +564,7 @@ export async function getBillingNoteSettlements(billingNoteId: string): Promise<
         const method = String(tx?.payment_method ?? "").toUpperCase();
         const docNo = String(row.doc_no ?? "");
         return {
+          voucher_doc_id: String(row.id),
           doc_no: docNo,
           paid_at: tx?.payment_date ? String(tx.payment_date) : null,
           channel_label: bankLabel || (method === "CASH" || !tx?.bank_account_id ? "เงินสด (Cash)" : "บัญชีธนาคาร"),

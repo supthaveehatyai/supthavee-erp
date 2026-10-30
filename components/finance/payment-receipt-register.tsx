@@ -17,6 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { compactRepeatedBillLabel, formatRegisterBillLabel } from "@/lib/finance/payment-register-label";
+import { ReplacePaymentSlipDialog } from "@/components/finance/replace-payment-slip-dialog";
 import { monthBounds, thaiMonthLabel, todayBillingIso } from "@/lib/utils/billing-period";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
 import { paymentTimeLabel } from "@/lib/utils/payment-timestamp";
@@ -63,6 +64,7 @@ export function PaymentReceiptRegister() {
   const [data, setData] = useState<PaymentRegisterData | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [replaceRow, setReplaceRow] = useState<PaymentRegisterData["rows"][number] | null>(null);
   const months = useMemo(() => recentMonths(4), []);
 
   async function load() {
@@ -296,18 +298,29 @@ export function PaymentReceiptRegister() {
                       {formatMoney(row.amount)}
                     </TableCell>
                     <TableCell>
-                      {row.slipUrl ? (
-                        <a
-                          href={row.slipUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-xs font-semibold text-blue-700 underline"
-                        >
-                          ดูสลิป
-                        </a>
-                      ) : (
-                        "—"
-                      )}
+                      <div className="flex flex-col items-start gap-1">
+                        {row.slipUrl ? (
+                          <a
+                            href={row.slipUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs font-semibold text-blue-700 underline"
+                          >
+                            ดูสลิป
+                          </a>
+                        ) : (
+                          <span>—</span>
+                        )}
+                        {row.voucherDocId ? (
+                          <button
+                            type="button"
+                            onClick={() => setReplaceRow(row)}
+                            className="text-xs font-semibold text-emerald-800 underline"
+                          >
+                            🔄 เปลี่ยนสลิป
+                          </button>
+                        ) : null}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -315,6 +328,16 @@ export function PaymentReceiptRegister() {
             </TableBody>
           </Table>
         </div>
+        <ReplacePaymentSlipDialog
+          open={replaceRow != null}
+          onOpenChange={(next) => {
+            if (!next) setReplaceRow(null);
+          }}
+          voucherDocId={replaceRow?.voucherDocId ?? ""}
+          partyName={replaceRow?.contactName ?? "คู่ค้า"}
+          netAmount={replaceRow?.amount ?? 0}
+          onSaved={() => void load()}
+        />
       </CardContent>
     </Card>
   );

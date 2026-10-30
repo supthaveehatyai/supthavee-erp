@@ -6,7 +6,7 @@
  * Submit via Server Action `submitAPPayment` + FormData (Zero Client-Side Fetching).
  */
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -41,6 +41,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -153,6 +157,10 @@ export function APPaymentClient({
   const [bankAccountId, setBankAccountId] = useState(() => preferredBankId(activeBanks));
   const [referenceNo, setReferenceNo] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [slipPreviewUrl, setSlipPreviewUrl] = useState<string | null>(null);
+  const [slipZoom, setSlipZoom] = useState(false);
+  const [returningToBilling, setReturningToBilling] = useState(false);
+  const slipInputRef = useRef<HTMLInputElement>(null);
   const [lineOpen, setLineOpen] = useState(false);
   const [lineNotice, setLineNotice] = useState<{
     paymentDocNo: string;
@@ -163,6 +171,16 @@ export function APPaymentClient({
     channelLabel: string;
     lineSent: boolean;
   } | null>(null);
+
+  useEffect(() => {
+    if (!slipFile) {
+      setSlipPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(slipFile);
+    setSlipPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [slipFile]);
 
   useEffect(() => {
     let cancelled = false;
@@ -510,6 +528,13 @@ export function APPaymentClient({
         toast.error(result.error ?? "บันทึกการจ่ายชำระไม่สำเร็จ");
         return;
       }
+      if (initialBillingNoteId) {
+        setReturningToBilling(true);
+        toast.success("✅ บันทึกจ่ายชำระสำเร็จ — กำลังกลับสู่หน้าระบบวางบิล...");
+        router.push("/finance/billing-notes?type=BR");
+        router.refresh();
+        return;
+      }
       toast.success(
         result.payment_doc_no
           ? `บันทึกจ่ายชำระสำเร็จ — ${result.payment_doc_no}`
@@ -714,7 +739,13 @@ export function APPaymentClient({
                 variant="outline"
                 size="sm"
                 className="gap-1.5"
-                onClick={() => handleVendorChange("")}
+                onClick={() => {
+                  if (initialBillingNoteId) {
+                    router.push("/finance/billing-notes?type=BR");
+                    return;
+                  }
+                  handleVendorChange("");
+                }}
               >
                 <ArrowLeft className="h-4 w-4" />
                 กลับไปสรุป
@@ -756,7 +787,11 @@ export function APPaymentClient({
               </div>
             ) : null}
 
-            {invoices.length === 0 ? (
+            {returningToBilling ? (
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 py-10 text-center text-sm font-medium text-emerald-800">
+                ✅ บันทึกจ่ายชำระสำเร็จ — กำลังกลับสู่หน้าระบบวางบิล...
+              </div>
+            ) : invoices.length === 0 ? (
               <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 py-10 text-center text-slate-500">
                 ไม่พบบิลค้างชำระ
                 {selectedBillingNoteId
@@ -1170,6 +1205,7 @@ export function APPaymentClient({
                         </div>
                       </div>
                       <Input
+                        ref={slipInputRef}
                         id="slip_file"
                         name="slip_file"
                         type="file"
@@ -1178,6 +1214,43 @@ export function APPaymentClient({
                         onChange={(e) => void handleSlipChange(e.target.files)}
                       />
                     </div>
+                    {slipPreviewUrl ? (
+                      <div className="space-y-2 rounded-xl bg-emerald-50/60 p-3">
+                        <p className="text-sm font-semibold text-emerald-950">
+                          🔍 โปรดตรวจสอบชื่อผู้รับโอน ({selectedVendor?.name ?? "คู่ค้า"}) และยอดเงินบนสลิปให้ตรงกับยอดจ่ายจริง (฿
+                          {formatMoney(totalPaymentAmount)}) ก่อนกดยืนยัน
+                        </p>
+                        {slipFile?.type === "application/pdf" ? (
+                          <iframe
+                            title="ตัวอย่างสลิป"
+                            src={slipPreviewUrl}
+                            className="h-[420px] w-full rounded-xl border-2 border-emerald-200 shadow-md"
+                          />
+                        ) : (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={slipPreviewUrl}
+                            alt="ตัวอย่างสลิปโอนเงิน"
+                            className="max-h-[420px] w-auto rounded-xl border-2 border-emerald-200 object-contain shadow-md"
+                          />
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          <Button type="button" variant="outline" onClick={() => setSlipZoom(true)}>
+                            🔍 คลิกเพื่อขยายดูสลิปเต็มจอ
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              setSlipFile(null);
+                              if (slipInputRef.current) slipInputRef.current.value = "";
+                            }}
+                          >
+                            🗑️ เปลี่ยนไฟล์สลิป
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -1199,6 +1272,20 @@ export function APPaymentClient({
           </CardContent>
         </Card>
       )}
+      <Dialog open={slipZoom} onOpenChange={setSlipZoom}>
+        <DialogContent className="max-h-[95vh] max-w-5xl overflow-auto bg-slate-950 p-3">
+          {slipPreviewUrl && slipFile?.type === "application/pdf" ? (
+            <iframe title="สลิปเต็มจอ" src={slipPreviewUrl} className="h-[85vh] w-full rounded-lg bg-white" />
+          ) : slipPreviewUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={slipPreviewUrl}
+              alt="สลิปเต็มจอ"
+              className="mx-auto max-h-[85vh] w-auto object-contain"
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
       {lineNotice ? (
         <LinePaymentSlipDialog
           open={lineOpen}

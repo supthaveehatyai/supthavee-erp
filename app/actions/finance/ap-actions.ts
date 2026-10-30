@@ -1030,3 +1030,167 @@ export async function submitAPPayment(
     return { success: false, error: message };
   }
 }
+
+function replacementTimestamp(raw: string | undefined): string | null {
+  const value = raw?.trim() ?? "";
+  if (!value) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return paymentTimestampIso(value, "00:00");
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return value;
+}
+
+function isMissingReplaceSlipRpc(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const message = error.message ?? "";
+  return (
+    error.code === "PGRST202" ||
+    error.code === "42883" ||
+    /could not find the function|schema cache/i.test(message)
+  );
+}
+
+async function applyReplacementSlip(
+  supabaseAdmin: SupabaseClient,
+  voucherDocId: string,
+  newSlipUrl: string,
+  paymentDate: string | null,
+  referenceNo: string | null,
+): Promise<string | null> {
+  const { data: voucher, error: voucherError } = await supabaseAdmin
+    .from("documents")
+    .select("id, doc_no, doc_type")
+    .eq("id", voucherDocId)
+    .maybeSingle();
+  if (voucherError) return voucherError.message;
+  const docType = String(voucher?.doc_type ?? "");
+  if (!voucher || (docType !== "PAY" && docType !== "REC")) {
+    return "ไม่พบใบสำคัญจ่ายหรือใบรับเงินที่จะเปลี่ยนสลิป";
+  }
+
+  const txPatch: {
+    attachment_url: string;
+    updated_at: string;
+    payment_date?: string;
+    reference_no?: string;
+  } = {
+    attachment_url: newSlipUrl,
+    updated_at: new Date().toISOString(),
+  };
+  if (paymentDate) txPatch.payment_date = paymentDate;
+  if (referenceNo) txPatch.reference_no = referenceNo;
+
+  const { error: txError } = await supabaseAdmin
+    .from("payment_transactions")
+    .update(txPatch)
+    .eq("document_id", voucherDocId)
+    .or("is_voided.is.null,is_voided.eq.false");
+  if (txError) return txError.message;
+
+  const { error: docError } = await supabaseAdmin
+    .from("documents")
+    .update({
+      attachment_url: newSlipUrl,
+      attached_file_url: newSlipUrl,
+      original_receipt_url: newSlipUrl,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", voucherDocId);
+  if (docError) return docError.message;
+
+  const headerPatch = {
+    attached_file_url: newSlipUrl,
+    original_receipt_url: newSlipUrl,
+  };
+  const { error: headerError } = await supabaseAdmin
+    .from("doc_headers")
+    .update(headerPatch)
+    .eq("id", voucherDocId);
+  if (headerError) return headerError.message;
+  if (voucher.doc_no) {
+    const { error: mirroredError } = await supabaseAdmin
+      .from("doc_headers")
+      .update(headerPatch)
+      .eq("doc_no", voucher.doc_no)
+      .eq("doc_type", docType);
+    if (mirroredError) return mirroredError.message;
+  }
+  return null;
+}
+
+export async function uploadReplacementPaymentSlipAction(
+  formData: FormData,
+): Promise<{ success: boolean; url: string | null; error: string | null }> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) return { success: false, url: null, error: owner.error };
+  const file = formData.get("slip_file");
+  if (!(file instanceof File) || file.size <= 0) {
+    return { success: false, url: null, error: "กรุณาเลือกไฟล์สลิปใหม่" };
+  }
+  const supabaseAdmin = createSupabaseAdminClient();
+  const uploaded = await uploadPaymentSlip(supabaseAdmin, file);
+  if ("error" in uploaded) return { success: false, url: null, error: uploaded.error };
+  return { success: true, url: uploaded.url, error: null };
+}
+
+/**
+ * Replace the slip on an existing PAY/REC voucher.
+ * Calls `replace_payment_slip_transaction`. If that RPC is not installed yet,
+ * the same columns are updated here so the voucher is not deleted or re-posted.
+ */
+export async function replacePaymentSlipAction(payload: {
+  voucherDocId: string;
+  newSlipUrl: string;
+  paymentDate?: string;
+  referenceNo?: string;
+}): Promise<{ success: boolean; error: string | null }> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) return { success: false, error: owner.error };
+
+  const voucherDocId = payload.voucherDocId.trim();
+  const newSlipUrl = payload.newSlipUrl.trim();
+  const referenceNo = payload.referenceNo?.trim() || null;
+  const paymentDate = replacementTimestamp(payload.paymentDate);
+  if (!voucherDocId) return { success: false, error: "ไม่พบใบสำคัญจ่าย" };
+  if (!newSlipUrl.startsWith("https://")) {
+    return { success: false, error: "ลิงก์สลิปใหม่ไม่ถูกต้อง" };
+  }
+
+  const supabaseAdmin = createSupabaseAdminClient();
+  const settleRpc = supabaseAdmin as unknown as {
+    rpc: (
+      fn: "replace_payment_slip_transaction",
+      args: {
+        p_voucher_doc_id: string;
+        p_new_slip_url: string;
+        p_payment_date: string | null;
+        p_reference_no: string | null;
+      },
+    ) => Promise<{ error: { code?: string; message?: string } | null }>;
+  };
+  const { error: rpcError } = await settleRpc.rpc("replace_payment_slip_transaction", {
+    p_voucher_doc_id: voucherDocId,
+    p_new_slip_url: newSlipUrl,
+    p_payment_date: paymentDate,
+    p_reference_no: referenceNo,
+  });
+  if (rpcError && !isMissingReplaceSlipRpc(rpcError)) {
+    return { success: false, error: rpcError.message ?? "เปลี่ยนสลิปไม่สำเร็จ" };
+  }
+  if (rpcError) {
+    const applied = await applyReplacementSlip(
+      supabaseAdmin,
+      voucherDocId,
+      newSlipUrl,
+      paymentDate,
+      referenceNo,
+    );
+    if (applied) return { success: false, error: applied };
+  }
+
+  revalidatePath("/finance/ap-payment");
+  revalidatePath("/finance/billing-notes", "layout");
+  revalidatePath("/finance/tax-reports");
+  revalidatePath("/reports");
+  return { success: true, error: null };
+}

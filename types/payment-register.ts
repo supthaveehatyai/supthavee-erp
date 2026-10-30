@@ -25,6 +25,7 @@ export type PaymentRegisterLine = {
 
 export type PaymentRegisterEntry = {
   id: string;
+  voucherDocId: string;
   direction: "AP" | "AR";
   paidAt: string;
   docNo: string;

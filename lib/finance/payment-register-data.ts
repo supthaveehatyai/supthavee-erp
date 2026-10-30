@@ -315,6 +315,7 @@ async function loadRegisterFallback(
     const lines = linesByReceipt.get(doc.id) ?? [];
     rows.push({
       id: tx.id,
+      voucherDocId: doc.id,
       direction,
       paidAt: String(tx.payment_date),
       docNo: String(doc.doc_no ?? "").trim() || "—",
@@ -347,6 +348,9 @@ function mapRpcRows(data: unknown): PaymentRegisterEntry[] | null {
     const lines = Array.isArray(row.lines) ? row.lines.map(mapRegisterLine) : [];
     return {
       id: String(row.id ?? ""),
+      voucherDocId: String(
+        row.voucherDocId ?? row.voucher_doc_id ?? row.document_id ?? row.documentId ?? "",
+      ),
       direction,
       paidAt: String(row.paidAt ?? row.paid_at ?? ""),
       docNo: String(row.docNo ?? row.doc_no ?? "—"),
