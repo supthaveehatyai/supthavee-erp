@@ -174,13 +174,13 @@ function BusinessOverviewTab({
           <Card key={kpi.key} className={`border ${kpi.accent}`}>
             <CardHeader className="border-b-0 pb-0">
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
+                <div className="min-w-0 overflow-visible">
                   <CardDescription className="text-[11px] font-semibold uppercase tracking-wide text-inherit/80">
                     {kpi.label}
                   </CardDescription>
                   <CardTitle
                     className={cn(
-                      "mt-2 truncate text-2xl font-bold tracking-tight sm:text-3xl",
+                      "mt-2 text-xl font-bold tabular-nums tracking-tight xl:text-2xl",
                       kpi.valueClassName,
                     )}
                   >

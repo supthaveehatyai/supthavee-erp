@@ -25,6 +25,7 @@ import {
 } from "@/lib/utils/deposit-apply";
 import { compressImage } from "@/lib/utils/image-compression";
 import { OutstandingPartyCombobox } from "@/components/finance/OutstandingPartyCombobox";
+import { LinePaymentSlipDialog } from "@/components/finance/line-payment-slip-dialog";
 import { AllocatedAmountCell } from "@/components/finance/AllocatedAmountCell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -141,6 +142,13 @@ export function APPaymentClient({
   );
   const [referenceNo, setReferenceNo] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [lineOpen, setLineOpen] = useState(false);
+  const [lineNotice, setLineNotice] = useState<{
+    paymentDocNo: string;
+    slipUrl: string | null;
+    message: string;
+    billingNoteNo: string | null;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -484,6 +492,36 @@ export function APPaymentClient({
           ? `บันทึกจ่ายชำระสำเร็จ — ${result.payment_doc_no}`
           : "บันทึกจ่ายชำระสำเร็จ",
       );
+      const paidBills = invoices
+        .filter((invoice) => Number(paymentAmounts[invoice.id] ?? 0) > 0)
+        .map((invoice) => invoice.document_no);
+      const note = billingNotes.find((item) => item.id === selectedBillingNoteId);
+      const bank = activeBanks.find((item) => item.id === bankAccountId);
+      const channel =
+        bankAccountId === "CASH"
+          ? "เงินสด (Cash)"
+          : bank
+            ? `${bank.bank_name} • ${bank.account_no}`
+            : "บัญชีธนาคาร";
+      const when = paymentTime.trim() ? `${paymentDate} ${paymentTime.trim()}` : paymentDate;
+      setLineNotice({
+        paymentDocNo: result.payment_doc_no ?? "",
+        slipUrl: result.slip_url ?? null,
+        billingNoteNo: note?.doc_no ?? null,
+        message: [
+          `เรียน ${selectedVendor?.name ?? "คู่ค้า"}`,
+          "บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด ขอแจ้งโอนเงินตามใบวางบิล",
+          note ? `ใบวางบิล: ${note.doc_no}` : null,
+          paidBills.length > 0 ? `รายการบิลที่ชำระ: ${paidBills.join(", ")}` : null,
+          result.payment_doc_no ? `ใบสำคัญจ่าย: ${result.payment_doc_no}` : null,
+          `วันที่โอน: ${when}`,
+          `ธนาคาร/ช่องทาง: ${channel}`,
+          referenceNo.trim() ? `เลขอ้างอิงสลิป: ${referenceNo.trim()}` : null,
+          `ยอดโอนสุทธิ: ${formatMoney(totalPaymentAmount)} บาท`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      });
       setPaymentAmounts({});
       setDepositAmounts({});
       setSlipFile(null);
@@ -505,6 +543,15 @@ export function APPaymentClient({
           เลือกผู้จำหน่ายหรือช่างรับเหมาที่มียอดค้าง เพื่อตัดยอดแบบ Knock-off
           (FIFO) — รองรับ AP_TAX / AP_INV / TB
         </p>
+        {lineNotice ? (
+          <button
+            type="button"
+            onClick={() => setLineOpen(true)}
+            className="inline-flex h-10 w-fit items-center rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white"
+          >
+            📲 ส่งสลิปแจ้งคู่ค้าทาง LINE
+          </button>
+        ) : null}
       </div>
 
       <Card>
@@ -1133,6 +1180,18 @@ export function APPaymentClient({
           </CardContent>
         </Card>
       )}
+      {lineNotice ? (
+        <LinePaymentSlipDialog
+          open={lineOpen}
+          onOpenChange={setLineOpen}
+          contactId={selectedVendorId}
+          contactName={selectedVendor?.name ?? "คู่ค้า"}
+          billingNoteNo={lineNotice.billingNoteNo}
+          paymentDocNo={lineNotice.paymentDocNo}
+          messageText={lineNotice.message}
+          slipUrl={lineNotice.slipUrl}
+        />
+      ) : null}
     </div>
   );
 }

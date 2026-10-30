@@ -553,30 +553,6 @@ export async function getBillingNoteSettlements(billingNoteId: string): Promise<
   }
 }
 
-type BillingNoteItemJoinRow = {
-  id: string;
-  invoice_id: string;
-  billed_amount: number | string | null;
-  invoice:
-    | {
-        id?: string;
-        doc_no?: string | null;
-        doc_type?: string | null;
-        doc_date?: string | null;
-        due_date?: string | null;
-        grand_total?: number | string | null;
-      }
-    | {
-        id?: string;
-        doc_no?: string | null;
-        doc_type?: string | null;
-        doc_date?: string | null;
-        due_date?: string | null;
-        grand_total?: number | string | null;
-      }[]
-    | null;
-};
-
 /**
  * Fetch a single Billing Note (BN/BR) with contact + invoice lines.
  */
@@ -641,21 +617,7 @@ export async function getBillingNoteById(
 
     const { data: itemRows, error: itemsError } = await supabase
       .from("billing_note_items")
-      .select(
-        `
-        id,
-        invoice_id,
-        billed_amount,
-        invoice:doc_headers!billing_note_items_invoice_id_fkey (
-          id,
-          doc_no,
-          doc_type,
-          doc_date,
-          due_date,
-          grand_total
-        )
-      `,
-      )
+      .select("id, invoice_id, billed_amount")
       .eq("billing_note_id", trimmedId)
       .order("created_at", { ascending: true });
 
@@ -670,25 +632,58 @@ export async function getBillingNoteById(
       (header as BillingNoteHeaderRow).contacts,
     );
 
-    const invoices: BillingNoteInvoiceLine[] = (
-      (itemRows ?? []) as BillingNoteItemJoinRow[]
-    ).map((row) => {
-      const invoice = Array.isArray(row.invoice)
-        ? (row.invoice[0] ?? null)
-        : row.invoice;
+    const invoiceIds = Array.from(
+      new Set(
+        (itemRows ?? [])
+          .map((row) => String(row.invoice_id ?? "").trim())
+          .filter(Boolean),
+      ),
+    );
+    type LedgerSide = {
+      id: string;
+      doc_no: string | null;
+      doc_type: string | null;
+      doc_date: string | null;
+      due_date: string | null;
+      grand_total: number | string | null;
+      reference_no?: string | null;
+    };
+    const headerById = new Map<string, LedgerSide>();
+    const documentById = new Map<string, LedgerSide>();
+    if (invoiceIds.length > 0) {
+      const [headerSide, documentSide] = await Promise.all([
+        supabase
+          .from("doc_headers")
+          .select("id, doc_no, doc_type, doc_date, due_date, grand_total")
+          .in("id", invoiceIds),
+        supabase
+          .from("documents")
+          .select("id, doc_no, doc_type, doc_date, due_date, grand_total, reference_no")
+          .in("id", invoiceIds),
+      ]);
+      for (const row of headerSide.data ?? []) headerById.set(String(row.id), row);
+      for (const row of documentSide.data ?? []) documentById.set(String(row.id), row);
+    }
+
+    const invoices: BillingNoteInvoiceLine[] = (itemRows ?? []).map((row) => {
+      const invoiceId = String(row.invoice_id ?? "");
+      const headerSide = headerById.get(invoiceId);
+      const documentSide = documentById.get(invoiceId);
+      const docNo = (headerSide?.doc_no || documentSide?.doc_no || "").trim();
+      const docType = (headerSide?.doc_type || documentSide?.doc_type || "").trim();
+      const docDate = headerSide?.doc_date || documentSide?.doc_date || "";
+      const dueDate = headerSide?.due_date ?? documentSide?.due_date ?? null;
+      const grand = headerSide?.grand_total ?? documentSide?.grand_total;
       return {
         id: row.id,
-        invoice_id: row.invoice_id,
+        invoice_id: invoiceId,
         billed_amount: roundMoney(toMoney(row.billed_amount)),
-        invoice_doc_no: invoice?.doc_no?.trim() || "—",
-        invoice_doc_type: invoice?.doc_type?.trim() || "—",
-        invoice_doc_date: invoice?.doc_date
-          ? String(invoice.doc_date)
-          : "",
-        invoice_due_date: invoice?.due_date
-          ? String(invoice.due_date)
-          : null,
-        invoice_grand_total: roundMoney(toMoney(invoice?.grand_total)),
+        invoice_doc_no: docNo || "—",
+        invoice_doc_type: docType || "—",
+        invoice_doc_date: docDate ? String(docDate) : "",
+        invoice_due_date: dueDate ? String(dueDate) : null,
+        invoice_grand_total: roundMoney(toMoney(grand)),
+        reference_no: documentSide?.reference_no?.trim() || null,
       };
     });
     const invoicesWithRefs = await attachInvoiceReferences(supabase, invoices);

@@ -959,6 +959,7 @@ export async function submitAPPayment(
       success: true,
       error: null,
       payment_doc_no: payDocNo,
+      slip_url: slipUrl,
     };
   } catch (err) {
     if (payDocId) {

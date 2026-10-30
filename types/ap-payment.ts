@@ -57,4 +57,5 @@ export type SubmitAPPaymentResult = {
   success: boolean;
   error: string | null;
   payment_doc_no?: string | null;
+  slip_url?: string | null;
 };

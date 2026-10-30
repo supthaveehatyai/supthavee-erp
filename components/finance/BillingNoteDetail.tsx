@@ -5,12 +5,14 @@
  * Print document rendered by BillingNotePrintTemplate (Server Component).
  */
 
+import { useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Printer } from "lucide-react";
 import { toast } from "sonner";
 import type { BillingNoteDetailData, BillingNoteSettlement } from "@/types/billing";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
 import { paymentTimeLabel } from "@/lib/utils/payment-timestamp";
+import { LinePaymentSlipDialog } from "@/components/finance/line-payment-slip-dialog";
 import {
   DeleteBillingNoteButton,
   EditBillingNoteButton,
@@ -156,7 +158,9 @@ export function BillingNoteDetail({
         {alreadyPaid ? (
           <PaidSettlementCard
             billingNoteNo={doc.doc_no}
+            contactId={doc.contact?.id ?? ""}
             contactName={doc.contact?.company_name ?? "คู่ค้า"}
+            invoiceNos={doc.invoices.map((line) => line.invoice_doc_no).filter(Boolean)}
             settlements={settlements}
           />
         ) : null}
@@ -175,43 +179,45 @@ function paidWhen(value: string | null): string {
 function transferMessage(
   billingNoteNo: string,
   contactName: string,
+  invoiceNos: string[],
   payment: BillingNoteSettlement,
 ): string {
   const lines = [
     `เรียน ${contactName}`,
     "บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด ขอแจ้งโอนเงินตามใบวางบิล",
     `ใบวางบิล: ${billingNoteNo}`,
+    invoiceNos.length > 0 ? `รายการบิลที่ชำระ: ${invoiceNos.join(", ")}` : null,
     `ใบสำคัญจ่าย: ${payment.doc_no}`,
     `วันที่โอน: ${paidWhen(payment.paid_at)}`,
-    `ช่องทาง: ${payment.channel_label}`,
+    `ธนาคาร/ช่องทาง: ${payment.channel_label}`,
     payment.reference_no ? `เลขอ้างอิงสลิป: ${payment.reference_no}` : null,
-    `ยอดโอน: ${payment.amount.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท`,
-    payment.slip_urls[0] ? `สลิป: ${payment.slip_urls[0]}` : null,
+    `ยอดโอนสุทธิ: ${payment.amount.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท`,
   ];
   return lines.filter(Boolean).join("\n");
 }
 
 function PaidSettlementCard({
   billingNoteNo,
+  contactId,
   contactName,
+  invoiceNos,
   settlements,
 }: {
   billingNoteNo: string;
+  contactId: string;
   contactName: string;
+  invoiceNos: string[];
   settlements: BillingNoteSettlement[];
 }) {
+  const [linePayment, setLinePayment] = useState<BillingNoteSettlement | null>(null);
+
   async function copyMessage(payment: BillingNoteSettlement) {
     try {
-      await navigator.clipboard.writeText(transferMessage(billingNoteNo, contactName, payment));
+      await navigator.clipboard.writeText(transferMessage(billingNoteNo, contactName, invoiceNos, payment));
       toast.success("คัดลอกข้อความแจ้งโอนแล้ว");
     } catch {
       toast.error("คัดลอกข้อความไม่สำเร็จ");
     }
-  }
-
-  function sendLine(payment: BillingNoteSettlement) {
-    const text = transferMessage(billingNoteNo, contactName, payment);
-    window.open(`https://line.me/R/msg/text/?${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
   }
 
   return (
@@ -240,7 +246,7 @@ function PaidSettlementCard({
                 ) : null}
                 <button
                   type="button"
-                  onClick={() => sendLine(payment)}
+                  onClick={() => setLinePayment(payment)}
                   className="inline-flex h-8 items-center rounded-lg bg-white px-2 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200"
                 >
                   📲 ส่งสลิปแจ้งคู่ค้าทาง LINE
@@ -257,6 +263,22 @@ function PaidSettlementCard({
           ))}
         </ul>
       )}
+      <LinePaymentSlipDialog
+        open={linePayment != null}
+        onOpenChange={(next) => {
+          if (!next) setLinePayment(null);
+        }}
+        contactId={contactId}
+        contactName={contactName}
+        billingNoteNo={billingNoteNo}
+        paymentDocNo={linePayment?.doc_no}
+        messageText={
+          linePayment
+            ? transferMessage(billingNoteNo, contactName, invoiceNos, linePayment)
+            : ""
+        }
+        slipUrl={linePayment?.slip_urls.find((url) => url.startsWith("https://")) ?? null}
+      />
     </div>
   );
 }
