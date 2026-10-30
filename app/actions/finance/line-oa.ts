@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { requireSessionUserId } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server-admin";
 import { loadLineChannelAccessToken, loadLineOaAccountUid, pushLineMessages } from "@/lib/line/line-oa";
-import { extractLineTargetId, H3_LINE_GROUP_ID, isH3Contact } from "@/lib/line/line-target";
+import { extractLineTargetId } from "@/lib/line/line-target";
 
 type KnownGroup = {
   group_id: string;
@@ -43,38 +43,49 @@ export async function listLineKnownGroupsAction(): Promise<{
 export async function loadContactLineTargetAction(
   contactId: string,
   contactName?: string | null,
-): Promise<{ lineTargetId: string | null; error: string | null }> {
+): Promise<{ lineTargetId: string | null; lineOaChatUrl: string | null; error: string | null }> {
   const owner = await requireSessionUserId();
-  if (!owner.ok) return { lineTargetId: null, error: owner.error };
+  if (!owner.ok) return { lineTargetId: null, lineOaChatUrl: null, error: owner.error };
   const id = contactId.trim();
+  void contactName;
   if (!id) {
-    return {
-      lineTargetId: isH3Contact(contactName) ? H3_LINE_GROUP_ID : null,
-      error: null,
-    };
+    return { lineTargetId: null, lineOaChatUrl: null, error: null };
   }
-  const supabase = createClient() as unknown as {
-    from: (table: "contacts") => {
-      select: (columns: string) => {
-        eq: (column: string, value: string) => {
-          maybeSingle: () => Promise<{
-            data: { line_target_id?: string | null; company_name?: string | null } | null;
-            error: { message?: string } | null;
-          }>;
+  const saved = await readContactLineFields(id);
+  return {
+    lineTargetId: saved.lineTargetId,
+    lineOaChatUrl: saved.lineOaChatUrl,
+    error: null,
+  };
+}
+
+export async function saveContactLineOaChatUrlAction(
+  contactId: string,
+  lineOaChatUrl: string,
+): Promise<{ success: boolean; error: string | null }> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) return { success: false, error: owner.error };
+  const id = contactId.trim();
+  const url = lineOaChatUrl.trim();
+  if (!id || !url) return { success: false, error: "ไม่พบคู่ค้าหรือลิงก์ห้องแชท" };
+  try {
+    const supabase = createClient() as unknown as {
+      from: (table: "contacts") => {
+        update: (values: { line_oa_chat_url: string }) => {
+          eq: (column: string, value: string) => Promise<{ error: { message?: string } | null }>;
         };
       };
     };
-  };
-  const { data } = await supabase
-    .from("contacts")
-    .select("line_target_id, company_name")
-    .eq("id", id)
-    .maybeSingle();
-  const saved = data?.line_target_id?.trim() || null;
-  if (saved) return { lineTargetId: saved, error: null };
-  const name = data?.company_name || contactName;
-  if (isH3Contact(name)) return { lineTargetId: H3_LINE_GROUP_ID, error: null };
-  return { lineTargetId: null, error: null };
+    const { error } = await supabase.from("contacts").update({ line_oa_chat_url: url }).eq("id", id);
+    if (error) {
+      console.error("[saveContactLineOaChatUrl]", error.message);
+      return { success: false, error: error.message ?? "บันทึกลิงก์ห้องแชทไม่สำเร็จ" };
+    }
+    return { success: true, error: null };
+  } catch (err) {
+    console.error("[saveContactLineOaChatUrl]", err);
+    return { success: false, error: "บันทึกลิงก์ห้องแชทไม่สำเร็จ" };
+  }
 }
 
 export async function sendVendorPaymentSlipLineAction(input: {
@@ -93,12 +104,14 @@ export async function sendVendorPaymentSlipLineAction(input: {
   const messageText = input.messageText?.trim() ?? "";
   if (!messageText) return { success: false, error: "กรุณาระบุข้อความแจ้งโอน", imageSent: false };
 
-  const lineTargetId =
-    extractLineTargetId(input.lineTargetId) ||
-    extractLineTargetId(input.lineOaChatUrl) ||
-    (isH3Contact(input.contactName) ? H3_LINE_GROUP_ID : null);
+  const lineTargetId = messagingGroupId(input.lineTargetId);
   if (!lineTargetId) {
-    return { success: false, error: "กรุณาเลือกกลุ่ม หรือวางลิงก์ห้องแชท LINE OA", imageSent: false };
+    return {
+      success: false,
+      error:
+        "Push API ใช้ได้เมื่อเลือก API Group ID ที่ได้จาก Webhook แล้วเท่านั้น รหัสหลัง /chat/ ของ chat.line.biz เป็นรหัสห้องในหน้าจัดการ ไม่ใช่ groupId",
+      imageSent: false,
+    };
   }
 
   const token = await loadLineChannelAccessToken();
@@ -153,6 +166,54 @@ export async function sendVendorPaymentSlipLineAction(input: {
     return { success: false, error: explainLineFailure(pushed.errorMessage, pushed.errorDetails), imageSent: false };
   }
   return { success: true, error: null, imageSent };
+}
+
+function messagingGroupId(value: string | null | undefined): string | null {
+  const raw = value?.trim() ?? "";
+  if (!raw || /chat\.line\.biz/i.test(raw) || raw.includes("/")) return null;
+  return extractLineTargetId(raw);
+}
+
+async function readContactLineFields(contactId: string): Promise<{
+  lineTargetId: string | null;
+  lineOaChatUrl: string | null;
+}> {
+  const supabase = createClient() as unknown as {
+    from: (table: "contacts") => {
+      select: (columns: string) => {
+        eq: (column: string, value: string) => {
+          maybeSingle: () => Promise<{
+            data: {
+              line_target_id?: string | null;
+              line_oa_chat_url?: string | null;
+            } | null;
+            error: { message?: string } | null;
+          }>;
+        };
+      };
+    };
+  };
+  const full = await supabase
+    .from("contacts")
+    .select("line_oa_chat_url, line_target_id")
+    .eq("id", contactId)
+    .maybeSingle();
+  if (!full.error) {
+    return {
+      lineTargetId: messagingGroupId(full.data?.line_target_id),
+      lineOaChatUrl: full.data?.line_oa_chat_url?.trim() || null,
+    };
+  }
+  console.error("[readContactLineFields]", full.error.message);
+  const legacy = await supabase
+    .from("contacts")
+    .select("line_target_id")
+    .eq("id", contactId)
+    .maybeSingle();
+  return {
+    lineTargetId: messagingGroupId(legacy.data?.line_target_id),
+    lineOaChatUrl: null,
+  };
 }
 
 async function lineJpegSlipUrl(slipPublicUrl: string): Promise<string> {

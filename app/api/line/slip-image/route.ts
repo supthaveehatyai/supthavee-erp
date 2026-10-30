@@ -21,12 +21,14 @@ export async function GET(request: Request) {
     }
     const bytes = Buffer.from(await upstream.arrayBuffer());
     const jpeg = await toJpegBuffer(bytes);
+    const download = new URL(request.url).searchParams.get("download") === "1";
     return new NextResponse(new Uint8Array(jpeg), {
       status: 200,
       headers: {
         "Content-Type": "image/jpeg",
         "Cache-Control": "public, max-age=86400",
         "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": download ? 'attachment; filename="payment-slip.jpg"' : "inline",
       },
     });
   } catch {

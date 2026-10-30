@@ -60,15 +60,21 @@ export function PaymentReceiptRegister() {
 
   async function load() {
     setLoading(true);
-    const result = await getPaymentReceiptRegisterAction({
-      direction,
-      fromDate,
-      toDate,
-      channelId: channelId || null,
-    });
-    setData(result);
-    setLoading(false);
-    if (result.error) toast.error(result.error);
+    try {
+      const result = await getPaymentReceiptRegisterAction({
+        direction,
+        fromDate,
+        toDate,
+        channelId: channelId || null,
+      });
+      setData(result ?? { rows: [], banks: [], channels: [], error: null });
+      if (result?.error) toast.error(result.error);
+    } catch (err) {
+      console.error(err);
+      setData({ rows: [], banks: [], channels: [], error: null });
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {

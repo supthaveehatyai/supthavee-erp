@@ -21,7 +21,6 @@ import {
   todayIsoDate,
 } from "@/lib/utils/outstanding-summary";
 import { paymentTimestampIso } from "@/lib/utils/payment-timestamp";
-import { isJpegBuffer, isPdfBuffer, toJpegBuffer } from "@/lib/line/slip-jpeg";
 import type {
   ApAllocationInput,
   ApVendorOption,
@@ -397,19 +396,20 @@ async function uploadPaymentSlip(
   const yyyy = String(now.getUTCFullYear());
   const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
   const source = Buffer.from(await file.arrayBuffer());
-  const isPdf = mimeType === "application/pdf" || isPdfBuffer(source);
+  const isPdf =
+    mimeType === "application/pdf" ||
+    (source.length > 4 && source.subarray(0, 4).toString("ascii") === "%PDF");
+  const isJpeg =
+    source.length > 3 && source[0] === 0xff && source[1] === 0xd8 && source[2] === 0xff;
   let body = source;
   let contentType = mimeType || "application/octet-stream";
   let ext = ".jpg";
   if (isPdf) {
     contentType = "application/pdf";
     ext = ".pdf";
-  } else if (mimeType.startsWith("image/") || isJpegBuffer(source)) {
-    try {
-      body = isJpegBuffer(source) ? source : Buffer.from(await toJpegBuffer(source));
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "แปลงสลิปเป็น JPEG ไม่สำเร็จ";
-      return { error: message };
+  } else if (mimeType.startsWith("image/") || isJpeg) {
+    if (!isJpeg) {
+      return { error: "รูปสลิปต้องเป็นไฟล์ JPEG (.jpg) — เลือกไฟล์ใหม่อีกครั้ง" };
     }
     contentType = "image/jpeg";
     ext = ".jpg";

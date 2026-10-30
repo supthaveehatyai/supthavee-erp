@@ -114,10 +114,10 @@ function docTypeBadgeLabel(docType: string): string {
 }
 
 export function APPaymentClient({
-  vendors,
-  invoices: initialInvoices,
-  availableDeposits,
-  bankAccounts,
+  vendors = [],
+  invoices: initialInvoices = [],
+  availableDeposits = [],
+  bankAccounts = [],
   selectedVendorId,
   billingNotes = [],
   pendingReceipts = [],

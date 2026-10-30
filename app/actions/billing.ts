@@ -1782,64 +1782,63 @@ export async function getInvoicesByBillingNote(
 
     const { data: items, error: itemsError } = await supabase
       .from("billing_note_items")
-      .select(
-        `
-        id,
-        invoice_id,
-        billed_amount,
-        invoice:doc_headers!billing_note_items_invoice_id_fkey (
-          id,
-          doc_no,
-          doc_type,
-          doc_date,
-          due_date,
-          grand_total,
-          payment_status,
-          contact_id
-        )
-      `,
-      )
-      .eq("billing_note_id", trimmed)
-      .order("created_at", { ascending: true });
+      .select("id, invoice_id, billed_amount")
+      .eq("billing_note_id", trimmed);
 
     if (itemsError) {
       return { data: [], error: itemsError.message, billing_note: null };
     }
 
-    type ItemRow = {
-      invoice_id: string;
-      invoice:
-        | {
-            id?: string;
-            doc_no?: string | null;
-            doc_type?: string | null;
-            doc_date?: string | null;
-            due_date?: string | null;
-            grand_total?: number | string | null;
-            payment_status?: string | null;
-            contact_id?: string | null;
-          }
-        | {
-            id?: string;
-            doc_no?: string | null;
-            doc_type?: string | null;
-            doc_date?: string | null;
-            due_date?: string | null;
-            grand_total?: number | string | null;
-            payment_status?: string | null;
-            contact_id?: string | null;
-          }[]
-        | null;
-    };
+    const invoiceIds = Array.from(
+      new Set(
+        (items ?? [])
+          .map((row) => String(row.invoice_id ?? "").trim())
+          .filter(Boolean),
+      ),
+    );
+    const [headerLookup, documentLookup] = await Promise.all([
+      invoiceIds.length === 0
+        ? Promise.resolve({ data: [], error: null })
+        : supabase
+            .from("doc_headers")
+            .select("id, doc_no, doc_type, doc_date, due_date, grand_total, payment_status, contact_id")
+            .in("id", invoiceIds),
+      invoiceIds.length === 0
+        ? Promise.resolve({ data: [], error: null })
+        : supabase
+            .from("documents")
+            .select(
+              "id, doc_no, doc_type, doc_date, due_date, grand_total, paid_amount, payment_status, contact_id, status, is_voided",
+            )
+            .in("id", invoiceIds),
+    ]);
+    if (headerLookup.error) console.error("[getInvoicesByBillingNote] doc_headers", headerLookup.error.message);
+    if (documentLookup.error) console.error("[getInvoicesByBillingNote] documents", documentLookup.error.message);
 
-    const headers = ((items ?? []) as ItemRow[])
-      .map((row) => {
-        const inv = Array.isArray(row.invoice)
-          ? (row.invoice[0] ?? null)
-          : row.invoice;
+    type LooseDoc = {
+      id?: string;
+      doc_no?: string | null;
+      doc_type?: string | null;
+      doc_date?: string | null;
+      due_date?: string | null;
+      grand_total?: number | string | null;
+      payment_status?: string | null;
+      contact_id?: string | null;
+    };
+    const byId = new Map<string, LooseDoc>();
+    for (const row of (headerLookup.data ?? []) as LooseDoc[]) {
+      if (row.id) byId.set(String(row.id), row);
+    }
+    for (const row of (documentLookup.data ?? []) as LooseDoc[]) {
+      if (row.id) byId.set(String(row.id), row);
+    }
+
+    const headers = invoiceIds
+      .map((invoiceId) => {
+        const inv = byId.get(invoiceId);
         if (!inv?.doc_no || !inv.doc_type) return null;
         return {
-          header_id: String(inv.id ?? row.invoice_id),
+          header_id: String(inv.id ?? invoiceId),
           doc_no: String(inv.doc_no).trim(),
           doc_type: String(inv.doc_type).trim(),
           doc_date: inv.doc_date ? String(inv.doc_date) : "",

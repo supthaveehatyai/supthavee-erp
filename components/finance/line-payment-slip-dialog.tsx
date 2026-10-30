@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   listLineKnownGroupsAction,
   loadContactLineTargetAction,
+  saveContactLineOaChatUrlAction,
   sendVendorPaymentSlipLineAction,
 } from "@/app/actions/finance/line-oa";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   H3_LINE_GROUP_ID,
-  H3_LINE_GROUP_NAME,
   LINE_OA_ACCOUNT_UID,
   extractLineTargetId,
   isH3Contact,
@@ -72,32 +72,32 @@ export function LinePaymentSlipDialog({
     ]).then(([listed, saved]) => {
       if (cancelled) return;
       setGroups(listed.groups);
+      const accountUid = listed.oaAccountUid || LINE_OA_ACCOUNT_UID;
       if (listed.oaAccountUid) setOaUid(listed.oaAccountUid);
-      const initial = saved.lineTargetId || (isH3Contact(contactName) ? H3_LINE_GROUP_ID : "");
-      setTargetId(initial);
-      setChatInput(initial ? lineBizChatUrl(listed.oaAccountUid || LINE_OA_ACCOUNT_UID, initial) : "");
+      const knownGroup = listed.groups.some((group) => group.group_id === saved.lineTargetId);
+      setTargetId(knownGroup && saved.lineTargetId ? saved.lineTargetId : "");
+      const savedChat = saved.lineOaChatUrl?.trim() || "";
+      setChatInput(
+        savedChat || (isH3Contact(contactName) ? lineBizChatUrl(accountUid, H3_LINE_GROUP_ID) : ""),
+      );
     });
     return () => {
       cancelled = true;
     };
   }, [open, contactId, contactName, messageText]);
 
-  const options = groups.some((group) => group.group_id === H3_LINE_GROUP_ID)
-    ? groups
-    : [{ group_id: H3_LINE_GROUP_ID, group_name: H3_LINE_GROUP_NAME, picture_url: null }, ...groups];
-  const resolvedId = extractLineTargetId(chatInput) || extractLineTargetId(targetId) || "";
+  const webhookGroupId = groups.some((group) => group.group_id === targetId) ? targetId : "";
 
   async function sendNow() {
-    if (!resolvedId) {
-      toast.error("กรุณาเลือกกลุ่ม หรือวางลิงก์ห้องแชท");
+    if (!webhookGroupId) {
+      toast.error("เลือก API Group ID จาก Webhook ก่อน — รหัสในลิงก์ chat.line.biz ใช้ส่ง Push ไม่ได้");
       return;
     }
     setSending(true);
     const result = await sendVendorPaymentSlipLineAction({
       contactId,
       contactName,
-      lineOaChatUrl: chatInput,
-      lineTargetId: resolvedId,
+      lineTargetId: webhookGroupId,
       messageText: draft,
       slipPublicUrl: slipUrl,
       billingNoteNo,
@@ -118,21 +118,33 @@ export function LinePaymentSlipDialog({
   }
 
   async function copyAndOpenChat() {
-    if (!resolvedId) {
-      toast.error("กรุณาเลือกกลุ่ม หรือวางลิงก์ห้องแชท");
+    const typed = chatInput.trim();
+    const extracted = extractLineTargetId(typed);
+    const openUrl = typed.startsWith("http")
+      ? typed
+      : extracted
+        ? lineBizChatUrl(oaUid, extracted)
+        : isH3Contact(contactName)
+          ? lineBizChatUrl(oaUid, H3_LINE_GROUP_ID)
+          : "";
+    if (!openUrl.includes("chat.line.biz")) {
+      toast.error("กรุณาวางลิงก์ห้องแชทจากหน้า chat.line.biz");
       return;
+    }
+    if (contactId) {
+      try {
+        await saveContactLineOaChatUrlAction(contactId, openUrl);
+      } catch (err) {
+        console.error(err);
+      }
     }
     try {
       await navigator.clipboard.writeText(draft);
-      toast.success(
-        slipUrl?.startsWith("https://")
-          ? "คัดลอกข้อความแล้ว เปิดห้องแชทให้แล้ว — กด Ctrl+V วางข้อความ แล้วคัดลอกรูปสลิปเพื่อวางต่อ"
-          : "คัดลอกข้อความแล้ว เปิดห้องแชทให้แล้ว — กด Ctrl+V เพื่อวาง",
-      );
+      toast.success("✅ คัดลอกข้อความแล้ว! กด Ctrl+V วางในช่องแชท LINE OA และส่งรูปสลิปได้เลย");
     } catch {
       toast.error("คัดลอกข้อความไม่สำเร็จ");
     }
-    window.open(lineBizChatUrl(oaUid, resolvedId), "_blank", "noopener,noreferrer");
+    window.open(openUrl, "_blank", "noopener,noreferrer");
   }
 
   async function copySlipImage() {
@@ -165,6 +177,17 @@ export function LinePaymentSlipDialog({
     }
   }
 
+  function downloadSlip() {
+    if (!slipUrl?.startsWith("https://")) return;
+    const link = document.createElement("a");
+    link.href = `/api/line/slip-image?url=${encodeURIComponent(slipUrl)}&download=1`;
+    link.download = "payment-slip.jpg";
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
@@ -173,41 +196,21 @@ export function LinePaymentSlipDialog({
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1">
-            <Label htmlFor="line-group">กลุ่ม LINE</Label>
-            <select
-              id="line-group"
-              value={targetId}
-              onChange={(event) => {
-                const next = event.target.value;
-                setTargetId(next);
-                if (next) setChatInput(lineBizChatUrl(oaUid, next));
-              }}
-              className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
-            >
-              <option value="">เลือกกลุ่มที่บอทรู้จัก</option>
-              {options.map((group) => (
-                <option key={group.group_id} value={group.group_id}>
-                  {group.group_id === H3_LINE_GROUP_ID
-                    ? H3_LINE_GROUP_NAME
-                    : group.group_name || group.group_id}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="line-chat-url">ลิงก์ห้องแชท LINE OA (จากหน้า chat.line.biz) / Group ID</Label>
+            <Label htmlFor="line-chat-url">ลิงก์ห้องแชท LINE OA (จากหน้า chat.line.biz)</Label>
             <Input
               id="line-chat-url"
               value={chatInput}
-              onChange={(event) => {
-                const next = event.target.value;
-                setChatInput(next);
-                const extracted = extractLineTargetId(next);
-                if (extracted) setTargetId(extracted);
-              }}
+              onChange={(event) => setChatInput(event.target.value)}
               placeholder="https://chat.line.biz/.../chat/C..."
             />
           </div>
+          <Button
+            type="button"
+            className="bg-emerald-600 hover:bg-emerald-700"
+            onClick={() => void copyAndOpenChat()}
+          >
+            💬 คัดลอกข้อความแจ้งโอน + เปิดห้องแชท LINE OA (chat.line.biz) ทันที
+          </Button>
           <div className="space-y-1">
             <Label htmlFor="line-message">ข้อความแจ้งโอนเงิน</Label>
             <textarea
@@ -222,15 +225,20 @@ export function LinePaymentSlipDialog({
             <div className="space-y-1">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-medium text-slate-700">รูปสลิปโอนเงิน</p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-8 px-2.5 text-xs"
-                  disabled={copyingSlip}
-                  onClick={() => void copySlipImage()}
-                >
-                  {copyingSlip ? "กำลังคัดลอกรูป..." : "🖼️ คัดลอกรูปสลิปลง Clipboard"}
-                </Button>
+                <div className="flex flex-wrap gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-8 px-2.5 text-xs"
+                    disabled={copyingSlip}
+                    onClick={() => void copySlipImage()}
+                  >
+                    {copyingSlip ? "กำลังคัดลอกรูป..." : "🖼️ คัดลอกรูปสลิปลง Clipboard"}
+                  </Button>
+                  <Button type="button" variant="outline" className="h-8 px-2.5 text-xs" onClick={downloadSlip}>
+                    ⬇️ ดาวน์โหลดรูปสลิป
+                  </Button>
+                </div>
               </div>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={slipUrl} alt="สลิปโอนเงิน" className="max-h-48 rounded-lg border object-contain" />
@@ -238,17 +246,31 @@ export function LinePaymentSlipDialog({
           ) : (
             <p className="text-xs text-slate-500">ไม่มีรูปสลิปแบบลิงก์สาธารณะ จะส่งเฉพาะข้อความ</p>
           )}
-          <div className="flex flex-col gap-2">
+          <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs leading-5 text-slate-600">
+              ส่งผ่าน LINE Push API ใช้ได้เมื่อได้ API Group ID จาก Webhook แล้วเท่านั้น
+              รหัสหลัง /chat/ ของ chat.line.biz เป็นคนละรหัสกับ groupId จึงใช้ยิง Push ไม่ได้
+            </p>
+            <select
+              id="line-group"
+              value={webhookGroupId}
+              onChange={(event) => setTargetId(event.target.value)}
+              className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
+            >
+              <option value="">เลือก API Group ID จาก Webhook</option>
+              {groups.map((group) => (
+                <option key={group.group_id} value={group.group_id}>
+                  {group.group_name || group.group_id}
+                </option>
+              ))}
+            </select>
             <Button
               type="button"
-              className="bg-emerald-600 hover:bg-emerald-700"
-              disabled={sending}
+              variant="outline"
+              disabled={sending || !webhookGroupId}
               onClick={() => void sendNow()}
             >
-              {sending ? "กำลังส่ง..." : "🚀 ส่งข้อความ + รูปสลิปเข้ากลุ่มทันที (LINE OA Push API)"}
-            </Button>
-            <Button type="button" variant="outline" onClick={() => void copyAndOpenChat()}>
-              💬 คัดลอกข้อความ + เปิดห้องแชท LINE OA (chat.line.biz)
+              {sending ? "กำลังส่ง..." : "ส่งผ่าน LINE Push API"}
             </Button>
           </div>
         </div>
