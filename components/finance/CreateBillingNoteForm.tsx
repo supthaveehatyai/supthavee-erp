@@ -42,6 +42,7 @@ import type { VendorOption } from "@/lib/actions/mapping";
 import { cn } from "@/lib/utils";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
 import {
+  coerceBillingDueDate,
   invoiceInRange,
   monthBounds,
   monthKeyFromIso,
@@ -111,8 +112,8 @@ export function CreateBillingNoteForm({
   const [billingDate, setBillingDate] = useState(defaultDate);
   const [dueDate, setDueDate] = useState(defaultDate);
   const [dueTouched, setDueTouched] = useState(false);
-  const [invoiceFrom, setInvoiceFrom] = useState("");
-  const [invoiceTo, setInvoiceTo] = useState("");
+  const [filterFromDate, setFilterFromDate] = useState("");
+  const [filterToDate, setFilterToDate] = useState("");
   const [periodKey, setPeriodKey] = useState("all");
   const [remark, setRemark] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -142,16 +143,20 @@ export function CreateBillingNoteForm({
   }, [invoices]);
 
   const visibleInvoices = useMemo(
-    () => invoices.filter((invoice) => invoiceInRange(invoice.doc_date, invoiceFrom, invoiceTo)),
-    [invoices, invoiceFrom, invoiceTo],
+    () => invoices.filter((invoice) => invoiceInRange(invoice.doc_date, filterFromDate, filterToDate)),
+    [invoices, filterFromDate, filterToDate],
   );
 
   const allSelected =
     visibleInvoices.length > 0 && visibleInvoices.every((inv) => selectedIds.has(inv.id));
 
   useEffect(() => {
-    if (dueTouched) return;
-    setDueDate(addDaysIso(billingDate, Math.max(0, creditDays)));
+    setDueDate((current) => {
+      const base = dueTouched
+        ? current
+        : addDaysIso(billingDate, Math.max(0, creditDays));
+      return coerceBillingDueDate(billingDate, base, creditDays);
+    });
   }, [billingDate, creditDays, dueTouched]);
 
   function navigate(nextType: BillingCategory, nextContactId: string) {
@@ -159,8 +164,8 @@ export function CreateBillingNoteForm({
   }
 
   function applyInvoicePeriod(from: string, to: string, key: string) {
-    setInvoiceFrom(from);
-    setInvoiceTo(to);
+    setFilterFromDate(from);
+    setFilterToDate(to);
     setPeriodKey(key);
     if (!from && !to) {
       setSelectedIds(new Set());
@@ -467,7 +472,17 @@ export function CreateBillingNoteForm({
                 id="billing_date"
                 type="date"
                 value={billingDate}
-                onChange={(e) => setBillingDate(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setBillingDate(next);
+                  setDueDate((current) =>
+                    coerceBillingDueDate(
+                      next,
+                      dueTouched ? current : addDaysIso(next, Math.max(0, creditDays)),
+                      creditDays,
+                    ),
+                  );
+                }}
                 required
                 className="h-10"
               />
@@ -483,7 +498,7 @@ export function CreateBillingNoteForm({
                 value={dueDate}
                 onChange={(e) => {
                   setDueTouched(true);
-                  setDueDate(e.target.value);
+                  setDueDate(coerceBillingDueDate(billingDate, e.target.value, creditDays));
                 }}
                 required
                 className="h-10"
@@ -563,17 +578,17 @@ export function CreateBillingNoteForm({
                   <Input
                     id="invoice-from"
                     type="date"
-                    value={invoiceFrom}
+                    value={filterFromDate}
                     onChange={(event) => {
                       const nextFrom = event.target.value;
                       const bounds = monthBounds(monthKeyFromIso(nextFrom));
                       const key =
-                        bounds && bounds.from === nextFrom && bounds.to === invoiceTo
+                        bounds && bounds.from === nextFrom && bounds.to === filterToDate
                           ? monthKeyFromIso(nextFrom)
-                          : nextFrom || invoiceTo
+                          : nextFrom || filterToDate
                             ? "custom"
                             : "all";
-                      applyInvoicePeriod(nextFrom, invoiceTo, key);
+                      applyInvoicePeriod(nextFrom, filterToDate, key);
                     }}
                   />
                 </div>
@@ -582,17 +597,17 @@ export function CreateBillingNoteForm({
                   <Input
                     id="invoice-to"
                     type="date"
-                    value={invoiceTo}
+                    value={filterToDate}
                     onChange={(event) => {
                       const nextTo = event.target.value;
-                      const bounds = monthBounds(monthKeyFromIso(invoiceFrom));
+                      const bounds = monthBounds(monthKeyFromIso(filterFromDate));
                       const key =
-                        bounds && bounds.from === invoiceFrom && bounds.to === nextTo
-                          ? monthKeyFromIso(invoiceFrom)
-                          : invoiceFrom || nextTo
+                        bounds && bounds.from === filterFromDate && bounds.to === nextTo
+                          ? monthKeyFromIso(filterFromDate)
+                          : filterFromDate || nextTo
                             ? "custom"
                             : "all";
-                      applyInvoicePeriod(invoiceFrom, nextTo, key);
+                      applyInvoicePeriod(filterFromDate, nextTo, key);
                     }}
                   />
                 </div>

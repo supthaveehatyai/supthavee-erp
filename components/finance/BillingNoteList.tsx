@@ -14,6 +14,7 @@ import type {
   BillingNoteListItem,
 } from "@/types/billing";
 import type { BillingNotesTab } from "@/types/technician-billing";
+import { DeleteBillingNoteButton } from "@/components/finance/billing-note-actions";
 import { TechnicianBillingPanel } from "@/components/finance/TechnicianBillingPanel";
 import type { TechnicianBillingPanelProps } from "@/components/finance/TechnicianBillingPanel";
 import { Badge } from "@/components/ui/badge";
@@ -264,7 +265,61 @@ export function BillingNoteList({
       </div>
 
       {isTB && technicianBilling ? (
-        <TechnicianBillingPanel {...technicianBilling} />
+        <>
+          {error ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error}
+            </div>
+          ) : null}
+          {rows.length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>ใบสรุปวางบิลช่างที่ออกแล้ว</CardTitle>
+                <CardDescription>ลบได้เฉพาะใบที่ยังไม่ชำระ เพื่อปลดงานกลับเข้าคิว</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>เลขที่เอกสาร</TableHead>
+                      <TableHead>ช่าง</TableHead>
+                      <TableHead className="text-right">ยอดรวม</TableHead>
+                      <TableHead>สถานะ</TableHead>
+                      <TableHead className="text-right">การดำเนินการ</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((row) => {
+                      const status = row.payment_status.trim().toUpperCase();
+                      return (
+                        <TableRow key={row.id}>
+                          <TableCell className="font-mono text-sm font-semibold">{row.doc_no}</TableCell>
+                          <TableCell>{row.contact_name}</TableCell>
+                          <TableCell className="text-right tabular-nums">฿{formatMoney(row.grand_total)}</TableCell>
+                          <TableCell>{statusBadge(row.payment_status)}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Link
+                                href={`/finance/billing-notes/${row.id}`}
+                                className="inline-flex h-8 items-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700"
+                              >
+                                ดูรายละเอียด
+                              </Link>
+                              {status === "PENDING" || status === "UNPAID" ? (
+                                <DeleteBillingNoteButton billingNoteId={row.id} docNo={row.doc_no} compact />
+                              ) : null}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          ) : null}
+          <TechnicianBillingPanel {...technicianBilling} />
+        </>
       ) : isTB ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           ไม่สามารถโหลดรายการสรุปวางบิลช่างได้
@@ -433,6 +488,13 @@ export function BillingNoteList({
                           >
                             ดูรายละเอียด
                           </Link>
+                          {status === "PENDING" || status === "UNPAID" ? (
+                            <DeleteBillingNoteButton
+                              billingNoteId={row.id}
+                              docNo={row.doc_no}
+                              compact
+                            />
+                          ) : null}
                         </div>
                       </TableCell>
                     </TableRow>

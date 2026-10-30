@@ -104,7 +104,7 @@ export type CreateBillingNoteResult =
   | { success: false; documentId?: null; error: string };
 
 /** Listing tab — BN (AR Billing Note) | BR (AP Bill Receipt). */
-export type BillingNoteDocType = "BN" | "BR";
+export type BillingNoteDocType = "BN" | "BR" | "TB";
 
 export type BillingNoteListItem = {
   id: string;
@@ -156,6 +156,8 @@ export type BillingNoteInvoiceLine = {
   invoice_doc_date: string;
   invoice_due_date: string | null;
   invoice_grand_total: number;
+  reference_no?: string | null;
+  tax_invoice_no?: string | null;
 };
 
 export type BillingNoteDetailData = {
@@ -166,6 +168,7 @@ export type BillingNoteDetailData = {
   due_date: string | null;
   grand_total: number;
   payment_status: string;
+  notes?: string | null;
   contact: BillingNoteContact | null;
   invoices: BillingNoteInvoiceLine[];
 };

@@ -8,6 +8,10 @@
 import Link from "next/link";
 import { ArrowLeft, Printer } from "lucide-react";
 import type { BillingNoteDetailData, BillingNoteSettlement } from "@/types/billing";
+import {
+  DeleteBillingNoteButton,
+  EditBillingNoteButton,
+} from "@/components/finance/billing-note-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -62,13 +66,17 @@ export function BillingNoteDetail({
   settlements = [],
 }: BillingNoteDetailProps) {
   const isBN = doc.doc_type === "BN";
-  const titleTh = isBN ? "ใบวางบิล" : "ใบรับวางบิล";
-  const titleEn = isBN ? "Billing Note" : "Bill Receipt";
+  const isTB = doc.doc_type === "TB";
+  const titleTh = isTB ? "ใบสรุปวางบิลช่าง" : isBN ? "ใบวางบิล" : "ใบรับวางบิล";
+  const titleEn = isTB ? "Technician Bill" : isBN ? "Billing Note" : "Bill Receipt";
   const listHref = `/finance/billing-notes?type=${doc.doc_type}`;
   const paymentStatus = doc.payment_status.trim().toUpperCase();
+  const canRevise = paymentStatus === "PENDING" || paymentStatus === "UNPAID";
   const awaitingPayment =
-    !isBN && (paymentStatus === "PENDING" || paymentStatus === "UNPAID" || paymentStatus === "PARTIAL");
-  const alreadyPaid = !isBN && (paymentStatus === "PAID" || paymentStatus === "COMPLETED");
+    doc.doc_type === "BR" &&
+    (paymentStatus === "PENDING" || paymentStatus === "UNPAID" || paymentStatus === "PARTIAL");
+  const alreadyPaid =
+    doc.doc_type === "BR" && (paymentStatus === "PAID" || paymentStatus === "COMPLETED");
 
   return (
     <div className="flex flex-wrap items-start justify-between gap-3 print:hidden">
@@ -98,6 +106,30 @@ export function BillingNoteDetail({
       </div>
       <div className="flex flex-col items-end gap-2">
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {canRevise ? (
+            <>
+              <EditBillingNoteButton
+                billingNoteId={doc.id}
+                docType={doc.doc_type}
+                docNo={doc.doc_no}
+                docDate={doc.doc_date}
+                dueDate={doc.due_date}
+                notes={doc.notes}
+                contactId={doc.contact?.id ?? ""}
+                lines={doc.invoices.map((line) => ({
+                  id: line.invoice_id,
+                  docNo: line.invoice_doc_no,
+                  referenceNo: line.tax_invoice_no || line.reference_no,
+                  amount: line.billed_amount,
+                }))}
+              />
+              <DeleteBillingNoteButton
+                billingNoteId={doc.id}
+                docNo={doc.doc_no}
+                redirectTo={listHref}
+              />
+            </>
+          ) : null}
           {awaitingPayment && doc.contact?.id ? (
             <Link
               href={`/finance/ap-payment?vendor_id=${encodeURIComponent(doc.contact.id)}&billing_note_id=${encodeURIComponent(doc.id)}`}

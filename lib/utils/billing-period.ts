@@ -37,6 +37,30 @@ export function thaiMonthLabel(monthKey: string): string {
   return parts.length >= 3 ? `${parts[1]} ${parts[2]}` : labeled;
 }
 
+/** Last calendar day of the month that contains `YYYY-MM-DD`. */
+export function endOfMonthIso(isoDate: string): string {
+  const bounds = monthBounds(monthKeyFromIso(isoDate));
+  return bounds?.to ?? isoDate.trim().slice(0, 10);
+}
+
+/**
+ * Due date must not sit before the billing-note date.
+ * Prefer credit days; otherwise the last day of the billing month.
+ */
+export function coerceBillingDueDate(
+  billingDate: string,
+  dueDate: string,
+  creditDays: number,
+): string {
+  const billing = billingDate.trim().slice(0, 10);
+  const due = dueDate.trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(billing)) return due;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(due) && due >= billing) return due;
+  const days = Math.max(0, Math.trunc(Number(creditDays) || 0));
+  if (days > 0) return addIsoDays(billing, days);
+  return endOfMonthIso(billing);
+}
+
 export function invoiceInRange(
   docDate: string,
   from: string,

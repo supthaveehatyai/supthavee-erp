@@ -114,10 +114,11 @@ export default async function BillingNotePrintTemplate({
                     {index + 1}
                   </td>
                   <td className="py-1.5 pr-2 font-mono text-[11px] font-medium text-neutral-800">
-                    {line.invoice_doc_no}
-                    <span className="ml-1 text-[10px] text-neutral-400">
-                      ({line.invoice_doc_type})
-                    </span>
+                    {(() => {
+                      const official = line.invoice_doc_no?.trim() || "—";
+                      const ref = (line.tax_invoice_no || line.reference_no || "").trim();
+                      return ref && ref !== official ? `${official} (Ref: ${ref})` : official;
+                    })()}
                   </td>
                   <td className="py-1.5 pr-2 text-neutral-700">
                     {formatDateShort(line.invoice_doc_date)}

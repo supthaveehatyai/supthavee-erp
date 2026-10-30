@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getBillingNotes } from "@/app/actions/billing";
+import { getBillingNotes, getIssuedTechnicianBills } from "@/app/actions/billing";
 import type { BillingNoteDocType } from "@/types/billing";
 import {
   getJobDetails,
@@ -57,12 +57,13 @@ export default async function BillingNotesPage({ searchParams }: PageProps) {
     const technicianId = params.technicianId?.trim() ?? "";
     const from = params.from?.trim() ?? "";
     const to = params.to?.trim() ?? "";
-    const [tb, whtRatesResult] = await Promise.all([
+    const [tb, issuedTb, whtRatesResult] = await Promise.all([
       getUnbilledTechnicianJobs({
         technicianId,
         from,
         to,
       }),
+      getIssuedTechnicianBills(),
       getActiveWhtRates(),
     ]);
 
@@ -82,8 +83,8 @@ export default async function BillingNotesPage({ searchParams }: PageProps) {
         <BillingNoteList
           type="TB"
           search=""
-          rows={[]}
-          error={tb.success ? null : tb.error}
+          rows={issuedTb.data}
+          error={issuedTb.error}
           technicianBilling={{
             technicianId,
             from,
