@@ -441,15 +441,6 @@ function parseDepositsJson(
   }
 }
 
-function resolvePaymentStatus(
-  grandTotal: number,
-  newPaidAmount: number,
-): "UNPAID" | "PARTIAL" | "PAID" {
-  if (newPaidAmount <= MONEY_EPS) return "UNPAID";
-  if (newPaidAmount >= roundMoney(grandTotal) - MONEY_EPS) return "PAID";
-  return "PARTIAL";
-}
-
 async function uploadPaymentSlip(
   supabaseAdmin: SupabaseClient,
   file: File,
@@ -914,39 +905,29 @@ export async function submitAPPayment(
       };
     }
 
-    // Step E — update source AP invoices
-    const touchedInvoiceIds: string[] = [];
-    for (const alloc of activeAllocations) {
-      const invoice = invoiceMap.get(alloc.invoice_id)!;
-      const grandTotal = toMoney(invoice.grand_total ?? invoice.total_amount);
-      const prevPaid = toMoney(invoice.paid_amount);
-      const newPaid = roundMoney(prevPaid + alloc.allocated_amount);
-      const nextPaymentStatus = resolvePaymentStatus(grandTotal, newPaid);
-      // document_status ENUM has no PARTIAL — COMPLETED only when fully paid.
-      const nextDocStatus =
-        nextPaymentStatus === "PAID" ? "COMPLETED" : "ISSUED";
-
-      const { error: updateError } = await supabaseAdmin
-        .from("documents")
-        .update({
-          paid_amount: newPaid,
-          payment_status: nextPaymentStatus,
-          status: nextDocStatus,
-          updated_at: nowIso,
-        })
-        .eq("id", alloc.invoice_id);
-
-      if (updateError) {
-        return {
-          success: false,
-          error: `บันทึก PAY ${payDocNo} แล้ว แต่อัปเดตบิลต้นทางไม่สำเร็จ: ${updateError.message}`,
-          payment_doc_no: payDocNo,
-        };
-      }
-      touchedInvoiceIds.push(alloc.invoice_id);
-    }
-
     const billingNoteId = String(formData.get("billing_note_id") ?? "").trim();
+    const touchedInvoiceIds = activeAllocations.map((row) => row.invoice_id);
+    const settleRpc = supabaseAdmin as unknown as {
+      rpc: (
+        fn: "settle_ap_invoices_bulk_fast",
+        args: {
+          p_pay_doc_id: string;
+          p_billing_note_id: string | null;
+          p_allocations: { invoice_id: string; amount: number; wht_amount: number }[];
+        },
+      ) => Promise<{ error: { message?: string } | null }>;
+    };
+    const { error: bulkErr } = await settleRpc.rpc("settle_ap_invoices_bulk_fast", {
+      p_pay_doc_id: payDocId,
+      p_billing_note_id: billingNoteId || null,
+      p_allocations: activeAllocations.map((row) => ({
+        invoice_id: row.invoice_id,
+        amount: row.allocated_amount,
+        wht_amount: 0,
+      })),
+    });
+    if (bulkErr) throw new Error(bulkErr.message ?? "ตัดชำระบิลต้นทางไม่สำเร็จ");
+
     if (touchedInvoiceIds.length > 0 || billingNoteId) {
       const bnSync = await syncBillingNotesAfterInvoicePayment(
         supabaseAdmin,

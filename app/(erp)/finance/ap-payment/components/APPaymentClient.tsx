@@ -87,6 +87,16 @@ function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+function preferredBankId(
+  banks: { id: string; bank_name: string; account_no: string }[],
+): string {
+  const preferred =
+    banks.find((bank) => bank.account_no.replace(/\D/g, "") === "9020746510") ??
+    banks.find((bank) => bank.bank_name.includes("กรุงไทย")) ??
+    banks[0];
+  return preferred?.id ?? "CASH";
+}
+
 function todayIsoLocal(): string {
   const now = new Date();
   const yyyy = now.getFullYear();
@@ -140,9 +150,7 @@ export function APPaymentClient({
   );
   const [paymentDate, setPaymentDate] = useState(todayIsoLocal);
   const [paymentTime, setPaymentTime] = useState("");
-  const [bankAccountId, setBankAccountId] = useState(
-    activeBanks[0]?.id ?? "CASH",
-  );
+  const [bankAccountId, setBankAccountId] = useState(() => preferredBankId(activeBanks));
   const [referenceNo, setReferenceNo] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
@@ -476,11 +484,7 @@ export function APPaymentClient({
   function selectBankForSlip() {
     setBankAccountId((current) => {
       if (current !== "CASH") return current;
-      const preferred =
-        activeBanks.find((bank) => bank.account_no.replace(/\D/g, "") === "9020746510") ??
-        activeBanks.find((bank) => bank.bank_name.includes("กรุงไทย")) ??
-        activeBanks[0];
-      return preferred?.id ?? current;
+      return preferredBankId(activeBanks);
     });
   }
 
