@@ -74,10 +74,32 @@ export type CreateBillingNoteInput = {
   documentDate: string;
   dueDate: string;
   remark?: string;
+  /** When false, skip the unbilled-vendor lookup used by Save & Next. */
+  resolveNextVendor?: boolean;
+};
+
+export type UnbilledApVendorQueueItem = {
+  contact_id: string;
+  contact_name: string;
+  invoice_count: number;
+  total_outstanding: number;
+};
+
+export type GetUnbilledApVendorQueueResult = {
+  data: UnbilledApVendorQueueItem[];
+  error: string | null;
 };
 
 export type CreateBillingNoteResult =
-  | { success: true; documentId: string; error?: null }
+  | {
+      success: true;
+      documentId: string;
+      billingNoteId: string;
+      docNo: string;
+      nextVendorId: string | null;
+      totalAmount: number;
+      error?: null;
+    }
   | { success: false; documentId?: null; error: string };
 
 /** Listing tab — BN (AR Billing Note) | BR (AP Bill Receipt). */

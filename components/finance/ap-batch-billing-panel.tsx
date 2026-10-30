@@ -175,15 +175,14 @@ export function ApBatchBillingPanel({ defaultDate }: { defaultDate: string }) {
       billingDate,
       groups,
     });
-    setSubmitting(false);
     if (!result.success) {
+      setSubmitting(false);
       toast.error(result.error ?? "ออกใบรับวางบิลแบบกลุ่มไม่สำเร็จ");
       if (result.created.length > 0) router.refresh();
       return;
     }
-    toast.success(
-      `ออกใบรับวางบิล ${result.created.length} ใบ: ${result.created.map((row) => row.docNo).join(", ")}`,
-    );
+    const docNos = result.created.map((row) => row.docNo).join(", ");
+    toast.success(`✅ สร้างใบรับวางบิล ${result.created.length} ใบ (${docNos}) สำเร็จ`);
     router.push("/finance/billing-notes?type=BR");
     router.refresh();
   }

@@ -10,6 +10,7 @@
  */
 
 import { revalidatePath } from "next/cache";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { createClient } from "@/utils/supabase/server";
 import { requireSessionUserId } from "@/lib/auth/current-user";
 import { roundMoney } from "@/lib/utils/payment-fifo";
@@ -33,8 +34,10 @@ import type {
   GetInvoicesByBillingNoteResult,
   GetOpenBillingNotesResult,
   GetOutstandingContactsSummaryResult,
+  GetUnbilledApVendorQueueResult,
   GetUnbilledInvoicesResult,
   OutstandingContactSummary,
+  UnbilledApVendorQueueItem,
   UnbilledInvoice,
 } from "@/types/billing";
 
@@ -126,6 +129,31 @@ function isMissingPeriodRpc(message: string): boolean {
   return /get_unbilled_ap_summary_by_period|PGRST202|schema cache|does not exist|could not find the function/i.test(
     message,
   );
+}
+
+function isMissingVendorQueueRpc(message: string): boolean {
+  return /get_unbilled_ap_vendor_queue|PGRST202|schema cache|does not exist|could not find the function/i.test(
+    message,
+  );
+}
+
+function normalizeVendorQueue(data: unknown): UnbilledApVendorQueueItem[] | null {
+  if (!Array.isArray(data)) return null;
+  const items: UnbilledApVendorQueueItem[] = [];
+  for (const raw of data) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = raw as Record<string, unknown>;
+    const contactId = String(row.contact_id ?? row.vendor_id ?? "").trim();
+    if (!contactId) continue;
+    items.push({
+      contact_id: contactId,
+      contact_name: String(row.contact_name ?? row.company_name ?? "ไม่ระบุชื่อคู่ค้า").trim() || "ไม่ระบุชื่อคู่ค้า",
+      invoice_count: Math.max(0, Number(row.invoice_count ?? row.bill_count ?? 0) || 0),
+      total_outstanding: roundMoney(toMoney(row.total_outstanding as number | string | null)),
+    });
+  }
+  if (items.length === 0 && data.length > 0) return null;
+  return items;
 }
 
 function toMoney(value: number | string | null | undefined): number {
@@ -911,6 +939,44 @@ export async function getOutstandingContactsSummary(
   }
 }
 
+export async function getUnbilledApVendorQueue(): Promise<GetUnbilledApVendorQueueResult> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: [], error: owner.error };
+
+    const supabase = createClient();
+    const rpc = supabase as unknown as {
+      rpc: (fn: "get_unbilled_ap_vendor_queue") => Promise<{
+        data: unknown;
+        error: { message: string } | null;
+      }>;
+    };
+    const { data, error } = await rpc.rpc("get_unbilled_ap_vendor_queue");
+    if (!error) {
+      if (Array.isArray(data) && data.length === 0) return { data: [], error: null };
+      const parsed = normalizeVendorQueue(data);
+      if (parsed) return { data: parsed, error: null };
+    } else if (!isMissingVendorQueueRpc(error.message)) {
+      return { data: [], error: error.message };
+    }
+
+    const fallback = await getOutstandingContactsSummary("AP");
+    return {
+      data: fallback.data.map((row) => ({
+        contact_id: row.contact_id,
+        contact_name: row.contact_name,
+        invoice_count: row.invoice_count,
+        total_outstanding: row.total_outstanding,
+      })),
+      error: fallback.error,
+    };
+  } catch (error: unknown) {
+    if (isRedirectError(error)) throw error;
+    const message = error instanceof Error ? error.message : "ดึงคิวเจ้าหนี้ค้างวางบิลไม่สำเร็จ";
+    return { data: [], error: message };
+  }
+}
+
 /**
  * Create Billing Note (BN) / Bill Receipt (BR) header + junction lines.
  * Resolves invoice IDs from `documents` → `doc_headers` when needed (FK).
@@ -921,6 +987,9 @@ export async function createBillingNote(
   let createdHeaderId: string | null = null;
 
   try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { success: false, error: owner.error };
+
     const contactId = data.contactId?.trim();
     if (!contactId) {
       return { success: false, error: "ต้องระบุผู้ติดต่อ (contactId)" };
@@ -1204,8 +1273,41 @@ export async function createBillingNote(
       };
     }
 
-    return { success: true, documentId: createdHeaderId };
+    let nextVendorId: string | null = null;
+    if (data.resolveNextVendor !== false) {
+      try {
+        const queue =
+          data.category === "AP"
+            ? await getUnbilledApVendorQueue()
+            : await getOutstandingContactsSummary("AR");
+        const rows = queue.data;
+        const currentIndex = rows.findIndex((row) => row.contact_id === contactId);
+        const following =
+          currentIndex >= 0
+            ? rows.slice(currentIndex + 1).find((row) => row.contact_id !== contactId)
+            : undefined;
+        nextVendorId =
+          following?.contact_id ??
+          rows.find((row) => row.contact_id !== contactId)?.contact_id ??
+          null;
+      } catch (queueError) {
+        if (isRedirectError(queueError)) throw queueError;
+        nextVendorId = null;
+      }
+    }
+
+    revalidatePath("/finance/billing-notes");
+    revalidatePath("/finance/billing-notes/create");
+    return {
+      success: true,
+      documentId: createdHeaderId,
+      billingNoteId: createdHeaderId,
+      docNo,
+      nextVendorId,
+      totalAmount: totalBilledAmount,
+    };
   } catch (err) {
+    if (isRedirectError(err)) throw err;
     if (createdHeaderId) {
       try {
         const supabase = createClient();
@@ -1744,6 +1846,7 @@ export async function createBatchBillingNotesAction(input: {
         documentDate: billingDate,
         dueDate: isIsoDate(group.dueDate) ? group.dueDate : billingDate,
         remark: input.remark?.trim() || undefined,
+        resolveNextVendor: false,
       });
       if (!result.success || !result.documentId) {
         return {

@@ -8,9 +8,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
+import { CheckCircle2, Loader2, Save } from "lucide-react";
 import { createBillingNote } from "@/app/actions/billing";
 import type {
   BillingCategory,
@@ -106,6 +106,7 @@ export function CreateBillingNoteForm({
 }: CreateBillingNoteFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [, startNavigate] = useTransition();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [billingDate, setBillingDate] = useState(defaultDate);
   const [dueDate, setDueDate] = useState(defaultDate);
@@ -194,8 +195,9 @@ export function CreateBillingNoteForm({
     });
   }
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  const listHref = `/finance/billing-notes?type=${isAR ? "BN" : "BR"}`;
+
+  async function saveBillingNote(intent: "next" | "list") {
     if (isSubmitting) return;
 
     setError(null);
@@ -240,42 +242,43 @@ export function CreateBillingNoteForm({
         const message = result.error ?? "สร้างใบวางบิลไม่สำเร็จ";
         setError(message);
         toast.error(message);
+        setIsSubmitting(false);
         return;
       }
 
+      const docNo = result.docNo;
+      const amountLabel = formatMoney(result.totalAmount);
       toast.success(
         isAR
-          ? "สร้างใบวางบิลลูกหนี้ (BN) สำเร็จ"
-          : "สร้างใบรับวางบิลเจ้าหนี้ (BR) สำเร็จ",
+          ? `✅ สร้างใบวางบิล ${docNo} ยอดรวม ฿${amountLabel} สำเร็จ`
+          : `✅ สร้างใบรับวางบิล ${docNo} ยอดรวม ฿${amountLabel} สำเร็จ`,
       );
 
-      const listHref = `/finance/billing-notes?type=${encodeURIComponent(
-        isAR ? "BN" : "BR",
-      )}`;
-      router.push(listHref);
-      router.refresh();
+      const nextHref = result.nextVendorId
+        ? buildHref(type, result.nextVendorId)
+        : buildHref(type);
+      const href = intent === "next" ? nextHref : listHref;
+      startNavigate(() => {
+        router.push(href);
+        router.refresh();
+      });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "สร้างใบวางบิลไม่สำเร็จ";
       setError(message);
       toast.error(message);
-    } finally {
       setIsSubmitting(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <Link
-          href={`/finance/billing-notes?type=${isAR ? "BN" : "BR"}`}
-          className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <ArrowLeft className="size-4" />
-          กลับรายการวางบิล
-        </Link>
-      </div>
-
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        void saveBillingNote("list");
+      }}
+      className="space-y-6"
+    >
       <div
         role="tablist"
         className="inline-flex h-10 w-full max-w-xl items-center justify-center rounded-xl bg-slate-100 p-1 text-slate-600"
@@ -673,7 +676,7 @@ export function CreateBillingNoteForm({
             </Table>
           )}
         </CardContent>
-        <CardFooter className="flex flex-col gap-4 border-t border-slate-100 bg-slate-50/60 sm:flex-row sm:items-center sm:justify-between">
+        <CardFooter className="flex flex-col gap-4 border-t border-slate-100 bg-slate-50/60">
           <div className="text-sm text-slate-600">
             เลือกแล้ว{" "}
             <span className="font-semibold text-slate-900">
@@ -685,23 +688,42 @@ export function CreateBillingNoteForm({
             </span>{" "}
             บาท
           </div>
-          <Button
-            type="submit"
-            disabled={isSubmitting || selectedIds.size === 0 || !contactId}
-            className="h-10 min-w-[160px] rounded-xl"
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 className="size-4 animate-spin" />
-                กำลังบันทึก...
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="size-4" />
-                บันทึกใบวางบิล
-              </>
-            )}
-          </Button>
+          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <Link
+              href={listHref}
+              className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            >
+              ยกเลิก / กลับหน้ารายการ
+            </Link>
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isSubmitting || selectedIds.size === 0 || !contactId}
+                className="h-10 rounded-xl"
+                onClick={() => void saveBillingNote("next")}
+              >
+                {isSubmitting ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Save className="size-4" />
+                )}
+                {isAR ? "💾 บันทึก และทำลูกค้าถัดไป" : "💾 บันทึก และทำเจ้าถัดไป"}
+              </Button>
+              <Button
+                type="submit"
+                disabled={isSubmitting || selectedIds.size === 0 || !contactId}
+                className="h-10 rounded-xl"
+              >
+                {isSubmitting ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="size-4" />
+                )}
+                ✓ บันทึก และไปหน้ารายการวางบิล
+              </Button>
+            </div>
+          </div>
         </CardFooter>
       </Card>
         </>
