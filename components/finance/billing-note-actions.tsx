@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { coerceBillingDueDate } from "@/lib/utils/billing-period";
+import { coerceBillingDueDate, formatBillingInvoiceNo } from "@/lib/utils/billing-period";
 import type { BillingNoteDocType } from "@/types/billing";
 
 type EditableLine = {
@@ -40,9 +40,7 @@ type EditableLine = {
 };
 
 function lineLabel(line: EditableLine): string {
-  const ref = line.referenceNo?.trim() ?? "";
-  if (ref && ref !== line.docNo) return `${line.docNo} (Ref: ${ref})`;
-  return line.docNo;
+  return formatBillingInvoiceNo(line.docNo, line.referenceNo);
 }
 
 function recreateBillingHref(docType: BillingNoteDocType, contactId: string): string {

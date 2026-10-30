@@ -1,5 +1,34 @@
 import { formatThaiDate } from "@/lib/utils/date-formatter";
 
+/** วันที่ออกใบวางบิลตามปฏิทินกรุงเทพ รูปแบบ YYYY-MM-DD */
+export function todayBillingIso(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const read = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  const year = read("year");
+  const month = read("month");
+  const day = read("day");
+  if (!year || !month || !day) return now.toISOString().slice(0, 10);
+  return `${year}-${month}-${day}`;
+}
+
+/** `APT-2608-0001 (Ref: IV6908000001)` when a vendor reference exists. */
+export function formatBillingInvoiceNo(
+  docNo: string | null | undefined,
+  referenceNo?: string | null,
+  taxInvoiceNo?: string | null,
+): string {
+  const official = String(docNo ?? "").trim() || "—";
+  const ref = String(referenceNo || taxInvoiceNo || "").trim();
+  if (!ref || ref === official) return official;
+  return `${official} (Ref: ${ref})`;
+}
+
 export function addIsoDays(isoDate: string, days: number): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(isoDate.trim());
   if (!match) return isoDate.slice(0, 10);

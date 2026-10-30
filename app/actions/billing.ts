@@ -658,6 +658,12 @@ function billingNoteMonthToken(docNo: string): string | null {
   return match?.[1] ?? null;
 }
 
+function vendorRefFromNotes(notes: string | null | undefined): string | null {
+  const match = String(notes ?? "").match(/อ้างอิงบิลซัพพลายเออร์:\s*(.+)$/m);
+  const value = match?.[1]?.trim();
+  return value || null;
+}
+
 async function attachInvoiceReferences(
   supabase: SupabaseAdmin,
   lines: BillingNoteInvoiceLine[],
@@ -665,31 +671,56 @@ async function attachInvoiceReferences(
   const docNos = Array.from(
     new Set(lines.map((line) => line.invoice_doc_no.trim()).filter((no) => no && no !== "—")),
   );
-  if (docNos.length === 0) return lines;
-  const { data, error } = await supabase
-    .from("documents")
-    .select("id, doc_no, reference_no")
-    .in("doc_no", docNos);
-  if (error || !data) return lines;
-  const byNo = new Map<string, { id: string; reference_no: string | null }>();
-  for (const row of data) {
+  const ids = Array.from(new Set(lines.map((line) => line.invoice_id.trim()).filter(Boolean)));
+  if (docNos.length === 0 && ids.length === 0) return lines;
+
+  type RefRow = {
+    id: string;
+    doc_no: string | null;
+    reference_no: string | null;
+    notes: string | null;
+  };
+  const rows: RefRow[] = [];
+  if (docNos.length > 0) {
+    const byNo = await supabase
+      .from("documents")
+      .select("id, doc_no, reference_no, notes")
+      .in("doc_no", docNos);
+    if (!byNo.error) rows.push(...((byNo.data ?? []) as RefRow[]));
+  }
+  const foundIds = new Set(rows.map((row) => String(row.id)));
+  const missingIds = ids.filter((id) => !foundIds.has(id));
+  if (missingIds.length > 0) {
+    const byId = await supabase
+      .from("documents")
+      .select("id, doc_no, reference_no, notes")
+      .in("id", missingIds);
+    if (!byId.error) rows.push(...((byId.data ?? []) as RefRow[]));
+  }
+  if (rows.length === 0) return lines;
+
+  const byNo = new Map<string, RefRow>();
+  const byId = new Map<string, RefRow>();
+  for (const row of rows) {
     const docNo = String(row.doc_no ?? "").trim();
-    if (!docNo) continue;
-    byNo.set(docNo, {
-      id: String(row.id),
-      reference_no: row.reference_no?.trim() || null,
-    });
+    if (docNo) byNo.set(docNo, row);
+    byId.set(String(row.id), row);
   }
   const taxById = await loadTaxInvoiceNumbers(
     supabase,
-    Array.from(byNo.values()).map((row) => row.id),
+    rows.map((row) => String(row.id)),
   );
   return lines.map((line) => {
-    const match = byNo.get(line.invoice_doc_no.trim());
+    const match = byNo.get(line.invoice_doc_no.trim()) ?? byId.get(line.invoice_id);
+    const reference =
+      match?.reference_no?.trim() ||
+      vendorRefFromNotes(match?.notes) ||
+      line.reference_no ||
+      null;
     return {
       ...line,
-      reference_no: match?.reference_no ?? line.reference_no ?? null,
-      tax_invoice_no: match ? (taxById.get(match.id) ?? null) : (line.tax_invoice_no ?? null),
+      reference_no: reference,
+      tax_invoice_no: match ? (taxById.get(String(match.id)) ?? line.tax_invoice_no ?? null) : (line.tax_invoice_no ?? null),
     };
   });
 }
@@ -1410,11 +1441,12 @@ export async function createBillingNote(
     }
 
     const nowIso = new Date().toISOString();
+    const billingDate = documentDate.slice(0, 10);
     let docNo = "";
     let header: { id: string } | null = null;
     let bnHeaderError: { message?: string } | null = null;
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const allocated = await allocateBillingNoteDocNo(supabase, docType, documentDate);
+      const allocated = await allocateBillingNoteDocNo(supabase, docType, billingDate);
       if (!allocated.docNo) {
         return {
           success: false,
@@ -1427,7 +1459,7 @@ export async function createBillingNote(
         .insert({
           doc_no: docNo,
           doc_type: docType,
-          doc_date: documentDate,
+          doc_date: billingDate,
           due_date: dueDate,
           contact_id: contactId,
           sub_total: totalBilledAmount,

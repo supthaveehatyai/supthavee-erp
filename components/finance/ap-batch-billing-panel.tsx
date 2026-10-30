@@ -16,9 +16,11 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
 import {
+  formatBillingInvoiceNo,
   monthBounds,
   monthKeyFromIso,
   thaiMonthLabel,
+  todayBillingIso,
 } from "@/lib/utils/billing-period";
 import { addDaysIso } from "@/lib/utils/outstanding-summary";
 
@@ -39,7 +41,7 @@ function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-export function ApBatchBillingPanel({ defaultDate }: { defaultDate: string }) {
+export function ApBatchBillingPanel() {
   const router = useRouter();
   const [catalog, setCatalog] = useState<ApPeriodVendorSummary[]>([]);
   const [vendors, setVendors] = useState<ApPeriodVendorSummary[]>([]);
@@ -48,7 +50,7 @@ export function ApBatchBillingPanel({ defaultDate }: { defaultDate: string }) {
   const [periodKey, setPeriodKey] = useState("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [openVendorId, setOpenVendorId] = useState<string | null>(null);
-  const [billingDate, setBillingDate] = useState(defaultDate);
+  const [billingDate, setBillingDate] = useState(todayBillingIso);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,7 +81,7 @@ export function ApBatchBillingPanel({ defaultDate }: { defaultDate: string }) {
       const keys = Array.from(
         new Set(result.data.flatMap((vendor) => vendor.invoices.map((invoice) => monthKeyFromIso(invoice.doc_date)))),
       ).filter((key) => /^\d{4}-\d{2}$/.test(key));
-      const current = defaultDate.slice(0, 7);
+      const current = todayBillingIso().slice(0, 7);
       const key = keys.includes(current) ? current : keys.sort((a, b) => b.localeCompare(a))[0];
       if (!key) {
         setVendors(result.data);
@@ -95,7 +97,7 @@ export function ApBatchBillingPanel({ defaultDate }: { defaultDate: string }) {
     return () => {
       cancelled = true;
     };
-  }, [defaultDate]);
+  }, []);
 
   useEffect(() => {
     if (periodKey === "all") return;
@@ -207,6 +209,9 @@ export function ApBatchBillingPanel({ defaultDate }: { defaultDate: string }) {
               value={billingDate}
               onChange={(event) => setBillingDate(event.target.value)}
             />
+            <p className="text-xs text-slate-500">
+              ข้อมูลหัวใบวางบิล ใช้เป็นเดือนของเลข BR และไม่เปลี่ยนตามงวดบิลซื้อ
+            </p>
           </div>
           <div className="space-y-2">
             <p className="text-sm font-semibold text-slate-800">งวดเดือนของบิลที่ต้องการรวบจ่าย</p>
@@ -326,7 +331,6 @@ export function ApBatchBillingPanel({ defaultDate }: { defaultDate: string }) {
                     {open ? (
                       <ul className="mt-3 space-y-2 pl-7">
                         {vendor.invoices.map((invoice) => {
-                          const refNo = invoice.tax_invoice_no || invoice.reference_no;
                           return (
                             <li key={invoice.id} className="flex items-start gap-2 text-sm">
                               <input
@@ -343,8 +347,13 @@ export function ApBatchBillingPanel({ defaultDate }: { defaultDate: string }) {
                                 }}
                               />
                               <span>
-                                <span className="font-medium">{invoice.doc_no}</span>
-                                {refNo ? <span className="ml-2 text-xs text-slate-500">Ref: {refNo}</span> : null}
+                                <span className="font-medium">
+                                  {formatBillingInvoiceNo(
+                                    invoice.doc_no,
+                                    invoice.reference_no,
+                                    invoice.tax_invoice_no,
+                                  )}
+                                </span>
                                 <span className="ml-2 text-xs text-slate-500">
                                   {formatDate(invoice.doc_date)} · ครบกำหนด {formatDate(invoice.due_date)} · ฿
                                   {formatMoney(invoice.outstanding_amount)}

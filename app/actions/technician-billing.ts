@@ -18,6 +18,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server-admin";
 import { requireSessionUserId } from "@/lib/auth/current-user";
 import { getActiveWhtRates } from "@/lib/actions/wht-rate-actions";
+import { todayBillingIso } from "@/lib/utils/billing-period";
 import { roundMoney } from "@/lib/utils/payment-fifo";
 import type {
   CreateTechnicianBillInput,
@@ -1020,7 +1021,7 @@ export async function createTechnicianBill(
       whtResolved.whtRate,
     );
 
-    const docDate = new Date().toISOString().slice(0, 10);
+    const docDate = todayBillingIso();
     const { data: docNoRaw, error: rpcError } = await supabase.rpc(
       "generate_document_no",
       {

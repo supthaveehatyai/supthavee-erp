@@ -3,6 +3,7 @@ import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSum
 import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
 import { documentPartyLabel, documentPrintHeading } from "@/lib/constants/document-print-heading";
 import type { BillingNoteDetailData } from "@/types/billing";
+import { formatBillingInvoiceNo } from "@/lib/utils/billing-period";
 import { cn } from "@/lib/utils";
 
 export type BillingNotePrintTemplateProps = {
@@ -114,11 +115,11 @@ export default async function BillingNotePrintTemplate({
                     {index + 1}
                   </td>
                   <td className="py-1.5 pr-2 font-mono text-[11px] font-medium text-neutral-800">
-                    {(() => {
-                      const official = line.invoice_doc_no?.trim() || "—";
-                      const ref = (line.tax_invoice_no || line.reference_no || "").trim();
-                      return ref && ref !== official ? `${official} (Ref: ${ref})` : official;
-                    })()}
+                    {formatBillingInvoiceNo(
+                      line.invoice_doc_no,
+                      line.reference_no,
+                      line.tax_invoice_no,
+                    )}
                   </td>
                   <td className="py-1.5 pr-2 text-neutral-700">
                     {formatDateShort(line.invoice_doc_date)}

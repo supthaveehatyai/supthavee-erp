@@ -8,7 +8,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { CheckCircle2, Loader2, Save } from "lucide-react";
 import { createBillingNote } from "@/app/actions/billing";
@@ -43,10 +43,12 @@ import { cn } from "@/lib/utils";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
 import {
   coerceBillingDueDate,
+  formatBillingInvoiceNo,
   invoiceInRange,
   monthBounds,
   monthKeyFromIso,
   thaiMonthLabel,
+  todayBillingIso,
 } from "@/lib/utils/billing-period";
 import { addDaysIso } from "@/lib/utils/outstanding-summary";
 import { ApBatchBillingPanel } from "@/components/finance/ap-batch-billing-panel";
@@ -60,7 +62,6 @@ export type CreateBillingNoteFormProps = {
   invoices: UnbilledInvoice[];
   /** Shown when contact_id is empty — contacts with outstanding unbilled invoices. */
   outstandingContacts: OutstandingContactSummary[];
-  defaultDate: string;
   creditDays?: number;
   mode?: "single" | "batch";
 };
@@ -101,7 +102,6 @@ export function CreateBillingNoteForm({
   vendors,
   invoices,
   outstandingContacts,
-  defaultDate,
   creditDays = 0,
   mode = "single",
 }: CreateBillingNoteFormProps) {
@@ -109,8 +109,8 @@ export function CreateBillingNoteForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [, startNavigate] = useTransition();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [billingDate, setBillingDate] = useState(defaultDate);
-  const [dueDate, setDueDate] = useState(defaultDate);
+  const [billingDate, setBillingDate] = useState(todayBillingIso);
+  const [dueDate, setDueDate] = useState(todayBillingIso);
   const [dueTouched, setDueTouched] = useState(false);
   const [filterFromDate, setFilterFromDate] = useState("");
   const [filterToDate, setFilterToDate] = useState("");
@@ -149,6 +149,19 @@ export function CreateBillingNoteForm({
 
   const allSelected =
     visibleInvoices.length > 0 && visibleInvoices.every((inv) => selectedIds.has(inv.id));
+
+  const contactKey = `${type}|${contactId}`;
+  const seenContactKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (seenContactKey.current === contactKey) return;
+    seenContactKey.current = contactKey;
+    const today = todayBillingIso();
+    setBillingDate(today);
+    setDueTouched(false);
+    setDueDate(
+      coerceBillingDueDate(today, addDaysIso(today, Math.max(0, creditDays)), creditDays),
+    );
+  }, [contactKey, creditDays]);
 
   useEffect(() => {
     setDueDate((current) => {
@@ -347,7 +360,7 @@ export function CreateBillingNoteForm({
       ) : null}
 
       {!isAR && mode === "batch" ? (
-        <ApBatchBillingPanel defaultDate={defaultDate} />
+        <ApBatchBillingPanel />
       ) : !contactId ? (
         <Card>
           <CardHeader>
@@ -648,7 +661,6 @@ export function CreateBillingNoteForm({
                   </TableRow>
                 ) : visibleInvoices.map((inv) => {
                   const checked = selectedIds.has(inv.id);
-                  const refNo = inv.tax_invoice_no || inv.reference_no;
                   return (
                     <TableRow
                       key={inv.id}
@@ -666,12 +678,7 @@ export function CreateBillingNoteForm({
                         />
                       </TableCell>
                       <TableCell className="font-medium text-slate-900">
-                        <div>{inv.doc_no}</div>
-                        {refNo ? (
-                          <div className="text-xs font-normal text-slate-500">Ref: {refNo}</div>
-                        ) : (
-                          <div className="text-xs text-slate-400">{inv.doc_type}</div>
-                        )}
+                        {formatBillingInvoiceNo(inv.doc_no, inv.reference_no, inv.tax_invoice_no)}
                       </TableCell>
                       <TableCell>{formatDate(inv.doc_date)}</TableCell>
                       <TableCell>{formatDate(inv.due_date)}</TableCell>

@@ -18,15 +18,6 @@ import { getActiveVendors } from "@/lib/actions/mapping";
 import type { CustomerOption } from "@/types/document";
 import type { VendorOption } from "@/lib/actions/mapping";
 
-function todayInBangkok(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Bangkok",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-}
-
 export const metadata: Metadata = {
   title: "สร้างใบวางบิล | Billing Note",
   description: "สร้างใบวางบิลลูกหนี้ (BN) / รับวางบิลเจ้าหนี้ (BR)",
@@ -205,7 +196,6 @@ export default async function CreateBillingNotePage({ searchParams }: PageProps)
         vendors={vendors}
         invoices={invoices}
         outstandingContacts={outstandingContacts}
-        defaultDate={todayInBangkok()}
         creditDays={creditDays}
         mode={params.mode === "batch" && type === "AP" ? "batch" : "single"}
       />
