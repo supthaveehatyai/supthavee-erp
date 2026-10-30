@@ -15,6 +15,7 @@ import { vendorTransferNotice } from "@/lib/line/line-target";
 import { LinePaymentSlipDialog } from "@/components/finance/line-payment-slip-dialog";
 import { PaidSettlementBar } from "@/components/finance/paid-settlement-bar";
 import { ReplacePaymentSlipDialog } from "@/components/finance/replace-payment-slip-dialog";
+import { ContactBankAccountsPanel } from "@/components/finance/contact-bank-accounts-panel";
 import {
   DeleteBillingNoteButton,
   EditBillingNoteButton,
@@ -88,6 +89,13 @@ export function BillingNoteDetail({
 
   return (
     <div className="flex flex-col gap-2 print:hidden">
+    {doc.contact?.id ? (
+      <ContactBankAccountsPanel
+        contactId={doc.contact.id}
+        contactName={doc.contact.company_name || "คู่ค้า"}
+        layout="billing"
+      />
+    ) : null}
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="flex flex-col gap-2">
         <Link

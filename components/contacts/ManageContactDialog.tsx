@@ -18,6 +18,7 @@ import {
 } from "@/app/actions/contacts";
 import type { ContactPersonRow } from "@/types/contact";
 import { SkillRateCard } from "@/components/contacts/skill-rate-card";
+import { ContactBankAccountsPanel } from "@/components/finance/contact-bank-accounts-panel";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -399,6 +400,13 @@ export default function ManageContactDialog({
             </TabsList>
 
             <TabsContent value="details" className="mt-4 space-y-4">
+              {contact?.id ? (
+                <ContactBankAccountsPanel
+                  contactId={contact.id}
+                  contactName={contact.company_name}
+                  layout="profile"
+                />
+              ) : null}
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label>

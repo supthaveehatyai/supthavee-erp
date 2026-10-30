@@ -27,6 +27,7 @@ import { compressSlipJpeg } from "@/lib/utils/image-compression";
 import { OutstandingPartyCombobox } from "@/components/finance/OutstandingPartyCombobox";
 import { LinePaymentSlipDialog } from "@/components/finance/line-payment-slip-dialog";
 import { PaidSettlementBar } from "@/components/finance/paid-settlement-bar";
+import { ContactBankAccountsPanel } from "@/components/finance/contact-bank-accounts-panel";
 import { vendorTransferNotice } from "@/lib/line/line-target";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
 import { AllocatedAmountCell } from "@/components/finance/AllocatedAmountCell";
@@ -295,6 +296,23 @@ export function APPaymentClient({
   const totalPaymentAmount = roundMoney(
     Math.max(0, totalInvoiceAmount - depositTotal),
   );
+
+  const preferredBankCategory = useMemo(() => {
+    const selected = invoices.filter((invoice) => Number(paymentAmounts[invoice.id] || 0) > 0);
+    const rows = selected.length > 0 ? selected : invoices;
+    let tax = 0;
+    let plain = 0;
+    for (const invoice of rows) {
+      const allocated = Number(paymentAmounts[invoice.id] || 0);
+      const weight = allocated > 0 ? allocated : invoice.remaining_balance;
+      if (invoice.doc_type === "AP_TAX") tax += weight;
+      else if (invoice.doc_type === "AP_INV" || invoice.doc_type === "TB") plain += weight;
+    }
+    if (tax <= 0 && plain <= 0) return null;
+    if (plain <= 0) return "CORPORATE_TAX" as const;
+    if (tax <= 0) return "PERSONAL_NON_TAX" as const;
+    return tax >= plain ? ("CORPORATE_TAX" as const) : ("PERSONAL_NON_TAX" as const);
+  }, [invoices, paymentAmounts]);
 
   const allocationsJson = useMemo(
     () =>
@@ -792,11 +810,21 @@ export function APPaymentClient({
                 ✅ บันทึกจ่ายชำระสำเร็จ — กำลังกลับสู่หน้าระบบวางบิล...
               </div>
             ) : invoices.length === 0 ? (
-              <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 py-10 text-center text-slate-500">
-                ไม่พบบิลค้างชำระ
-                {selectedBillingNoteId
-                  ? " ในใบรับวางบิลที่เลือก"
-                  : " สำหรับเจ้าหนี้รายนี้"}
+              <div className="space-y-3">
+                {selectedVendor ? (
+                  <ContactBankAccountsPanel
+                    contactId={selectedVendor.id}
+                    contactName={selectedVendor.name}
+                    layout="payment"
+                    preferredCategory={preferredBankCategory}
+                  />
+                ) : null}
+                <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 py-10 text-center text-slate-500">
+                  ไม่พบบิลค้างชำระ
+                  {selectedBillingNoteId
+                    ? " ในใบรับวางบิลที่เลือก"
+                    : " สำหรับเจ้าหนี้รายนี้"}
+                </div>
               </div>
             ) : (
               <form action={handleSubmit} className="space-y-4">
@@ -1118,6 +1146,14 @@ export function APPaymentClient({
                       ระบุวันที่จ่าย บัญชี/เงินสด เลขอ้างอิง และแนบสลิปโอนเงิน
                     </p>
                   </div>
+                  {selectedVendor ? (
+                    <ContactBankAccountsPanel
+                      contactId={selectedVendor.id}
+                      contactName={selectedVendor.name}
+                      layout="payment"
+                      preferredCategory={preferredBankCategory}
+                    />
+                  ) : null}
 
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                     <div className="space-y-2">

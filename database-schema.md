@@ -32,6 +32,8 @@ mst_document_taxonomy (มาตรฐานเอกสารและขนา
 
 contacts (คู่ค้า Multi-Role — PK: id, ใช้ contact_roles VARCHAR[] เท่านั้น; มี default_doc_type, default_vat_mode, default_credit_days, default_freight_tax_mode)
 
+contact_bank_accounts (บัญชีรับเงินของคู่ค้าแบบหลายบัญชี — PK: id, FK: contact_id → contacts.id ON DELETE CASCADE, account_category [CORPORATE_TAX | PERSONAL_NON_TAX | PROMPTPAY | OTHER], bank_code, bank_name, account_no, account_name, branch_name, qr_image_url, notes, is_default, is_active, created_by, created_at, updated_at; บัญชีหลักแยกตาม account_category ผ่าน Trigger trg_sync_default_contact_bank_account; บันทึกผ่าน RPC upsert_contact_bank_account)
+
 contact_persons (ผู้ติดต่อภายใต้คู่ค้า — PK: id, FK: contact_id)
 
 user_profiles (โปรไฟล์พนักงาน/ผู้ใช้งาน — PK: id, role_code, data_access_scope [ALL | OWN], approval_limit, is_active)
