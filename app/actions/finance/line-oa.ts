@@ -1,5 +1,6 @@
 "use server";
 
+import { headers } from "next/headers";
 import { requireSessionUserId } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server-admin";
 import { loadLineChannelAccessToken, loadLineOaAccountUid, pushLineMessages } from "@/lib/line/line-oa";
@@ -85,23 +86,25 @@ export async function sendVendorPaymentSlipLineAction(input: {
   slipPublicUrl?: string | null;
   billingNoteNo?: string | null;
   paymentDocNo?: string | null;
-}): Promise<{ success: boolean; error: string | null }> {
+}): Promise<{ success: boolean; error: string | null; imageSent: boolean }> {
   const owner = await requireSessionUserId();
-  if (!owner.ok) return { success: false, error: owner.error };
+  if (!owner.ok) return { success: false, error: owner.error, imageSent: false };
 
   const messageText = input.messageText?.trim() ?? "";
-  if (!messageText) return { success: false, error: "กรุณาระบุข้อความแจ้งโอน" };
+  if (!messageText) return { success: false, error: "กรุณาระบุข้อความแจ้งโอน", imageSent: false };
 
   const lineTargetId =
     extractLineTargetId(input.lineTargetId) ||
     extractLineTargetId(input.lineOaChatUrl) ||
     (isH3Contact(input.contactName) ? H3_LINE_GROUP_ID : null);
   if (!lineTargetId) {
-    return { success: false, error: "กรุณาเลือกกลุ่ม หรือวางลิงก์ห้องแชท LINE OA" };
+    return { success: false, error: "กรุณาเลือกกลุ่ม หรือวางลิงก์ห้องแชท LINE OA", imageSent: false };
   }
 
   const token = await loadLineChannelAccessToken();
-  if (!token) return { success: false, error: "ไม่พบ LINE Channel Access Token ในระบบ" };
+  if (!token) {
+    return { success: false, error: "ไม่พบ LINE Channel Access Token ในระบบ", imageSent: false };
+  }
 
   const contactId = input.contactId?.trim() ?? "";
   if (contactId && (input.lineOaChatUrl?.trim() || input.lineTargetId?.trim())) {
@@ -119,31 +122,77 @@ export async function sendVendorPaymentSlipLineAction(input: {
   }
 
   const slipPublicUrl = input.slipPublicUrl?.trim() ?? "";
-  const messages: Array<Record<string, string>> = [{ type: "text", text: messageText }];
-  if (slipPublicUrl.startsWith("https://")) {
-    messages.push({
-      type: "image",
-      originalContentUrl: slipPublicUrl,
-      previewImageUrl: slipPublicUrl,
-    });
+  const jpegSlipUrl = await lineJpegSlipUrl(slipPublicUrl);
+  const textOnly: Array<Record<string, string>> = [{ type: "text", text: messageText }];
+  const withImage: Array<Record<string, string>> = jpegSlipUrl
+    ? [
+        ...textOnly,
+        { type: "image", originalContentUrl: jpegSlipUrl, previewImageUrl: jpegSlipUrl },
+      ]
+    : textOnly;
+
+  let pushed = await pushLineMessages(token, lineTargetId, withImage);
+  let imageSent = Boolean(jpegSlipUrl) && pushed.ok;
+  if (!pushed.ok && jpegSlipUrl) {
+    pushed = await pushLineMessages(token, lineTargetId, textOnly);
+    imageSent = false;
   }
 
-  const pushed = await pushLineMessages(token, lineTargetId, messages);
   await writeLineLog({
     contactId,
     lineTargetId,
     messageText,
-    slipUrl: slipPublicUrl || null,
+    slipUrl: imageSent ? jpegSlipUrl : slipPublicUrl || null,
     billingNoteNo: input.billingNoteNo?.trim() || null,
     paymentDocNo: input.paymentDocNo?.trim() || null,
     sentBy: owner.userId,
     status: pushed.ok ? "SENT" : "FAILED",
-    errorMessage: pushed.error,
+    errorMessage: pushed.ok ? null : pushed.error,
   });
   if (!pushed.ok) {
-    return { success: false, error: pushed.error ?? "ส่งข้อความเข้า LINE ไม่สำเร็จ" };
+    return { success: false, error: explainLineFailure(pushed.errorMessage, pushed.errorDetails), imageSent: false };
   }
-  return { success: true, error: null };
+  return { success: true, error: null, imageSent };
+}
+
+async function lineJpegSlipUrl(slipPublicUrl: string): Promise<string> {
+  if (!slipPublicUrl.startsWith("https://")) return "";
+  if (/\.pdf($|\?)/i.test(slipPublicUrl)) return "";
+  const origin = await publicAppOrigin();
+  if (origin.startsWith("https://")) {
+    return `${origin}/api/line/slip-image?url=${encodeURIComponent(slipPublicUrl)}`;
+  }
+  if (/\.(jpe?g|png)($|\?)/i.test(slipPublicUrl)) return slipPublicUrl;
+  return "";
+}
+
+async function publicAppOrigin(): Promise<string> {
+  try {
+    const h = await headers();
+    const host = (h.get("x-forwarded-host") || h.get("host") || "").split(",")[0]?.trim() ?? "";
+    if (!host) return "";
+    const forwarded = (h.get("x-forwarded-proto") || "").split(",")[0]?.trim() ?? "";
+    const proto = forwarded || (host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https");
+    return `${proto}://${host}`;
+  } catch {
+    return "";
+  }
+}
+
+function explainLineFailure(message: string | null, details: string | null): string {
+  const headline = message?.trim() || "ส่งข้อความเข้า LINE ไม่สำเร็จ";
+  const detailLine = details?.trim() ? `รายละเอียด: ${details.trim()}` : "";
+  const blob = `${headline}\n${details ?? ""}`.toLowerCase();
+  let advice =
+    "แนะนำ: ตรวจ Group ID จากลิงก์ chat.line.biz (รหัสหลัง /chat/), สิทธิ์ของ OA ในกลุ่ม และโควตา Push API";
+  if (/quota|monthly limit|rate limit|too many requests|429/.test(blob)) {
+    advice =
+      "แนะนำ: โควตา Push API ของแพ็กเกจฟรีอาจเต็มแล้ว รอรีเซ็ตต้นเดือน หรืออัปเกรดแพ็กเกจ LINE Official Account";
+  } else if (/failed to send messages|not a friend|not found|invalid|group|member|haven't added|has not added/.test(blob)) {
+    advice =
+      "แนะนำ: ให้สมาชิกทักในกลุ่ม LINE ที่มีบัญชี OA อยู่อย่างน้อย 1 ข้อความก่อน แล้วตรวจว่าเลือกกลุ่มถูก (รหัสหลัง /chat/) จากนั้นส่งใหม่ หากข้อความธรรมดาก็ไม่ผ่าน โควตา Push API ของแพ็กเกจฟรีอาจเต็ม";
+  }
+  return [headline, detailLine, advice].filter(Boolean).join("\n");
 }
 
 async function writeLineLog(entry: {

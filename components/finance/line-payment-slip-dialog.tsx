@@ -60,6 +60,7 @@ export function LinePaymentSlipDialog({
   const [chatInput, setChatInput] = useState("");
   const [draft, setDraft] = useState(messageText);
   const [sending, setSending] = useState(false);
+  const [copyingSlip, setCopyingSlip] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -107,7 +108,11 @@ export function LinePaymentSlipDialog({
       toast.error(result.error ?? "ส่งเข้า LINE ไม่สำเร็จ");
       return;
     }
-    toast.success("ส่งข้อความและรูปสลิปเข้ากลุ่ม LINE แล้ว");
+    if (slipUrl?.startsWith("https://") && !result.imageSent) {
+      toast.success("ส่งข้อความเข้ากลุ่มแล้ว — LINE รับรูปไม่ได้ ระบบส่งเฉพาะข้อความให้แล้ว");
+    } else {
+      toast.success("ส่งข้อความและรูปสลิปเข้ากลุ่ม LINE แล้ว");
+    }
     onSent?.();
     onOpenChange(false);
   }
@@ -119,11 +124,45 @@ export function LinePaymentSlipDialog({
     }
     try {
       await navigator.clipboard.writeText(draft);
-      toast.success("คัดลอกข้อความแจ้งโอนแล้ว");
+      toast.success(
+        slipUrl?.startsWith("https://")
+          ? "คัดลอกข้อความแล้ว เปิดห้องแชทให้แล้ว — กด Ctrl+V วางข้อความ แล้วคัดลอกรูปสลิปเพื่อวางต่อ"
+          : "คัดลอกข้อความแล้ว เปิดห้องแชทให้แล้ว — กด Ctrl+V เพื่อวาง",
+      );
     } catch {
       toast.error("คัดลอกข้อความไม่สำเร็จ");
     }
     window.open(lineBizChatUrl(oaUid, resolvedId), "_blank", "noopener,noreferrer");
+  }
+
+  async function copySlipImage() {
+    if (!slipUrl?.startsWith("https://")) return;
+    setCopyingSlip(true);
+    try {
+      const response = await fetch(`/api/line/slip-image?url=${encodeURIComponent(slipUrl)}`);
+      if (!response.ok) throw new Error("โหลดรูปไม่สำเร็จ");
+      const blob = await response.blob();
+      const bitmap = await createImageBitmap(blob);
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("canvas");
+      context.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      const png = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((value) => {
+          if (value) resolve(value);
+          else reject(new Error("แปลงรูปไม่สำเร็จ"));
+        }, "image/png");
+      });
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+      toast.success("คัดลอกรูปสลิปแล้ว — ในห้องแชทกด Ctrl+V เพื่อวางรูป");
+    } catch {
+      toast.error("คัดลอกรูปสลิปไม่สำเร็จ");
+    } finally {
+      setCopyingSlip(false);
+    }
   }
 
   return (
@@ -181,7 +220,18 @@ export function LinePaymentSlipDialog({
           </div>
           {slipUrl?.startsWith("https://") ? (
             <div className="space-y-1">
-              <p className="text-sm font-medium text-slate-700">รูปสลิปโอนเงิน</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium text-slate-700">รูปสลิปโอนเงิน</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8 px-2.5 text-xs"
+                  disabled={copyingSlip}
+                  onClick={() => void copySlipImage()}
+                >
+                  {copyingSlip ? "กำลังคัดลอกรูป..." : "🖼️ คัดลอกรูปสลิปลง Clipboard"}
+                </Button>
+              </div>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={slipUrl} alt="สลิปโอนเงิน" className="max-h-48 rounded-lg border object-contain" />
             </div>

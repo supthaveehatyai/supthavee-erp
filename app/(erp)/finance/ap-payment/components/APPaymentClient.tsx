@@ -23,7 +23,7 @@ import {
   checkedDepositIdsFromAmounts,
   redistributeCheckedDeposits,
 } from "@/lib/utils/deposit-apply";
-import { compressImage } from "@/lib/utils/image-compression";
+import { compressSlipJpeg } from "@/lib/utils/image-compression";
 import { OutstandingPartyCombobox } from "@/components/finance/OutstandingPartyCombobox";
 import { LinePaymentSlipDialog } from "@/components/finance/line-payment-slip-dialog";
 import { PaidSettlementBar } from "@/components/finance/paid-settlement-bar";
@@ -455,7 +455,7 @@ export function APPaymentClient({
 
     if (mime.startsWith("image/")) {
       try {
-        const compressed = await compressImage(file);
+        const compressed = await compressSlipJpeg(file);
         setSlipFile(compressed);
       } catch (err) {
         toast.error(
@@ -1148,7 +1148,7 @@ export function APPaymentClient({
                           <p className="text-xs text-slate-500">
                             {slipFile
                               ? `เลือกแล้ว: ${slipFile.name}`
-                              : "ยังไม่ได้เลือกไฟล์ — ไม่บังคับ แต่แนะนำให้แนบหลักฐาน"}
+                              : "ยังไม่ได้เลือกไฟล์ — รูปสลิปจะถูกบันทึกเป็น JPEG (.jpg)"}
                           </p>
                         </div>
                       </div>

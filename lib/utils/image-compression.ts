@@ -75,6 +75,35 @@ export async function compressImage(file: File): Promise<File> {
   return toWebpFile(compressed, file.name);
 }
 
+const SLIP_JPEG_OPTIONS: Parameters<typeof imageCompression>[1] = {
+  maxSizeMB: 1.2,
+  maxWidthOrHeight: 1920,
+  useWebWorker: true,
+  fileType: "image/jpeg",
+  initialQuality: 0.85,
+};
+
+function toJpegFile(file: File, originalName: string): File {
+  const base = originalName.replace(/\.[^.]+$/, "").trim() || "slip";
+  const safeBase = base.replace(/[^\w.-]+/g, "_").slice(0, 80) || "slip";
+  return new File([file], `${safeBase}.jpg`, {
+    type: "image/jpeg",
+    lastModified: Date.now(),
+  });
+}
+
+/** สลิปโอนเงินต้องเป็น JPEG เสมอ — LINE Messaging API ไม่รับ WebP */
+export async function compressSlipJpeg(file: File): Promise<File> {
+  if (!file || !(file instanceof File) || file.size <= 0) {
+    return file;
+  }
+  if (!isCompressibleImage(file)) {
+    return file;
+  }
+  const compressed = await imageCompression(file, SLIP_JPEG_OPTIONS);
+  return toJpegFile(compressed, file.name);
+}
+
 /**
  * Compress many files in sequence (preserves order).
  * Failures surface as thrown errors — callers should toast / abort upload.

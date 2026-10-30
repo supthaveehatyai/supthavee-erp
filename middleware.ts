@@ -13,7 +13,12 @@ import { updateSession } from "@/lib/supabase/update-session";
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (pathname === "/api/line/webhook" || pathname.startsWith("/api/line/webhook/")) {
+  if (
+    pathname === "/api/line/webhook" ||
+    pathname.startsWith("/api/line/webhook/") ||
+    pathname === "/api/line/slip-image" ||
+    pathname.startsWith("/api/line/slip-image/")
+  ) {
     return NextResponse.next();
   }
 

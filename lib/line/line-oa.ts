@@ -76,7 +76,12 @@ export async function pushLineMessages(
   token: string,
   targetId: string,
   messages: Array<Record<string, string>>,
-): Promise<{ ok: boolean; error: string | null }> {
+): Promise<{
+  ok: boolean;
+  error: string | null;
+  errorMessage: string | null;
+  errorDetails: string | null;
+}> {
   const response = await fetch("https://api.line.me/v2/bot/message/push", {
     method: "POST",
     headers: {
@@ -85,7 +90,32 @@ export async function pushLineMessages(
     },
     body: JSON.stringify({ to: targetId, messages }),
   });
-  if (response.ok) return { ok: true, error: null };
-  const detail = await response.text();
-  return { ok: false, error: detail.slice(0, 400) || `LINE ตอบกลับ ${response.status}` };
+  if (response.ok) {
+    return { ok: true, error: null, errorMessage: null, errorDetails: null };
+  }
+  const raw = (await response.text()).slice(0, 1200);
+  const parsed = parseLineErrorBody(raw);
+  const error =
+    [parsed.message, parsed.details ? `รายละเอียด: ${parsed.details}` : ""]
+      .filter(Boolean)
+      .join("\n") || `LINE ตอบกลับ ${response.status}`;
+  return {
+    ok: false,
+    error,
+    errorMessage: parsed.message || `LINE ตอบกลับ ${response.status}`,
+    errorDetails: parsed.details,
+  };
+}
+
+function parseLineErrorBody(raw: string): { message: string; details: string | null } {
+  try {
+    const parsed = JSON.parse(raw) as { message?: string; details?: unknown };
+    const message = parsed.message?.trim() || raw;
+    if (parsed.details == null) return { message, details: null };
+    const details =
+      typeof parsed.details === "string" ? parsed.details : JSON.stringify(parsed.details);
+    return { message, details };
+  } catch {
+    return { message: raw || "ส่งข้อความเข้า LINE ไม่สำเร็จ", details: null };
+  }
 }

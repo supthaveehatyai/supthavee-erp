@@ -21,6 +21,7 @@ import {
   todayIsoDate,
 } from "@/lib/utils/outstanding-summary";
 import { paymentTimestampIso } from "@/lib/utils/payment-timestamp";
+import { isJpegBuffer, isPdfBuffer, toJpegBuffer } from "@/lib/line/slip-jpeg";
 import type {
   ApAllocationInput,
   ApVendorOption,
@@ -395,28 +396,30 @@ async function uploadPaymentSlip(
   const now = new Date();
   const yyyy = String(now.getUTCFullYear());
   const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const safeName = file.name
-    .replace(/[^\w.\-ก-๙]+/g, "_")
-    .replace(/_+/g, "_")
-    .slice(0, 120);
-  const extFromName = safeName.includes(".")
-    ? safeName.slice(safeName.lastIndexOf("."))
-    : mimeType === "application/pdf"
-      ? ".pdf"
-      : mimeType === "image/png"
-        ? ".png"
-        : mimeType === "image/webp"
-          ? ".webp"
-          : mimeType === "image/gif"
-            ? ".gif"
-            : ".jpg";
-  const objectPath = `ap-payment/${yyyy}/${mm}/${crypto.randomUUID()}${extFromName}`;
-  const buffer = Buffer.from(await file.arrayBuffer());
+  const source = Buffer.from(await file.arrayBuffer());
+  const isPdf = mimeType === "application/pdf" || isPdfBuffer(source);
+  let body = source;
+  let contentType = mimeType || "application/octet-stream";
+  let ext = ".jpg";
+  if (isPdf) {
+    contentType = "application/pdf";
+    ext = ".pdf";
+  } else if (mimeType.startsWith("image/") || isJpegBuffer(source)) {
+    try {
+      body = isJpegBuffer(source) ? source : Buffer.from(await toJpegBuffer(source));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "แปลงสลิปเป็น JPEG ไม่สำเร็จ";
+      return { error: message };
+    }
+    contentType = "image/jpeg";
+    ext = ".jpg";
+  }
+  const objectPath = `ap-payment/${yyyy}/${mm}/${crypto.randomUUID()}${ext}`;
 
   const { error: uploadError } = await supabaseAdmin.storage
     .from(DOCUMENT_ATTACHMENTS_BUCKET)
-    .upload(objectPath, buffer, {
-      contentType: mimeType || "application/octet-stream",
+    .upload(objectPath, body, {
+      contentType,
       upsert: false,
     });
 
