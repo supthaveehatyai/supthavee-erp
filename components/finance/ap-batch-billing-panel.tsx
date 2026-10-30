@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
 import { SortHeaderButton } from "@/components/finance/billing-sort-controls";
+import { PurchaseTaxTierSwitch } from "@/components/finance/accounting-tax-tier-controls";
 import {
   formatBillingInvoiceNo,
   monthBounds,
@@ -418,6 +419,10 @@ export function ApBatchBillingPanel({
                                     invoice.tax_invoice_no,
                                   )}
                                 </span>
+                                <PurchaseTaxTierSwitch
+                                  documentId={invoice.document_id || invoice.id}
+                                  current={invoice.accounting_tax_tier}
+                                />
                                 <span className="ml-2 text-xs text-slate-500">
                                   {formatDate(invoice.doc_date)} · ครบกำหนด {formatDate(invoice.due_date)} · ฿
                                   {formatMoney(invoice.outstanding_amount)}

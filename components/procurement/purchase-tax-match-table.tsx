@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
+import { PurchaseTaxTierSwitch } from "@/components/finance/accounting-tax-tier-controls";
 import { roundTaxMoney } from "@/lib/utils/tax-invoice-status";
 import type { DocumentStatus, DocumentType, PurchaseDocumentListItem } from "@/types/document";
 
@@ -397,6 +398,9 @@ export function PurchaseTaxMatchTable({
                         <span className="ml-1.5 text-xs text-slate-500">Ref: {doc.reference_no}</span>
                       ) : null}
                     </div>
+                    {(doc.doc_type === "AP_TAX" || doc.doc_type === "AP_INV" || doc.doc_type === "AP_CASH") ? (
+                      <PurchaseTaxTierSwitch documentId={doc.id} current={doc.accounting_tax_tier} />
+                    ) : null}
                     <TaxInvoiceBadge doc={doc} onRevert={setRevertDoc} />
                   </TableCell>
                   <TableCell className="w-[14%] px-2 py-2 text-left">

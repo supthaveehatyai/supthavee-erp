@@ -14,6 +14,7 @@ import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import { createClient } from "@/utils/supabase/server";
 import { requireSessionUserId } from "@/lib/auth/current-user";
+import { loadAccountingTaxTiers } from "@/lib/finance/cash-receipt-data";
 import { roundMoney } from "@/lib/utils/payment-fifo";
 import { resolveDueDate } from "@/lib/utils/outstanding-summary";
 import type {
@@ -1108,6 +1109,10 @@ export async function getUnbilledInvoices(
       supabase,
       rows.map((row) => row.id),
     );
+    const accountingTierById = await loadAccountingTaxTiers(
+      supabase,
+      rows.map((row) => row.id),
+    );
     if (rows.length === 0) {
       return { data: [], error: null, creditDays };
     }
@@ -1163,6 +1168,7 @@ export async function getUnbilledInvoices(
 
       unbilled.push({
         id: resolvedId,
+        document_id: row.id,
         doc_no: docNo,
         doc_type: docType,
         doc_date: row.doc_date ? String(row.doc_date).slice(0, 10) : "",
@@ -1177,6 +1183,7 @@ export async function getUnbilledInvoices(
         payment_status: row.payment_status,
         reference_no: row.reference_no?.trim() || null,
         tax_invoice_no: taxInvoiceNoById.get(row.id) ?? null,
+        accounting_tax_tier: accountingTierById.get(row.id) ?? null,
       });
     }
 
@@ -2036,6 +2043,10 @@ async function queryUnbilledApByPeriod(
     supabase,
     openRows.map((row) => row.id),
   );
+  const accountingTierById = await loadAccountingTaxTiers(
+    supabase,
+    openRows.map((row) => row.id),
+  );
   const grouped = new Map<string, ApPeriodVendorSummary>();
   for (const row of openRows) {
     const contactId = row.contact_id?.trim() || "";
@@ -2050,6 +2061,7 @@ async function queryUnbilledApByPeriod(
     const docDate = row.doc_date ? String(row.doc_date).slice(0, 10) : "";
     const invoice: ApPeriodInvoice = {
       id: resolvedId,
+      document_id: row.id,
       doc_no: docNo,
       doc_type: docType,
       doc_date: docDate,
@@ -2057,6 +2069,7 @@ async function queryUnbilledApByPeriod(
       reference_no: row.reference_no?.trim() || null,
       tax_invoice_no: taxInvoiceNoById.get(row.id) ?? null,
       outstanding_amount: roundMoney(toMoney(row.grand_total) - toMoney(row.paid_amount)),
+      accounting_tax_tier: accountingTierById.get(row.id) ?? null,
     };
     const existing = grouped.get(contactId);
     if (!existing) {
@@ -2107,6 +2120,7 @@ function normalizeApPeriodRpc(value: unknown): ApPeriodVendorSummary[] | null {
       if (!id) return null;
       invoices.push({
         id,
+        document_id: String(invoice.document_id ?? id),
         doc_no: String(invoice.doc_no ?? ""),
         doc_type: String(invoice.doc_type ?? ""),
         doc_date: String(invoice.doc_date ?? "").slice(0, 10),
@@ -2114,6 +2128,7 @@ function normalizeApPeriodRpc(value: unknown): ApPeriodVendorSummary[] | null {
         reference_no: invoice.reference_no ? String(invoice.reference_no) : null,
         tax_invoice_no: invoice.tax_invoice_no ? String(invoice.tax_invoice_no) : null,
         outstanding_amount: roundMoney(toMoney(invoice.outstanding_amount as number)),
+        accounting_tax_tier: invoice.accounting_tax_tier ? String(invoice.accounting_tax_tier) : null,
       });
     }
     vendors.push({

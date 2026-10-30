@@ -65,6 +65,12 @@ export default async function PurchaseDocumentsPage({
         </div>
         <div className="flex flex-wrap gap-2">
           <Link
+            href="/finance/reports"
+            className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-4 text-sm font-semibold text-amber-900 shadow-sm transition hover:bg-amber-100"
+          >
+            ชุดใบรับเงิน 1.2
+          </Link>
+          <Link
             href="/purchases/manual-receipt"
             className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
           >

@@ -114,6 +114,9 @@ export default async function BillingNotesPage({ searchParams }: PageProps) {
 
   return (
     <div className="flex flex-col gap-6 p-6">
+      <a href="/finance/reports" className="w-fit text-sm font-semibold text-amber-800 underline">
+        ชุดใบรับเงินกลุ่ม 1.2 (บิลซื้อไม่มี VAT)
+      </a>
       <BillingNoteList
         type={type}
         search={search ?? ""}

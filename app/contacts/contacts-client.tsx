@@ -31,6 +31,11 @@ import {
   importContacts,
   toggleContactStatus,
 } from "@/lib/actions/contacts";
+import {
+  setContactVendorTaxTierAction,
+  uploadContactIdCardAction,
+} from "@/app/actions/finance/cash-receipts";
+import type { VendorTaxTier } from "@/types/cash-receipt";
 import ManageContactDialog from "@/components/contacts/ManageContactDialog";
 import ViewContactDialog from "@/components/contacts/ViewContactDialog";
 import { toast } from "sonner";
@@ -378,6 +383,8 @@ export default function ContactsClient({
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [form, setForm] = useState<ContactForm>(createEmptyForm);
+  const [newVendorTier, setNewVendorTier] = useState<VendorTaxTier>("CORP_VAT");
+  const [newIdCard, setNewIdCard] = useState<File | null>(null);
 
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [importFileName, setImportFileName] = useState("");
@@ -740,10 +747,28 @@ export default function ContactsClient({
         return;
       }
 
+      if (contact_roles.includes("Vendor") || contact_roles.includes("Technician")) {
+        const tierResult = await setContactVendorTaxTierAction({
+          contactId: result.data.id,
+          vendorTaxTier: newVendorTier,
+        });
+        if (!tierResult.success) {
+          toast.error(tierResult.error ?? "บันทึกประเภทผู้จำหน่ายไม่สำเร็จ");
+        } else if (newVendorTier === "INDIVIDUAL_ID_1_2" && newIdCard) {
+          const cardData = new FormData();
+          cardData.set("contact_id", result.data.id);
+          cardData.set("id_card", newIdCard);
+          const uploaded = await uploadContactIdCardAction(cardData);
+          if (!uploaded.success) toast.error(uploaded.error ?? "อัปโหลดสำเนาบัตรไม่สำเร็จ");
+        }
+      }
+
       toast.success("สร้างข้อมูลคู่ค้าสำเร็จ");
       setContacts((current) => [result.data!, ...current]);
       setIsDialogOpen(false);
       setForm(createEmptyForm());
+      setNewVendorTier("CORP_VAT");
+      setNewIdCard(null);
     } catch (error) {
       console.error("Submit Error:", error);
       const message =
@@ -1279,6 +1304,36 @@ export default function ContactsClient({
                         className={fieldClass}
                       />
                     </label>
+                    {(form.contactRoles.includes("Vendor") || form.contactRoles.includes("Technician")) ? (
+                      <div className="space-y-2 sm:col-span-2">
+                        <span className="block text-xs font-semibold text-slate-700">ประเภทผู้จำหน่ายสำหรับบัญชี</span>
+                        {(
+                          [
+                            ["CORP_VAT", "🏢 1.1 นิติบุคคล (มีใบกำกับภาษี VAT)"],
+                            ["INDIVIDUAL_ID_1_2", "🪪 1.2 บุคคลธรรมดา แนบบัตรประชาชน (ออกใบรับเงินส่งบัญชี)"],
+                            ["INTERNAL_NO_ID_1_3", "🔒 1.3 บุคคลธรรมดา ไม่แนบบัตรประชาชน (บิลภายใน)"],
+                          ] as const
+                        ).map(([value, label]) => (
+                          <label key={value} className="flex items-start gap-2 text-sm text-slate-800">
+                            <input
+                              type="radio"
+                              name="new-vendor-tax-tier"
+                              checked={newVendorTier === value}
+                              onChange={() => setNewVendorTier(value)}
+                            />
+                            <span>{label}</span>
+                          </label>
+                        ))}
+                        {newVendorTier === "INDIVIDUAL_ID_1_2" ? (
+                          <input
+                            type="file"
+                            accept="image/*,application/pdf,.pdf"
+                            className="block w-full text-xs"
+                            onChange={(event) => setNewIdCard(event.target.files?.[0] ?? null)}
+                          />
+                        ) : null}
+                      </div>
+                    ) : null}
 
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-semibold text-slate-700">

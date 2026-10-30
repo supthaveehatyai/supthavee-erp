@@ -8,6 +8,8 @@ export type BillingCategory = "AR" | "AP";
 
 export type UnbilledInvoice = {
   id: string;
+  /** documents.id used by convert_purchase_bill_tax_mode */
+  document_id: string;
   doc_no: string;
   doc_type: string;
   doc_date: string;
@@ -18,6 +20,7 @@ export type UnbilledInvoice = {
   payment_status: string | null;
   reference_no: string | null;
   tax_invoice_no: string | null;
+  accounting_tax_tier?: string | null;
 };
 
 export type GetUnbilledInvoicesResult = {
@@ -28,6 +31,7 @@ export type GetUnbilledInvoicesResult = {
 
 export type ApPeriodInvoice = {
   id: string;
+  document_id: string;
   doc_no: string;
   doc_type: string;
   doc_date: string;
@@ -35,6 +39,7 @@ export type ApPeriodInvoice = {
   reference_no: string | null;
   tax_invoice_no: string | null;
   outstanding_amount: number;
+  accounting_tax_tier?: string | null;
 };
 
 export type ApPeriodVendorSummary = {

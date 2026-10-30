@@ -11,6 +11,7 @@ import {
 import { getContactDetails } from "@/app/actions/contacts";
 import type { ContactDetails, ContactPersonRow } from "@/types/contact";
 import { SkillRateCard } from "@/components/contacts/skill-rate-card";
+import { VendorTaxTierCard } from "@/components/contacts/vendor-tax-tier-card";
 import { ContactBankAccountsPanel } from "@/components/finance/contact-bank-accounts-panel";
 import { Button } from "@/components/ui/button";
 import {
@@ -178,6 +179,8 @@ export default function ViewContactDialog({
               contactName={contact.company_name}
               layout="profile"
             />
+
+            <VendorTaxTierCard contactId={contact.id} />
 
             <section>
               <div className="mb-2 flex items-center justify-between gap-2">

@@ -122,6 +122,11 @@ export const REPORT_TABS: readonly PageModeTab[] = [
     label: "ศูนย์รายงานภาษีและทะเบียนเอกสาร",
   },
   {
+    key: "cash-receipt",
+    href: "/finance/reports",
+    label: "ชุดใบรับเงิน 1.2",
+  },
+  {
     key: "wht",
     href: "/tax/wht-report",
     label: "รายงานหัก ณ ที่จ่าย (WHT 50 ทวิ)",

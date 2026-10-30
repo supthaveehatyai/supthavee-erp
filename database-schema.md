@@ -30,7 +30,7 @@ mst_document_taxonomy (มาตรฐานเอกสารและขนา
 
 2. Core Entities (องค์กร, ผู้ใช้, ตั้งค่า)
 
-contacts (คู่ค้า Multi-Role — PK: id, ใช้ contact_roles VARCHAR[] เท่านั้น; มี default_doc_type, default_vat_mode, default_credit_days, default_freight_tax_mode)
+contacts (คู่ค้า Multi-Role — PK: id, ใช้ contact_roles VARCHAR[] เท่านั้น; มี default_doc_type, default_vat_mode, default_credit_days, default_freight_tax_mode, vendor_tax_tier [CORP_VAT | INDIVIDUAL_ID_1_2 | INTERNAL_NO_ID_1_3], id_card_attachment_url)
 
 contact_bank_accounts (บัญชีรับเงินของคู่ค้าแบบหลายบัญชี — PK: id, FK: contact_id → contacts.id ON DELETE CASCADE, account_category [CORPORATE_TAX | PERSONAL_NON_TAX | PROMPTPAY | OTHER], bank_code, bank_name, account_no, account_name, branch_name, qr_image_url, notes, is_default, is_active, created_by, created_at, updated_at; บัญชีหลักแยกตาม account_category ผ่าน Trigger trg_sync_default_contact_bank_account; บันทึกผ่าน RPC upsert_contact_bank_account)
 
@@ -70,7 +70,7 @@ technician_rates (เรตค่าแรงช่างผูกกับ prod
 
 4. Documents & Financials (เอกสารและการเงิน)
 
-documents (เอกสารหลักทั้งระบบ — PK: id, doc_no, doc_type, doc_date, contact_id, vat_type [ENUM: vat_calculation_type], sub_total [มีขีดล่าง _ คั่น], discount_amount, vat_amount, grand_total, status [DRAFT | PENDING | ISSUED | VOID | PAID], payment_status [UNPAID | PARTIAL | PAID], attachment_urls TEXT[], attachments JSONB, freight_cost / origin_freight_amount, dest_freight_cost / dest_freight_amount, dest_freight_paid_status [NOT NULL, Default 'NONE' ควบคุมผ่าน Trigger trg_sanitize_document_defaults], carrier_id, sales_channel, ecommerce_order_no, ecommerce_buyer_name, tracking_no, one_time_address, created_by)
+documents (เอกสารหลักทั้งระบบ — PK: id, doc_no, doc_type, doc_date, contact_id, vat_type [ENUM: vat_calculation_type], sub_total [มีขีดล่าง _ คั่น], discount_amount, vat_amount, grand_total, status [DRAFT | PENDING | ISSUED | VOID | PAID], payment_status [UNPAID | PARTIAL | PAID], accounting_tax_tier [CORP_VAT | RECEIPT_1_2 | INTERNAL_1_3], cash_receipt_no เช่น CA01/0001, attachment_urls TEXT[], attachments JSONB, freight_cost / origin_freight_amount, dest_freight_cost / dest_freight_amount, dest_freight_paid_status [NOT NULL, Default 'NONE' ควบคุมผ่าน Trigger trg_sanitize_document_defaults], carrier_id, sales_channel, ecommerce_order_no, ecommerce_buyer_name, tracking_no, one_time_address, created_by)
 
 document_items (รายการสินค้าในเอกสาร — PK: id, document_id, product_id, qty NUMERIC(14,4), uom_used, unit_price, unit_cost_price, net_unit_cost, line_total, prorated_freight, technician_id, wage_cost, technician_bill_id, mockup_image_url)
 
@@ -129,6 +129,10 @@ public.get_on_hand_qty_by_product_ids(p_product_ids UUID[])
 public.issue_document_transaction(...)
 
 public.process_ar_receipt_transaction(...)
+
+public.generate_tier_1_2_cash_receipt_numbers(p_start_date DATE, p_end_date DATE, p_prefix VARCHAR DEFAULT 'CA01') (รันเลขใบรับเงิน CA ให้บิลซื้อกลุ่ม RECEIPT_1_2 / คู่ค้า INDIVIDUAL_ID_1_2)
+
+public.convert_purchase_bill_tax_mode(p_document_id UUID, p_target_tier VARCHAR) (สลับบิลซื้อเป็น CORP_VAT / RECEIPT_1_2 / INTERNAL_1_3 และคำนวณยอดใหม่)
 
 public.save_manual_goods_receipt_transaction(...)
 

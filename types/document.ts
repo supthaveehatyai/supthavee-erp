@@ -503,6 +503,7 @@ export type PurchaseDocumentListItem = {
   bill_attachment_urls?: string[];
   tax_invoice_status?: "TAX_READY" | "PENDING_TAX_INVOICE" | "CONSOLIDATED_CHILD" | null;
   tax_invoice_no?: string | null;
+  accounting_tax_tier?: string | null;
 };
 
 export type GetPurchaseDocumentsResult = {

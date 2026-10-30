@@ -52,6 +52,7 @@ import {
 } from "@/lib/utils/billing-period";
 import { addDaysIso } from "@/lib/utils/outstanding-summary";
 import { ApBatchBillingPanel } from "@/components/finance/ap-batch-billing-panel";
+import { PurchaseTaxTierSwitch } from "@/components/finance/accounting-tax-tier-controls";
 import { ContactSortBar, SortHeaderButton } from "@/components/finance/billing-sort-controls";
 import {
   matchesContactQuery,
@@ -755,6 +756,12 @@ export function CreateBillingNoteForm({
                       </TableCell>
                       <TableCell className="font-medium text-slate-900">
                         {formatBillingInvoiceNo(inv.doc_no, inv.reference_no, inv.tax_invoice_no)}
+                        {type === "AP" ? (
+                          <PurchaseTaxTierSwitch
+                            documentId={inv.document_id || inv.id}
+                            current={inv.accounting_tax_tier}
+                          />
+                        ) : null}
                       </TableCell>
                       <TableCell>{formatDate(inv.doc_date)}</TableCell>
                       <TableCell>{formatDate(inv.due_date)}</TableCell>

@@ -18,6 +18,7 @@ import {
 } from "@/app/actions/contacts";
 import type { ContactPersonRow } from "@/types/contact";
 import { SkillRateCard } from "@/components/contacts/skill-rate-card";
+import { VendorTaxTierCard } from "@/components/contacts/vendor-tax-tier-card";
 import { ContactBankAccountsPanel } from "@/components/finance/contact-bank-accounts-panel";
 import {
   AlertDialog,
@@ -407,6 +408,7 @@ export default function ManageContactDialog({
                   layout="profile"
                 />
               ) : null}
+              {contact?.id ? <VendorTaxTierCard contactId={contact.id} /> : null}
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label>

@@ -2762,7 +2762,7 @@ export async function getPurchaseDocuments(
       contactIds = (matchedContacts ?? []).map((c) => c.id as string);
     }
 
-    const listSelect = (includeTax: boolean) =>
+    const listSelect = (includeTax: boolean, includeTier: boolean) =>
       `
         id,
         doc_no,
@@ -2775,16 +2775,17 @@ export async function getPurchaseDocuments(
         created_at,
         grand_total,
         contact_id,
+        ${includeTier ? "accounting_tax_tier," : ""}
         ${includeTax ? "tax_invoice_status, tax_invoice_no," : ""}
         contacts:contact_id (
           company_name
         )
       `;
 
-    const runList = (includeTax: boolean) => {
+    const runList = (includeTax: boolean, includeTier: boolean) => {
       let query = supabase
         .from("documents")
-        .select(listSelect(includeTax))
+        .select(listSelect(includeTax, includeTier))
         .in("doc_type", [...PURCHASE_DOC_TYPES]);
 
       if (search) {
@@ -2802,9 +2803,14 @@ export async function getPurchaseDocuments(
       return query.order("created_at", { ascending: false }).limit(safeLimit);
     };
 
-    let { data, error } = await runList(true);
+    let { data, error } = await runList(true, true);
+    if (error && /accounting_tax_tier|schema cache|42703/i.test(error.message)) {
+      const withoutTier = await runList(true, false);
+      data = withoutTier.data;
+      error = withoutTier.error;
+    }
     if (error && /tax_invoice_status|tax_invoice_no|schema cache|42703/i.test(error.message)) {
-      const fallback = await runList(false);
+      const fallback = await runList(false, false);
       data = fallback.data;
       error = fallback.error;
     }
@@ -2827,6 +2833,7 @@ export async function getPurchaseDocuments(
       contact_id: string;
       tax_invoice_status?: string | null;
       tax_invoice_no?: string | null;
+      accounting_tax_tier?: string | null;
       contacts:
         | { company_name?: string | null }
         | { company_name?: string | null }[]
@@ -2871,6 +2878,7 @@ export async function getPurchaseDocuments(
           notes,
           (row.attachment_url as string | null) ?? null,
         ),
+        accounting_tax_tier: String(row.accounting_tax_tier ?? "").trim() || null,
       };
     });
 
