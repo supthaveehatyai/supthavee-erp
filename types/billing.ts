@@ -82,6 +82,7 @@ export type UnbilledApVendorQueueItem = {
   contact_id: string;
   contact_name: string;
   invoice_count: number;
+  unbilled_count?: number | null;
   total_outstanding: number;
 };
 

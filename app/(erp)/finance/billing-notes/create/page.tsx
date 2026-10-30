@@ -141,7 +141,7 @@ export default async function CreateBillingNotePage({ searchParams }: PageProps)
                           : "border-slate-200 bg-slate-50 text-slate-700 hover:border-blue-300 hover:bg-blue-50"
                       }`}
                     >
-                      {vendor.contact_name} ({vendor.invoice_count} ใบ)
+                      {vendor.contact_name} ({vendor.unbilled_count ?? vendor.invoice_count ?? 0} ใบ)
                     </Link>
                   );
                 })}

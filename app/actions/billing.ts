@@ -11,6 +11,7 @@
 
 import { revalidatePath } from "next/cache";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
+import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import { createClient } from "@/utils/supabase/server";
 import { requireSessionUserId } from "@/lib/auth/current-user";
 import { roundMoney } from "@/lib/utils/payment-fifo";
@@ -149,6 +150,10 @@ function normalizeVendorQueue(data: unknown): UnbilledApVendorQueueItem[] | null
       contact_id: contactId,
       contact_name: String(row.contact_name ?? row.company_name ?? "ไม่ระบุชื่อคู่ค้า").trim() || "ไม่ระบุชื่อคู่ค้า",
       invoice_count: Math.max(0, Number(row.invoice_count ?? row.bill_count ?? 0) || 0),
+      unbilled_count:
+        row.unbilled_count == null || row.unbilled_count === ""
+          ? null
+          : Math.max(0, Number(row.unbilled_count) || 0),
       total_outstanding: roundMoney(toMoney(row.total_outstanding as number | string | null)),
     });
   }
@@ -169,6 +174,68 @@ function resolveInvoiceDocTypes(
 
 function resolveBillingDocType(category: BillingCategory): "BN" | "BR" {
   return category === "AR" ? "BN" : "BR";
+}
+
+function billingNoteRunningPrefix(docType: "BN" | "BR", documentDate: string): string {
+  const yymm = `${documentDate.slice(2, 4)}${documentDate.slice(5, 7)}`;
+  return `${docType}-${yymm}-`;
+}
+
+/** Last 1–4 digits of a `PREFIX-YYMM-XXXX` number. Non-matching tails do not vote. */
+function billingNoteSequence(docNo: string, runningPrefix: string): number {
+  if (!docNo.startsWith(runningPrefix)) return 0;
+  const tail = docNo.slice(runningPrefix.length);
+  const match = tail.match(/^(\d{1,4})$/);
+  return match ? Number(match[1]) : 0;
+}
+
+function isDuplicateDocNo(error: { code?: string; message?: string } | null): boolean {
+  const message = error?.message ?? "";
+  return error?.code === "23505" || /duplicate key|unique constraint/i.test(message);
+}
+
+/**
+ * Next BN/BR number from the highest 4-digit tail in BOTH ledgers.
+ * The scan is company-wide: never filter by contact_id.
+ */
+async function allocateBillingNoteDocNo(
+  supabase: SupabaseAdmin,
+  docType: "BN" | "BR",
+  documentDate: string,
+): Promise<{ docNo: string | null; error: string | null }> {
+  const runningPrefix = billingNoteRunningPrefix(docType, documentDate);
+  const pattern = `${runningPrefix}%`;
+
+  async function listDocNos(table: "doc_headers" | "documents") {
+    return fetchAllPages<{ doc_no: string | null }>((from, to) =>
+      supabase
+        .from(table)
+        .select("doc_no")
+        .like("doc_no", pattern)
+        .order("doc_no", { ascending: true })
+        .range(from, to),
+    );
+  }
+
+  const [headers, documents] = await Promise.all([
+    listDocNos("doc_headers"),
+    listDocNos("documents"),
+  ]);
+  if (headers.error) return { docNo: null, error: headers.error.message };
+  if (documents.error) return { docNo: null, error: documents.error.message };
+
+  let maxSeq = 0;
+  for (const row of [...headers.data, ...documents.data]) {
+    maxSeq = Math.max(maxSeq, billingNoteSequence(String(row.doc_no ?? "").trim(), runningPrefix));
+  }
+  const nextSeq = maxSeq + 1;
+  if (nextSeq > 9999) {
+    return { docNo: null, error: `เลขที่เอกสาร ${runningPrefix} เกิน 9999` };
+  }
+  return {
+    docNo: `${runningPrefix}${String(nextSeq).padStart(4, "0")}`,
+    error: null,
+  };
 }
 
 function sanitizeSearch(raw: string): string {
@@ -1200,47 +1267,47 @@ export async function createBillingNote(
       }
     }
 
-    // Running number — RPC only (do not alter generate_document_no logic).
-    const { data: docNoRaw, error: rpcError } = await supabase.rpc(
-      "generate_document_no",
-      {
-        p_doc_type: docType,
-        p_doc_date: documentDate,
-      },
-    );
-
-    if (rpcError || typeof docNoRaw !== "string" || !docNoRaw.trim()) {
-      return {
-        success: false,
-        error:
-          rpcError?.message ??
-          "RPC generate_document_no ไม่คืนเลขที่เอกสาร",
-      };
-    }
-
-    const docNo = docNoRaw.trim();
     const nowIso = new Date().toISOString();
-
-    const { data: header, error: bnHeaderError } = await supabase
-      .from("doc_headers")
-      .insert({
-        doc_no: docNo,
-        doc_type: docType,
-        doc_date: documentDate,
-        due_date: dueDate,
-        contact_id: contactId,
-        sub_total: totalBilledAmount,
-        discount_amount: 0,
-        tax_rate: 0,
-        tax_amount: 0,
-        wht_rate: 0,
-        wht_amount: 0,
-        grand_total: totalBilledAmount,
-        deposit_deducted: 0,
-        payment_status: "PENDING",
-      })
-      .select("id")
-      .single();
+    let docNo = "";
+    let header: { id: string } | null = null;
+    let bnHeaderError: { message?: string } | null = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const allocated = await allocateBillingNoteDocNo(supabase, docType, documentDate);
+      if (!allocated.docNo) {
+        return {
+          success: false,
+          error: allocated.error ?? "ออกเลขที่ใบวางบิลไม่สำเร็จ",
+        };
+      }
+      docNo = allocated.docNo;
+      const inserted = await supabase
+        .from("doc_headers")
+        .insert({
+          doc_no: docNo,
+          doc_type: docType,
+          doc_date: documentDate,
+          due_date: dueDate,
+          contact_id: contactId,
+          sub_total: totalBilledAmount,
+          discount_amount: 0,
+          tax_rate: 0,
+          tax_amount: 0,
+          wht_rate: 0,
+          wht_amount: 0,
+          grand_total: totalBilledAmount,
+          deposit_deducted: 0,
+          payment_status: "PENDING",
+        })
+        .select("id")
+        .single();
+      if (!inserted.error && inserted.data?.id) {
+        header = { id: String(inserted.data.id) };
+        bnHeaderError = null;
+        break;
+      }
+      bnHeaderError = inserted.error;
+      if (!isDuplicateDocNo(inserted.error)) break;
+    }
 
     if (bnHeaderError || !header?.id) {
       return {
