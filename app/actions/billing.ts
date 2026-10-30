@@ -528,14 +528,43 @@ export async function getBillingNoteSettlements(billingNoteId: string): Promise<
         .filter((row) => row.is_voided !== true)
         .map((row) => [String(row.document_id), row]),
     );
+    const payDocNos = (payments ?? []).map((row) => String(row.doc_no ?? "").trim()).filter(Boolean);
+    const lineSentDocNos = new Set<string>();
+    if (payDocNos.length > 0) {
+      const logs = supabase as unknown as {
+        from: (table: "line_notification_logs") => {
+          select: (columns: string) => {
+            in: (
+              column: string,
+              values: string[],
+            ) => Promise<{
+              data: { payment_doc_no?: string | null; status?: string | null }[] | null;
+              error: { message?: string } | null;
+            }>;
+          };
+        };
+      };
+      const logged = await logs
+        .from("line_notification_logs")
+        .select("payment_doc_no, status")
+        .in("payment_doc_no", payDocNos);
+      if (!logged.error) {
+        for (const row of logged.data ?? []) {
+          if (String(row.status ?? "").toUpperCase() === "SENT" && row.payment_doc_no) {
+            lineSentDocNos.add(String(row.payment_doc_no));
+          }
+        }
+      }
+    }
 
     return {
       data: (payments ?? []).map((row) => {
         const tx = txByDoc.get(String(row.id));
         const bankLabel = tx?.bank_account_id ? bankById.get(String(tx.bank_account_id)) : null;
         const method = String(tx?.payment_method ?? "").toUpperCase();
+        const docNo = String(row.doc_no ?? "");
         return {
-          doc_no: String(row.doc_no ?? ""),
+          doc_no: docNo,
           paid_at: tx?.payment_date ? String(tx.payment_date) : null,
           channel_label: bankLabel || (method === "CASH" || !tx?.bank_account_id ? "เงินสด (Cash)" : "บัญชีธนาคาร"),
           reference_no: tx?.reference_no?.trim() || null,
@@ -543,6 +572,7 @@ export async function getBillingNoteSettlements(billingNoteId: string): Promise<
           slip_urls: [tx?.attachment_url, row.attachment_url, row.attached_file_url, row.original_receipt_url]
             .map((url) => String(url ?? "").trim())
             .filter((url, index, all) => Boolean(url) && all.indexOf(url) === index),
+          line_sent: lineSentDocNos.has(docNo),
         };
       }),
       error: null,

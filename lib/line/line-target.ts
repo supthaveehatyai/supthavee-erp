@@ -18,3 +18,17 @@ export function extractLineTargetId(value: string | null | undefined): string | 
 export function lineBizChatUrl(oaAccountUid: string, targetId: string): string {
   return `https://chat.line.biz/${oaAccountUid}/chat/${targetId}`;
 }
+
+/** ข้อความแจ้งโอน 4 บรรทัด สำหรับ LINE OA และปุ่มคัดลอก */
+export function vendorTransferNotice(
+  vendorName: string,
+  paymentDateOnly: string,
+  formattedTotalAmount: string,
+): string {
+  return [
+    `เรียน ${vendorName}`,
+    "บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด ขอแจ้งโอนชำระค่าสินค้าครับ",
+    `วันที่โอน: ${paymentDateOnly}`,
+    `ยอดโอนชำระสุทธิ: ${formattedTotalAmount} บาท`,
+  ].join("\n");
+}

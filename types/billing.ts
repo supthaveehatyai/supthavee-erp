@@ -134,6 +134,7 @@ export type BillingNoteSettlement = {
   reference_no: string | null;
   amount: number;
   slip_urls: string[];
+  line_sent: boolean;
 };
 
 export type GetBillingNotesResult = {

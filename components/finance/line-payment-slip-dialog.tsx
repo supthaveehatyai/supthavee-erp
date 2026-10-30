@@ -40,6 +40,7 @@ export type LinePaymentSlipDialogProps = {
   paymentDocNo?: string | null;
   messageText: string;
   slipUrl?: string | null;
+  onSent?: () => void;
 };
 
 export function LinePaymentSlipDialog({
@@ -51,6 +52,7 @@ export function LinePaymentSlipDialog({
   paymentDocNo,
   messageText,
   slipUrl,
+  onSent,
 }: LinePaymentSlipDialogProps) {
   const [groups, setGroups] = useState<KnownGroup[]>([]);
   const [oaUid, setOaUid] = useState(LINE_OA_ACCOUNT_UID);
@@ -106,6 +108,7 @@ export function LinePaymentSlipDialog({
       return;
     }
     toast.success("ส่งข้อความและรูปสลิปเข้ากลุ่ม LINE แล้ว");
+    onSent?.();
     onOpenChange(false);
   }
 

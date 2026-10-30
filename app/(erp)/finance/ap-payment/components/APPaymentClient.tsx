@@ -26,6 +26,9 @@ import {
 import { compressImage } from "@/lib/utils/image-compression";
 import { OutstandingPartyCombobox } from "@/components/finance/OutstandingPartyCombobox";
 import { LinePaymentSlipDialog } from "@/components/finance/line-payment-slip-dialog";
+import { PaidSettlementBar } from "@/components/finance/paid-settlement-bar";
+import { vendorTransferNotice } from "@/lib/line/line-target";
+import { formatThaiDate } from "@/lib/utils/date-formatter";
 import { AllocatedAmountCell } from "@/components/finance/AllocatedAmountCell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -148,6 +151,9 @@ export function APPaymentClient({
     slipUrl: string | null;
     message: string;
     billingNoteNo: string | null;
+    dateLabel: string;
+    channelLabel: string;
+    lineSent: boolean;
   } | null>(null);
 
   useEffect(() => {
@@ -492,9 +498,6 @@ export function APPaymentClient({
           ? `บันทึกจ่ายชำระสำเร็จ — ${result.payment_doc_no}`
           : "บันทึกจ่ายชำระสำเร็จ",
       );
-      const paidBills = invoices
-        .filter((invoice) => Number(paymentAmounts[invoice.id] ?? 0) > 0)
-        .map((invoice) => invoice.document_no);
       const note = billingNotes.find((item) => item.id === selectedBillingNoteId);
       const bank = activeBanks.find((item) => item.id === bankAccountId);
       const channel =
@@ -503,24 +506,16 @@ export function APPaymentClient({
           : bank
             ? `${bank.bank_name} • ${bank.account_no}`
             : "บัญชีธนาคาร";
-      const when = paymentTime.trim() ? `${paymentDate} ${paymentTime.trim()}` : paymentDate;
+      const vendorName = selectedVendor?.name ?? "คู่ค้า";
+      const dateLabel = formatThaiDate(paymentDate, "short");
       setLineNotice({
         paymentDocNo: result.payment_doc_no ?? "",
         slipUrl: result.slip_url ?? null,
         billingNoteNo: note?.doc_no ?? null,
-        message: [
-          `เรียน ${selectedVendor?.name ?? "คู่ค้า"}`,
-          "บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด ขอแจ้งโอนเงินตามใบวางบิล",
-          note ? `ใบวางบิล: ${note.doc_no}` : null,
-          paidBills.length > 0 ? `รายการบิลที่ชำระ: ${paidBills.join(", ")}` : null,
-          result.payment_doc_no ? `ใบสำคัญจ่าย: ${result.payment_doc_no}` : null,
-          `วันที่โอน: ${when}`,
-          `ธนาคาร/ช่องทาง: ${channel}`,
-          referenceNo.trim() ? `เลขอ้างอิงสลิป: ${referenceNo.trim()}` : null,
-          `ยอดโอนสุทธิ: ${formatMoney(totalPaymentAmount)} บาท`,
-        ]
-          .filter(Boolean)
-          .join("\n"),
+        dateLabel,
+        channelLabel: channel,
+        lineSent: false,
+        message: vendorTransferNotice(vendorName, dateLabel, formatMoney(totalPaymentAmount)),
       });
       setPaymentAmounts({});
       setDepositAmounts({});
@@ -543,14 +538,21 @@ export function APPaymentClient({
           เลือกผู้จำหน่ายหรือช่างรับเหมาที่มียอดค้าง เพื่อตัดยอดแบบ Knock-off
           (FIFO) — รองรับ AP_TAX / AP_INV / TB
         </p>
-        {lineNotice ? (
-          <button
-            type="button"
-            onClick={() => setLineOpen(true)}
-            className="inline-flex h-10 w-fit items-center rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white"
-          >
-            📲 ส่งสลิปแจ้งคู่ค้าทาง LINE
-          </button>
+        {lineNotice?.paymentDocNo ? (
+          <PaidSettlementBar
+            docNo={lineNotice.paymentDocNo}
+            dateLabel={lineNotice.dateLabel}
+            channelLabel={lineNotice.channelLabel}
+            lineSent={lineNotice.lineSent}
+            slipUrl={lineNotice.slipUrl}
+            onSendLine={() => setLineOpen(true)}
+            onCopy={() => {
+              void navigator.clipboard.writeText(lineNotice.message).then(
+                () => toast.success("คัดลอกข้อความแจ้งโอนแล้ว"),
+                () => toast.error("คัดลอกข้อความไม่สำเร็จ"),
+              );
+            }}
+          />
         ) : null}
       </div>
 
@@ -1190,6 +1192,9 @@ export function APPaymentClient({
           paymentDocNo={lineNotice.paymentDocNo}
           messageText={lineNotice.message}
           slipUrl={lineNotice.slipUrl}
+          onSent={() =>
+            setLineNotice((current) => (current ? { ...current, lineSent: true } : current))
+          }
         />
       ) : null}
     </div>
