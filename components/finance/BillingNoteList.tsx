@@ -34,9 +34,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { SortHeaderButton } from "@/components/finance/billing-sort-controls";
 import { cn } from "@/lib/utils";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
 import { monthKeyFromIso, thaiMonthLabel } from "@/lib/utils/billing-period";
+import {
+  matchesBillingStatus,
+  matchesContactQuery,
+  nextNoteSort,
+  NOTE_SORT_OPTIONS,
+  sortBillingNotes,
+  type BillingStatusFilter,
+  type NoteSortKey,
+  type SortDir,
+} from "@/lib/utils/billing-list-sort";
 
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -118,6 +129,9 @@ export function BillingNoteList({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [search, setSearch] = useState(urlSearch);
+  const [statusFilter, setStatusFilter] = useState<BillingStatusFilter>("all");
+  const [sortKey, setSortKey] = useState<NoteSortKey>("doc_no");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const latestRef = useRef({ search, urlSearch, type });
   latestRef.current = { search, urlSearch, type };
 
@@ -145,10 +159,27 @@ export function BillingNoteList({
       }));
   }, [rows]);
   const [scheduleMonth, setScheduleMonth] = useState("all");
-  const visibleRows =
+  const searchedRows = useMemo(() => {
+    const q = search.trim();
+    if (!q) return rows;
+    return rows.filter(
+      (row) => matchesContactQuery(row.contact_name, q) || matchesContactQuery(row.doc_no, q),
+    );
+  }, [rows, search]);
+  const monthRows =
     !isBR || scheduleMonth === "all"
-      ? rows
-      : rows.filter((row) => monthKeyFromIso(row.doc_date) === scheduleMonth);
+      ? searchedRows
+      : searchedRows.filter((row) => monthKeyFromIso(row.doc_date) === scheduleMonth);
+  const displayRows = useMemo(
+    () =>
+      sortBillingNotes(
+        monthRows.filter((row) => matchesBillingStatus(row.payment_status, statusFilter)),
+        sortKey,
+        sortDir,
+      ),
+    [monthRows, statusFilter, sortKey, sortDir],
+  );
+  const visibleRows = monthRows;
   const paidRows = visibleRows.filter((row) => {
     const status = row.payment_status.trim().toUpperCase();
     return status === "PAID" || status === "COMPLETED";
@@ -158,6 +189,70 @@ export function BillingNoteList({
     items.reduce((sum, row) => sum + row.grand_total, 0);
   const scheduleLabel =
     scheduleMonth === "all" ? "ทั้งหมด" : thaiMonthLabel(scheduleMonth);
+  const statusLabel =
+    statusFilter === "pending" ? "รอโอนจ่าย" : statusFilter === "paid" ? "จ่ายแล้ว" : "ทุกสถานะ";
+
+  function applyNoteSort(nextKey: NoteSortKey) {
+    const next = nextNoteSort(sortKey, sortDir, nextKey);
+    setSortKey(next.key);
+    setSortDir(next.dir);
+  }
+
+  const listTools = (
+    <div className="flex w-full flex-col gap-2 lg:max-w-3xl">
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="relative w-full sm:max-w-xs">
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="ค้นหาเลขที่เอกสาร / ชื่อคู่ค้า"
+            className="h-10 pl-9"
+            aria-label="ค้นหารายการวางบิล"
+          />
+        </div>
+        <select
+          aria-label="เรียงลำดับรายการวางบิล"
+          className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800"
+          value={`${sortKey}:${sortDir}`}
+          onChange={(event) => {
+            const [key, dir] = event.target.value.split(":") as [NoteSortKey, SortDir];
+            setSortKey(key);
+            setSortDir(dir);
+          }}
+        >
+          {NOTE_SORT_OPTIONS.map((option) => (
+            <option key={`${option.key}:${option.dir}`} value={`${option.key}:${option.dir}`}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {(
+          [
+            ["all", "สถานะทั้งหมด"],
+            ["pending", "⏳ รอโอนจ่าย (PENDING)"],
+            ["paid", "✅ จ่ายแล้ว (PAID)"],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setStatusFilter(value)}
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs font-semibold",
+              statusFilter === value
+                ? "border-slate-900 bg-slate-900 text-white"
+                : "border-slate-200 bg-white text-slate-700",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   useEffect(() => {
     setSearch(urlSearch);
@@ -273,23 +368,50 @@ export function BillingNoteList({
           ) : null}
           {rows.length > 0 ? (
             <Card>
-              <CardHeader>
-                <CardTitle>ใบสรุปวางบิลช่างที่ออกแล้ว</CardTitle>
-                <CardDescription>ลบได้เฉพาะใบที่ยังไม่ชำระ เพื่อปลดงานกลับเข้าคิว</CardDescription>
+              <CardHeader className="gap-4">
+                <div>
+                  <CardTitle>ใบสรุปวางบิลช่างที่ออกแล้ว</CardTitle>
+                  <CardDescription>
+                    พบ {displayRows.length} รายการ · ลบได้เฉพาะใบที่ยังไม่ชำระ เพื่อปลดงานกลับเข้าคิว
+                  </CardDescription>
+                </div>
+                {listTools}
               </CardHeader>
               <CardContent>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>เลขที่เอกสาร</TableHead>
-                      <TableHead>ช่าง</TableHead>
-                      <TableHead className="text-right">ยอดรวม</TableHead>
+                      <TableHead>
+                        <SortHeaderButton
+                          label="เลขที่เอกสาร"
+                          active={sortKey === "doc_no"}
+                          dir={sortDir}
+                          onClick={() => applyNoteSort("doc_no")}
+                        />
+                      </TableHead>
+                      <TableHead>
+                        <SortHeaderButton
+                          label="ช่าง"
+                          active={sortKey === "name"}
+                          dir={sortDir}
+                          onClick={() => applyNoteSort("name")}
+                        />
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <SortHeaderButton
+                          label="ยอดรวม"
+                          active={sortKey === "amount"}
+                          dir={sortDir}
+                          align="right"
+                          onClick={() => applyNoteSort("amount")}
+                        />
+                      </TableHead>
                       <TableHead>สถานะ</TableHead>
                       <TableHead className="text-right">การดำเนินการ</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {rows.map((row) => {
+                    {displayRows.map((row) => {
                       const status = row.payment_status.trim().toUpperCase();
                       return (
                         <TableRow key={row.id}>
@@ -393,20 +515,12 @@ export function BillingNoteList({
               {isBN ? "รายการวางบิลลูกหนี้" : "รายการรับวางบิลเจ้าหนี้"}
             </CardTitle>
             <CardDescription>
-              พบ {visibleRows.length} รายการ
-              {urlSearch ? ` · ค้นหา “${urlSearch}”` : null}
+              พบ {displayRows.length} รายการ
+              {search.trim() ? ` · ค้นหา “${search.trim()}”` : null}
+              {statusFilter !== "all" ? ` · ${statusLabel}` : null}
             </CardDescription>
           </div>
-          <div className="relative w-full sm:max-w-xs">
-            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="ค้นหาเลขที่เอกสาร / ชื่อคู่ค้า"
-              className="h-10 pl-9"
-              aria-label="ค้นหารายการวางบิล"
-            />
-          </div>
+          {listTools}
         </CardHeader>
         <CardContent>
           {error ? (
@@ -415,10 +529,10 @@ export function BillingNoteList({
             </div>
           ) : null}
 
-          {rows.length === 0 ? (
+          {displayRows.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-12 text-center text-sm text-slate-500">
-              {urlSearch
-                ? "ไม่พบรายการที่ตรงกับการค้นหา"
+              {search.trim() || statusFilter !== "all"
+                ? "ไม่พบรายการที่ตรงกับการค้นหาหรือตัวกรองสถานะ"
                 : isBN
                   ? "ยังไม่มีใบวางบิลลูกหนี้ (BN)"
                   : "ยังไม่มีใบรับวางบิลเจ้าหนี้ (BR)"}
@@ -429,17 +543,45 @@ export function BillingNoteList({
                 <TableHeader>
                   <TableRow className="bg-slate-50">
                     <TableHead className="whitespace-nowrap">
-                      วันที่เอกสาร
+                      <SortHeaderButton
+                        label="วันที่เอกสาร"
+                        active={sortKey === "doc_date"}
+                        dir={sortDir}
+                        onClick={() => applyNoteSort("doc_date")}
+                      />
                     </TableHead>
                     <TableHead className="whitespace-nowrap">
-                      เลขที่เอกสาร
+                      <SortHeaderButton
+                        label="เลขที่เอกสาร"
+                        active={sortKey === "doc_no"}
+                        dir={sortDir}
+                        onClick={() => applyNoteSort("doc_no")}
+                      />
                     </TableHead>
-                    <TableHead>{contactColumnLabel}</TableHead>
+                    <TableHead>
+                      <SortHeaderButton
+                        label={contactColumnLabel}
+                        active={sortKey === "name"}
+                        dir={sortDir}
+                        onClick={() => applyNoteSort("name")}
+                      />
+                    </TableHead>
                     <TableHead className="whitespace-nowrap">
-                      วันครบกำหนด
+                      <SortHeaderButton
+                        label="วันครบกำหนด"
+                        active={sortKey === "due_date"}
+                        dir={sortDir}
+                        onClick={() => applyNoteSort("due_date")}
+                      />
                     </TableHead>
                     <TableHead className="whitespace-nowrap text-right">
-                      ยอดรวม
+                      <SortHeaderButton
+                        label="ยอดรวม"
+                        active={sortKey === "amount"}
+                        dir={sortDir}
+                        align="right"
+                        onClick={() => applyNoteSort("amount")}
+                      />
                     </TableHead>
                     <TableHead className="whitespace-nowrap">สถานะ</TableHead>
                     <TableHead className="whitespace-nowrap text-right print:hidden">
@@ -448,7 +590,7 @@ export function BillingNoteList({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {visibleRows.map((row) => {
+                  {displayRows.map((row) => {
                     const status = row.payment_status.trim().toUpperCase();
                     const canPay =
                       row.doc_type === "BR" &&
@@ -521,7 +663,7 @@ export function BillingNoteList({
       <article id="br-payment-schedule" className="hidden bg-white p-8 text-slate-900 print:block">
         <h1 className="text-xl font-bold">ใบสรุปรายจ่ายประจำเดือน</h1>
         <p className="mt-1 text-sm">
-          บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด · งวด {scheduleLabel}
+          บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด · งวด {scheduleLabel} · {statusLabel}
         </p>
         <table className="mt-4 w-full border-collapse text-sm">
           <thead>
@@ -536,7 +678,7 @@ export function BillingNoteList({
             </tr>
           </thead>
           <tbody>
-            {visibleRows.map((row, index) => {
+            {displayRows.map((row, index) => {
               const status = row.payment_status.trim().toUpperCase();
               const paid = status === "PAID" || status === "COMPLETED";
               return (
@@ -558,7 +700,7 @@ export function BillingNoteList({
                 ยอดรวมสุทธิ
               </td>
               <td className="text-right text-base font-bold tabular-nums">
-                {formatMoney(sumGrand(visibleRows))}
+                {formatMoney(sumGrand(displayRows))}
               </td>
               <td />
             </tr>

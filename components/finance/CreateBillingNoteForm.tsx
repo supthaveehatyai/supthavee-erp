@@ -52,6 +52,14 @@ import {
 } from "@/lib/utils/billing-period";
 import { addDaysIso } from "@/lib/utils/outstanding-summary";
 import { ApBatchBillingPanel } from "@/components/finance/ap-batch-billing-panel";
+import { ContactSortBar, SortHeaderButton } from "@/components/finance/billing-sort-controls";
+import {
+  matchesContactQuery,
+  nextContactSort,
+  sortContacts,
+  type ContactSortKey,
+  type SortDir,
+} from "@/lib/utils/billing-list-sort";
 import type { CustomerOption } from "@/types/document";
 
 export type CreateBillingNoteFormProps = {
@@ -64,6 +72,11 @@ export type CreateBillingNoteFormProps = {
   outstandingContacts: OutstandingContactSummary[];
   creditDays?: number;
   mode?: "single" | "batch";
+  contactQuery: string;
+  contactSort: ContactSortKey;
+  contactDir: SortDir;
+  onContactQueryChange: (value: string) => void;
+  onContactSort: (key: ContactSortKey, dir: SortDir) => void;
 };
 
 function formatMoney(value: number): string {
@@ -104,6 +117,11 @@ export function CreateBillingNoteForm({
   outstandingContacts,
   creditDays = 0,
   mode = "single",
+  contactQuery,
+  contactSort,
+  contactDir,
+  onContactQueryChange,
+  onContactSort,
 }: CreateBillingNoteFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -119,6 +137,32 @@ export function CreateBillingNoteForm({
   const [error, setError] = useState<string | null>(null);
 
   const isAR = type === "AR";
+  const shownContacts = useMemo(() => {
+    const filtered = outstandingContacts.filter((row) =>
+      matchesContactQuery(row.contact_name, contactQuery),
+    );
+    return sortContacts(filtered, contactSort, contactDir, {
+      name: (row) => row.contact_name,
+      count: (row) => row.invoice_count,
+      amount: (row) => row.total_outstanding,
+    });
+  }, [outstandingContacts, contactQuery, contactSort, contactDir]);
+
+  function sortContactColumn(key: ContactSortKey) {
+    const next = nextContactSort(contactSort, contactDir, key);
+    onContactSort(next.key, next.dir);
+  }
+
+  const contactTools = (
+    <ContactSortBar
+      query={contactQuery}
+      onQueryChange={onContactQueryChange}
+      sortKey={contactSort}
+      sortDir={contactDir}
+      onSort={onContactSort}
+      placeholder={isAR ? "ค้นหาชื่อลูกค้า..." : "ค้นหาชื่อคู่ค้า..."}
+    />
+  );
 
   const totalBilledAmount = useMemo(() => {
     return roundMoney(
@@ -360,7 +404,15 @@ export function CreateBillingNoteForm({
       ) : null}
 
       {!isAR && mode === "batch" ? (
-        <ApBatchBillingPanel />
+        <div className="space-y-3">
+          {contactTools}
+          <ApBatchBillingPanel
+            contactQuery={contactQuery}
+            contactSort={contactSort}
+            contactDir={contactDir}
+            onContactSort={sortContactColumn}
+          />
+        </div>
       ) : !contactId ? (
         <Card>
           <CardHeader>
@@ -375,7 +427,8 @@ export function CreateBillingNoteForm({
               }
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
+            {contactTools}
             {outstandingContacts.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
                 ไม่พบ{isAR ? "ลูกค้า" : "ซัพพลายเออร์"}ที่มียอดค้างวางบิล
@@ -386,13 +439,30 @@ export function CreateBillingNoteForm({
                   <TableHeader>
                     <TableRow className="bg-slate-50">
                       <TableHead>
-                        {isAR ? "ชื่อลูกค้า" : "ชื่อคู่ค้า"}
+                        <SortHeaderButton
+                          label={isAR ? "ชื่อลูกค้า" : "ชื่อคู่ค้า"}
+                          active={contactSort === "name"}
+                          dir={contactDir}
+                          onClick={() => sortContactColumn("name")}
+                        />
                       </TableHead>
                       <TableHead className="whitespace-nowrap text-right">
-                        จำนวนบิล
+                        <SortHeaderButton
+                          label="จำนวนบิล"
+                          active={contactSort === "count"}
+                          dir={contactDir}
+                          align="right"
+                          onClick={() => sortContactColumn("count")}
+                        />
                       </TableHead>
                       <TableHead className="whitespace-nowrap text-right">
-                        ยอดค้างชำระรวม
+                        <SortHeaderButton
+                          label="ยอดค้างชำระรวม"
+                          active={contactSort === "amount"}
+                          dir={contactDir}
+                          align="right"
+                          onClick={() => sortContactColumn("amount")}
+                        />
                       </TableHead>
                       <TableHead className="whitespace-nowrap text-right">
                         การดำเนินการ
@@ -400,7 +470,13 @@ export function CreateBillingNoteForm({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {outstandingContacts.map((row) => (
+                    {shownContacts.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="h-16 text-center text-slate-500">
+                          ไม่พบคู่ค้าที่ตรงกับคำค้น
+                        </TableCell>
+                      </TableRow>
+                    ) : shownContacts.map((row) => (
                       <TableRow key={row.contact_id}>
                         <TableCell className="font-medium text-slate-900">
                           {row.contact_name}

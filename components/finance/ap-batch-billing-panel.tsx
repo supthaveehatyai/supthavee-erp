@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
+import { SortHeaderButton } from "@/components/finance/billing-sort-controls";
 import {
   formatBillingInvoiceNo,
   monthBounds,
@@ -22,6 +23,12 @@ import {
   thaiMonthLabel,
   todayBillingIso,
 } from "@/lib/utils/billing-period";
+import {
+  matchesContactQuery,
+  sortContacts,
+  type ContactSortKey,
+  type SortDir,
+} from "@/lib/utils/billing-list-sort";
 import { addDaysIso } from "@/lib/utils/outstanding-summary";
 
 function formatMoney(value: number): string {
@@ -41,7 +48,17 @@ function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-export function ApBatchBillingPanel() {
+export function ApBatchBillingPanel({
+  contactQuery,
+  contactSort,
+  contactDir,
+  onContactSort,
+}: {
+  contactQuery: string;
+  contactSort: ContactSortKey;
+  contactDir: SortDir;
+  onContactSort: (key: ContactSortKey) => void;
+}) {
   const router = useRouter();
   const [catalog, setCatalog] = useState<ApPeriodVendorSummary[]>([]);
   const [vendors, setVendors] = useState<ApPeriodVendorSummary[]>([]);
@@ -118,6 +135,14 @@ export function ApBatchBillingPanel() {
     };
   }, [fromDate, toDate, periodKey]);
 
+  const shownVendors = useMemo(() => {
+    const filtered = vendors.filter((vendor) => matchesContactQuery(vendor.contact_name, contactQuery));
+    return sortContacts(filtered, contactSort, contactDir, {
+      name: (row) => row.contact_name,
+      count: (row) => row.invoice_count,
+      amount: (row) => row.total_outstanding,
+    });
+  }, [vendors, contactQuery, contactSort, contactDir]);
   const selectedVendors = vendors.filter((vendor) =>
     vendor.invoices.some((invoice) => selectedIds.has(invoice.id)),
   );
@@ -137,15 +162,27 @@ export function ApBatchBillingPanel() {
     ),
   );
   const allChecked =
-    vendors.length > 0 &&
-    vendors.every((vendor) => vendor.invoices.every((invoice) => selectedIds.has(invoice.id)));
+    shownVendors.length > 0 &&
+    shownVendors.every((vendor) => vendor.invoices.every((invoice) => selectedIds.has(invoice.id)));
 
   function selectAll(checked: boolean) {
     if (!checked) {
-      setSelectedIds(new Set());
+      setSelectedIds((current) => {
+        const next = new Set(current);
+        for (const vendor of shownVendors) {
+          for (const invoice of vendor.invoices) next.delete(invoice.id);
+        }
+        return next;
+      });
       return;
     }
-    setSelectedIds(new Set(vendors.flatMap((vendor) => vendor.invoices.map((invoice) => invoice.id))));
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      for (const vendor of shownVendors) {
+        for (const invoice of vendor.invoices) next.add(invoice.id);
+      }
+      return next;
+    });
   }
 
   function toggleVendor(vendor: ApPeriodVendorSummary, checked: boolean) {
@@ -298,9 +335,36 @@ export function ApBatchBillingPanel() {
             <div className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-slate-500">
               ไม่มีผู้จำหน่ายที่มียอดค้างในงวดนี้
             </div>
+          ) : shownVendors.length === 0 ? (
+            <div className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-slate-500">
+              ไม่พบคู่ค้าที่ตรงกับคำค้น
+            </div>
           ) : (
+            <div className="space-y-2">
+              <div className="flex items-center gap-3 px-3 text-xs">
+                <SortHeaderButton
+                  label="ชื่อคู่ค้า"
+                  active={contactSort === "name"}
+                  dir={contactDir}
+                  onClick={() => onContactSort("name")}
+                />
+                <div className="ml-auto flex items-center gap-6">
+                  <SortHeaderButton
+                    label="จำนวนบิล"
+                    active={contactSort === "count"}
+                    dir={contactDir}
+                    onClick={() => onContactSort("count")}
+                  />
+                  <SortHeaderButton
+                    label="ยอดค้างชำระ"
+                    active={contactSort === "amount"}
+                    dir={contactDir}
+                    onClick={() => onContactSort("amount")}
+                  />
+                </div>
+              </div>
             <div className="divide-y rounded-xl border">
-              {vendors.map((vendor) => {
+              {shownVendors.map((vendor) => {
                 const vendorChecked = vendor.invoices.every((invoice) => selectedIds.has(invoice.id));
                 const open = openVendorId === vendor.contact_id;
                 return (
@@ -367,6 +431,7 @@ export function ApBatchBillingPanel() {
                   </div>
                 );
               })}
+            </div>
             </div>
           )}
           <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
