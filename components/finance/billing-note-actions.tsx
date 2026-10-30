@@ -45,35 +45,50 @@ function lineLabel(line: EditableLine): string {
   return line.docNo;
 }
 
+function recreateBillingHref(docType: BillingNoteDocType, contactId: string): string {
+  if (docType === "TB") {
+    const params = new URLSearchParams({ type: "TB" });
+    if (contactId) params.set("technicianId", contactId);
+    return `/finance/billing-notes?${params.toString()}`;
+  }
+  const params = new URLSearchParams({ type: docType === "BN" ? "AR" : "AP" });
+  if (contactId) params.set("contact_id", contactId);
+  return `/finance/billing-notes/create?${params.toString()}`;
+}
+
 export function DeleteBillingNoteButton({
   billingNoteId,
   docNo,
-  redirectTo,
+  docType,
+  contactId,
   compact = false,
 }: {
   billingNoteId: string;
   docNo: string;
-  redirectTo?: string;
+  docType: BillingNoteDocType;
+  contactId: string;
   compact?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
-  function confirmDelete() {
+  function confirmDelete(next: "list" | "recreate") {
     startTransition(async () => {
       const result = await deleteBillingNoteAction(billingNoteId);
       if (!result.success) {
         toast.error(result.error ?? "ลบใบวางบิลไม่สำเร็จ");
         return;
       }
-      toast.success(`ลบใบวางบิล ${docNo} แล้ว บิลย่อยกลับเข้าคิวรอวางบิล`);
-      setOpen(false);
-      if (redirectTo) {
-        router.push(redirectTo);
-        router.refresh();
-        return;
-      }
+      const deletedDocNo = result.docNo || docNo;
+      toast.success(
+        `✅ ลบใบวางบิล ${deletedDocNo} และคืนบิล ${result.releasedCount} ใบกลับเข้าคิววางบิลแล้ว`,
+      );
+      const href =
+        next === "recreate"
+          ? recreateBillingHref(docType, contactId)
+          : `/finance/billing-notes?type=${encodeURIComponent(docType)}`;
+      router.push(href);
       router.refresh();
     });
   }
@@ -93,18 +108,28 @@ export function DeleteBillingNoteButton({
         <Trash2 className="size-3.5" />
         {compact ? "ลบ" : "ลบใบวางบิล"}
       </Button>
-      <AlertDialog open={open} onOpenChange={(next) => !isPending && setOpen(next)}>
+      <AlertDialog open={open} onOpenChange={(nextOpen) => !isPending && setOpen(nextOpen)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>ลบใบวางบิล</AlertDialogTitle>
             <AlertDialogDescription>
-              {`ยืนยันการลบใบวางบิล ${docNo}? บิลย่อยข้างในทั้งหมดจะถูกปลดล็อกกลับเข้าคิวรอวางบิลทันที`}
+              {`เมื่อลบใบวางบิล ${docNo} แล้ว รายการบิลตั้งหนี้ข้างในทั้งหมดจะถูกคืนกลับเข้าสู่ 'รายการบิลค้างวางบิล' ตามเดิม (บิลซื้อ/ขายต้นฉบับไม่ถูกลบ)`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isPending}>ยกเลิก</AlertDialogCancel>
-            <AlertDialogAction disabled={isPending} onClick={confirmDelete}>
-              {isPending ? "กำลังลบ..." : "ยืนยันลบ"}
+            <AlertDialogAction
+              disabled={isPending}
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => confirmDelete("list")}
+            >
+              {isPending ? "กำลังลบ..." : "🗑️ ลบ และกลับหน้ารายการวางบิล"}
+            </AlertDialogAction>
+            <AlertDialogAction
+              disabled={isPending}
+              onClick={() => confirmDelete("recreate")}
+            >
+              {isPending ? "กำลังลบ..." : "🔄 ลบ และเลือกบิลวางบิลเจ้านี้ใหม่ทันที"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

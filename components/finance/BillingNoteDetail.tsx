@@ -126,7 +126,8 @@ export function BillingNoteDetail({
               <DeleteBillingNoteButton
                 billingNoteId={doc.id}
                 docNo={doc.doc_no}
-                redirectTo={listHref}
+                docType={doc.doc_type}
+                contactId={doc.contact?.id ?? ""}
               />
             </>
           ) : null}

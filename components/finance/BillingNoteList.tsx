@@ -306,7 +306,13 @@ export function BillingNoteList({
                                 ดูรายละเอียด
                               </Link>
                               {status === "PENDING" || status === "UNPAID" ? (
-                                <DeleteBillingNoteButton billingNoteId={row.id} docNo={row.doc_no} compact />
+                                <DeleteBillingNoteButton
+                                  billingNoteId={row.id}
+                                  docNo={row.doc_no}
+                                  docType={row.doc_type}
+                                  contactId={row.contact_id}
+                                  compact
+                                />
                               ) : null}
                             </div>
                           </TableCell>
@@ -492,6 +498,8 @@ export function BillingNoteList({
                             <DeleteBillingNoteButton
                               billingNoteId={row.id}
                               docNo={row.doc_no}
+                              docType={row.doc_type}
+                              contactId={row.contact_id}
                               compact
                             />
                           ) : null}

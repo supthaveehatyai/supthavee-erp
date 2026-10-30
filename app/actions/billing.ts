@@ -2179,6 +2179,46 @@ async function unlockTechnicianBill(supabase: SupabaseAdmin, billingNoteId: stri
     .eq("technician_bill_id", billingNoteId);
 }
 
+async function readBillingNoteRelease(
+  supabase: SupabaseAdmin,
+  billingNoteId: string,
+): Promise<{ docNo: string; releasedCount: number } | null> {
+  const { data: header } = await supabase
+    .from("doc_headers")
+    .select("doc_no, doc_type")
+    .eq("id", billingNoteId)
+    .maybeSingle();
+  if (header && (header.doc_type === "BN" || header.doc_type === "BR")) {
+    const { count } = await supabase
+      .from("billing_note_items")
+      .select("id", { count: "exact", head: true })
+      .eq("billing_note_id", billingNoteId);
+    return {
+      docNo: String(header.doc_no ?? ""),
+      releasedCount: count ?? 0,
+    };
+  }
+
+  const { data: document } = await supabase
+    .from("documents")
+    .select("doc_no, doc_type")
+    .eq("id", billingNoteId)
+    .maybeSingle();
+  if (!document || document.doc_type !== "TB") return null;
+  const linked = await supabase
+    .from("document_items")
+    .select("id", { count: "exact", head: true })
+    .eq("technician_bill_id", billingNoteId);
+  if ((linked.count ?? 0) > 0) {
+    return { docNo: String(document.doc_no ?? ""), releasedCount: linked.count ?? 0 };
+  }
+  const own = await supabase
+    .from("document_items")
+    .select("id", { count: "exact", head: true })
+    .eq("document_id", billingNoteId);
+  return { docNo: String(document.doc_no ?? ""), releasedCount: own.count ?? 0 };
+}
+
 async function fallbackDeleteBillingNote(
   supabase: SupabaseAdmin,
   billingNoteId: string,
@@ -2422,15 +2462,21 @@ async function fallbackUpdateBillingNote(
 
 export async function deleteBillingNoteAction(
   billingNoteId: string,
-): Promise<{ success: boolean; error: string | null }> {
+): Promise<{
+  success: boolean;
+  error: string | null;
+  docNo: string | null;
+  releasedCount: number;
+}> {
   const owner = await requireSessionUserId();
-  if (!owner.ok) return { success: false, error: owner.error };
+  if (!owner.ok) return { success: false, error: owner.error, docNo: null, releasedCount: 0 };
   const userId = owner.userId;
   const id = billingNoteId.trim();
-  if (!id) return { success: false, error: "ไม่พบใบวางบิล" };
+  if (!id) return { success: false, error: "ไม่พบใบวางบิล", docNo: null, releasedCount: 0 };
 
   try {
     const supabase = createClient();
+    const release = await readBillingNoteRelease(supabase, id);
     const rpc = supabase as unknown as {
       rpc: (
         fn: "delete_billing_note_transaction",
@@ -2442,19 +2488,31 @@ export async function deleteBillingNoteAction(
       p_actor_id: userId,
     });
     if (error && !isMissingBillingNoteRpc(error.message ?? "")) {
-      return { success: false, error: error.message ?? "ลบใบวางบิลไม่สำเร็จ" };
+      return {
+        success: false,
+        error: error.message ?? "ลบใบวางบิลไม่สำเร็จ",
+        docNo: null,
+        releasedCount: 0,
+      };
     }
     if (error) {
       const fallback = await fallbackDeleteBillingNote(supabase, id);
-      if (!fallback.success) return fallback;
+      if (!fallback.success) {
+        return { success: false, error: fallback.error, docNo: null, releasedCount: 0 };
+      }
     }
     revalidatePath("/finance/billing-notes");
     revalidatePath("/finance/billing-notes/create");
-    return { success: true, error: null };
+    return {
+      success: true,
+      error: null,
+      docNo: release?.docNo || null,
+      releasedCount: release?.releasedCount ?? 0,
+    };
   } catch (error: unknown) {
     if (isRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "ลบใบวางบิลไม่สำเร็จ";
-    return { success: false, error: message };
+    return { success: false, error: message, docNo: null, releasedCount: 0 };
   }
 }
 
