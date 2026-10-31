@@ -86,7 +86,9 @@ document_allocations (การตัดยอดหนี้ / มัดจำ 
 
 billing_note_items (รายการใบวางบิล — PK: id, billing_note_id, invoice_id, billed_amount)
 
-expenses (บิลค่าใช้จ่าย / OPEX — PK: id, net_amount, vat_amount, และคอลัมน์ grand_total เป็น GENERATED ALWAYS AS (net_amount + vat_amount) ห้ามส่งค่าตอน Insert/Upsert; accounting_tax_tier [CORP_VAT | RECEIPT_1_2 | INTERNAL_1_3], tax_type [INCLUSIVE | EXCLUSIVE | NO_VAT], tax_invoice_no, reference_no, vehicle_plate, vendor_tax_id)
+expenses (บิลค่าใช้จ่าย / OPEX — PK: id, net_amount, vat_amount, และคอลัมน์ grand_total เป็น GENERATED ALWAYS AS (net_amount + vat_amount) ห้ามส่งค่าตอน Insert/Upsert; ส่ง net_amount, sub_total, vat_amount, total_amount; accounting_tax_tier [CORP_VAT | RECEIPT_1_2 | INTERNAL_1_3], tax_type [INCLUSIVE | EXCLUSIVE | NO_VAT], tax_invoice_status [TAX_READY | PENDING_TAX_INVOICE], tax_invoice_no, reference_no, vehicle_plate, vendor_tax_id)
+
+RPC save_expense_direct_no_draft(...) RETURNS jsonb — ออกเลข EXP ทันที สถานะ PAID (หรือ PENDING เมื่อ payment_method = CREDIT) โดยไม่สร้างเลข DRAFT และไม่รับ grand_total
 
 expense_items (รายการย่อยในบิลค่าใช้จ่าย — PK: id, FK: expense_id, line_no, item_description, quantity, unit_name, unit_price, discount_amount, line_total)
 

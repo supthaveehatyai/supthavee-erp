@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  createDraftExpense,
+  saveExpenseDirect,
   updateDraftExpense,
 } from "@/app/actions/expenses";
 import { getOcrQuotaStatusAction } from "@/lib/actions/receipt";
@@ -127,7 +127,7 @@ export type ExpenseCreateWorkspaceProps = {
   initialValues?: ExpenseFormInitialValues;
 };
 
-type PaymentMethod = "CASH" | "TRANSFER";
+type PaymentMethod = "CASH" | "TRANSFER" | "CREDIT";
 
 type ExpenseFormItem = {
   description: string;
@@ -149,6 +149,8 @@ export type ExpenseFormValues = {
   vendor_name: string;
   vendor_tax_id: string;
   accounting_tax_tier: "CORP_VAT" | "RECEIPT_1_2" | "INTERNAL_1_3";
+  doc_tax_mode: "INC_VAT" | "EXC_VAT" | "RECEIPT_1_2" | "INTERNAL_1_3";
+  tax_invoice_status: "TAX_READY" | "PENDING_TAX_INVOICE";
   reference_no: string;
   vehicle_plate: string;
   document_number: string;
@@ -185,9 +187,29 @@ export type ExpenseFormValues = {
 };
 
 const PAYMENT_OPTIONS: { value: PaymentMethod; label: string }[] = [
-  { value: "CASH", label: "เงินสด (Cash)" },
-  { value: "TRANSFER", label: "โอนเงิน (Transfer)" },
+  { value: "CASH", label: "เงินสด (CASH)" },
+  { value: "TRANSFER", label: "โอนเงิน (TRANSFER)" },
+  { value: "CREDIT", label: "ตั้งหนี้ค้างจ่าย (CREDIT)" },
 ];
+
+const DOC_TAX_MODES = [
+  {
+    value: "INC_VAT",
+    label: "ใบกำกับภาษี — ราคารวม VAT 7% (Inc. VAT เช่น บิลน้ำมัน)",
+  },
+  {
+    value: "EXC_VAT",
+    label: "ใบกำกับภาษี — ราคาแยก VAT 7% (Exc. VAT)",
+  },
+  {
+    value: "RECEIPT_1_2",
+    label: "ใบรับเงิน / บิลไม่มี VAT — กลุ่ม 1.2 (แนบบัตรประชาชน ส่งบัญชี)",
+  },
+  {
+    value: "INTERNAL_1_3",
+    label: "บิลค่าใช้จ่ายภายใน — กลุ่ม 1.3 (ไม่มี VAT ไม่ส่งบัญชี)",
+  },
+] as const;
 
 const CATEGORY_HINT_TO_NAMES: Record<string, string[]> = {
   FUEL_TRANSPORT: ["ค่าน้ำมันเชื้อเพลิงและยานพาหนะ", "ค่าขนส่งและเดินทาง", "ค่าขนส่ง"],
@@ -290,7 +312,9 @@ function resolveBaseAmountInput(
 function resolvePaymentMethod(
   raw: string | null | undefined,
 ): PaymentMethod {
-  return raw?.trim().toUpperCase() === "TRANSFER" ? "TRANSFER" : "CASH";
+  const method = raw?.trim().toUpperCase();
+  if (method === "TRANSFER" || method === "CREDIT" || method === "CASH") return method;
+  return "CASH";
 }
 
 function formatWhtRatePercent(rate: number): string {
@@ -395,8 +419,8 @@ export function calculateExpenseAmounts(
     return { net: base, vat, grand: roundMoney(base + vat) };
   }
 
-  const vat = roundMoney((base * 7) / 107);
-  const net = roundMoney(base - vat);
+  const net = roundMoney(base / 1.07);
+  const vat = roundMoney(base - net);
   return { net, vat, grand: base };
 }
 
@@ -586,6 +610,8 @@ export function ExpenseCreateWorkspace({
       vendor_name: "",
       vendor_tax_id: "",
       accounting_tax_tier: "CORP_VAT",
+      doc_tax_mode: "INC_VAT",
+      tax_invoice_status: "TAX_READY",
       reference_no: "",
       vehicle_plate: "",
       document_number: initialValues?.vendor_doc_no ?? "",
@@ -648,6 +674,8 @@ export function ExpenseCreateWorkspace({
   const watchedExpenseDate = useWatch({ control, name: "expense_date" });
   const watchedBaseAmount = useWatch({ control, name: "base_amount" });
   const watchedVatType = useWatch({ control, name: "vat_type" });
+  const watchedDocTaxMode = useWatch({ control, name: "doc_tax_mode" });
+  const watchedTaxInvoiceStatus = useWatch({ control, name: "tax_invoice_status" });
   const watchedPaymentMethod = useWatch({ control, name: "payment_method" });
   const watchedVendorId = useWatch({ control, name: "vendor_id" });
   const watchedVendorName = useWatch({ control, name: "vendor_name" });
@@ -1050,6 +1078,17 @@ export function ExpenseCreateWorkspace({
         vendor_name: extraction.vendor_name ?? "",
         vendor_tax_id: extraction.vendor_tax_id ?? "",
         accounting_tax_tier: extraction.accounting_tax_tier,
+        doc_tax_mode:
+          extraction.accounting_tax_tier === "RECEIPT_1_2"
+            ? "RECEIPT_1_2"
+            : extraction.accounting_tax_tier === "INTERNAL_1_3"
+              ? "INTERNAL_1_3"
+              : vatType === "EXCLUSIVE"
+                ? "EXC_VAT"
+                : vatType === "NONE"
+                  ? "INTERNAL_1_3"
+                  : "INC_VAT",
+        tax_invoice_status: "TAX_READY",
         reference_no: extraction.reference_no ?? "",
         vehicle_plate: extraction.vehicle_plate ?? "",
         vendor_id: matchedVendorId || current.vendor_id,
@@ -1317,9 +1356,15 @@ export function ExpenseCreateWorkspace({
       formData.append("wht_amount", String(whtTotals.whtAmount));
       formData.append("net_payable", String(whtTotals.netPayable));
       formData.append("payment_method", values.payment_method);
+      formData.append("tax_invoice_status", values.tax_invoice_status);
+      formData.append("total_amount", String(values.grand_total));
       formData.append(
         "bank_account_id",
-        values.payment_method === "TRANSFER" ? values.bank_account_id : "",
+        values.payment_method === "CASH" ? "" : values.bank_account_id,
+      );
+      formData.append(
+        "category_name",
+        categories.find((category) => category.id === values.category_id)?.category_name ?? "",
       );
       formData.append("remark", values.remark.trim());
       formData.append("accounting_tax_tier", values.accounting_tax_tier);
@@ -1386,7 +1431,7 @@ export function ExpenseCreateWorkspace({
       const result =
         isEdit && expenseId
           ? await updateDraftExpense(expenseId, formData)
-          : await createDraftExpense(formData);
+          : await saveExpenseDirect(formData);
 
       // Duplicate Invoice Early Warning — keep form data intact for review
       if (result.error === DUPLICATE_INVOICE_ERROR) {
@@ -1404,7 +1449,7 @@ export function ExpenseCreateWorkspace({
       if (result.error || !result.data?.id) {
         const msg =
           result.error ??
-          (isEdit ? "อัปเดต Draft ไม่สำเร็จ" : "บันทึก Draft ไม่สำเร็จ");
+          (isEdit ? "อัปเดต Draft ไม่สำเร็จ" : "บันทึกค่าใช้จ่ายไม่สำเร็จ");
         setError(msg);
         toast.error(msg);
         unlock();
@@ -1414,13 +1459,11 @@ export function ExpenseCreateWorkspace({
       toast.success(
         isEdit
           ? `อัปเดต Draft ${result.data.document_no} สำเร็จ`
-          : `บันทึก Draft ${result.data.document_no} สำเร็จ`,
+          : `บันทึก ${result.data.document_no} สำเร็จ`,
       );
 
-      // Flush client Router Cache so /expenses list shows the new DRAFT
-      // after Soft Navigation (revalidatePath alone is not always enough).
       router.refresh();
-      router.push("/expenses/" + result.data.id);
+      router.push(isEdit ? `/expenses/${result.data.id}` : "/expenses");
     } catch (err) {
       const msg =
         err instanceof Error
@@ -1504,23 +1547,35 @@ export function ExpenseCreateWorkspace({
         </div>
       ) : null}
 
-      <Tabs value={tab} onValueChange={handleTabChange} className="space-y-5">
-        {false ? (
-          <TabsList className="grid w-full grid-cols-2 sm:inline-flex sm:w-auto">
-            <TabsTrigger value="ocr" className="gap-1.5" disabled={formBusy}>
-              <Sparkles className="h-3.5 w-3.5" />
-              สแกนบิลด้วย AI (Smart OCR)
-            </TabsTrigger>
-            <TabsTrigger
-              value="manual"
-              className="gap-1.5"
+      <Tabs value="manual" className="space-y-5">
+        {isEdit ? null : (
+          <div className="grid w-full grid-cols-2 rounded-xl bg-slate-100 p-1 sm:max-w-xl">
+            <button
+              type="button"
               disabled={formBusy}
+              onClick={() => setTab("ocr")}
+              className={cn(
+                "inline-flex h-10 items-center justify-center gap-1.5 rounded-lg text-sm font-semibold",
+                tab === "ocr" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500",
+              )}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              สแกนบิลอัจฉริยะ (AI OCR)
+            </button>
+            <button
+              type="button"
+              disabled={formBusy}
+              onClick={() => setTab("manual")}
+              className={cn(
+                "inline-flex h-10 items-center justify-center gap-1.5 rounded-lg text-sm font-semibold",
+                tab === "manual" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500",
+              )}
             >
               <PenLine className="h-3.5 w-3.5" />
-              กรอกข้อมูลเอง (Manual)
-            </TabsTrigger>
-          </TabsList>
-        ) : null}
+              บันทึกค่าใช้จ่ายเอง (Manual)
+            </button>
+          </div>
+        )}
 
         {isEdit ? null : (
           <TabsContent value="ocr">
@@ -1592,19 +1647,17 @@ export function ExpenseCreateWorkspace({
         <TabsContent value="manual">
           <form
             onSubmit={handleSubmit(onSaveDraft)}
-            className={
-              isEdit
-                ? "space-y-5"
-                : "grid items-start gap-5 xl:grid-cols-[minmax(280px,440px)_minmax(0,1fr)]"
-            }
+            className="grid grid-cols-1 items-start gap-4 lg:grid-cols-12"
           >
             {isEdit ? null : (
-              <aside className="xl:sticky xl:top-4">
+              <aside className="lg:col-span-5 lg:col-start-8 lg:row-start-1">
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">ตัวอย่างบิล / PDF</CardTitle>
+                    <CardTitle className="text-base">รูปบิลใบเสร็จ & สลิปการโอนเงิน</CardTitle>
                     <CardDescription>
-                      วางรูปหรือ PDF แล้วระบบจะสแกนด้วยเครื่อง OCR เดียวกับรับสินค้า
+                      {tab === "ocr"
+                        ? "วางบิลแล้วระบบอ่านให้ แล้วตรวจยอดก่อนบันทึก"
+                        : "แนบใบเสร็จขนาดใหญ่ และสลิปโอนเงินถ้ามี"}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
@@ -1615,16 +1668,22 @@ export function ExpenseCreateWorkspace({
                         className="sr-only"
                         disabled={formBusy}
                         onChange={(e) => {
-                          void runExpenseOcr(e.target.files?.[0]);
+                          const file = e.target.files?.[0];
+                          if (tab === "ocr") void runExpenseOcr(file);
+                          else void setAttachmentFile(file ?? null);
                         }}
                       />
-                      {isOcrProcessing ? "กำลังอ่านบิล..." : "คลิกหรือวางไฟล์ .jpg .png .webp .pdf"}
+                      {isOcrProcessing
+                        ? "กำลังอ่านบิล..."
+                        : tab === "ocr"
+                          ? "วางบิลเพื่อสแกน .jpg .png .webp .pdf"
+                          : "แนบใบเสร็จ .jpg .png .webp .pdf"}
                     </label>
                     {ocrPreviewUrl && ocrPreviewKind === "pdf" ? (
                       <iframe
                         title="ตัวอย่างใบเสร็จ PDF"
                         src={ocrPreviewUrl}
-                        className="h-[480px] w-full rounded-lg border"
+                        className="h-[560px] w-full rounded-lg border"
                       />
                     ) : null}
                     {ocrPreviewUrl && ocrPreviewKind !== "pdf" ? (
@@ -1632,15 +1691,15 @@ export function ExpenseCreateWorkspace({
                       <img
                         src={ocrPreviewUrl}
                         alt="ตัวอย่างใบเสร็จ"
-                        className="max-h-[480px] w-full rounded-lg border object-contain"
+                        className="max-h-[560px] w-full rounded-lg border object-contain"
                       />
                     ) : null}
                   </CardContent>
                 </Card>
               </aside>
             )}
-            <div className="space-y-5">
-            <Card>
+            <div className="contents">
+            <Card className={isEdit ? "lg:col-span-12" : "hidden"}>
               <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1.5">
                   <CardTitle className="flex items-center gap-2 text-base">
@@ -1769,57 +1828,23 @@ export function ExpenseCreateWorkspace({
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="lg:col-span-7 lg:row-start-1">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
                   <PenLine className="h-4 w-4 text-blue-600" />
                   {isEdit
                     ? `แก้ไข Draft${documentNo ? ` · ${documentNo}` : ""}`
-                    : "ตรวจสอบข้อมูลบิลก่อนบันทึก"}
+                    : "หัวเอกสารค่าใช้จ่าย"}
                 </CardTitle>
                 <CardDescription>
                   {isEdit
                     ? "อัปเดตได้เฉพาะสถานะ DRAFT · VAT คำนวณอัตโนมัติ · บันทึกแล้วกลับหน้ารายละเอียด"
-                    : "Combobox ค้นหาได้ · VAT คำนวณอัตโนมัติ · Late Numbering DRAFT · รองรับ AI OCR"}
+                    : "ผู้จำหน่าย · วันที่บิล · เลขอ้างอิง · ประเภทเอกสาร"}
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div>
-                  <Label htmlFor="expense_date">วันที่เกิดค่าใช้จ่าย</Label>
-                  <Input
-                    id="expense_date"
-                    type="date"
-                    disabled={formBusy}
-                    value={watchedExpenseDate}
-                    onChange={(e) => {
-                      setValue("expense_date", e.target.value, {
-                        shouldValidate: true,
-                      });
-                      setValue("document_date", e.target.value, {
-                        shouldValidate: true,
-                      });
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="document_number">
-                    เลขที่เอกสาร / ใบกำกับภาษี
-                  </Label>
-                  <Input
-                    id="document_number"
-                    type="text"
-                    placeholder="เลขที่ใบเสร็จ / ใบกำกับจากบิล"
-                    disabled={formBusy}
-                    {...register("document_number")}
-                  />
-                  <p className="mt-1 text-[11px] text-slate-400">
-                    ใช้กันบิลซ้ำ: Vendor + วันที่บิล + เลขที่บิล
-                  </p>
-                </div>
-
-                <div>
-                  <Label>ผู้ให้บริการ (Vendor)</Label>
+                <div className="md:col-span-2">
+                  <Label>ผู้จำหน่าย / ผู้ให้บริการ (Vendor)</Label>
                   <VendorCombobox
                     options={vendorOptions}
                     value={watchedVendorId}
@@ -1840,6 +1865,39 @@ export function ExpenseCreateWorkspace({
                     </p>
                   ) : null}
                 </div>
+                <div>
+                  <Label htmlFor="expense_date">วันที่บิล (Doc Date)</Label>
+                  <Input
+                    id="expense_date"
+                    type="date"
+                    disabled={formBusy}
+                    value={watchedExpenseDate}
+                    onChange={(e) => {
+                      setValue("expense_date", e.target.value, {
+                        shouldValidate: true,
+                      });
+                      setValue("document_date", e.target.value, {
+                        shouldValidate: true,
+                      });
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="document_number">
+                    เลขที่เอกสารอ้างอิง / ใบกำกับภาษี (Vendor Ref No.)
+                  </Label>
+                  <Input
+                    id="document_number"
+                    type="text"
+                    placeholder="เลขที่ใบเสร็จ / ใบกำกับจากบิล"
+                    disabled={formBusy}
+                    {...register("document_number")}
+                  />
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    ใช้กันบิลซ้ำ: Vendor + วันที่บิล + เลขที่บิล
+                  </p>
+                </div>
 
                 <div>
                   <Label htmlFor="vendor_name">ชื่อผู้ขาย (OCR)</Label>
@@ -1851,19 +1909,72 @@ export function ExpenseCreateWorkspace({
                   />
                 </div>
 
-                <div>
-                  <Label htmlFor="accounting_tax_tier">ประเภททางบัญชี</Label>
+                <div className="md:col-span-2">
+                  <Label htmlFor="doc_tax_mode">ประเภทเอกสารและวิธีคิดภาษี</Label>
                   <Select
-                    id="accounting_tax_tier"
+                    id="doc_tax_mode"
                     disabled={formBusy}
-                    {...register("accounting_tax_tier")}
+                    value={watchedDocTaxMode}
+                    onChange={(e) => {
+                      const mode = e.target.value as ExpenseFormValues["doc_tax_mode"];
+                      setValue("doc_tax_mode", mode, { shouldValidate: true });
+                      if (mode === "INC_VAT") {
+                        setValue("vat_type", "INCLUSIVE");
+                        setValue("accounting_tax_tier", "CORP_VAT");
+                        syncAmountsFromBase(getValues("base_amount"), "INCLUSIVE");
+                      } else if (mode === "EXC_VAT") {
+                        setValue("vat_type", "EXCLUSIVE");
+                        setValue("accounting_tax_tier", "CORP_VAT");
+                        syncAmountsFromBase(getValues("base_amount"), "EXCLUSIVE");
+                      } else if (mode === "RECEIPT_1_2") {
+                        setValue("vat_type", "NONE");
+                        setValue("accounting_tax_tier", "RECEIPT_1_2");
+                        syncAmountsFromBase(getValues("base_amount"), "NONE");
+                      } else {
+                        setValue("vat_type", "NONE");
+                        setValue("accounting_tax_tier", "INTERNAL_1_3");
+                        syncAmountsFromBase(getValues("base_amount"), "NONE");
+                      }
+                    }}
                   >
-                    {TAX_TIER_OPTIONS.map((option) => (
+                    {DOC_TAX_MODES.map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
                     ))}
                   </Select>
+                </div>
+
+                <div className="md:col-span-2 space-y-1.5">
+                  <p className="text-[11px] font-semibold text-slate-500">สถานะใบกำกับภาษี</p>
+                  <div className="grid gap-1.5">
+                    <button
+                      type="button"
+                      disabled={formBusy}
+                      onClick={() => setValue("tax_invoice_status", "TAX_READY")}
+                      className={cn(
+                        "rounded-lg border px-2.5 py-1.5 text-left text-[11px] font-semibold",
+                        watchedTaxInvoiceStatus === "TAX_READY"
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+                          : "border-slate-200 bg-white text-slate-600",
+                      )}
+                    >
+                      🟢 ได้รับใบกำกับภาษีตัวจริงแล้ว (TAX_READY)
+                    </button>
+                    <button
+                      type="button"
+                      disabled={formBusy}
+                      onClick={() => setValue("tax_invoice_status", "PENDING_TAX_INVOICE")}
+                      className={cn(
+                        "rounded-lg border px-2.5 py-1.5 text-left text-[11px] font-semibold",
+                        watchedTaxInvoiceStatus === "PENDING_TAX_INVOICE"
+                          ? "border-orange-300 bg-orange-50 text-orange-950"
+                          : "border-slate-200 bg-white text-slate-600",
+                      )}
+                    >
+                      🟠 บิลชั่วคราว / รอใบกำกับภาษีตัวจริงตามหลัง (PENDING_TAX_INVOICE)
+                    </button>
+                  </div>
                 </div>
 
                 <div>
@@ -1900,7 +2011,7 @@ export function ExpenseCreateWorkspace({
                   />
                 </div>
 
-                <div>
+                <div className="hidden">
                   <Label htmlFor="vat_type">ประเภทภาษี (VAT Type)</Label>
                   <Select
                     id="vat_type"
@@ -1921,37 +2032,110 @@ export function ExpenseCreateWorkspace({
                 </div>
 
                 <div className="md:col-span-2 space-y-2">
-                  <Label>รายการย่อยในบิล</Label>
-                  {billLines.length === 0 ? (
-                    <p className="text-xs text-slate-500">
-                      ยังไม่มีรายการ — สแกนบิลแล้วระบบจะเติมตารางให้อัตโนมัติ
-                    </p>
-                  ) : (
-                    <div className="overflow-x-auto rounded-lg border">
-                      <table className="w-full text-sm">
-                        <thead className="bg-slate-50 text-left text-xs text-slate-500">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label>รายการค่าใช้จ่าย & หมวดหมู่</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={formBusy}
+                      onClick={() =>
+                        setBillLines((current) => [
+                          ...current,
+                          {
+                            description: "",
+                            quantity: 1,
+                            unit_name: "รายการ",
+                            unit_price: 0,
+                            line_total: 0,
+                          },
+                        ])
+                      }
+                    >
+                      เพิ่มรายการ
+                    </Button>
+                  </div>
+                  <div className="overflow-x-auto rounded-lg border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-left text-xs text-slate-500">
+                        <tr>
+                          <th className="px-2 py-2">ลำดับ</th>
+                          <th className="px-2 py-2">รายละเอียดรายการ</th>
+                          <th className="px-2 py-2">หมวดหมู่ค่าใช้จ่าย</th>
+                          <th className="px-2 py-2">จำนวนเงิน</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {billLines.length === 0 ? (
                           <tr>
-                            <th className="px-2 py-2">รายการ</th>
-                            <th className="px-2 py-2">จำนวน</th>
-                            <th className="px-2 py-2">หน่วย</th>
-                            <th className="px-2 py-2">ราคา</th>
-                            <th className="px-2 py-2">รวม</th>
+                            <td colSpan={4} className="px-2 py-6 text-center text-xs text-slate-500">
+                              ยังไม่มีรายการ — สแกนบิลหรือกดเพิ่มรายการ
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody>
-                          {billLines.map((line, index) => (
-                            <tr key={`${line.description}-${index}`} className="border-t">
-                              <td className="px-2 py-2">{line.description}</td>
-                              <td className="px-2 py-2">{line.quantity}</td>
-                              <td className="px-2 py-2">{line.unit_name || "-"}</td>
-                              <td className="px-2 py-2">{line.unit_price.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</td>
-                              <td className="px-2 py-2">{line.line_total.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</td>
+                        ) : (
+                          billLines.map((line, index) => (
+                            <tr key={`${index}-${line.description}`} className="border-t">
+                              <td className="px-2 py-2">{index + 1}</td>
+                              <td className="px-2 py-2">
+                                <Input
+                                  value={line.description}
+                                  disabled={formBusy}
+                                  onChange={(e) =>
+                                    setBillLines((current) =>
+                                      current.map((item, itemIndex) =>
+                                        itemIndex === index
+                                          ? { ...item, description: e.target.value }
+                                          : item,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </td>
+                              <td className="px-2 py-2">
+                                <Select
+                                  value={watchedCategoryId}
+                                  disabled={formBusy}
+                                  onChange={(e) =>
+                                    setValue("category_id", e.target.value, { shouldValidate: true })
+                                  }
+                                >
+                                  {categories.map((category) => (
+                                    <option key={category.id} value={category.id}>
+                                      {category.category_name}
+                                    </option>
+                                  ))}
+                                </Select>
+                              </td>
+                              <td className="px-2 py-2">
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={line.line_total}
+                                  disabled={formBusy}
+                                  className="text-right"
+                                  onChange={(e) => {
+                                    const amount = Number(e.target.value);
+                                    setBillLines((current) =>
+                                      current.map((item, itemIndex) =>
+                                        itemIndex === index
+                                          ? {
+                                              ...item,
+                                              line_total: Number.isFinite(amount) ? amount : 0,
+                                              unit_price: Number.isFinite(amount) ? amount : 0,
+                                            }
+                                          : item,
+                                      ),
+                                    );
+                                  }}
+                                />
+                              </td>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
 
                 <div>
@@ -1982,7 +2166,7 @@ export function ExpenseCreateWorkspace({
                 </div>
 
                 <div>
-                  <Label htmlFor="sub_total">ยอดก่อนภาษี (Sub Total)</Label>
+                  <Label htmlFor="sub_total">มูลค่าก่อนภาษี (Net Amount)</Label>
                   <Input
                     id="sub_total"
                     type="text"
@@ -1994,7 +2178,7 @@ export function ExpenseCreateWorkspace({
                 </div>
 
                 <div>
-                  <Label htmlFor="vat_amount">ภาษีมูลค่าเพิ่ม (VAT)</Label>
+                  <Label htmlFor="vat_amount">ภาษีมูลค่าเพิ่ม 7% (VAT Amount)</Label>
                   <Input
                     id="vat_amount"
                     type="text"
@@ -2006,7 +2190,7 @@ export function ExpenseCreateWorkspace({
                 </div>
 
                 <div>
-                  <Label htmlFor="wht_type">หัก ณ ที่จ่าย (WHT Type)</Label>
+                  <Label htmlFor="wht_type">หัก ณ ที่จ่าย (ไม่มี / 1% / 3% / 5%)</Label>
                   <Select
                     id="wht_type"
                     disabled={formBusy}
@@ -2097,7 +2281,7 @@ export function ExpenseCreateWorkspace({
                         htmlFor="grand_total"
                         className="text-slate-600"
                       >
-                        ยอดรวมบิล (Grand Total)
+                        ยอดรวมสุทธิ (Grand Total)
                       </Label>
                       <Input
                         id="grand_total"
@@ -2134,7 +2318,7 @@ export function ExpenseCreateWorkspace({
                 </div>
 
                 <div>
-                  <Label htmlFor="payment_method">วิธีการชำระ</Label>
+                  <Label htmlFor="payment_method">ชำระโดย</Label>
                   <Select
                     id="payment_method"
                     disabled={formBusy}
@@ -2144,7 +2328,7 @@ export function ExpenseCreateWorkspace({
                       setValue("payment_method", next, {
                         shouldValidate: true,
                       });
-                      if (next !== "TRANSFER") {
+                      if (next === "CASH") {
                         setValue("bank_account_id", "", {
                           shouldValidate: true,
                         });
@@ -2162,7 +2346,7 @@ export function ExpenseCreateWorkspace({
                 {watchedPaymentMethod === "TRANSFER" ? (
                   <div className="md:col-span-2">
                     <Label htmlFor="bank_account_id">
-                      บัญชีธนาคาร (Bank Account)
+                      สมุดบัญชีธนาคารที่ตัดจ่าย
                     </Label>
                     <Select
                       id="bank_account_id"
@@ -2506,7 +2690,7 @@ export function ExpenseCreateWorkspace({
             </Card>
 
             {fields.length > 0 ? (
-              <Card>
+              <Card className="lg:col-span-12">
                 <CardHeader>
                   <CardTitle className="text-base">
                     รายการจาก OCR ({fields.length})
@@ -2580,12 +2764,12 @@ export function ExpenseCreateWorkspace({
             ) : null}
 
             {error ? (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 lg:col-span-12">
                 {error}
               </div>
             ) : null}
 
-            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end lg:col-span-12">
               <Link
                 href={cancelHref}
                 className={cn(
@@ -2598,6 +2782,7 @@ export function ExpenseCreateWorkspace({
               </Link>
               <Button
                 type="submit"
+                className={isEdit ? undefined : "bg-blue-800 text-white hover:bg-blue-900"}
                 disabled={
                   formBusy ||
                   categories.length === 0 ||
@@ -2612,7 +2797,7 @@ export function ExpenseCreateWorkspace({
                 ) : (
                   <Save className="h-4 w-4" />
                 )}
-                {DOCUMENT_ACTIONS.SAVE_DRAFT}
+                {isEdit ? DOCUMENT_ACTIONS.SAVE_DRAFT : "✅ บันทึกค่าใช้จ่าย (ออกเลข EXP ทันที)"}
               </Button>
             </div>
             </div>

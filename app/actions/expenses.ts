@@ -1058,6 +1058,193 @@ async function persistExpenseBillDetails(
   return inserted.error?.message ?? null;
 }
 
+function roundExpenseMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+export async function saveExpenseDirect(
+  formData: FormData,
+): Promise<CreateDraftExpenseResult> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: null, error: owner.error };
+
+    const parsed = parseExpenseDraftFormData(formData);
+    const receipt = await resolveReceiptUrlFromForm(parsed);
+    if (receipt.error) return { data: null, error: receipt.error };
+    const paymentSlip = await resolvePaymentSlipUrlFromForm(parsed);
+    if (paymentSlip.error) return { data: null, error: paymentSlip.error };
+
+    const data: CreateDraftExpenseInput = {
+      ...parsed.input,
+      receipt_url: receipt.url,
+      payment_slip_url: paymentSlip.url,
+    };
+    const supabaseAdmin = createSupabaseAdminClient();
+    const validated = await validateExpenseDraftPayload(supabaseAdmin, data);
+    if (validated.error || !validated.data) {
+      return { data: null, error: validated.error ?? "ข้อมูลไม่ถูกต้อง" };
+    }
+    const v = validated.data;
+    if (String(formData.get("is_installment") ?? "") === "1") {
+      return { data: null, error: "การบันทึกค่าใช้จ่ายทันทียังไม่รองรับแผนผ่อนชำระ" };
+    }
+
+    const dup = await findDuplicateExpense(supabaseAdmin, {
+      vendorId: v.vendorId,
+      expenseDate: v.expenseDate,
+      vendorDocNo: v.vendorDocNo,
+    });
+    if (dup.error) return { data: null, error: dup.error };
+    if (dup.isDuplicate) return duplicateInvoiceResult();
+
+    const taxTypeRaw = String(formData.get("tax_type") ?? "").trim().toUpperCase();
+    const taxType =
+      taxTypeRaw === "EXCLUSIVE" || taxTypeRaw === "NO_VAT" || taxTypeRaw === "INCLUSIVE"
+        ? taxTypeRaw
+        : "INCLUSIVE";
+    const tierRaw = String(formData.get("accounting_tax_tier") ?? "").trim();
+    const tier =
+      tierRaw === "RECEIPT_1_2" || tierRaw === "INTERNAL_1_3" || tierRaw === "CORP_VAT"
+        ? tierRaw
+        : "CORP_VAT";
+    const taxStatusRaw = String(formData.get("tax_invoice_status") ?? "").trim().toUpperCase();
+    const taxStatus = taxStatusRaw === "PENDING_TAX_INVOICE" ? "PENDING_TAX_INVOICE" : "TAX_READY";
+    const totalInput = Number(String(formData.get("total_amount") ?? "").replace(/,/g, ""));
+    let total = Number.isFinite(totalInput) && totalInput > 0
+      ? roundExpenseMoney(totalInput)
+      : roundExpenseMoney(v.netAmount + v.vatAmount);
+    let net = v.netAmount;
+    let vat = v.vatAmount;
+    if (taxType === "INCLUSIVE") {
+      net = roundExpenseMoney(total / 1.07);
+      vat = roundExpenseMoney(total - net);
+    } else if (taxType === "NO_VAT") {
+      vat = 0;
+      net = total;
+    } else {
+      net = roundExpenseMoney(v.netAmount);
+      vat = roundExpenseMoney(net * 0.07);
+      total = roundExpenseMoney(net + vat);
+    }
+
+    const { data: categoryRow } = await supabaseAdmin
+      .from("mst_expense_categories")
+      .select("category_name")
+      .eq("id", v.categoryId)
+      .maybeSingle();
+    const categoryName =
+      String(formData.get("category_name") ?? "").trim() ||
+      String(categoryRow?.category_name ?? "").trim() ||
+      "OTHER";
+
+    let items: Array<Record<string, unknown>> = [];
+    try {
+      const parsedItems = JSON.parse(String(formData.get("line_items") ?? "[]")) as unknown;
+      if (Array.isArray(parsedItems)) {
+        items = parsedItems.flatMap((row) => {
+          if (!row || typeof row !== "object") return [];
+          const item = row as Record<string, unknown>;
+          const description = String(item.description ?? "").trim();
+          if (!description) return [];
+          const quantity = Number(item.quantity);
+          const lineTotal = Number(item.line_total ?? item.amount);
+          return [{
+            description,
+            quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
+            unit: String(item.unit_name ?? item.unit ?? "").trim() || "รายการ",
+            unit_price: Number(item.unit_price) || 0,
+            amount: Number.isFinite(lineTotal) ? lineTotal : 0,
+          }];
+        });
+      }
+    } catch {
+      items = [];
+    }
+    if (items.length === 0) {
+      items = [{
+        description: v.remark || categoryName || "ค่าใช้จ่าย",
+        quantity: 1,
+        unit: "รายการ",
+        unit_price: total,
+        amount: total,
+      }];
+    }
+
+    const rpcClient = supabaseAdmin as unknown as {
+      rpc: (
+        fn: "save_expense_direct_no_draft",
+        args: Record<string, unknown>,
+      ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    };
+    const saved = await rpcClient.rpc("save_expense_direct_no_draft", {
+      p_expense_date: v.expenseDate,
+      p_contact_id: v.vendorId,
+      p_vendor_name: String(formData.get("vendor_name") ?? "").trim() || null,
+      p_vendor_tax_id: String(formData.get("vendor_tax_id") ?? "").replace(/\D/g, "") || null,
+      p_vendor_address: null,
+      p_tax_invoice_no: v.vendorDocNo,
+      p_reference_no: String(formData.get("reference_no") ?? "").trim() || null,
+      p_category: categoryName,
+      p_description: v.remark,
+      p_tax_type: taxType,
+      p_tax_invoice_status: taxStatus,
+      p_accounting_tax_tier: tier,
+      p_sub_total: net,
+      p_vat_amount: vat,
+      p_wht_amount: v.whtAmount,
+      p_total_amount: total,
+      p_payment_method: v.paymentMethod || "TRANSFER",
+      p_bank_account_id:
+        v.paymentMethod === "CASH"
+          ? null
+          : String(formData.get("bank_account_id") ?? "").trim() || v.bankAccountId,
+      p_attachment_url: receipt.url,
+      p_payment_slip_url: paymentSlip.url,
+      p_vehicle_plate: String(formData.get("vehicle_plate") ?? "").trim() || null,
+      p_items: items,
+    });
+    if (saved.error) return { data: null, error: saved.error.message };
+    const payload = (Array.isArray(saved.data) ? saved.data[0] : saved.data) as
+      | { id?: string; expense_no?: string }
+      | null;
+    const expenseId = String(payload?.id ?? "");
+    const expenseNo = String(payload?.expense_no ?? "");
+    if (!expenseId) return { data: null, error: "RPC ไม่คืนรหัสเอกสารค่าใช้จ่าย" };
+
+    const linked = await supabaseAdmin
+      .from("expenses")
+      .update({
+        category_id: v.categoryId,
+        vendor_id: v.vendorId,
+        vendor_doc_no: v.vendorDocNo,
+        receipt_url: receipt.url,
+        wht_type: v.whtType,
+        wht_rate: v.whtRate,
+        net_payable: roundExpenseMoney(Math.max(0, total - v.whtAmount)),
+        approval_status: "APPROVED",
+        recorded_by: owner.userId,
+        remark: v.remark,
+      })
+      .eq("id", expenseId)
+      .select(EXPENSE_ROW_SELECT)
+      .maybeSingle();
+    if (linked.error || !linked.data) {
+      return {
+        data: null,
+        error: linked.error?.message || `บันทึก ${expenseNo} แล้ว แต่ผูกหมวดและผู้ขายไม่สำเร็จ`,
+      };
+    }
+
+    revalidateExpenseCaches(expenseId);
+    return { data: mapExpenseRow(linked.data as Record<string, unknown>), error: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "บันทึกค่าใช้จ่ายไม่สำเร็จ";
+    console.error("[saveExpenseDirect]", message);
+    return { data: null, error: message };
+  }
+}
+
 export async function createDraftExpense(
   formData: FormData,
 ): Promise<CreateDraftExpenseResult> {
