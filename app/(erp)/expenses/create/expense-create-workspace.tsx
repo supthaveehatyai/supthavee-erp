@@ -8,7 +8,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import {
   ArrowLeft,
@@ -577,6 +577,10 @@ export function ExpenseCreateWorkspace({
   const [extraVendors, setExtraVendors] = useState<ExpenseVendorOption[]>([]);
   const [ocrQuota, setOcrQuota] = useState<OcrQuotaStatus | null>(null);
   const [preferredOcrModel, setPreferredOcrModel] = useState("");
+  const [isDraggingReceipt, setIsDraggingReceipt] = useState(false);
+  const [isDraggingSlip, setIsDraggingSlip] = useState(false);
+  const receiptDragDepth = useRef(0);
+  const slipDragDepth = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -585,6 +589,18 @@ export function ExpenseCreateWorkspace({
     });
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const preventBrowserFileOpen = (event: DragEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("dragover", preventBrowserFileOpen);
+    window.addEventListener("drop", preventBrowserFileOpen);
+    return () => {
+      window.removeEventListener("dragover", preventBrowserFileOpen);
+      window.removeEventListener("drop", preventBrowserFileOpen);
     };
   }, []);
 
@@ -1136,6 +1152,60 @@ export function ExpenseCreateWorkspace({
     };
   }
 
+  function handleDragOver(event: ReactDragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleReceiptDragEnter(event: ReactDragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    receiptDragDepth.current += 1;
+    setIsDraggingReceipt(true);
+  }
+
+  function handleReceiptDragLeave(event: ReactDragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    receiptDragDepth.current = Math.max(0, receiptDragDepth.current - 1);
+    if (receiptDragDepth.current === 0) setIsDraggingReceipt(false);
+  }
+
+  async function handleReceiptDrop(event: ReactDragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    receiptDragDepth.current = 0;
+    setIsDraggingReceipt(false);
+    const droppedFile = event.dataTransfer.files?.[0];
+    if (!droppedFile) return;
+    await runExpenseOcr(droppedFile);
+  }
+
+  function handleSlipDragEnter(event: ReactDragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    slipDragDepth.current += 1;
+    setIsDraggingSlip(true);
+  }
+
+  function handleSlipDragLeave(event: ReactDragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    slipDragDepth.current = Math.max(0, slipDragDepth.current - 1);
+    if (slipDragDepth.current === 0) setIsDraggingSlip(false);
+  }
+
+  async function handleSlipDrop(event: ReactDragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    slipDragDepth.current = 0;
+    setIsDraggingSlip(false);
+    const droppedFile = event.dataTransfer.files?.[0];
+    if (!droppedFile) return;
+    await setPaymentSlipFile(droppedFile);
+  }
+
   async function runExpenseOcr(file: File | null | undefined) {
     if (!file || file.size === 0) {
       toast.error("กรุณาเลือกไฟล์รูปบิลก่อน");
@@ -1593,16 +1663,17 @@ export function ExpenseCreateWorkspace({
                 <label
                   htmlFor="expense-ocr-upload"
                   className={cn(
-                    "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-6 py-14 text-center transition",
-                    "hover:border-blue-400 hover:bg-blue-50/40",
+                    "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed px-6 py-14 text-center transition",
+                    isDraggingReceipt
+                      ? "border-blue-500 bg-blue-50/60 ring-2 ring-blue-200"
+                      : "border-slate-300 bg-slate-50/80 hover:border-blue-400 hover:bg-blue-50/40",
                     isOcrProcessing && "pointer-events-none opacity-70",
                   )}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    void runExpenseOcr(e.dataTransfer.files?.[0]);
+                  onDragEnter={handleReceiptDragEnter}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleReceiptDragLeave}
+                  onDrop={(event) => {
+                    void handleReceiptDrop(event);
                   }}
                 >
                   <div className="grid size-14 place-items-center rounded-2xl bg-white text-blue-600 shadow-sm">
@@ -1655,29 +1726,36 @@ export function ExpenseCreateWorkspace({
                   <CardHeader>
                     <CardTitle className="text-base">รูปบิลใบเสร็จ & สลิปการโอนเงิน</CardTitle>
                     <CardDescription>
-                      {tab === "ocr"
-                        ? "วางบิลแล้วระบบอ่านให้ แล้วตรวจยอดก่อนบันทึก"
-                        : "แนบใบเสร็จขนาดใหญ่ และสลิปโอนเงินถ้ามี"}
+                      วางรูปหรือ PDF แล้วระบบแสดงตัวอย่างและสแกนบิลทันที
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-600">
+                    <label
+                      className={cn(
+                        "flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed px-4 py-6 text-center text-sm transition",
+                        isDraggingReceipt
+                          ? "border-blue-500 bg-blue-50/60 text-blue-800 ring-2 ring-blue-200"
+                          : "border-slate-300 bg-slate-50 text-slate-600",
+                      )}
+                      onDragEnter={handleReceiptDragEnter}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleReceiptDragLeave}
+                      onDrop={(event) => {
+                        void handleReceiptDrop(event);
+                      }}
+                    >
                       <input
                         type="file"
                         accept="image/jpeg,image/png,image/webp,application/pdf,.jpg,.jpeg,.png,.webp,.pdf"
                         className="sr-only"
                         disabled={formBusy}
                         onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (tab === "ocr") void runExpenseOcr(file);
-                          else void setAttachmentFile(file ?? null);
+                          void runExpenseOcr(e.target.files?.[0]);
                         }}
                       />
                       {isOcrProcessing
                         ? "กำลังอ่านบิล..."
-                        : tab === "ocr"
-                          ? "วางบิลเพื่อสแกน .jpg .png .webp .pdf"
-                          : "แนบใบเสร็จ .jpg .png .webp .pdf"}
+                        : "วางบิลเพื่อสแกน .jpg .png .webp .pdf"}
                     </label>
                     {ocrPreviewUrl && ocrPreviewKind === "pdf" ? (
                       <iframe
@@ -1765,8 +1843,10 @@ export function ExpenseCreateWorkspace({
                   role="button"
                   tabIndex={0}
                   className={cn(
-                    "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-6 py-10 text-center transition",
-                    "hover:border-blue-400 hover:bg-blue-50/40",
+                    "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed px-6 py-10 text-center transition",
+                    isDraggingReceipt
+                      ? "border-blue-500 bg-blue-50/60 ring-2 ring-blue-200"
+                      : "border-slate-300 bg-slate-50/80 hover:border-blue-400 hover:bg-blue-50/40",
                     formBusy && "pointer-events-none opacity-70",
                   )}
                   onClick={() => attachmentInputRef.current?.click()}
@@ -1776,12 +1856,11 @@ export function ExpenseCreateWorkspace({
                       attachmentInputRef.current?.click();
                     }
                   }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    void setAttachmentFile(e.dataTransfer.files?.[0] ?? null);
+                  onDragEnter={handleReceiptDragEnter}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleReceiptDragLeave}
+                  onDrop={(event) => {
+                    void handleReceiptDrop(event);
                   }}
                 >
                   {attachmentPreviewUrl ? (
@@ -2612,8 +2691,10 @@ export function ExpenseCreateWorkspace({
                     role="button"
                     tabIndex={0}
                     className={cn(
-                      "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-300 bg-white px-4 py-8 text-center transition",
-                      "hover:border-emerald-400 hover:bg-emerald-50/40",
+                      "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed px-4 py-8 text-center transition",
+                      isDraggingSlip
+                        ? "border-blue-500 bg-blue-50/60 ring-2 ring-blue-200"
+                        : "border-slate-300 bg-white hover:border-emerald-400 hover:bg-emerald-50/40",
                       formBusy && "pointer-events-none opacity-70",
                     )}
                     onClick={() => paymentSlipInputRef.current?.click()}
@@ -2623,12 +2704,11 @@ export function ExpenseCreateWorkspace({
                         paymentSlipInputRef.current?.click();
                       }
                     }}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      void setPaymentSlipFile(e.dataTransfer.files?.[0] ?? null);
+                    onDragEnter={handleSlipDragEnter}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleSlipDragLeave}
+                    onDrop={(event) => {
+                      void handleSlipDrop(event);
                     }}
                   >
                     {paymentSlipPreviewUrl ? (
