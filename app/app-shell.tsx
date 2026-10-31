@@ -91,6 +91,7 @@ const navigationGroups: NavigationGroup[] = [
       },
       { label: "ระบบวางบิล", href: "/finance/billing-notes" },
       { label: "ค่าใช้จ่าย (Expenses)", href: "/expenses" },
+      { label: "เงินเดือน / ประกันสังคม (Payroll)", href: "/finance/payroll" },
       {
         label: "ศูนย์รายงาน (Report Center)",
         href: "/finance/tax-reports",

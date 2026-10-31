@@ -86,7 +86,15 @@ document_allocations (การตัดยอดหนี้ / มัดจำ 
 
 billing_note_items (รายการใบวางบิล — PK: id, billing_note_id, invoice_id, billed_amount)
 
-expenses (บิลค่าใช้จ่าย / OPEX — PK: id, net_amount, vat_amount, และคอลัมน์ grand_total เป็น GENERATED ALWAYS AS (net_amount + vat_amount) ห้ามส่งค่าตอน Insert/Upsert)
+expenses (บิลค่าใช้จ่าย / OPEX — PK: id, net_amount, vat_amount, และคอลัมน์ grand_total เป็น GENERATED ALWAYS AS (net_amount + vat_amount) ห้ามส่งค่าตอน Insert/Upsert; accounting_tax_tier [CORP_VAT | RECEIPT_1_2 | INTERNAL_1_3])
+
+mst_employees (ทะเบียนพนักงานเงินเดือน — PK: id, UNIQUE: emp_code, citizen_id, payroll_channel [CORPORATE_OFFICIAL | INTERNAL_PRIVATE], base_salary, is_sso_enrolled, bank_name, bank_account_no, bank_account_name, position_title NOT NULL)
+
+hr_payroll_periods (งวดเงินเดือน — PK: id, UNIQUE: period_year + period_month, sso_rate_pct, sso_wage_ceiling, official_gross_total, official_net_total, internal_gross_total, internal_net_total, sso_employee_total, sso_employer_total, sso_total_remittance, sso_payment_status, sso_payment_date, sso_payment_slip_url, sso_reference_no, status)
+
+hr_payroll_items (รายการเงินเดือนรายคน — PK: id, UNIQUE: payroll_period_id + employee_id, payroll_channel, base_salary, ot_amount, allowance_amount, commission_amount, bonus_amount, gross_income, sso_employee_amount, sso_employer_amount, wht_tax_amount, other_deduction, net_pay, payment_status, payment_date, paid_from_account, payment_slip_url, payment_reference_no, linked_expense_id)
+
+RPC generate_or_sync_payroll_period(p_year integer, p_month integer, p_sso_rate_pct numeric) RETURNS uuid — สร้างงวดและรายการพนักงานที่ Active (แถวเดิมไม่ถูกเขียนทับ) แล้วเรียก recalculate_payroll_period_totals(p_period_id uuid)
 
 expense_installments (งวดผ่อนชำระ TFRS 16 — PK: id, principal_amount, interest_amount, และคอลัมน์ total_installment เป็น GENERATED ALWAYS AS (principal_amount + interest_amount) ห้ามส่งค่าตอน Insert/Upsert)
 
