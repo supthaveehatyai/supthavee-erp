@@ -1,8 +1,16 @@
-/** Gemini 3.x order used when `system_parameters.model_cascade_order` is empty. */
+/**
+ * Same 7-model order as Smart Goods Receipt when
+ * `system_parameters.model_cascade_order` is empty.
+ * Preferred id comes from `GEMINI_MODEL_VERSION` (gemini-3.7-flash).
+ */
 export const OCR_MODEL_CASCADE = [
-  "gemini-3.0-flash",
-  "gemini-2.5-flash",
-  "gemini-1.5-flash",
+  "gemini-3-flash",
+  "gemini-3.5-flash",
+  "gemini-3.6-flash",
+  "gemini-3.7-flash",
+  "gemini-3.8-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-3.5-flash-lite",
 ] as const;
 
 const RETIRED_OCR_MODELS = new Set(["gemini-2.0-flash"]);
@@ -153,6 +161,54 @@ export function readOcrQuotaMaps(data: unknown): {
   };
 }
 
+type OcrQuotaRpc = {
+  rpc: (
+    fn: "record_and_get_ocr_quota",
+    args: { p_model_used: string | null; p_is_exhausted: boolean },
+  ) => Promise<{
+    data: unknown;
+    error: { code?: string; message?: string } | null;
+  }>;
+};
+
+function isMissingOcrQuotaRpc(
+  error: { code?: string; message?: string } | null,
+): boolean {
+  if (!error) return false;
+  const message = error.message ?? "";
+  return (
+    error.code === "PGRST202" ||
+    /record_and_get_ocr_quota|does not exist|could not find the function|schema cache/i.test(
+      message,
+    )
+  );
+}
+
+/** Shared daily counter used by Smart Goods Receipt and expense OCR. */
+export async function recordOcrQuota(
+  client: OcrQuotaRpc,
+  model: string | null,
+  exhausted: boolean,
+): Promise<unknown> {
+  const { data, error } = await client.rpc("record_and_get_ocr_quota", {
+    p_model_used: model,
+    p_is_exhausted: exhausted,
+  });
+  if (error && isMissingOcrQuotaRpc(error)) {
+    console.warn("[ocr-quota] record_and_get_ocr_quota is not deployed:", error.message);
+    return null;
+  }
+  if (error) {
+    console.warn("[ocr-quota]", error.message);
+    return null;
+  }
+  return data;
+}
+
+function fallbackQuotaLimit(model: string): number {
+  return /flash-lite/i.test(model) ? 500 : OCR_QUOTA_DAILY_LIMIT;
+}
+
 /** Models whose stored usage is already at or above the stored limit. */
 export function modelsAtQuota(data: unknown): string[] {
   const { usage, limits } = readOcrQuotaMaps(data);
@@ -186,7 +242,7 @@ export function normalizeOcrQuotaPayload(data: unknown): OcrQuotaModelStatus[] {
   const { usage, limits } = readOcrQuotaMaps(data);
   if (Object.keys(usage).length > 0 || Object.keys(limits).length > 0) {
     const ids = [
-      ...OCR_MODEL_CASCADE.filter((model) => model in usage || model in limits),
+      ...OCR_MODEL_CASCADE,
       ...Object.keys(usage),
       ...Object.keys(limits),
     ];
@@ -194,14 +250,14 @@ export function normalizeOcrQuotaPayload(data: unknown): OcrQuotaModelStatus[] {
       (model) => model && !RETIRED_OCR_MODELS.has(model),
     );
     return orderedIds.map((model) => {
-      const limit = limits[model] ?? null;
-      const used = model in usage ? usage[model] : limit != null ? 0 : null;
+      const limit = limits[model] ?? fallbackQuotaLimit(model);
+      const used = model in usage ? usage[model] : 0;
       return {
         model,
         label: ocrModelLabel(model),
         used,
         limit,
-        exhausted: used != null && limit != null && used >= limit,
+        exhausted: used >= limit,
       };
     });
   }

@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
-import { generateGeminiContent, resolveGeminiApiKey } from "@/lib/ai/gemini-client";
-import { OCR_MODEL_CASCADE } from "@/lib/ai/ocr-quota";
+import { cleanGeminiModelId, generateGeminiContent, resolveGeminiApiKey } from "@/lib/ai/gemini-client";
+import {
+  modelsAtQuota,
+  parseModelCascadeOrder,
+  recordOcrQuota,
+} from "@/lib/ai/ocr-quota";
 import { createClient } from "@/lib/supabase/server-admin";
 import type { ExpenseOcrLine, ExpenseOcrScan } from "@/types/expense";
 
@@ -20,6 +24,7 @@ type ScanBody = {
   fileBase64?: string;
   mimeType?: string;
   fileName?: string;
+  preferredModel?: string;
 };
 
 type GeminiJson = {
@@ -86,8 +91,8 @@ function promptText(): string {
     '{"vendor_name":"","vendor_tax_id":"","vendor_address":"","invoice_no":"","reference_no":"","expense_date":"YYYY-MM-DD","description":"","category":"FUEL_TRANSPORT|UTILITIES|OFFICE_SUPPLIES|REPAIR_MAINTENANCE|OTHER","sub_total":0,"vat_amount":0,"total_amount":0,"has_vat":true,"vat_mode":"INCLUSIVE|EXCLUSIVE|NO_VAT","vehicle_plate":"","line_items":[{"description":"","quantity":1,"unit_name":"","unit_price":0,"line_total":0}]}',
     "กฎ:",
     `1. ห้ามใส่เลขผู้เสียภาษี ${BUYER_TAX_ID} ของบริษัท ทรัพย์ทวี หาดใหญ่ จำกัด ซึ่งเป็นผู้ซื้อ ลง vendor_tax_id ให้ใช้เลขของผู้ขายหรือปั๊มน้ำมันที่ออกบิลเท่านั้น`,
-    "2. expense_date ต้องเป็น ค.ศ. รูปแบบ YYYY-MM-DD",
-    "3. ถ้าบิลมีมูลค่าสินค้า ภาษีมูลค่าเพิ่ม 7% และรวมเงิน ให้ใส่ sub_total, vat_amount, total_amount ตามตัวเลขบนบิลตรง ๆ เช่น มูลค่าสินค้า 1,214.95 ภาษี 85.05 รวมเงิน 1,300.00",
+    "2. expense_date ต้องเป็น ค.ศ. รูปแบบ YYYY-MM-DD ถ้าบนบิลเป็น พ.ศ. ให้ลบ 543 เช่น 15/10/2569 = 2026-10-15",
+    "3. ถ้าบิลมีมูลค่าสินค้า ภาษีมูลค่าเพิ่ม 7% และรวมเงิน ให้ใส่ sub_total, vat_amount, total_amount ตามตัวเลขบนบิลตรง ๆ เช่น มูลค่าสินค้า 1,214.95 ภาษี 85.05 รวมเงิน 1,300.00 และ invoice_no ตามเลขที่ใบกำกับที่พิมพ์ เช่น IV261015022",
     "4. category ของบิลน้ำมันคือ FUEL_TRANSPORT",
     "5. description ให้สรุปรายการและทะเบียนรถถ้ามี",
     "6. line_items ให้แยกรายการบนบิล เช่น ชื่อสินค้า จำนวน หน่วย ราคาต่อหน่วย และยอดรวมบรรทัด",
@@ -95,17 +100,49 @@ function promptText(): string {
   ].join("\n");
 }
 
-async function askGemini(apiKey: string, mimeType: string, base64: string): Promise<string> {
+function expenseDate(value: unknown): string | null {
+  const raw = text(value);
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (iso) {
+    const year = Number(iso[1]) > 2400 ? Number(iso[1]) - 543 : Number(iso[1]);
+    return `${year}-${iso[2]}-${iso[3]}`;
+  }
+  const dmy = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(raw);
+  if (!dmy) return null;
+  const year = Number(dmy[3]) > 2400 ? Number(dmy[3]) - 543 : Number(dmy[3]);
+  return `${year}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+}
+
+async function askGemini(
+  apiKey: string,
+  mimeType: string,
+  base64: string,
+  preferredOverride: string,
+): Promise<{ text: string; modelUsed: string; notice: string | null }> {
+  const admin = createClient();
+  const [{ data: paramRow }, { data: cascadeRow }] = await Promise.all([
+    admin.from("system_parameters").select("param_value").eq("param_key", "GEMINI_MODEL_VERSION").maybeSingle(),
+    admin.from("system_parameters").select("param_value").eq("param_key", "model_cascade_order").maybeSingle(),
+  ]);
+  const quotaClient = admin as unknown as Parameters<typeof recordOcrQuota>[0];
+  const quotaSnapshot = await recordOcrQuota(quotaClient, null, false);
+  const manual = cleanGeminiModelId(preferredOverride);
+  const preferred = manual || cleanGeminiModelId(String(paramRow?.param_value ?? "")) || "gemini-3.7-flash";
+  const skipModels = modelsAtQuota(quotaSnapshot).filter((model) => model !== manual);
   const result = await generateGeminiContent({
     apiKey,
-    preferredModel: OCR_MODEL_CASCADE[0],
-    modelCascade: [...OCR_MODEL_CASCADE],
+    preferredModel: preferred,
+    modelCascade: parseModelCascadeOrder(cascadeRow?.param_value),
+    skipModels,
+    onModelOutcome: async ({ model, exhausted }) => {
+      await recordOcrQuota(quotaClient, model, exhausted);
+    },
     parts: [
       { text: promptText() },
       { inlineData: { mimeType, data: base64 } },
     ],
   });
-  return result.text;
+  return { text: result.text, modelUsed: result.modelUsed, notice: result.notice };
 }
 
 function parseScan(raw: string): GeminiJson {
@@ -280,15 +317,18 @@ export async function POST(request: Request) {
     }
     const attachmentUrl = admin.storage.from("document_attachments").getPublicUrl(safeStoragePath).data.publicUrl;
 
-    const answer = await askGemini(apiKey, mimeType, base64);
-    const parsed = parseScan(answer);
+    const scanned = await askGemini(
+      apiKey,
+      mimeType,
+      base64,
+      cleanGeminiModelId(text(body.preferredModel)),
+    );
+    const parsed = parseScan(scanned.text);
     let vendorTaxId = digits(text(parsed.vendor_tax_id));
     if (vendorTaxId === BUYER_TAX_ID) vendorTaxId = "";
     const vendorName = text(parsed.vendor_name);
     const vendorAddress = text(parsed.vendor_address);
-    const expenseDate = /^\d{4}-\d{2}-\d{2}$/.test(text(parsed.expense_date))
-      ? text(parsed.expense_date)
-      : null;
+    const billDate = expenseDate(parsed.expense_date);
     const contactId = await matchOrCreateContact(vendorName, vendorTaxId, vendorAddress);
     const scannedText = [
       text(parsed.description),
@@ -308,7 +348,7 @@ export async function POST(request: Request) {
       vendor_address: vendorAddress || null,
       invoice_no: text(parsed.invoice_no) || null,
       reference_no: text(parsed.reference_no) || null,
-      expense_date: expenseDate,
+      expense_date: billDate,
       description: text(parsed.description) || null,
       category: categoryCode,
       category_id: category.id,
@@ -324,7 +364,24 @@ export async function POST(request: Request) {
       attachment_url: attachmentUrl,
       line_items: lineItemsOf(parsed.line_items),
     };
-    return NextResponse.json({ success: true, data });
+    if (
+      data.line_items.length === 0 &&
+      /แก๊สโซฮอล์|gasohol|\be20\b/i.test(`${data.description ?? ""} ${scannedText}`)
+    ) {
+      data.line_items = [{
+        description: "แก๊สโซฮอล์ E20",
+        quantity: 1,
+        unit_name: "ลิตร",
+        unit_price: data.total_amount,
+        line_total: data.total_amount,
+      }];
+    }
+    return NextResponse.json({
+      success: true,
+      data,
+      modelUsed: scanned.modelUsed,
+      modelNotice: scanned.notice,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "สแกนบิลไม่สำเร็จ";
     console.error("[expense-ocr]", message);

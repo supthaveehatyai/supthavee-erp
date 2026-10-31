@@ -30,6 +30,7 @@ import {
   OCR_QUOTA_RESET_NOTE,
   parseModelCascadeOrder,
   modelsAtQuota,
+  recordOcrQuota,
 } from "@/lib/ai/ocr-quota";
 import { runGoodsReceiptOcr } from "@/lib/ai/goods-receipt-ocr";
 import { rememberVendorTaxInvoiceStatus } from "@/lib/actions/vendor-tax-invoice";
@@ -526,7 +527,11 @@ export async function parseReceiptOcr(
       console.warn("[parseReceiptOcr] model_cascade_order:", cascadeError.message);
     }
 
-    const quotaSnapshot = await recordOcrQuota(supabaseAdmin, null, false);
+    const quotaSnapshot = await recordOcrQuota(
+      supabaseAdmin as unknown as Parameters<typeof recordOcrQuota>[0],
+      null,
+      false,
+    );
     const extraction = await runGoodsReceiptOcr({
       apiKey,
       preferredModel: cleanGeminiModelId(paramRow?.param_value),
@@ -536,7 +541,11 @@ export async function parseReceiptOcr(
       modelCascade: parseModelCascadeOrder(cascadeRow?.param_value),
       skipModels: modelsAtQuota(quotaSnapshot),
       onModelOutcome: async ({ model, exhausted }) => {
-        await recordOcrQuota(supabaseAdmin, model, exhausted);
+        await recordOcrQuota(
+          supabaseAdmin as unknown as Parameters<typeof recordOcrQuota>[0],
+          model,
+          exhausted,
+        );
       },
     });
 
@@ -569,48 +578,6 @@ export async function parseReceiptOcr(
   }
 }
 
-function isMissingOcrQuotaRpc(
-  error: { code?: string; message?: string } | null,
-): boolean {
-  if (!error) return false;
-  const message = error.message ?? "";
-  return (
-    error.code === "PGRST202" ||
-    /record_and_get_ocr_quota|does not exist|could not find the function|schema cache/i.test(
-      message,
-    )
-  );
-}
-
-async function recordOcrQuota(
-  supabaseAdmin: SupabaseClient,
-  model: string | null,
-  exhausted: boolean,
-): Promise<unknown> {
-  const rpcClient = supabaseAdmin as unknown as {
-    rpc: (
-      fn: "record_and_get_ocr_quota",
-      args: { p_model_used: string | null; p_is_exhausted: boolean },
-    ) => Promise<{
-      data: unknown;
-      error: { code?: string; message?: string } | null;
-    }>;
-  };
-  const { data, error } = await rpcClient.rpc("record_and_get_ocr_quota", {
-    p_model_used: model,
-    p_is_exhausted: exhausted,
-  });
-  if (error && isMissingOcrQuotaRpc(error)) {
-    console.warn("[ocr-quota] record_and_get_ocr_quota is not deployed:", error.message);
-    return null;
-  }
-  if (error) {
-    console.warn("[ocr-quota]", error.message);
-    return null;
-  }
-  return data;
-}
-
 export async function getOcrQuotaStatusAction(): Promise<OcrQuotaStatus> {
   const owner = await requireSessionUserId();
   if (!owner.ok) {
@@ -619,7 +586,11 @@ export async function getOcrQuotaStatusAction(): Promise<OcrQuotaStatus> {
 
   try {
     const supabaseAdmin = createSupabaseAdminClient();
-    const data = await recordOcrQuota(supabaseAdmin, null, false);
+    const data = await recordOcrQuota(
+      supabaseAdmin as unknown as Parameters<typeof recordOcrQuota>[0],
+      null,
+      false,
+    );
     return {
       models: normalizeOcrQuotaPayload(data),
       resetNote: OCR_QUOTA_RESET_NOTE,

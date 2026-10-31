@@ -23,12 +23,18 @@ import {
   Paperclip,
   X,
   FileText,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   createDraftExpense,
   updateDraftExpense,
 } from "@/app/actions/expenses";
+import { getOcrQuotaStatusAction } from "@/lib/actions/receipt";
+import {
+  formatOcrQuotaChip,
+  type OcrQuotaStatus,
+} from "@/lib/ai/ocr-quota";
 import {
   DUPLICATE_INVOICE_ERROR,
   DUPLICATE_INVOICE_MESSAGE,
@@ -544,6 +550,19 @@ export function ExpenseCreateWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [categories, setCategories] =
     useState<ExpenseCategory[]>(initialCategories);
+  const [extraVendors, setExtraVendors] = useState<ExpenseVendorOption[]>([]);
+  const [ocrQuota, setOcrQuota] = useState<OcrQuotaStatus | null>(null);
+  const [preferredOcrModel, setPreferredOcrModel] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void getOcrQuotaStatusAction().then((result) => {
+      if (!cancelled) setOcrQuota(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /** Sync lock — blocks double-submit before React re-renders `isSubmitting`. */
   const submitLockRef = useRef(false);
@@ -923,13 +942,21 @@ export function ExpenseCreateWorkspace({
     [whtRates, initialValues?.wht_type, initialValues?.wht_rate],
   );
 
+  const vendorChoices = useMemo(() => {
+    const known = new Set(vendors.map((vendor) => vendor.id));
+    return [
+      ...vendors,
+      ...extraVendors.filter((vendor) => !known.has(vendor.id)),
+    ];
+  }, [vendors, extraVendors]);
+
   const vendorOptions = useMemo(
     () =>
-      vendors.map((vendor) => ({
+      vendorChoices.map((vendor) => ({
         id: vendor.id,
         company_name: vendor.company_name,
       })),
-    [vendors],
+    [vendorChoices],
   );
 
   const baseAmountLabel =
@@ -986,8 +1013,28 @@ export function ExpenseCreateWorkspace({
       ];
       setCategories(nextCategories);
     }
+    const knownVendor =
+      (extraction.contact_id
+        ? vendorChoices.find((vendor) => vendor.id === extraction.contact_id)
+        : null) ?? null;
+    const matchedContactId = extraction.contact_id;
+    const matchedVendorName = extraction.vendor_name;
+    if (matchedContactId && matchedVendorName && !knownVendor) {
+      setExtraVendors((current) =>
+        current.some((vendor) => vendor.id === matchedContactId)
+          ? current
+          : [
+              ...current,
+              {
+                id: matchedContactId,
+                company_name: matchedVendorName,
+              },
+            ],
+      );
+    }
     const matchedVendorId =
-      extraction.contact_id || matchVendorId(extraction.vendor_name, vendors);
+      extraction.contact_id ||
+      matchVendorId(extraction.vendor_name, vendorChoices);
     const matchedCategoryId =
       extraction.category_id || matchCategoryId(extraction.category, nextCategories);
     const docDate = extraction.expense_date || getValues("expense_date");
@@ -1095,12 +1142,18 @@ export function ExpenseCreateWorkspace({
       const response = await fetch("/api/expenses/ocr", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileBase64, mimeType, fileName: file.name }),
+        body: JSON.stringify({
+          fileBase64,
+          mimeType,
+          fileName: `exp-${Date.now()}.${isPdf ? "pdf" : "jpg"}`,
+          preferredModel: preferredOcrModel,
+        }),
       });
       const result = (await response.json()) as {
         success?: boolean;
         error?: string;
         data?: ExpenseOcrScan;
+        modelNotice?: string | null;
       };
 
       if (!response.ok || !result.success || !result.data) {
@@ -1119,7 +1172,11 @@ export function ExpenseCreateWorkspace({
       }
 
       applyOcrResult(result.data);
-      toast.success("อ่านบิลสำเร็จ — ตรวจสอบข้อมูลก่อนบันทึก Draft");
+      toast.success(
+        result.modelNotice || "อ่านบิลสำเร็จ — ตรวจสอบข้อมูลก่อนบันทึก Draft",
+      );
+      const quota = await getOcrQuotaStatusAction();
+      setOcrQuota(quota);
     } catch (err) {
       console.error("[Expense OCR] processExpenseOCR threw:", err);
       const msg = formatOcrTransportError(err);
@@ -1381,6 +1438,51 @@ export function ExpenseCreateWorkspace({
 
   return (
     <div className="space-y-5">
+      {ocrQuota ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+          <p className="text-[11px] font-semibold leading-relaxed text-slate-700">
+            {ocrQuota.models.length > 0
+              ? ocrQuota.models.map((model, index) => (
+                  <span key={model.model}>
+                    {index > 0 ? " | " : null}
+                    <button
+                      type="button"
+                      className={
+                        preferredOcrModel === model.model
+                          ? "rounded bg-blue-100 px-1 text-blue-800"
+                          : model.exhausted
+                            ? "rounded px-1 text-amber-700"
+                            : "rounded px-1 hover:bg-white"
+                      }
+                      onClick={() =>
+                        setPreferredOcrModel((current) =>
+                          current === model.model ? "" : model.model,
+                        )
+                      }
+                    >
+                      {formatOcrQuotaChip(model)}
+                    </button>
+                  </span>
+                ))
+              : "ยังไม่มีข้อมูลโควตา OCR"}
+          </p>
+          <a
+            href="https://ai.dev/rate-limit"
+            target="_blank"
+            rel="noreferrer"
+            className="mt-1 inline-flex items-center gap-1 text-[10px] text-slate-500 hover:text-blue-700"
+          >
+            {ocrQuota.resetNote}
+            {preferredOcrModel
+              ? " · คลิกโมเดลที่เลือกอีกครั้งเพื่อกลับไปใช้ค่าจาก System Parameters"
+              : " · คลิกชื่อโมเดลเพื่อเลือกใช้ก่อน ถ้าโควตาเต็มระบบจะสลับต่ออัตโนมัติ"}
+            <ExternalLink className="size-3" aria-hidden />
+          </a>
+          {ocrQuota.error ? (
+            <p className="mt-1 text-[10px] text-red-600">{ocrQuota.error}</p>
+          ) : null}
+        </div>
+      ) : null}
       {categoriesError || vendorsError || bankAccountsError || whtRatesError ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           {[
@@ -1724,10 +1826,10 @@ export function ExpenseCreateWorkspace({
                     onChange={(id) => {
                       setValue("vendor_id", id, { shouldValidate: true });
                       const name =
-                        vendors.find((v) => v.id === id)?.company_name ?? "";
+                        vendorChoices.find((v) => v.id === id)?.company_name ?? "";
                       setValue("vendor_name", name, { shouldValidate: true });
                     }}
-                    disabled={formBusy || vendors.length === 0}
+                    disabled={formBusy || vendorChoices.length === 0}
                     placeholder="ค้นหาและเลือกผู้ให้บริการ..."
                     emptyMessage="ไม่พบผู้ให้บริการ"
                   />
@@ -2499,7 +2601,7 @@ export function ExpenseCreateWorkspace({
                 disabled={
                   formBusy ||
                   categories.length === 0 ||
-                  vendors.length === 0 ||
+                  vendorChoices.length === 0 ||
                   installmentSubmitBlocked
                 }
                 aria-busy={isSubmitting}
