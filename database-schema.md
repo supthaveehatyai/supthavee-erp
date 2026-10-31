@@ -90,6 +90,8 @@ expenses (บิลค่าใช้จ่าย / OPEX — PK: id, net_amount,
 
 RPC save_expense_direct_no_draft(...) RETURNS jsonb — ออกเลข EXP ทันที สถานะ PAID (หรือ PENDING เมื่อ payment_method = CREDIT) โดยไม่สร้างเลข DRAFT และไม่รับ grand_total
 
+RPC update_expense_direct(p_expense_id uuid, p_expense_date date, p_contact_id uuid, p_vendor_name varchar, p_vendor_tax_id varchar, p_tax_invoice_no varchar, p_reference_no varchar, p_category varchar, p_description text, p_tax_type varchar, p_tax_invoice_status varchar, p_accounting_tax_tier varchar, p_net_amount numeric, p_vat_amount numeric, p_wht_amount numeric, p_total_amount numeric, p_payment_method varchar, p_bank_account_id uuid, p_attachment_url text, p_payment_slip_url text, p_vehicle_plate varchar) RETURNS jsonb — แก้ไขบิลที่ยังไม่ VOID โดยส่ง net_amount กับ vat_amount ห้ามส่ง grand_total (คอลัมน์คำนวณ)
+
 expense_items (รายการย่อยในบิลค่าใช้จ่าย — PK: id, FK: expense_id, line_no, item_description, quantity, unit_name, unit_price, discount_amount, line_total)
 
 mst_employees (ทะเบียนพนักงานเงินเดือน — PK: id, UNIQUE: emp_code, citizen_id, address, payroll_channel [CORPORATE_OFFICIAL | INTERNAL_PRIVATE], base_salary, is_sso_enrolled, bank_name, bank_account_no, bank_account_name, id_card_attachment_url, bank_book_attachment_url, position_title NOT NULL; แนบสำเนาบัตรผ่าน RPC update_employee_id_card_attachment(p_employee_id uuid, p_id_card_url text, p_bank_book_url text DEFAULT NULL) — ค่าว่างไม่ทับไฟล์เดิม)

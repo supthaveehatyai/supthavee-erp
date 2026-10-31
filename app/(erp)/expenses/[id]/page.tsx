@@ -3,7 +3,11 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Receipt } from "lucide-react";
-import { getBankAccounts, getExpenseById } from "@/app/actions/expenses";
+import {
+  getBankAccounts,
+  getExpenseById,
+  getExpenseCategories,
+} from "@/app/actions/expenses";
 import { getPaymentSlipStorageMeta } from "@/app/actions/payment-slips";
 import { resolvePaymentSlipPreviewUrl } from "@/types/payment-transaction-meta";
 import { hasFixedAssetForExpense } from "@/app/actions/fixed-assets";
@@ -23,10 +27,12 @@ import {
   expenseRemarkLabel,
 } from "@/lib/utils/expense-labels";
 import { ExpenseAttachmentPreview } from "./expense-attachment-preview";
+import { ExpenseEditDialog } from "./expense-edit-dialog";
 import { ExpenseDetailActions } from "./expense-detail-actions";
 import { ExpenseInstallmentPayCell } from "./pay-installment-dialog";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -102,13 +108,15 @@ export async function generateMetadata({
 
 export default async function ExpenseDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const [{ data: expense, error }, bankAccountsResult, assetLinkResult] =
+  const [{ data: expense, error }, bankAccountsResult, categoriesResult, assetLinkResult] =
     await Promise.all([
       getExpenseById(id),
       getBankAccounts(),
+      getExpenseCategories(),
       hasFixedAssetForExpense(id),
     ]);
   const bankAccounts = bankAccountsResult.data ?? [];
+  const categories = categoriesResult.data ?? [];
   const hasRegisteredAsset = assetLinkResult.hasRegisteredAsset;
 
   if (!expense) {
@@ -159,13 +167,38 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
             <StatusBadge status={expense.status} />
           </div>
           <p className="text-slate-500">
-            รายละเอียดเอกสารค่าใช้จ่าย — อ่านอย่างเดียว · DRAFT = ลบได้ ·
-            ISSUED = ยกเลิก (Void) ได้ · พิมพ์ A4
+            รายละเอียดเอกสารค่าใช้จ่าย — สามารถกดแก้ไขหมวดหมู่ / ข้อมูลภาษี /
+            แนบสลิปเพิ่มเติมได้
           </p>
         </div>
 
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
           <ExpensePrintButton />
+          {statusNormalized !== "VOID" ? (
+            <ExpenseEditDialog
+              key={expense.updated_at}
+              expenseId={expense.id}
+              expenseDate={expense.expense_date}
+              categoryLabel={categoryLabel}
+              vendorName={expense.vendor_name}
+              vendorTaxId={expense.vendor_tax_id ?? ""}
+              taxInvoiceNo={expense.tax_invoice_no ?? expense.vendor_doc_no ?? ""}
+              taxType={expense.tax_type ?? ""}
+              netAmount={Number(expense.net_amount ?? 0)}
+              vatAmount={Number(expense.vat_amount ?? 0)}
+              whtAmount={Number(expense.wht_amount ?? 0)}
+              paymentMethod={expense.payment_method ?? ""}
+              bankAccountId={expense.bank_account_id ?? ""}
+              remark={remarkLabel}
+              receiptUrl={expense.receipt_url || expense.attachment_url || ""}
+              paymentSlipUrl={expense.payment_slip_url ?? ""}
+              categories={categories.map((category) => category.category_name)}
+              bankAccounts={bankAccounts.map((account) => ({
+                id: account.id,
+                label: account.label,
+              }))}
+            />
+          ) : null}
           {Number(expense.wht_amount) > 0 ? (
             <Link
               href={`/expenses/${expense.id}/print-wht`}
@@ -200,7 +233,7 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
         <Card className="xl:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">ข้อมูลเอกสาร</CardTitle>
-            <CardDescription>Read-only document header</CardDescription>
+            <CardDescription>หัวเอกสารค่าใช้จ่าย</CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <Field label="Document No">{expense.document_no}</Field>
@@ -381,7 +414,7 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
           </CardHeader>
           <CardContent>
             <ExpenseAttachmentPreview
-              url={expense.receipt_url}
+              url={expense.receipt_url || expense.attachment_url}
               documentNo={expense.document_no}
               title="ใบเสร็จ"
               emptyLabel="ไม่มีไฟล์แนบ"

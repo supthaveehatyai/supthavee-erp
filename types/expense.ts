@@ -102,6 +102,11 @@ export type ExpenseDetail = ExpenseRecord & {
   /** expenses.description — fallback for the remark column. */
   description: string | null;
   vendor_name: string;
+  vendor_tax_id: string | null;
+  tax_invoice_no: string | null;
+  tax_type: string | null;
+  /** Storage URL written by update_expense_direct when receipt_url is empty. */
+  attachment_url: string | null;
   bank_account_label: string | null;
   installments: ExpenseInstallmentRow[];
 };
