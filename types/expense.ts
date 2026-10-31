@@ -266,7 +266,15 @@ export type ProcessExpenseOcrResult =
   | { success: true; data: ExpenseOcrExtraction }
   | { success: false; error: string };
 
-/** ผลสแกนบิลจาก `POST /api/expenses/ocr` */
+export type ExpenseOcrLine = {
+  description: string;
+  quantity: number;
+  unit_name: string | null;
+  unit_price: number;
+  line_total: number;
+};
+
+/** ผลสแกนบิลจาก `POST /api/expenses/ocr` ใช้เครื่อง Gemini เดียวกับรับสินค้า */
 export type ExpenseOcrScan = {
   vendor_name: string | null;
   vendor_tax_id: string | null;
@@ -276,11 +284,16 @@ export type ExpenseOcrScan = {
   expense_date: string | null;
   description: string | null;
   category: string | null;
+  category_id: string | null;
+  category_name: string | null;
   sub_total: number;
   vat_amount: number;
   total_amount: number;
   has_vat: boolean;
+  vat_mode: "INCLUSIVE" | "EXCLUSIVE" | "NO_VAT";
+  accounting_tax_tier: "CORP_VAT" | "RECEIPT_1_2" | "INTERNAL_1_3";
   vehicle_plate: string | null;
   contact_id: string | null;
   attachment_url: string | null;
+  line_items: ExpenseOcrLine[];
 };

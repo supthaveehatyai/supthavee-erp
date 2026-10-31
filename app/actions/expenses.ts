@@ -957,6 +957,107 @@ async function resolvePaymentSlipUrlFromForm(
  * Create a DRAFT expense from FormData (Late Numbering `DRAFT-…`).
  * Uploads `receipt_file` to `expense_documents` and persists `receipt_url`.
  */
+function readExpenseBillExtras(formData: FormData): {
+  columns: Record<string, string | null>;
+  lines: Array<{
+    description: string;
+    quantity: number;
+    unit_name: string | null;
+    unit_price: number;
+    line_total: number;
+  }>;
+} {
+  const tier = String(formData.get("accounting_tax_tier") ?? "").trim();
+  const taxType = String(formData.get("tax_type") ?? "").trim().toUpperCase();
+  let lines: Array<{
+    description: string;
+    quantity: number;
+    unit_name: string | null;
+    unit_price: number;
+    line_total: number;
+  }> = [];
+  try {
+    const parsed = JSON.parse(String(formData.get("line_items") ?? "[]")) as unknown;
+    if (Array.isArray(parsed)) {
+      lines = parsed.flatMap((row) => {
+        if (!row || typeof row !== "object") return [];
+        const item = row as Record<string, unknown>;
+        const description = String(item.description ?? "").trim();
+        if (!description) return [];
+        const quantity = Number(item.quantity);
+        return [{
+          description,
+          quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
+          unit_name: String(item.unit_name ?? "").trim() || null,
+          unit_price: Number(item.unit_price) || 0,
+          line_total: Number(item.line_total) || 0,
+        }];
+      });
+    }
+  } catch {
+    lines = [];
+  }
+  return {
+    columns: {
+      accounting_tax_tier:
+        tier === "RECEIPT_1_2" || tier === "INTERNAL_1_3" || tier === "CORP_VAT"
+          ? tier
+          : "CORP_VAT",
+      tax_invoice_no: String(formData.get("tax_invoice_no") ?? "").trim() || null,
+      reference_no: String(formData.get("reference_no") ?? "").trim() || null,
+      vehicle_plate: String(formData.get("vehicle_plate") ?? "").trim() || null,
+      vendor_tax_id: String(formData.get("vendor_tax_id") ?? "").replace(/\D/g, "") || null,
+      tax_type:
+        taxType === "INCLUSIVE" || taxType === "EXCLUSIVE" || taxType === "NO_VAT"
+          ? taxType
+          : "NO_VAT",
+    },
+    lines,
+  };
+}
+
+async function persistExpenseBillDetails(
+  admin: SupabaseClient,
+  expenseId: string,
+  formData: FormData,
+  expenseDate: string,
+): Promise<string | null> {
+  const extras = readExpenseBillExtras(formData);
+  const loose = admin as unknown as {
+    from: (table: string) => {
+      update: (row: Record<string, unknown>) => {
+        eq: (column: string, value: string) => Promise<{ error: { message: string } | null }>;
+      };
+      delete: () => {
+        eq: (column: string, value: string) => Promise<{ error: { message: string } | null }>;
+      };
+      insert: (rows: Record<string, unknown>[]) => Promise<{ error: { message: string } | null }>;
+    };
+  };
+  const updated = await loose
+    .from("expenses")
+    .update({ ...extras.columns, tax_invoice_date: expenseDate })
+    .eq("id", expenseId);
+  if (updated.error) return updated.error.message;
+  if (String(formData.get("sync_line_items") ?? "") !== "1") return null;
+  const removed = await loose.from("expense_items").delete().eq("expense_id", expenseId);
+  if (removed.error) return removed.error.message;
+  if (extras.lines.length === 0) return null;
+  const inserted = await loose.from("expense_items").insert(
+    extras.lines.map((line, index) => ({
+      expense_id: expenseId,
+      line_no: index + 1,
+      item_description: line.description,
+      quantity: line.quantity,
+      unit_name: line.unit_name,
+      unit_price: line.unit_price,
+      discount_amount: 0,
+      line_total: line.line_total,
+    })),
+  );
+  return inserted.error?.message ?? null;
+}
+
 export async function createDraftExpense(
   formData: FormData,
 ): Promise<CreateDraftExpenseResult> {
@@ -1070,6 +1171,18 @@ export async function createDraftExpense(
     }
 
     const mapped = mapExpenseRow(inserted as Record<string, unknown>);
+    const detailError = await persistExpenseBillDetails(
+      supabaseAdmin,
+      mapped.id,
+      formData,
+      v.expenseDate,
+    );
+    if (detailError) {
+      return {
+        data: mapped,
+        error: `บันทึกหัวบิลแล้ว แต่รายละเอียดบิลไม่ครบ: ${detailError}`,
+      };
+    }
 
     if (plan.isInstallment) {
       const sync = await replaceExpenseInstallments(
@@ -1472,6 +1585,18 @@ export async function updateDraftExpense(
     }
 
     const mapped = mapExpenseRow(updated as Record<string, unknown>);
+    const detailError = await persistExpenseBillDetails(
+      supabaseAdmin,
+      mapped.id,
+      formData,
+      v.expenseDate,
+    );
+    if (detailError) {
+      return {
+        data: mapped,
+        error: `อัปเดตหัวบิลแล้ว แต่รายละเอียดบิลไม่ครบ: ${detailError}`,
+      };
+    }
     fireExpenseAuditLog({
       recordId: expenseId,
       auditEvent: "UPDATE",

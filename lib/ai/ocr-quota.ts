@@ -1,11 +1,8 @@
 /** Gemini 3.x order used when `system_parameters.model_cascade_order` is empty. */
 export const OCR_MODEL_CASCADE = [
-  "gemini-3.8-flash",
-  "gemini-3.7-flash",
-  "gemini-3.5-flash",
-  "gemini-3.5-flash-lite",
-  "gemini-3-flash",
-  "gemini-3.1-flash-lite",
+  "gemini-3.0-flash",
+  "gemini-2.5-flash",
+  "gemini-1.5-flash",
 ] as const;
 
 const RETIRED_OCR_MODELS = new Set(["gemini-2.0-flash"]);

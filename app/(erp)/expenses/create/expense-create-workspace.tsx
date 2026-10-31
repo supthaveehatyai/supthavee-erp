@@ -55,7 +55,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { VAT_OPTIONS, type VatOptionValue } from "@/lib/constants/accounting";
+import { type VatOptionValue } from "@/lib/constants/accounting";
 import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import { cn } from "@/lib/utils";
 import { compressImage } from "@/lib/utils/image-compression";
@@ -64,6 +64,18 @@ import { ExpenseCategoryCombobox } from "./expense-category-combobox";
 export type ExpenseCreateTab = "ocr" | "manual";
 
 export type ExpenseVatType = VatOptionValue;
+
+const EXPENSE_VAT_OPTIONS: { value: ExpenseVatType; label: string }[] = [
+  { value: "INCLUSIVE", label: "ราคารวม VAT 7% (Inclusive VAT)" },
+  { value: "EXCLUSIVE", label: "ราคาแยก VAT 7% (Exclusive VAT)" },
+  { value: "NONE", label: "ไม่มี VAT (noVAT)" },
+];
+
+const TAX_TIER_OPTIONS = [
+  { value: "CORP_VAT", label: "1.1 มีใบกำกับภาษี VAT" },
+  { value: "RECEIPT_1_2", label: "1.2 ใบรับเงินแนบบัตร ปชช." },
+  { value: "INTERNAL_1_3", label: "1.3 บิลภายใน noVAT" },
+] as const;
 
 export type ExpenseFormInitialValues = {
   expense_date: string;
@@ -129,6 +141,10 @@ export type ExpenseFormValues = {
   expense_date: string;
   vendor_id: string;
   vendor_name: string;
+  vendor_tax_id: string;
+  accounting_tax_tier: "CORP_VAT" | "RECEIPT_1_2" | "INTERNAL_1_3";
+  reference_no: string;
+  vehicle_plate: string;
   document_number: string;
   document_date: string;
   category_id: string;
@@ -168,7 +184,7 @@ const PAYMENT_OPTIONS: { value: PaymentMethod; label: string }[] = [
 ];
 
 const CATEGORY_HINT_TO_NAMES: Record<string, string[]> = {
-  FUEL_TRANSPORT: ["ค่าขนส่งและเดินทาง", "ค่าขนส่ง"],
+  FUEL_TRANSPORT: ["ค่าน้ำมันเชื้อเพลิงและยานพาหนะ", "ค่าขนส่งและเดินทาง", "ค่าขนส่ง"],
   TRANSPORT: ["ค่าขนส่งและเดินทาง", "ค่าขนส่ง"],
   UTILITIES: ["ค่าสาธารณูปโภค", "ค่าน้ำ-ไฟ", "ค่าน้ำ", "ค่าไฟ"],
   OFFICE_SUPPLIES: ["ค่าวัสดุสิ้นเปลือง"],
@@ -510,9 +526,16 @@ export function ExpenseCreateWorkspace({
     initialAmounts.grand,
   );
 
-  const [tab, setTab] = useState<ExpenseCreateTab>(
-    isEdit ? "manual" : defaultTab,
-  );
+  const [tab, setTab] = useState<ExpenseCreateTab>("manual");
+  const [billLines, setBillLines] = useState<
+    Array<{
+      description: string;
+      quantity: number;
+      unit_name: string | null;
+      unit_price: number;
+      line_total: number;
+    }>
+  >([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const [ocrFileName, setOcrFileName] = useState<string | null>(null);
@@ -542,6 +565,10 @@ export function ExpenseCreateWorkspace({
       expense_date: initialValues?.expense_date || defaultDate,
       vendor_id: initialValues?.vendor_id ?? "",
       vendor_name: "",
+      vendor_tax_id: "",
+      accounting_tax_tier: "CORP_VAT",
+      reference_no: "",
+      vehicle_plate: "",
       document_number: initialValues?.vendor_doc_no ?? "",
       document_date: initialValues?.expense_date || defaultDate,
       category_id:
@@ -936,25 +963,48 @@ export function ExpenseCreateWorkspace({
   }
 
   function applyOcrResult(extraction: ExpenseOcrScan) {
-    const vatType = extraction.has_vat && extraction.vat_amount > 0 ? "EXCLUSIVE" : "NONE";
+    const vatType: ExpenseVatType =
+      extraction.vat_mode === "EXCLUSIVE"
+        ? "EXCLUSIVE"
+        : extraction.vat_mode === "NO_VAT" || !extraction.has_vat
+          ? "NONE"
+          : "INCLUSIVE";
+    let nextCategories = categories;
+    if (
+      extraction.category_id &&
+      !categories.some((category) => category.id === extraction.category_id)
+    ) {
+      nextCategories = [
+        ...categories,
+        {
+          id: extraction.category_id,
+          category_name: extraction.category_name || "ค่าน้ำมันเชื้อเพลิงและยานพาหนะ",
+          description: null,
+          is_active: true,
+          created_at: new Date().toISOString(),
+        },
+      ];
+      setCategories(nextCategories);
+    }
     const matchedVendorId =
       extraction.contact_id || matchVendorId(extraction.vendor_name, vendors);
-    const matchedCategoryId = matchCategoryId(extraction.category, categories);
+    const matchedCategoryId =
+      extraction.category_id || matchCategoryId(extraction.category, nextCategories);
     const docDate = extraction.expense_date || getValues("expense_date");
     const current = getValues();
     const description = extraction.description?.trim() || extraction.vendor_name || "ค่าใช้จ่าย";
-    const nextItems = [
-      {
-        description,
-        amount: extraction.total_amount || extraction.sub_total,
-        category_hint: extraction.category || "OTHER",
-      },
-    ];
+    const baseAmount =
+      vatType === "EXCLUSIVE" ? extraction.sub_total : extraction.total_amount;
+    setBillLines(extraction.line_items ?? []);
 
     reset(
       {
         ...current,
         vendor_name: extraction.vendor_name ?? "",
+        vendor_tax_id: extraction.vendor_tax_id ?? "",
+        accounting_tax_tier: extraction.accounting_tax_tier,
+        reference_no: extraction.reference_no ?? "",
+        vehicle_plate: extraction.vehicle_plate ?? "",
         vendor_id: matchedVendorId || current.vendor_id,
         document_number: extraction.invoice_no ?? "",
         document_date: docDate,
@@ -964,8 +1014,14 @@ export function ExpenseCreateWorkspace({
         sub_total: extraction.sub_total,
         vat_amount: extraction.vat_amount,
         grand_total: extraction.total_amount,
-        base_amount: String(vatType === "NONE" ? extraction.total_amount : extraction.sub_total),
-        items: nextItems,
+        base_amount: String(baseAmount),
+        items: [
+          {
+            description,
+            amount: extraction.total_amount || extraction.sub_total,
+            category_hint: extraction.category || "OTHER",
+          },
+        ],
         remark: buildOcrRemark(extraction, current.remark),
         receipt_url: extraction.attachment_url || current.receipt_url,
       },
@@ -1209,6 +1265,19 @@ export function ExpenseCreateWorkspace({
         values.payment_method === "TRANSFER" ? values.bank_account_id : "",
       );
       formData.append("remark", values.remark.trim());
+      formData.append("accounting_tax_tier", values.accounting_tax_tier);
+      formData.append("tax_invoice_no", values.document_number.trim());
+      formData.append("reference_no", values.reference_no.trim());
+      formData.append("vehicle_plate", values.vehicle_plate.trim());
+      formData.append("vendor_tax_id", values.vendor_tax_id.trim());
+      formData.append(
+        "tax_type",
+        values.vat_type === "NONE" ? "NO_VAT" : values.vat_type,
+      );
+      if (!isEdit || billLines.length > 0) {
+        formData.append("sync_line_items", "1");
+        formData.append("line_items", JSON.stringify(billLines));
+      }
       // Map UI/OCR "document_number" → DB column expenses.vendor_doc_no
       const vendorDocNo = (
         values.document_number ||
@@ -1334,7 +1403,7 @@ export function ExpenseCreateWorkspace({
       ) : null}
 
       <Tabs value={tab} onValueChange={handleTabChange} className="space-y-5">
-        {isEdit ? null : (
+        {false ? (
           <TabsList className="grid w-full grid-cols-2 sm:inline-flex sm:w-auto">
             <TabsTrigger value="ocr" className="gap-1.5" disabled={formBusy}>
               <Sparkles className="h-3.5 w-3.5" />
@@ -1349,7 +1418,7 @@ export function ExpenseCreateWorkspace({
               กรอกข้อมูลเอง (Manual)
             </TabsTrigger>
           </TabsList>
-        )}
+        ) : null}
 
         {isEdit ? null : (
           <TabsContent value="ocr">
@@ -1422,39 +1491,52 @@ export function ExpenseCreateWorkspace({
           <form
             onSubmit={handleSubmit(onSaveDraft)}
             className={
-              ocrPreviewUrl
-                ? "grid items-start gap-5 xl:grid-cols-[minmax(280px,440px)_minmax(0,1fr)]"
-                : "space-y-5"
+              isEdit
+                ? "space-y-5"
+                : "grid items-start gap-5 xl:grid-cols-[minmax(280px,440px)_minmax(0,1fr)]"
             }
           >
-            {ocrPreviewUrl ? (
+            {isEdit ? null : (
               <aside className="xl:sticky xl:top-4">
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">ตัวอย่างใบเสร็จ</CardTitle>
+                    <CardTitle className="text-base">ตัวอย่างบิล / PDF</CardTitle>
                     <CardDescription>
-                      เทียบตัวเลขบนบิลกับช่องที่ AI กรอกก่อนบันทึก
+                      วางรูปหรือ PDF แล้วระบบจะสแกนด้วยเครื่อง OCR เดียวกับรับสินค้า
                     </CardDescription>
                   </CardHeader>
-                  <CardContent>
-                    {ocrPreviewKind === "pdf" ? (
+                  <CardContent className="space-y-3">
+                    <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-600">
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,application/pdf,.jpg,.jpeg,.png,.webp,.pdf"
+                        className="sr-only"
+                        disabled={formBusy}
+                        onChange={(e) => {
+                          void runExpenseOcr(e.target.files?.[0]);
+                        }}
+                      />
+                      {isOcrProcessing ? "กำลังอ่านบิล..." : "คลิกหรือวางไฟล์ .jpg .png .webp .pdf"}
+                    </label>
+                    {ocrPreviewUrl && ocrPreviewKind === "pdf" ? (
                       <iframe
                         title="ตัวอย่างใบเสร็จ PDF"
                         src={ocrPreviewUrl}
                         className="h-[480px] w-full rounded-lg border"
                       />
-                    ) : (
+                    ) : null}
+                    {ocrPreviewUrl && ocrPreviewKind !== "pdf" ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={ocrPreviewUrl}
                         alt="ตัวอย่างใบเสร็จ"
-                        className="max-h-[480px] w-auto rounded-lg border object-contain"
+                        className="max-h-[480px] w-full rounded-lg border object-contain"
                       />
-                    )}
+                    ) : null}
                   </CardContent>
                 </Card>
               </aside>
-            ) : null}
+            )}
             <div className="space-y-5">
             <Card>
               <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1591,7 +1673,7 @@ export function ExpenseCreateWorkspace({
                   <PenLine className="h-4 w-4 text-blue-600" />
                   {isEdit
                     ? `แก้ไข Draft${documentNo ? ` · ${documentNo}` : ""}`
-                    : "บันทึกค่าใช้จ่าย (Manual)"}
+                    : "ตรวจสอบข้อมูลบิลก่อนบันทึก"}
                 </CardTitle>
                 <CardDescription>
                   {isEdit
@@ -1620,7 +1702,7 @@ export function ExpenseCreateWorkspace({
 
                 <div>
                   <Label htmlFor="document_number">
-                    เลขที่บิลผู้จำหน่าย (Vendor Doc No)
+                    เลขที่เอกสาร / ใบกำกับภาษี
                   </Label>
                   <Input
                     id="document_number"
@@ -1667,6 +1749,42 @@ export function ExpenseCreateWorkspace({
                   />
                 </div>
 
+                <div>
+                  <Label htmlFor="accounting_tax_tier">ประเภททางบัญชี</Label>
+                  <Select
+                    id="accounting_tax_tier"
+                    disabled={formBusy}
+                    {...register("accounting_tax_tier")}
+                  >
+                    {TAX_TIER_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                <div>
+                  <Label htmlFor="reference_no">เลขอ้างอิง</Label>
+                  <Input
+                    id="reference_no"
+                    type="text"
+                    disabled={formBusy}
+                    {...register("reference_no")}
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="vehicle_plate">ทะเบียนรถ</Label>
+                  <Input
+                    id="vehicle_plate"
+                    type="text"
+                    placeholder="เช่น ขว 398 สข"
+                    disabled={formBusy}
+                    {...register("vehicle_plate")}
+                  />
+                </div>
+
                 <div className="md:col-span-2">
                   <Label>หมวดหมู่ค่าใช้จ่าย</Label>
                   <ExpenseCategoryCombobox
@@ -1692,12 +1810,46 @@ export function ExpenseCreateWorkspace({
                       syncAmountsFromBase(getValues("base_amount"), next);
                     }}
                   >
-                    {VAT_OPTIONS.map((option) => (
+                    {EXPENSE_VAT_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
                     ))}
                   </Select>
+                </div>
+
+                <div className="md:col-span-2 space-y-2">
+                  <Label>รายการย่อยในบิล</Label>
+                  {billLines.length === 0 ? (
+                    <p className="text-xs text-slate-500">
+                      ยังไม่มีรายการ — สแกนบิลแล้วระบบจะเติมตารางให้อัตโนมัติ
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto rounded-lg border">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50 text-left text-xs text-slate-500">
+                          <tr>
+                            <th className="px-2 py-2">รายการ</th>
+                            <th className="px-2 py-2">จำนวน</th>
+                            <th className="px-2 py-2">หน่วย</th>
+                            <th className="px-2 py-2">ราคา</th>
+                            <th className="px-2 py-2">รวม</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {billLines.map((line, index) => (
+                            <tr key={`${line.description}-${index}`} className="border-t">
+                              <td className="px-2 py-2">{line.description}</td>
+                              <td className="px-2 py-2">{line.quantity}</td>
+                              <td className="px-2 py-2">{line.unit_name || "-"}</td>
+                              <td className="px-2 py-2">{line.unit_price.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</td>
+                              <td className="px-2 py-2">{line.line_total.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
 
                 <div>

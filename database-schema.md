@@ -86,7 +86,9 @@ document_allocations (การตัดยอดหนี้ / มัดจำ 
 
 billing_note_items (รายการใบวางบิล — PK: id, billing_note_id, invoice_id, billed_amount)
 
-expenses (บิลค่าใช้จ่าย / OPEX — PK: id, net_amount, vat_amount, และคอลัมน์ grand_total เป็น GENERATED ALWAYS AS (net_amount + vat_amount) ห้ามส่งค่าตอน Insert/Upsert; accounting_tax_tier [CORP_VAT | RECEIPT_1_2 | INTERNAL_1_3])
+expenses (บิลค่าใช้จ่าย / OPEX — PK: id, net_amount, vat_amount, และคอลัมน์ grand_total เป็น GENERATED ALWAYS AS (net_amount + vat_amount) ห้ามส่งค่าตอน Insert/Upsert; accounting_tax_tier [CORP_VAT | RECEIPT_1_2 | INTERNAL_1_3], tax_type [INCLUSIVE | EXCLUSIVE | NO_VAT], tax_invoice_no, reference_no, vehicle_plate, vendor_tax_id)
+
+expense_items (รายการย่อยในบิลค่าใช้จ่าย — PK: id, FK: expense_id, line_no, item_description, quantity, unit_name, unit_price, discount_amount, line_total)
 
 mst_employees (ทะเบียนพนักงานเงินเดือน — PK: id, UNIQUE: emp_code, citizen_id, address, payroll_channel [CORPORATE_OFFICIAL | INTERNAL_PRIVATE], base_salary, is_sso_enrolled, bank_name, bank_account_no, bank_account_name, id_card_attachment_url, bank_book_attachment_url, position_title NOT NULL; แนบสำเนาบัตรผ่าน RPC update_employee_id_card_attachment(p_employee_id uuid, p_id_card_url text, p_bank_book_url text DEFAULT NULL) — ค่าว่างไม่ทับไฟล์เดิม)
 
