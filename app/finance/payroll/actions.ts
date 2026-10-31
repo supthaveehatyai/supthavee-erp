@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { requireSessionUserId } from "@/lib/auth/current-user";
 import { buildPayrollWorkbook } from "@/lib/finance/payroll-excel";
 import { createClient } from "@/lib/supabase/server-admin";
@@ -46,6 +47,8 @@ interface PayrollAdmin {
 }
 
 const SALARY_CATEGORY_NAME = "ค่าจ้างและเงินเดือน";
+const EMPLOYEE_COLUMNS =
+  "id, emp_code, full_name, citizen_id, position_title, payroll_channel, base_salary, is_sso_enrolled, bank_name, bank_account_no, bank_account_name, is_active, address, id_card_attachment_url, bank_book_attachment_url";
 const SSO_WAGE_FLOOR = 1650;
 const SSO_WAGE_CEILING = 15000;
 const SSO_AMOUNT_CAP = 750;
@@ -80,6 +83,9 @@ function mapEmployee(row: Row | null | undefined): PayrollEmployee {
     bankName: text(row?.bank_name),
     bankAccountNo: text(row?.bank_account_no),
     bankAccountName: text(row?.bank_account_name),
+    address: text(row?.address),
+    idCardAttachmentUrl: text(row?.id_card_attachment_url),
+    bankBookAttachmentUrl: text(row?.bank_book_attachment_url),
     isActive: row?.is_active !== false,
   };
 }
@@ -161,12 +167,12 @@ async function loadPeriodBundle(
   }
   const itemResult = await admin
     .from("hr_payroll_items")
-    .select("*, mst_employees(*)")
+    .select(`*, mst_employees(${EMPLOYEE_COLUMNS})`)
     .eq("payroll_period_id", periodId);
   if (itemResult.error) throw new Error(itemResult.error.message);
   const employeeResult = await admin
     .from("mst_employees")
-    .select("*")
+    .select(EMPLOYEE_COLUMNS)
     .order("emp_code", { ascending: true });
   if (employeeResult.error) throw new Error(employeeResult.error.message);
 
@@ -228,7 +234,7 @@ async function syncPeriod(year: number, month: number, ratePct: number | null) {
 async function applySsoRate(admin: PayrollAdmin, periodId: string, ratePct: number) {
   const itemResult = await admin
     .from("hr_payroll_items")
-    .select("*, mst_employees(*)")
+    .select(`*, mst_employees(${EMPLOYEE_COLUMNS})`)
     .eq("payroll_period_id", periodId);
   if (itemResult.error) throw new Error(itemResult.error.message);
   for (const row of itemResult.data ?? []) {
@@ -258,11 +264,11 @@ async function applySsoRate(admin: PayrollAdmin, periodId: string, ratePct: numb
   if (totals.error) throw new Error(totals.error.message);
 }
 
-function jpegBuffer(slipJpegBase64: string): Buffer {
+function jpegBuffer(slipJpegBase64: string, label = "ไฟล์สลิป"): Buffer {
   const payload = slipJpegBase64.replace(/^data:image\/jpeg;base64,/i, "").trim();
   const buffer = Buffer.from(payload, "base64");
   if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) {
-    throw new Error("ไฟล์สลิปต้องเป็นรูป JPEG (.jpg) เท่านั้น");
+    throw new Error(`${label}ต้องเป็นรูป JPEG (.jpg) เท่านั้น`);
   }
   if (buffer.length > 8 * 1024 * 1024) {
     throw new Error("ไฟล์สลิปใหญ่เกิน 8 MB");
@@ -310,6 +316,47 @@ export async function getOrCreatePayrollPeriodAction(
   }
 }
 
+export async function uploadEmployeeIdCardAction(
+  empCode: string,
+  jpegBase64: string,
+): Promise<PayrollActionResult<{ url: string }>> {
+  const session = await requireSessionUserId();
+  if (!session.ok) return fail(session.error);
+  const safeCode = empCode.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "") || "EMP";
+  try {
+    const admin = adminClient();
+    const buffer = jpegBuffer(jpegBase64, "สำเนาบัตรประชาชน");
+    const path = `employee-id-cards/${safeCode}-${Date.now()}.jpg`;
+    const uploaded = await admin.storage.from("document_attachments").upload(path, buffer, {
+      contentType: "image/jpeg",
+      upsert: false,
+    });
+    if (uploaded.error) return fail(uploaded.error.message);
+    const url = admin.storage.from("document_attachments").getPublicUrl(path).data.publicUrl;
+    return { ok: true, data: { url } };
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : "อัปโหลดสำเนาบัตรประชาชนไม่สำเร็จ");
+  }
+}
+
+export async function updateEmployeeIdCardAction(
+  employeeId: string,
+  idCardUrl: string,
+): Promise<PayrollActionResult<{ employeeId: string }>> {
+  const session = await requireSessionUserId();
+  if (!session.ok) return fail(session.error);
+  const url = idCardUrl.trim();
+  if (!employeeId || !url) return fail("ไม่พบไฟล์บัตรประชาชน");
+  const admin = adminClient();
+  const saved = await admin.rpc("update_employee_id_card_attachment", {
+    p_employee_id: employeeId,
+    p_id_card_url: url,
+  });
+  if (saved.error) return fail(saved.error.message);
+  revalidatePath("/finance/payroll");
+  return { ok: true, data: { employeeId } };
+}
+
 export async function setPayrollSsoRateAction(
   year: number,
   month: number,
@@ -336,7 +383,7 @@ export async function updatePayrollItemCalculationAction(
   try {
     const current = await admin
       .from("hr_payroll_items")
-      .select("*, mst_employees(*)")
+      .select(`*, mst_employees(${EMPLOYEE_COLUMNS})`)
       .eq("id", payload.itemId)
       .single();
     if (current.error || !current.data) {
@@ -390,7 +437,7 @@ export async function confirmEmployeeSalaryPaymentAction(
   try {
     const current = await admin
       .from("hr_payroll_items")
-      .select("*, mst_employees(*), hr_payroll_periods(period_label, period_year, period_month)")
+      .select(`*, mst_employees(${EMPLOYEE_COLUMNS}), hr_payroll_periods(period_label, period_year, period_month)`)
       .eq("id", payload.itemId)
       .single();
     if (current.error || !current.data) {
@@ -585,6 +632,9 @@ export async function upsertEmployeeMasterAction(
     bank_name: payload.bankName.trim() || null,
     bank_account_no: payload.bankAccountNo.replace(/\s/g, "") || null,
     bank_account_name: payload.bankAccountName.trim() || fullName,
+    address: payload.address.trim() || null,
+    id_card_attachment_url: payload.idCardAttachmentUrl.trim() || null,
+    bank_book_attachment_url: payload.bankBookAttachmentUrl.trim() || null,
     is_active: true,
     updated_at: new Date().toISOString(),
   };
@@ -617,6 +667,9 @@ export async function upsertEmployeeMasterAction(
       bankName: payload.bankName.trim(),
       bankAccountNo: payload.bankAccountNo.replace(/\s/g, ""),
       bankAccountName: payload.bankAccountName.trim() || fullName,
+      address: payload.address.trim(),
+      idCardAttachmentUrl: payload.idCardAttachmentUrl.trim(),
+      bankBookAttachmentUrl: payload.bankBookAttachmentUrl.trim(),
       isActive: true,
     });
     return { ok: true, data: { employeeId } };
@@ -640,6 +693,7 @@ function sheetRow(item: PayrollItem, monthCount = 1): PayrollWorkbookSheetRow {
     whtTaxAmount: item.whtTaxAmount,
     netPay: item.netPay,
     slipUrl: item.paymentSlipUrl ?? "",
+    idCardUrl: item.employee.idCardAttachmentUrl,
     isSsoEnrolled: item.employee.isSsoEnrolled,
     monthCount,
   };
@@ -655,7 +709,7 @@ export async function exportPayrollWorkbookAction(
     const bundle = await loadPeriodBundle(admin, periodId);
     const yearItems = await admin
       .from("hr_payroll_items")
-      .select("*, mst_employees(*), hr_payroll_periods!inner(period_year)")
+      .select(`*, mst_employees(${EMPLOYEE_COLUMNS}), hr_payroll_periods!inner(period_year)`)
       .eq("payroll_channel", "CORPORATE_OFFICIAL");
     if (yearItems.error) return fail(yearItems.error.message);
     const yearly = new Map<string, PayrollWorkbookSheetRow>();

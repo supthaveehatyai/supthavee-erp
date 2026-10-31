@@ -44,7 +44,7 @@ export async function buildPayrollWorkbook(input: {
   salary.addRow([
     `บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด — รายงานเงินเดือน ${input.periodLabel} (เฉพาะพนักงานในระบบบัญชี)`,
   ]);
-  salary.mergeCells(1, 1, 1, 10);
+  salary.mergeCells(1, 1, 1, 11);
   salary.getRow(1).font = { bold: true, size: 14 };
   salary.addRow([
     "ลำดับที่",
@@ -57,6 +57,7 @@ export async function buildPayrollWorkbook(input: {
     "หัก ณ ที่จ่าย",
     "เงินได้สุทธิ",
     "ลิงก์รูปสลิปโอนเงิน",
+    "ลิงก์สำเนาบัตรประชาชน",
   ]);
   styleHeader(salary.getRow(2));
   input.monthRows.forEach((row, index) => {
@@ -71,9 +72,16 @@ export async function buildPayrollWorkbook(input: {
       row.whtTaxAmount,
       row.netPay,
       slipCell(row.slipUrl),
+      row.idCardUrl ? { text: "เปิดสำเนาบัตร", hyperlink: row.idCardUrl } : "",
     ]);
     if (row.slipUrl) {
       added.getCell(10).font = {
+        color: { argb: "FF1D4ED8" },
+        underline: true,
+      };
+    }
+    if (row.idCardUrl) {
+      added.getCell(11).font = {
         color: { argb: "FF1D4ED8" },
         underline: true,
       };
@@ -102,11 +110,13 @@ export async function buildPayrollWorkbook(input: {
     salaryTotal.wht,
     salaryTotal.net,
     "",
+    "",
   ]);
   salary.getRow(input.monthRows.length + 3).font = { bold: true };
   salary.getColumn(1).width = 12;
   salary.getColumn(2).width = 28;
   salary.getColumn(10).width = 24;
+  salary.getColumn(11).width = 24;
   moneyColumns(salary, [3, 4, 5, 6, 7, 8, 9]);
 
   const sso = workbook.addWorksheet("สปส.1-10 (ประกันสังคม)");

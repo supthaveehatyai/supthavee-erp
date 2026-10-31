@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,7 +17,9 @@ import {
   exportPayrollWorkbookAction,
   getOrCreatePayrollPeriodAction,
   setPayrollSsoRateAction,
+  updateEmployeeIdCardAction,
   updatePayrollItemCalculationAction,
+  uploadEmployeeIdCardAction,
   upsertEmployeeMasterAction,
 } from "@/app/finance/payroll/actions";
 import type {
@@ -110,6 +112,129 @@ async function fileToJpeg(file: File) {
   return canvas.toDataURL("image/jpeg", 0.9);
 }
 
+type PdfJsLib = {
+  getDocument: (src: { data: Uint8Array }) => {
+    promise: Promise<{
+      getPage: (pageNumber: number) => Promise<{
+        getViewport: (params: { scale: number }) => { width: number; height: number };
+        render: (params: {
+          canvasContext: CanvasRenderingContext2D;
+          viewport: { width: number; height: number };
+        }) => { promise: Promise<void> };
+      }>;
+    }>;
+  };
+  GlobalWorkerOptions: { workerSrc: string };
+};
+
+function loadPdfJs(): Promise<PdfJsLib> {
+  const host = window as Window & { pdfjsLib?: PdfJsLib };
+  if (host.pdfjsLib) return Promise.resolve(host.pdfjsLib);
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    script.async = true;
+    script.onload = () => {
+      if (!host.pdfjsLib) {
+        reject(new Error("โหลดตัวอ่าน PDF ไม่สำเร็จ"));
+        return;
+      }
+      host.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      resolve(host.pdfjsLib);
+    };
+    script.onerror = () => reject(new Error("โหลดตัวอ่าน PDF ไม่สำเร็จ"));
+    document.head.appendChild(script);
+  });
+}
+
+async function pdfToIdCardJpeg(file: File) {
+  const pdfjs = await loadPdfJs();
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const page = await pdf.getPage(1);
+  const base = page.getViewport({ scale: 1 });
+  const viewport = page.getViewport({ scale: Math.min(1400 / base.width, 3) });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(viewport.width));
+  canvas.height = Math.max(1, Math.round(viewport.height));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("แปลงไฟล์บัตรประชาชนไม่สำเร็จ");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: context, viewport }).promise;
+  return canvas.toDataURL("image/jpeg", 0.9);
+}
+
+async function fileToIdCardJpeg(file: File) {
+  const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  if (isPdf) return pdfToIdCardJpeg(file);
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 1400 / bitmap.width);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("แปลงไฟล์บัตรประชาชนไม่สำเร็จ");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return canvas.toDataURL("image/jpeg", 0.9);
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function printIdCards(
+  cards: { fullName: string; citizenId: string; empCode: string; url: string }[],
+) {
+  const popup = window.open("", "_blank");
+  if (!popup) {
+    toast.error("เบราว์เซอร์บล็อกหน้าต่างพิมพ์");
+    return;
+  }
+  const pages = cards
+    .map(
+      (card) => `<section class="page">
+        <h1>สำเนาบัตรประชาชน</h1>
+        <p>${escapeHtml(card.empCode)} · ${escapeHtml(card.fullName)}</p>
+        <p>เลขประจำตัวประชาชน ${escapeHtml(card.citizenId || "—")}</p>
+        <img src="${escapeHtml(card.url)}" alt="สำเนาบัตรประชาชน" />
+      </section>`,
+    )
+    .join("");
+  popup.document.write(`<!DOCTYPE html><html lang="th"><head><meta charset="utf-8" />
+    <title>สำเนาบัตรประชาชนพนักงาน</title>
+    <style>
+      @page { size: A4 portrait; margin: 12mm; }
+      body { font-family: "Sarabun", "Segoe UI", sans-serif; color: #0f172a; }
+      .page { break-after: page; }
+      h1 { font-size: 18px; margin: 0 0 8px; }
+      p { margin: 0 0 6px; }
+      img { display: block; width: auto; max-width: 100%; max-height: 230mm; object-fit: contain; border: 1px solid #cbd5e1; }
+    </style></head><body>${pages}
+    <script>window.addEventListener("load", () => setTimeout(() => window.print(), 400));</script>
+    </body></html>`);
+  popup.document.close();
+}
+
+async function downloadIdCard(url: string, empCode: string) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("ดาวน์โหลดสำเนาบัตรประชาชนไม่สำเร็จ");
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = `${empCode || "employee"}-id-card.jpg`;
+  link.click();
+  URL.revokeObjectURL(objectUrl);
+}
+
 async function copyText(value: string, emptyMessage: string) {
   const clean = value.replace(/\s/g, "");
   if (!clean) {
@@ -131,6 +256,9 @@ export function PayrollCenter() {
   const [ssoOpen, setSsoOpen] = useState(false);
   const [employeeOpen, setEmployeeOpen] = useState(false);
   const [editing, setEditing] = useState<PayrollEmployee | null>(null);
+  const [cardViewer, setCardViewer] = useState<PayrollEmployee | null>(null);
+  const cardInputRef = useRef<HTMLInputElement>(null);
+  const cardTargetRef = useRef<PayrollEmployee | null>(null);
 
   async function load(nextYear = year, nextMonth = month) {
     setLoading(true);
@@ -231,6 +359,69 @@ export function PayrollCenter() {
     toast.success("ส่งออก Excel สำหรับสำนักงานบัญชีแล้ว");
   }
 
+  function patchIdCard(employeeId: string, url: string) {
+    setBundle((current) => {
+      if (!current) return current;
+      const patch = (employee: PayrollEmployee) =>
+        employee.id === employeeId ? { ...employee, idCardAttachmentUrl: url } : employee;
+      return {
+        ...current,
+        employees: current.employees.map(patch),
+        items: current.items.map((item) => ({ ...item, employee: patch(item.employee) })),
+      };
+    });
+    setCardViewer((current) =>
+      current?.id === employeeId ? { ...current, idCardAttachmentUrl: url } : current,
+    );
+  }
+
+  async function storeIdCard(employee: PayrollEmployee, file: File) {
+    setBusyId(`card-${employee.id}`);
+    try {
+      const jpeg = await fileToIdCardJpeg(file);
+      const uploaded = await uploadEmployeeIdCardAction(employee.empCode, jpeg);
+      if (!uploaded.ok) {
+        toast.error(uploaded.error);
+        return null;
+      }
+      const saved = await updateEmployeeIdCardAction(employee.id, uploaded.data.url);
+      if (!saved.ok) {
+        toast.error(saved.error);
+        return null;
+      }
+      patchIdCard(employee.id, uploaded.data.url);
+      toast.success(`แนบสำเนาบัตรประชาชนของ ${employee.fullName} แล้ว`);
+      return uploaded.data.url;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "แนบสำเนาบัตรประชาชนไม่สำเร็จ");
+      return null;
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  function printOfficialIdCards() {
+    const people = official.filter((item) => item.employee.idCardAttachmentUrl);
+    const missing = official
+      .filter((item) => !item.employee.idCardAttachmentUrl)
+      .map((item) => item.employee.fullName);
+    if (people.length === 0) {
+      toast.error("ยังไม่มีสำเนาบัตรประชาชนของพนักงานในระบบบัญชี");
+      return;
+    }
+    if (missing.length > 0) {
+      toast.error(`ยังไม่มีไฟล์บัตรของ ${missing.join(", ")}`);
+    }
+    printIdCards(
+      people.map((item) => ({
+        fullName: item.employee.fullName,
+        citizenId: item.employee.citizenId,
+        empCode: item.employee.empCode,
+        url: item.employee.idCardAttachmentUrl,
+      })),
+    );
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-5 p-4 md:p-6">
       <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -325,7 +516,23 @@ export function PayrollCenter() {
             <Button type="button" disabled={busyId === "excel"} onClick={() => void exportExcel()}>
               📊 ส่งออก Excel รายงานเงินเดือน & ประกันสังคม (ส่งสำนักงานบัญชี)
             </Button>
+            <Button type="button" variant="outline" onClick={printOfficialIdCards}>
+              🖨️ พิมพ์รวมสำเนาบัตร ปชช. พนักงานทุกคน (PDF/A4)
+            </Button>
           </div>
+          <input
+            ref={cardInputRef}
+            type="file"
+            accept="image/*,.pdf,application/pdf"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              const target = cardTargetRef.current;
+              event.target.value = "";
+              if (!file || !target) return;
+              void storeIdCard(target, file);
+            }}
+          />
 
           <PayrollTable
             title="🏢 พนักงานในระบบ (ส่งสำนักงานบัญชี)"
@@ -337,6 +544,11 @@ export function PayrollCenter() {
             }
             onSave={(item) => void saveItem(item)}
             onPay={setPayItem}
+            onViewCard={setCardViewer}
+            onAttachCard={(employee) => {
+              cardTargetRef.current = employee;
+              cardInputRef.current?.click();
+            }}
           />
           <PayrollTable
             title="🔒 พนักงานจ่ายส่วนตัว (Internal)"
@@ -348,6 +560,11 @@ export function PayrollCenter() {
             }
             onSave={(item) => void saveItem(item)}
             onPay={setPayItem}
+            onViewCard={setCardViewer}
+            onAttachCard={(employee) => {
+              cardTargetRef.current = employee;
+              cardInputRef.current?.click();
+            }}
           />
         </>
       )}
@@ -384,6 +601,16 @@ export function PayrollCenter() {
           setEditing(null);
           void load();
         }}
+        onCardUploaded={patchIdCard}
+      />
+      <IdCardViewer
+        employee={cardViewer}
+        busy={busyId === `card-${cardViewer?.id ?? ""}`}
+        onClose={() => setCardViewer(null)}
+        onReplace={(file) => {
+          if (!cardViewer) return;
+          void storeIdCard(cardViewer, file);
+        }}
       />
     </div>
   );
@@ -418,6 +645,8 @@ function PayrollTable({
   onDraft,
   onSave,
   onPay,
+  onViewCard,
+  onAttachCard,
 }: {
   title: string;
   items: PayrollItem[];
@@ -426,6 +655,8 @@ function PayrollTable({
   onDraft: (id: string, patch: Partial<Draft>) => void;
   onSave: (item: PayrollItem) => void;
   onPay: (item: PayrollItem) => void;
+  onViewCard: (employee: PayrollEmployee) => void;
+  onAttachCard: (employee: PayrollEmployee) => void;
 }) {
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
@@ -465,17 +696,40 @@ function PayrollTable({
                       {item.employee.bankName || "ธนาคาร"} {item.employee.bankAccountNo || "ยังไม่มีเลขบัญชี"}
                     </div>
                     <div>{item.employee.bankAccountName}</div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="mt-1"
-                      onClick={() =>
-                        void copyText(item.employee.bankAccountNo, "ยังไม่มีเลขบัญชีให้คัดลอก")
-                      }
-                    >
-                      📋 คัดลอกเลขบัญชี
-                    </Button>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          void copyText(item.employee.bankAccountNo, "ยังไม่มีเลขบัญชีให้คัดลอก")
+                        }
+                      >
+                        📋 คัดลอกเลขบัญชี
+                      </Button>
+                      {item.employee.idCardAttachmentUrl ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                          onClick={() => onViewCard(item.employee)}
+                        >
+                          🪪 ดูบัตร ปชช.
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="border-orange-200 bg-orange-50 text-orange-800 hover:bg-orange-100"
+                          disabled={busyId === `card-${item.employee.id}`}
+                          onClick={() => onAttachCard(item.employee)}
+                        >
+                          📤 แนบบัตร ปชช.
+                        </Button>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-3">
                     <Input
@@ -786,6 +1040,7 @@ function EmployeeDialog({
   onEdit,
   onClose,
   onSaved,
+  onCardUploaded,
 }: {
   open: boolean;
   employees: PayrollEmployee[];
@@ -793,6 +1048,7 @@ function EmployeeDialog({
   onEdit: (employee: PayrollEmployee | null) => void;
   onClose: () => void;
   onSaved: () => void;
+  onCardUploaded: (employeeId: string, url: string) => void;
 }) {
   const [form, setForm] = useState<EmployeeMasterPayload>({
     id: null,
@@ -806,8 +1062,15 @@ function EmployeeDialog({
     bankName: "กรุงไทย",
     bankAccountNo: "",
     bankAccountName: "",
+    address: "",
+    idCardAttachmentUrl: "",
+    bankBookAttachmentUrl: "",
   });
   const [saving, setSaving] = useState(false);
+  const [cardPreview, setCardPreview] = useState("");
+  const [pendingJpeg, setPendingJpeg] = useState("");
+  const [cardUploading, setCardUploading] = useState(false);
+  const cardFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!editing) {
@@ -823,9 +1086,16 @@ function EmployeeDialog({
         bankName: "กรุงไทย",
         bankAccountNo: "",
         bankAccountName: "",
+        address: "",
+        idCardAttachmentUrl: "",
+        bankBookAttachmentUrl: "",
       });
+      setCardPreview("");
+      setPendingJpeg("");
       return;
     }
+    setCardPreview(editing.idCardAttachmentUrl);
+    setPendingJpeg("");
     setForm({
       id: editing.id,
       empCode: editing.empCode,
@@ -838,6 +1108,9 @@ function EmployeeDialog({
       bankName: editing.bankName,
       bankAccountNo: editing.bankAccountNo,
       bankAccountName: editing.bankAccountName,
+      address: editing.address,
+      idCardAttachmentUrl: editing.idCardAttachmentUrl,
+      bankBookAttachmentUrl: editing.bankBookAttachmentUrl,
     });
   }, [editing]);
 
@@ -849,13 +1122,55 @@ function EmployeeDialog({
       toast.error(result.error);
       return;
     }
+    if (pendingJpeg && result.data.employeeId) {
+      const uploaded = await uploadEmployeeIdCardAction(form.empCode, pendingJpeg);
+      if (!uploaded.ok) {
+        toast.error(uploaded.error);
+      } else {
+        const linked = await updateEmployeeIdCardAction(result.data.employeeId, uploaded.data.url);
+        if (!linked.ok) toast.error(linked.error);
+        else onCardUploaded(result.data.employeeId, uploaded.data.url);
+      }
+    }
     toast.success("บันทึกข้อมูลพนักงานแล้ว");
     onSaved();
   }
 
+  async function onCardFile(file: File | undefined) {
+    if (!file) return;
+    setCardUploading(true);
+    try {
+      const jpeg = await fileToIdCardJpeg(file);
+      setCardPreview(jpeg);
+      if (!form.id) {
+        setPendingJpeg(jpeg);
+        return;
+      }
+      const uploaded = await uploadEmployeeIdCardAction(form.empCode, jpeg);
+      if (!uploaded.ok) {
+        toast.error(uploaded.error);
+        return;
+      }
+      const linked = await updateEmployeeIdCardAction(form.id, uploaded.data.url);
+      if (!linked.ok) {
+        toast.error(linked.error);
+        return;
+      }
+      setPendingJpeg("");
+      setForm((current) => ({ ...current, idCardAttachmentUrl: uploaded.data.url }));
+      setCardPreview(uploaded.data.url);
+      onCardUploaded(form.id, uploaded.data.url);
+      toast.success("แนบสำเนาบัตรประชาชนแล้ว");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "แปลงไฟล์บัตรประชาชนไม่สำเร็จ");
+    } finally {
+      setCardUploading(false);
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>ข้อมูลพนักงาน</DialogTitle>
         </DialogHeader>
@@ -877,7 +1192,57 @@ function EmployeeDialog({
         <div className="grid gap-2">
           <Input placeholder="รหัสพนักงาน" value={form.empCode} onChange={(event) => setForm({ ...form, empCode: event.target.value })} />
           <Input placeholder="ชื่อ-สกุล" value={form.fullName} onChange={(event) => setForm({ ...form, fullName: event.target.value })} />
-          <Input placeholder="เลขบัตรประชาชน" value={form.citizenId} onChange={(event) => setForm({ ...form, citizenId: event.target.value })} />
+          <Input placeholder="เลขบัตรประชาชน 13 หลัก" value={form.citizenId} onChange={(event) => setForm({ ...form, citizenId: event.target.value })} />
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-sm font-medium text-slate-800">
+              🪪 สำเนาบัตรประชาชนพนักงาน (สำหรับส่งสำนักงานบัญชี / ประกันสังคม)
+            </p>
+            <input
+              ref={cardFileRef}
+              type="file"
+              accept="image/*,.pdf,application/pdf"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                void onCardFile(file);
+              }}
+            />
+            {cardPreview ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={cardPreview}
+                alt="สำเนาบัตรประชาชน"
+                className="mt-3 max-h-[280px] w-auto rounded-lg border object-contain"
+              />
+            ) : (
+              <p className="mt-2 text-xs text-slate-500">ยังไม่ได้แนบสำเนาบัตรประชาชน</p>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {cardPreview ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const url = form.idCardAttachmentUrl || cardPreview;
+                    window.open(url, "_blank", "noopener,noreferrer");
+                    if (form.idCardAttachmentUrl) {
+                      void downloadIdCard(form.idCardAttachmentUrl, form.empCode).catch((error: unknown) => {
+                        toast.error(error instanceof Error ? error.message : "ดาวน์โหลดสำเนาบัตรประชาชนไม่สำเร็จ");
+                      });
+                    }
+                  }}
+                >
+                  🔍 เปิดดูรูปเต็ม / ดาวน์โหลด
+                </Button>
+              ) : null}
+              <Button type="button" size="sm" variant="outline" onClick={() => cardFileRef.current?.click()}>
+                {cardPreview ? "🔄 เปลี่ยนไฟล์บัตร ปชช." : "📤 แนบบัตร ปชช."}
+              </Button>
+            </div>
+          </div>
+          <Input placeholder="ที่อยู่" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} />
           <Input placeholder="ตำแหน่ง" value={form.positionTitle} onChange={(event) => setForm({ ...form, positionTitle: event.target.value })} />
           <select
             className="h-9 rounded-md border border-slate-200 px-2 text-sm"
@@ -916,8 +1281,91 @@ function EmployeeDialog({
           <Button type="button" variant="outline" onClick={onClose}>
             ปิด
           </Button>
-          <Button type="button" disabled={saving} onClick={() => void save()}>
+          <Button type="button" disabled={saving || cardUploading} onClick={() => void save()}>
             บันทึกพนักงาน
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function IdCardViewer({
+  employee,
+  busy,
+  onClose,
+  onReplace,
+}: {
+  employee: PayrollEmployee | null;
+  busy: boolean;
+  onClose: () => void;
+  onReplace: (file: File) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  return (
+    <Dialog open={employee != null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            สำเนาบัตรประชาชน {employee?.fullName ?? ""}
+          </DialogTitle>
+        </DialogHeader>
+        {employee?.idCardAttachmentUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={employee.idCardAttachmentUrl}
+            alt={`สำเนาบัตรประชาชน ${employee.fullName}`}
+            className="max-h-[70vh] w-auto rounded-lg border object-contain"
+          />
+        ) : null}
+        <p className="text-sm text-slate-500">
+          {employee?.empCode} · เลขประจำตัวประชาชน {employee?.citizenId || "—"}
+        </p>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*,.pdf,application/pdf"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) onReplace(file);
+          }}
+        />
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!employee?.idCardAttachmentUrl}
+            onClick={() => {
+              if (!employee?.idCardAttachmentUrl) return;
+              void downloadIdCard(employee.idCardAttachmentUrl, employee.empCode).catch((error: unknown) => {
+                toast.error(error instanceof Error ? error.message : "ดาวน์โหลดสำเนาบัตรประชาชนไม่สำเร็จ");
+              });
+            }}
+          >
+            ⬇️ ดาวน์โหลดไฟล์บัตร ปชช.
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!employee?.idCardAttachmentUrl}
+            onClick={() => {
+              if (!employee?.idCardAttachmentUrl) return;
+              printIdCards([
+                {
+                  fullName: employee.fullName,
+                  citizenId: employee.citizenId,
+                  empCode: employee.empCode,
+                  url: employee.idCardAttachmentUrl,
+                },
+              ]);
+            }}
+          >
+            🖨️ พิมพ์สำเนาบัตร ปชช. (A4)
+          </Button>
+          <Button type="button" variant="outline" disabled={busy} onClick={() => fileRef.current?.click()}>
+            🔄 เปลี่ยนไฟล์ใหม่
           </Button>
         </DialogFooter>
       </DialogContent>

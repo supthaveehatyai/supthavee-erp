@@ -12,6 +12,9 @@ export type PayrollEmployee = {
   bankName: string;
   bankAccountNo: string;
   bankAccountName: string;
+  address: string;
+  idCardAttachmentUrl: string;
+  bankBookAttachmentUrl: string;
   isActive: boolean;
 };
 
@@ -104,6 +107,9 @@ export type EmployeeMasterPayload = {
   bankName: string;
   bankAccountNo: string;
   bankAccountName: string;
+  address: string;
+  idCardAttachmentUrl: string;
+  bankBookAttachmentUrl: string;
 };
 
 export type PayrollActionResult<T> =
@@ -124,6 +130,7 @@ export type PayrollWorkbookSheetRow = {
   whtTaxAmount: number;
   netPay: number;
   slipUrl: string;
+  idCardUrl: string;
   isSsoEnrolled: boolean;
   monthCount: number;
 };

@@ -88,7 +88,7 @@ billing_note_items (รายการใบวางบิล — PK: id, billi
 
 expenses (บิลค่าใช้จ่าย / OPEX — PK: id, net_amount, vat_amount, และคอลัมน์ grand_total เป็น GENERATED ALWAYS AS (net_amount + vat_amount) ห้ามส่งค่าตอน Insert/Upsert; accounting_tax_tier [CORP_VAT | RECEIPT_1_2 | INTERNAL_1_3])
 
-mst_employees (ทะเบียนพนักงานเงินเดือน — PK: id, UNIQUE: emp_code, citizen_id, payroll_channel [CORPORATE_OFFICIAL | INTERNAL_PRIVATE], base_salary, is_sso_enrolled, bank_name, bank_account_no, bank_account_name, position_title NOT NULL)
+mst_employees (ทะเบียนพนักงานเงินเดือน — PK: id, UNIQUE: emp_code, citizen_id, address, payroll_channel [CORPORATE_OFFICIAL | INTERNAL_PRIVATE], base_salary, is_sso_enrolled, bank_name, bank_account_no, bank_account_name, id_card_attachment_url, bank_book_attachment_url, position_title NOT NULL; แนบสำเนาบัตรผ่าน RPC update_employee_id_card_attachment(p_employee_id uuid, p_id_card_url text, p_bank_book_url text DEFAULT NULL) — ค่าว่างไม่ทับไฟล์เดิม)
 
 hr_payroll_periods (งวดเงินเดือน — PK: id, UNIQUE: period_year + period_month, sso_rate_pct, sso_wage_ceiling, official_gross_total, official_net_total, internal_gross_total, internal_net_total, sso_employee_total, sso_employer_total, sso_total_remittance, sso_payment_status, sso_payment_date, sso_payment_slip_url, sso_reference_no, status)
 
