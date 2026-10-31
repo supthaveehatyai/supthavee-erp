@@ -198,7 +198,12 @@ async function loadPeriodBundle(
     ssoPaymentDate: period.sso_payment_date == null ? null : String(period.sso_payment_date),
     ssoPaymentSlipUrl:
       period.sso_payment_slip_url == null ? null : String(period.sso_payment_slip_url),
+    ssoReceiptNo: text(period.sso_receipt_no),
     ssoReferenceNo: period.sso_reference_no == null ? null : String(period.sso_reference_no),
+    ssoEmployerAccountNo: text(period.sso_employer_account_no),
+    paidSsoFromAccount: text(period.paid_sso_from_account),
+    linkedSsoExpenseId:
+      period.linked_sso_expense_id == null ? null : String(period.linked_sso_expense_id),
     status: text(period.status) || "OPEN",
     paidCount: items.filter((item) => item.paymentStatus === "PAID").length,
     headcount: items.length,
@@ -530,6 +535,130 @@ export async function confirmEmployeeSalaryPaymentAction(
   }
 }
 
+function pdfBuffer(fileBase64: string): Buffer {
+  const payload = fileBase64.replace(/^data:application\/pdf;base64,/i, "").trim();
+  const buffer = Buffer.from(payload, "base64");
+  if (buffer.subarray(0, 4).toString("utf8") !== "%PDF") {
+    throw new Error("ไฟล์ใบเสร็จต้องเป็น PDF");
+  }
+  if (buffer.length > 12 * 1024 * 1024) {
+    throw new Error("ไฟล์ใบเสร็จใหญ่เกิน 12 MB");
+  }
+  return buffer;
+}
+
+async function uploadSsoReceipt(
+  admin: PayrollAdmin,
+  year: number,
+  month: number,
+  fileKind: "pdf" | "jpeg",
+  fileBase64: string,
+) {
+  const monthText = String(month).padStart(2, "0");
+  const stamp = Date.now();
+  if (fileKind === "pdf") {
+    const path = `sso-receipts/SSO-${year}-${monthText}-${stamp}.pdf`;
+    const uploaded = await admin.storage.from("document_attachments").upload(path, pdfBuffer(fileBase64), {
+      contentType: "application/pdf",
+      upsert: false,
+    });
+    if (uploaded.error) throw new Error(uploaded.error.message);
+    return admin.storage.from("document_attachments").getPublicUrl(path).data.publicUrl;
+  }
+  const path = `sso-receipts/SSO-${year}-${monthText}-${stamp}.jpg`;
+  const uploaded = await admin.storage.from("document_attachments").upload(
+    path,
+    jpegBuffer(fileBase64, "ใบเสร็จประกันสังคม"),
+    { contentType: "image/jpeg", upsert: false },
+  );
+  if (uploaded.error) throw new Error(uploaded.error.message);
+  return admin.storage.from("document_attachments").getPublicUrl(path).data.publicUrl;
+}
+
+async function categoryIdByName(admin: PayrollAdmin, categoryName: string) {
+  const found = await admin
+    .from("mst_expense_categories")
+    .select("id, category_name")
+    .eq("category_name", categoryName)
+    .maybeSingle();
+  if (found.error) throw new Error(found.error.message);
+  return text(found.data?.id);
+}
+
+async function ensureSsoExpense(
+  admin: PayrollAdmin,
+  period: PayrollPeriodView,
+  slipUrl: string,
+  receiptNo: string,
+  referenceNo: string,
+  paymentDate: string,
+  userId: string,
+) {
+  const categoryId =
+    (await categoryIdByName(admin, "ค่าธรรมเนียมและภาษี")) ||
+    (await categoryIdByName(admin, SALARY_CATEGORY_NAME));
+  if (!categoryId) throw new Error("ไม่พบหมวดค่าใช้จ่ายสำหรับนำส่งประกันสังคม");
+  const monthText = String(period.periodMonth).padStart(2, "0");
+  const documentNo = `EXP-SSO-${period.periodYear}${monthText}`;
+  const remark = `SALARY_SSO เงินสมทบกองทุนประกันสังคม ม.33 งวด ${period.periodLabel} (นายจ้างสมทบ ${period.ssoEmployerTotal.toFixed(2)} + ผู้ประกันตน ${period.ssoEmployeeTotal.toFixed(2)} | เลขที่ใบเสร็จ: ${receiptNo})`;
+  const expenseRow = {
+    expense_date: paymentDate,
+    category_id: categoryId,
+    net_amount: period.ssoTotalRemittance,
+    vat_amount: 0,
+    wht_amount: 0,
+    wht_rate: 0,
+    net_payable: period.ssoTotalRemittance,
+    payment_method: "TRANSFER",
+    payment_slip_url: slipUrl,
+    receipt_url: slipUrl,
+    status: "PAID",
+    approval_status: "APPROVED",
+    remark,
+    vendor_name: "สำนักงานประกันสังคม (บัญชีนายจ้าง 9020012177)",
+    vendor_doc_no: receiptNo,
+    accounting_tax_tier: "CORP_VAT",
+    updated_at: new Date().toISOString(),
+  };
+  let expenseId = period.linkedSsoExpenseId;
+  if (!expenseId) {
+    const existing = await admin
+      .from("expenses")
+      .select("id")
+      .eq("document_no", documentNo)
+      .maybeSingle();
+    if (existing.error) throw new Error(existing.error.message);
+    expenseId = text(existing.data?.id) || null;
+  }
+  if (expenseId) {
+    const patched = await admin.from("expenses").update(expenseRow).eq("id", expenseId);
+    if (patched.error) throw new Error(patched.error.message);
+  } else {
+    const inserted = await admin
+      .from("expenses")
+      .insert({
+        ...expenseRow,
+        document_no: documentNo,
+        recorded_by: userId,
+      })
+      .select("id")
+      .single();
+    if (inserted.error || !inserted.data) {
+      throw new Error(inserted.error?.message ?? "สร้างรายการค่าใช้จ่ายประกันสังคมไม่สำเร็จ");
+    }
+    expenseId = text(inserted.data.id);
+  }
+  const linked = await admin
+    .from("hr_payroll_periods")
+    .update({
+      linked_sso_expense_id: expenseId,
+      sso_employer_account_no: period.ssoEmployerAccountNo || "9020012177",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", period.id);
+  if (linked.error) throw new Error(linked.error.message);
+}
+
 export async function confirmSsoRemittancePaymentAction(
   payload: SsoRemittancePayload,
 ): Promise<PayrollActionResult<PayrollPeriodView>> {
@@ -537,22 +666,40 @@ export async function confirmSsoRemittancePaymentAction(
   if (!session.ok) return fail(session.error);
   const admin = adminClient();
   try {
-    if (!payload.paymentDate) return fail("กรุณาระบุวันที่นำส่งประกันสังคม");
-    const slipUrl = await uploadSlip(admin, "sso", payload.slipJpegBase64);
-    const saved = await admin
-      .from("hr_payroll_periods")
-      .update({
-        sso_payment_status: "PAID",
-        sso_payment_date: payload.paymentDate,
-        sso_payment_slip_url: slipUrl,
-        sso_reference_no: payload.referenceNo.trim() || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", payload.periodId);
+    if (!payload.paymentDate) return fail("กรุณาระบุวันที่ชำระเงิน");
+    if (!payload.receiptNo.trim()) return fail("กรุณาระบุเลขที่ใบเสร็จรับเงิน สปส.");
+    const slipUrl = await uploadSsoReceipt(
+      admin,
+      payload.periodYear,
+      payload.periodMonth,
+      payload.fileKind,
+      payload.fileBase64,
+    );
+    const saved = await admin.rpc("record_sso_remittance_and_expense", {
+      p_period_id: payload.periodId,
+      p_payment_date: payload.paymentDate,
+      p_receipt_no: payload.receiptNo.trim(),
+      p_reference_no: payload.referenceNo.trim(),
+      p_slip_url: slipUrl,
+      p_paid_from_account: payload.paidFromAccount.trim(),
+    });
     if (saved.error) return fail(saved.error.message);
+    const recorded = await loadPeriodBundle(admin, payload.periodId);
+    await ensureSsoExpense(
+      admin,
+      recorded,
+      slipUrl,
+      payload.receiptNo.trim(),
+      payload.referenceNo.trim(),
+      payload.paymentDate,
+      session.userId,
+    );
+    revalidatePath("/finance/payroll");
+    revalidatePath("/finance/expenses");
+    revalidatePath("/expenses");
     return { ok: true, data: await loadPeriodBundle(admin, payload.periodId) };
   } catch (error) {
-    return fail(error instanceof Error ? error.message : "บันทึกสลิปประกันสังคมไม่สำเร็จ");
+    return fail(error instanceof Error ? error.message : "บันทึกใบเสร็จประกันสังคมไม่สำเร็จ");
   }
 }
 
@@ -745,6 +892,10 @@ export async function exportPayrollWorkbookAction(
       ssoEmployeeTotal: bundle.ssoEmployeeTotal,
       ssoEmployerTotal: bundle.ssoEmployerTotal,
       ssoRemittance: bundle.ssoTotalRemittance,
+      ssoReceiptNo: bundle.ssoReceiptNo,
+      ssoReferenceNo: bundle.ssoReferenceNo ?? "",
+      ssoSlipUrl: bundle.ssoPaymentSlipUrl ?? "",
+      ssoReceiptFileLabel: `${bundle.periodYear}${String(bundle.periodMonth).padStart(2, "0")}_SSO.pdf`,
     });
     const month = String(bundle.periodMonth).padStart(2, "0");
     const filename = `${bundle.periodYear + 543}-เงินเดือน_${bundle.periodYear}${month}.xlsx`;

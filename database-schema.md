@@ -90,7 +90,9 @@ expenses (บิลค่าใช้จ่าย / OPEX — PK: id, net_amount,
 
 mst_employees (ทะเบียนพนักงานเงินเดือน — PK: id, UNIQUE: emp_code, citizen_id, address, payroll_channel [CORPORATE_OFFICIAL | INTERNAL_PRIVATE], base_salary, is_sso_enrolled, bank_name, bank_account_no, bank_account_name, id_card_attachment_url, bank_book_attachment_url, position_title NOT NULL; แนบสำเนาบัตรผ่าน RPC update_employee_id_card_attachment(p_employee_id uuid, p_id_card_url text, p_bank_book_url text DEFAULT NULL) — ค่าว่างไม่ทับไฟล์เดิม)
 
-hr_payroll_periods (งวดเงินเดือน — PK: id, UNIQUE: period_year + period_month, sso_rate_pct, sso_wage_ceiling, official_gross_total, official_net_total, internal_gross_total, internal_net_total, sso_employee_total, sso_employer_total, sso_total_remittance, sso_payment_status, sso_payment_date, sso_payment_slip_url, sso_reference_no, status)
+hr_payroll_periods (งวดเงินเดือน — PK: id, UNIQUE: period_year + period_month, sso_rate_pct, sso_wage_ceiling, official_gross_total, official_net_total, internal_gross_total, internal_net_total, sso_employee_total, sso_employer_total, sso_total_remittance, sso_payment_status, sso_payment_date, sso_payment_slip_url, sso_receipt_no, sso_reference_no, sso_employer_account_no, paid_sso_from_account, linked_sso_expense_id, status)
+
+RPC record_sso_remittance_and_expense(p_period_id uuid, p_payment_date date, p_receipt_no varchar, p_reference_no varchar, p_slip_url text, p_paid_from_account varchar) — อัปเดตสถานะนำส่ง สปส. ของงวด; ถ้าโครงสร้าง expenses ในฟังก์ชันไม่ตรงคอลัมน์จริง แอปจะสร้างรายการค่าใช้จ่ายด้วย document_no / net_amount / remark / payment_slip_url แล้วผูก linked_sso_expense_id
 
 hr_payroll_items (รายการเงินเดือนรายคน — PK: id, UNIQUE: payroll_period_id + employee_id, payroll_channel, base_salary, ot_amount, allowance_amount, commission_amount, bonus_amount, gross_income, sso_employee_amount, sso_employer_amount, wht_tax_amount, other_deduction, net_pay, payment_status, payment_date, paid_from_account, payment_slip_url, payment_reference_no, linked_expense_id)
 

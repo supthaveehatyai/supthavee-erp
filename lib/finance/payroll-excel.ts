@@ -36,6 +36,10 @@ export async function buildPayrollWorkbook(input: {
   ssoEmployeeTotal: number;
   ssoEmployerTotal: number;
   ssoRemittance: number;
+  ssoReceiptNo: string;
+  ssoReferenceNo: string;
+  ssoSlipUrl: string;
+  ssoReceiptFileLabel: string;
 }): Promise<ExcelJS.Buffer> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Supthavee ERP";
@@ -154,7 +158,24 @@ export async function buildPayrollWorkbook(input: {
     input.ssoRemittance,
   ]);
   sso.getRow(insured.length + 3).font = { bold: true };
-  sso.getColumn(1).width = 12;
+  const receiptStart = insured.length + 5;
+  sso.getCell(receiptStart, 1).value = "เลขที่ใบเสร็จรับเงิน สปส.";
+  sso.getCell(receiptStart, 2).value = input.ssoReceiptNo;
+  sso.getCell(receiptStart + 1, 1).value = "หมายเลขอ้างอิง (Reference No.)";
+  sso.getCell(receiptStart + 1, 2).value = input.ssoReferenceNo;
+  sso.getCell(receiptStart + 2, 1).value = "ลิงก์ดาวน์โหลดใบเสร็จ";
+  sso.getCell(receiptStart + 2, 2).value = input.ssoSlipUrl
+    ? { text: input.ssoReceiptFileLabel, hyperlink: input.ssoSlipUrl }
+    : "";
+  if (input.ssoSlipUrl) {
+    sso.getCell(receiptStart + 2, 2).font = {
+      color: { argb: "FF1D4ED8" },
+      underline: true,
+    };
+  }
+  sso.getRow(receiptStart).font = { bold: true };
+  sso.getRow(receiptStart + 1).font = { bold: true };
+  sso.getColumn(1).width = 32;
   sso.getColumn(2).width = 28;
   sso.getColumn(3).width = 22;
   moneyColumns(sso, [4, 5, 6]);

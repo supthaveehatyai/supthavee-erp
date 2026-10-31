@@ -69,6 +69,26 @@ function todayBangkok() {
   }).format(new Date());
 }
 
+const SSO_RECEIPT_NO = "900169EF0038985";
+const SSO_REFERENCE_NO = "M33690024288788";
+const SSO_PAID_FROM = "กรุงไทย • 9020746510";
+
+function periodEndDate(year: number, month: number) {
+  const last = new Date(Date.UTC(year, month, 0));
+  const monthText = String(last.getUTCMonth() + 1).padStart(2, "0");
+  const dayText = String(last.getUTCDate()).padStart(2, "0");
+  return `${last.getUTCFullYear()}-${monthText}-${dayText}`;
+}
+
+function readFileBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("อ่านไฟล์ใบเสร็จไม่สำเร็จ"));
+    reader.readAsDataURL(file);
+  });
+}
+
 function draftFrom(item: PayrollItem): Draft {
   return {
     baseSalary: String(item.baseSalary),
@@ -493,11 +513,34 @@ export function PayrollCenter() {
               value={money(bundle.ssoTotalRemittance)}
               detail={`หักพนักงาน ${bundle.ssoRatePct}% ${money(bundle.ssoEmployeeTotal)} + บริษัทสมทบ ${money(bundle.ssoEmployerTotal)} · เพดาน 750 บาท`}
               action={
-                <Button type="button" size="sm" onClick={() => setSsoOpen(true)}>
-                  {bundle.ssoPaymentStatus === "PAID"
-                    ? "🔄 เปลี่ยนสลิปประกันสังคม"
-                    : "🏛️ แนบสลิปจ่ายประกันสังคม"}
-                </Button>
+                bundle.ssoPaymentStatus === "PAID" ? (
+                  <div className="flex flex-col items-start gap-2">
+                    <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                      ✅ ชำระ สปส. แล้ว (ใบเสร็จ: {bundle.ssoReceiptNo || SSO_RECEIPT_NO})
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {bundle.ssoPaymentSlipUrl ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            window.open(bundle.ssoPaymentSlipUrl ?? "", "_blank", "noopener,noreferrer")
+                          }
+                        >
+                          📄 ดูใบเสร็จ สปส. (PDF)
+                        </Button>
+                      ) : null}
+                      <Button type="button" size="sm" variant="outline" onClick={() => setSsoOpen(true)}>
+                        🔄 เปลี่ยนไฟล์ใบเสร็จ
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button type="button" size="sm" onClick={() => setSsoOpen(true)}>
+                    🏛️ แนบสลิป / ใบเสร็จจ่ายประกันสังคม
+                  </Button>
+                )
               }
             />
             <Kpi
@@ -581,7 +624,13 @@ export function PayrollCenter() {
       <SsoSlipDialog
         open={ssoOpen}
         periodId={bundle?.id ?? ""}
+        periodYear={bundle?.periodYear ?? year}
+        periodMonth={bundle?.periodMonth ?? month}
         amount={bundle?.ssoTotalRemittance ?? 0}
+        savedDate={bundle?.ssoPaymentDate ?? ""}
+        savedReceipt={bundle?.ssoReceiptNo ?? ""}
+        savedReference={bundle?.ssoReferenceNo ?? ""}
+        savedAccount={bundle?.paidSsoFromAccount ?? ""}
         onClose={() => setSsoOpen(false)}
         onSaved={(next) => {
           setBundle(next);
@@ -950,40 +999,97 @@ function PaySlipDialog({
 function SsoSlipDialog({
   open,
   periodId,
+  periodYear,
+  periodMonth,
   amount,
+  savedDate,
+  savedReceipt,
+  savedReference,
+  savedAccount,
   onClose,
   onSaved,
 }: {
   open: boolean;
   periodId: string;
+  periodYear: number;
+  periodMonth: number;
   amount: number;
+  savedDate: string;
+  savedReceipt: string;
+  savedReference: string;
+  savedAccount: string;
   onClose: () => void;
   onSaved: (bundle: PayrollPeriodView) => void;
 }) {
-  const [date, setDate] = useState(todayBangkok());
-  const [reference, setReference] = useState("");
-  const [preview, setPreview] = useState("");
-  const [jpeg, setJpeg] = useState("");
+  const [date, setDate] = useState(periodEndDate(2026, 10));
+  const [receiptNo, setReceiptNo] = useState(SSO_RECEIPT_NO);
+  const [reference, setReference] = useState(SSO_REFERENCE_NO);
+  const [account, setAccount] = useState(SSO_PAID_FROM);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [fileKind, setFileKind] = useState<"pdf" | "jpeg" | "">("");
+  const [fileBase64, setFileBase64] = useState("");
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    if (!open) return;
+    setDate((savedDate || periodEndDate(periodYear, periodMonth)).slice(0, 10));
+    setReceiptNo(savedReceipt || SSO_RECEIPT_NO);
+    setReference(savedReference || SSO_REFERENCE_NO);
+    setAccount(savedAccount || SSO_PAID_FROM);
+    setPreviewUrl("");
+    setFileKind("");
+    setFileBase64("");
+  }, [open, periodYear, periodMonth, savedDate, savedReceipt, savedReference, savedAccount]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  async function onFile(file: File | undefined) {
+    if (!file) return;
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (previewUrl.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
+    try {
+      if (isPdf) {
+        setFileKind("pdf");
+        setPreviewUrl(URL.createObjectURL(file));
+        setFileBase64(await readFileBase64(file));
+        return;
+      }
+      setFileKind("jpeg");
+      const jpeg = await fileToJpeg(file);
+      setPreviewUrl(jpeg);
+      setFileBase64(jpeg);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "เปิดไฟล์ใบเสร็จไม่สำเร็จ");
+    }
+  }
+
   async function save() {
-    if (!jpeg) {
-      toast.error("กรุณาเลือกไฟล์สลิปก่อนบันทึก");
+    if (!fileBase64 || !fileKind) {
+      toast.error("กรุณาเลือกไฟล์ใบเสร็จก่อนบันทึก");
       return;
     }
     setSaving(true);
     const result = await confirmSsoRemittancePaymentAction({
       periodId,
+      periodYear,
+      periodMonth,
       paymentDate: date,
+      receiptNo,
       referenceNo: reference,
-      slipJpegBase64: jpeg,
+      paidFromAccount: account,
+      fileKind,
+      fileBase64,
     });
     setSaving(false);
     if (!result.ok) {
       toast.error(result.error);
       return;
     }
-    toast.success("บันทึกสลิปนำส่งประกันสังคมแล้ว");
+    toast.success("บันทึกใบเสร็จประกันสังคมและรายการค่าใช้จ่ายแล้ว");
     onSaved(result.data);
   }
 
@@ -991,41 +1097,53 @@ function SsoSlipDialog({
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>แนบสลิปจ่ายประกันสังคม</DialogTitle>
+          <DialogTitle>แนบสลิป / ใบเสร็จจ่ายประกันสังคม</DialogTitle>
         </DialogHeader>
         <p className="text-3xl font-semibold text-slate-900">{money(amount)}</p>
+        <p className="text-sm text-emerald-700">
+          ✅ ระบบจะบันทึกเป็นหลักฐานการนำส่ง สปส.1-10 และสร้างรายการค่าใช้จ่ายบริษัท (Expenses) ให้อัตโนมัติโดยไม่ต้องคีย์แยก
+        </p>
         <label className="text-sm text-slate-600">
-          วันที่นำส่ง
+          วันที่ชำระเงิน
           <Input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
         </label>
         <label className="mt-2 block text-sm text-slate-600">
-          เลขอ้างอิง สปส.
+          เลขที่ใบเสร็จรับเงิน สปส.
+          <Input value={receiptNo} onChange={(event) => setReceiptNo(event.target.value)} />
+        </label>
+        <label className="mt-2 block text-sm text-slate-600">
+          หมายเลขอ้างอิง (Reference No.)
           <Input value={reference} onChange={(event) => setReference(event.target.value)} />
         </label>
         <label className="mt-2 block text-sm text-slate-600">
-          รูปสลิป
+          ชำระจากบัญชีธนาคาร
+          <Input value={account} onChange={(event) => setAccount(event.target.value)} />
+        </label>
+        <label className="mt-2 block text-sm text-slate-600">
+          ไฟล์ใบเสร็จ (.pdf, .jpg, .png)
           <Input
             type="file"
-            accept="image/*"
-            onChange={async (event) => {
-              const file = event.target.files?.[0];
-              if (!file) return;
-              const dataUrl = await fileToJpeg(file);
-              setPreview(dataUrl);
-              setJpeg(dataUrl);
-            }}
+            accept="application/pdf,image/jpeg,image/png,image/*"
+            onChange={(event) => void onFile(event.target.files?.[0])}
           />
         </label>
-        {preview ? (
+        {previewUrl && fileKind === "pdf" ? (
+          <iframe title="ตัวอย่างใบเสร็จประกันสังคม" src={previewUrl} className="w-full h-[420px] rounded-xl border" />
+        ) : null}
+        {previewUrl && fileKind === "jpeg" ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={preview} alt="ตัวอย่างสลิปประกันสังคม" className="mt-3 max-h-[420px] w-full rounded-xl border object-contain" />
+          <img
+            src={previewUrl}
+            alt="ตัวอย่างใบเสร็จประกันสังคม"
+            className="max-h-[420px] w-full rounded-xl border object-contain"
+          />
         ) : null}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>
             ปิด
           </Button>
           <Button type="button" disabled={saving} onClick={() => void save()}>
-            บันทึกสลิป
+            บันทึกใบเสร็จ
           </Button>
         </DialogFooter>
       </DialogContent>

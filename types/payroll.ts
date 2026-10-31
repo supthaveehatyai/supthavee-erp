@@ -60,7 +60,11 @@ export type PayrollPeriodView = {
   ssoPaymentStatus: string;
   ssoPaymentDate: string | null;
   ssoPaymentSlipUrl: string | null;
+  ssoReceiptNo: string;
   ssoReferenceNo: string | null;
+  ssoEmployerAccountNo: string;
+  paidSsoFromAccount: string;
+  linkedSsoExpenseId: string | null;
   status: string;
   paidCount: number;
   headcount: number;
@@ -90,9 +94,14 @@ export type SalaryPaymentPayload = {
 
 export type SsoRemittancePayload = {
   periodId: string;
+  periodYear: number;
+  periodMonth: number;
   paymentDate: string;
+  receiptNo: string;
   referenceNo: string;
-  slipJpegBase64: string;
+  paidFromAccount: string;
+  fileKind: "pdf" | "jpeg";
+  fileBase64: string;
 };
 
 export type EmployeeMasterPayload = {
