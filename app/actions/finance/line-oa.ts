@@ -1,6 +1,5 @@
 "use server";
 
-import { headers } from "next/headers";
 import { requireSessionUserId } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server-admin";
 import {
@@ -127,8 +126,6 @@ export async function sendVendorPaymentSlipLineAction(input: {
   lineTargetId?: string | null;
   messageText: string;
   slipPublicUrl?: string | null;
-  jpegBase64?: string | null;
-  appOrigin?: string | null;
   billingNoteNo?: string | null;
   paymentDocNo?: string | null;
 }): Promise<{ success: boolean; error: string | null; imageSent: boolean; channel: "reply" | "push" | null }> {
@@ -169,13 +166,12 @@ export async function sendVendorPaymentSlipLineAction(input: {
     await supabase.from("contacts").update({ line_target_id: lineTargetId }).eq("id", contactId);
   }
 
-  const slipPublicUrl = input.slipPublicUrl?.trim() ?? "";
-  const directJpgUrl = input.jpegBase64?.trim() ? await uploadLineReadyJpeg(input.jpegBase64) : "";
+  const slipPublicUrl = cleanSupabaseSlipUrl(input.slipPublicUrl ?? "");
   const textOnly: Array<Record<string, string>> = [{ type: "text", text: messageText }];
-  const withImage: Array<Record<string, string>> = directJpgUrl
+  const withImage: Array<Record<string, string>> = slipPublicUrl
     ? [
         ...textOnly,
-        { type: "image", originalContentUrl: directJpgUrl, previewImageUrl: directJpgUrl },
+        { type: "image", originalContentUrl: slipPublicUrl, previewImageUrl: slipPublicUrl },
       ]
     : textOnly;
 
@@ -194,7 +190,7 @@ export async function sendVendorPaymentSlipLineAction(input: {
     await clearReplyToken(lineTargetId);
     if (replied.ok) {
       channel = "reply";
-      imageSent = Boolean(directJpgUrl);
+      imageSent = Boolean(slipPublicUrl);
       pushed = replied;
     }
   }
@@ -203,7 +199,7 @@ export async function sendVendorPaymentSlipLineAction(input: {
       (messages) => pushLineMessages(token, lineTargetId, messages),
       withImage,
       textOnly,
-      directJpgUrl,
+      slipPublicUrl,
     );
     channel = "push";
     imageSent = pushedResult.imageSent;
@@ -214,7 +210,7 @@ export async function sendVendorPaymentSlipLineAction(input: {
     contactId,
     lineTargetId,
     messageText,
-    slipUrl: imageSent ? directJpgUrl : slipPublicUrl || null,
+    slipUrl: imageSent ? slipPublicUrl : input.slipPublicUrl?.trim() || null,
     billingNoteNo: input.billingNoteNo?.trim() || null,
     paymentDocNo: input.paymentDocNo?.trim() || null,
     sentBy: owner.userId,
@@ -232,24 +228,21 @@ export async function sendVendorPaymentSlipLineAction(input: {
   return { success: true, error: null, imageSent, channel };
 }
 
-async function uploadLineReadyJpeg(jpegBase64: string): Promise<string> {
-  const base64Data = jpegBase64.replace(/^data:image\/jpeg;base64,/i, "").replace(/\s/g, "");
-  if (!base64Data) return "";
-  const buffer = Buffer.from(base64Data, "base64");
-  if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8 || buffer[2] !== 0xff) return "";
-  const filePath = `line-ready/${crypto.randomUUID()}.jpg`;
-  const admin = createClient();
-  const bucket = admin.storage.from("document_attachments");
-  const uploaded = await bucket.upload(filePath, buffer, {
-    contentType: "image/jpeg",
-    upsert: true,
-  });
-  if (uploaded.error) {
-    console.error("[line-slip-upload]", uploaded.error.message);
-    return "";
+function cleanSupabaseSlipUrl(value: string): string {
+  let direct = value.trim();
+  if (!direct) return "";
+  if (direct.includes("/api/line/slip-image")) {
+    try {
+      const parsed = new URL(direct, "https://placeholder.local");
+      direct = decodeURIComponent(parsed.searchParams.get("url")?.trim() ?? "");
+    } catch {
+      return "";
+    }
   }
-  const publicUrl = bucket.getPublicUrl(filePath).data.publicUrl?.trim() ?? "";
-  return publicUrl.startsWith("https://") ? publicUrl : "";
+  if (!direct.startsWith("https://") || direct.includes("/api/line/slip-image")) return "";
+  const path = direct.split("?")[0] ?? "";
+  if (!/\.(jpe?g|png)$/i.test(path)) return "";
+  return direct;
 }
 
 async function sendWithImageFallback(
@@ -322,40 +315,6 @@ async function readContactLineFields(contactId: string): Promise<{
     lineTargetId: messagingGroupId(legacy.data?.line_target_id),
     lineOaChatUrl: null,
   };
-}
-
-async function lineJpegSlipUrl(slipPublicUrl: string, appOrigin?: string | null): Promise<string> {
-  if (!slipPublicUrl.startsWith("https://")) return "";
-  if (/\.pdf($|\?)/i.test(slipPublicUrl)) return "";
-  const origin = httpsOrigin(appOrigin) || (await publicAppOrigin());
-  if (origin.startsWith("https://")) {
-    return `${origin}/api/line/slip-image?url=${encodeURIComponent(slipPublicUrl)}`;
-  }
-  if (/\.(jpe?g|png)($|\?)/i.test(slipPublicUrl)) return slipPublicUrl;
-  return "";
-}
-
-function httpsOrigin(value: string | null | undefined): string {
-  try {
-    const url = new URL((value ?? "").trim());
-    if (url.protocol !== "https:") return "";
-    return url.origin;
-  } catch {
-    return "";
-  }
-}
-
-async function publicAppOrigin(): Promise<string> {
-  try {
-    const h = await headers();
-    const host = (h.get("x-forwarded-host") || h.get("host") || "").split(",")[0]?.trim() ?? "";
-    if (!host) return "";
-    const forwarded = (h.get("x-forwarded-proto") || "").split(",")[0]?.trim() ?? "";
-    const proto = forwarded || (host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https");
-    return `${proto}://${host}`;
-  } catch {
-    return "";
-  }
 }
 
 async function loadFreshReplyToken(groupId: string): Promise<string | null> {

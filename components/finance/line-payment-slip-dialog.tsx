@@ -53,51 +53,53 @@ function apiGroupId(value: string): string {
   return raw;
 }
 
-async function handleCopySlipImageToClipboard(slipUrl: string) {
-  const pngBlobPromise = (async () => {
-    const proxyUrl = `/api/line/slip-image?url=${encodeURIComponent(slipUrl)}&t=${Date.now()}`;
-    const res = await fetch(proxyUrl);
-    if (!res.ok) throw new Error("โหลดไฟล์รูปสลิปไม่สำเร็จ");
-    const srcBlob = await res.blob();
-    const bitmap = await createImageBitmap(srcBlob);
-    const canvas = document.createElement("canvas");
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("ไม่สามารถสร้าง Canvas Context ได้");
-    ctx.fillStyle = "#FFFFFF";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(bitmap, 0, 0);
-    bitmap.close();
-    return await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("แปลงเป็น PNG ไม่สำเร็จ"))), "image/png");
+async function handleCopySlipImageToClipboard(rawSlipUrl: string) {
+  try {
+    let directUrl = rawSlipUrl;
+    if (directUrl.includes("/api/line/slip-image?url=")) {
+      const parsed = new URL(directUrl, window.location.origin);
+      directUrl = decodeURIComponent(parsed.searchParams.get("url") || "");
+    }
+    const sep = directUrl.includes("?") ? "&" : "?";
+    const fetchUrl = `${directUrl}${sep}cors_cb=${Date.now()}`;
+
+    const response = await fetch(fetchUrl, { mode: "cors", cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+
+    const pngBlob = await new Promise<Blob>((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      const objectUrl = URL.createObjectURL(blob);
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error("Canvas context error"));
+          return;
+        }
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(objectUrl);
+        canvas.toBlob((value) => (value ? resolve(value) : reject(new Error("toBlob failed"))), "image/png");
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error("Image load error"));
+      };
+      img.src = objectUrl;
     });
-  })();
 
-  await navigator.clipboard.write([new ClipboardItem({ "image/png": pngBlobPromise })]);
-}
-
-async function slipJpegBase64(slipUrl: string): Promise<string> {
-  const proxyUrl = `/api/line/slip-image?url=${encodeURIComponent(slipUrl)}&t=${Date.now()}`;
-  const res = await fetch(proxyUrl);
-  if (!res.ok) throw new Error("โหลดไฟล์รูปสลิปไม่สำเร็จ");
-  const srcBlob = await res.blob();
-  const bitmap = await createImageBitmap(srcBlob);
-  const maxSide = 1200;
-  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
-  const width = Math.max(1, Math.round(bitmap.width * scale));
-  const height = Math.max(1, Math.round(bitmap.height * scale));
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("ไม่สามารถสร้าง Canvas Context ได้");
-  ctx.fillStyle = "#FFFFFF";
-  ctx.fillRect(0, 0, width, height);
-  ctx.drawImage(bitmap, 0, 0, width, height);
-  bitmap.close();
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.88);
-  return dataUrl.replace(/^data:image\/jpeg;base64,/i, "");
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": pngBlob })]);
+    toast.success("คัดลอกรูปสลิปลง Clipboard เรียบร้อยแล้ว! กด Ctrl+V วางในแชท LINE ได้เลย");
+  } catch (err) {
+    console.error("Copy slip error:", err);
+    toast.error("คัดลอกรูปสลิปไม่สำเร็จ");
+  }
 }
 
 export type LinePaymentSlipDialogProps = {
@@ -176,24 +178,12 @@ export function LinePaymentSlipDialog({
       return;
     }
     setSending(true);
-    let jpegBase64 = "";
-    if (slipUrl?.startsWith("https://")) {
-      try {
-        jpegBase64 = await slipJpegBase64(slipUrl);
-      } catch (error) {
-        console.error(error);
-        setSending(false);
-        toast.error("เตรียมรูปสลิปสำหรับ LINE ไม่สำเร็จ");
-        return;
-      }
-    }
     const result = await sendVendorPaymentSlipLineAction({
       contactId,
       contactName,
       lineTargetId: sendGroupId,
       messageText: draft,
       slipPublicUrl: slipUrl,
-      jpegBase64,
       billingNoteNo,
       paymentDocNo,
     });
@@ -278,10 +268,6 @@ export function LinePaymentSlipDialog({
     setCopyingSlip(true);
     try {
       await handleCopySlipImageToClipboard(slipUrl);
-      toast.success("✅ คัดลอกรูปสลิปลง Clipboard เรียบร้อยแล้ว! (กด Ctrl+V วางในแชท LINE ได้เลย)");
-    } catch (error) {
-      console.error(error);
-      toast.error("คัดลอกรูปสลิปไม่สำเร็จ");
     } finally {
       setCopyingSlip(false);
     }
