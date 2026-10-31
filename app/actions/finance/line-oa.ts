@@ -127,6 +127,7 @@ export async function sendVendorPaymentSlipLineAction(input: {
   lineTargetId?: string | null;
   messageText: string;
   slipPublicUrl?: string | null;
+  jpegBase64?: string | null;
   appOrigin?: string | null;
   billingNoteNo?: string | null;
   paymentDocNo?: string | null;
@@ -169,12 +170,12 @@ export async function sendVendorPaymentSlipLineAction(input: {
   }
 
   const slipPublicUrl = input.slipPublicUrl?.trim() ?? "";
-  const jpegSlipUrl = await lineJpegSlipUrl(slipPublicUrl, input.appOrigin);
+  const directJpgUrl = input.jpegBase64?.trim() ? await uploadLineReadyJpeg(input.jpegBase64) : "";
   const textOnly: Array<Record<string, string>> = [{ type: "text", text: messageText }];
-  const withImage: Array<Record<string, string>> = jpegSlipUrl
+  const withImage: Array<Record<string, string>> = directJpgUrl
     ? [
         ...textOnly,
-        { type: "image", originalContentUrl: jpegSlipUrl, previewImageUrl: jpegSlipUrl },
+        { type: "image", originalContentUrl: directJpgUrl, previewImageUrl: directJpgUrl },
       ]
     : textOnly;
 
@@ -193,7 +194,7 @@ export async function sendVendorPaymentSlipLineAction(input: {
     await clearReplyToken(lineTargetId);
     if (replied.ok) {
       channel = "reply";
-      imageSent = Boolean(jpegSlipUrl);
+      imageSent = Boolean(directJpgUrl);
       pushed = replied;
     }
   }
@@ -202,7 +203,7 @@ export async function sendVendorPaymentSlipLineAction(input: {
       (messages) => pushLineMessages(token, lineTargetId, messages),
       withImage,
       textOnly,
-      jpegSlipUrl,
+      directJpgUrl,
     );
     channel = "push";
     imageSent = pushedResult.imageSent;
@@ -213,7 +214,7 @@ export async function sendVendorPaymentSlipLineAction(input: {
     contactId,
     lineTargetId,
     messageText,
-    slipUrl: imageSent ? jpegSlipUrl : slipPublicUrl || null,
+    slipUrl: imageSent ? directJpgUrl : slipPublicUrl || null,
     billingNoteNo: input.billingNoteNo?.trim() || null,
     paymentDocNo: input.paymentDocNo?.trim() || null,
     sentBy: owner.userId,
@@ -229,6 +230,26 @@ export async function sendVendorPaymentSlipLineAction(input: {
     };
   }
   return { success: true, error: null, imageSent, channel };
+}
+
+async function uploadLineReadyJpeg(jpegBase64: string): Promise<string> {
+  const base64Data = jpegBase64.replace(/^data:image\/jpeg;base64,/i, "").replace(/\s/g, "");
+  if (!base64Data) return "";
+  const buffer = Buffer.from(base64Data, "base64");
+  if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8 || buffer[2] !== 0xff) return "";
+  const filePath = `line-ready/${crypto.randomUUID()}.jpg`;
+  const admin = createClient();
+  const bucket = admin.storage.from("document_attachments");
+  const uploaded = await bucket.upload(filePath, buffer, {
+    contentType: "image/jpeg",
+    upsert: true,
+  });
+  if (uploaded.error) {
+    console.error("[line-slip-upload]", uploaded.error.message);
+    return "";
+  }
+  const publicUrl = bucket.getPublicUrl(filePath).data.publicUrl?.trim() ?? "";
+  return publicUrl.startsWith("https://") ? publicUrl : "";
 }
 
 async function sendWithImageFallback(

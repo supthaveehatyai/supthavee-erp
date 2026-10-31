@@ -1,37 +1,33 @@
 import { NextResponse } from "next/server";
-import { isAllowedSlipSourceUrl, toJpegBuffer } from "@/lib/line/slip-jpeg";
+import { isAllowedSlipSourceUrl } from "@/lib/line/slip-jpeg";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const source = new URL(request.url).searchParams.get("url")?.trim() ?? "";
-  if (!isAllowedSlipSourceUrl(source)) {
+  const targetUrl = new URL(request.url).searchParams.get("url")?.trim() ?? "";
+  if (!isAllowedSlipSourceUrl(targetUrl)) {
     return new NextResponse("ลิงก์สลิปไม่ถูกต้อง", { status: 400 });
   }
 
   try {
-    const upstream = await fetch(source, {
-      redirect: "error",
-      cache: "no-store",
-      signal: AbortSignal.timeout(15000),
-    });
+    const upstream = await fetch(targetUrl, { cache: "no-store" });
     if (!upstream.ok) {
       return new NextResponse("ดึงรูปสลิปไม่สำเร็จ", { status: 404 });
     }
-    const bytes = Buffer.from(await upstream.arrayBuffer());
-    const jpeg = await toJpegBuffer(bytes);
+    const bytes = await upstream.arrayBuffer();
+    const upstreamContentType = upstream.headers.get("content-type")?.split(";")[0]?.trim() || "";
     const download = new URL(request.url).searchParams.get("download") === "1";
-    return new NextResponse(new Uint8Array(jpeg), {
+    return new NextResponse(bytes, {
       status: 200,
       headers: {
-        "Content-Type": "image/jpeg",
-        "Cache-Control": "public, max-age=86400",
-        "X-Content-Type-Options": "nosniff",
+        "Content-Type": upstreamContentType || "image/jpeg",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-store, max-age=0",
         "Content-Disposition": download ? 'attachment; filename="payment-slip.jpg"' : "inline",
       },
     });
   } catch {
-    return new NextResponse("แปลงรูปสลิปเป็น JPEG ไม่สำเร็จ", { status: 422 });
+    return new NextResponse("ดึงรูปสลิปไม่สำเร็จ", { status: 422 });
   }
 }

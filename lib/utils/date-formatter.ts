@@ -13,14 +13,8 @@ function parseToDate(date: string | Date): Date | null {
   const raw = String(date ?? "").trim();
   if (!raw) return null;
 
-  const iso = raw.slice(0, 10);
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (match) {
-    const parsed = new Date(
-      Number(match[1]),
-      Number(match[2]) - 1,
-      Number(match[3]),
-    );
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const parsed = new Date(`${raw}T12:00:00+07:00`);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
@@ -35,6 +29,7 @@ function createThaiFormatter(
     calendar: "buddhist",
     numberingSystem: "latn",
     ...options,
+    timeZone: "Asia/Bangkok",
   });
 }
 
