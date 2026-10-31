@@ -717,10 +717,12 @@ function isReceiptUploadFile(value: unknown): value is File {
 }
 
 function sanitizeReceiptFileName(fileName: string): string {
-  return fileName
-    .replace(/[^\w.\-ก-๙]+/g, "_")
+  const ascii = fileName
+    .replace(/[^\w.\-]+/g, "_")
     .replace(/_+/g, "_")
-    .slice(0, 120);
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+  return ascii || "receipt.jpg";
 }
 
 type ExpenseAttachmentKind = "receipt" | "payment_slip";

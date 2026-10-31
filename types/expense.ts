@@ -265,3 +265,22 @@ export type ExpenseOcrExtraction = {
 export type ProcessExpenseOcrResult =
   | { success: true; data: ExpenseOcrExtraction }
   | { success: false; error: string };
+
+/** ผลสแกนบิลจาก `POST /api/expenses/ocr` */
+export type ExpenseOcrScan = {
+  vendor_name: string | null;
+  vendor_tax_id: string | null;
+  vendor_address: string | null;
+  invoice_no: string | null;
+  reference_no: string | null;
+  expense_date: string | null;
+  description: string | null;
+  category: string | null;
+  sub_total: number;
+  vat_amount: number;
+  total_amount: number;
+  has_vat: boolean;
+  vehicle_plate: string | null;
+  contact_id: string | null;
+  attachment_url: string | null;
+};

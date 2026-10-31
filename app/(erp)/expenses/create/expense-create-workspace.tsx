@@ -3,7 +3,7 @@
 /**
  * Phase 8 — Expense create workspace (Client island for Tabs + form state).
  * Categories / vendors / bank accounts come from Server Component parent.
- * OCR goes through Server Action `processExpenseOCR` only (Zero Client-Side Fetching).
+ * OCR ส่งรูปที่บีบอัดแล้วไป `POST /api/expenses/ocr` (Gemini โดยตรง)
  */
 
 import Link from "next/link";
@@ -39,8 +39,7 @@ import type {
   ExpenseVendorOption,
 } from "@/types/expense";
 import type { MstWhtRate } from "@/types/wht-rate";
-import { processExpenseOCR } from "@/app/actions/expense/ocr-action";
-import type { ExpenseOcrExtraction } from "@/types/expense";
+import type { ExpenseOcrScan } from "@/types/expense";
 import VendorCombobox from "@/components/procurement/VendorCombobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,7 +58,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VAT_OPTIONS, type VatOptionValue } from "@/lib/constants/accounting";
 import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import { cn } from "@/lib/utils";
-import { compressImage, compressImageForOcr } from "@/lib/utils/image-compression";
+import { compressImage } from "@/lib/utils/image-compression";
 import { ExpenseCategoryCombobox } from "./expense-category-combobox";
 
 export type ExpenseCreateTab = "ocr" | "manual";
@@ -169,12 +168,15 @@ const PAYMENT_OPTIONS: { value: PaymentMethod; label: string }[] = [
 ];
 
 const CATEGORY_HINT_TO_NAMES: Record<string, string[]> = {
-  TRANSPORT: ["ค่าขนส่ง"],
-  UTILITIES: ["ค่าน้ำ-ไฟ", "ค่าน้ำ", "ค่าไฟ"],
+  FUEL_TRANSPORT: ["ค่าขนส่งและเดินทาง", "ค่าขนส่ง"],
+  TRANSPORT: ["ค่าขนส่งและเดินทาง", "ค่าขนส่ง"],
+  UTILITIES: ["ค่าสาธารณูปโภค", "ค่าน้ำ-ไฟ", "ค่าน้ำ", "ค่าไฟ"],
+  OFFICE_SUPPLIES: ["ค่าวัสดุสิ้นเปลือง"],
   OFFICE_SUPPLY: ["ค่าวัสดุสิ้นเปลือง"],
-  MAINTENANCE: ["ค่าใช้จ่ายสำนักงาน"],
-  SALARY: ["เงินเดือน"],
-  OTHER: ["อื่นๆ"],
+  REPAIR_MAINTENANCE: ["ค่าซ่อมแซมและบำรุงรักษา"],
+  MAINTENANCE: ["ค่าซ่อมแซมและบำรุงรักษา", "ค่าใช้จ่ายสำนักงาน"],
+  SALARY: ["ค่าจ้างและเงินเดือน", "เงินเดือน"],
+  OTHER: ["ค่าใช้จ่ายเบ็ดเตล็ด", "อื่นๆ"],
 };
 
 function formatThaiBaht(value: number): string {
@@ -417,27 +419,16 @@ function matchCategoryId(
 }
 
 function buildOcrRemark(
-  extraction: ExpenseOcrExtraction,
+  extraction: ExpenseOcrScan,
   existingRemark: string,
 ): string {
   const parts: string[] = [];
-  if (extraction.document_number) {
-    parts.push(`เลขที่เอกสาร: ${extraction.document_number}`);
-  }
-  if (extraction.tax_id) {
-    parts.push(`Tax ID: ${extraction.tax_id}`);
-  }
-  if (extraction.items.length > 0) {
-    const lines = extraction.items
-      .filter((item) => item.description.trim())
-      .map(
-        (item) =>
-          `- ${item.description}${item.amount ? ` (${formatThaiBaht(item.amount)})` : ""}`,
-      );
-    if (lines.length > 0) {
-      parts.push(`รายการ OCR:\n${lines.join("\n")}`);
-    }
-  }
+  if (extraction.description) parts.push(extraction.description);
+  if (extraction.invoice_no) parts.push(`เลขที่เอกสาร: ${extraction.invoice_no}`);
+  if (extraction.reference_no) parts.push(`เลขอ้างอิง: ${extraction.reference_no}`);
+  if (extraction.vendor_tax_id) parts.push(`Tax ID: ${extraction.vendor_tax_id}`);
+  if (extraction.vehicle_plate) parts.push(`ทะเบียนรถ: ${extraction.vehicle_plate}`);
+  if (extraction.vendor_address) parts.push(`ที่อยู่ผู้ขาย: ${extraction.vendor_address}`);
 
   const ocrBlock = parts.join("\n");
   const prev = existingRemark.trim();
@@ -525,6 +516,8 @@ export function ExpenseCreateWorkspace({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const [ocrFileName, setOcrFileName] = useState<string | null>(null);
+  const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string | null>(null);
+  const [ocrPreviewKind, setOcrPreviewKind] = useState<"image" | "pdf" | "">("");
   const [error, setError] = useState<string | null>(null);
   const [categories, setCategories] =
     useState<ExpenseCategory[]>(initialCategories);
@@ -942,53 +935,63 @@ export function ExpenseCreateWorkspace({
     });
   }
 
-  function applyOcrResult(extraction: ExpenseOcrExtraction) {
-    const vatType = extraction.vat_type;
-    const matchedVendorId = matchVendorId(extraction.vendor_name, vendors);
-    const primaryHint =
-      extraction.items.find((i) => i.category_hint)?.category_hint ?? "OTHER";
-    const matchedCategoryId = matchCategoryId(primaryHint, categories);
-
-    const baseAmount =
-      vatType === "INCLUSIVE"
-        ? String(extraction.grand_total || extraction.sub_total)
-        : String(extraction.sub_total || extraction.grand_total);
-
-    const docDate = extraction.document_date || getValues("expense_date");
+  function applyOcrResult(extraction: ExpenseOcrScan) {
+    const vatType = extraction.has_vat && extraction.vat_amount > 0 ? "EXCLUSIVE" : "NONE";
+    const matchedVendorId =
+      extraction.contact_id || matchVendorId(extraction.vendor_name, vendors);
+    const matchedCategoryId = matchCategoryId(extraction.category, categories);
+    const docDate = extraction.expense_date || getValues("expense_date");
     const current = getValues();
-    const nextItems = extraction.items.map((item) => ({
-      description: item.description,
-      amount: item.amount,
-      category_hint: item.category_hint || "OTHER",
-    }));
+    const description = extraction.description?.trim() || extraction.vendor_name || "ค่าใช้จ่าย";
+    const nextItems = [
+      {
+        description,
+        amount: extraction.total_amount || extraction.sub_total,
+        category_hint: extraction.category || "OTHER",
+      },
+    ];
 
     reset(
       {
         ...current,
         vendor_name: extraction.vendor_name ?? "",
         vendor_id: matchedVendorId || current.vendor_id,
-        document_number: extraction.document_number ?? "",
+        document_number: extraction.invoice_no ?? "",
         document_date: docDate,
         expense_date: docDate,
         category_id: matchedCategoryId || current.category_id,
         vat_type: vatType,
         sub_total: extraction.sub_total,
         vat_amount: extraction.vat_amount,
-        grand_total: extraction.grand_total,
-        base_amount: baseAmount,
-        items: nextItems.length > 0 ? nextItems : current.items,
+        grand_total: extraction.total_amount,
+        base_amount: String(vatType === "NONE" ? extraction.total_amount : extraction.sub_total),
+        items: nextItems,
         remark: buildOcrRemark(extraction, current.remark),
+        receipt_url: extraction.attachment_url || current.receipt_url,
       },
       { keepDefaultValues: false },
     );
+  }
 
-    console.log("[Expense OCR] applied to form:", {
-      vendor_name: extraction.vendor_name,
-      document_number: extraction.document_number,
-      document_date: docDate,
-      grand_total: extraction.grand_total,
-      item_count: nextItems.length,
-    });
+  async function receiptToJpeg(file: File) {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 1600 / Math.max(bitmap.width, 1));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("บีบอัดรูปไม่สำเร็จ");
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+    return {
+      dataUrl,
+      file: new File([blob], `receipt-${Date.now()}.jpg`, { type: "image/jpeg" }),
+    };
   }
 
   async function runExpenseOcr(file: File | null | undefined) {
@@ -998,46 +1001,57 @@ export function ExpenseCreateWorkspace({
     }
 
     const mime = (file.type || "").toLowerCase();
-    if (
-      mime &&
-      !mime.startsWith("image/") &&
-      mime !== "application/octet-stream"
-    ) {
-      toast.error("รองรับเฉพาะไฟล์รูปภาพ (.jpg, .png)");
+    const isPdf = mime === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    const isImage = mime.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name);
+    if (!isPdf && !isImage) {
+      toast.error("รองรับไฟล์รูปภาพ (.jpg, .png, .webp) และ PDF");
       return;
     }
 
     setIsOcrProcessing(true);
     setError(null);
     setOcrFileName(file.name);
+    if (ocrPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(ocrPreviewUrl);
 
     try {
-      let uploadFile: File;
-      try {
-        uploadFile = await compressImageForOcr(file);
-      } catch (compressErr) {
-        console.error("[Expense OCR] compressImageForOcr failed:", compressErr);
-        const msg =
-          compressErr instanceof Error
-            ? `บีบอัดรูปไม่สำเร็จ: ${compressErr.message}`
-            : "บีบอัดรูปไม่สำเร็จ — กรุณาลองใช้รูปที่เล็กลง";
-        setError(msg);
-        toast.error(msg);
-        return;
+      let fileBase64 = "";
+      let mimeType = isPdf ? "application/pdf" : "image/jpeg";
+      if (isPdf) {
+        fileBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result ?? ""));
+          reader.onerror = () => reject(new Error("อ่านไฟล์ PDF ไม่สำเร็จ"));
+          reader.readAsDataURL(file);
+        });
+        const preview = URL.createObjectURL(file);
+        setOcrPreviewUrl(preview);
+        setOcrPreviewKind("pdf");
+        const safePdf = new File([file], `receipt-${Date.now()}.pdf`, { type: "application/pdf" });
+        void setAttachmentFile(safePdf);
+      } else {
+        const jpeg = await receiptToJpeg(file);
+        fileBase64 = jpeg.dataUrl;
+        setOcrPreviewUrl(jpeg.dataUrl);
+        setOcrPreviewKind("image");
+        void setAttachmentFile(jpeg.file);
       }
 
-      // Keep compressed file as Manual attachment (upload on Save Draft)
-      void setAttachmentFile(uploadFile);
+      const response = await fetch("/api/expenses/ocr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileBase64, mimeType, fileName: file.name }),
+      });
+      const result = (await response.json()) as {
+        success?: boolean;
+        error?: string;
+        data?: ExpenseOcrScan;
+      };
 
-      const formData = new FormData();
-      formData.append("file", uploadFile);
-
-      const result = await processExpenseOCR(formData);
-
-      if (!result.success) {
-        console.error("[Expense OCR] processExpenseOCR failed:", result.error);
-        setError(result.error);
-        toast.error(result.error);
+      if (!response.ok || !result.success || !result.data) {
+        const message = result.error || "สแกนบิลไม่สำเร็จ";
+        console.error("[Expense OCR] /api/expenses/ocr failed:", message);
+        setError(message);
+        toast.error(message);
         return;
       }
 
@@ -1346,9 +1360,7 @@ export function ExpenseCreateWorkspace({
                   Smart OCR
                 </CardTitle>
                 <CardDescription>
-                  อัปโหลดรูปใบเสร็จ — Server Action เรียก Edge Function{" "}
-                  <code className="text-xs">ocr-expense</code> แล้ว prefills
-                  ฟอร์ม Manual ให้ตรวจทาน
+                  อัปโหลดรูปหรือ PDF ใบเสร็จ — ระบบส่งให้ Gemini อ่านบิลแล้วเติมฟอร์ม Manual ให้ตรวจทาน
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -1378,10 +1390,10 @@ export function ExpenseCreateWorkspace({
                     <p className="text-sm font-semibold text-slate-800">
                       {isOcrProcessing
                         ? "กำลังอ่านบิลด้วย AI..."
-                        : "ลากวางรูปใบเสร็จที่นี่ หรือคลิกเพื่อเลือกไฟล์"}
+                        : "ลากวางใบเสร็จที่นี่ หรือคลิกเพื่อเลือกไฟล์"}
                     </p>
                     <p className="text-xs text-slate-500">
-                      รองรับ JPG / PNG / WEBP
+                      รองรับ JPG / PNG / WEBP / PDF
                     </p>
                   </div>
                   {ocrFileName ? (
@@ -1393,7 +1405,7 @@ export function ExpenseCreateWorkspace({
                     ref={ocrInputRef}
                     id="expense-ocr-upload"
                     type="file"
-                    accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png"
+                    accept="image/jpeg,image/png,image/webp,application/pdf,.jpg,.jpeg,.png,.webp,.pdf"
                     className="sr-only"
                     disabled={isOcrProcessing}
                     onChange={(e) => {
@@ -1409,8 +1421,41 @@ export function ExpenseCreateWorkspace({
         <TabsContent value="manual">
           <form
             onSubmit={handleSubmit(onSaveDraft)}
-            className="space-y-5"
+            className={
+              ocrPreviewUrl
+                ? "grid items-start gap-5 xl:grid-cols-[minmax(280px,440px)_minmax(0,1fr)]"
+                : "space-y-5"
+            }
           >
+            {ocrPreviewUrl ? (
+              <aside className="xl:sticky xl:top-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">ตัวอย่างใบเสร็จ</CardTitle>
+                    <CardDescription>
+                      เทียบตัวเลขบนบิลกับช่องที่ AI กรอกก่อนบันทึก
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {ocrPreviewKind === "pdf" ? (
+                      <iframe
+                        title="ตัวอย่างใบเสร็จ PDF"
+                        src={ocrPreviewUrl}
+                        className="h-[480px] w-full rounded-lg border"
+                      />
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={ocrPreviewUrl}
+                        alt="ตัวอย่างใบเสร็จ"
+                        className="max-h-[480px] w-auto rounded-lg border object-contain"
+                      />
+                    )}
+                  </CardContent>
+                </Card>
+              </aside>
+            ) : null}
+            <div className="space-y-5">
             <Card>
               <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1.5">
@@ -1428,7 +1473,7 @@ export function ExpenseCreateWorkspace({
                   <input
                     ref={manualOcrInputRef}
                     type="file"
-                    accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png"
+                    accept="image/jpeg,image/png,image/webp,application/pdf,.jpg,.jpeg,.png,.webp,.pdf"
                     className="sr-only"
                     disabled={formBusy}
                     onChange={(e) => {
@@ -2315,6 +2360,7 @@ export function ExpenseCreateWorkspace({
                 )}
                 {DOCUMENT_ACTIONS.SAVE_DRAFT}
               </Button>
+            </div>
             </div>
           </form>
         </TabsContent>
