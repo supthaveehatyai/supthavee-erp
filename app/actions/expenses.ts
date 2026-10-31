@@ -448,8 +448,13 @@ function unwrapCategoryName(
 ): string {
   if (value == null) return "—";
   const row = Array.isArray(value) ? (value[0] ?? null) : value;
-  const name = row?.category_name?.trim();
-  return name || "—";
+  return row?.category_name?.trim() || "—";
+}
+
+function readOptionalText(value: unknown): string | null {
+  if (value == null) return null;
+  const text = String(value).trim();
+  return text || null;
 }
 
 /**
@@ -473,7 +478,10 @@ export async function getExpenses(
         expense_date,
         created_at,
         category_id,
+        category,
+        expense_category,
         remark,
+        description,
         grand_total,
         status,
         mst_expense_categories (
@@ -505,7 +513,10 @@ export async function getExpenses(
             | null
             | undefined,
         ),
-        remark: raw.remark == null ? null : String(raw.remark),
+        category: readOptionalText(raw.category),
+        expense_category: readOptionalText(raw.expense_category),
+        description: readOptionalText(raw.description),
+        remark: readOptionalText(raw.remark),
         grand_total: Number(raw.grand_total ?? 0),
         status: String(raw.status ?? "DRAFT"),
       };
@@ -1824,6 +1835,9 @@ export async function getExpenseById(
       .select(
         `
         ${EXPENSE_ROW_SELECT},
+        category,
+        expense_category,
+        description,
         mst_expense_categories ( category_name ),
         contacts:vendor_id ( company_name ),
         mst_bank_accounts!bank_account_id (
@@ -1930,6 +1944,10 @@ export async function getExpenseById(
       data: {
         ...base,
         category_name: category?.category_name?.trim() || "—",
+        category: readOptionalText(raw.category),
+        expense_category: readOptionalText(raw.expense_category),
+        description: readOptionalText(raw.description),
+        remark: readOptionalText(raw.remark),
         vendor_name: vendor?.company_name?.trim() || "—",
         bank_account_label: bankLabel,
         installments: (installmentRows ?? []).map((row) => {

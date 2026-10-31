@@ -2,6 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Plus, Receipt } from "lucide-react";
 import { getExpenses } from "@/app/actions/expenses";
+import {
+  expenseCategoryLabel,
+  expenseRemarkLabel,
+} from "@/lib/utils/expense-labels";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -167,10 +171,10 @@ export default async function ExpensesPage() {
                         </code>
                       </TableCell>
                       <TableCell className="text-sm font-medium text-slate-900">
-                        {row.category_name}
+                        {expenseCategoryLabel(row)}
                       </TableCell>
                       <TableCell className="max-w-[16rem] truncate text-sm text-slate-500">
-                        {row.remark?.trim() || "—"}
+                        {expenseRemarkLabel(row)}
                       </TableCell>
                       <TableCell className="text-center">
                         <StatusBadge status={row.status} />

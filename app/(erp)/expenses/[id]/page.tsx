@@ -18,6 +18,10 @@ import {
 import PrintExpenseTemplate from "@/components/expenses/PrintExpenseTemplate";
 import { ExpensePrintButton } from "@/components/expenses/expense-print-button";
 import { isAssetClearingCategory } from "@/lib/utils/expense-capitalize";
+import {
+  expenseCategoryLabel,
+  expenseRemarkLabel,
+} from "@/lib/utils/expense-labels";
 import { ExpenseAttachmentPreview } from "./expense-attachment-preview";
 import { ExpenseDetailActions } from "./expense-detail-actions";
 import { ExpenseInstallmentPayCell } from "./pay-installment-dialog";
@@ -129,9 +133,11 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
 
   const statusNormalized = expense.status.trim().toUpperCase();
   const installments = expense.installments ?? [];
+  const categoryLabel = expenseCategoryLabel(expense);
+  const remarkLabel = expenseRemarkLabel(expense);
   const canCapitalize =
     (statusNormalized === "ISSUED" || statusNormalized === "PAID") &&
-    isAssetClearingCategory(expense.category_name);
+    isAssetClearingCategory(categoryLabel);
 
   const paymentSlipMeta = await getPaymentSlipStorageMeta(
     expense.payment_slip_url,
@@ -205,7 +211,7 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
               {expense.vendor_doc_no?.trim() || "—"}
             </Field>
             <Field label="Vendor / ผู้ให้บริการ">{expense.vendor_name}</Field>
-            <Field label="Category / หมวดหมู่">{expense.category_name}</Field>
+            <Field label="Category / หมวดหมู่">{categoryLabel}</Field>
             <Field label="Payment Method">
               {expense.payment_method || "—"}
             </Field>
@@ -214,7 +220,7 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
             </Field>
             <Field label="Remark">
               <span className="whitespace-pre-wrap font-normal text-slate-700">
-                {expense.remark?.trim() || "—"}
+                {remarkLabel}
               </span>
             </Field>
             <Field label="Status">

@@ -2,6 +2,10 @@ import { getExpenseById } from "@/app/actions/expenses";
 import { getPaymentSlipStorageMeta } from "@/app/actions/payment-slips";
 import type { ExpenseDetail } from "@/types/expense";
 import {
+  expenseCategoryLabel,
+  expenseRemarkLabel,
+} from "@/lib/utils/expense-labels";
+import {
   resolvePaymentSlipPreviewUrl,
   type PaymentTransactionDisplayMeta,
 } from "@/types/payment-transaction-meta";
@@ -76,7 +80,7 @@ function ExpenseReviewBody({
         <Field label="Document No">{expense.document_no}</Field>
         <Field label="Expense Date">{formatDate(expense.expense_date)}</Field>
         <Field label="Vendor">{expense.vendor_name}</Field>
-        <Field label="Category">{expense.category_name}</Field>
+        <Field label="Category">{expenseCategoryLabel(expense)}</Field>
         <Field label="เลขที่บิลผู้จำหน่าย">
           {expense.vendor_doc_no?.trim() || "—"}
         </Field>
@@ -99,7 +103,7 @@ function ExpenseReviewBody({
 
       <Field label="Remark">
         <span className="whitespace-pre-wrap font-normal text-slate-700">
-          {expense.remark?.trim() || "—"}
+          {expenseRemarkLabel(expense)}
         </span>
       </Field>
 

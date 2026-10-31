@@ -4,6 +4,10 @@ import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
 import type { ExpenseDetail } from "@/types/expense";
 import type { PrintVatType } from "@/types/print-document";
 import { cn } from "@/lib/utils";
+import {
+  expenseCategoryLabel,
+  expenseRemarkLabel,
+} from "@/lib/utils/expense-labels";
 
 export type PrintExpenseTemplateProps = {
   expense: ExpenseDetail;
@@ -24,6 +28,7 @@ export default async function PrintExpenseTemplate({
   const whtAmount = Number(expense.wht_amount ?? 0);
   const vatType: PrintVatType = vatAmount > 0 ? "EXCLUSIVE" : "NONE";
   const paperSize = await getDocumentPrintPaperSize("EXPENSE");
+  const remarkLabel = expenseRemarkLabel(expense);
 
   return (
     <PrintLayout
@@ -53,7 +58,7 @@ export default async function PrintExpenseTemplate({
         <div className="grid gap-2 sm:grid-cols-2">
           <p>
             <span className="text-neutral-500">หมวดหมู่: </span>
-            {expense.category_name || "—"}
+            {expenseCategoryLabel(expense)}
           </p>
           <p>
             <span className="text-neutral-500">วิธีชำระ: </span>
@@ -71,12 +76,12 @@ export default async function PrintExpenseTemplate({
             </p>
           ) : null}
         </div>
-        {expense.remark?.trim() ? (
+        {remarkLabel !== "—" ? (
           <div className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
               หมายเหตุ
             </p>
-            <p className="mt-1 whitespace-pre-wrap">{expense.remark.trim()}</p>
+            <p className="mt-1 whitespace-pre-wrap">{remarkLabel}</p>
           </div>
         ) : null}
       </section>

@@ -95,6 +95,12 @@ export type ExpenseCashSettlementResult = {
 
 export type ExpenseDetail = ExpenseRecord & {
   category_name: string;
+  /** expenses.category — text label when category_id is not linked. */
+  category: string | null;
+  /** expenses.expense_category — legacy text label. */
+  expense_category: string | null;
+  /** expenses.description — fallback for the remark column. */
+  description: string | null;
   vendor_name: string;
   bank_account_label: string | null;
   installments: ExpenseInstallmentRow[];
@@ -227,7 +233,14 @@ export type ExpenseListItem = {
   /** Posting timestamp — when the row was saved (sort key). */
   created_at: string;
   category_id: string | null;
+  /** Joined name from mst_expense_categories. Empty when category_id is unset. */
   category_name: string;
+  /** expenses.category — Thai label written by save_expense_direct_no_draft. */
+  category: string | null;
+  /** expenses.expense_category — legacy text label. */
+  expense_category: string | null;
+  /** expenses.description — used when remark is empty. */
+  description: string | null;
   remark: string | null;
   grand_total: number;
   status: string;
