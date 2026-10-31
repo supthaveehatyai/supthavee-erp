@@ -267,6 +267,7 @@ type BillingNoteHeaderRow = {
   due_date: string | null;
   grand_total: number | string | null;
   payment_status: string | null;
+  line_notified_at?: string | null;
   contact_id: string | null;
   contacts?: ContactJoin | ContactJoin[] | null;
 };
@@ -312,6 +313,7 @@ export async function getBillingNotes(
         due_date,
         grand_total,
         payment_status,
+        line_notified_at,
         contact_id,
         contacts:contact_id (
           id,
@@ -356,6 +358,7 @@ export async function getBillingNotes(
             contact?.company_name?.trim() || "ไม่ระบุชื่อคู่ค้า",
           grand_total: roundMoney(toMoney(row.grand_total)),
           payment_status: String(row.payment_status ?? "PENDING"),
+          line_notified_at: row.line_notified_at ? String(row.line_notified_at) : null,
           invoice_count: 0,
         };
       });
@@ -488,7 +491,7 @@ export async function getBillingNoteSettlements(billingNoteId: string): Promise<
 
     const { data: payments, error: paymentError } = await supabase
       .from("documents")
-      .select("id, doc_no, doc_type, grand_total, attachment_url, attached_file_url, original_receipt_url")
+      .select("id, doc_no, doc_type, grand_total, attachment_url, attached_file_url, original_receipt_url, line_notified_at")
       .in("id", receiptIds)
       .eq("doc_type", "PAY");
     if (paymentError) return { data: [], error: paymentError.message };
@@ -575,6 +578,7 @@ export async function getBillingNoteSettlements(billingNoteId: string): Promise<
             .map((url) => String(url ?? "").trim())
             .filter((url, index, all) => Boolean(url) && all.indexOf(url) === index),
           line_sent: lineSentDocNos.has(docNo),
+          line_notified_at: row.line_notified_at ? String(row.line_notified_at) : null,
         };
       }),
       error: null,
@@ -2266,6 +2270,7 @@ export async function getIssuedTechnicianBills(): Promise<GetBillingNotesResult>
         due_date,
         grand_total,
         payment_status,
+        line_notified_at,
         contact_id,
         contacts:contact_id (
           id,
@@ -2291,6 +2296,9 @@ export async function getIssuedTechnicianBills(): Promise<GetBillingNotesResult>
         contact_name: contact?.company_name?.trim() || "ไม่ระบุชื่อช่าง",
         grand_total: roundMoney(toMoney(row.grand_total)),
         payment_status: String(row.payment_status ?? "UNPAID"),
+        line_notified_at: (row as { line_notified_at?: string | null }).line_notified_at
+          ? String((row as { line_notified_at?: string | null }).line_notified_at)
+          : null,
         invoice_count: 0,
       };
     });

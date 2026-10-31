@@ -755,20 +755,90 @@ async function writeLineLog(entry: {
   status: "SENT" | "FAILED";
   errorMessage: string | null;
 }) {
+  const documentIds = entry.status === "SENT" ? await findLineNotifyDocIds(entry.billingNoteNo, entry.paymentDocNo) : [];
   const supabase = createClient() as unknown as {
     from: (table: "line_notification_logs") => {
       insert: (row: Record<string, string | null>) => Promise<{ error: { message?: string } | null }>;
     };
   };
-  await supabase.from("line_notification_logs").insert({
+  const logged = await supabase.from("line_notification_logs").insert({
+    document_id: documentIds[0] ?? null,
     contact_id: entry.contactId || null,
     line_target_id: entry.lineTargetId,
-    message_text: entry.messageText,
-    slip_url: entry.slipUrl,
-    billing_note_no: entry.billingNoteNo,
-    payment_doc_no: entry.paymentDocNo,
-    status: entry.status,
+    message_summary: entry.messageText,
+    slip_image_url: entry.slipUrl,
+    send_status: entry.status === "SENT" ? "SUCCESS" : "FAILED",
     error_message: entry.errorMessage,
-    sent_by: entry.sentBy,
+    sent_by: entry.sentBy || null,
   });
+  if (logged.error) console.error("[line-notification-logs]", logged.error.message);
+  if (entry.status === "SENT") await stampLineNotified(documentIds);
+}
+
+async function findLineNotifyDocIds(billingNoteNo: string | null, paymentDocNo: string | null): Promise<string[]> {
+  const ids: string[] = [];
+  const db = createClient() as unknown as {
+    from: (table: "documents" | "doc_headers") => {
+      select: (columns: string) => {
+        eq: (column: string, value: string) => {
+          eq: (column: string, value: string) => {
+            maybeSingle: () => Promise<{ data: { id?: string } | null; error: { message?: string } | null }>;
+          };
+          in: (column: string, values: string[]) => {
+            limit: (count: number) => Promise<{ data: { id?: string }[] | null; error: { message?: string } | null }>;
+          };
+        };
+      };
+    };
+  };
+  const payNo = paymentDocNo?.trim() ?? "";
+  if (payNo) {
+    const pay = await db.from("documents").select("id").eq("doc_no", payNo).eq("doc_type", "PAY").maybeSingle();
+    if (pay.data?.id) ids.push(String(pay.data.id));
+  }
+  const noteNo = billingNoteNo?.trim() ?? "";
+  if (noteNo) {
+    const notes = await db
+      .from("doc_headers")
+      .select("id")
+      .eq("doc_no", noteNo)
+      .in("doc_type", ["BN", "BR"])
+      .limit(1);
+    const noteId = notes.data?.[0]?.id;
+    if (noteId) ids.push(String(noteId));
+  }
+  return [...new Set(ids)];
+}
+
+async function stampLineNotified(ids: string[]) {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return;
+  const now = new Date().toISOString();
+  const db = createClient() as unknown as {
+    from: (table: "documents" | "doc_headers") => {
+      select: (columns: string) => {
+        eq: (column: string, value: string) => {
+          maybeSingle: () => Promise<{
+            data: { line_notified_count?: number | null } | null;
+            error: { message?: string } | null;
+          }>;
+        };
+      };
+      update: (values: { line_notified_at: string; line_notified_count: number }) => {
+        eq: (column: string, value: string) => Promise<{ error: { message?: string } | null }>;
+      };
+    };
+  };
+  for (const id of unique) {
+    for (const table of ["documents", "doc_headers"] as const) {
+      const current = await db.from(table).select("line_notified_count").eq("id", id).maybeSingle();
+      if (current.error || !current.data) continue;
+      const count = Number(current.data.line_notified_count ?? 0) + 1;
+      const saved = await db
+        .from(table)
+        .update({ line_notified_at: now, line_notified_count: count })
+        .eq("id", id);
+      if (saved.error) console.error("[stamp-line-notified]", saved.error.message);
+    }
+  }
 }

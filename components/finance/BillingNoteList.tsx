@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/table";
 import { SortHeaderButton } from "@/components/finance/billing-sort-controls";
 import { cn } from "@/lib/utils";
-import { formatThaiDate } from "@/lib/utils/date-formatter";
+import { formatThaiDate, formatThaiDateTime } from "@/lib/utils/date-formatter";
 import { monthKeyFromIso, thaiMonthLabel } from "@/lib/utils/billing-period";
 import {
   matchesBillingStatus,
@@ -116,6 +116,24 @@ function statusBadge(status: string) {
     <Badge className="border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-50">
       {status || "—"}
     </Badge>
+  );
+}
+
+function statusWithLineNotice(row: BillingNoteListItem) {
+  const status = row.payment_status.trim().toUpperCase();
+  const paid = status === "PAID" || status === "COMPLETED";
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {statusBadge(row.payment_status)}
+      {paid && row.line_notified_at ? (
+        <span
+          title={`ส่งล่าสุด ${formatThaiDateTime(row.line_notified_at)}`}
+          className="inline-flex items-center rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white"
+        >
+          💬 ส่ง LINE แล้ว
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -418,7 +436,7 @@ export function BillingNoteList({
                           <TableCell className="font-mono text-sm font-semibold">{row.doc_no}</TableCell>
                           <TableCell>{row.contact_name}</TableCell>
                           <TableCell className="text-right tabular-nums">฿{formatMoney(row.grand_total)}</TableCell>
-                          <TableCell>{statusBadge(row.payment_status)}</TableCell>
+                          <TableCell>{statusWithLineNotice(row)}</TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-1">
                               <Link
@@ -617,9 +635,7 @@ export function BillingNoteList({
                       <TableCell className="whitespace-nowrap text-right font-medium tabular-nums text-slate-900">
                         ฿{formatMoney(row.grand_total)}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {statusBadge(row.payment_status)}
-                      </TableCell>
+                      <TableCell className="whitespace-nowrap">{statusWithLineNotice(row)}</TableCell>
                       <TableCell className="whitespace-nowrap text-right">
                         <div className="flex justify-end gap-1">
                           {canPay ? (

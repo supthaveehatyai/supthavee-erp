@@ -5,6 +5,7 @@ type PaidSettlementBarProps = {
   dateLabel: string;
   channelLabel: string;
   lineSent: boolean;
+  lineNotifiedAt?: string | null;
   slipUrl?: string | null;
   onSendLine: () => void;
   onCopy: () => void;
@@ -19,6 +20,7 @@ export function PaidSettlementBar({
   dateLabel,
   channelLabel,
   lineSent,
+  lineNotifiedAt,
   slipUrl,
   onSendLine,
   onCopy,
@@ -52,7 +54,7 @@ export function PaidSettlementBar({
           </button>
         ) : null}
         <button type="button" onClick={onSendLine} className={actionClass}>
-          📲 ส่งสลิปทาง LINE
+          {lineNotifiedAt ? "✅ ส่งสลิปทาง LINE แล้ว (ส่งซ้ำ)" : "📲 ส่งสลิปทาง LINE"}
         </button>
         <button type="button" onClick={onCopy} className={actionClass}>
           📋 คัดลอกข้อความ

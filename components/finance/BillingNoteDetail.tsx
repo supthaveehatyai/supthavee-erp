@@ -199,7 +199,7 @@ function PaidSettlementCard({
 }) {
   const [linePayment, setLinePayment] = useState<BillingNoteSettlement | null>(null);
   const [replacePayment, setReplacePayment] = useState<BillingNoteSettlement | null>(null);
-  const [sentNos, setSentNos] = useState<string[]>([]);
+  const [sentAtByNo, setSentAtByNo] = useState<Record<string, string>>({});
 
   async function copyMessage(payment: BillingNoteSettlement) {
     try {
@@ -218,19 +218,23 @@ function PaidSettlementCard({
         </div>
       ) : (
         <div className="flex flex-col gap-1.5">
-          {settlements.map((payment) => (
+          {settlements.map((payment) => {
+            const notifiedAt = payment.line_notified_at || sentAtByNo[payment.doc_no] || null;
+            return (
             <PaidSettlementBar
               key={payment.doc_no}
               docNo={payment.doc_no}
               dateLabel={formatThaiDate(payment.paid_at ?? "", "short")}
               channelLabel={payment.channel_label}
-              lineSent={payment.line_sent || sentNos.includes(payment.doc_no)}
+              lineSent={payment.line_sent || Boolean(notifiedAt)}
+              lineNotifiedAt={notifiedAt}
               slipUrl={payment.slip_urls[0]}
               onSendLine={() => setLinePayment(payment)}
               onCopy={() => void copyMessage(payment)}
               onReplaceSlip={() => setReplacePayment(payment)}
             />
-          ))}
+            );
+          })}
         </div>
       )}
       <LinePaymentSlipDialog
@@ -242,10 +246,17 @@ function PaidSettlementCard({
         contactName={contactName}
         billingNoteNo={billingNoteNo}
         paymentDocNo={linePayment?.doc_no}
+        lastNotifiedAt={
+          linePayment
+            ? linePayment.line_notified_at || sentAtByNo[linePayment.doc_no] || null
+            : null
+        }
         messageText={linePayment ? transferMessage(contactName, linePayment) : ""}
         slipUrl={linePayment?.slip_urls.find((url) => url.startsWith("https://")) ?? null}
         onSent={() => {
-          if (linePayment?.doc_no) setSentNos((current) => [...current, linePayment.doc_no]);
+          if (linePayment?.doc_no) {
+            setSentAtByNo((current) => ({ ...current, [linePayment.doc_no]: new Date().toISOString() }));
+          }
         }}
       />
       <ReplacePaymentSlipDialog

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { formatThaiDateTime } from "@/lib/utils/date-formatter";
 import {
   diagnoseAndSyncLineWebhookAction,
   listLineKnownGroupsAction,
@@ -111,6 +112,7 @@ export type LinePaymentSlipDialogProps = {
   paymentDocNo?: string | null;
   messageText: string;
   slipUrl?: string | null;
+  lastNotifiedAt?: string | null;
   onSent?: () => void;
 };
 
@@ -123,6 +125,7 @@ export function LinePaymentSlipDialog({
   paymentDocNo,
   messageText,
   slipUrl,
+  lastNotifiedAt,
   onSent,
 }: LinePaymentSlipDialogProps) {
   const [groups, setGroups] = useState<KnownGroup[]>([]);
@@ -290,6 +293,11 @@ export function LinePaymentSlipDialog({
         <DialogHeader>
           <DialogTitle>ส่งสลิปโอนเงินแจ้งคู่ค้าผ่าน LINE OA (@hzr1801v)</DialogTitle>
         </DialogHeader>
+        {lastNotifiedAt ? (
+          <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
+            ส่งสำเร็จล่าสุด: {formatThaiDateTime(lastNotifiedAt)} — กดส่งอีกครั้งจะเป็นการส่งซ้ำเข้ากลุ่มคู่ค้า
+          </p>
+        ) : null}
         <div className="space-y-3">
           <div className="space-y-1">
             <Label htmlFor="line-chat-url">ลิงก์ห้องแชท LINE OA (จากหน้า chat.line.biz)</Label>

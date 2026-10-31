@@ -122,6 +122,7 @@ export type BillingNoteListItem = {
   grand_total: number;
   payment_status: string;
   invoice_count: number;
+  line_notified_at: string | null;
 };
 
 export type PendingBillReceipt = {
@@ -141,6 +142,7 @@ export type BillingNoteSettlement = {
   amount: number;
   slip_urls: string[];
   line_sent: boolean;
+  line_notified_at: string | null;
 };
 
 export type GetBillingNotesResult = {

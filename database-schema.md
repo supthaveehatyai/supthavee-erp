@@ -76,11 +76,11 @@ technician_rates (เรตค่าแรงช่างผูกกับ prod
 
 4. Documents & Financials (เอกสารและการเงิน)
 
-documents (เอกสารหลักทั้งระบบ — PK: id, doc_no, doc_type, doc_date, contact_id, vat_type [ENUM: vat_calculation_type], sub_total [มีขีดล่าง _ คั่น], discount_amount, vat_amount, grand_total, status [DRAFT | PENDING | ISSUED | VOID | PAID], payment_status [UNPAID | PARTIAL | PAID], accounting_tax_tier [CORP_VAT | RECEIPT_1_2 | INTERNAL_1_3], cash_receipt_no เช่น CA01/0001, attachment_urls TEXT[], attachments JSONB, freight_cost / origin_freight_amount, dest_freight_cost / dest_freight_amount, dest_freight_paid_status [NOT NULL, Default 'NONE' ควบคุมผ่าน Trigger trg_sanitize_document_defaults], carrier_id, sales_channel, ecommerce_order_no, ecommerce_buyer_name, tracking_no, one_time_address, created_by)
+documents (เอกสารหลักทั้งระบบ — PK: id, doc_no, doc_type, doc_date, contact_id, vat_type [ENUM: vat_calculation_type], sub_total [มีขีดล่าง _ คั่น], discount_amount, vat_amount, grand_total, status [DRAFT | PENDING | ISSUED | VOID | PAID], payment_status [UNPAID | PARTIAL | PAID], accounting_tax_tier [CORP_VAT | RECEIPT_1_2 | INTERNAL_1_3], cash_receipt_no เช่น CA01/0001, attachment_urls TEXT[], attachments JSONB, line_notified_at timestamptz, line_notified_count integer, freight_cost / origin_freight_amount, dest_freight_cost / dest_freight_amount, dest_freight_paid_status [NOT NULL, Default 'NONE' ควบคุมผ่าน Trigger trg_sanitize_document_defaults], carrier_id, sales_channel, ecommerce_order_no, ecommerce_buyer_name, tracking_no, one_time_address, created_by)
 
 document_items (รายการสินค้าในเอกสาร — PK: id, document_id, product_id, qty NUMERIC(14,4), uom_used, unit_price, unit_cost_price, net_unit_cost, line_total, prorated_freight, technician_id, wage_cost, technician_bill_id, mockup_image_url)
 
-doc_headers / doc_details (ตารางเอกสารคู่ขนานสำหรับระบบรับสินค้าและ FK ของ billing_note_items — มีคอลัมน์ attachment_urls TEXT[], attachments JSONB)
+doc_headers / doc_details (ตารางเอกสารคู่ขนานสำหรับระบบรับสินค้าและ FK ของ billing_note_items — มีคอลัมน์ attachment_urls TEXT[], attachments JSONB, line_notified_at timestamptz, line_notified_count integer)
 
 document_allocations (การตัดยอดหนี้ / มัดจำ / ลดหนี้ / คืนเงิน — PK: id, receipt_doc_id, invoice_doc_id, allocated_amount, wht_amount, original_receipt_received)
 

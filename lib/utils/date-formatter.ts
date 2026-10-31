@@ -90,6 +90,27 @@ export function formatThaiDate(
   return `${day}/${month}/${year}`;
 }
 
+/** วัน-เวลา พ.ศ. ตาม Asia/Bangkok เช่น 30/10/2569 14:05 */
+export function formatThaiDateTime(date: string | Date): string {
+  const parsed = parseToDate(date);
+  if (!parsed) return "—";
+  const parts = createThaiFormatter({
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(parsed);
+  const day = readPart(parts, "day").padStart(2, "0");
+  const month = readPart(parts, "month").padStart(2, "0");
+  const year = readPart(parts, "year");
+  const hour = readPart(parts, "hour").padStart(2, "0");
+  const minute = readPart(parts, "minute").padStart(2, "0");
+  if (!day || !month || !year || !hour || !minute) return "—";
+  return `${day}/${month}/${year} ${hour}:${minute}`;
+}
+
 /**
  * Timestamp for Excel export filenames — `YYMMDDHHmmss` (Asia/Bangkok).
  * Native Intl only — ไม่เพิ่ม date-fns / dayjs
