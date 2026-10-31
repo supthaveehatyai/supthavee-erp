@@ -31,6 +31,8 @@ export type ExpenseAttachmentPreviewProps = {
   /** Phase 14 Tiered Storage — from payment_transactions (Server-resolved props) */
   storageTier?: StorageTier | null;
   nasArchiveUrl?: string | null;
+  /** Large bill preview on the expense detail page. */
+  prominent?: boolean;
 };
 
 function isProbablyImageUrl(url: string): boolean {
@@ -55,6 +57,7 @@ export function ExpenseAttachmentPreview({
   viewFullLabel = "ขยายดูเต็มจอ",
   storageTier = "CLOUD",
   nasArchiveUrl = null,
+  prominent = false,
 }: ExpenseAttachmentPreviewProps) {
   const resolved = resolveStorageDisplayUrl({
     storageTier,
@@ -92,12 +95,20 @@ export function ExpenseAttachmentPreview({
     return <p className="text-sm text-slate-500">{emptyLabel}</p>;
   }
 
-  const showImage = isProbablyImageUrl(url) || isHttpUrl(url);
+  const isPdf = /\.pdf($|\?)/i.test(url.split("?")[0] ?? "");
+  const showImage = !isPdf && (isProbablyImageUrl(url) || isHttpUrl(url));
   const sheetTitle = `${title} · ${documentNo}`;
+  const frameClass = prominent ? "relative h-[640px] w-full" : "relative mx-auto max-h-64 min-h-40 w-full";
 
   return (
     <div className="space-y-3">
-      {showImage ? (
+      {isPdf ? (
+        <iframe
+          title={sheetTitle}
+          src={url}
+          className={prominent ? "h-[640px] w-full rounded-xl border" : "h-80 w-full rounded-xl border"}
+        />
+      ) : showImage ? (
         <AttachmentSheetViewer
           fileUrl={url}
           title={sheetTitle}
@@ -107,17 +118,17 @@ export function ExpenseAttachmentPreview({
               type="button"
               className="group relative block w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-50 text-left transition hover:border-blue-300 hover:shadow-sm"
             >
-              <div className="relative mx-auto max-h-64 min-h-40 w-full">
+              <div className={frameClass}>
                 <TieredStorageImage
                   src={url}
                   alt={`${title} ${documentNo}`}
                   storageTier={tier}
                   nasPath={resolved.nasPath}
                   fill
-                  sizes="(max-width: 768px) 100vw, 480px"
+                  sizes={prominent ? "(max-width: 1280px) 100vw, 960px" : "(max-width: 768px) 100vw, 480px"}
                   objectFit="contain"
                   showTierBadge={tier === "NAS"}
-                  className="max-h-64"
+                  className={prominent ? "h-[640px]" : "max-h-64"}
                 />
               </div>
               <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-lg bg-white/95 px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm opacity-90 group-hover:opacity-100">

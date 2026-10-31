@@ -1631,6 +1631,7 @@ export async function getExpenseById(
 
     const supabaseAdmin = createSupabaseAdminClient();
     // Must include payment_slip_url (+ WHT) — explicit column lists strip omitted fields.
+    // Embed bank only through bank_account_id. A second FK to mst_bank_accounts makes an unqualified embed fail.
     const { data, error } = await supabaseAdmin
       .from("expenses")
       .select(
@@ -1638,7 +1639,7 @@ export async function getExpenseById(
         ${EXPENSE_ROW_SELECT},
         mst_expense_categories ( category_name ),
         contacts:vendor_id ( company_name ),
-        mst_bank_accounts (
+        mst_bank_accounts!bank_account_id (
           bank_name,
           account_no,
           account_name

@@ -365,12 +365,12 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
         </Card>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 print:hidden md:grid-cols-2">
-        <Card>
+      <div className="grid grid-cols-1 gap-4 print:hidden xl:grid-cols-3">
+        <Card className="xl:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">ใบเสร็จแนบ (Receipt)</CardTitle>
             <CardDescription>
-              ไฟล์จาก Storage bucket expense_documents
+              รูปบิลจาก OCR — ตรวจตัวเลขก่อนกดยืนยันออกเอกสาร
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -381,6 +381,7 @@ export default async function ExpenseDetailPage({ params }: PageProps) {
               emptyLabel="ไม่มีไฟล์แนบ"
               fileLabel="ไฟล์แนบใบเสร็จ"
               viewFullLabel="ดูใบเสร็จเต็มจอ"
+              prominent
             />
           </CardContent>
         </Card>
