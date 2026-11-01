@@ -102,11 +102,28 @@ function createLineFromProduct(
   };
 }
 
+function createServiceLine(): SalesLineItem {
+  return {
+    key: `service-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    product_id: null,
+    sku: "SERVICE",
+    description: "",
+    qty: 1,
+    uom_used: "งาน",
+    unit_price: 0,
+    cost_price: 0,
+    discount_text: "",
+    discount_amount: 0,
+    line_total: 0,
+    image_url: null,
+  };
+}
+
 function linesFromDocument(doc: DocumentDetail): SalesLineItem[] {
   return doc.items.map((item, index) => ({
     key: item.id || `${item.product_id ?? "line"}-${index}`,
-    product_id: item.product_id ?? "",
-    sku: item.sku ?? "—",
+    product_id: item.product_id,
+    sku: item.product_id ? (item.sku ?? "—") : "SERVICE",
     description: item.description || item.product_name || "",
     qty: Number(item.qty ?? 0),
     uom_used: item.uom_used?.trim() || "ตัว",
@@ -154,6 +171,11 @@ export default function SalesEditWorkspace({
       : "EXCLUSIVE",
   );
   const [notes, setNotes] = useState(initialDocument.notes ?? "");
+  const [docDate, setDocDate] = useState(
+    () =>
+      (initialDocument.doc_date || "").slice(0, 10) ||
+      new Date().toISOString().slice(0, 10),
+  );
   const [salesChannelFields, setSalesChannelFields] =
     useState<SalesChannelFieldsValue>(() =>
       salesChannelFieldsFromDocument(initialDocument),
@@ -334,8 +356,12 @@ export default function SalesEditWorkspace({
         toast.error("กรุณาเพิ่มรายการสินค้าอย่างน้อย 1 รายการ");
         return;
       }
-      if (lineItems.some((row) => !row.product_id || row.qty <= 0)) {
-        toast.error("รายการสินค้าไม่ครบถ้วน หรือจำนวนต้องมากกว่า 0");
+      if (lineItems.some((row) => row.qty <= 0)) {
+        toast.error("จำนวนสินค้าต้องมากกว่า 0");
+        return;
+      }
+      if (lineItems.some((row) => !row.product_id && !row.description.trim())) {
+        toast.error("กรุณาระบุรายละเอียดรายการบริการ");
         return;
       }
     }
@@ -355,7 +381,7 @@ export default function SalesEditWorkspace({
         document_id: initialDocument.id,
         contact_id: hideContactPicker ? null : contactId,
         contact_person_id: hideContactPicker ? null : contactPersonId || null,
-        doc_date: initialDocument.doc_date || new Date().toISOString().slice(0, 10),
+        doc_date: docDate,
         discount_text: discountText.trim() || null,
         vat_type: vatType,
         vat_rate: DEFAULT_VAT_RATE,
@@ -373,7 +399,7 @@ export default function SalesEditWorkspace({
         items: isReplacement
           ? undefined
           : lineItems.map((row, index) => ({
-              product_id: row.product_id,
+              product_id: row.product_id || null,
               description: row.description,
               qty: row.qty,
               uom_used: row.uom_used,
@@ -467,6 +493,16 @@ export default function SalesEditWorkspace({
           <div className="space-y-1.5">
             <Label>เลขที่เอกสาร</Label>
             <Input value={initialDocument.doc_no} disabled readOnly />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="doc-date">วันที่เอกสาร (doc_date)</Label>
+            <Input
+              id="doc-date"
+              type="date"
+              value={docDate}
+              disabled={isPending}
+              onChange={(event) => setDocDate(event.target.value)}
+            />
           </div>
           <div className="space-y-1.5">
             <Label>
@@ -586,10 +622,21 @@ export default function SalesEditWorkspace({
         </CardHeader>
         <CardContent className="space-y-4">
           {!isReplacement ? (
-            <ModelMatrixPicker
-              onAddToBill={handleAddToBill}
-              disabled={isPending}
-            />
+            <div className="flex flex-col gap-3">
+              <ModelMatrixPicker
+                onAddToBill={handleAddToBill}
+                disabled={isPending}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isPending}
+                onClick={() => setLineItems((current) => [...current, createServiceLine()])}
+                className="h-9 w-fit"
+              >
+                + เพิ่มรายการบริการ / ค่าสกรีน / ค่าปัก / กำหนดเอง
+              </Button>
+            </div>
           ) : null}
 
           <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
@@ -642,7 +689,25 @@ export default function SalesEditWorkspace({
                         {row.sku}
                       </TableCell>
                       <TableCell className="max-w-[14rem] px-3 text-sm">
-                        {displayDocumentItemDescription(row.description)}
+                        {!isReplacement && !row.product_id ? (
+                          <Input
+                            value={row.description}
+                            disabled={isPending}
+                            placeholder="รายละเอียดบริการ"
+                            onChange={(event) =>
+                              setLineItems((current) =>
+                                current.map((line) =>
+                                  line.key === row.key
+                                    ? { ...line, description: event.target.value }
+                                    : line,
+                                ),
+                              )
+                            }
+                            className="h-9"
+                          />
+                        ) : (
+                          displayDocumentItemDescription(row.description)
+                        )}
                       </TableCell>
                       <TableCell className="px-3">
                         {isReplacement ? (
@@ -664,7 +729,24 @@ export default function SalesEditWorkspace({
                         )}
                       </TableCell>
                       <TableCell className="px-3 text-xs text-slate-600">
-                        {row.uom_used}
+                        {!isReplacement && !row.product_id ? (
+                          <Input
+                            value={row.uom_used}
+                            disabled={isPending}
+                            onChange={(event) =>
+                              setLineItems((current) =>
+                                current.map((line) =>
+                                  line.key === row.key
+                                    ? { ...line, uom_used: event.target.value }
+                                    : line,
+                                ),
+                              )
+                            }
+                            className="h-9 w-20"
+                          />
+                        ) : (
+                          row.uom_used
+                        )}
                       </TableCell>
                       <TableCell className="px-3">
                         {isReplacement ? (

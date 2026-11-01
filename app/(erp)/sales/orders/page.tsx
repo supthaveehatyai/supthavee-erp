@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { ClipboardList, Plus } from "lucide-react";
 import { getSalesOrders } from "@/lib/actions/sales-order-actions";
 import type { DocumentStatus } from "@/types/document";
-import { formatThaiDate } from "@/lib/utils/date-formatter";
+import { formatShortDateTh, formatThaiDate } from "@/lib/utils/date-formatter";
 import DocumentFilter from "@/components/documents/document-filter";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -63,6 +63,29 @@ function statusBadge(status: DocumentStatus) {
   return (
     <Badge variant="slate" className="font-semibold">
       {status}
+    </Badge>
+  );
+}
+
+function paymentBadge(paymentStatus: string, isBilled: boolean) {
+  const normalized = paymentStatus.trim().toUpperCase();
+  if (normalized === "PAID") {
+    return (
+      <Badge className="border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
+        ชำระแล้ว (PAID)
+      </Badge>
+    );
+  }
+  if (isBilled) {
+    return (
+      <Badge className="border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-50">
+        วางบิลแล้ว
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-50">
+      ค้างชำระ
     </Badge>
   );
 }
@@ -156,20 +179,36 @@ export default async function SalesOrdersPage({ searchParams }: PageProps) {
                   </TableRow>
                 ) : (
                   documents.map((doc) => (
-                    <TableRow key={doc.id}>
-                      <TableCell className="whitespace-nowrap text-slate-700">
-                        {formatThaiDate(doc.doc_date || doc.created_at, "short")}
+                    <TableRow
+                      key={doc.id}
+                      className="odd:bg-white even:bg-slate-50/90 hover:bg-blue-50/60 transition-colors"
+                    >
+                      <TableCell
+                        className="whitespace-nowrap text-slate-700"
+                        title={formatThaiDate(doc.doc_date || doc.created_at)}
+                      >
+                        {formatShortDateTh(doc.doc_date || doc.created_at)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap font-mono text-sm font-semibold text-slate-900">
                         {doc.doc_no}
                       </TableCell>
-                      <TableCell className="text-slate-700">
-                        {doc.customer_name || "—"}
+                      <TableCell>
+                        <span
+                          className="block max-w-[200px] truncate text-slate-700"
+                          title={doc.customer_name ?? ""}
+                        >
+                          {doc.customer_name || "—"}
+                        </span>
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums text-slate-800">
                         {formatMoney(doc.grand_total)}
                       </TableCell>
-                      <TableCell>{statusBadge(doc.status)}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {statusBadge(doc.status)}
+                          {paymentBadge(doc.payment_status, doc.is_billed)}
+                        </div>
+                      </TableCell>
                       <TableCell className="whitespace-nowrap text-right">
                         <div className="flex justify-end gap-2">
                           {doc.status === "DRAFT" ? (

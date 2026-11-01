@@ -50,6 +50,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import IssueDocumentButton from "./issue-document-button";
+import { SalesHeaderEditDialog } from "./sales-header-edit-dialog";
 import IssueCreditNoteButton from "./issue-credit-note-button";
 import DeleteDraftDocumentButton from "./delete-draft-document-button";
 import VoidDocumentActions from "./void-document-actions";
@@ -332,6 +333,9 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   const isCreditNoteIssued =
     isCreditNote && (doc.status === "ISSUED" || doc.status === "COMPLETED");
   const canEditDraft = canIssue && !isCreditNoteIssued;
+  const canEditIssuedHeader =
+    !isCreditNote &&
+    (doc.status === "ISSUED" || doc.status === "COMPLETED");
   const canPrint =
     isReceiptDoc ||
     isSettlementDoc ||
@@ -484,6 +488,13 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
             เปิดบิลใหม่
           </Link>
           {canPrint && <PrintDocumentButton className="h-10 gap-2" />}
+          {canEditIssuedHeader ? (
+            <SalesHeaderEditDialog
+              documentId={doc.id}
+              docDate={doc.doc_date}
+              notes={doc.notes ?? ""}
+            />
+          ) : null}
           {canSendToProduction && (
             <SendToProductionButton
               documentId={doc.id}

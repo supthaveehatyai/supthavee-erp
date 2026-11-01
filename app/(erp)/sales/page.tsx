@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { FileText, Plus } from "lucide-react";
 import { getSalesDocuments } from "@/lib/actions/document-actions";
+import { formatShortDateTh, formatThaiDate } from "@/lib/utils/date-formatter";
 import type { DocumentStatus, DocumentType } from "@/types/document";
 import DocumentFilter from "@/components/documents/document-filter";
 import { Badge } from "@/components/ui/badge";
@@ -39,17 +40,6 @@ function formatMoney(value: number): string {
   return value.toLocaleString("th-TH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  });
-}
-
-function formatDate(value: string | null | undefined): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("th-TH", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
   });
 }
 
@@ -96,6 +86,29 @@ function statusBadge(status: DocumentStatus) {
   return (
     <Badge variant="slate" className="font-semibold">
       {status}
+    </Badge>
+  );
+}
+
+function paymentBadge(paymentStatus: string, isBilled: boolean) {
+  const normalized = paymentStatus.trim().toUpperCase();
+  if (normalized === "PAID") {
+    return (
+      <Badge className="border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
+        ชำระแล้ว (PAID)
+      </Badge>
+    );
+  }
+  if (isBilled) {
+    return (
+      <Badge className="border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-50">
+        วางบิลแล้ว
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-50">
+      ค้างชำระ
     </Badge>
   );
 }
@@ -200,9 +213,15 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
                   </TableRow>
                 ) : (
                   documents.map((doc) => (
-                    <TableRow key={doc.id}>
-                      <TableCell className="whitespace-nowrap text-slate-700">
-                        {formatDate(doc.doc_date || doc.created_at)}
+                    <TableRow
+                      key={doc.id}
+                      className="odd:bg-white even:bg-slate-50/90 hover:bg-blue-50/60 transition-colors"
+                    >
+                      <TableCell
+                        className="whitespace-nowrap text-slate-700"
+                        title={formatThaiDate(doc.doc_date || doc.created_at)}
+                      >
+                        {formatShortDateTh(doc.doc_date || doc.created_at)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap font-mono text-sm font-semibold text-slate-900">
                         {doc.doc_no}
@@ -215,14 +234,22 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
                           ({doc.doc_type})
                         </span>
                       </TableCell>
-                      <TableCell className="max-w-[220px] truncate text-slate-700">
-                        {doc.customer_name ?? "—"}
+                      <TableCell>
+                        <span
+                          className="block max-w-[200px] truncate text-slate-700"
+                          title={doc.customer_name ?? ""}
+                        >
+                          {doc.customer_name || "—"}
+                        </span>
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right font-medium tabular-nums text-slate-900">
                         {formatMoney(doc.grand_total)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
-                        {statusBadge(doc.status)}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {statusBadge(doc.status)}
+                          {paymentBadge(doc.payment_status, doc.is_billed)}
+                        </div>
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right">
                         <Link

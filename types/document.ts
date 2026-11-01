@@ -99,7 +99,8 @@ export type CreateDocumentResult = {
 
 /** Line payload for `createDraftDocument` — prices come from the sales UI. */
 export type CreateDraftDocumentItemInput = {
-  product_id: string;
+  /** Null for a free-text service line (screen / embroidery / freight). */
+  product_id: string | null;
   description?: string;
   qty: number;
   uom_used?: string;
@@ -120,6 +121,8 @@ export type CreateDraftDocumentInput = {
   contact_person_id?: string | null;
   /** Optional ISO date `YYYY-MM-DD` — defaults to today. */
   doc_date?: string | null;
+  /** Job name / customer PO / remark — maps to `documents.notes`. */
+  notes?: string | null;
   items?: CreateDraftDocumentItemInput[];
   /** Bill discount text e.g. "10%" or "500". */
   discount_text?: string | null;
@@ -226,7 +229,8 @@ export type SearchProductsForSalesResult = {
 /** Client-side line item before `completeDocument`. */
 export type SalesLineItem = {
   key: string;
-  product_id: string;
+  /** Null when the row is a service / custom charge, not a stock SKU. */
+  product_id: string | null;
   sku: string;
   description: string;
   qty: number;
@@ -472,6 +476,9 @@ export type SalesDocumentListItem = {
   grand_total: number;
   contact_id: string;
   customer_name: string | null;
+  payment_status: string;
+  /** True when this doc_no is already on a billing note. */
+  is_billed: boolean;
 };
 
 export type SalesDocumentFilters = {

@@ -15,9 +15,9 @@ import { toast } from "sonner";
 import {
   createDraftDocument,
   getContactPersons,
+  issueDocument,
 } from "@/lib/actions/document-actions";
 import { VAT_OPTIONS } from "@/lib/constants/accounting";
-import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import {
   DEFAULT_SALES_CREATE_DOC_TYPE,
   isSalesContactRequired,
@@ -131,6 +131,23 @@ function createLineFromProduct(
   };
 }
 
+function createServiceLine(): SalesLineItem {
+  return {
+    key: `service-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    product_id: null,
+    sku: "SERVICE",
+    description: "",
+    qty: 1,
+    uom_used: "งาน",
+    unit_price: 0,
+    cost_price: 0,
+    discount_text: "",
+    discount_amount: 0,
+    line_total: 0,
+    image_url: null,
+  };
+}
+
 export type SalesCreateWorkspaceProps = {
   customers: CustomerOption[];
   customersError?: string | null;
@@ -155,6 +172,10 @@ export default function SalesCreateWorkspace({
   const [vatType, setVatType] = useState<VatCalculationType>(INITIAL_VAT_TYPE);
   const [salesChannelFields, setSalesChannelFields] =
     useState<SalesChannelFieldsValue>(INITIAL_SALES_CHANNEL_FIELDS);
+  const [docDate, setDocDate] = useState(
+    () => new Date().toISOString().slice(0, 10),
+  );
+  const [notes, setNotes] = useState("");
   const [isPending, startTransition] = useTransition();
 
   const hideContactPicker = shouldHideSalesContactPicker({
@@ -262,6 +283,8 @@ export default function SalesCreateWorkspace({
     setDiscountText("");
     setVatType(INITIAL_VAT_TYPE);
     setSalesChannelFields(INITIAL_SALES_CHANNEL_FIELDS);
+    setDocDate(new Date().toISOString().slice(0, 10));
+    setNotes("");
   }
 
   function handleDocTypeChange(next: string) {
@@ -349,7 +372,23 @@ export default function SalesCreateWorkspace({
     setLineItems((current) => current.filter((row) => row.key !== key));
   }
 
-  function handleCreateDraft() {
+  function addServiceLine() {
+    clearLastSavedArtifact();
+    setLineItems((current) => [...current, createServiceLine()]);
+  }
+
+  function updateLineText(
+    key: string,
+    field: "description" | "uom_used",
+    value: string,
+  ) {
+    clearLastSavedArtifact();
+    setLineItems((current) =>
+      current.map((row) => (row.key === key ? { ...row, [field]: value } : row)),
+    );
+  }
+
+  function handleCreateDraft(issueNow: boolean) {
     if (contactRequired && !contactId) {
       toast.error("กรุณาเลือกลูกค้าก่อนสร้างเอกสาร");
       return;
@@ -360,6 +399,10 @@ export default function SalesCreateWorkspace({
     }
     if (lineItems.some((row) => row.qty <= 0)) {
       toast.error("จำนวนสินค้าต้องมากกว่า 0");
+      return;
+    }
+    if (lineItems.some((row) => !row.product_id && !row.description.trim())) {
+      toast.error("กรุณาระบุรายละเอียดรายการบริการ");
       return;
     }
     if (!isSalesTradingDocType(docType)) {
@@ -382,7 +425,8 @@ export default function SalesCreateWorkspace({
         doc_type: docType,
         contact_id: hideContactPicker ? null : contactId,
         contact_person_id: hideContactPicker ? null : contactPersonId || null,
-        doc_date: new Date().toISOString().slice(0, 10),
+        doc_date: docDate,
+        notes: notes.trim() || null,
         discount_text: discountText.trim() || null,
         vat_type: vatType,
         vat_rate: DEFAULT_VAT_RATE,
@@ -397,7 +441,7 @@ export default function SalesCreateWorkspace({
         tracking_no: header.data.tracking_no,
         one_time_address: header.data.one_time_address,
         items: lineItems.map((row, index) => ({
-          product_id: row.product_id,
+          product_id: row.product_id || null,
           description: row.description,
           qty: row.qty,
           uom_used: row.uom_used,
@@ -415,17 +459,42 @@ export default function SalesCreateWorkspace({
         return;
       }
 
-      const docNo = result.data.document_no;
-      toast.success(`สร้างเอกสาร ${docNo} สำเร็จ`);
+      const draftNo = result.data.document_no;
+      const documentId = result.data.document_id;
+      if (issueNow) {
+        const issued = await issueDocument(documentId);
+        if (issued.error || !issued.data) {
+          toast.error(
+            issued.error ??
+              "บันทึกร่างแล้ว แต่ออกเลขบิลไม่สำเร็จ — เปิดร่างเพื่อออกเอกสารต่อ",
+          );
+          router.push(`/sales/${encodeURIComponent(draftNo)}`);
+          router.refresh();
+          return;
+        }
+        toast.success(
+          issued.data.successMessage ??
+            `ออกบิล ${issued.data.document_no} แล้ว`,
+        );
+        setLastSavedDocNo(issued.data.document_no);
+        resetFormToInitial();
+        router.refresh();
+        router.push(
+          `/sales/${encodeURIComponent(issued.data.document_no)}`,
+        );
+        return;
+      }
+
+      toast.success(`สร้างเอกสาร ${draftNo} สำเร็จ`);
 
       // 1) Show success artifact briefly
-      setLastSavedDocNo(docNo);
+      setLastSavedDocNo(draftNo);
       // 2) Hard-reset all draft form state so nothing sticks
       resetFormToInitial();
       // 3) Invalidate Next.js client cache / re-fetch server props
       router.refresh();
       // 4) Open read-only document view for issue / complete flow
-      router.push(`/sales/${encodeURIComponent(docNo)}`);
+      router.push(`/sales/${encodeURIComponent(draftNo)}`);
     });
   }
 
@@ -478,7 +547,7 @@ export default function SalesCreateWorkspace({
             className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
             onSubmit={(event) => {
               event.preventDefault();
-              handleCreateDraft();
+              handleCreateDraft(false);
             }}
           >
             <div className="space-y-1.5">
@@ -558,6 +627,38 @@ export default function SalesCreateWorkspace({
               </>
             )}
 
+            <div className="space-y-1.5">
+              <Label htmlFor="doc-date">วันที่เอกสาร (doc_date)</Label>
+              <Input
+                id="doc-date"
+                type="date"
+                value={docDate}
+                disabled={isPending}
+                onChange={(event) => {
+                  clearLastSavedArtifact();
+                  setDocDate(event.target.value);
+                }}
+                className="h-10"
+              />
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2 lg:col-span-3">
+              <Label htmlFor="sales-notes">
+                หมายเหตุ / ชื่องาน / เลขใบสั่งซื้อลูกค้า (notes)
+              </Label>
+              <Input
+                id="sales-notes"
+                value={notes}
+                disabled={isPending}
+                placeholder="เช่น งานสกรีนเสื้อโปโล / PO-2569-010"
+                onChange={(event) => {
+                  clearLastSavedArtifact();
+                  setNotes(event.target.value);
+                }}
+                className="h-10"
+              />
+            </div>
+
             <SalesChannelFields
               value={salesChannelFields}
               onChange={(next) => {
@@ -569,18 +670,33 @@ export default function SalesCreateWorkspace({
               platformClassName="sm:col-span-2 lg:col-span-4"
             />
 
-            <div className="flex items-end">
+            <div className="flex flex-col gap-2 sm:col-span-2 sm:flex-row lg:col-span-4">
               <Button
-                type="submit"
+                type="button"
                 disabled={
                   isPending ||
                   lineItems.length === 0 ||
                   (contactRequired && !contactId)
                 }
-                className="h-10 w-full gap-2"
+                className="h-10 flex-1 gap-2 bg-blue-800 text-white hover:bg-blue-900"
+                onClick={() => handleCreateDraft(true)}
+              >
+                {isPending
+                  ? "กำลังบันทึก..."
+                  : "✅ บันทึกและออกบิลขายทันที (ออกเลขจริง + ตัดสต็อก)"}
+              </Button>
+              <Button
+                type="submit"
+                variant="outline"
+                disabled={
+                  isPending ||
+                  lineItems.length === 0 ||
+                  (contactRequired && !contactId)
+                }
+                className="h-10 gap-2"
               >
                 <FilePlus2 className="size-4" />
-                {isPending ? "กำลังบันทึก..." : DOCUMENT_ACTIONS.SAVE_DRAFT}
+                {isPending ? "กำลังบันทึก..." : "💾 บันทึกร่าง (Draft)"}
               </Button>
             </div>
           </form>
@@ -601,8 +717,7 @@ export default function SalesCreateWorkspace({
             onAddToBill={handleAddToBill}
           />
           <p className="mt-2 text-[11px] text-slate-500">
-            เพิ่มจาก Matrix แล้วปรับราคา/จำนวนในตารางได้ — กด &quot;
-            {DOCUMENT_ACTIONS.SAVE_DRAFT}&quot; เพื่อรันเลขที่บิล + บันทึก
+            เพิ่มจาก Matrix หรือแถวบริการ แล้วปรับราคา/จำนวนในตารางได้ — ปุ่มหลักออกเลขบิลทันที ปุ่มร่างไว้พักบิล
           </p>
         </CardContent>
       </Card>
@@ -617,6 +732,15 @@ export default function SalesCreateWorkspace({
                 : "เลือกรุ่นสินค้าจาก Model Matrix เพื่อเพิ่มลงบิล"}
             </CardDescription>
           </div>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isPending}
+            onClick={addServiceLine}
+            className="h-9 shrink-0"
+          >
+            + เพิ่มรายการบริการ / ค่าสกรีน / ค่าปัก / กำหนดเอง
+          </Button>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -659,10 +783,25 @@ export default function SalesCreateWorkspace({
                         {row.sku}
                       </TableCell>
                       <TableCell className="max-w-[16rem] px-4 text-sm text-slate-700">
-                        <span className="line-clamp-2">{row.description}</span>
-                        <span className="mt-0.5 block text-[10px] text-slate-400">
-                          ต้นทุน snapshot {formatMoney(row.cost_price)} ฿
-                        </span>
+                        {row.product_id ? (
+                          <span className="line-clamp-2">{row.description}</span>
+                        ) : (
+                          <Input
+                            value={row.description}
+                            disabled={isPending}
+                            placeholder="รายละเอียดบริการ"
+                            onChange={(event) =>
+                              updateLineText(row.key, "description", event.target.value)
+                            }
+                            className="h-8"
+                            aria-label="รายละเอียดรายการบริการ"
+                          />
+                        )}
+                        {row.product_id ? (
+                          <span className="mt-0.5 block text-[10px] text-slate-400">
+                            ต้นทุน snapshot {formatMoney(row.cost_price)} ฿
+                          </span>
+                        ) : null}
                       </TableCell>
                       <TableCell className="px-4">
                         <Input
@@ -679,7 +818,19 @@ export default function SalesCreateWorkspace({
                         />
                       </TableCell>
                       <TableCell className="px-4 text-xs text-slate-600">
-                        {row.uom_used}
+                        {row.product_id ? (
+                          row.uom_used
+                        ) : (
+                          <Input
+                            value={row.uom_used}
+                            disabled={isPending}
+                            onChange={(event) =>
+                              updateLineText(row.key, "uom_used", event.target.value)
+                            }
+                            className="h-8 w-20"
+                            aria-label="หน่วยรายการบริการ"
+                          />
+                        )}
                       </TableCell>
                       <TableCell className="px-4">
                         <Input

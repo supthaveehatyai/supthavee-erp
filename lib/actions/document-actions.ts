@@ -300,6 +300,70 @@ async function resolveValidatedSalesContact(input: {
   };
 }
 
+function validateSalesDraftLine(
+  item: { product_id?: string | null; description?: string | null; qty: number; unit_price: number },
+  index: number,
+): string | null {
+  const productId = item.product_id?.trim() ?? "";
+  if (!productId && !item.description?.trim()) {
+    return `รายการที่ ${index + 1}: กรุณาระบุรายละเอียดรายการบริการ`;
+  }
+  if (!Number.isFinite(item.qty) || item.qty <= 0) {
+    return `รายการที่ ${index + 1}: จำนวนต้องมากกว่า 0`;
+  }
+  if (!Number.isFinite(item.unit_price) || item.unit_price < 0) {
+    return `รายการที่ ${index + 1}: ราคาต่อหน่วยไม่ถูกต้อง`;
+  }
+  return null;
+}
+
+function mapSalesDraftLine(
+  item: {
+    product_id?: string | null;
+    description?: string | null;
+    qty: number;
+    uom_used?: string | null;
+    unit_price: number;
+    unit_cost_price?: number | null;
+    discount_text?: string | null;
+    discount_amount?: number | null;
+    line_total: number;
+    sort_order?: number;
+  },
+  index: number,
+  lookup: {
+    costByProductId: Map<string, number>;
+    nameByProductId: Map<string, string>;
+    uomByProductId: Map<string, string>;
+  },
+) {
+  const productId = item.product_id?.trim() ?? "";
+  const snapshotCost = productId && lookup.costByProductId.has(productId)
+    ? lookup.costByProductId.get(productId)!
+    : Number(item.unit_cost_price ?? 0);
+  const discountAmount = Number(item.discount_amount ?? 0);
+  const lineTotal = Number(item.line_total);
+  return {
+    product_id: productId || null,
+    description: (
+      item.description?.trim() ||
+      (productId ? lookup.nameByProductId.get(productId) : "") ||
+      ""
+    ).slice(0, 255),
+    qty: item.qty,
+    uom_used:
+      item.uom_used?.trim() ||
+      (productId ? lookup.uomByProductId.get(productId) : "") ||
+      (productId ? "ตัว" : "งาน"),
+    unit_price: item.unit_price,
+    unit_cost_price: Number.isFinite(snapshotCost) ? snapshotCost : 0,
+    discount_text: item.discount_text?.trim() || null,
+    discount_amount: Number.isFinite(discountAmount) ? discountAmount : 0,
+    line_total: Number.isFinite(lineTotal) ? lineTotal : 0,
+    sort_order: item.sort_order ?? index,
+  };
+}
+
 /**
  * Create a DRAFT document header + optional line items.
  * Late Numbering: uses temporary `DRAFT-YYYYMMDDHHmmss` — official running
@@ -356,21 +420,8 @@ export async function createDraftDocument(
     const contactPersonId = resolvedContact.contactPersonId;
 
     for (const [index, item] of items.entries()) {
-      if (!item.product_id?.trim()) {
-        return { data: null, error: `รายการที่ ${index + 1}: ไม่มี product_id` };
-      }
-      if (!Number.isFinite(item.qty) || item.qty <= 0) {
-        return {
-          data: null,
-          error: `รายการที่ ${index + 1}: จำนวนต้องมากกว่า 0`,
-        };
-      }
-      if (!Number.isFinite(item.unit_price) || item.unit_price < 0) {
-        return {
-          data: null,
-          error: `รายการที่ ${index + 1}: ราคาต่อหน่วยไม่ถูกต้อง`,
-        };
-      }
+      const lineError = validateSalesDraftLine(item, index);
+      if (lineError) return { data: null, error: lineError };
     }
 
     // Late Numbering — do NOT call generate_document_no for drafts.
@@ -382,7 +433,11 @@ export async function createDraftDocument(
     const supabase = createSupabaseServerClient();
 
     const productIds = [
-      ...new Set(items.map((item) => item.product_id.trim()).filter(Boolean)),
+      ...new Set(
+        items
+          .map((item) => item.product_id?.trim() ?? "")
+          .filter((id) => id.length > 0),
+      ),
     ];
     const costByProductId = new Map<string, number>();
     const nameByProductId = new Map<string, string>();
@@ -417,32 +472,13 @@ export async function createDraftDocument(
       }
     }
 
-    const lineRows = items.map((item, index) => {
-      const productId = item.product_id.trim();
-      const snapshotCost = costByProductId.has(productId)
-        ? costByProductId.get(productId)!
-        : Number(item.unit_cost_price ?? 0);
-      const discountAmount = Number(item.discount_amount ?? 0);
-      const lineTotal = Number(item.line_total);
-
-      return {
-        product_id: productId,
-        description: (
-          item.description?.trim() ||
-          nameByProductId.get(productId) ||
-          ""
-        ).slice(0, 255),
-        qty: item.qty,
-        uom_used:
-          item.uom_used?.trim() || uomByProductId.get(productId) || "ตัว",
-        unit_price: item.unit_price,
-        unit_cost_price: Number.isFinite(snapshotCost) ? snapshotCost : 0,
-        discount_text: item.discount_text?.trim() || null,
-        discount_amount: Number.isFinite(discountAmount) ? discountAmount : 0,
-        line_total: Number.isFinite(lineTotal) ? lineTotal : 0,
-        sort_order: item.sort_order ?? index,
-      };
-    });
+    const lineRows = items.map((item, index) =>
+      mapSalesDraftLine(item, index, {
+        costByProductId,
+        nameByProductId,
+        uomByProductId,
+      }),
+    );
 
     const vatType: VatCalculationType = isVatCalculationType(
       String(payload.vat_type ?? "EXCLUSIVE"),
@@ -491,6 +527,10 @@ export async function createDraftDocument(
         ecommerce_buyer_name: header.data.ecommerce_buyer_name,
         tracking_no: header.data.tracking_no,
         one_time_address: header.data.one_time_address,
+        notes:
+          typeof payload.notes === "string"
+            ? payload.notes.trim() || null
+            : null,
         created_by: owner.userId,
         updated_at: nowIso,
       })
@@ -1946,25 +1986,16 @@ export async function updateDraftDocument(
     }
 
     for (const [index, item] of items.entries()) {
-      if (!item.product_id?.trim()) {
-        return { data: null, error: `รายการที่ ${index + 1}: ไม่มี product_id` };
-      }
-      if (!Number.isFinite(item.qty) || item.qty <= 0) {
-        return {
-          data: null,
-          error: `รายการที่ ${index + 1}: จำนวนต้องมากกว่า 0`,
-        };
-      }
-      if (!Number.isFinite(item.unit_price) || item.unit_price < 0) {
-        return {
-          data: null,
-          error: `รายการที่ ${index + 1}: ราคาต่อหน่วยไม่ถูกต้อง`,
-        };
-      }
+      const lineError = validateSalesDraftLine(item, index);
+      if (lineError) return { data: null, error: lineError };
     }
 
     const productIds = [
-      ...new Set(items.map((item) => item.product_id.trim()).filter(Boolean)),
+      ...new Set(
+        items
+          .map((item) => item.product_id?.trim() ?? "")
+          .filter((id) => id.length > 0),
+      ),
     ];
     const costByProductId = new Map<string, number>();
     const nameByProductId = new Map<string, string>();
@@ -1999,32 +2030,13 @@ export async function updateDraftDocument(
       }
     }
 
-    const lineRows = items.map((item, index) => {
-      const productId = item.product_id.trim();
-      const snapshotCost = costByProductId.has(productId)
-        ? costByProductId.get(productId)!
-        : Number(item.unit_cost_price ?? 0);
-      const discountAmount = Number(item.discount_amount ?? 0);
-      const lineTotal = Number(item.line_total);
-
-      return {
-        product_id: productId,
-        description: (
-          item.description?.trim() ||
-          nameByProductId.get(productId) ||
-          ""
-        ).slice(0, 255),
-        qty: item.qty,
-        uom_used:
-          item.uom_used?.trim() || uomByProductId.get(productId) || "ตัว",
-        unit_price: item.unit_price,
-        unit_cost_price: Number.isFinite(snapshotCost) ? snapshotCost : 0,
-        discount_text: item.discount_text?.trim() || null,
-        discount_amount: Number.isFinite(discountAmount) ? discountAmount : 0,
-        line_total: Number.isFinite(lineTotal) ? lineTotal : 0,
-        sort_order: item.sort_order ?? index,
-      };
-    });
+    const lineRows = items.map((item, index) =>
+      mapSalesDraftLine(item, index, {
+        costByProductId,
+        nameByProductId,
+        uomByProductId,
+      }),
+    );
 
     const vatType: VatCalculationType = isVatCalculationType(
       String(payload.vat_type ?? "EXCLUSIVE"),
@@ -2168,7 +2180,7 @@ export async function issueDocument(
 
     const { data: document, error: documentError } = await supabase
       .from("documents")
-      .select("id, doc_no, doc_type, status, grand_total, paid_amount")
+      .select("id, doc_no, doc_type, status, grand_total, paid_amount, doc_date")
       .eq("id", id)
       .maybeSingle();
 
@@ -2296,7 +2308,10 @@ export async function issueDocument(
     const grandTotal = Number(document.grand_total ?? 0);
     const paidAmount =
       paymentStatus === "PAID" ? grandTotal : Number(document.paid_amount ?? 0);
-    const issueDate = new Date().toISOString().slice(0, 10);
+    const storedDocDate = String(document.doc_date ?? "").slice(0, 10);
+    const issueDate = /^\d{4}-\d{2}-\d{2}$/.test(storedDocDate)
+      ? storedDocDate
+      : new Date().toISOString().slice(0, 10);
     const draftDocNo = String(document.doc_no ?? "");
     const needsOfficialNumber = isTemporaryDraftDocNo(draftDocNo);
 
@@ -2624,6 +2639,89 @@ export async function issueCreditNoteAction(
   }
 }
 
+async function loadBilledSalesDocNos(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  docNos: string[],
+): Promise<Set<string>> {
+  const billed = new Set<string>();
+  if (docNos.length === 0) return billed;
+  const { data: headers, error: headerError } = await supabase
+    .from("doc_headers")
+    .select("id, doc_no")
+    .in("doc_no", docNos);
+  if (headerError || !headers?.length) return billed;
+
+  const docNoByHeaderId = new Map<string, string>();
+  for (const header of headers) {
+    const id = String(header.id ?? "");
+    const docNo = String(header.doc_no ?? "").trim();
+    if (id && docNo) docNoByHeaderId.set(id, docNo);
+  }
+  const headerIds = [...docNoByHeaderId.keys()];
+  if (headerIds.length === 0) return billed;
+
+  const { data: links, error: linkError } = await supabase
+    .from("billing_note_items")
+    .select("invoice_id")
+    .in("invoice_id", headerIds);
+  if (linkError || !links) return billed;
+  for (const link of links) {
+    const docNo = docNoByHeaderId.get(String(link.invoice_id ?? ""));
+    if (docNo) billed.add(docNo);
+  }
+  return billed;
+}
+
+/**
+ * Edit the header of an issued sales document without VOID.
+ * Money columns stay as stored unless the caller sends them.
+ */
+export async function updateSalesDocumentDirect(input: {
+  document_id: string;
+  doc_date: string;
+  notes: string | null;
+}) {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: null, error: owner.error };
+
+    const documentId = input.document_id?.trim() ?? "";
+    const docDate = input.doc_date?.trim() ?? "";
+    if (!documentId) return { data: null, error: "ไม่พบรหัสเอกสาร" };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(docDate)) {
+      return { data: null, error: "วันที่เอกสารไม่ถูกต้อง" };
+    }
+
+    const supabase = createSupabaseServerClient();
+    const notes = input.notes?.trim() ?? "";
+    const rpcClient = supabase as unknown as {
+      rpc: (
+        fn: "update_sales_document_direct",
+        args: Record<string, unknown>,
+      ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    };
+    const saved = await rpcClient.rpc("update_sales_document_direct", {
+      p_document_id: documentId,
+      p_doc_date: docDate,
+      p_notes: notes,
+      p_remark: notes,
+    });
+    if (saved.error) return { data: null, error: saved.error.message };
+
+    const payload = (Array.isArray(saved.data) ? saved.data[0] : saved.data) as
+      | { doc_no?: string }
+      | null;
+    const docNo = String(payload?.doc_no ?? "");
+    revalidatePath("/sales");
+    revalidatePath("/sales/orders");
+    if (docNo) revalidatePath(`/sales/${encodeURIComponent(docNo)}`);
+    return { data: { document_id: documentId, document_no: docNo }, error: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "แก้ไขหัวบิลขายไม่สำเร็จ";
+    return { data: null, error: message };
+  }
+}
+
 /**
  * List sales documents (newest first) with customer name.
  * Optional URL-driven filters: search (doc_no / customer), doc_date from/to.
@@ -2667,6 +2765,7 @@ export async function getSalesDocuments(
         doc_date,
         created_at,
         grand_total,
+        payment_status,
         contact_id,
         contacts:contact_id (
           company_name
@@ -2701,14 +2800,20 @@ export async function getSalesDocuments(
       return { data: [], error: error.message };
     }
 
+    const docNos = (data ?? [])
+      .map((row) => String(row.doc_no ?? "").trim())
+      .filter((docNo) => docNo.length > 0);
+    const billedDocNos = await loadBilledSalesDocNos(supabase, docNos);
+
     const rows: SalesDocumentListItem[] = (data ?? []).map((row) => {
       const contact = Array.isArray(row.contacts)
         ? row.contacts[0]
         : row.contacts;
+      const docNo = row.doc_no as string;
 
       return {
         id: row.id as string,
-        doc_no: row.doc_no as string,
+        doc_no: docNo,
         doc_type: row.doc_type as DocumentType,
         status: row.status as DocumentStatus,
         doc_date: row.doc_date as string,
@@ -2718,6 +2823,8 @@ export async function getSalesDocuments(
         customer_name:
           (contact as { company_name?: string | null } | null)?.company_name ??
           null,
+        payment_status: String(row.payment_status ?? "UNPAID"),
+        is_billed: billedDocNos.has(docNo),
       };
     });
 
