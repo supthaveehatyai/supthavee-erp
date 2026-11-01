@@ -247,6 +247,10 @@ export type ExpenseListItem = {
   /** expenses.description — used when remark is empty. */
   description: string | null;
   remark: string | null;
+  /** expenses.vendor_name written on the bill. */
+  vendor_name: string | null;
+  /** contacts joined through expenses.contact_id. */
+  contacts: { company_name: string | null } | null;
   grand_total: number;
   status: string;
 };

@@ -3,6 +3,11 @@ import Link from "next/link";
 import { Plus, Receipt } from "lucide-react";
 import { getExpenses } from "@/app/actions/expenses";
 import {
+  formatShortDateTh,
+  formatThaiDate,
+  formatThaiDateTime,
+} from "@/lib/utils/date-formatter";
+import {
   expenseCategoryLabel,
   expenseRemarkLabel,
 } from "@/lib/utils/expense-labels";
@@ -37,31 +42,10 @@ function formatThaiBaht(value: number): string {
   }).format(Number.isFinite(value) ? value : 0);
 }
 
-/** Document Date — calendar date only (expense_date / bill date). */
-function formatDocDate(value: string): string {
-  if (!value) return "—";
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("th-TH", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(date);
-}
-
-/** Posting Date — created_at with time (dd MMM yyyy HH:mm). */
-function formatPostingDate(value: string): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("th-TH", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
+function compactVendorName(name: string): string {
+  return name
+    .replace(/^ห้างหุ้นส่วนจำกัด\s+/u, "หจก. ")
+    .replace(/^บริษัท\s+/u, "บจก. ");
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -149,6 +133,12 @@ export default async function ExpensesPage() {
                       </span>
                     </TableHead>
                     <TableHead>Document No</TableHead>
+                    <TableHead className="whitespace-nowrap">
+                      คู่ค้า / ผู้รับเงิน
+                      <span className="mt-0.5 block text-[10px] font-normal text-slate-400">
+                        Vendor
+                      </span>
+                    </TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Remark</TableHead>
                     <TableHead className="text-center">Status</TableHead>
@@ -157,24 +147,60 @@ export default async function ExpensesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {expenses.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell className="whitespace-nowrap text-sm font-medium tabular-nums text-slate-900">
-                        {formatPostingDate(row.created_at)}
+                  {expenses.map((row) => {
+                    const fullVendorName =
+                      row.vendor_name || row.contacts?.company_name || "-";
+                    const vendorLabel =
+                      fullVendorName === "-"
+                        ? "-"
+                        : compactVendorName(fullVendorName);
+                    const categoryLabel = expenseCategoryLabel(row);
+                    const remarkLabel = expenseRemarkLabel(row);
+                    return (
+                    <TableRow
+                      key={row.id}
+                      className="border-b border-slate-100 odd:bg-white even:bg-slate-50/90 hover:bg-blue-50/60 transition-colors"
+                    >
+                      <TableCell
+                        className="whitespace-nowrap text-sm font-medium tabular-nums text-slate-900"
+                        title={formatThaiDateTime(row.created_at)}
+                      >
+                        {formatShortDateTh(row.created_at)}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-sm tabular-nums text-slate-600">
-                        {formatDocDate(row.expense_date)}
+                      <TableCell
+                        className="whitespace-nowrap text-sm tabular-nums text-slate-600"
+                        title={formatThaiDate(row.expense_date)}
+                      >
+                        {formatShortDateTh(row.expense_date)}
                       </TableCell>
                       <TableCell>
                         <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-700">
                           {row.document_no || "—"}
                         </code>
                       </TableCell>
-                      <TableCell className="text-sm font-medium text-slate-900">
-                        {expenseCategoryLabel(row)}
+                      <TableCell>
+                        <span
+                          className="block max-w-[180px] truncate font-medium text-slate-800"
+                          title={fullVendorName}
+                        >
+                          {vendorLabel}
+                        </span>
                       </TableCell>
-                      <TableCell className="max-w-[16rem] truncate text-sm text-slate-500">
-                        {expenseRemarkLabel(row)}
+                      <TableCell>
+                        <span
+                          className="block max-w-[170px] truncate text-sm font-medium text-slate-900"
+                          title={categoryLabel}
+                        >
+                          {categoryLabel}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className="block max-w-[220px] truncate text-sm text-slate-500"
+                          title={remarkLabel}
+                        >
+                          {remarkLabel}
+                        </span>
                       </TableCell>
                       <TableCell className="text-center">
                         <StatusBadge status={row.status} />
@@ -191,7 +217,8 @@ export default async function ExpensesPage() {
                         </Link>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

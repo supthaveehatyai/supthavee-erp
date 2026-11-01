@@ -90,6 +90,22 @@ export function formatThaiDate(
   return `${day}/${month}/${year}`;
 }
 
+/** วันที่สั้นสำหรับตาราง: DD/MM/YY พ.ศ. เช่น 01/11/69 ไม่มีเวลา */
+export function formatShortDateTh(dateInput: string | Date): string {
+  const parsed = parseToDate(dateInput);
+  if (!parsed) return "—";
+  const parts = createThaiFormatter({
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+  }).formatToParts(parsed);
+  const day = readPart(parts, "day").padStart(2, "0");
+  const month = readPart(parts, "month").padStart(2, "0");
+  const year = readPart(parts, "year").slice(-2);
+  if (!day || !month || !year) return "—";
+  return `${day}/${month}/${year}`;
+}
+
 /** วัน-เวลา พ.ศ. ตาม Asia/Bangkok เช่น 30/10/2569 14:05 */
 export function formatThaiDateTime(date: string | Date): string {
   const parsed = parseToDate(date);

@@ -482,8 +482,12 @@ export async function getExpenses(
         expense_category,
         remark,
         description,
+        vendor_name,
         grand_total,
         status,
+        contacts:contact_id (
+          company_name
+        ),
         mst_expense_categories (
           category_name
         )
@@ -517,6 +521,14 @@ export async function getExpenses(
         expense_category: readOptionalText(raw.expense_category),
         description: readOptionalText(raw.description),
         remark: readOptionalText(raw.remark),
+        vendor_name: readOptionalText(raw.vendor_name),
+        contacts: (() => {
+          const contact = unwrapJoin(
+            raw.contacts as NamedJoin | NamedJoin[] | null | undefined,
+          );
+          const companyName = contact?.company_name?.trim() || null;
+          return companyName ? { company_name: companyName } : null;
+        })(),
         grand_total: Number(raw.grand_total ?? 0),
         status: String(raw.status ?? "DRAFT"),
       };
