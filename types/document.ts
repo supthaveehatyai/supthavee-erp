@@ -66,6 +66,8 @@ export type DocumentRow = {
 export type CustomerOption = {
   id: string;
   company_name: string;
+  /** ชื่อเล่นลูกค้าหน้าร้าน เช่น พี่ก๊ก, พี่รัตน์ — `contacts.nickname` */
+  nickname?: string | null;
 };
 
 export type ContactPersonOption = {
@@ -112,6 +114,8 @@ export type CreateDraftDocumentItemInput = {
   discount_amount?: number;
   line_total: number;
   sort_order?: number;
+  /** true เมื่อเป็นค่าบริการที่ไม่มี SKU สต็อก (`document_items.is_service_item`) */
+  is_service_item?: boolean;
 };
 
 export type CreateDraftDocumentInput = {
@@ -123,6 +127,8 @@ export type CreateDraftDocumentInput = {
   doc_date?: string | null;
   /** Job name / customer PO / remark — maps to `documents.notes`. */
   notes?: string | null;
+  /** อ้างอิงบิลเขียนมือ เช่น "เล่มที่ 21 เลขที่ 5" — maps to `documents.reference_no`. */
+  handwritten_doc_ref?: string | null;
   items?: CreateDraftDocumentItemInput[];
   /** Bill discount text e.g. "10%" or "500". */
   discount_text?: string | null;
@@ -162,6 +168,8 @@ export type UpdateDraftDocumentInput = {
   vat_rate?: number;
   /** Remark / หมายเหตุ — maps to `documents.notes`. */
   notes?: string | null;
+  /** อ้างอิงบิลเขียนมือ — maps to `documents.reference_no`. */
+  handwritten_doc_ref?: string | null;
   total_amount?: number;
   discount_amount?: number;
   net_before_vat?: number;
@@ -242,6 +250,8 @@ export type SalesLineItem = {
   line_total: number;
   /** Snapshot จาก product_models.image_url ตอนเลือกสินค้า */
   image_url: string | null;
+  /** รายการบริการไม่มีรหัสสต็อก */
+  is_service_item?: boolean;
 };
 
 export type CompleteDocumentLineInput = {
@@ -316,6 +326,8 @@ export type DocumentDetailItem = {
   is_manufactured: boolean;
   /** product_models.is_service — งานบริการ (สกรีน/ปัก) */
   is_service: boolean;
+  /** document_items.is_service_item — บรรทัดค่าบริการที่ไม่มี SKU */
+  is_service_item?: boolean;
   /**
    * รูป Mockup รายบรรทัด (document_items.mockup_image_url)
    * bucket: production_attachments

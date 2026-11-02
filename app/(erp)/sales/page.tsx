@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { FileText, Plus } from "lucide-react";
+import { FileText, Landmark, Plus, ShoppingCart } from "lucide-react";
 import { getSalesDocuments } from "@/lib/actions/document-actions";
 import { formatShortDateTh, formatThaiDate } from "@/lib/utils/date-formatter";
 import type { DocumentStatus, DocumentType } from "@/types/document";
@@ -155,6 +155,20 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
             เปิดใบสั่งขาย (SO)
           </Link>
           <Link
+            href="/sales/reconcile"
+            className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-4 text-sm font-semibold text-sky-900 shadow-sm transition hover:bg-sky-100"
+          >
+            <Landmark className="size-4" />
+            🏦 ชนยอด Statement ธนาคาร (KTB)
+          </Link>
+          <Link
+            href="/sales/create?import=ecommerce"
+            className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-4 text-sm font-semibold text-violet-800 shadow-sm transition hover:bg-violet-100"
+          >
+            <ShoppingCart className="size-4" />
+            นำเข้า Shopee / Lazada
+          </Link>
+          <Link
             href="/sales/create"
             className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
           >
@@ -176,7 +190,7 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
             </CardDescription>
           </div>
           <Suspense fallback={<FilterFallback />}>
-            <DocumentFilter searchPlaceholder="ชื่อลูกค้า / เลขที่เอกสาร" />
+            <DocumentFilter searchPlaceholder="ชื่อเล่น / ชื่อลูกค้า / เลขที่เอกสาร" />
           </Suspense>
         </CardHeader>
         <CardContent className="px-0 sm:px-6">
@@ -215,7 +229,7 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
                   documents.map((doc) => (
                     <TableRow
                       key={doc.id}
-                      className="odd:bg-white even:bg-slate-50/90 hover:bg-blue-50/60 transition-colors"
+                      className="border-b border-slate-100 odd:bg-white even:bg-slate-50/90 hover:bg-blue-50/60 transition-colors"
                     >
                       <TableCell
                         className="whitespace-nowrap text-slate-700"
@@ -236,7 +250,7 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
                       </TableCell>
                       <TableCell>
                         <span
-                          className="block max-w-[200px] truncate text-slate-700"
+                          className="block max-w-[220px] truncate text-sm text-slate-700"
                           title={doc.customer_name ?? ""}
                         >
                           {doc.customer_name || "—"}

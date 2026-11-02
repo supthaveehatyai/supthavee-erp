@@ -17,7 +17,10 @@ const HEADINGS: Record<string, { title: string; subtitle: string }> = {
   INV_DO: { title: "ใบส่งของ / แจ้งหนี้", subtitle: "(DELIVERY ORDER & INVOICE)" },
   TAX_INV: { title: "ใบกำกับภาษี", subtitle: "(TAX INVOICE)" },
   CS_TAX: { title: "ใบกำกับเงินสด", subtitle: "(CASH TAX INVOICE)" },
-  ABB: { title: "ใบเสร็จอย่างย่อ", subtitle: "(ABBREVIATED TAX INVOICE)" },
+  ABB: {
+    title: "บิลเงินสด / ใบกำกับภาษีอย่างย่อ",
+    subtitle: "(ABBREVIATED TAX INVOICE)",
+  },
   DEP_IN: { title: "ใบมัดจำรับ", subtitle: "(CUSTOMER DEPOSIT)" },
   BN: { title: "ใบวางบิล", subtitle: "(BILLING NOTE)" },
   BR: { title: "ใบรับวางบิล", subtitle: "(BILL RECEIPT)" },

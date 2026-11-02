@@ -8,9 +8,9 @@
  * Persistence / lookups go through Server Actions only — never client Supabase.
  */
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { FilePlus2, Receipt, Trash2 } from "lucide-react";
+import { FilePlus2, Receipt, ShoppingCart, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   createDraftDocument,
@@ -67,6 +67,9 @@ import SalesChannelFields, {
   INITIAL_SALES_CHANNEL_FIELDS,
   type SalesChannelFieldsValue,
 } from "@/components/sales/sales-channel-fields";
+import HandwrittenBillDropzone from "@/components/sales/handwritten-bill-dropzone";
+import EcommerceOrderImporter from "@/components/sales/ecommerce-order-importer";
+import type { EcommerceOrderDraft, HandwrittenBillScan, ScannedSalesLine } from "@/types/sales-ocr";
 
 const INITIAL_DOC_TYPE: SalesTradingDocType = DEFAULT_SALES_CREATE_DOC_TYPE;
 const INITIAL_VAT_TYPE: VatCalculationType = "EXCLUSIVE";
@@ -128,6 +131,7 @@ function createLineFromProduct(
     discount_amount: 0,
     line_total: calcLineTotal(nextQty, unitPrice),
     image_url: product.image_url ?? null,
+    is_service_item: false,
   };
 }
 
@@ -145,17 +149,38 @@ function createServiceLine(): SalesLineItem {
     discount_amount: 0,
     line_total: 0,
     image_url: null,
+    is_service_item: true,
   };
 }
 
 export type SalesCreateWorkspaceProps = {
   customers: CustomerOption[];
   customersError?: string | null;
+  openEcommerceImport?: boolean;
 };
+
+function lineFromScan(line: ScannedSalesLine): SalesLineItem {
+  return {
+    key: `scan-${line.sku}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    product_id: line.product_id,
+    sku: line.sku,
+    description: line.description,
+    qty: line.qty,
+    uom_used: line.uom_used || (line.is_service_item ? "งาน" : "ตัว"),
+    unit_price: line.unit_price,
+    cost_price: line.cost_price,
+    discount_text: line.discount_text,
+    discount_amount: line.discount_amount,
+    line_total: line.line_total,
+    image_url: line.image_url,
+    is_service_item: line.is_service_item || !line.product_id,
+  };
+}
 
 export default function SalesCreateWorkspace({
   customers,
   customersError = null,
+  openEcommerceImport = false,
 }: SalesCreateWorkspaceProps) {
   const router = useRouter();
   const [docType, setDocType] = useState<SalesTradingDocType>(INITIAL_DOC_TYPE);
@@ -175,8 +200,23 @@ export default function SalesCreateWorkspace({
   const [docDate, setDocDate] = useState(
     () => new Date().toISOString().slice(0, 10),
   );
+  const [handwrittenDocRef, setHandwrittenDocRef] = useState("");
   const [notes, setNotes] = useState("");
+  const [ecommerceOpen, setEcommerceOpen] = useState(openEcommerceImport);
   const [isPending, startTransition] = useTransition();
+  const scanKey = useRef(0);
+
+  useEffect(() => {
+    const preventBrowserFileOpen = (event: DragEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("dragover", preventBrowserFileOpen);
+    window.addEventListener("drop", preventBrowserFileOpen);
+    return () => {
+      window.removeEventListener("dragover", preventBrowserFileOpen);
+      window.removeEventListener("drop", preventBrowserFileOpen);
+    };
+  }, []);
 
   const hideContactPicker = shouldHideSalesContactPicker({
     docType,
@@ -248,7 +288,7 @@ export default function SalesCreateWorkspace({
     setCustomerOptions((current) =>
       current.map((row) =>
         row.id === contact.id
-          ? { ...row, company_name: contact.company_name }
+          ? { ...row, company_name: contact.company_name, nickname: row.nickname }
           : row,
       ),
     );
@@ -284,6 +324,7 @@ export default function SalesCreateWorkspace({
     setVatType(INITIAL_VAT_TYPE);
     setSalesChannelFields(INITIAL_SALES_CHANNEL_FIELDS);
     setDocDate(new Date().toISOString().slice(0, 10));
+    setHandwrittenDocRef("");
     setNotes("");
   }
 
@@ -377,6 +418,52 @@ export default function SalesCreateWorkspace({
     setLineItems((current) => [...current, createServiceLine()]);
   }
 
+  function applyScannedLines(items: ScannedSalesLine[]) {
+    scanKey.current += 1;
+    const batch = scanKey.current;
+    setLineItems(
+      items.map((line, index) => ({
+        ...lineFromScan(line),
+        key: `scan-${batch}-${index}`,
+      })),
+    );
+  }
+
+  function applyHandwrittenScan(scan: HandwrittenBillScan) {
+    clearLastSavedArtifact();
+    setDocType("INV_DO");
+    if (scan.doc_date) setDocDate(scan.doc_date);
+    setHandwrittenDocRef(scan.handwritten_doc_ref ?? "");
+    setNotes(scan.notes ?? "");
+    setVatType(scan.vat_type);
+    setContactId(scan.contact_id ?? "");
+    setContactPersonId("");
+    setSalesChannelFields(INITIAL_SALES_CHANNEL_FIELDS);
+    setDiscountText("");
+    applyScannedLines(scan.items);
+  }
+
+  function applyEcommerceOrder(order: EcommerceOrderDraft) {
+    clearLastSavedArtifact();
+    setDocType("ABB");
+    setDocDate(order.doc_date);
+    setHandwrittenDocRef("");
+    setNotes("");
+    setVatType("INCLUSIVE");
+    setContactId("");
+    setContactPersonId("");
+    setDiscountText("");
+    setSalesChannelFields({
+      sales_channel: order.sales_channel,
+      ecommerce_order_no: order.ecommerce_order_no,
+      ecommerce_buyer_name: order.ecommerce_buyer_name ?? "",
+      tracking_no: order.tracking_no ?? "",
+      one_time_address: "",
+    });
+    applyScannedLines(order.items);
+    toast.success(`เติมคำสั่งซื้อ ${order.ecommerce_order_no} ลงฟอร์ม ABB แล้ว`);
+  }
+
   function updateLineText(
     key: string,
     field: "description" | "uom_used",
@@ -426,6 +513,7 @@ export default function SalesCreateWorkspace({
         contact_id: hideContactPicker ? null : contactId,
         contact_person_id: hideContactPicker ? null : contactPersonId || null,
         doc_date: docDate,
+        handwritten_doc_ref: handwrittenDocRef.trim() || null,
         notes: notes.trim() || null,
         discount_text: discountText.trim() || null,
         vat_type: vatType,
@@ -451,6 +539,7 @@ export default function SalesCreateWorkspace({
           discount_amount: row.discount_amount,
           line_total: row.line_total,
           sort_order: index,
+          is_service_item: !row.product_id || row.is_service_item === true,
         })),
       });
 
@@ -512,7 +601,7 @@ export default function SalesCreateWorkspace({
               เปิดบิลขาย
             </h1>
             <p className="mt-0.5 text-sm text-slate-500">
-              Phase 4 — Smart SKU Picker + Line Items (Server Actions only)
+              เลือกวันที่ย้อนหลังได้ · ค้นชื่อเล่นลูกค้า · รายการบริการ · ออกเลข ABB / SP / LZ
             </p>
           </div>
         </div>
@@ -522,6 +611,26 @@ export default function SalesCreateWorkspace({
           </span>
         )}
       </div>
+
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+        <HandwrittenBillDropzone disabled={isPending} onScanned={applyHandwrittenScan} />
+        <button
+          type="button"
+          disabled={isPending}
+          onClick={() => setEcommerceOpen(true)}
+          className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-5 text-center text-sm font-semibold text-violet-900 transition hover:bg-violet-100 disabled:opacity-60"
+        >
+          <ShoppingCart className="size-5" />
+          🛒 นำเข้าออเดอร์ Shopee / Lazada
+        </button>
+      </div>
+
+      <EcommerceOrderImporter
+        open={ecommerceOpen}
+        onOpenChange={setEcommerceOpen}
+        disabled={isPending}
+        onFillForm={applyEcommerceOrder}
+      />
 
       {customersError && (
         <p
@@ -594,6 +703,13 @@ export default function SalesCreateWorkspace({
                     value={contactId}
                     onChange={handleCustomerChange}
                     disabled={isPending || customerOptions.length === 0}
+                    onNicknameChange={(id, nickname) => {
+                      setCustomerOptions((current) =>
+                        current.map((row) =>
+                          row.id === id ? { ...row, nickname } : row,
+                        ),
+                      );
+                    }}
                   />
                 </div>
                 <QuickEditContactButton
@@ -642,7 +758,24 @@ export default function SalesCreateWorkspace({
               />
             </div>
 
-            <div className="space-y-1.5 sm:col-span-2 lg:col-span-3">
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="handwritten-doc-ref">
+                อ้างอิงบิลมือ (handwritten_doc_ref)
+              </Label>
+              <Input
+                id="handwritten-doc-ref"
+                value={handwrittenDocRef}
+                disabled={isPending}
+                placeholder='เช่น เล่มที่ 21 เลขที่ 5'
+                onChange={(event) => {
+                  clearLastSavedArtifact();
+                  setHandwrittenDocRef(event.target.value);
+                }}
+                className="h-10"
+              />
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2 lg:col-span-2">
               <Label htmlFor="sales-notes">
                 หมายเหตุ / ชื่องาน / เลขใบสั่งซื้อลูกค้า (notes)
               </Label>

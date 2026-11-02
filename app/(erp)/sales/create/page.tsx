@@ -8,17 +8,25 @@ export const metadata: Metadata = {
     "Phase 4 — สร้างเอกสารขายผ่าน Server Component + Server Actions (ห้าม Client Supabase)",
 };
 
+export const maxDuration = 60;
+
+type PageProps = {
+  searchParams: Promise<{ import?: string }>;
+};
+
 /**
  * Server Component entry — loads customers via Service Role Server Action,
  * then hands interactive state to the Client workspace island.
  */
-export default async function CreateSalesDocumentPage() {
+export default async function CreateSalesDocumentPage({ searchParams }: PageProps) {
+  const params = await searchParams;
   const customersResult = await listActiveCustomers();
 
   return (
     <SalesCreateWorkspace
       customers={customersResult.data}
       customersError={customersResult.error}
+      openEcommerceImport={params.import === "ecommerce"}
     />
   );
 }

@@ -6,70 +6,31 @@ Tech Stack หลัก: Supabase Cloud (PostgreSQL, Auth, Edge Functions, Stora
 
 CRITICAL SYSTEM GUARDRAILS (AI MUST FOLLOW)
 
-ALWAYS read database-schema.md (and Supabase Snippet-SchemaDump.csv if provided) before generating any Supabase queries, RPCs, or Server Actions.
-
-STRICTLY use the exact table names and column names defined in the schema (e.g., documents.sub_total has an underscore, documents.vat_type is ENUM vat_calculation_type, inventory_ledger uses trans_type and qty, and ALWAYS use mst_bank_accounts instead of bank_accounts).
-
-DO NOT generate raw component boilerplate code in chat unless requested; prioritize clear architectural explanations, ready-to-run Supabase SQL scripts, and concise "Cursor Prompts" for Cursor Composer.
+1. ALWAYS read `database-schema.md` (and `Supabase Snippet-SchemaDump.csv` if provided) before generating any Supabase queries, RPCs, or Server Actions.
+2. STRICTLY use the exact table names and column names defined in the schema:
+   - `documents.sub_total` has an underscore (`_`), `documents.vat_type` is ENUM `vat_calculation_type` (`INCLUSIVE` | `EXCLUSIVE` | `NONE`).
+   - `inventory_ledger` uses `trans_type` and `qty`.
+   - ALWAYS use `mst_bank_accounts` instead of `bank_accounts` (and join `expenses` to `mst_bank_accounts` strictly via `bank_account_id` to avoid PostgREST ambiguous relationship errors).
+   - NEVER pass `grand_total` into `.insert()` or `.update()` on `public.expenses` because `expenses.grand_total` is a PostgreSQL `GENERATED ALWAYS AS (net_amount + vat_amount) STORED` column (pass `net_amount`, `sub_total`, `vat_amount`, and `total_amount` instead).
+3. DO NOT generate raw component boilerplate code in chat unless requested; prioritize clear architectural explanations, ready-to-run Supabase SQL scripts, and concise "Cursor Prompts" for Cursor Composer.
 
 Supthavee ERP SuperApp - Global Code Rules
 
 1. Architecture & Data Fetching (STRICT CLOUD & VERCEL)
-
-100% Supabase Cloud & Vercel: ระบบทำงานบน Supabase Cloud และ Vercel เสมอ ห้ามสร้างไฟล์ .sql migration ลงเครื่อง Local โดยไม่จำเป็น ให้เตรียมคำสั่ง SQL สำหรับรันบน Supabase Cloud SQL Editor โดยตรง
-
-Zero Client-Side Fetching: ห้ามใช้ supabase.from() ใน Client Component สำหรับตารางการเงินและเอกสารสำคัญ ให้ทำผ่าน Server Actions หรือ PostgreSQL RPC Functions พร้อมตรวจสอบ Session (requireSessionUserId()) เสมอ
-
-PostgREST 1,000-Row Limit Protection: ระบบมีสินค้ามากกว่า 3,811+ SKUs และรายการ Mapping กว่า 3,917+ แถว ห้ามใช้ .select() แบบไม่แบ่งหน้ากับตารางขนาดใหญ่ ให้ใช้ fetchAllPages หรือเรียก RPC get_on_hand_qty_by_product_ids เสมอ
-
-Type Separation & Strict "use server" Exports: ในไฟล์ที่มี 'use server' อนุญาตให้ export async function เท่านั้น ห้าม export type, interface, หรือ export const (เช่น maxDuration) เด็ดขาด เพื่อป้องกัน Vercel/Turbopack Build Error
+- 100% Supabase Cloud & Vercel: ระบบทำงานบน Supabase Cloud และ Vercel เสมอ ห้ามสร้างไฟล์ .sql migration ลงเครื่อง Local โดยไม่จำเป็น ให้เตรียมคำสั่ง SQL สำหรับรันบน Supabase Cloud SQL Editor โดยตรง
+- Zero Client-Side Fetching: ห้ามใช้ `supabase.from()` ใน Client Component สำหรับตารางการเงินและเอกสารสำคัญ ให้ทำผ่าน Server Actions หรือ PostgreSQL RPC Functions พร้อมตรวจสอบ Session (`requireSessionUserId()`) เสมอ
+- PostgREST 1,000-Row Limit Protection: ระบบมีสินค้ามากกว่า 3,811+ SKUs และรายการ Mapping กว่า 3,917+ แถว ห้ามใช้ `.select()` แบบไม่แบ่งหน้ากับตารางขนาดใหญ่ ให้ใช้ `fetchAllPages` หรือเรียก RPC `get_on_hand_qty_by_product_ids` เสมอ
+- Type Separation & Strict "use server" Exports: ในไฟล์ที่มี `'use server'` อนุญาตให้ `export async function` เท่านั้น ห้าม `export type`, `interface`, หรือ `export const` (เช่น `maxDuration`) เด็ดขาด เพื่อป้องกัน Vercel/Turbopack Build Error
 
 2. Business & Accounting Logic (GAAP / TFRS / SAP Standard)
-
-Document Lifecycle & Pre-Post Preview:
-
-เอกสารทั่วไปใช้รหัสชั่วคราว (DRAFT-...) และรันเลขจริงผ่าน Atomic RPC เฉพาะตอนกดยืนยัน (ISSUED)
-
-สำหรับการรับสินค้าเข้าคลัง (Goods Receipt) ให้แสดงหน้าต่าง Pre-Post Document Preview Modal (A5-แนวตั้ง) เพื่อตรวจทานก่อนกดยืนยันออกเอกสารจริง
-
-เอกสารสถานะ ISSUED ห้ามลบ (No Hard Delete) และล็อกด้วย Trigger trg_protect_issued_documents ห้ามพนักงานทั่วไปแก้ไขยอดเงินหรือกดยกเลิกโดยพลการ (ต้องเป็น Admin หรือส่งคำขอผ่านศูนย์อนุมัติเท่านั้น)
-
-Admin Controlled Revision: กรณีเลือกโหมดภาษีผิดในเอกสารซื้อที่ยังไม่ได้จ่ายเงิน (UNPAID) ให้ใช้ฟังก์ชัน RPC admin_revise_purchase_vat_mode ของ Admin เพื่อคำนวณฐานภาษีก่อน VAT (sub_total), vat_amount, grand_total และต้นทุนสุทธิต่อหน่วยตามมาตรฐาน TAS 2 ใหม่ พร้อมบันทึก audit_logs
-
-Dual-Freight Landed Cost & Moving Average (TAS 2):
-
-แยกค่าขนส่งต้นทาง (freight_cost / origin_freight_amount ที่ผู้ขายเรียกเก็บในบิล) และค่าขนส่งปลายทาง (dest_freight_cost / dest_freight_amount ที่จ่ายบริษัทขนส่งแยกต่างหาก)
-
-นำทั้งคู่มาปันส่วนเข้าฐานต้นทุนสินค้าเข้าคลัง (Landed Cost Pool) แต่ห้ามนำค่าขนส่งปลายทางไปรวมในยอดเจ้าหนี้ผู้ขาย (grand_total)
-
-หากไม่มีค่าขนส่งปลายทาง ต้องส่งค่า dest_freight_paid_status = 'NONE' เสมอ (ห้ามส่ง null)
-
-การคำนวณต้นทุนถัวเฉลี่ยเคลื่อนที่ (Moving Average Cost) ต้องดึงยอดคงเหลือก่อนบันทึก inventory_ledger เสมอ
-
-3-Tier Canonical OCR Matching:
-
-การจับคู่รหัสสินค้าจาก AI OCR กับ vendor_product_mapping ต้องใช้ normalize_ocr_text (ตัดช่องว่าง สัญลักษณ์ และแปลงคำพ้อง เช่น ไซด์ -> ไซส์, XXL -> 2XL) คู่กับการล็อก size_token และสีให้ตรงกัน 100% ห้ามจับคู่ข้ามไซส์เด็ดขาด
-
-Procurement Bills Cloud Storage:
-
-รูปบิลรับสินค้าทั้งจากหน้า Manual และ AI OCR ต้องถูกบีบอัดเป็น WebP (ความกว้างไม่เกิน 1920px) แล้วอัปโหลดขึ้น Supabase Storage Bucket procurement_bills พร้อมบันทึก URL ลงใน attachment_urls และ attachments ของเอกสารเสมอ
-
-3. Master Document Print Engine & Taxonomy (A5/A4 Standard)
-
-Document Taxonomy SSOT (mst_document_taxonomy): ขนาดกระดาษของเอกสารทุกประเภทถูกควบคุมผ่าน Document Taxonomy (A4_PORTRAIT, A5_PORTRAIT, A5_LANDSCAPE) โดยเอกสารซื้อ (AP_TAX, AP_CASH) ใช้ค่าเริ่มต้นเป็น A5-แนวตั้ง (A5_PORTRAIT)
-
-Single-Line Header Standard: หัวกระดาษบริษัท บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด สำนักงานใหญ่ และ (Supthavee Hatyai Co., Ltd.) รวมถึงที่อยู่และเลขประจำตัวผู้เสียภาษี ต้องจัดขนาดฟอนต์ให้จบในบรรทัดเดียว ห้ามตัดคำตกบรรทัด และจัดวางข้อมูลผู้จำหน่าย/ลูกค้าให้อยู่ในระนาบเดียวกับข้อมูลเลขที่เอกสาร
-
-4. Backup & Self-Healing Restore Rules
-
-หน้าต่างสำรองและกู้คืนข้อมูลต้องแยกเป็น 2 แท็บ (สำรองข้อมูล (Backup) และ กู้คืนข้อมูล (Restore))
-
-ระบบ Restore ต้องตัดคอลัมน์คำนวณอัตโนมัติ (GENERATED ALWAYS) ออกก่อน Upsert เสมอ ได้แก่:
-
-mst_asset_categories: depreciation_rate
-
-expenses: grand_total
-
-expense_installments: total_installment
-
-fixed_assets: current_net_book_value
+- Zero-Draft Direct Posting & Editable Documents:
+  - ระบบรับเข้าเอกสารซื้อ (`Purchase`), ค่าใช้จ่าย (`Expenses` ผ่าน `save_expense_direct_no_draft`), และการเปิดบิลขาย (`Sales`) เน้นการบันทึกออกเลขจริงในคลิกเดียว พร้อมรองรับการแก้ไขข้อมูลผ่าน Controlled RPC (`update_expense_direct`, `update_sales_document_direct`) สำหรับเอกสารที่ยังไม่ถูก `VOID` และงวดบัญชียังไม่ถูกล็อก
+- Shared 7-Model Gemini OCR Pool (`parseReceiptOcr`):
+  - ทั้งหน้ารับสินค้า (`Smart Goods Receipt`), หน้าเพิ่มค่าใช้จ่าย (`Expenses`), และหน้าสแกนบิลขาย ใช้เครื่องยนต์ OCR และระบบสลับโมเดลอัตโนมัติ 7 ตัวร่วมกัน (`gemini-3.7-flash` จาก `System Parameters` ร่วมกับ `3.8-Flash`, `3.6-Flash`, `3.5-Flash`, `3-Flash`, `3.5-Flash-Lite`, `3.1-Flash-Lite`) พร้อมตั้งชื่อไฟล์ใน Supabase Storage เป็นรหัส ASCII เสมอ (ห้ามใช้ชื่อไฟล์ภาษาไทยใน Storage Path)
+  - ทุก Dropzone รับไฟล์ต้องดักจับ `onDragOver` และ `onDrop` ด้วย `e.preventDefault()` และ `e.stopPropagation()` คู่กับ Window-level Drag Guard เพื่อป้องกันเบราว์เซอร์ Chrome เปิดไฟล์ทับหน้าเว็บ
+- LINE OA Slip Notification (`@hzr1801v`):
+  - ส่งข้อความแจ้งโอน 4 บรรทัดพร้อมรูปสลิปโอนเงินโดยส่ง Direct Public URL ของ Supabase Storage CDN (`document_attachments`) ให้กับ LINE Messaging API โดยตรง (ห้ามแปลงผ่าน `/api/line/slip-image`) และประทับสถานะ `line_notified_at` อัตโนมัติ
+- Dual-Lens HR, Payroll & SSO Management:
+  - แยกพนักงานในระบบบัญชี (`CORPORATE_OFFICIAL` 4 คน หักประกันสังคม 5% เพดาน 15,000 บาท สูงสุด 750 บาท ยกเว้นผู้บริหาร) ออกจากพนักงานจ่ายส่วนตัว (`INTERNAL_PRIVATE` 1 คน ไม่ส่งสำนักงานบัญชี) และซิงก์ใบเสร็จประกันสังคม (`record_sso_remittance_and_expense`) เข้าตาราง `expenses` อัตโนมัติ
+- Unified Sales, E-Commerce (`SP` / `LZ`) & Bank Statement Reconciliation (Phase 24):
+  - ใช้แบบฟอร์มใบกำกับภาษีอย่างย่อ (`ABB`) ฟอร์มเดียวร่วมกันทุกช่องทาง โดยแยกซีรีส์เลขที่เอกสารตาม `sales_channel` (`ABB-YYMM-XXXX` สำหรับหน้าร้าน, `SPMM/XX` สำหรับ Shopee, `LZMM/XX` สำหรับ Lazada) และรับรู้รายได้เต็มจำนวน (Gross Sales ตาม TFRS 15) คู่กับการตั้งค่าใช้จ่ายค่าธรรมเนียมแพลตฟอร์มแยกต่างหาก

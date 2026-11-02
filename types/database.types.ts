@@ -310,6 +310,7 @@ export type Database = {
           address: string | null
           branch_code: string | null
           company_name: string
+          nickname: string | null
           contact_roles: string[]
           created_at: string | null
           credit_days: number | null
@@ -330,6 +331,7 @@ export type Database = {
           address?: string | null
           branch_code?: string | null
           company_name: string
+          nickname?: string | null
           contact_roles?: string[]
           created_at?: string | null
           credit_days?: number | null
@@ -350,6 +352,7 @@ export type Database = {
           address?: string | null
           branch_code?: string | null
           company_name?: string
+          nickname?: string | null
           contact_roles?: string[]
           created_at?: string | null
           credit_days?: number | null
@@ -479,6 +482,7 @@ export type Database = {
           freight_cost: number | null
           grand_total: number | null
           id: string
+          reference_no: string | null
           original_file_name: string | null
           original_receipt_url: string | null
           payment_status: string | null
@@ -505,6 +509,7 @@ export type Database = {
           freight_cost?: number | null
           grand_total?: number | null
           id?: string
+          reference_no?: string | null
           original_file_name?: string | null
           original_receipt_url?: string | null
           payment_status?: string | null
@@ -531,6 +536,7 @@ export type Database = {
           freight_cost?: number | null
           grand_total?: number | null
           id?: string
+          reference_no?: string | null
           original_file_name?: string | null
           original_receipt_url?: string | null
           payment_status?: string | null
@@ -647,6 +653,7 @@ export type Database = {
           id: string
           line_total: number
           product_id: string | null
+          is_service_item: boolean
           prorated_freight: number | null
           qty: number
           sort_order: number
@@ -666,6 +673,7 @@ export type Database = {
           id?: string
           line_total?: number
           product_id?: string | null
+          is_service_item?: boolean
           prorated_freight?: number | null
           qty?: number
           sort_order?: number
@@ -685,6 +693,7 @@ export type Database = {
           id?: string
           line_total?: number
           product_id?: string | null
+          is_service_item?: boolean
           prorated_freight?: number | null
           qty?: number
           sort_order?: number
@@ -2493,6 +2502,14 @@ export type Database = {
       fn_is_admin: { Args: never; Returns: boolean }
       generate_document_no: {
         Args: { p_doc_date: string; p_doc_type: string }
+        Returns: string
+      }
+      generate_abb_channel_doc_no: {
+        Args: {
+          p_sales_channel: string
+          p_doc_date: string
+          p_document_id?: string | null
+        }
         Returns: string
       }
       generate_expense_no: {

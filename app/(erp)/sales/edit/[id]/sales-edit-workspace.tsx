@@ -12,6 +12,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import {
   getContactPersons,
+  issueDocument,
   updateDraftDocument,
 } from "@/lib/actions/document-actions";
 import { VAT_OPTIONS } from "@/lib/constants/accounting";
@@ -99,6 +100,7 @@ function createLineFromProduct(
     discount_amount: 0,
     line_total: calcLineTotal(nextQty, unitPrice),
     image_url: product.image_url ?? null,
+    is_service_item: false,
   };
 }
 
@@ -116,6 +118,7 @@ function createServiceLine(): SalesLineItem {
     discount_amount: 0,
     line_total: 0,
     image_url: null,
+    is_service_item: true,
   };
 }
 
@@ -124,6 +127,7 @@ function linesFromDocument(doc: DocumentDetail): SalesLineItem[] {
     key: item.id || `${item.product_id ?? "line"}-${index}`,
     product_id: item.product_id,
     sku: item.product_id ? (item.sku ?? "—") : "SERVICE",
+    is_service_item: item.is_service_item === true || !item.product_id,
     description: item.description || item.product_name || "",
     qty: Number(item.qty ?? 0),
     uom_used: item.uom_used?.trim() || "ตัว",
@@ -171,6 +175,9 @@ export default function SalesEditWorkspace({
       : "EXCLUSIVE",
   );
   const [notes, setNotes] = useState(initialDocument.notes ?? "");
+  const [handwrittenDocRef, setHandwrittenDocRef] = useState(
+    initialDocument.reference_no ?? "",
+  );
   const [docDate, setDocDate] = useState(
     () =>
       (initialDocument.doc_date || "").slice(0, 10) ||
@@ -346,7 +353,7 @@ export default function SalesEditWorkspace({
     setLineItems((current) => current.filter((row) => row.key !== key));
   }
 
-  function handleSave() {
+  function handleSave(issueNow = false) {
     if (contactRequired && !contactId) {
       toast.error("กรุณาเลือกลูกค้าก่อนบันทึก");
       return;
@@ -382,6 +389,7 @@ export default function SalesEditWorkspace({
         contact_id: hideContactPicker ? null : contactId,
         contact_person_id: hideContactPicker ? null : contactPersonId || null,
         doc_date: docDate,
+        handwritten_doc_ref: handwrittenDocRef.trim() || null,
         discount_text: discountText.trim() || null,
         vat_type: vatType,
         vat_rate: DEFAULT_VAT_RATE,
@@ -409,11 +417,36 @@ export default function SalesEditWorkspace({
               discount_amount: row.discount_amount,
               line_total: row.line_total,
               sort_order: index,
+              is_service_item: !row.product_id || row.is_service_item === true,
             })),
       });
 
       if (result.error || !result.data) {
         toast.error(result.error ?? "บันทึกเอกสารร่างไม่สำเร็จ");
+        return;
+      }
+
+      if (issueNow && !isReplacement) {
+        const issued = await issueDocument(initialDocument.id);
+        if (issued.error || !issued.data) {
+          toast.error(
+            issued.error ??
+              "บันทึกร่างแล้ว แต่ออกเลขบิลไม่สำเร็จ — เปิดร่างเพื่อออกเอกสารต่อ",
+          );
+          router.push(
+            `/sales/${encodeURIComponent(result.data.document_no)}`,
+          );
+          router.refresh();
+          return;
+        }
+        toast.success(
+          issued.data.successMessage ??
+            `ออกบิล ${issued.data.document_no} แล้ว`,
+        );
+        router.push(
+          `/sales/${encodeURIComponent(issued.data.document_no)}`,
+        );
+        router.refresh();
         return;
       }
 
@@ -526,6 +559,13 @@ export default function SalesEditWorkspace({
                     setContactId(next);
                   }}
                   disabled={isPending || customerOptions.length === 0}
+                  onNicknameChange={(id, nickname) => {
+                    setCustomerOptions((current) =>
+                      current.map((row) =>
+                        row.id === id ? { ...row, nickname } : row,
+                      ),
+                    );
+                  }}
                 />
               </div>
               <QuickEditContactButton
@@ -592,7 +632,19 @@ export default function SalesEditWorkspace({
             platformClassName="sm:col-span-2 lg:col-span-3"
           />
           <div className="space-y-1.5 sm:col-span-2 lg:col-span-3">
-            <Label htmlFor="notes">หมายเหตุ / Remark</Label>
+            <Label htmlFor="handwritten-doc-ref">
+              อ้างอิงบิลมือ (handwritten_doc_ref)
+            </Label>
+            <Input
+              id="handwritten-doc-ref"
+              value={handwrittenDocRef}
+              onChange={(event) => setHandwrittenDocRef(event.target.value)}
+              disabled={isPending}
+              placeholder="เช่น เล่มที่ 21 เลขที่ 5"
+            />
+          </div>
+          <div className="space-y-1.5 sm:col-span-2 lg:col-span-3">
+            <Label htmlFor="notes">หมายเหตุ (notes)</Label>
             <textarea
               id="notes"
               rows={3}
@@ -674,7 +726,10 @@ export default function SalesEditWorkspace({
                     </TableCell>
                   </TableRow>
                 ) : (
-                  lineItems.map((row, index) => (
+                  lineItems.map((row, index) => {
+                    const serviceLine =
+                      row.is_service_item === true || !row.product_id;
+                    return (
                     <TableRow key={row.key}>
                       <TableCell className="px-3">
                         <LineItemProductThumb
@@ -689,7 +744,7 @@ export default function SalesEditWorkspace({
                         {row.sku}
                       </TableCell>
                       <TableCell className="max-w-[14rem] px-3 text-sm">
-                        {!isReplacement && !row.product_id ? (
+                        {!isReplacement && serviceLine ? (
                           <Input
                             value={row.description}
                             disabled={isPending}
@@ -729,7 +784,7 @@ export default function SalesEditWorkspace({
                         )}
                       </TableCell>
                       <TableCell className="px-3 text-xs text-slate-600">
-                        {!isReplacement && !row.product_id ? (
+                        {!isReplacement && serviceLine ? (
                           <Input
                             value={row.uom_used}
                             disabled={isPending}
@@ -784,7 +839,8 @@ export default function SalesEditWorkspace({
                         </TableCell>
                       ) : null}
                     </TableRow>
-                  ))
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
@@ -823,23 +879,42 @@ export default function SalesEditWorkspace({
                 </span>
               </p>
             </div>
-            <Button
-              type="button"
-              disabled={
-                isPending ||
-                (contactRequired && !contactId) ||
-                (!isReplacement && lineItems.length === 0)
-              }
-              className="h-10 gap-2"
-              onClick={handleSave}
-            >
-              <Save className="size-4" />
-              {isPending
-                ? "กำลังบันทึก..."
-                : isReplacement
-                  ? "บันทึกข้อมูลลูกค้า"
-                  : DOCUMENT_ACTIONS.SAVE_DRAFT}
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {!isReplacement ? (
+                <Button
+                  type="button"
+                  disabled={
+                    isPending ||
+                    (contactRequired && !contactId) ||
+                    lineItems.length === 0
+                  }
+                  className="h-10 gap-2 bg-blue-800 text-white hover:bg-blue-900"
+                  onClick={() => handleSave(true)}
+                >
+                  {isPending
+                    ? "กำลังบันทึก..."
+                    : "✅ บันทึกและออกบิลขายทันที (ออกเลขจริง + ตัดสต็อก)"}
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant="outline"
+                disabled={
+                  isPending ||
+                  (contactRequired && !contactId) ||
+                  (!isReplacement && lineItems.length === 0)
+                }
+                className="h-10 gap-2"
+                onClick={() => handleSave(false)}
+              >
+                <Save className="size-4" />
+                {isPending
+                  ? "กำลังบันทึก..."
+                  : isReplacement
+                    ? "บันทึกข้อมูลลูกค้า"
+                    : DOCUMENT_ACTIONS.SAVE_DRAFT}
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>

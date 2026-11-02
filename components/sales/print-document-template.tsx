@@ -2,6 +2,10 @@ import { PrintLayout } from "@/components/shared/print/PrintLayout";
 import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
 import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
 import { documentPartyLabel, documentPrintHeading } from "@/lib/constants/document-print-heading";
+import {
+  isSalesChannel,
+  SALES_CHANNEL_LABELS,
+} from "@/lib/constants/document";
 import type { DocumentDetail } from "@/types/document";
 import type { PrintPaperSize, PrintVatType } from "@/types/print-document";
 import { cn } from "@/lib/utils";
@@ -70,10 +74,23 @@ export default async function PrintDocumentTemplate({
           address: oneTimeAddress || null,
         }
       : null;
+  const channelLabel = isSalesChannel(doc.sales_channel)
+    ? SALES_CHANNEL_LABELS[doc.sales_channel]
+    : null;
+  const orderNo = doc.ecommerce_order_no?.trim() || "";
+  const handwrittenRef = doc.reference_no?.trim() || "";
   const printReferenceNo =
-    [doc.ecommerce_order_no?.trim(), doc.tracking_no?.trim()]
-      .filter(Boolean)
-      .join(" · ") || doc.reference_no;
+    doc.doc_type === "ABB"
+      ? [
+          channelLabel,
+          orderNo ? `คำสั่งซื้อ ${orderNo}` : null,
+          handwrittenRef ? `บิลมือ ${handwrittenRef}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || null
+      : [orderNo, doc.tracking_no?.trim(), handwrittenRef]
+          .filter(Boolean)
+          .join(" · ") || null;
 
   return (
     <PrintLayout
@@ -192,7 +209,7 @@ export default async function PrintDocumentTemplate({
                       {index + 1}
                     </td>
                     <td className="py-1.5 pr-2 font-mono text-[11px] font-medium text-neutral-800">
-                      {item.sku ?? "—"}
+                      {item.product_id ? (item.sku ?? "—") : "SERVICE"}
                     </td>
                     <td className="max-w-[12rem] py-1.5 pr-2 text-neutral-800">
                       {displayDocumentItemDescription(

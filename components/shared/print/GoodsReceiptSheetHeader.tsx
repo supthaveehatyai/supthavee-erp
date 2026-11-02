@@ -176,7 +176,11 @@ export function GoodsReceiptSheetHeader({
             <span className="font-medium">{dateLabel}</span>
           </p>
           <p>
-            <span className="text-neutral-500">เลขที่บิลผู้จำหน่ายอ้างอิง (Ref No.): </span>
+            <span className="text-neutral-500">
+              {docType === "ABB"
+                ? "ช่องทาง / เลขคำสั่งซื้อ: "
+                : "เลขที่บิลผู้จำหน่ายอ้างอิง (Ref No.): "}
+            </span>
             <span className="font-mono font-semibold">{referenceNo?.trim() || "—"}</span>
           </p>
           <p className="font-semibold">

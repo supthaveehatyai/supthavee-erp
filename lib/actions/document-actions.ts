@@ -329,6 +329,7 @@ function mapSalesDraftLine(
     discount_amount?: number | null;
     line_total: number;
     sort_order?: number;
+    is_service_item?: boolean;
   },
   index: number,
   lookup: {
@@ -361,7 +362,66 @@ function mapSalesDraftLine(
     discount_amount: Number.isFinite(discountAmount) ? discountAmount : 0,
     line_total: Number.isFinite(lineTotal) ? lineTotal : 0,
     sort_order: item.sort_order ?? index,
+    is_service_item: !productId || item.is_service_item === true,
   };
+}
+
+function normalizeHandwrittenDocRef(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, 120) : null;
+}
+
+function isMissingDocHeaderReferenceColumn(error: {
+  message?: string;
+  code?: string;
+} | null): boolean {
+  if (!error) return false;
+  const message = error.message ?? "";
+  return (
+    error.code === "42703" ||
+    error.code === "PGRST204" ||
+    (/reference_no/i.test(message) &&
+      /schema cache|does not exist|could not find/i.test(message))
+  );
+}
+
+/**
+ * `handwritten_doc_ref` is stored as `reference_no` on both ledgers.
+ * `documents` is written by the caller. This copies the same value onto
+ * the mirrored `doc_headers` row (match id, then doc_no).
+ */
+async function syncHandwrittenRefToDocHeader(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  input: { documentId: string; docNo: string; referenceNo: string | null },
+): Promise<string | null> {
+  const patch = { reference_no: input.referenceNo };
+  const byId = await supabase
+    .from("doc_headers")
+    .update(patch)
+    .eq("id", input.documentId)
+    .select("id");
+
+  if (byId.error) {
+    if (isMissingDocHeaderReferenceColumn(byId.error)) return null;
+    return byId.error.message;
+  }
+  if ((byId.data ?? []).length > 0) return null;
+
+  const docNo = input.docNo.trim();
+  if (!docNo) return null;
+
+  const byNo = await supabase
+    .from("doc_headers")
+    .update(patch)
+    .eq("doc_no", docNo)
+    .select("id");
+
+  if (byNo.error) {
+    if (isMissingDocHeaderReferenceColumn(byNo.error)) return null;
+    return byNo.error.message;
+  }
+  return null;
 }
 
 /**
@@ -531,6 +591,7 @@ export async function createDraftDocument(
           typeof payload.notes === "string"
             ? payload.notes.trim() || null
             : null,
+        reference_no: normalizeHandwrittenDocRef(payload.handwritten_doc_ref),
         created_by: owner.userId,
         updated_at: nowIso,
       })
@@ -545,6 +606,16 @@ export async function createDraftDocument(
     }
 
     const documentId = document.id as string;
+    const savedDocNo = (document.doc_no as string) || documentNo;
+    const headerSyncError = await syncHandwrittenRefToDocHeader(supabase, {
+      documentId,
+      docNo: savedDocNo,
+      referenceNo: normalizeHandwrittenDocRef(payload.handwritten_doc_ref),
+    });
+    if (headerSyncError) {
+      await supabase.from("documents").delete().eq("id", documentId);
+      return { data: null, error: headerSyncError };
+    }
 
     if (lineRows.length > 0) {
       const itemsPayload = lineRows.map((row) => ({
@@ -741,17 +812,68 @@ export async function listActiveCustomers(): Promise<GetCustomersResult> {
     const supabase = createSupabaseServerClient();
     const { data, error } = await supabase
       .from("contacts")
-      .select("id, company_name")
+      .select("id, company_name, nickname")
       .contains("contact_roles", ["Customer"])
       .eq("is_active", true)
       .order("company_name");
 
     if (error) return { data: [], error: error.message };
-    return { data: (data ?? []) as CustomerOption[], error: null };
+    const customers: CustomerOption[] = (data ?? []).map((row) => ({
+      id: row.id,
+      company_name: row.company_name,
+      nickname: row.nickname?.trim() || null,
+    }));
+    return { data: customers, error: null };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "โหลดรายการลูกค้าไม่สำเร็จ";
     return { data: [], error: message };
+  }
+}
+
+/** Quick add/edit of a storefront nickname (`contacts.nickname`). */
+export async function updateCustomerNickname(
+  contactId: string,
+  nickname: string,
+): Promise<{
+  data: { id: string; company_name: string; nickname: string | null } | null;
+  error: string | null;
+}> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: null, error: owner.error };
+
+    const id = contactId?.trim() ?? "";
+    if (!id) return { data: null, error: "ไม่พบรหัสลูกค้า" };
+
+    const nextNickname = nickname.trim().slice(0, 80);
+
+    const supabase = createSupabaseServerClient();
+    const { data, error } = await supabase
+      .from("contacts")
+      .update({ nickname: nextNickname || null })
+      .eq("id", id)
+      .select("id, company_name, nickname")
+      .maybeSingle();
+
+    if (error) return { data: null, error: error.message };
+    if (!data) return { data: null, error: "ไม่พบลูกค้าที่ต้องการแก้ชื่อเล่น" };
+
+    revalidatePath("/sales");
+    revalidatePath("/sales/create");
+
+    return {
+      data: {
+        id: data.id,
+        company_name: data.company_name,
+        nickname: data.nickname?.trim() || null,
+      },
+      error: null,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "บันทึกชื่อเล่นลูกค้าไม่สำเร็จ";
+    return { data: null, error: message };
   }
 }
 
@@ -1433,6 +1555,7 @@ type NestedItemRow = {
   mockup_image_url?: string | null;
   production_status?: string | null;
   is_sent_to_production?: boolean | null;
+  is_service_item?: boolean | null;
   products: NestedProduct | NestedProduct[] | null;
 };
 
@@ -1526,6 +1649,7 @@ export async function getDocumentByNo(
           mockup_image_url,
           production_status,
           is_sent_to_production,
+          is_service_item,
           products!document_items_product_id_fkey (
             id,
             sku,
@@ -1561,7 +1685,8 @@ export async function getDocumentByNo(
       const legacySelect = selectSql
         .replace(/\s*mockup_image_url,\s*/g, "\n          ")
         .replace(/\s*production_status,\s*/g, "\n          ")
-        .replace(/\s*is_sent_to_production,\s*/g, "\n          ");
+        .replace(/\s*is_sent_to_production,\s*/g, "\n          ")
+        .replace(/\s*is_service_item,\s*/g, "\n          ");
       const retry = await supabase
         .from("documents")
         .select(legacySelect)
@@ -1590,7 +1715,8 @@ export async function getDocumentByNo(
         const legacySelect = selectSql
           .replace(/\s*mockup_image_url,\s*/g, "\n          ")
           .replace(/\s*production_status,\s*/g, "\n          ")
-          .replace(/\s*is_sent_to_production,\s*/g, "\n          ");
+          .replace(/\s*is_sent_to_production,\s*/g, "\n          ")
+        .replace(/\s*is_service_item,\s*/g, "\n          ");
         const retry = await supabase
           .from("documents")
           .select(legacySelect)
@@ -1714,6 +1840,7 @@ export async function getDocumentByNo(
           model_code: model?.model_code?.trim() || null,
           is_manufactured: isManufactured,
           is_service: isService,
+          is_service_item: row.is_service_item === true || !row.product_id,
           mockup_image_url: row.mockup_image_url?.trim() || null,
           production_status: productionStatus,
           is_sent_to_production: isSentToProduction,
@@ -1884,6 +2011,9 @@ export async function updateDraftDocument(
         : new Date().toISOString().slice(0, 10);
     const notes =
       typeof payload?.notes === "string" ? payload.notes.trim() || null : null;
+    const handwrittenDocRef = normalizeHandwrittenDocRef(
+      payload?.handwritten_doc_ref,
+    );
 
     if (!documentId) {
       return { data: null, error: "ไม่พบรหัสเอกสาร" };
@@ -1950,6 +2080,8 @@ export async function updateDraftDocument(
           contact_id: contactId,
           contact_person_id: contactPersonId,
           notes,
+          reference_no: handwrittenDocRef,
+          doc_date: docDate,
           sales_channel: salesChannel,
           ecommerce_order_no: header.data.ecommerce_order_no,
           ecommerce_buyer_name: header.data.ecommerce_buyer_name,
@@ -1965,6 +2097,15 @@ export async function updateDraftDocument(
           data: null,
           error: headerError.message ?? "อัปเดตข้อมูลลูกค้าไม่สำเร็จ",
         };
+      }
+
+      const headerSyncError = await syncHandwrittenRefToDocHeader(supabase, {
+        documentId,
+        docNo: String(existing.doc_no ?? ""),
+        referenceNo: handwrittenDocRef,
+      });
+      if (headerSyncError) {
+        return { data: null, error: headerSyncError };
       }
 
       revalidatePath("/sales");
@@ -2071,6 +2212,7 @@ export async function updateDraftDocument(
         vat_amount: summary.vat_amount,
         discount_text: discountText,
         notes,
+        reference_no: handwrittenDocRef,
         sales_channel: salesChannel,
         ecommerce_order_no: header.data.ecommerce_order_no,
         ecommerce_buyer_name: header.data.ecommerce_buyer_name,
@@ -2086,6 +2228,15 @@ export async function updateDraftDocument(
         data: null,
         error: headerError.message ?? "อัปเดตหัวเอกสารไม่สำเร็จ",
       };
+    }
+
+    const headerSyncError = await syncHandwrittenRefToDocHeader(supabase, {
+      documentId,
+      docNo: String(existing.doc_no ?? ""),
+      referenceNo: handwrittenDocRef,
+    });
+    if (headerSyncError) {
+      return { data: null, error: headerSyncError };
     }
 
     const { error: deleteItemsError } = await supabase
@@ -2155,6 +2306,187 @@ export async function updateDraftDocument(
 }
 
 /* -------------------------------------------------------------------------- */
+/* ABB / SP / LZ numbering                                                    */
+/* -------------------------------------------------------------------------- */
+
+function isMissingAbbNumberRpc(error: {
+  message?: string;
+  code?: string;
+} | null): boolean {
+  if (!error) return false;
+  const message = error.message ?? "";
+  return (
+    error.code === "PGRST202" ||
+    error.code === "42883" ||
+    /could not find the function/i.test(message) ||
+    /does not exist/i.test(message) ||
+    /schema cache/i.test(message)
+  );
+}
+
+function nextPlatformAbbNo(
+  series: "SP" | "LZ",
+  docDate: string,
+  existing: string[],
+): string {
+  const month = docDate.slice(5, 7);
+  const prefix = `${series}${month}/`;
+  let maxSeq = 0;
+  const pattern = new RegExp(`^${prefix}(\\d+)$`);
+  for (const docNo of existing) {
+    const match = pattern.exec(docNo);
+    if (!match) continue;
+    const seq = Number(match[1]);
+    if (Number.isFinite(seq) && seq > maxSeq) maxSeq = seq;
+  }
+  return `${prefix}${String(maxSeq + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Reserve the official ABB number on the DRAFT row before
+ * `issue_document_transaction`, so SP/LZ slash series is not rewritten
+ * as PREFIX-YYMM-XXXX.
+ *
+ * Prefers `public.generate_abb_channel_doc_no` when installed on Cloud.
+ * Falls back to a unique-constraint retry when that RPC is not deployed yet.
+ */
+async function assignAbbChannelDocNo(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  input: {
+    documentId: string;
+    draftDocNo: string;
+    salesChannel: string;
+    docDate: string;
+  },
+): Promise<{ docNo: string | null; error: string | null }> {
+  const channel = input.salesChannel.trim().toUpperCase() || "STORE";
+  const generated = await supabase.rpc("generate_abb_channel_doc_no", {
+    p_sales_channel: channel,
+    p_doc_date: input.docDate,
+    p_document_id: input.documentId,
+  });
+
+  if (!generated.error) {
+    const fromRpc = typeof generated.data === "string" ? generated.data.trim() : "";
+    if (!fromRpc) {
+      return {
+        docNo: null,
+        error: "ฟังก์ชัน generate_abb_channel_doc_no ไม่คืนเลขที่เอกสาร",
+      };
+    }
+    const { data: stampedByRpc } = await supabase
+      .from("documents")
+      .select("doc_no")
+      .eq("id", input.documentId)
+      .maybeSingle();
+    if (String(stampedByRpc?.doc_no ?? "") === fromRpc) {
+      return { docNo: fromRpc, error: null };
+    }
+    const stamped = await stampDraftDocNo(supabase, {
+      documentId: input.documentId,
+      expectedDocNo: input.draftDocNo,
+      nextDocNo: fromRpc,
+    });
+    if (stamped.docNo) return { docNo: stamped.docNo, error: null };
+    if (stamped.error && !stamped.conflict) {
+      return { docNo: null, error: stamped.error };
+    }
+    const { data: current } = await supabase
+      .from("documents")
+      .select("doc_no")
+      .eq("id", input.documentId)
+      .maybeSingle();
+    if (String(current?.doc_no ?? "") === fromRpc) {
+      return { docNo: fromRpc, error: null };
+    }
+    return { docNo: null, error: "จองเลขบิลอย่างย่อไม่สำเร็จ" };
+  }
+
+  if (!isMissingAbbNumberRpc(generated.error)) {
+    return { docNo: null, error: generated.error.message };
+  }
+
+  let expectedDocNo = input.draftDocNo;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    let nextDocNo = "";
+    if (channel === "SHOPEE" || channel === "LAZADA") {
+      const series = channel === "SHOPEE" ? "SP" : "LZ";
+      const month = input.docDate.slice(5, 7);
+      const { data: rows, error: listError } = await supabase
+        .from("documents")
+        .select("doc_no")
+        .like("doc_no", `${series}${month}/%`)
+        .limit(1000);
+      if (listError) return { docNo: null, error: listError.message };
+      nextDocNo = nextPlatformAbbNo(
+        series,
+        input.docDate,
+        (rows ?? []).map((row) => String(row.doc_no ?? "")),
+      );
+    } else {
+      const { data: storeNo, error: storeError } = await supabase.rpc(
+        "generate_document_no",
+        { p_doc_type: "ABB", p_doc_date: input.docDate },
+      );
+      if (storeError || typeof storeNo !== "string" || !storeNo.trim()) {
+        return {
+          docNo: null,
+          error: storeError?.message ?? "ออกเลข ABB-YYMM-XXXX ไม่สำเร็จ",
+        };
+      }
+      nextDocNo = storeNo.trim();
+    }
+
+    const stamped = await stampDraftDocNo(supabase, {
+      documentId: input.documentId,
+      expectedDocNo,
+      nextDocNo,
+    });
+    if (stamped.docNo) return { docNo: stamped.docNo, error: null };
+    if (stamped.error && !stamped.conflict) {
+      return { docNo: null, error: stamped.error };
+    }
+
+    const { data: current } = await supabase
+      .from("documents")
+      .select("doc_no, status")
+      .eq("id", input.documentId)
+      .maybeSingle();
+    const currentNo = String(current?.doc_no ?? "");
+    if (current?.status === "DRAFT" && currentNo && !isTemporaryDraftDocNo(currentNo)) {
+      return { docNo: currentNo, error: null };
+    }
+    if (currentNo) expectedDocNo = currentNo;
+  }
+
+  return { docNo: null, error: "ออกเลขบิลอย่างย่อไม่สำเร็จ กรุณาลองใหม่" };
+}
+
+async function stampDraftDocNo(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  input: { documentId: string; expectedDocNo: string; nextDocNo: string },
+): Promise<{ docNo: string | null; error: string | null; conflict: boolean }> {
+  const { data, error } = await supabase
+    .from("documents")
+    .update({
+      doc_no: input.nextDocNo,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.documentId)
+    .eq("status", "DRAFT")
+    .eq("doc_no", input.expectedDocNo)
+    .select("doc_no")
+    .maybeSingle();
+
+  if (error?.code === "23505") {
+    return { docNo: null, error: null, conflict: true };
+  }
+  if (error) return { docNo: null, error: error.message, conflict: false };
+  if (!data?.doc_no) return { docNo: null, error: null, conflict: true };
+  return { docNo: String(data.doc_no), error: null, conflict: false };
+}
+
+/* -------------------------------------------------------------------------- */
 /* issueDocument                                                              */
 /* -------------------------------------------------------------------------- */
 
@@ -2176,11 +2508,18 @@ export async function issueDocument(
       return { data: null, error: "ไม่พบรหัสเอกสาร (document_id)" };
     }
 
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { data: null, error: owner.error };
+    }
+
     const supabase = createSupabaseServerClient();
 
     const { data: document, error: documentError } = await supabase
       .from("documents")
-      .select("id, doc_no, doc_type, status, grand_total, paid_amount, doc_date")
+      .select(
+        "id, doc_no, doc_type, status, grand_total, paid_amount, doc_date, sales_channel",
+      )
       .eq("id", id)
       .maybeSingle();
 
@@ -2313,7 +2652,23 @@ export async function issueDocument(
       ? storedDocDate
       : new Date().toISOString().slice(0, 10);
     const draftDocNo = String(document.doc_no ?? "");
-    const needsOfficialNumber = isTemporaryDraftDocNo(draftDocNo);
+    let needsOfficialNumber = isTemporaryDraftDocNo(draftDocNo);
+
+    if (docType === "ABB" && needsOfficialNumber) {
+      const assigned = await assignAbbChannelDocNo(supabase, {
+        documentId: id,
+        draftDocNo,
+        salesChannel: String(document.sales_channel ?? "STORE"),
+        docDate: issueDate,
+      });
+      if (assigned.error || !assigned.docNo) {
+        return {
+          data: null,
+          error: assigned.error ?? "ออกเลขบิลอย่างย่อไม่สำเร็จ",
+        };
+      }
+      needsOfficialNumber = false;
+    }
 
     const stockOutLinesRaw = isStockOutDocType(docType)
       ? lineItems
@@ -2744,7 +3099,7 @@ export async function getSalesDocuments(
       const { data: matchedContacts, error: contactError } = await supabase
         .from("contacts")
         .select("id")
-        .ilike("company_name", `%${search}%`)
+        .or(`company_name.ilike.%${search}%,nickname.ilike.%${search}%`)
         .limit(200);
 
       if (contactError) {
@@ -2860,7 +3215,7 @@ export async function getPurchaseDocuments(
       const { data: matchedContacts, error: contactError } = await supabase
         .from("contacts")
         .select("id")
-        .ilike("company_name", `%${search}%`)
+        .or(`company_name.ilike.%${search}%,nickname.ilike.%${search}%`)
         .limit(200);
 
       if (contactError) {
