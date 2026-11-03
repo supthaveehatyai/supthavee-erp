@@ -1715,6 +1715,11 @@ export async function getDocumentByNo(
         wht_rate,
         wht_amount,
         payment_status,
+        payment_channel,
+        receiving_bank_label,
+        is_swept_to_company,
+        swept_to_company_at,
+        swept_batch_ref,
         notes,
         reference_no,
         remark,
@@ -2084,6 +2089,14 @@ export async function getDocumentByNo(
       wht_rate: Number(data.wht_rate ?? 0),
       wht_amount: Number(data.wht_amount ?? 0),
       payment_status: String(data.payment_status ?? "Pending"),
+      payment_channel: (data.payment_channel as string | null) ?? null,
+      receiving_bank_label: (data.receiving_bank_label as string | null) ?? null,
+      is_swept_to_company:
+        data.is_swept_to_company == null
+          ? null
+          : Boolean(data.is_swept_to_company),
+      swept_to_company_at: (data.swept_to_company_at as string | null) ?? null,
+      swept_batch_ref: (data.swept_batch_ref as string | null) ?? null,
       notes: visibleNotes,
       remark: (data.remark as string | null) ?? null,
       void_reason: (data.void_reason as string | null) ?? null,
@@ -3305,6 +3318,8 @@ export async function updateSalesDocumentDirect(input: {
   doc_date: string;
   notes: string | null;
   reference_no?: string | null;
+  payment_channel?: string | null;
+  receiving_bank_label?: string | null;
 }) {
   try {
     const owner = await requireSessionUserId();
@@ -3332,6 +3347,8 @@ export async function updateSalesDocumentDirect(input: {
       p_notes: notes,
       p_remark: notes,
       p_reference_no: referenceNo || null,
+      p_payment_channel: input.payment_channel?.trim() || null,
+      p_receiving_bank_label: input.receiving_bank_label?.trim() || null,
     });
     if (saved.error) return { data: null, error: saved.error.message };
 
@@ -3340,6 +3357,7 @@ export async function updateSalesDocumentDirect(input: {
       | null;
     const docNo = String(payload?.doc_no ?? "");
     revalidatePath("/sales");
+    revalidatePath("/finance/deposits");
     revalidatePath("/sales/orders");
     if (docNo) revalidatePath(`/sales/${encodeURIComponent(docNo)}`);
     return { data: { document_id: documentId, document_no: docNo }, error: null };

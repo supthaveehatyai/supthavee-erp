@@ -4,7 +4,14 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { PaymentChannelPicker } from "@/components/finance/payment-channel-picker";
 import { updateSalesDocumentDirect } from "@/lib/actions/document-actions";
+import {
+  isPaymentChannel,
+  otherBankNameFromLabel,
+  paymentChannelLabel,
+  type PaymentChannel,
+} from "@/lib/finance/payment-channel";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,11 +28,15 @@ export function SalesHeaderEditDialog({
   docDate,
   notes,
   referenceNo,
+  paymentChannel,
+  receivingBankLabel,
 }: {
   documentId: string;
   docDate: string;
   notes: string;
   referenceNo: string;
+  paymentChannel?: string | null;
+  receivingBankLabel?: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -33,6 +44,12 @@ export function SalesHeaderEditDialog({
   const [date, setDate] = useState(docDate.slice(0, 10));
   const [slipNo, setSlipNo] = useState(referenceNo);
   const [remark, setRemark] = useState(notes);
+  const [channel, setChannel] = useState<PaymentChannel>(
+    isPaymentChannel(paymentChannel) ? paymentChannel : "COMPANY_BANK",
+  );
+  const [otherBankName, setOtherBankName] = useState(
+    otherBankNameFromLabel(receivingBankLabel),
+  );
 
   function onSave() {
     if (pending) return;
@@ -42,6 +59,8 @@ export function SalesHeaderEditDialog({
         doc_date: date,
         notes: remark.trim() || null,
         reference_no: slipNo.trim() || null,
+        payment_channel: channel,
+        receiving_bank_label: paymentChannelLabel(channel, otherBankName),
       });
       if (result.error || !result.data) {
         toast.error(result.error ?? "แก้ไขหัวบิลไม่สำเร็จ");
@@ -68,7 +87,7 @@ export function SalesHeaderEditDialog({
           <DialogHeader>
             <DialogTitle>แก้ไขหัวบิลที่ออกแล้ว</DialogTitle>
             <DialogDescription>
-              ปรับวันที่ เลขสลิป และหมายเหตุโดยไม่ยกเลิกเอกสาร และไม่แก้รายการสินค้า
+              ปรับวันที่ เลขสลิป ช่องทางรับเงิน และหมายเหตุโดยไม่ยกเลิกเอกสาร
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -92,6 +111,15 @@ export function SalesHeaderEditDialog({
                 placeholder="เลขสลิปโอนเงิน / เลขที่บิลอ้างอิง"
               />
             </div>
+            <PaymentChannelPicker
+              value={channel}
+              otherBankName={otherBankName}
+              disabled={pending}
+              onChange={(next, name) => {
+                setChannel(next);
+                setOtherBankName(name);
+              }}
+            />
             <div className="space-y-1.5">
               <Label htmlFor="issued-notes">หมายเหตุ / ชื่องาน</Label>
               <textarea

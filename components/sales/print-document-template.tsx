@@ -9,6 +9,7 @@ import {
 import { SalesPrintLineTable } from "@/components/sales/sales-print-controls";
 import type { DocumentDetail } from "@/types/document";
 import type { PrintPaperSize, PrintVatType } from "@/types/print-document";
+import { receiptMethodText } from "@/lib/finance/payment-channel";
 import { stripDepositNoteMetadata } from "@/lib/utils/deposit-note";
 import { cn } from "@/lib/utils";
 
@@ -206,6 +207,22 @@ export default async function PrintDocumentTemplate({
           />
         )}
       </section>
+
+      {doc.doc_type === "DEP_IN" ? (
+        <section className="mt-3 space-y-1 text-xs text-neutral-800">
+          <p>
+            ชำระโดย (Payment Method):{" "}
+            {receiptMethodText({
+              payment_channel: doc.payment_channel,
+              receiving_bank_label: doc.receiving_bank_label,
+              is_swept_to_company: doc.is_swept_to_company,
+            }) || "—"}
+          </p>
+          <p className="break-all">
+            เลขอ้างอิงสลิป: {doc.reference_no?.trim() || "—"}
+          </p>
+        </section>
+      ) : null}
 
       {doc.doc_type === "CN" && doc.status !== "VOID" && doc.remark?.trim() ? (
         <section className="mt-3 rounded-md border border-neutral-300 bg-neutral-50 px-3 py-2">

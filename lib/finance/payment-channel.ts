@@ -35,6 +35,39 @@ export function paymentChannelLabel(
   return "—";
 }
 
+export function otherBankNameFromLabel(
+  label: string | null | undefined,
+): string {
+  const text = String(label ?? "").trim();
+  if (!text || text === OTHER_BANK_LABEL || text === COMPANY_BANK_LABEL) return "";
+  const wrapped = text.match(/^โอนเข้าบัญชีอื่น \((.+)\)$/);
+  if (wrapped && wrapped[1] !== "รอโอนเข้าบริษัท") return wrapped[1];
+  if (text.startsWith("โอนเข้าบัญชี")) return "";
+  return text;
+}
+
+export function receiptMethodText(input: {
+  payment_channel?: string | null;
+  receiving_bank_label?: string | null;
+  is_swept_to_company?: boolean | null;
+}): string {
+  const channel = String(input.payment_channel ?? "").trim();
+  const stored = String(input.receiving_bank_label ?? "").trim();
+  if (channel === "COMPANY_BANK") return `🏦 ${stored || COMPANY_BANK_LABEL}`;
+  if (channel === "CASH") {
+    return input.is_swept_to_company
+      ? "💵 เงินสดหน้าร้าน (โอนเข้าบริษัทแล้ว)"
+      : "💵 เงินสดหน้าร้าน (รอโอนเข้าบริษัท)";
+  }
+  if (channel === "OTHER_BANK") {
+    if (stored && !stored.startsWith("โอนเข้าบัญชีอื่น")) {
+      return `📱 โอนเข้าบัญชีอื่น (${stored})`;
+    }
+    return `📱 ${stored || OTHER_BANK_LABEL}`;
+  }
+  return stored;
+}
+
 export function isSweptOnReceipt(channel: PaymentChannel): boolean {
   return channel === "COMPANY_BANK";
 }

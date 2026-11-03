@@ -24,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { receiptMethodText } from "@/lib/finance/payment-channel";
 import { cn } from "@/lib/utils";
 import {
   PageModeTabs,
@@ -64,6 +65,44 @@ function formatDate(value: string | null | undefined): string {
     month: "short",
     day: "numeric",
   });
+}
+
+function PaymentChannelBadge({
+  channel,
+  label,
+  swept,
+}: {
+  channel?: string | null;
+  label?: string | null;
+  swept?: boolean | null;
+}) {
+  if (channel === "COMPANY_BANK") {
+    return (
+      <Badge className="border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-50">
+        โอนเข้าบัญชีบริษัท
+      </Badge>
+    );
+  }
+  if (channel === "CASH") {
+    return (
+      <Badge className="border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-50">
+        {swept ? "เงินสดหน้าร้าน · โอนแล้ว" : "เงินสดหน้าร้าน · รอโอนรวม"}
+      </Badge>
+    );
+  }
+  if (channel === "OTHER_BANK") {
+    const name = receiptMethodText({
+      payment_channel: channel,
+      receiving_bank_label: label,
+      is_swept_to_company: swept,
+    }).replace(/^📱\s*/, "");
+    return (
+      <Badge className="border-violet-200 bg-violet-50 text-violet-900 hover:bg-violet-50">
+        {swept ? `${name} · โอนแล้ว` : `${name} · รอโอนรวม`}
+      </Badge>
+    );
+  }
+  return <span className="text-slate-400">—</span>;
 }
 
 function statusBadge(label: string) {
@@ -120,6 +159,7 @@ function DepositTable({
             <TableHead className="whitespace-nowrap">วันที่</TableHead>
             <TableHead className="whitespace-nowrap">เลขที่เอกสาร</TableHead>
             <TableHead>ชื่อผู้ติดต่อ</TableHead>
+            <TableHead className="whitespace-nowrap">ช่องทางรับเงิน</TableHead>
             <TableHead className="whitespace-nowrap text-right">
               ยอดรวม (Grand Total)
             </TableHead>
@@ -143,6 +183,13 @@ function DepositTable({
               </TableCell>
               <TableCell className="max-w-[240px] truncate text-slate-700">
                 {doc.contact_name}
+              </TableCell>
+              <TableCell className="whitespace-nowrap">
+                <PaymentChannelBadge
+                  channel={doc.payment_channel}
+                  label={doc.receiving_bank_label}
+                  swept={doc.is_swept_to_company}
+                />
               </TableCell>
               <TableCell className="whitespace-nowrap text-right font-medium tabular-nums text-slate-900">
                 ฿{formatMoney(doc.grand_total)}

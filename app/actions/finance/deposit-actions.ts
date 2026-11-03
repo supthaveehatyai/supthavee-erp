@@ -84,6 +84,9 @@ type DepositDocRow = {
   grand_total: number | string | null;
   deposit_deducted: number | string | null;
   payment_status: string | null;
+  payment_channel?: string | null;
+  receiving_bank_label?: string | null;
+  is_swept_to_company?: boolean | null;
   contact_id: string | null;
   is_voided?: boolean | null;
   contacts?: ContactJoin | ContactJoin[] | null;
@@ -176,6 +179,9 @@ export async function getDepositDocuments(
         grand_total,
         deposit_deducted,
         payment_status,
+        payment_channel,
+        receiving_bank_label,
+        is_swept_to_company,
         contact_id,
         is_voided,
         contacts:contact_id (
@@ -259,6 +265,9 @@ export async function getDepositDocuments(
         deposit_deducted: depositDeducted,
         status_label: resolveDepositStatusLabel(grandTotal, allocatedAmount),
         payment_status: String(raw.payment_status ?? "UNPAID"),
+        payment_channel: raw.payment_channel ?? null,
+        receiving_bank_label: raw.receiving_bank_label ?? null,
+        is_swept_to_company: raw.is_swept_to_company ?? null,
         created_at: raw.created_at ? String(raw.created_at) : "",
       };
     });

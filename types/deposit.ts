@@ -22,6 +22,9 @@ export type DepositDocument = {
   /** Human-readable allocation status for the dashboard. */
   status_label: string;
   payment_status: string;
+  payment_channel?: string | null;
+  receiving_bank_label?: string | null;
+  is_swept_to_company?: boolean | null;
   created_at: string;
 };
 

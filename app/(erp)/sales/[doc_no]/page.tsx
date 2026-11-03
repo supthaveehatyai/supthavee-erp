@@ -61,6 +61,7 @@ import VoidDocumentActions from "./void-document-actions";
 import DuplicateDocumentButton from "./duplicate-document-button";
 import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
 import { VoidedDocumentAlert } from "@/components/shared/document/voided-document-alert";
+import { receiptMethodText } from "@/lib/finance/payment-channel";
 import { stripDepositNoteMetadata } from "@/lib/utils/deposit-note";
 import { resolveVoidRemark } from "@/lib/utils/void-remark";
 import { displayDocumentItemDescription, stripCreditNoteLineMeta } from "@/lib/utils/credit-note-line";
@@ -376,6 +377,12 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
       doc.doc_type === "TAX_INV") &&
     doc.status === "ISSUED" &&
     amountDue > 0;
+  const receiptMethod = receiptMethodText({
+    payment_channel: doc.payment_channel,
+    receiving_bank_label: doc.receiving_bank_label,
+    is_swept_to_company: doc.is_swept_to_company,
+  });
+  const slipReference = doc.reference_no?.trim() || "";
   const linkedDeposits = doc.linked_deposits ?? [];
   const linkedDepositGross = linkedDeposits.reduce(
     (sum, row) => sum + Number(row.grand_total ?? 0),
@@ -573,6 +580,8 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                   : (doc.notes ?? "")
               }
               referenceNo={doc.reference_no ?? ""}
+              paymentChannel={doc.payment_channel}
+              receivingBankLabel={doc.receiving_bank_label}
             />
           ) : null}
           {canSendKanban || showBatchMto ? (
@@ -818,6 +827,20 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                   ) : null}
                 </div>
               ) : null}
+              {receiptMethod || slipReference ? (
+                <div className="mt-3 space-y-1 rounded-lg border border-sky-100 bg-sky-50/70 px-3 py-2">
+                  {receiptMethod ? (
+                    <p className="font-medium text-slate-800">
+                      ช่องทางการรับเงิน: {receiptMethod}
+                    </p>
+                  ) : null}
+                  {slipReference ? (
+                    <p className="break-all text-slate-700">
+                      เลขที่อ้างอิง / เลขสลิป: {slipReference}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 
@@ -835,6 +858,20 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2.5">
+              {receiptMethod || slipReference ? (
+                <div className="space-y-1 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-sm">
+                  {receiptMethod ? (
+                    <p className="font-semibold text-slate-900">
+                      ช่องทางการรับเงิน: {receiptMethod}
+                    </p>
+                  ) : null}
+                  {slipReference ? (
+                    <p className="break-all text-slate-700">
+                      เลขที่อ้างอิง / เลขสลิป: {slipReference}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               <GoodsQtyBadge rows={doc.items} />
               {isReceiptDoc ? (
                 <>
