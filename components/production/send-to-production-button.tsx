@@ -1,110 +1,63 @@
 "use client";
 
 /**
- * Send to Production — Sales document detail.
- * - SO + is_manufactured → BatchProductionModal (1 mockup / model)
- * - อื่นๆ (สกรีน/ปัก legacy) → CreateJobModal
+ * ส่งทั้งบิลเข้า Production Kanban — 1 บรรทัดบริการ/ผลิตเอง = 1 การ์ด
  */
 
-import { useMemo, useState } from "react";
-import { CheckCircle2, Factory } from "lucide-react";
+import { useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Factory, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import type { ManufacturedSendGroup } from "@/types/production";
-import { BatchProductionModal } from "@/components/sales/batch-production-modal";
-import { CreateJobModal } from "@/components/production/create-job-modal";
+import { sendDocumentToKanban } from "@/lib/actions/production/send-to-production-action";
 import { Button } from "@/components/ui/button";
 
 export type SendToProductionButtonProps = {
   documentId: string;
-  documentNo: string;
-  /** Extra lock (e.g. parent still resolving) — page already gates ISSUED */
+  documentNo?: string;
   disabled?: boolean;
-  /**
-   * กลุ่มรุ่น is_manufactured บน SO — ถ้ามี → ใช้ Batch MTO flow
-   * ถ้าว่าง → เปิด CreateJobModal (งานสกรีน/ปัก เดิม)
-   */
-  manufacturedGroups?: ManufacturedSendGroup[];
-  remark?: string | null;
 };
 
 export function SendToProductionButton({
   documentId,
-  documentNo,
   disabled = false,
-  manufacturedGroups = [],
-  remark = null,
 }: SendToProductionButtonProps) {
-  const [legacyOpen, setLegacyOpen] = useState(false);
-  const [batchOpen, setBatchOpen] = useState(false);
-
-  const pendingGroups = useMemo(
-    () => manufacturedGroups.filter((group) => !group.already_sent),
-    [manufacturedGroups],
-  );
-  const sentGroups = useMemo(
-    () => manufacturedGroups.filter((group) => group.already_sent),
-    [manufacturedGroups],
-  );
-  const isMtoMode = manufacturedGroups.length > 0;
-  const allSent = isMtoMode && pendingGroups.length === 0;
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   function handleClick() {
-    if (isMtoMode) {
-      if (allSent) {
-        toast.info("เอกสารนี้ส่งงานผลิตครบทุกรุ่นแล้ว");
+    if (!documentId || isPending || disabled) return;
+    startTransition(async () => {
+      const result = await sendDocumentToKanban(documentId);
+      if (!result.success || !result.data) {
+        toast.error(result.error ?? "ส่งงานเข้า Production Kanban ไม่สำเร็จ");
         return;
       }
-      setBatchOpen(true);
-      return;
-    }
-    setLegacyOpen(true);
+      const jobNos = result.data.job_nos.filter(Boolean);
+      toast.success(
+        jobNos.length > 0
+          ? `ส่งงานเข้า Production Kanban แล้ว: ${jobNos.join(", ")}`
+          : "ส่งงานเข้า Production Kanban แล้ว",
+      );
+      if (result.error) toast.error(result.error);
+      router.push("/production/kanban");
+    });
   }
 
   return (
-    <>
-      <Button
-        type="button"
-        variant="outline"
-        disabled={disabled || !documentId || allSent}
-        onClick={handleClick}
-        className={
-          allSent
-            ? "h-10 gap-2 border-emerald-200 bg-emerald-50 font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-100"
-            : "h-10 gap-2 border-violet-200 bg-violet-50 font-semibold text-violet-800 hover:bg-violet-100 disabled:opacity-60"
-        }
-      >
-        {allSent ? (
-          <>
-            <CheckCircle2 className="size-4" />
-            ส่งงานผลิตแล้ว
-          </>
-        ) : (
-          <>
-            <Factory className="size-4" />
-            ส่งงานผลิต (Send to Production)
-          </>
-        )}
-      </Button>
-
-      {isMtoMode ? (
-        <BatchProductionModal
-          open={batchOpen}
-          onOpenChange={setBatchOpen}
-          documentId={documentId}
-          documentNo={documentNo}
-          pendingGroups={pendingGroups}
-          sentCount={sentGroups.length}
-          defaultRemark={remark}
-        />
+    <Button
+      type="button"
+      variant="outline"
+      disabled={disabled || !documentId || isPending}
+      onClick={handleClick}
+      className="h-10 gap-2 border-violet-200 bg-violet-50 font-semibold text-violet-800 hover:bg-violet-100 disabled:opacity-60"
+    >
+      {isPending ? (
+        <Loader2 className="size-4 animate-spin" />
       ) : (
-        <CreateJobModal
-          documentId={documentId}
-          documentNo={documentNo}
-          open={legacyOpen}
-          onOpenChange={setLegacyOpen}
-        />
+        <Factory className="size-4" />
       )}
-    </>
+      🏭 ส่งงานเข้า Production Kanban
+    </Button>
   );
 }
 

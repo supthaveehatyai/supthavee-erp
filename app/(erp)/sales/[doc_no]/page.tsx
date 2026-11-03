@@ -64,7 +64,6 @@ import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import ConvertDocumentDropdown from "./convert-document-dropdown";
 import { SendToProductionButton } from "@/components/production/send-to-production-button";
 import { SalesMockupCard } from "@/components/sales/sales-mockup-card";
-import { SendBillToKanbanButton } from "@/components/sales/send-bill-to-kanban-button";
 import { SoLineItemProductionActions } from "@/components/sales/so-line-item-production-actions";
 import { lineDiscountPresentation } from "@/lib/sales/print-line-view";
 import { UpgradeAbbTaxButton } from "@/components/sales/upgrade-abb-tax-button";
@@ -369,9 +368,6 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
     doc.items,
     doc.attachment_url || doc.attached_file_url,
   );
-  const hasManufacturedPending = manufacturedGroups.some(
-    (group) => !group.already_sent,
-  );
   const canSendMto =
     doc.doc_type === "SO" &&
     doc.status === "ISSUED" &&
@@ -379,11 +375,10 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   const kanbanDocTypes = new Set(["SO", "INV_DO", "TAX_INV", "CS_TAX", "ABB"]);
   const kanbanTargets = doc.items.filter(
     (item) =>
-      Boolean(item.product_id) &&
       item.qty > 0 &&
       (item.is_service === true ||
         item.is_service_item === true ||
-        item.is_manufactured === true),
+        (item.is_manufactured === true && Boolean(item.product_id))),
   );
   const hasProductionWork = doc.items.some(
     (item) =>
@@ -522,26 +517,19 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               notes={doc.notes ?? ""}
             />
           ) : null}
-          {showBatchMto && (
+          {canSendKanban || showBatchMto ? (
             <SendToProductionButton
               documentId={doc.id}
               documentNo={doc.doc_no}
-              manufacturedGroups={manufacturedGroups}
-              remark={doc.notes}
-              disabled={!hasManufacturedPending}
-            />
-          )}
-          {canSendKanban && !showBatchMto ? (
-            <SendBillToKanbanButton
-              lines={kanbanTargets.map((item) => ({
-                id: item.id,
-                label: item.sku?.trim() || item.description?.trim() || "รายการ",
-                sent:
-                  item.is_sent_to_production === true ||
-                  item.production_status === "IN_PRODUCTION" ||
-                  item.production_status === "COMPLETED" ||
-                  Boolean(item.production_job_no),
-              }))}
+              disabled={
+                !kanbanTargets.some(
+                  (item) =>
+                    item.is_sent_to_production !== true &&
+                    item.production_status !== "IN_PRODUCTION" &&
+                    item.production_status !== "COMPLETED" &&
+                    !item.production_job_no,
+                )
+              }
             />
           ) : null}
           {canDuplicate && (
@@ -1083,7 +1071,10 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                                   item.production_job_no,
                                 )
                               : null}
-                            {canSendKanban && item.product_id ? (
+                            {(canSendKanban || showBatchMto) &&
+                            (item.is_service === true ||
+                              item.is_service_item === true ||
+                              item.is_manufactured === true) ? (
                               <SoLineItemProductionActions
                                 documentItemId={item.id}
                                 docNo={doc.doc_no}

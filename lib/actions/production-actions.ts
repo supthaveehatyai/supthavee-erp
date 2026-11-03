@@ -274,6 +274,8 @@ type JobQueryRow = {
   estimated_completion_date: string | null;
   created_at: string | null;
   updated_at: string | null;
+  remark?: string | null;
+  ref_document_item_id?: string | null;
   product_models?: ProductModelJoin;
 };
 
@@ -302,7 +304,12 @@ function mapJobCard(row: JobQueryRow): ProductionJobCard | null {
   if (!status) return null;
 
   const model = unwrapModel(row.product_models);
-  const productName = model?.name || model?.model_code || "— ยังไม่ผูกสินค้า";
+  const remarkLabel = String(row.remark ?? "")
+    .replace(/^\[[^\]]+\]\s*/, "")
+    .split("—")[0]
+    ?.trim();
+  const productName =
+    model?.name || model?.model_code || remarkLabel || "— ยังไม่ผูกสินค้า";
 
   return {
     id: String(row.id),
@@ -362,6 +369,8 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
         estimated_completion_date,
         created_at,
         updated_at,
+        remark,
+        ref_document_item_id,
         product_models!production_jobs_finished_model_id_fkey (
           id,
           name,
@@ -389,7 +398,7 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
     const { data: rows, error: jobsError } = await supabaseAdmin
       .from("production_jobs")
       .select(
-        "id, job_no, status, finished_model_id, target_quantity, estimated_completion_date, created_at, updated_at",
+        "id, job_no, status, finished_model_id, target_quantity, estimated_completion_date, created_at, updated_at, remark, ref_document_item_id",
       )
       .order("estimated_completion_date", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
@@ -499,7 +508,7 @@ export async function updateJobStatus(
 
     const { data: current, error: currentError } = await supabaseAdmin
       .from("production_jobs")
-      .select("id, status")
+      .select("id, status, ref_document_item_id")
       .eq("id", id)
       .maybeSingle();
 
@@ -595,6 +604,26 @@ export async function updateJobStatus(
         console.info(
           `[updateJobStatus] backflush confirmed ${flushed?.length ?? 0} routing operation(s) for job ${id}`,
         );
+      }
+
+      const refItemId = String(current.ref_document_item_id ?? "").trim();
+      if (refItemId) {
+        const { error: lineError } = await supabaseAdmin
+          .from("document_items")
+          .update({ production_status: "COMPLETED" })
+          .eq("id", refItemId);
+        if (lineError) {
+          console.error(
+            "[updateJobStatus] document item complete:",
+            lineError.message,
+          );
+          return {
+            success: false,
+            error:
+              lineError.message ??
+              "ปิดใบงานแล้ว แต่ยังอัปเดตสถานะบรรทัดเอกสารไม่สำเร็จ",
+          };
+        }
       }
     }
 
@@ -1329,6 +1358,7 @@ export async function getProductionJobDetails(
         target_quantity,
         estimated_completion_date,
         ref_document_id,
+        ref_document_item_id,
         mockup_image_url,
         remark
       `,
@@ -1353,6 +1383,9 @@ export async function getProductionJobDetails(
       : null;
     const refDocumentId = job.ref_document_id
       ? String(job.ref_document_id)
+      : null;
+    const refDocumentItemId = job.ref_document_item_id
+      ? String(job.ref_document_item_id)
       : null;
 
     const [modelRes, soRes, itemsRes, materialsRes, serviceDocItemsRes, techRes, ratesRes] =
@@ -1663,6 +1696,9 @@ export async function getProductionJobDetails(
       const isServiceLine =
         model?.is_service === true || row.is_service_item === true;
       if (isServiceLine) {
+        if (refDocumentItemId && String(row.id) !== refDocumentItemId) {
+          continue;
+        }
         const techId = row.technician_id
           ? String(row.technician_id).trim()
           : null;
@@ -1738,7 +1774,9 @@ export async function getProductionJobDetails(
       }
     }
 
-    const jobIsService = modelRes.data?.is_service === true;
+    const jobIsService =
+      modelRes.data?.is_service === true ||
+      (Boolean(refDocumentItemId) && modelRes.data?.is_manufactured !== true);
     if (jobIsService && garmentDrafts.length > 0) {
       items.length = 0;
       for (const row of garmentDrafts) {
@@ -1756,10 +1794,12 @@ export async function getProductionJobDetails(
     }
 
     const model = modelRes.data;
+    const linkedServiceName = service_lines[0]?.name?.trim() || "";
     const productName =
       String(model?.name ?? "").trim() ||
       String(model?.short_name ?? "").trim() ||
       String(model?.model_code ?? "").trim() ||
+      linkedServiceName ||
       "— ยังไม่ผูกสินค้า";
 
     const mockupFromCol = String(job.mockup_image_url ?? "").trim();
@@ -1781,7 +1821,7 @@ export async function getProductionJobDetails(
         ? String(model.model_code).trim()
         : null,
       is_manufactured: model?.is_manufactured === true,
-      is_service: model?.is_service === true,
+      is_service: jobIsService,
       target_quantity: toQty(job.target_quantity),
       estimated_completion_date: job.estimated_completion_date
         ? String(job.estimated_completion_date)

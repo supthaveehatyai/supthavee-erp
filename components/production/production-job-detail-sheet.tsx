@@ -564,6 +564,12 @@ export function ProductionJobDetailSheet({
                       {serviceLines.length} รายการ
                     </span>
                   </div>
+                  {serviceLines.length === 1 ? (
+                    <p className="text-xs font-medium text-violet-700">
+                      การ์ดนี้ติดตามเฉพาะบรรทัด {serviceLines[0]?.sku}{" "}
+                      {serviceLines[0]?.name}
+                    </p>
+                  ) : null}
                   <p className="text-xs leading-relaxed text-slate-500">
                     มอบหมายช่างและค่าแรงลง{" "}
                     <span className="font-mono">document_items</span>{" "}

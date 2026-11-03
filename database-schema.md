@@ -58,7 +58,7 @@ CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names, column names, views, 
 
 3\. Products, Inventory \& Production (สินค้า, คลัง, ผลิต)
 
-\- `product\_models`, `products` (3,811+ SKUs), `vendor\_product\_mapping` (3,917+ แถว), `inventory\_ledger`, `product\_boms`, `production\_jobs`, `production\_job\_items`, `production\_job\_materials`, `production\_job\_operations`, `technician\_rates`
+\- `product\_models`, `products` (3,811+ SKUs), `vendor\_product\_mapping` (3,917+ แถว), `inventory\_ledger`, `product\_boms`, `production\_jobs` (`finished\_model\_id` nullable, `ref\_document\_id`, `ref\_document\_item\_id` → `document\_items.id` แยกการ์ด Kanban ต่อบรรทัดบริการ, `job\_no`, `status`, `target\_quantity`, `mockup\_image\_url`, `remark`), `production\_job\_items`, `production\_job\_materials`, `production\_job\_operations`, `technician\_rates`
 
 
 

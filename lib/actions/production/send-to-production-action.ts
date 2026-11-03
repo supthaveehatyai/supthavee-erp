@@ -185,7 +185,7 @@ async function markItemSentToProduction(
 type FetchedLine = {
   id: string;
   document_id: string;
-  product_id: string;
+  product_id: string | null;
   qty: number;
   description: string | null;
   production_status: string | null;
@@ -194,10 +194,12 @@ type FetchedLine = {
   doc_no: string | null;
   doc_type: string | null;
   doc_status: string | null;
+  doc_notes: string | null;
   mockup_image_url: string | null;
-  model_id: string;
+  model_id: string | null;
   model_code: string | null;
   model_name: string | null;
+  sku: string | null;
   is_service: boolean;
   is_manufactured: boolean;
   is_raw_material: boolean;
@@ -376,11 +378,13 @@ function mapFetchedRow(
   const productId = String(row.product_id ?? product?.id ?? "").trim();
   const modelId = String(model?.id ?? product?.model_id ?? "").trim();
   const qty = toPositiveQty(row.qty);
+  const isService =
+    model?.is_service === true || row.is_service_item === true;
 
-  if (!productId) {
+  if (!isService && !productId) {
     return { data: null, error: "รายการนี้ไม่มี product_id" };
   }
-  if (!modelId) {
+  if (!isService && !modelId) {
     return { data: null, error: "สินค้านี้ยังไม่ผูกกับรุ่น (product_models)" };
   }
   if (qty == null) {
@@ -388,10 +392,7 @@ function mapFetchedRow(
   }
 
   const itemMockup = String(row.mockup_image_url ?? "").trim();
-  const headerMockup =
-    String(doc?.attachment_url ?? "").trim() ||
-    String(doc?.attached_file_url ?? "").trim() ||
-    "";
+  const headerMockup = String(doc?.attachment_url ?? "").trim();
   const mockup = itemMockup || headerMockup || null;
 
   const productionStatus =
@@ -404,7 +405,7 @@ function mapFetchedRow(
     data: {
       id: String(row.id),
       document_id: String(row.document_id),
-      product_id: productId,
+      product_id: productId || null,
       qty,
       description: row.description != null ? String(row.description) : null,
       production_status: alreadySentFlag
@@ -419,11 +420,13 @@ function mapFetchedRow(
       doc_no: doc?.doc_no != null ? String(doc.doc_no) : null,
       doc_type: doc?.doc_type != null ? String(doc.doc_type) : null,
       doc_status: doc?.status != null ? String(doc.status) : null,
+      doc_notes: doc?.notes != null ? String(doc.notes) : null,
       mockup_image_url: mockup,
-      model_id: modelId,
+      model_id: modelId || null,
       model_code: model?.model_code != null ? String(model.model_code) : null,
       model_name: model?.name != null ? String(model.name) : null,
-      is_service: model?.is_service === true || row.is_service_item === true,
+      sku: product?.sku != null ? String(product.sku) : null,
+      is_service: isService,
       is_manufactured: model?.is_manufactured === true,
       is_raw_material: model?.is_raw_material === true,
     },
@@ -434,13 +437,39 @@ function mapFetchedRow(
 async function assertNotDuplicateJob(
   supabase: SupabaseClient,
   documentId: string,
-  productId: string,
+  productId: string | null,
   finishedModelId: string | null,
+  documentItemId?: string | null,
 ): Promise<string | null> {
+  // งานบริการ: กันซ้ำเฉพาะบรรทัดนี้ เพื่อให้บิลเดียวกันส่งได้หลายการ์ด
+  if (documentItemId) {
+    const { data: lineJobs, error: lineError } = await supabase
+      .from("production_jobs")
+      .select("id, job_no, status")
+      .eq("ref_document_item_id", documentItemId)
+      .neq("status", "CANCELLED")
+      .limit(1);
+
+    if (lineError) {
+      console.warn(
+        "[sendToProduction] duplicate check service line:",
+        lineError.message,
+      );
+      return lineError.message ?? "ตรวจสอบงานซ้ำของบรรทัดบริการไม่สำเร็จ";
+    }
+
+    const existing = lineJobs?.[0];
+    if (!existing) return null;
+    const jobNo = String(existing.job_no ?? "").trim();
+    return jobNo
+      ? `บรรทัดนี้ถูกส่งเข้า Kanban แล้ว (${jobNo})`
+      : "บรรทัดนี้ถูกส่งเข้า Kanban แล้ว";
+  }
+
   // Active jobs for this SO
   const { data: jobs, error: jobsError } = await supabase
     .from("production_jobs")
-    .select("id, job_no, status, finished_model_id")
+    .select("id, job_no, status, finished_model_id, ref_document_item_id")
     .eq("ref_document_id", documentId)
     .neq("status", "CANCELLED");
 
@@ -449,7 +478,9 @@ async function assertNotDuplicateJob(
     return null;
   }
 
-  const activeJobs = jobs ?? [];
+  const activeJobs = (jobs ?? []).filter(
+    (job) => !String(job.ref_document_item_id ?? "").trim(),
+  );
   if (activeJobs.length === 0) return null;
 
   if (finishedModelId) {
@@ -469,7 +500,7 @@ async function assertNotDuplicateJob(
     .from("production_job_items")
     .select("id, job_id, product_id")
     .in("job_id", jobIds)
-    .eq("product_id", productId)
+    .eq("product_id", productId ?? "")
     .limit(1);
 
   if (itemsError) {
@@ -553,6 +584,7 @@ async function routeServiceFlow(
     line.document_id,
     line.product_id,
     null,
+    line.id,
   );
   if (duplicate) {
     return { success: false, error: duplicate };
@@ -562,18 +594,19 @@ async function routeServiceFlow(
 
   for (let attempt = 0; attempt < JOB_NO_MAX_RETRIES; attempt += 1) {
     const jobNo = await nextMtoJobNo(supabase);
-    const remark =
+    const serviceName =
       line.description?.trim() ||
-      [line.model_code, line.model_name].filter(Boolean).join(" · ") ||
-      "งานบริการจากใบสั่งขาย";
+      [line.sku, line.model_code, line.model_name].filter(Boolean).join(" ") ||
+      "งานบริการ";
+    const remarkHead = `[${line.doc_no?.trim() || "บิล"}] ${serviceName} × ${line.qty}`;
+    const billNote = line.doc_notes?.trim() || "";
+    const remark = billNote ? `${remarkHead} — ${billNote}` : remarkHead;
 
-    // production_jobs schema: job_no, ref_document_id, finished_model_id,
-    // target_quantity, status, estimated_completion_date, mockup_image_url, remark
-    // (technician_id / wage_cost อยู่ที่ document_items — ห้ามใส่ใน jobs)
     const jobInsert: Record<string, unknown> = {
       job_no: jobNo,
       status: "PLANNED",
       ref_document_id: line.document_id,
+      ref_document_item_id: line.id,
       finished_model_id: line.model_id,
       target_quantity: line.qty,
       mockup_image_url: line.mockup_image_url,
@@ -602,27 +635,24 @@ async function routeServiceFlow(
       line.id,
     );
 
-    const { error: itemsError } = await supabase
-      .from("production_job_items")
-      .insert([
-        {
-          job_id: jobId,
-          product_id: line.product_id,
-          quantity: line.qty,
-        },
-        ...garmentItems.map((item) => ({
-          job_id: jobId,
-          product_id: item.product_id,
-          quantity: item.quantity,
-        })),
-      ]);
+    if (garmentItems.length > 0) {
+      const { error: itemsError } = await supabase
+        .from("production_job_items")
+        .insert(
+          garmentItems.map((item) => ({
+            job_id: jobId,
+            product_id: item.product_id,
+            quantity: item.quantity,
+          })),
+        );
 
-    if (itemsError) {
-      await rollbackJob(supabase, jobId);
-      return {
-        success: false,
-        error: `${itemsError.message ?? "บันทึก production_job_items ไม่สำเร็จ"} (Rollback แล้ว)`,
-      };
+      if (itemsError) {
+        await rollbackJob(supabase, jobId);
+        return {
+          success: false,
+          error: `${itemsError.message ?? "บันทึก production_job_items ไม่สำเร็จ"} (Rollback แล้ว)`,
+        };
+      }
     }
 
     // Best-effort service_tracking breadcrumb (legacy table; FK may point at doc_headers)
@@ -678,6 +708,12 @@ async function routeManufacturedFlow(
     return {
       success: false,
       error: "ไม่สามารถเปิดใบสั่งผลิตจากวัตถุดิบได้",
+    };
+  }
+  if (!line.product_id || !line.model_id) {
+    return {
+      success: false,
+      error: "สินค้าผลิตเองต้องมีรหัสสินค้าและรุ่นก่อนส่งเข้า Kanban",
     };
   }
 
@@ -934,6 +970,152 @@ export async function sendToProduction(
       success: false,
       error:
         err instanceof Error ? err.message : "ส่งงานผลิตไม่สำเร็จ",
+    };
+  }
+}
+
+/**
+ * ส่งทุกบรรทัดบริการ / สินค้าผลิตเองที่ยังไม่เข้า Kanban
+ * 1 บรรทัด = 1 ใบงาน (MTO-YYMM-XXXX คนละใบ)
+ */
+export async function sendDocumentToKanban(documentId: string): Promise<{
+  success: boolean;
+  error: string | null;
+  data: { job_nos: string[] } | null;
+}> {
+  try {
+    const id = String(documentId ?? "").trim();
+    if (!id) {
+      return { success: false, error: "ไม่พบรหัสเอกสาร", data: null };
+    }
+
+    const supabase = getSupabaseAdmin();
+    const { data: doc, error: docError } = await supabase
+      .from("documents")
+      .select("id, doc_no, doc_type, status")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (docError) {
+      return { success: false, error: docError.message, data: null };
+    }
+    if (!doc) {
+      return { success: false, error: "ไม่พบเอกสาร", data: null };
+    }
+
+    const docType = String(doc.doc_type ?? "").toUpperCase();
+    const docStatus = String(doc.status ?? "").toUpperCase();
+    const kanbanDocTypes = new Set(["SO", "INV_DO", "TAX_INV", "CS_TAX", "ABB"]);
+    if (!kanbanDocTypes.has(docType)) {
+      return {
+        success: false,
+        error: `ส่งงานเข้า Production Kanban ได้เฉพาะ SO, INV_DO, TAX_INV, CS_TAX, ABB`,
+        data: null,
+      };
+    }
+    if (docStatus !== "ISSUED" && docStatus !== "COMPLETED") {
+      return {
+        success: false,
+        error: "ส่งงานผลิตได้เมื่อเอกสารยืนยันแล้ว (ISSUED)",
+        data: null,
+      };
+    }
+
+    const { data: rows, error: itemsError } = await supabase
+      .from("document_items")
+      .select(
+        `
+        id,
+        product_id,
+        qty,
+        sort_order,
+        is_service_item,
+        is_sent_to_production,
+        production_status,
+        products!document_items_product_id_fkey (
+          product_models!products_model_id_fkey ( is_service, is_manufactured )
+        )
+      `,
+      )
+      .eq("document_id", id)
+      .order("sort_order", { ascending: true });
+
+    if (itemsError) {
+      return { success: false, error: itemsError.message, data: null };
+    }
+
+    const pendingIds: string[] = [];
+    for (const row of rows ?? []) {
+      const sentFlag = row.is_sent_to_production === true;
+      const status = String(row.production_status ?? "NONE").trim().toUpperCase();
+      if (sentFlag || (status !== "" && status !== "NONE")) continue;
+      if ((toPositiveQty(row.qty) ?? 0) <= 0) continue;
+
+      const product = unwrapOne(
+        row.products as
+          | {
+              product_models?:
+                | { is_service?: boolean | null; is_manufactured?: boolean | null }
+                | { is_service?: boolean | null; is_manufactured?: boolean | null }[]
+                | null;
+            }
+          | {
+              product_models?:
+                | { is_service?: boolean | null; is_manufactured?: boolean | null }
+                | { is_service?: boolean | null; is_manufactured?: boolean | null }[]
+                | null;
+            }[]
+          | null,
+      );
+      const model = unwrapOne(product?.product_models ?? null);
+      const isService =
+        row.is_service_item === true || model?.is_service === true;
+      const isManufactured =
+        model?.is_manufactured === true && Boolean(String(row.product_id ?? "").trim());
+      if (!isService && !isManufactured) continue;
+      pendingIds.push(String(row.id));
+    }
+
+    if (pendingIds.length === 0) {
+      return {
+        success: false,
+        error: "ไม่มีรายการบริการหรือสินค้าผลิตเองที่ยังไม่ได้ส่งเข้า Kanban",
+        data: null,
+      };
+    }
+
+    const jobNos: string[] = [];
+    const errors: string[] = [];
+    for (const itemId of pendingIds) {
+      const result = await sendToProduction(itemId);
+      if (result.success && result.data?.job_no) {
+        jobNos.push(result.data.job_no);
+      } else {
+        errors.push(result.error ?? "ส่งงานไม่สำเร็จ");
+      }
+    }
+
+    revalidatePaths(doc.doc_no != null ? String(doc.doc_no) : null);
+
+    if (jobNos.length === 0) {
+      return {
+        success: false,
+        error: errors[0] ?? "ส่งงานเข้า Production Kanban ไม่สำเร็จ",
+        data: null,
+      };
+    }
+
+    return {
+      success: true,
+      error: errors.length > 0 ? errors[0] : null,
+      data: { job_nos: jobNos },
+    };
+  } catch (err) {
+    console.error("[sendDocumentToKanban]", err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "ส่งงานเข้า Production Kanban ไม่สำเร็จ",
+      data: null,
     };
   }
 }

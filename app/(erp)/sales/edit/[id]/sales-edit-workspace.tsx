@@ -6,7 +6,6 @@
  */
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { AlertTriangle, ArrowLeft, Pencil, Save, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -175,7 +174,6 @@ export default function SalesEditWorkspace({
   customers,
   customersError = null,
 }: SalesEditWorkspaceProps) {
-  const router = useRouter();
   const [contactId, setContactId] = useState(initialDocument.contact_id);
   const [contactPersonId, setContactPersonId] = useState(
     initialDocument.contact_person_id ?? "",
@@ -543,26 +541,25 @@ export default function SalesEditWorkspace({
             issued.error ??
               "บันทึกร่างแล้ว แต่ออกเลขบิลไม่สำเร็จ — เปิดร่างเพื่อออกเอกสารต่อ",
           );
-          router.push(
+          window.location.assign(
             `/sales/${encodeURIComponent(result.data.document_no)}`,
           );
-          router.refresh();
           return;
         }
         toast.success(
           issued.data.successMessage ??
             `ออกบิล ${issued.data.document_no} แล้ว`,
         );
-        router.push(
+        window.location.assign(
           `/sales/${encodeURIComponent(issued.data.document_no)}`,
         );
-        router.refresh();
         return;
       }
 
       toast.success(`บันทึกเอกสาร ${result.data.document_no} แล้ว`);
-      router.push(`/sales/${encodeURIComponent(result.data.document_no)}`);
-      router.refresh();
+      window.location.assign(
+        `/sales/${encodeURIComponent(result.data.document_no)}`,
+      );
     });
   }
 

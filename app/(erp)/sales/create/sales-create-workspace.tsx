@@ -9,7 +9,6 @@
  */
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { FilePlus2, Receipt, ShoppingCart, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -205,7 +204,6 @@ export default function SalesCreateWorkspace({
   openEcommerceImport = false,
   initialDocType = INITIAL_DOC_TYPE,
 }: SalesCreateWorkspaceProps) {
-  const router = useRouter();
   const startingDocType = isSalesTradingDocType(initialDocType)
     ? initialDocType
     : INITIAL_DOC_TYPE;
@@ -668,33 +666,21 @@ export default function SalesCreateWorkspace({
             issued.error ??
               "บันทึกร่างแล้ว แต่ออกเลขบิลไม่สำเร็จ — เปิดร่างเพื่อออกเอกสารต่อ",
           );
-          router.push(`/sales/${encodeURIComponent(draftNo)}`);
-          router.refresh();
+          window.location.assign(`/sales/${encodeURIComponent(draftNo)}`);
           return;
         }
         toast.success(
           issued.data.successMessage ??
             `ออกบิล ${issued.data.document_no} แล้ว`,
         );
-        setLastSavedDocNo(issued.data.document_no);
-        resetFormToInitial();
-        router.refresh();
-        router.push(
+        window.location.assign(
           `/sales/${encodeURIComponent(issued.data.document_no)}`,
         );
         return;
       }
 
       toast.success(`สร้างเอกสาร ${draftNo} สำเร็จ`);
-
-      // 1) Show success artifact briefly
-      setLastSavedDocNo(draftNo);
-      // 2) Hard-reset all draft form state so nothing sticks
-      resetFormToInitial();
-      // 3) Invalidate Next.js client cache / re-fetch server props
-      router.refresh();
-      // 4) Open read-only document view for issue / complete flow
-      router.push(`/sales/${encodeURIComponent(draftNo)}`);
+      window.location.assign(`/sales/${encodeURIComponent(draftNo)}`);
     });
   }
 

@@ -31,7 +31,7 @@
 - `mst_uom` (หน่วยนับรับเข้า — `uom_code`, `uom_name`, `default_multiplier`, `allow_custom_multiplier`, `sort_order`, `is_active`)
 - `vendor_product_mapping` (การผูกรหัสสินค้าซัพพลายเออร์ — เก็บ `purchase_uom_code` และ `conversion_factor` ตอน Confirm Mapping)
 - `inventory_ledger` (สมุดบัญชีคลังสินค้า - ควบคุมการเข้าออกสต็อก)
-- `production_jobs` (ใบสั่งผลิต / งาน MTO — มี `finished_model_id`, `target_quantity`, `estimated_completion_date`, `ref_document_id` → SO, `mockup_image_url`, `remark`; สถานะ Kanban: PLANNED / IN_PROGRESS / QA / COMPLETED; Phase 14 Tiered Storage: `storage_tier`)
+- `production_jobs` (ใบสั่งผลิต / งาน MTO — `finished_model_id` nullable, `target_quantity`, `estimated_completion_date`, `ref_document_id` → documents, `ref_document_item_id` → document_items.id สำหรับแยกการ์ดตามบรรทัดบริการ, `mockup_image_url`, `remark`; สถานะ Kanban: PLANNED / IN_PROGRESS / QA / COMPLETED; Phase 14 Tiered Storage: `storage_tier`)
 - `production_job_items` (รายการ SKU/ไซส์ ต่อใบสั่งผลิต — `job_id`, `product_id`, `quantity`)
 - `production_job_materials` (BOM Snapshot ต่อใบสั่งผลิต — `job_id`, `raw_material_model_id`, `uom_id`, `planned_qty`, `cost_price_snapshot`)
 - `production_job_operations` (ขั้นตอนการผลิตและค่าแรง In-house Routing / SAP Yield Confirmation — `job_id` → production_jobs, `operation_name`, `technician_id` → contacts, `confirmed_qty` ยอดยืนยัน, `unit_wage` ค่าแรงต่อหน่วยจาก Rate Card, `wage_cost` = confirmed_qty × unit_wage, `remark` เหตุผลเมื่อ override unit_wage, `technician_bill_id` โยง TB, `status` PENDING|COMPLETED — แยกจาก Service Assignment บน document_items)
