@@ -146,6 +146,8 @@ export type CreateDraftDocumentInput = {
   ecommerce_buyer_name?: string | null;
   tracking_no?: string | null;
   one_time_address?: string | null;
+  /** Mockup สกรีน/ปัก/ผลิต — `documents.attachment_url` และ `attached_file_url` */
+  attachment_url?: string | null;
 };
 
 export type CreateDraftDocumentResult = {
@@ -181,6 +183,8 @@ export type UpdateDraftDocumentInput = {
   ecommerce_buyer_name?: string | null;
   tracking_no?: string | null;
   one_time_address?: string | null;
+  /** Mockup สกรีน/ปัก/ผลิต — `documents.attachment_url` และ `attached_file_url` */
+  attachment_url?: string | null;
 };
 
 export type UpdateDraftDocumentResult = {
@@ -225,6 +229,8 @@ export type SalesProductSearchItem = {
   tax_type?: string | null;
   /** `product_models.is_service` — งานบริการ (ไม่ตัดสต็อก) */
   is_service: boolean;
+  /** `product_models.is_manufactured` — สินค้าผลิตเอง (MTO) */
+  is_manufactured?: boolean;
   /** `product_models.short_name` — ชื่อย่อสำหรับใบกำกับภาษี */
   short_name?: string | null;
   /** `product_models` → `mst_categories.category_name` */
@@ -256,6 +262,10 @@ export type SalesLineItem = {
   image_url: string | null;
   /** รายการบริการไม่มีรหัสสต็อก */
   is_service_item?: boolean;
+  /** `product_models.is_service` */
+  is_service?: boolean;
+  /** `product_models.is_manufactured` */
+  is_manufactured?: boolean;
 };
 
 export type CompleteDocumentLineInput = {

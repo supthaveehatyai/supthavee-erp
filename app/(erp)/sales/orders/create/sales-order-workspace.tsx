@@ -690,16 +690,16 @@ export default function SalesOrderWorkspace({
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">สินค้าผลิตเอง (SKU Matrix)</CardTitle>
+          <CardTitle className="text-base">สินค้าในบิล (สต็อก / สกรีน / ผลิตเอง)</CardTitle>
           <CardDescription>
-            ค้นหารุ่นที่ is_manufactured = true แล้วกรอกจำนวนตามไซส์
+            เลือกได้ทั้งเสื้อในสต็อก, SKU งานสกรีน/ปัก และสินค้าผลิตเอง
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <ModelMatrixPicker
-            manufacturedOnly
+            manufacturedOnly={false}
             disabled={isBusy}
-            placeholder="ค้นหารุ่นสินค้าที่ผลิตเอง..."
+            placeholder="ค้นหาเสื้อในสต็อก, งานสกรีน/ปัก หรือสินค้าผลิตเอง..."
             onAddToBill={handleAddToBill}
           />
 

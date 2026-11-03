@@ -424,6 +424,110 @@ async function syncHandwrittenRefToDocHeader(
   return null;
 }
 
+function normalizeAttachmentUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, 2000) : null;
+}
+
+function modelProductionFlags(value: unknown): {
+  is_service: boolean;
+  is_manufactured: boolean;
+} {
+  const row = Array.isArray(value) ? value[0] : value;
+  if (!row || typeof row !== "object") {
+    return { is_service: false, is_manufactured: false };
+  }
+  const model = row as {
+    is_service?: boolean | null;
+    is_manufactured?: boolean | null;
+  };
+  return {
+    is_service: model.is_service === true,
+    is_manufactured: model.is_manufactured === true,
+  };
+}
+
+async function loadSalesDraftProducts(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  productIds: string[],
+): Promise<
+  | {
+      ok: true;
+      costByProductId: Map<string, number>;
+      nameByProductId: Map<string, string>;
+      uomByProductId: Map<string, string>;
+      productionProductIds: Set<string>;
+    }
+  | { ok: false; error: string }
+> {
+  const costByProductId = new Map<string, number>();
+  const nameByProductId = new Map<string, string>();
+  const uomByProductId = new Map<string, string>();
+  const productionProductIds = new Set<string>();
+  if (productIds.length === 0) {
+    return {
+      ok: true,
+      costByProductId,
+      nameByProductId,
+      uomByProductId,
+      productionProductIds,
+    };
+  }
+
+  const { data: products, error: productsError } = await supabase
+    .from("products")
+    .select(
+      "id, name, cost_price, base_uom, product_models(is_service, is_manufactured)",
+    )
+    .in("id", productIds)
+    .eq("is_active", true);
+
+  if (productsError) return { ok: false, error: productsError.message };
+
+  for (const row of products ?? []) {
+    const id = String(row.id ?? "");
+    if (!id) continue;
+    const cost = Number(row.cost_price ?? 0);
+    costByProductId.set(id, Number.isFinite(cost) ? cost : 0);
+    nameByProductId.set(id, String(row.name ?? ""));
+    if (row.base_uom) uomByProductId.set(id, String(row.base_uom));
+    const flags = modelProductionFlags(row.product_models);
+    if (flags.is_service || flags.is_manufactured) productionProductIds.add(id);
+  }
+
+  for (const productId of productIds) {
+    if (!costByProductId.has(productId)) {
+      return {
+        ok: false,
+        error: `ไม่พบสินค้าในระบบ หรือถูกปิดใช้งาน: ${productId}`,
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    costByProductId,
+    nameByProductId,
+    uomByProductId,
+    productionProductIds,
+  };
+}
+
+function stampProductionMockup<T extends { product_id: string | null; is_service_item?: boolean }>(
+  rows: T[],
+  attachmentUrl: string | null,
+  productionProductIds: Set<string>,
+): T[] {
+  if (!attachmentUrl) return rows;
+  return rows.map((row) => {
+    const stamp =
+      row.is_service_item === true ||
+      (Boolean(row.product_id) && productionProductIds.has(String(row.product_id)));
+    return stamp ? { ...row, mockup_image_url: attachmentUrl } : row;
+  });
+}
+
 /**
  * Create a DRAFT document header + optional line items.
  * Late Numbering: uses temporary `DRAFT-YYYYMMDDHHmmss` — official running
@@ -499,45 +603,22 @@ export async function createDraftDocument(
           .filter((id) => id.length > 0),
       ),
     ];
-    const costByProductId = new Map<string, number>();
-    const nameByProductId = new Map<string, string>();
-    const uomByProductId = new Map<string, string>();
-
-    if (productIds.length > 0) {
-      const { data: products, error: productsError } = await supabase
-        .from("products")
-        .select("id, name, cost_price, base_uom")
-        .in("id", productIds)
-        .eq("is_active", true);
-
-      if (productsError) {
-        return { data: null, error: productsError.message };
-      }
-
-      for (const row of products ?? []) {
-        const id = row.id as string;
-        const cost = Number(row.cost_price ?? 0);
-        costByProductId.set(id, Number.isFinite(cost) ? cost : 0);
-        nameByProductId.set(id, String(row.name ?? ""));
-        if (row.base_uom) uomByProductId.set(id, String(row.base_uom));
-      }
-
-      for (const productId of productIds) {
-        if (!costByProductId.has(productId)) {
-          return {
-            data: null,
-            error: `ไม่พบสินค้าในระบบ หรือถูกปิดใช้งาน: ${productId}`,
-          };
-        }
-      }
+    const productLookup = await loadSalesDraftProducts(supabase, productIds);
+    if (!productLookup.ok) {
+      return { data: null, error: productLookup.error };
     }
 
-    const lineRows = items.map((item, index) =>
-      mapSalesDraftLine(item, index, {
-        costByProductId,
-        nameByProductId,
-        uomByProductId,
-      }),
+    const attachmentUrl = normalizeAttachmentUrl(payload.attachment_url);
+    const lineRows = stampProductionMockup(
+      items.map((item, index) =>
+        mapSalesDraftLine(item, index, {
+          costByProductId: productLookup.costByProductId,
+          nameByProductId: productLookup.nameByProductId,
+          uomByProductId: productLookup.uomByProductId,
+        }),
+      ),
+      attachmentUrl,
+      productLookup.productionProductIds,
     );
 
     const vatType: VatCalculationType = isVatCalculationType(
@@ -592,6 +673,8 @@ export async function createDraftDocument(
             ? payload.notes.trim() || null
             : null,
         reference_no: normalizeHandwrittenDocRef(payload.handwritten_doc_ref),
+        attachment_url: attachmentUrl,
+        attached_file_url: attachmentUrl,
         created_by: owner.userId,
         updated_at: nowIso,
       })
@@ -939,6 +1022,7 @@ type ProductModelSearchJoin = {
   short_name?: string | null;
   is_raw_material?: boolean | null;
   is_service?: boolean | null;
+  is_manufactured?: boolean | null;
   mst_categories?: CategoryNameJoin | CategoryNameJoin[] | null;
 };
 
@@ -1054,6 +1138,7 @@ async function searchProductsInternal(
         short_name,
         is_raw_material,
         is_service,
+        is_manufactured,
         mst_categories ( category_name )
       )
     `
@@ -1074,6 +1159,7 @@ async function searchProductsInternal(
         short_name,
         is_raw_material,
         is_service,
+        is_manufactured,
         mst_categories ( category_name )
       )
     `;
@@ -1260,6 +1346,7 @@ async function searchProductsInternal(
         base_uom: row.base_uom,
         image_url: model?.image_url?.trim() || null,
         is_service: model?.is_service === true,
+        is_manufactured: model?.is_manufactured === true,
         short_name: model?.short_name?.trim() || null,
         category_name:
           unwrapJoin(model?.mst_categories)?.category_name?.trim() || null,
@@ -2013,6 +2100,105 @@ export async function getDocumentById(
   }
 }
 
+const SALES_MOCKUP_DOC_TYPES = new Set([
+  "QT",
+  "SO",
+  "INV_DO",
+  "TAX_INV",
+  "CS_TAX",
+  "ABB",
+]);
+
+/**
+ * บันทึก Mockup ลงหัวบิลและแถวงานบริการ/งานผลิต
+ * ใช้ได้ทั้ง DRAFT และ ISSUED (ไม่ล็อกเฉพาะร่าง)
+ */
+export async function updateSalesDocumentMockup(
+  documentId: string,
+  attachmentUrl: string,
+): Promise<{ data: { url: string } | null; error: string | null }> {
+  try {
+    const id = documentId?.trim() ?? "";
+    const url = normalizeAttachmentUrl(attachmentUrl);
+    if (!id) return { data: null, error: "ไม่พบรหัสเอกสาร" };
+    if (!url) return { data: null, error: "ไม่พบ URL รูป Mockup" };
+
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: null, error: owner.error };
+
+    const supabase = createSupabaseServerClient();
+    const { data: existing, error: existingError } = await supabase
+      .from("documents")
+      .select("id, doc_no, doc_type, status")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (existingError) return { data: null, error: existingError.message };
+    if (!existing) return { data: null, error: "ไม่พบเอกสาร" };
+    const docType = String(existing.doc_type ?? "");
+    const status = String(existing.status ?? "");
+    if (!SALES_MOCKUP_DOC_TYPES.has(docType)) {
+      return { data: null, error: "บันทึก Mockup ได้เฉพาะเอกสารขาย" };
+    }
+    if (status === "VOID" || status === "CANCELLED") {
+      return { data: null, error: "เอกสารถูกยกเลิกแล้ว — เปลี่ยนรูป Mockup ไม่ได้" };
+    }
+
+    const { error: headerError } = await supabase
+      .from("documents")
+      .update({
+        attachment_url: url,
+        attached_file_url: url,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+
+    if (headerError) return { data: null, error: headerError.message };
+
+    const { data: itemRows, error: itemsError } = await supabase
+      .from("document_items")
+      .select(
+        "id, product_id, is_service_item, products(product_models(is_service, is_manufactured))",
+      )
+      .eq("document_id", id);
+
+    if (itemsError) return { data: null, error: itemsError.message };
+
+    const lineIds = (itemRows ?? [])
+      .filter((row) => {
+        if (row.is_service_item === true || !row.product_id) return true;
+        const product = Array.isArray(row.products) ? row.products[0] : row.products;
+        const models =
+          product && typeof product === "object" && "product_models" in product
+            ? (product as { product_models?: unknown }).product_models
+            : null;
+        const flags = modelProductionFlags(models);
+        return flags.is_service || flags.is_manufactured;
+      })
+      .map((row) => String(row.id));
+
+    if (lineIds.length > 0) {
+      const { error: lineError } = await supabase
+        .from("document_items")
+        .update({ mockup_image_url: url })
+        .in("id", lineIds);
+      if (lineError && !/mockup_image_url/i.test(lineError.message ?? "")) {
+        return { data: null, error: lineError.message };
+      }
+    }
+
+    revalidatePath("/sales");
+    revalidatePath(`/sales/${encodeURIComponent(String(existing.doc_no ?? ""))}`);
+    revalidatePath("/production/kanban");
+    return { data: { url }, error: null };
+  } catch (err) {
+    return {
+      data: null,
+      error: err instanceof Error ? err.message : "บันทึกรูป Mockup ไม่สำเร็จ",
+    };
+  }
+}
+
 /**
  * Update an existing DRAFT document header + replace line items.
  * Preserves `doc_no`, `doc_type`, and lineage (`ref_document_id`).
@@ -2110,6 +2296,12 @@ export async function updateDraftDocument(
           ecommerce_buyer_name: header.data.ecommerce_buyer_name,
           tracking_no: header.data.tracking_no,
           one_time_address: header.data.one_time_address,
+          ...(payload.attachment_url !== undefined
+            ? {
+                attachment_url: normalizeAttachmentUrl(payload.attachment_url),
+                attached_file_url: normalizeAttachmentUrl(payload.attachment_url),
+              }
+            : {}),
           updated_at: nowIso,
         })
         .eq("id", documentId)
@@ -2161,45 +2353,22 @@ export async function updateDraftDocument(
           .filter((id) => id.length > 0),
       ),
     ];
-    const costByProductId = new Map<string, number>();
-    const nameByProductId = new Map<string, string>();
-    const uomByProductId = new Map<string, string>();
-
-    if (productIds.length > 0) {
-      const { data: products, error: productsError } = await supabase
-        .from("products")
-        .select("id, name, cost_price, base_uom")
-        .in("id", productIds)
-        .eq("is_active", true);
-
-      if (productsError) {
-        return { data: null, error: productsError.message };
-      }
-
-      for (const row of products ?? []) {
-        const id = row.id as string;
-        const cost = Number(row.cost_price ?? 0);
-        costByProductId.set(id, Number.isFinite(cost) ? cost : 0);
-        nameByProductId.set(id, String(row.name ?? ""));
-        if (row.base_uom) uomByProductId.set(id, String(row.base_uom));
-      }
-
-      for (const productId of productIds) {
-        if (!costByProductId.has(productId)) {
-          return {
-            data: null,
-            error: `ไม่พบสินค้าในระบบ หรือถูกปิดใช้งาน: ${productId}`,
-          };
-        }
-      }
+    const productLookup = await loadSalesDraftProducts(supabase, productIds);
+    if (!productLookup.ok) {
+      return { data: null, error: productLookup.error };
     }
 
-    const lineRows = items.map((item, index) =>
-      mapSalesDraftLine(item, index, {
-        costByProductId,
-        nameByProductId,
-        uomByProductId,
-      }),
+    const attachmentUrl = normalizeAttachmentUrl(payload.attachment_url);
+    const lineRows = stampProductionMockup(
+      items.map((item, index) =>
+        mapSalesDraftLine(item, index, {
+          costByProductId: productLookup.costByProductId,
+          nameByProductId: productLookup.nameByProductId,
+          uomByProductId: productLookup.uomByProductId,
+        }),
+      ),
+      attachmentUrl,
+      productLookup.productionProductIds,
     );
 
     const vatType: VatCalculationType = isVatCalculationType(
@@ -2241,6 +2410,12 @@ export async function updateDraftDocument(
         ecommerce_buyer_name: header.data.ecommerce_buyer_name,
         tracking_no: header.data.tracking_no,
         one_time_address: header.data.one_time_address,
+        ...(payload.attachment_url !== undefined
+          ? {
+              attachment_url: attachmentUrl,
+              attached_file_url: attachmentUrl,
+            }
+          : {}),
         updated_at: nowIso,
       })
       .eq("id", documentId)

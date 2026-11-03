@@ -41,6 +41,7 @@ import ModelMatrixPicker, {
   type ModelMatrixBillItem,
 } from "@/components/sales/model-matrix-picker";
 import { ServiceLineShortcuts } from "@/components/sales/service-line-shortcuts";
+import { SalesMockupCard } from "@/components/sales/sales-mockup-card";
 import { moneyAfterQtyPrice } from "@/lib/sales/service-line-price";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import { Button } from "@/components/ui/button";
@@ -134,6 +135,8 @@ function createLineFromProduct(
     line_total: calcLineTotal(nextQty, unitPrice),
     image_url: product.image_url ?? null,
     is_service_item: product.is_service === true,
+    is_service: product.is_service === true,
+    is_manufactured: product.is_manufactured === true,
   };
 }
 
@@ -152,6 +155,8 @@ function createServiceLine(): SalesLineItem {
     line_total: 0,
     image_url: null,
     is_service_item: true,
+    is_service: true,
+    is_manufactured: false,
   };
 }
 
@@ -204,6 +209,7 @@ export default function SalesCreateWorkspace({
   );
   const [handwrittenDocRef, setHandwrittenDocRef] = useState("");
   const [notes, setNotes] = useState("");
+  const [mockupUrl, setMockupUrl] = useState("");
   const [ecommerceOpen, setEcommerceOpen] = useState(openEcommerceImport);
   const [isPending, startTransition] = useTransition();
   const scanKey = useRef(0);
@@ -252,6 +258,16 @@ export default function SalesCreateWorkspace({
         vatRate: DEFAULT_VAT_RATE,
       }),
     [lineItems, discountText, vatType],
+  );
+  const needsProductionMockup = useMemo(
+    () =>
+      lineItems.some(
+        (row) =>
+          row.is_service_item === true ||
+          row.is_service === true ||
+          row.is_manufactured === true,
+      ),
+    [lineItems],
   );
 
   useEffect(() => {
@@ -581,6 +597,7 @@ export default function SalesCreateWorkspace({
         ecommerce_buyer_name: header.data.ecommerce_buyer_name,
         tracking_no: header.data.tracking_no,
         one_time_address: header.data.one_time_address,
+        attachment_url: mockupUrl.trim() || null,
         items: lineItems.map((row, index) => ({
           product_id: row.product_id || null,
           description: row.description,
@@ -888,6 +905,17 @@ export default function SalesCreateWorkspace({
           </form>
         </CardContent>
       </Card>
+
+      {needsProductionMockup ? (
+        <SalesMockupCard
+          url={mockupUrl}
+          disabled={isPending}
+          onChange={(nextUrl) => {
+            clearLastSavedArtifact();
+            setMockupUrl(nextUrl);
+          }}
+        />
+      ) : null}
 
       <Card className="border-slate-200 shadow-sm">
         <CardHeader className="pb-3">

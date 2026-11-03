@@ -1369,7 +1369,7 @@ export async function getProductionJobDetails(
         refDocumentId
           ? supabaseAdmin
               .from("documents")
-              .select("id, doc_no, doc_type")
+              .select("id, doc_no, doc_type, attachment_url, attached_file_url")
               .eq("id", refDocumentId)
               .maybeSingle()
           : Promise.resolve({ data: null, error: null }),
@@ -1396,6 +1396,7 @@ export async function getProductionJobDetails(
               description,
               uom_used,
               sort_order,
+              is_service_item,
               technician_id,
               wage_cost,
               technician_bill_id,
@@ -1645,45 +1646,113 @@ export async function getProductionJobDetails(
     }
 
     const service_lines: ProductionJobServiceLine[] = [];
+    const garmentDrafts: {
+      id: string;
+      product_id: string;
+      sku: string;
+      product_name: string;
+      size: string | null;
+      colorCode: string | null;
+      quantity: number;
+    }[] = [];
     for (const row of serviceDocItemsRes.data ?? []) {
       const product = unwrapOne(
         row.products as NestedProduct | NestedProduct[] | null,
       );
       const model = unwrapOne(product?.product_models ?? null);
-      if (model?.is_service !== true) continue;
-
-      const techId = row.technician_id
-        ? String(row.technician_id).trim()
-        : null;
-      service_lines.push({
-        id: String(row.id),
-        sku: String(product?.sku ?? "—").trim() || "—",
-        name:
-          String(product?.name ?? "").trim() ||
-          String(product?.short_name ?? "").trim() ||
-          String(model?.name ?? "").trim() ||
-          "งานบริการ",
-        qty: toQty(row.qty),
-        uom: row.uom_used ? String(row.uom_used).trim() || null : null,
-        color: product?.color ? String(product.color) : null,
-        size: product?.size ? String(product.size) : null,
-        description: row.description
-          ? String(row.description).trim() || null
-          : null,
-        model_id: model?.id
-          ? String(model.id)
-          : product?.model_id
-            ? String(product.model_id)
+      const isServiceLine =
+        model?.is_service === true || row.is_service_item === true;
+      if (isServiceLine) {
+        const techId = row.technician_id
+          ? String(row.technician_id).trim()
+          : null;
+        service_lines.push({
+          id: String(row.id),
+          sku: String(product?.sku ?? "—").trim() || "—",
+          name:
+            String(product?.name ?? "").trim() ||
+            String(product?.short_name ?? "").trim() ||
+            String(model?.short_name ?? "").trim() ||
+            String(model?.name ?? "").trim() ||
+            String(row.description ?? "").trim() ||
+            "งานบริการ",
+          qty: toQty(row.qty),
+          uom: row.uom_used ? String(row.uom_used).trim() || null : null,
+          color: product?.color ? String(product.color) : null,
+          size: product?.size ? String(product.size) : null,
+          description: row.description
+            ? String(row.description).trim() || null
             : null,
-        technician_id: techId || null,
-        technician_name: techId
-          ? technicianNameById.get(techId) ?? null
-          : null,
-        wage_cost: toCostPrice(row.wage_cost) ?? 0,
-        technician_bill_id: row.technician_bill_id
-          ? String(row.technician_bill_id).trim() || null
-          : null,
+          model_id: model?.id
+            ? String(model.id)
+            : product?.model_id
+              ? String(product.model_id)
+              : null,
+          technician_id: techId || null,
+          technician_name: techId
+            ? technicianNameById.get(techId) ?? null
+            : null,
+          wage_cost: toCostPrice(row.wage_cost) ?? 0,
+          technician_bill_id: row.technician_bill_id
+            ? String(row.technician_bill_id).trim() || null
+            : null,
+        });
+        continue;
+      }
+
+      const productId = String(product?.id ?? "").trim();
+      if (!productId) continue;
+      const modelLabel =
+        String(model?.short_name ?? "").trim() ||
+        String(model?.name ?? "").trim() ||
+        String(model?.model_code ?? "").trim();
+      const description = String(row.description ?? "").trim();
+      garmentDrafts.push({
+        id: String(row.id),
+        product_id: productId,
+        sku: String(product?.sku ?? "—").trim() || "—",
+        product_name: description || modelLabel || String(product?.name ?? "เสื้อ"),
+        size: product?.size ? String(product.size) : null,
+        colorCode: product?.color ? String(product.color).trim() : null,
+        quantity: toQty(row.qty),
       });
+    }
+
+    const colorCodes = [
+      ...new Set(
+        garmentDrafts
+          .map((row) => row.colorCode?.trim().toUpperCase() ?? "")
+          .filter(Boolean),
+      ),
+    ];
+    const colorNameByCode = new Map<string, string>();
+    if (colorCodes.length > 0) {
+      const { data: colorRows } = await supabaseAdmin
+        .from("mst_colors")
+        .select("color_code, color_name")
+        .in("color_code", colorCodes);
+      for (const color of colorRows ?? []) {
+        const code = String(color.color_code ?? "").trim().toUpperCase();
+        const name = String(color.color_name ?? "").trim();
+        if (code && name) colorNameByCode.set(code, name);
+      }
+    }
+
+    const jobIsService = modelRes.data?.is_service === true;
+    if (jobIsService && garmentDrafts.length > 0) {
+      items.length = 0;
+      for (const row of garmentDrafts) {
+        const code = row.colorCode?.trim().toUpperCase() ?? "";
+        items.push({
+          id: row.id,
+          product_id: row.product_id,
+          sku: row.sku,
+          product_name: row.product_name,
+          size: row.size,
+          color: (code && colorNameByCode.get(code)) || row.colorCode,
+          quantity: row.quantity,
+        });
+      }
     }
 
     const model = modelRes.data;
@@ -1694,8 +1763,11 @@ export async function getProductionJobDetails(
       "— ยังไม่ผูกสินค้า";
 
     const mockupFromCol = String(job.mockup_image_url ?? "").trim();
+    const headerMockup =
+      String(soRes.data?.attachment_url ?? "").trim() ||
+      String(soRes.data?.attached_file_url ?? "").trim();
     const modelImage = String(model?.image_url ?? "").trim();
-    const mockupImageUrl = mockupFromCol || modelImage || null;
+    const mockupImageUrl = mockupFromCol || headerMockup || modelImage || null;
 
     const remark = String(job.remark ?? "").trim() || null;
 

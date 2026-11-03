@@ -63,6 +63,9 @@ import { displayDocumentItemDescription, stripCreditNoteLineMeta } from "@/lib/u
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import ConvertDocumentDropdown from "./convert-document-dropdown";
 import { SendToProductionButton } from "@/components/production/send-to-production-button";
+import { SalesMockupCard } from "@/components/sales/sales-mockup-card";
+import { SendBillToKanbanButton } from "@/components/sales/send-bill-to-kanban-button";
+import { SoLineItemProductionActions } from "@/components/sales/so-line-item-production-actions";
 import { isTemporaryDraftDocNo } from "@/lib/utils/draft-document-no";
 import type { ManufacturedSendGroup } from "@/types/production";
 
@@ -369,15 +372,34 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
     doc.doc_type === "SO" &&
     doc.status === "ISSUED" &&
     manufacturedGroups.length > 0;
-  const canSendLegacyProduction =
-    (doc.doc_type === "SO" ||
-      doc.doc_type === "TAX_INV" ||
-      doc.doc_type === "ABB" ||
-      doc.doc_type === "CS_TAX" ||
-      doc.doc_type === "INV_DO") &&
-    doc.status === "ISSUED" &&
-    manufacturedGroups.length === 0;
-  const canSendToProduction = canSendMto || canSendLegacyProduction;
+  const kanbanDocTypes = new Set(["SO", "INV_DO", "TAX_INV", "CS_TAX", "ABB"]);
+  const kanbanTargets = doc.items.filter(
+    (item) =>
+      Boolean(item.product_id) &&
+      item.qty > 0 &&
+      (item.is_service === true ||
+        item.is_service_item === true ||
+        item.is_manufactured === true),
+  );
+  const hasProductionWork = doc.items.some(
+    (item) =>
+      item.is_service === true ||
+      item.is_service_item === true ||
+      item.is_manufactured === true,
+  );
+  const isKanbanDoc = kanbanDocTypes.has(doc.doc_type);
+  const canSendKanban =
+    isKanbanDoc &&
+    (doc.status === "ISSUED" || doc.status === "COMPLETED") &&
+    kanbanTargets.length > 0;
+  const hasServiceWork = kanbanTargets.some(
+    (item) => item.is_service === true || item.is_service_item === true,
+  );
+  const showBatchMto = canSendMto && !hasServiceWork;
+  const showKanbanDraftHint =
+    isKanbanDoc && doc.status === "DRAFT" && hasProductionWork;
+  const mockupUrl =
+    doc.attachment_url?.trim() || doc.attached_file_url?.trim() || "";
   const canDuplicate =
     !isReceiptDoc &&
     !isSettlementDoc &&
@@ -496,15 +518,28 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               notes={doc.notes ?? ""}
             />
           ) : null}
-          {canSendToProduction && (
+          {showBatchMto && (
             <SendToProductionButton
               documentId={doc.id}
               documentNo={doc.doc_no}
-              manufacturedGroups={canSendMto ? manufacturedGroups : []}
+              manufacturedGroups={manufacturedGroups}
               remark={doc.notes}
-              disabled={canSendMto && !hasManufacturedPending}
+              disabled={!hasManufacturedPending}
             />
           )}
+          {canSendKanban && !showBatchMto ? (
+            <SendBillToKanbanButton
+              lines={kanbanTargets.map((item) => ({
+                id: item.id,
+                label: item.sku?.trim() || item.description?.trim() || "รายการ",
+                sent:
+                  item.is_sent_to_production === true ||
+                  item.production_status === "IN_PRODUCTION" ||
+                  item.production_status === "COMPLETED" ||
+                  Boolean(item.production_job_no),
+              }))}
+            />
+          ) : null}
           {canDuplicate && (
             <DuplicateDocumentButton documentId={doc.id} docNo={doc.doc_no} />
           )}
@@ -970,7 +1005,15 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                 {doc.items.length} รายการ — แสดงแบบอ่านอย่างเดียว
               </CardDescription>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className="space-y-4 p-4 sm:p-6">
+              {hasProductionWork ? (
+                <SalesMockupCard url={mockupUrl} documentId={doc.id} />
+              ) : null}
+              {showKanbanDraftHint ? (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  กด «ยืนยันและออกเอกสาร (Confirm &amp; Issue)» ด้านบนเพื่อส่งงานเข้า Production Kanban
+                </p>
+              ) : null}
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
@@ -1026,12 +1069,34 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                                 item.product_name,
                               )}
                             </span>
-                            {item.is_manufactured
+                            {item.is_manufactured || item.is_service || item.is_service_item
                               ? productionStatusBadge(
                                   item.production_status,
                                   item.production_job_no,
                                 )
                               : null}
+                            {canSendKanban && item.product_id ? (
+                              <SoLineItemProductionActions
+                                documentItemId={item.id}
+                                docNo={doc.doc_no}
+                                canSend
+                                isService={
+                                  item.is_service === true ||
+                                  item.is_service_item === true
+                                }
+                                isManufactured={item.is_manufactured === true}
+                                isSentToProduction={
+                                  item.is_sent_to_production === true ||
+                                  item.production_status === "IN_PRODUCTION" ||
+                                  item.production_status === "COMPLETED"
+                                }
+                                mockupImageUrl={
+                                  item.mockup_image_url || mockupUrl || null
+                                }
+                                productionJobNo={item.production_job_no}
+                                className="mt-2"
+                              />
+                            ) : null}
                           </TableCell>
                           <TableCell className="px-4 text-right text-sm tabular-nums text-slate-700">
                             {item.qty}

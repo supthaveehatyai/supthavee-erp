@@ -29,6 +29,7 @@ import {
 } from "@/lib/utils/document-summary";
 import { displayDocumentItemDescription } from "@/lib/utils/credit-note-line";
 import { ServiceLineShortcuts } from "@/components/sales/service-line-shortcuts";
+import { SalesMockupCard } from "@/components/sales/sales-mockup-card";
 import { moneyAfterQtyPrice } from "@/lib/sales/service-line-price";
 import type {
   ContactPersonOption,
@@ -103,6 +104,8 @@ function createLineFromProduct(
     line_total: calcLineTotal(nextQty, unitPrice),
     image_url: product.image_url ?? null,
     is_service_item: product.is_service === true,
+    is_service: product.is_service === true,
+    is_manufactured: product.is_manufactured === true,
   };
 }
 
@@ -121,6 +124,8 @@ function createServiceLine(): SalesLineItem {
     line_total: 0,
     image_url: null,
     is_service_item: true,
+    is_service: true,
+    is_manufactured: false,
   };
 }
 
@@ -139,6 +144,8 @@ function linesFromDocument(doc: DocumentDetail): SalesLineItem[] {
     discount_amount: Number(item.discount_amount ?? 0),
     line_total: Number(item.line_total ?? 0),
     image_url: item.image_url ?? null,
+    is_service: item.is_service === true || item.is_service_item === true,
+    is_manufactured: item.is_manufactured === true,
   }));
 }
 
@@ -177,6 +184,11 @@ export default function SalesEditWorkspace({
       : "EXCLUSIVE",
   );
   const [notes, setNotes] = useState(initialDocument.notes ?? "");
+  const [mockupUrl, setMockupUrl] = useState(
+    initialDocument.attachment_url?.trim() ||
+      initialDocument.attached_file_url?.trim() ||
+      "",
+  );
   const [handwrittenDocRef, setHandwrittenDocRef] = useState(
     initialDocument.reference_no ?? "",
   );
@@ -227,6 +239,16 @@ export default function SalesEditWorkspace({
         vatRate: DEFAULT_VAT_RATE,
       }),
     [lineItems, discountText, vatType],
+  );
+  const needsProductionMockup = useMemo(
+    () =>
+      lineItems.some(
+        (row) =>
+          row.is_service_item === true ||
+          row.is_service === true ||
+          row.is_manufactured === true,
+      ),
+    [lineItems],
   );
 
   useEffect(() => {
@@ -457,6 +479,7 @@ export default function SalesEditWorkspace({
         ecommerce_buyer_name: header.data.ecommerce_buyer_name,
         tracking_no: header.data.tracking_no,
         one_time_address: header.data.one_time_address,
+        attachment_url: mockupUrl.trim() || null,
         items: isReplacement
           ? undefined
           : lineItems.map((row, index) => ({
@@ -710,6 +733,14 @@ export default function SalesEditWorkspace({
           </div>
         </CardContent>
       </Card>
+
+      {needsProductionMockup ? (
+        <SalesMockupCard
+          url={mockupUrl}
+          disabled={isPending}
+          onChange={setMockupUrl}
+        />
+      ) : null}
 
       <Card
         className={cn(

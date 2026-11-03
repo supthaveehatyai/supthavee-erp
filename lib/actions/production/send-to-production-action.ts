@@ -219,6 +219,7 @@ async function fetchDocumentItemForRouting(
       description,
       production_status,
       is_sent_to_production,
+      is_service_item,
       mockup_image_url,
       technician_id,
       wage_cost,
@@ -262,6 +263,7 @@ async function fetchDocumentItemForRouting(
           product_id,
           qty,
           description,
+          is_service_item,
           technician_id,
           wage_cost,
           documents!document_items_document_id_fkey (
@@ -356,6 +358,7 @@ type RoutedDocumentItemRow = {
   description: string | null;
   production_status: string | null;
   is_sent_to_production: boolean | null;
+  is_service_item?: boolean | null;
   mockup_image_url: string | null;
   technician_id: string | null;
   wage_cost: number | null;
@@ -420,7 +423,7 @@ function mapFetchedRow(
       model_id: modelId,
       model_code: model?.model_code != null ? String(model.model_code) : null,
       model_name: model?.name != null ? String(model.name) : null,
-      is_service: model?.is_service === true,
+      is_service: model?.is_service === true || row.is_service_item === true,
       is_manufactured: model?.is_manufactured === true,
       is_raw_material: model?.is_raw_material === true,
     },
@@ -489,6 +492,54 @@ async function assertNotDuplicateJob(
   return null;
 }
 
+async function loadSiblingGarmentItems(
+  supabase: SupabaseClient,
+  documentId: string,
+  serviceItemId: string,
+): Promise<{ product_id: string; quantity: number }[]> {
+  const { data, error } = await supabase
+    .from("document_items")
+    .select(
+      `
+      id,
+      product_id,
+      qty,
+      is_service_item,
+      products!document_items_product_id_fkey (
+        id,
+        product_models!products_model_id_fkey ( is_service )
+      )
+    `,
+    )
+    .eq("document_id", documentId);
+
+  if (error || !data) {
+    if (error) {
+      console.warn("[sendToProduction] garment lines:", error.message);
+    }
+    return [];
+  }
+
+  const garments: { product_id: string; quantity: number }[] = [];
+  for (const row of data) {
+    if (String(row.id) === serviceItemId) continue;
+    const productId = String(row.product_id ?? "").trim();
+    const qty = Math.round(Number(row.qty ?? 0));
+    if (!productId || qty <= 0) continue;
+    if (row.is_service_item === true) continue;
+    const product = unwrapOne(
+      row.products as
+        | { product_models?: { is_service?: boolean | null } | { is_service?: boolean | null }[] | null }
+        | { product_models?: { is_service?: boolean | null } | { is_service?: boolean | null }[] | null }[]
+        | null,
+    );
+    const model = unwrapOne(product?.product_models ?? null);
+    if (model?.is_service === true) continue;
+    garments.push({ product_id: productId, quantity: qty });
+  }
+  return garments;
+}
+
 /**
  * Flow 1 — Service (สกรีน/ปัก): สร้างใบงาน Kanban สำหรับมอบหมายช่าง
  * ไม่ Snapshot BOM / ไม่ตัดสต็อกวัตถุดิบ
@@ -545,14 +596,26 @@ async function routeServiceFlow(
     }
 
     const jobId = String(created.id);
+    const garmentItems = await loadSiblingGarmentItems(
+      supabase,
+      line.document_id,
+      line.id,
+    );
 
     const { error: itemsError } = await supabase
       .from("production_job_items")
-      .insert({
-        job_id: jobId,
-        product_id: line.product_id,
-        quantity: line.qty,
-      });
+      .insert([
+        {
+          job_id: jobId,
+          product_id: line.product_id,
+          quantity: line.qty,
+        },
+        ...garmentItems.map((item) => ({
+          job_id: jobId,
+          product_id: item.product_id,
+          quantity: item.quantity,
+        })),
+      ]);
 
     if (itemsError) {
       await rollbackJob(supabase, jobId);
@@ -838,10 +901,17 @@ export async function sendToProduction(
     // Prefer ISSUED SO — Soft Allocation / Job Costing integrity
     const docType = String(line.doc_type ?? "").toUpperCase();
     const docStatus = String(line.doc_status ?? "").toUpperCase();
-    if (docType === "SO" && docStatus !== "ISSUED") {
+    const kanbanDocTypes = new Set(["SO", "INV_DO", "TAX_INV", "CS_TAX", "ABB"]);
+    if (!kanbanDocTypes.has(docType)) {
       return {
         success: false,
-        error: `ส่งงานผลิตได้เมื่อใบสั่งขายเป็นสถานะ ISSUED (ปัจจุบัน: ${line.doc_status ?? "—"})`,
+        error: `ส่งงานเข้า Production Kanban ได้เฉพาะ SO, INV_DO, TAX_INV, CS_TAX, ABB (ปัจจุบัน: ${line.doc_type ?? "—"})`,
+      };
+    }
+    if (docStatus !== "ISSUED" && docStatus !== "COMPLETED") {
+      return {
+        success: false,
+        error: `ส่งงานผลิตได้เมื่อเอกสารยืนยันแล้ว (ISSUED) — ปัจจุบัน: ${line.doc_status ?? "—"}`,
       };
     }
 

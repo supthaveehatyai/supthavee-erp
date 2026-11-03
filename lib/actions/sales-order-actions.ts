@@ -17,6 +17,7 @@ import {
   issueDocument,
   updateDraftDocument,
 } from "@/lib/actions/document-actions";
+import { sendToProduction } from "@/lib/actions/production/send-to-production-action";
 import { createProductionJobFromSO } from "@/lib/actions/production-actions";
 import { parseSalesDocumentDraftHeader } from "@/lib/validations/sales-document";
 import type {
@@ -372,20 +373,6 @@ export async function sendSalesOrderToProduction(
       }
     }
 
-    if (groups.size === 0) {
-      return {
-        success: false,
-        error:
-          "ไม่พบสินค้าที่ตั้งค่าผลิตเอง (is_manufactured) — ไม่สามารถส่งงานผลิตได้",
-        data: {
-          document_id: documentId,
-          document_no: documentNo,
-          status,
-          jobs: [],
-        },
-      };
-    }
-
     const jobs: {
       id: string;
       job_no: string;
@@ -414,6 +401,43 @@ export async function sendSalesOrderToProduction(
         items_count: result.data.items_count,
         materials_count: result.data.materials_count,
       });
+    }
+
+    for (const item of detail.data.items) {
+      const serviceLine =
+        item.is_service === true || item.is_service_item === true;
+      if (!serviceLine || !item.product_id || !item.id) continue;
+      const alreadySent =
+        item.is_sent_to_production === true ||
+        item.production_status === "IN_PRODUCTION" ||
+        item.production_status === "COMPLETED";
+      if (alreadySent) continue;
+      const sent = await sendToProduction(item.id);
+      if (!sent.success || !sent.data?.job_id) {
+        errors.push(sent.error ?? "ส่งงานบริการเข้า Kanban ไม่สำเร็จ");
+        continue;
+      }
+      jobs.push({
+        id: sent.data.job_id,
+        job_no: sent.data.job_no ?? sent.data.job_id,
+        items_count: 1,
+        materials_count: sent.data.materials_count,
+      });
+    }
+
+    if (groups.size === 0 && jobs.length === 0) {
+      return {
+        success: false,
+        error:
+          errors[0] ??
+          "ไม่พบสินค้าผลิตเอง (is_manufactured) หรืองานบริการ (is_service) — ไม่สามารถส่งงานผลิตได้",
+        data: {
+          document_id: documentId,
+          document_no: documentNo,
+          status,
+          jobs: [],
+        },
+      };
     }
 
     revalidateSalesOrderPaths(documentNo);

@@ -422,7 +422,9 @@ export function ProductionJobDetailSheet({
                   <div className="flex items-end justify-between gap-2">
                     <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
                       <Scissors className="size-4 text-slate-500" aria-hidden />
-                      ตารางงานผลิต
+                      {detail.is_service
+                        ? "ตารางรายการเสื้อ / ไซส์ / สีในบิล"
+                        : "ตารางงานผลิต"}
                     </h3>
                     <span className="text-xs text-slate-400">
                       {detail.items.length} SKU
