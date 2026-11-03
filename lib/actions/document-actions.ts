@@ -1330,18 +1330,18 @@ async function searchProductsInternal(
       const sizeMeta = sizeMetaByLabel.get(sizeKey);
       const sizeLabel = sizeMeta?.label ?? (row.size?.trim() || null);
 
-      const parts = [
-        modelName || row.name?.trim() || row.sku,
-        colorName,
-        sizeLabel,
-      ].filter(Boolean);
+      const title = modelName || row.name?.trim() || row.sku;
+      const isService = model?.is_service === true;
+      const displayName = isService
+        ? title
+        : [title, colorName, sizeLabel].filter(Boolean).join(" · ");
 
       return {
         id: row.id,
         sku: row.sku,
         unit_price: toMoneyNumber(row.retail_price),
         cost_price: toMoneyNumber(row.cost_price),
-        display_name: parts.join(" · "),
+        display_name: displayName,
         model_name: modelName,
         color_name: colorName,
         size_label: sizeLabel,
