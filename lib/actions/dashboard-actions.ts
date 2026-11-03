@@ -10,9 +10,10 @@
 
 import {
   DEFAULT_SALES_CHANNEL,
-  SALES_CHANNEL_LABELS,
-  SALES_CHANNELS,
+  SALES_CHANNEL_OPTIONS,
   isSalesChannel,
+  isStorefrontSalesChannel,
+  salesChannelLabel,
   type SalesChannelCode,
 } from "@/lib/constants/document";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
@@ -27,13 +28,7 @@ const CHANNEL_SALES_DOC_TYPES = ["INV_DO", "TAX_INV", "CS_TAX", "ABB"] as const;
 /** เอกสารขายที่ยืนยันแล้ว — รวม PAID เพราะบิลเงินสด (ABB/CS_TAX) ขึ้น PAID ได้ */
 const CHANNEL_SALES_STATUSES = ["ISSUED", "PAID", "COMPLETED"] as const;
 
-const CHANNEL_REPORT_ORDER: SalesChannelCode[] = [
-  "STORE",
-  "SHOPEE",
-  "LAZADA",
-  "TIKTOK",
-  "DIRECT",
-];
+const CHANNEL_REPORT_ORDER: SalesChannelCode[] = [...SALES_CHANNEL_OPTIONS];
 
 type ChannelSalesRow = {
   sales_channel: string | null;
@@ -54,9 +49,7 @@ function isIsoDate(value: string): boolean {
 }
 
 function channelDisplayName(channel: SalesChannelCode): string {
-  if (channel === "STORE") return "หน้าร้าน (STORE)";
-  if (channel === "DIRECT") return "ขายตรง / B2B (DIRECT)";
-  return SALES_CHANNEL_LABELS[channel];
+  return salesChannelLabel(channel);
 }
 
 function emptyChannelSeries(): SalesByChannelDatum[] {
@@ -70,7 +63,8 @@ function emptyChannelSeries(): SalesByChannelDatum[] {
 function normalizeChannel(
   value: string | null | undefined,
 ): SalesChannelCode {
-  const raw = String(value ?? "").trim();
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (isStorefrontSalesChannel(raw) || raw === "") return "STORE";
   if (isSalesChannel(raw)) return raw;
   return DEFAULT_SALES_CHANNEL;
 }
@@ -123,7 +117,7 @@ export async function getSalesByChannel(
     }
 
     const totals = new Map<SalesChannelCode, number>(
-      SALES_CHANNELS.map((channel) => [channel, 0]),
+      CHANNEL_REPORT_ORDER.map((channel) => [channel, 0]),
     );
 
     for (const row of page.data) {

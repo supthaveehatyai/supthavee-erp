@@ -586,7 +586,16 @@ export async function searchOpenSalesBills(
       .in("status", [...OPEN_DOC_STATUSES])
       .order("doc_date", { ascending: false })
       .limit(80);
-    if (channel) query = query.eq("sales_channel", channel);
+    if (channel === "STORE") {
+      query = query.in("sales_channel", [
+        "STORE",
+        "DIRECT",
+        "RETAIL",
+        "WHOLESALE",
+      ]);
+    } else if (channel) {
+      query = query.eq("sales_channel", channel);
+    }
     const txDate = input.tx_date?.slice(0, 10) ?? "";
     if (/^\d{4}-\d{2}-\d{2}$/.test(txDate) && !keyword) {
       query = query.gte("doc_date", shiftIso(txDate, -31)).lte("doc_date", shiftIso(txDate, 31));

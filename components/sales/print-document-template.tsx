@@ -4,7 +4,7 @@ import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
 import { documentPartyLabel, documentPrintHeading } from "@/lib/constants/document-print-heading";
 import {
   isSalesChannel,
-  SALES_CHANNEL_LABELS,
+  salesChannelLabel,
 } from "@/lib/constants/document";
 import { SalesPrintLineTable } from "@/components/sales/sales-print-controls";
 import type { DocumentDetail } from "@/types/document";
@@ -93,7 +93,7 @@ export default async function PrintDocumentTemplate({
         }
       : null;
   const channelLabel = isSalesChannel(doc.sales_channel)
-    ? SALES_CHANNEL_LABELS[doc.sales_channel]
+    ? salesChannelLabel(doc.sales_channel)
     : null;
   const orderNo = doc.ecommerce_order_no?.trim() || "";
   const handwrittenRef = doc.reference_no?.trim() || "";

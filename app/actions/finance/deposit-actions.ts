@@ -15,6 +15,7 @@ import { generateDocumentNumber } from "@/lib/actions/document-actions";
 import { getCurrentAuthUser, requireSessionUserId } from "@/lib/auth/current-user";
 import { canAccessCustomerDeposits, canAccessVendorDeposits } from "@/lib/auth/module-access";
 import {
+  DEFAULT_SALES_CHANNEL,
   resolveInitialPaymentStatus,
   resolveIssuedDocumentStatus,
 } from "@/lib/constants/document";
@@ -456,6 +457,7 @@ export async function createDepositDocument(
     }
 
     let sourceDocNo: string | null = null;
+    let sourceSalesChannel: string | null = null;
     if (refDocumentId) {
       if (docType !== "DEP_IN") {
         return {
@@ -465,7 +467,7 @@ export async function createDepositDocument(
       }
       const { data: sourceDoc, error: sourceError } = await supabase
         .from("documents")
-        .select("id, doc_no, doc_type, status, contact_id")
+        .select("id, doc_no, doc_type, status, contact_id, sales_channel")
         .eq("id", refDocumentId)
         .maybeSingle();
       if (sourceError || !sourceDoc) {
@@ -492,7 +494,13 @@ export async function createDepositDocument(
         return { success: false, error: "ลูกค้าของใบมัดจำต้องตรงกับเอกสารขาย" };
       }
       sourceDocNo = String(sourceDoc.doc_no ?? "").trim() || null;
+      sourceSalesChannel =
+        String(sourceDoc.sales_channel ?? "").trim() || null;
     }
+    const salesChannel =
+      sourceSalesChannel ||
+      String(formData.get("sales_channel") ?? "").trim() ||
+      DEFAULT_SALES_CHANNEL;
 
     // Running number — reuse existing helper (RPC architecture untouched)
     const numberResult = await generateDocumentNumber(docType, documentDate);
@@ -567,6 +575,7 @@ export async function createDepositDocument(
         paid_amount: markPaid ? grandTotal : 0,
         payment_status: paymentStatus,
         reference_no: referenceNo,
+        sales_channel: salesChannel,
         attachment_url: slipUrl,
         attached_file_url: slipUrl,
         original_file_name:

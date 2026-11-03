@@ -12,8 +12,8 @@ import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import {
   CREDIT_NOTE_SOURCE_DOC_TYPES,
   CREDIT_NOTE_SOURCE_STATUSES,
-  SALES_CHANNEL_LABELS,
   SALES_DOC_TYPES,
+  salesChannelLabel,
   getDocumentTypeLabel,
   isEcommercePlatformChannel,
   isRefundDocType,
@@ -533,6 +533,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                 doc.contact?.company_name?.trim() || "ลูกค้า"
               }
               orderTotal={Number(doc.grand_total ?? 0)}
+              salesChannel={doc.sales_channel}
             />
           ) : null}
           {canEditIssuedHeader ? (
@@ -764,7 +765,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                     ช่องทางขาย
                   </p>
                   <p className="font-medium text-slate-800">
-                    {SALES_CHANNEL_LABELS[doc.sales_channel]}
+                    {salesChannelLabel(doc.sales_channel)}
                   </p>
                   {(isEcommercePlatformChannel(doc.sales_channel) ||
                   doc.ecommerce_buyer_name?.trim() ||

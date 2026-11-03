@@ -10,11 +10,11 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  DEFAULT_SALES_CHANNEL,
-  SALES_CHANNELS,
   SALES_CHANNEL_LABELS,
+  SALES_CHANNEL_OPTIONS,
   isEcommercePlatformChannel,
   isSalesChannel,
+  selectableSalesChannel,
   shouldShowWalkInOptionalFields,
   type SalesChannelCode,
 } from "@/lib/constants/document";
@@ -30,7 +30,7 @@ export type SalesChannelFieldsValue = {
 };
 
 export const INITIAL_SALES_CHANNEL_FIELDS: SalesChannelFieldsValue = {
-  sales_channel: DEFAULT_SALES_CHANNEL,
+  sales_channel: "STORE",
   ecommerce_order_no: "",
   ecommerce_buyer_name: "",
   tracking_no: "",
@@ -44,9 +44,7 @@ export function salesChannelFieldsFromDocument(doc?: {
   tracking_no?: string | null;
   one_time_address?: string | null;
 } | null): SalesChannelFieldsValue {
-  const channel = isSalesChannel(doc?.sales_channel)
-    ? doc.sales_channel
-    : DEFAULT_SALES_CHANNEL;
+  const channel = selectableSalesChannel(doc?.sales_channel);
   return {
     sales_channel: channel,
     ecommerce_order_no: doc?.ecommerce_order_no ?? "",
@@ -90,15 +88,15 @@ export default function SalesChannelFields({
         <Select
           id="sales-channel"
           name="sales_channel"
-          value={value.sales_channel}
+          value={selectableSalesChannel(value.sales_channel)}
           disabled={disabled}
           onChange={(event) => {
             const next = event.target.value;
             if (!isSalesChannel(next)) return;
-            patch({ sales_channel: next as SalesChannelCode });
+            patch({ sales_channel: selectableSalesChannel(next) as SalesChannelCode });
           }}
         >
-          {SALES_CHANNELS.map((channel) => (
+          {SALES_CHANNEL_OPTIONS.map((channel) => (
             <option key={channel} value={channel}>
               {SALES_CHANNEL_LABELS[channel]}
             </option>

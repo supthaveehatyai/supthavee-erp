@@ -51,12 +51,14 @@ export function ReceiveDepositDialog({
   contactId,
   customerName,
   orderTotal,
+  salesChannel,
 }: {
   documentId: string;
   docNo: string;
   contactId: string;
   customerName: string;
   orderTotal: number;
+  salesChannel?: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -130,6 +132,7 @@ export function ReceiveDepositDialog({
     formData.set("vat_rate", "7");
     formData.set("reference_no", referenceNo.trim());
     formData.set("ref_document_id", documentId);
+    formData.set("sales_channel", String(salesChannel ?? "").trim());
     formData.set("mark_paid", "1");
     if (slipFile) formData.set("slip_file", slipFile);
 

@@ -2073,7 +2073,7 @@ export async function getDocumentByNo(
       dest_freight_cost:
         data.dest_freight_cost == null ? null : Number(data.dest_freight_cost),
       sales_channel: (() => {
-        const channelRaw = String(data.sales_channel ?? "");
+        const channelRaw = String(data.sales_channel ?? "").trim().toUpperCase();
         return isSalesChannel(channelRaw) ? channelRaw : null;
       })(),
       ecommerce_order_no: (data.ecommerce_order_no as string | null) ?? null,
@@ -4056,7 +4056,8 @@ export async function convertDocument(
           : Number(source.vat_amount ?? source.tax_amount ?? 0),
         payment_status: resolveInitialPaymentStatus(targetDocType),
         notes,
-        sales_channel: ecommerce.sales_channel,
+        sales_channel:
+          String(source.sales_channel ?? "").trim() || ecommerce.sales_channel,
         ecommerce_order_no: ecommerce.ecommerce_order_no,
         ecommerce_buyer_name: ecommerce.ecommerce_buyer_name,
         tracking_no: ecommerce.tracking_no,
@@ -4255,7 +4256,8 @@ export async function upgradeAbbToFullTaxInvoice(
         vat_amount: summary.vat_amount,
         payment_status: resolveInitialPaymentStatus(targetDocType),
         notes,
-        sales_channel: ecommerce.sales_channel,
+        sales_channel:
+          String(source.sales_channel ?? "").trim() || ecommerce.sales_channel,
         ecommerce_order_no: ecommerce.ecommerce_order_no,
         ecommerce_buyer_name: ecommerce.ecommerce_buyer_name,
         tracking_no: ecommerce.tracking_no,

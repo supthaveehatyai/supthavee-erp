@@ -48,13 +48,18 @@ export const DOCUMENT_STATUSES = [
   "VOID",
 ] as const;
 
-/** Phase 19 — ช่องทางขาย (documents.sales_channel). NULL บนเอกสารเก่า = ถือเป็น STORE */
+/**
+ * Phase 19 — ช่องทางขาย (documents.sales_channel). NULL บนเอกสารเก่า = ถือเป็น STORE
+ * RETAIL / WHOLESALE / DIRECT เป็นรหัสเก่าของหน้าร้าน — ยังอยู่ใน type เพื่อไม่ให้ข้อมูลเก่า error
+ */
 export const SALES_CHANNELS = [
+  "STORE",
   "SHOPEE",
   "LAZADA",
   "TIKTOK",
-  "STORE",
   "DIRECT",
+  "RETAIL",
+  "WHOLESALE",
 ] as const;
 
 export type SalesChannelCode = (typeof SALES_CHANNELS)[number];
@@ -70,6 +75,22 @@ export type EcommercePlatformChannel =
   (typeof ECOMMERCE_PLATFORM_CHANNELS)[number];
 
 export const DEFAULT_SALES_CHANNEL: SalesChannelCode = "STORE";
+
+/** ตัวเลือกใน Dropdown — ไม่แยกขายปลีก/ขายส่ง และไม่โชว์รหัสเก่า */
+export const SALES_CHANNEL_OPTIONS = [
+  "STORE",
+  "SHOPEE",
+  "LAZADA",
+  "TIKTOK",
+] as const satisfies readonly SalesChannelCode[];
+
+/** รหัสหน้าร้านที่เอกสารเก่าอาจเก็บไว้ */
+export const STOREFRONT_SALES_CHANNELS = [
+  "STORE",
+  "DIRECT",
+  "RETAIL",
+  "WHOLESALE",
+] as const;
 
 /**
  * Phase 19 — Dummy Contact UUIDs (SAP CPD One-Time Customer)
@@ -88,17 +109,46 @@ export function resolveSystemDummyContactId(
 ): string | null {
   if (salesChannel === "SHOPEE") return SYSTEM_CONTACTS.SHOPEE;
   if (salesChannel === "LAZADA") return SYSTEM_CONTACTS.LAZADA;
-  if (salesChannel === "STORE") return SYSTEM_CONTACTS.CASH_STORE;
+  if (isStorefrontSalesChannel(salesChannel)) return SYSTEM_CONTACTS.CASH_STORE;
   return null;
 }
 
 export const SALES_CHANNEL_LABELS: Record<SalesChannelCode, string> = {
+  STORE: "หน้าร้าน / ทั่วไป",
   SHOPEE: "Shopee",
   LAZADA: "Lazada",
   TIKTOK: "TikTok Shop",
-  STORE: "ขายปลีก",
-  DIRECT: "ขายส่ง",
+  DIRECT: "หน้าร้าน / ทั่วไป",
+  RETAIL: "หน้าร้าน / ทั่วไป",
+  WHOLESALE: "หน้าร้าน / ทั่วไป",
 };
+
+export function isStorefrontSalesChannel(
+  value: string | null | undefined,
+): boolean {
+  return (STOREFRONT_SALES_CHANNELS as readonly string[]).includes(
+    String(value ?? "").trim().toUpperCase(),
+  );
+}
+
+/** รหัสเก่าของหน้าร้านและรหัสปัจจุบัน แสดงเป็นชื่อเดียวกัน */
+export function salesChannelLabel(
+  value: string | null | undefined,
+): string {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (!raw || isStorefrontSalesChannel(raw)) return "หน้าร้าน / ทั่วไป";
+  if (isSalesChannel(raw)) return SALES_CHANNEL_LABELS[raw];
+  return "หน้าร้าน / ทั่วไป";
+}
+
+/** ค่าที่ Dropdown เลือกได้ — รหัสหน้าร้านเก่าถูกยุบเป็น STORE */
+export function selectableSalesChannel(
+  value: string | null | undefined,
+): (typeof SALES_CHANNEL_OPTIONS)[number] {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (raw === "SHOPEE" || raw === "LAZADA" || raw === "TIKTOK") return raw;
+  return "STORE";
+}
 
 export function isSalesChannel(
   value: string | null | undefined,
@@ -149,7 +199,7 @@ export function shouldShowWalkInOptionalFields(input: {
   const channel = isSalesChannel(input.salesChannel)
     ? input.salesChannel
     : DEFAULT_SALES_CHANNEL;
-  return channel === "STORE" && isWalkInCashDocType(input.docType);
+  return isStorefrontSalesChannel(channel) && isWalkInCashDocType(input.docType);
 }
 
 /** บังคับเลือกลูกค้าจริง — ไม่ใช่ E-Commerce และไม่ใช่เงินสดหน้าร้าน */

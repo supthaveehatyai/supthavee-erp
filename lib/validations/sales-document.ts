@@ -3,6 +3,7 @@ import {
   DEFAULT_SALES_CHANNEL,
   SALES_CHANNELS,
   isEcommercePlatformChannel,
+  isStorefrontSalesChannel,
   isWalkInCashDocType,
   type SalesChannelCode,
 } from "@/lib/constants/document";
@@ -60,7 +61,9 @@ export function parseSalesDocumentEcommerce(
           sales_channel:
             String(
               (input as { sales_channel?: unknown }).sales_channel ?? "",
-            ).trim() || DEFAULT_SALES_CHANNEL,
+            )
+              .trim()
+              .toUpperCase() || DEFAULT_SALES_CHANNEL,
         }
       : { sales_channel: DEFAULT_SALES_CHANNEL };
 
@@ -151,7 +154,7 @@ export const salesDocumentDraftHeaderSchema = z
     }
     if (
       value.doc_type === "TAX_INV" &&
-      value.sales_channel === "STORE" &&
+      isStorefrontSalesChannel(value.sales_channel) &&
       !value.contact_id
     ) {
       ctx.addIssue({
@@ -195,7 +198,9 @@ export function parseSalesDocumentDraftHeader(
           sales_channel:
             String(
               (input as { sales_channel?: unknown }).sales_channel ?? "",
-            ).trim() || DEFAULT_SALES_CHANNEL,
+            )
+              .trim()
+              .toUpperCase() || DEFAULT_SALES_CHANNEL,
         }
       : { sales_channel: DEFAULT_SALES_CHANNEL };
 

@@ -58,7 +58,7 @@ export function SalesByChannelChart({
             </CardTitle>
             <CardDescription>
               INV_DO / TAX_INV / CS_TAX / ABB · ISSUED / PAID / COMPLETED ·
-              NULL = หน้าร้าน (STORE)
+              NULL = หน้าร้าน / ทั่วไป
             </CardDescription>
           </div>
           {error ? (

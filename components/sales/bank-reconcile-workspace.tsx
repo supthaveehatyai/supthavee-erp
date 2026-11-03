@@ -426,7 +426,7 @@ export default function BankReconcileWorkspace() {
                   <option value="">ทุกช่องทาง</option>
                   <option value="SHOPEE">Shopee</option>
                   <option value="LAZADA">Lazada</option>
-                  <option value="STORE">หน้าร้าน</option>
+                  <option value="STORE">หน้าร้าน / ทั่วไป</option>
                 </select>
                 <Button variant="outline" disabled={isWorking} onClick={() => void runSearch()}>
                   ค้นหาบิล
