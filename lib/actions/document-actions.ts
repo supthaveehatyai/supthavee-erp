@@ -927,13 +927,19 @@ function unwrapJoin<T>(value: T | T[] | null | undefined): T | null {
   return value ?? null;
 }
 
+type CategoryNameJoin = {
+  category_name?: string | null;
+};
+
 type ProductModelSearchJoin = {
   id: string;
   name: string | null;
   model_code: string | null;
   image_url: string | null;
+  short_name?: string | null;
   is_raw_material?: boolean | null;
   is_service?: boolean | null;
+  mst_categories?: CategoryNameJoin | CategoryNameJoin[] | null;
 };
 
 type ProductSearchRow = {
@@ -1045,8 +1051,10 @@ async function searchProductsInternal(
         name,
         model_code,
         image_url,
+        short_name,
         is_raw_material,
-        is_service
+        is_service,
+        mst_categories ( category_name )
       )
     `
       : `
@@ -1063,8 +1071,10 @@ async function searchProductsInternal(
         name,
         model_code,
         image_url,
+        short_name,
         is_raw_material,
-        is_service
+        is_service,
+        mst_categories ( category_name )
       )
     `;
 
@@ -1250,6 +1260,9 @@ async function searchProductsInternal(
         base_uom: row.base_uom,
         image_url: model?.image_url?.trim() || null,
         is_service: model?.is_service === true,
+        short_name: model?.short_name?.trim() || null,
+        category_name:
+          unwrapJoin(model?.mst_categories)?.category_name?.trim() || null,
         is_raw_material: model?.is_raw_material === true,
       };
     });
@@ -1526,6 +1539,8 @@ type NestedProduct = {
         is_manufactured: boolean | null;
         is_service: boolean | null;
         is_raw_material: boolean | null;
+        short_name?: string | null;
+        mst_categories?: CategoryNameJoin | CategoryNameJoin[] | null;
       }
     | {
         id: string;
@@ -1535,6 +1550,8 @@ type NestedProduct = {
         is_manufactured: boolean | null;
         is_service: boolean | null;
         is_raw_material: boolean | null;
+        short_name?: string | null;
+        mst_categories?: CategoryNameJoin | CategoryNameJoin[] | null;
       }[]
     | null;
 };
@@ -1662,7 +1679,9 @@ export async function getDocumentByNo(
               name,
               is_manufactured,
               is_service,
-              is_raw_material
+              is_raw_material,
+              short_name,
+              mst_categories ( category_name )
             )
           )
         )
@@ -1840,7 +1859,11 @@ export async function getDocumentByNo(
           model_code: model?.model_code?.trim() || null,
           is_manufactured: isManufactured,
           is_service: isService,
-          is_service_item: row.is_service_item === true || !row.product_id,
+          model_short_name: model?.short_name?.trim() || null,
+          category_name:
+            unwrapJoin(model?.mst_categories)?.category_name?.trim() || null,
+          is_service_item:
+            row.is_service_item === true || !row.product_id || isService,
           mockup_image_url: row.mockup_image_url?.trim() || null,
           production_status: productionStatus,
           is_sent_to_production: isSentToProduction,
@@ -2548,7 +2571,7 @@ export async function issueDocument(
 
     const { data: items, error: itemsError } = await supabase
       .from("document_items")
-      .select("id, product_id, qty, description")
+      .select("id, product_id, qty, description, is_service_item")
       .eq("document_id", id)
       .order("sort_order", { ascending: true });
 
@@ -2672,7 +2695,7 @@ export async function issueDocument(
 
     const stockOutLinesRaw = isStockOutDocType(docType)
       ? lineItems
-          .filter((row) => Boolean(row.product_id))
+          .filter((row) => Boolean(row.product_id) && row.is_service_item !== true)
           .map((row) => ({
             product_id: row.product_id as string,
             qty: Math.round(Number(row.qty ?? 0)),

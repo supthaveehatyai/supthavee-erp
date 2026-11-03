@@ -195,7 +195,7 @@ async function loadProduct(
   const { data, error } = await supabase
     .from("products")
     .select(
-      "id, sku, name, retail_price, cost_price, base_uom, product_models(image_url)",
+      "id, sku, name, retail_price, cost_price, base_uom, product_models(image_url, is_service)",
     )
     .eq("id", productId)
     .eq("is_active", true)
@@ -217,7 +217,7 @@ async function loadProduct(
     discount_text: "",
     discount_amount: 0,
     line_total: money.line_total,
-    is_service_item: false,
+    is_service_item: model?.is_service === true,
     image_url: model?.image_url?.trim() || null,
     match_note: "จับคู่จากรายการที่จำไว้",
   };
@@ -316,7 +316,7 @@ async function resolvePrintedLine(
     discount_text: discountText,
     discount_amount: priced.discount_amount,
     line_total: priced.line_total,
-    is_service_item: false,
+    is_service_item: chosen.is_service === true,
     image_url: chosen.image_url,
     match_note: exact ? `ตรงรหัส ${chosen.sku}` : `จับคู่ ${chosen.sku}`,
   };

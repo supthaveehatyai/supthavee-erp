@@ -201,6 +201,8 @@ function toBillItem(
     base_uom: sku.base_uom,
     image_url: matrix.image_url,
     is_service: matrix.is_service || sku.is_service,
+    short_name: matrix.short_name,
+    category_name: matrix.category_name,
     qty,
     model_id: matrix.model_id,
     model_code: matrix.model_code,

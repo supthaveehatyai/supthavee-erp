@@ -225,6 +225,10 @@ export type SalesProductSearchItem = {
   tax_type?: string | null;
   /** `product_models.is_service` — งานบริการ (ไม่ตัดสต็อก) */
   is_service: boolean;
+  /** `product_models.short_name` — ชื่อย่อสำหรับใบกำกับภาษี */
+  short_name?: string | null;
+  /** `product_models` → `mst_categories.category_name` */
+  category_name?: string | null;
   /** `product_models.is_raw_material` — วัตถุดิบ (รับเข้าคลัง AP) */
   is_raw_material?: boolean;
 };
@@ -326,7 +330,11 @@ export type DocumentDetailItem = {
   is_manufactured: boolean;
   /** product_models.is_service — งานบริการ (สกรีน/ปัก) */
   is_service: boolean;
-  /** document_items.is_service_item — บรรทัดค่าบริการที่ไม่มี SKU */
+  /** product_models.short_name */
+  model_short_name?: string | null;
+  /** product_models → mst_categories.category_name */
+  category_name?: string | null;
+  /** document_items.is_service_item — บรรทัดค่าบริการที่ไม่มี SKU หรือ SKU บริการ */
   is_service_item?: boolean;
   /**
    * รูป Mockup รายบรรทัด (document_items.mockup_image_url)

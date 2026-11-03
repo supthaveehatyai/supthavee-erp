@@ -74,6 +74,10 @@ export type ModelMatrixForSale = {
   is_raw_material: boolean;
   /** product_models.is_manufactured — สินค้าผลิตเอง (MTO) */
   is_manufactured: boolean;
+  /** product_models.short_name */
+  short_name: string | null;
+  /** mst_categories.category_name */
+  category_name: string | null;
   /** SKUs เรียง color_name แล้วตาม size sort_order */
   skus: ModelMatrixSkuRow[];
 };

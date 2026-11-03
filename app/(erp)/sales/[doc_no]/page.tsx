@@ -20,6 +20,7 @@ import {
   isSalesChannel,
 } from "@/lib/constants/document";
 import PrintDocumentTemplate from "@/components/sales/print-document-template";
+import { SalesPrintOptions } from "@/components/sales/sales-print-controls";
 import PrintPaymentReceiptTemplate from "@/components/finance/PrintPaymentReceiptTemplate";
 import PrintSettlementVoucherTemplate from "@/components/finance/PrintSettlementVoucherTemplate";
 import { computePrintVatBreakdown } from "@/components/shared/print/DocumentPrintSummary";
@@ -545,6 +546,9 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
             </Link>
           )}
         </div>
+        {!isReceiptDoc && !isSettlementDoc ? (
+          <SalesPrintOptions docNo={doc.doc_no} docType={doc.doc_type} />
+        ) : null}
       </div>
 
       {/* Screen-only interactive / card view */}
@@ -1086,7 +1090,11 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
           className="mt-2 print:mt-0"
         />
       ) : (
-        <PrintDocumentTemplate document={doc} className="mt-2 print:mt-0" />
+        <PrintDocumentTemplate
+          document={doc}
+          className="mt-2 print:mt-0"
+          followDocumentDefaults
+        />
       )}
     </div>
   );

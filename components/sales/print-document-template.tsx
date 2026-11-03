@@ -6,10 +6,10 @@ import {
   isSalesChannel,
   SALES_CHANNEL_LABELS,
 } from "@/lib/constants/document";
+import { SalesPrintLineTable } from "@/components/sales/sales-print-controls";
 import type { DocumentDetail } from "@/types/document";
 import type { PrintPaperSize, PrintVatType } from "@/types/print-document";
 import { cn } from "@/lib/utils";
-import { displayDocumentItemDescription } from "@/lib/utils/credit-note-line";
 
 function formatMoney(value: number): string {
   return value.toLocaleString("th-TH", {
@@ -34,19 +34,25 @@ export type PrintDocumentTemplateProps = {
   className?: string;
   /** override ขนาดกระดาษ — default ตามประเภทเอกสาร */
   paperSize?: PrintPaperSize;
+  /**
+   * หน้าขาย: ชื่อย่อ/ยุบรวม และซ่อนบริการ 0 บาท ตามประเภทเอกสาร
+   * หน้าซื้อไม่ส่งค่านี้ จึงพิมพ์รายละเอียดเต็มทุกบรรทัด
+   */
+  followDocumentDefaults?: boolean;
 };
 
 /**
  * Sales/Purchase document print — Shared PrintLayout (TFRS / company SSOT).
  * Paper size: lib/constants/print-paper-size.ts
+ * Sales detail page toggles the line table; purchases keep full SKU defaults.
  */
 export default async function PrintDocumentTemplate({
   document: doc,
   className,
   paperSize,
+  followDocumentDefaults = false,
 }: PrintDocumentTemplateProps) {
-  const isDepositDoc =
-    doc.doc_type === "DEP_IN" || doc.doc_type === "DEP_OUT";
+  const isDepositDoc = doc.doc_type === "DEP_IN" || doc.doc_type === "DEP_OUT";
   const freightCost = roundMoney(Math.max(0, Number(doc.freight_cost ?? 0)));
   const subtotal = Number(doc.total_amount ?? doc.sub_total ?? 0);
   const discountAmount = Number(doc.discount_amount ?? 0);
@@ -132,7 +138,6 @@ export default async function PrintDocumentTemplate({
         />
       }
     >
-      {/* ตารางสินค้า / มัดจำ */}
       <section className={compact ? "mt-2" : "mt-1"}>
         {isDepositDoc ? (
           <table className="w-full border-collapse text-left text-xs">
@@ -167,79 +172,16 @@ export default async function PrintDocumentTemplate({
             </tbody>
           </table>
         ) : (
-          <table className="w-full border-collapse text-left text-xs">
-            <thead>
-              <tr className="border-b border-neutral-400">
-                <th className="py-1.5 pr-2 font-semibold text-neutral-700">#</th>
-                <th className="py-1.5 pr-2 font-semibold text-neutral-700">SKU</th>
-                <th className="py-1.5 pr-2 font-semibold text-neutral-700">
-                  รายละเอียด
-                </th>
-                <th className="py-1.5 pr-2 text-right font-semibold text-neutral-700">
-                  จำนวน
-                </th>
-                <th className="py-1.5 pr-2 text-center font-semibold text-neutral-700">
-                  หน่วย
-                </th>
-                <th className="py-1.5 pr-2 text-right font-semibold text-neutral-700">
-                  ราคา/หน่วย
-                </th>
-                <th className="py-1.5 text-right font-semibold text-neutral-700">
-                  รวม
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {doc.items.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="py-6 text-center text-neutral-400"
-                  >
-                    ไม่มีรายการสินค้า
-                  </td>
-                </tr>
-              ) : (
-                doc.items.map((item, index) => (
-                  <tr
-                    key={item.id}
-                    className="border-b border-neutral-200 align-top"
-                  >
-                    <td className="py-1.5 pr-2 tabular-nums text-neutral-500">
-                      {index + 1}
-                    </td>
-                    <td className="py-1.5 pr-2 font-mono text-[11px] font-medium text-neutral-800">
-                      {item.product_id ? (item.sku ?? "—") : "SERVICE"}
-                    </td>
-                    <td className="max-w-[12rem] py-1.5 pr-2 text-neutral-800">
-                      {displayDocumentItemDescription(
-                        item.description,
-                        item.product_name,
-                      )}
-                    </td>
-                    <td className="py-1.5 pr-2 text-right tabular-nums text-neutral-800">
-                      {item.qty}
-                    </td>
-                    <td className="py-1.5 pr-2 text-center text-neutral-600">
-                      {item.uom_used ?? "—"}
-                    </td>
-                    <td className="py-1.5 pr-2 text-right tabular-nums text-neutral-800">
-                      {formatMoney(item.unit_price)}
-                    </td>
-                    <td className="py-1.5 text-right font-medium tabular-nums text-neutral-900">
-                      {formatMoney(item.line_total)}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+          <SalesPrintLineTable
+            docNo={doc.doc_no}
+            docType={doc.doc_type}
+            items={doc.items}
+            followDocumentDefaults={followDocumentDefaults}
+          />
         )}
       </section>
 
-      {doc.doc_type === "CN" &&
-      doc.status !== "VOID" &&
-      doc.remark?.trim() ? (
+      {doc.doc_type === "CN" && doc.status !== "VOID" && doc.remark?.trim() ? (
         <section className="mt-3 rounded-md border border-neutral-300 bg-neutral-50 px-3 py-2">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
             เหตุผลการลดหนี้

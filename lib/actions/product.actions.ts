@@ -26,6 +26,13 @@ function escapeIlikePattern(raw: string): string {
   return raw.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
+function readCategoryName(value: unknown): string | null {
+  const row = Array.isArray(value) ? value[0] : value;
+  if (!row || typeof row !== "object" || !("category_name" in row)) return null;
+  const name = row.category_name;
+  return typeof name === "string" && name.trim() ? name.trim() : null;
+}
+
 function toMoney(value: unknown): number {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n)) return 0;
@@ -199,7 +206,9 @@ export async function getModelMatrixForSale(
 
     const { data: model, error: modelError } = await supabase
       .from("product_models")
-      .select("id, model_code, name, short_name, image_url, is_service, is_raw_material, is_manufactured")
+      .select(
+        "id, model_code, name, short_name, image_url, is_service, is_raw_material, is_manufactured, mst_categories(category_name)",
+      )
       .eq("id", id)
       .maybeSingle();
 
@@ -222,6 +231,8 @@ export async function getModelMatrixForSale(
       is_service: isService,
       is_raw_material: isRawMaterial,
       is_manufactured: isManufactured,
+      short_name: model.short_name?.trim() || null,
+      category_name: readCategoryName(model.mst_categories),
       skus: [],
     };
 
@@ -384,6 +395,8 @@ export async function getModelMatrixForSale(
         is_service: isService,
         is_raw_material: isRawMaterial,
         is_manufactured: isManufactured,
+        short_name: model.short_name?.trim() || null,
+        category_name: readCategoryName(model.mst_categories),
         skus,
       },
     };

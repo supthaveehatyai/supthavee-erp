@@ -40,6 +40,8 @@ import type {
 import ModelMatrixPicker, {
   type ModelMatrixBillItem,
 } from "@/components/sales/model-matrix-picker";
+import { ServiceLineShortcuts } from "@/components/sales/service-line-shortcuts";
+import { moneyAfterQtyPrice } from "@/lib/sales/service-line-price";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import { Button } from "@/components/ui/button";
 import {
@@ -131,7 +133,7 @@ function createLineFromProduct(
     discount_amount: 0,
     line_total: calcLineTotal(nextQty, unitPrice),
     image_url: product.image_url ?? null,
-    is_service_item: false,
+    is_service_item: product.is_service === true,
   };
 }
 
@@ -358,10 +360,16 @@ export default function SalesCreateWorkspace({
         if (existingIndex >= 0) {
           const row = next[existingIndex];
           const qty = row.qty + qtyToAdd;
+          const money = moneyAfterQtyPrice({
+            qty,
+            unitPrice: row.unit_price,
+            discountText: row.discount_text,
+            discountAmount: row.discount_amount,
+          });
           next[existingIndex] = {
             ...row,
             qty,
-            line_total: calcLineTotal(qty, row.unit_price),
+            ...money,
           };
         } else {
           next = [...next, createLineFromProduct(product, qtyToAdd)];
@@ -383,10 +391,16 @@ export default function SalesCreateWorkspace({
       current.map((row) => {
         if (row.key !== key) return row;
         const nextQty = Number.isFinite(qty) && qty >= 0 ? qty : 0;
+        const money = moneyAfterQtyPrice({
+          qty: nextQty,
+          unitPrice: row.unit_price,
+          discountText: row.discount_text,
+          discountAmount: row.discount_amount,
+        });
         return {
           ...row,
           qty: nextQty,
-          line_total: calcLineTotal(nextQty, row.unit_price),
+          ...money,
         };
       }),
     );
@@ -399,10 +413,49 @@ export default function SalesCreateWorkspace({
       current.map((row) => {
         if (row.key !== key) return row;
         const nextPrice = Number.isFinite(price) && price >= 0 ? price : 0;
+        const money = moneyAfterQtyPrice({
+          qty: row.qty,
+          unitPrice: nextPrice,
+          discountText: row.discount_text,
+          discountAmount: row.discount_amount,
+        });
         return {
           ...row,
           unit_price: nextPrice,
-          line_total: calcLineTotal(row.qty, nextPrice),
+          ...money,
+        };
+      }),
+    );
+  }
+
+  function includeServiceInGarment(key: string) {
+    clearLastSavedArtifact();
+    setLineItems((current) =>
+      current.map((row) =>
+        row.key === key
+          ? {
+              ...row,
+              unit_price: 0,
+              discount_text: "",
+              discount_amount: 0,
+              line_total: 0,
+            }
+          : row,
+      ),
+    );
+  }
+
+  function giftServiceLine(key: string) {
+    clearLastSavedArtifact();
+    setLineItems((current) =>
+      current.map((row) => {
+        if (row.key !== key) return row;
+        const gross = calcLineTotal(row.qty, row.unit_price);
+        return {
+          ...row,
+          discount_text: "100%",
+          discount_amount: gross,
+          line_total: 0,
         };
       }),
     );
@@ -934,6 +987,13 @@ export default function SalesCreateWorkspace({
                           <span className="mt-0.5 block text-[10px] text-slate-400">
                             ต้นทุน snapshot {formatMoney(row.cost_price)} ฿
                           </span>
+                        ) : null}
+                        {row.is_service_item ? (
+                          <ServiceLineShortcuts
+                            disabled={isPending}
+                            onIncludeInGarment={() => includeServiceInGarment(row.key)}
+                            onFreeGift={() => giftServiceLine(row.key)}
+                          />
                         ) : null}
                       </TableCell>
                       <TableCell className="px-4">
