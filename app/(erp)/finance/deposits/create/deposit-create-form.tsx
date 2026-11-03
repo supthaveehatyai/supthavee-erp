@@ -14,7 +14,15 @@ import { toast } from "sonner";
 import { createDepositDocument } from "@/app/actions/finance/deposit-actions";
 import { parseTransferSlipOcr } from "@/lib/actions/sales-ocr-actions";
 import { PaymentChannelPicker } from "@/components/finance/payment-channel-picker";
-import { classifySlipPayee, type PaymentChannel } from "@/lib/finance/payment-channel";
+import {
+  bankAccountDisplay,
+  initialBankAccountId,
+  paymentChannelLabel,
+  resolveSlipBankAccount,
+  selectedBankAccount,
+  type ActiveBankAccount,
+  type PaymentChannel,
+} from "@/lib/finance/payment-channel";
 import { formatBuddhistSlash } from "@/lib/utils/deposit-note";
 import type { DepositTab } from "@/types/deposit";
 import CustomerCombobox from "@/app/(erp)/sales/create/customer-combobox";
@@ -57,6 +65,7 @@ export type DepositCreateFormProps = {
   customers: CustomerOption[];
   vendors: VendorOption[];
   defaultDate: string;
+  bankAccounts?: ActiveBankAccount[];
 };
 
 export function DepositCreateForm({
@@ -64,6 +73,7 @@ export function DepositCreateForm({
   customers,
   vendors,
   defaultDate,
+  bankAccounts = [],
 }: DepositCreateFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -76,7 +86,9 @@ export function DepositCreateForm({
   const [referenceNo, setReferenceNo] = useState("");
   const [remark, setRemark] = useState("");
   const [paymentChannel, setPaymentChannel] = useState<PaymentChannel>("COMPANY_BANK");
-  const [otherBankName, setOtherBankName] = useState("");
+  const [bankAccountId, setBankAccountId] = useState<string | null>(() =>
+    initialBankAccountId(bankAccounts, "COMPANY_BANK"),
+  );
   const [slipFile, setSlipFile] = useState<File | null>(null);
   const [isReadingSlip, setIsReadingSlip] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -122,10 +134,16 @@ export function DepositCreateForm({
       if (result.data.amount && !(Number(amount) > 0)) {
         setAmount(result.data.amount.toFixed(2));
       }
-      const payee = classifySlipPayee(result.data.payee_name, result.data.payee_account);
+      const payee = resolveSlipBankAccount(
+        bankAccounts,
+        result.data.payee_name,
+        result.data.payee_account,
+      );
       if (payee) {
         setPaymentChannel(payee.channel);
-        setOtherBankName(payee.otherBankName);
+        setBankAccountId(
+          payee.bankAccountId ?? initialBankAccountId(bankAccounts, payee.channel),
+        );
         toast.message(payee.notice);
       }
     } finally {
@@ -156,8 +174,13 @@ export function DepositCreateForm({
     formData.set("reference_no", referenceNo);
     formData.set("remark", remark);
     if (docType === "DEP_IN") {
+      const account = selectedBankAccount(bankAccounts, paymentChannel, bankAccountId);
       formData.set("payment_channel", paymentChannel);
-      formData.set("other_bank_name", otherBankName);
+      formData.set("bank_account_id", account?.id ?? "");
+      formData.set(
+        "receiving_bank_label",
+        account ? bankAccountDisplay(account) : paymentChannelLabel(paymentChannel),
+      );
     }
 
     if (slipFile) {
@@ -309,11 +332,12 @@ export function DepositCreateForm({
           {isDepIn ? (
             <PaymentChannelPicker
               value={paymentChannel}
-              otherBankName={otherBankName}
+              bankAccountId={bankAccountId}
+              accounts={bankAccounts}
               disabled={isPending}
-              onChange={(channel, name) => {
+              onChange={(channel, accountId) => {
                 setPaymentChannel(channel);
-                setOtherBankName(name);
+                setBankAccountId(accountId);
               }}
             />
           ) : null}

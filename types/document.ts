@@ -437,6 +437,7 @@ export type DocumentDetail = {
   payment_status: string;
   /** `documents.payment_channel` — COMPANY_BANK | CASH | OTHER_BANK */
   payment_channel?: string | null;
+  bank_account_id?: string | null;
   receiving_bank_label?: string | null;
   is_swept_to_company?: boolean | null;
   swept_to_company_at?: string | null;

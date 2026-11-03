@@ -7,7 +7,11 @@ import {
   getAccountantReceiptFiles,
   markReceiptsSweptToCompany,
 } from "@/lib/actions/finance/receipt-sweep-actions";
-import type { UnsweptReceiptRow } from "@/lib/finance/payment-channel";
+import {
+  otherAccountSweepLines,
+  type ActiveBankAccount,
+  type UnsweptReceiptRow,
+} from "@/lib/finance/payment-channel";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -54,9 +58,11 @@ function downloadBase64(filename: string, base64: string, mime: string) {
 export function UnsweptReceiptsCard({
   rows,
   error,
+  otherAccounts = [],
 }: {
   rows: UnsweptReceiptRow[];
   error?: string | null;
+  otherAccounts?: ActiveBankAccount[];
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -77,6 +83,10 @@ export function UnsweptReceiptsCard({
         .filter((row) => row.payment_channel === "OTHER_BANK")
         .reduce((sum, row) => sum + row.amount, 0),
     [rows],
+  );
+  const otherLines = useMemo(
+    () => otherAccountSweepLines(otherAccounts, rows),
+    [otherAccounts, rows],
   );
   const selectedIds = rows.filter((row) => selected[row.id]).map((row) => row.id);
 
@@ -177,6 +187,15 @@ export function UnsweptReceiptsCard({
             </p>
           </div>
         )}
+        {otherLines.length > 0 ? (
+          <ul className="space-y-1 text-sm text-slate-800">
+            {otherLines.map((line) => (
+              <li key={line.id}>
+                {line.label}: ฿{formatMoney(line.amount)}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {rows.length > 0 ? (
           <div className="space-y-2">
             <label className="flex items-center gap-2 text-xs font-medium text-slate-600">

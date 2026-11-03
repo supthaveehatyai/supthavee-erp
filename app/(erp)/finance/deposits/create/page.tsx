@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { HandCoins } from "lucide-react";
 import { DepositCreateForm } from "./deposit-create-form";
 import type { DepositTab } from "@/types/deposit";
-import { listActiveCustomers } from "@/lib/actions/document-actions";
+import { listActiveBankAccounts, listActiveCustomers } from "@/lib/actions/document-actions";
 import { getActiveVendors } from "@/lib/actions/mapping";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { canAccessVendorDeposits } from "@/lib/auth/module-access";
@@ -42,9 +42,10 @@ export default async function CreateDepositPage({ searchParams }: PageProps) {
     ? resolveDocType(params.type)
     : "DEP_IN";
 
-  const [customersResult, vendorsResult] = await Promise.all([
+  const [customersResult, vendorsResult, bankAccounts] = await Promise.all([
     listActiveCustomers(),
     getActiveVendors(),
+    listActiveBankAccounts(),
   ]);
 
   return (
@@ -80,6 +81,7 @@ export default async function CreateDepositPage({ searchParams }: PageProps) {
         customers={customersResult.data ?? []}
         vendors={vendorsResult.data ?? []}
         defaultDate={todayIsoDate()}
+        bankAccounts={bankAccounts.data}
       />
     </div>
   );

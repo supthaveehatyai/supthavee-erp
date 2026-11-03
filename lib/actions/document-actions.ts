@@ -36,6 +36,10 @@ import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { getSystemSettings } from "@/lib/actions/settings";
 import { requireSessionUserId } from "@/lib/auth/current-user";
 import {
+  normalizeActiveBankAccount,
+  type ActiveBankAccount,
+} from "@/lib/finance/payment-channel";
+import {
   assertStockOutAvailability,
   excludeServiceLines,
   loadServiceProductIdSet,
@@ -893,6 +897,36 @@ export async function createDocument(
   }
 }
 
+/** Active bank book from `public.get_active_bank_accounts()`. */
+export async function listActiveBankAccounts(): Promise<{
+  data: ActiveBankAccount[];
+  error: string | null;
+}> {
+  try {
+    const supabase = createSupabaseServerClient();
+    const rpcClient = supabase as unknown as {
+      rpc: (
+        fn: "get_active_bank_accounts",
+        args?: Record<string, never>,
+      ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    };
+    const result = await rpcClient.rpc("get_active_bank_accounts");
+    if (result.error) return { data: [], error: result.error.message };
+    const payload = result.data;
+    const rows = Array.isArray(payload) ? payload : [];
+    return {
+      data: rows
+        .map(normalizeActiveBankAccount)
+        .filter((row): row is ActiveBankAccount => row != null),
+      error: null,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "โหลดสมุดบัญชีธนาคารไม่สำเร็จ";
+    return { data: [], error: message };
+  }
+}
+
 /** Active customers for the sales document header combobox. */
 export async function listActiveCustomers(): Promise<GetCustomersResult> {
   try {
@@ -1716,6 +1750,7 @@ export async function getDocumentByNo(
         wht_amount,
         payment_status,
         payment_channel,
+        bank_account_id,
         receiving_bank_label,
         is_swept_to_company,
         swept_to_company_at,
@@ -2090,6 +2125,7 @@ export async function getDocumentByNo(
       wht_amount: Number(data.wht_amount ?? 0),
       payment_status: String(data.payment_status ?? "Pending"),
       payment_channel: (data.payment_channel as string | null) ?? null,
+      bank_account_id: (data.bank_account_id as string | null) ?? null,
       receiving_bank_label: (data.receiving_bank_label as string | null) ?? null,
       is_swept_to_company:
         data.is_swept_to_company == null
@@ -3320,6 +3356,7 @@ export async function updateSalesDocumentDirect(input: {
   reference_no?: string | null;
   payment_channel?: string | null;
   receiving_bank_label?: string | null;
+  bank_account_id?: string | null;
 }) {
   try {
     const owner = await requireSessionUserId();
@@ -3349,6 +3386,7 @@ export async function updateSalesDocumentDirect(input: {
       p_reference_no: referenceNo || null,
       p_payment_channel: input.payment_channel?.trim() || null,
       p_receiving_bank_label: input.receiving_bank_label?.trim() || null,
+      p_bank_account_id: input.bank_account_id?.trim() || null,
     });
     if (saved.error) return { data: null, error: saved.error.message };
 

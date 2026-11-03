@@ -1,11 +1,14 @@
 "use client";
 
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import {
+  accountsForChannel,
+  bankAccountDisplay,
   CASH_RECEIPT_LABEL,
   COMPANY_BANK_LABEL,
   OTHER_BANK_LABEL,
+  type ActiveBankAccount,
   type PaymentChannel,
 } from "@/lib/finance/payment-channel";
 import { cn } from "@/lib/utils";
@@ -18,15 +21,21 @@ const OPTIONS: Array<{ value: PaymentChannel; label: string }> = [
 
 export function PaymentChannelPicker({
   value,
-  otherBankName,
+  bankAccountId,
+  accounts,
   onChange,
   disabled = false,
 }: {
   value: PaymentChannel;
-  otherBankName: string;
-  onChange: (channel: PaymentChannel, otherBankName: string) => void;
+  bankAccountId: string | null;
+  accounts: ActiveBankAccount[];
+  onChange: (channel: PaymentChannel, bankAccountId: string | null) => void;
   disabled?: boolean;
 }) {
+  const pool = accountsForChannel(accounts, value);
+  const accountLabel =
+    value === "COMPANY_BANK" ? "บัญชีบริษัทที่รับโอน" : "ชื่อธนาคาร / บัญชีที่รับโอน";
+
   return (
     <div className="space-y-2">
       <Label>ช่องทางรับเงิน</Label>
@@ -38,7 +47,13 @@ export function PaymentChannelPicker({
               key={option.value}
               type="button"
               disabled={disabled}
-              onClick={() => onChange(option.value, otherBankName)}
+              onClick={() => {
+                const nextPool = accountsForChannel(accounts, option.value);
+                onChange(
+                  option.value,
+                  option.value === "CASH" ? null : (nextPool[0]?.id ?? null),
+                );
+              }}
               className={cn(
                 "h-auto min-h-10 rounded-lg border px-2 py-2 text-left text-xs font-semibold leading-snug",
                 active
@@ -51,18 +66,29 @@ export function PaymentChannelPicker({
           );
         })}
       </div>
-      {value === "OTHER_BANK" ? (
+      {value === "CASH" ? null : (
         <div className="space-y-1.5">
-          <Label htmlFor="other-bank-name">ชื่อธนาคาร / บัญชีที่รับโอน</Label>
-          <Input
-            id="other-bank-name"
-            value={otherBankName}
-            disabled={disabled}
-            placeholder="เช่น SCB / KBank สำรอง"
-            onChange={(event) => onChange("OTHER_BANK", event.target.value)}
-          />
+          <Label htmlFor="receiving-bank-account">{accountLabel}</Label>
+          {pool.length > 0 ? (
+            <Select
+              id="receiving-bank-account"
+              value={bankAccountId ?? pool[0]?.id ?? ""}
+              disabled={disabled}
+              onChange={(event) => onChange(value, event.target.value || null)}
+            >
+              {pool.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {bankAccountDisplay(account)}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              ยังไม่มีสมุดบัญชีในระบบสำหรับช่องทางนี้
+            </p>
+          )}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

@@ -1169,6 +1169,8 @@ export async function receiveSalesDocumentPayment(
     const receiptChannel = await paymentChannelFields({
       channel: String(formData.get("payment_channel") ?? ""),
       otherBankName: String(formData.get("other_bank_name") ?? ""),
+      bankAccountId: String(formData.get("bank_account_id") ?? ""),
+      receivingBankLabel: String(formData.get("receiving_bank_label") ?? ""),
     });
     const { error: updateError } = await supabase
       .from("documents")

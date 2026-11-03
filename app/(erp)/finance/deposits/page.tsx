@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { HandCoins, Plus, Wallet } from "lucide-react";
 import { getDepositDocuments } from "@/app/actions/finance/deposit-actions";
+import { listActiveBankAccounts } from "@/lib/actions/document-actions";
 import { getUnsweptReceipts } from "@/lib/actions/finance/receipt-sweep-actions";
 import { UnsweptReceiptsCard } from "@/components/finance/unswept-receipts-card";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
@@ -231,9 +232,10 @@ export default async function DepositsPage({ searchParams }: PageProps) {
 
   const tab: DepositTab = canUseDepOut ? resolveTab(params.tab) : "DEP_IN";
 
-  const [{ data, error }, unswept] = await Promise.all([
+  const [{ data, error }, unswept, bankAccounts] = await Promise.all([
     getDepositDocuments(tab, search),
     getUnsweptReceipts(),
+    listActiveBankAccounts(),
   ]);
 
   const totalAmount = data.reduce((sum, row) => sum + row.grand_total, 0);
@@ -305,7 +307,11 @@ export default async function DepositsPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      <UnsweptReceiptsCard rows={unswept.data} error={unswept.error} />
+      <UnsweptReceiptsCard
+        rows={unswept.data}
+        error={unswept.error}
+        otherAccounts={bankAccounts.data}
+      />
 
       {error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

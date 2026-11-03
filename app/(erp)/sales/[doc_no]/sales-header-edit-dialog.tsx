@@ -7,9 +7,12 @@ import { toast } from "sonner";
 import { PaymentChannelPicker } from "@/components/finance/payment-channel-picker";
 import { updateSalesDocumentDirect } from "@/lib/actions/document-actions";
 import {
+  bankAccountDisplay,
+  initialBankAccountId,
   isPaymentChannel,
-  otherBankNameFromLabel,
   paymentChannelLabel,
+  selectedBankAccount,
+  type ActiveBankAccount,
   type PaymentChannel,
 } from "@/lib/finance/payment-channel";
 import { Button } from "@/components/ui/button";
@@ -30,6 +33,8 @@ export function SalesHeaderEditDialog({
   referenceNo,
   paymentChannel,
   receivingBankLabel,
+  storedBankAccountId,
+  bankAccounts = [],
 }: {
   documentId: string;
   docDate: string;
@@ -37,6 +42,8 @@ export function SalesHeaderEditDialog({
   referenceNo: string;
   paymentChannel?: string | null;
   receivingBankLabel?: string | null;
+  storedBankAccountId?: string | null;
+  bankAccounts?: ActiveBankAccount[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -44,11 +51,17 @@ export function SalesHeaderEditDialog({
   const [date, setDate] = useState(docDate.slice(0, 10));
   const [slipNo, setSlipNo] = useState(referenceNo);
   const [remark, setRemark] = useState(notes);
-  const [channel, setChannel] = useState<PaymentChannel>(
-    isPaymentChannel(paymentChannel) ? paymentChannel : "COMPANY_BANK",
-  );
-  const [otherBankName, setOtherBankName] = useState(
-    otherBankNameFromLabel(receivingBankLabel),
+  const initialChannel: PaymentChannel = isPaymentChannel(paymentChannel)
+    ? paymentChannel
+    : "COMPANY_BANK";
+  const [channel, setChannel] = useState<PaymentChannel>(initialChannel);
+  const [bankAccountId, setBankAccountId] = useState<string | null>(() =>
+    initialBankAccountId(
+      bankAccounts,
+      initialChannel,
+      storedBankAccountId,
+      receivingBankLabel,
+    ),
   );
 
   function onSave() {
@@ -60,7 +73,11 @@ export function SalesHeaderEditDialog({
         notes: remark.trim() || null,
         reference_no: slipNo.trim() || null,
         payment_channel: channel,
-        receiving_bank_label: paymentChannelLabel(channel, otherBankName),
+        bank_account_id: selectedBankAccount(bankAccounts, channel, bankAccountId)?.id ?? null,
+        receiving_bank_label: (() => {
+          const account = selectedBankAccount(bankAccounts, channel, bankAccountId);
+          return account ? bankAccountDisplay(account) : paymentChannelLabel(channel);
+        })(),
       });
       if (result.error || !result.data) {
         toast.error(result.error ?? "แก้ไขหัวบิลไม่สำเร็จ");
@@ -113,11 +130,12 @@ export function SalesHeaderEditDialog({
             </div>
             <PaymentChannelPicker
               value={channel}
-              otherBankName={otherBankName}
+              bankAccountId={bankAccountId}
+              accounts={bankAccounts}
               disabled={pending}
-              onChange={(next, name) => {
+              onChange={(next, accountId) => {
                 setChannel(next);
-                setOtherBankName(name);
+                setBankAccountId(accountId);
               }}
             />
             <div className="space-y-1.5">

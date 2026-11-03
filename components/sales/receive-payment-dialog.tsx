@@ -7,7 +7,15 @@ import { toast } from "sonner";
 import { receiveSalesDocumentPayment } from "@/lib/actions/finance/payment";
 import { parseTransferSlipOcr } from "@/lib/actions/sales-ocr-actions";
 import { PaymentChannelPicker } from "@/components/finance/payment-channel-picker";
-import { classifySlipPayee, type PaymentChannel } from "@/lib/finance/payment-channel";
+import {
+  bankAccountDisplay,
+  initialBankAccountId,
+  paymentChannelLabel,
+  resolveSlipBankAccount,
+  selectedBankAccount,
+  type ActiveBankAccount,
+  type PaymentChannel,
+} from "@/lib/finance/payment-channel";
 import { formatBuddhistSlash } from "@/lib/utils/deposit-note";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,6 +47,7 @@ export function ReceivePaymentDialog({
   depositDeducted,
   paidAmount,
   amountDue,
+  bankAccounts = [],
 }: {
   documentId: string;
   docNo: string;
@@ -46,6 +55,7 @@ export function ReceivePaymentDialog({
   depositDeducted: number;
   paidAmount: number;
   amountDue: number;
+  bankAccounts?: ActiveBankAccount[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -54,7 +64,9 @@ export function ReceivePaymentDialog({
   );
   const [amount, setAmount] = useState(amountDue.toFixed(2));
   const [paymentChannel, setPaymentChannel] = useState<PaymentChannel>("COMPANY_BANK");
-  const [otherBankName, setOtherBankName] = useState("");
+  const [bankAccountId, setBankAccountId] = useState<string | null>(() =>
+    initialBankAccountId(bankAccounts, "COMPANY_BANK"),
+  );
   const [whtRate, setWhtRate] = useState<"0" | "1" | "3">("0");
   const [referenceNo, setReferenceNo] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
@@ -87,10 +99,16 @@ export function ReceivePaymentDialog({
         );
       }
       if (result.data.reference_no) setReferenceNo(result.data.reference_no);
-      const payee = classifySlipPayee(result.data.payee_name, result.data.payee_account);
+      const payee = resolveSlipBankAccount(
+        bankAccounts,
+        result.data.payee_name,
+        result.data.payee_account,
+      );
       if (payee) {
         setPaymentChannel(payee.channel);
-        setOtherBankName(payee.otherBankName);
+        setBankAccountId(
+          payee.bankAccountId ?? initialBankAccountId(bankAccounts, payee.channel),
+        );
         toast.message(payee.notice);
       }
     } finally {
@@ -109,8 +127,13 @@ export function ReceivePaymentDialog({
     formData.set("amount", settle.toFixed(2));
     formData.set("wht_rate", whtRate);
     formData.set("reference_no", referenceNo.trim());
+    const account = selectedBankAccount(bankAccounts, paymentChannel, bankAccountId);
     formData.set("payment_channel", paymentChannel);
-    formData.set("other_bank_name", otherBankName);
+    formData.set("bank_account_id", account?.id ?? "");
+    formData.set(
+      "receiving_bank_label",
+      account ? bankAccountDisplay(account) : paymentChannelLabel(paymentChannel),
+    );
     if (slipFile) formData.set("slip_file", slipFile);
 
     startTransition(async () => {
@@ -190,11 +213,12 @@ export function ReceivePaymentDialog({
             </div>
             <PaymentChannelPicker
               value={paymentChannel}
-              otherBankName={otherBankName}
+              bankAccountId={bankAccountId}
+              accounts={bankAccounts}
               disabled={isPending}
-              onChange={(channel, name) => {
+              onChange={(channel, accountId) => {
                 setPaymentChannel(channel);
-                setOtherBankName(name);
+                setBankAccountId(accountId);
               }}
             />
             <div className="space-y-1.5">

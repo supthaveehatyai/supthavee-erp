@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Eye, FileText, Link2, Lock, Pencil, Undo2 } from "lucide-react";
-import { getDocumentByNo } from "@/lib/actions/document-actions";
+import { getDocumentByNo, listActiveBankAccounts } from "@/lib/actions/document-actions";
 import {
   getDepositAllocationHistory,
   getDocumentAllocationsByReceiptId,
@@ -283,6 +283,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
     notFound();
   }
 
+  const bankAccountsPromise = listActiveBankAccounts();
   let result: Awaited<ReturnType<typeof getDocumentByNo>>;
   try {
     result = await getDocumentByNo(docNo);
@@ -295,6 +296,8 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
       </div>
     );
   }
+
+  const bankAccounts = await bankAccountsPromise;
 
   if (!result.data) {
     if (result.error && !/ไม่พบเอกสาร/.test(result.error)) {
@@ -558,6 +561,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               }
               orderTotal={Number(doc.grand_total ?? 0)}
               salesChannel={doc.sales_channel}
+              bankAccounts={bankAccounts.data}
             />
           ) : null}
           {canReceivePayment ? (
@@ -568,6 +572,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               depositDeducted={Number(doc.deposit_deducted ?? 0)}
               paidAmount={Number(doc.paid_amount ?? 0)}
               amountDue={amountDue}
+              bankAccounts={bankAccounts.data}
             />
           ) : null}
           {canEditIssuedHeader ? (
@@ -582,6 +587,8 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               referenceNo={doc.reference_no ?? ""}
               paymentChannel={doc.payment_channel}
               receivingBankLabel={doc.receiving_bank_label}
+              storedBankAccountId={doc.bank_account_id}
+              bankAccounts={bankAccounts.data}
             />
           ) : null}
           {canSendKanban || showBatchMto ? (

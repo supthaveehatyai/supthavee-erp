@@ -27,6 +27,7 @@ type ReceiptQueryRow = {
   paid_amount: number | string | null;
   payment_channel: string | null;
   receiving_bank_label: string | null;
+  bank_account_id: string | null;
   reference_no: string | null;
   is_swept_to_company: boolean | null;
   swept_to_company_at: string | null;
@@ -74,7 +75,7 @@ async function loadReceiptRows(): Promise<{
       .select(
         `
         id, doc_no, doc_date, doc_type, status, grand_total, net_before_vat,
-        vat_amount, paid_amount, payment_channel, receiving_bank_label,
+        vat_amount, paid_amount, payment_channel, receiving_bank_label, bank_account_id,
         reference_no, is_swept_to_company, swept_to_company_at, swept_batch_ref,
         contacts:contact_id ( company_name )
       `,
@@ -129,6 +130,7 @@ export async function getUnsweptReceipts(): Promise<{
         payment_channel: row.payment_channel as "CASH" | "OTHER_BANK",
         amount: receivedAmount(row),
         receiving_bank_label: row.receiving_bank_label,
+        bank_account_id: row.bank_account_id,
       }));
     return { data, error: null };
   } catch (error) {
@@ -261,6 +263,8 @@ export async function getAccountantReceiptFiles(): Promise<{
 export async function paymentChannelFields(input: {
   channel: string | null | undefined;
   otherBankName?: string | null;
+  bankAccountId?: string | null;
+  receivingBankLabel?: string | null;
 }): Promise<{
   payment_channel: PaymentChannel;
   bank_account_id: string | null;
@@ -271,9 +275,15 @@ export async function paymentChannelFields(input: {
   const channel: PaymentChannel = isPaymentChannel(input.channel)
     ? input.channel
     : "COMPANY_BANK";
-  const label = paymentChannelLabel(channel, input.otherBankName);
+  const explicitId = String(input.bankAccountId ?? "").trim();
+  const label =
+    String(input.receivingBankLabel ?? "").trim() ||
+    paymentChannelLabel(channel, input.otherBankName);
   const swept = channel === "COMPANY_BANK";
-  const bankAccountId = swept ? await resolveCompanyBankAccountId() : null;
+  const bankAccountId =
+    channel === "CASH"
+      ? null
+      : explicitId || (swept ? await resolveCompanyBankAccountId() : null);
   return {
     payment_channel: channel,
     bank_account_id: bankAccountId,

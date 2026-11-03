@@ -562,6 +562,8 @@ export async function createDepositDocument(
         ? await paymentChannelFields({
             channel: String(formData.get("payment_channel") ?? ""),
             otherBankName: String(formData.get("other_bank_name") ?? ""),
+            bankAccountId: String(formData.get("bank_account_id") ?? ""),
+            receivingBankLabel: String(formData.get("receiving_bank_label") ?? ""),
           })
         : null;
 
