@@ -27,6 +27,7 @@ import {
   calculateDocumentSummary,
   type VatCalculationType,
 } from "@/lib/utils/document-summary";
+import { isCancelAndReplaceDraft } from "@/lib/utils/cancel-replace-draft";
 import { displayDocumentItemDescription } from "@/lib/utils/credit-note-line";
 import { ServiceLineShortcuts } from "@/components/sales/service-line-shortcuts";
 import { SalesMockupCard } from "@/components/sales/sales-mockup-card";
@@ -216,9 +217,11 @@ export default function SalesEditWorkspace({
     );
   const [isPending, startTransition] = useTransition();
   const preserveInitialPersonRef = useRef(true);
-  const isReplacement =
-    Boolean(initialDocument.ref_document_id) &&
-    initialDocument.doc_type !== "CN";
+  const isReplacement = isCancelAndReplaceDraft({
+    refDocumentId: initialDocument.ref_document_id,
+    docType: initialDocument.doc_type,
+    notes: initialDocument.notes,
+  });
   const hideContactPicker = shouldHideSalesContactPicker({
     docType: initialDocument.doc_type,
     salesChannel: salesChannelFields.sales_channel,
@@ -250,8 +253,11 @@ export default function SalesEditWorkspace({
         discountText,
         vatType,
         vatRate: DEFAULT_VAT_RATE,
+        depositGross: Number(initialDocument.deposit_deducted ?? 0),
+        depositNet: Number(initialDocument.deposit_net_deducted ?? 0),
+        depositVat: Number(initialDocument.deposit_vat_deducted ?? 0),
       }),
-    [lineItems, discountText, vatType],
+    [lineItems, discountText, vatType, initialDocument],
   );
   const needsProductionMockup = useMemo(
     () =>
@@ -979,6 +985,18 @@ export default function SalesEditWorkspace({
 
           <div className="flex flex-wrap items-end justify-between gap-4 border-t border-slate-100 pt-4">
             <div className="space-y-1 text-sm text-slate-600">
+              {billSummary.deposit_deducted > 0 ? (
+                <p>
+                  หักเงินมัดจำ (รวม VAT):{" "}
+                  <span className="font-semibold tabular-nums text-red-600">
+                    −{formatMoney(billSummary.deposit_deducted)}
+                  </span>
+                  <span className="ml-2 text-xs text-slate-400">
+                    ฐาน {formatMoney(billSummary.deposit_net_deducted)} + VAT{" "}
+                    {formatMoney(billSummary.deposit_vat_deducted)}
+                  </span>
+                </p>
+              ) : null}
               <p>
                 ยอดก่อนภาษี:{" "}
                 <span className="font-semibold tabular-nums text-slate-900">

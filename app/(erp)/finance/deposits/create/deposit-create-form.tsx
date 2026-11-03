@@ -36,7 +36,9 @@ import {
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-const INITIAL_VAT_TYPE: VatCalculationType = "NONE";
+function initialVatType(docType: DepositTab): VatCalculationType {
+  return docType === "DEP_IN" ? "INCLUSIVE" : "NONE";
+}
 
 function formatMoney(value: number): string {
   return value.toLocaleString("th-TH", {
@@ -63,7 +65,9 @@ export function DepositCreateForm({
   const [contactId, setContactId] = useState("");
   const [documentDate, setDocumentDate] = useState(defaultDate);
   const [amount, setAmount] = useState("");
-  const [vatType, setVatType] = useState<VatCalculationType>(INITIAL_VAT_TYPE);
+  const [vatType, setVatType] = useState<VatCalculationType>(
+    initialVatType(docType),
+  );
   const [referenceNo, setReferenceNo] = useState("");
   const [remark, setRemark] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);

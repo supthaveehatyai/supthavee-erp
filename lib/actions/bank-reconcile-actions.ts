@@ -35,7 +35,7 @@ import type {
 } from "@/types/bank-reconcile";
 import type { ParsedKtbLine } from "@/types/bank-reconcile";
 
-const SALES_DOC_TYPES = ["INV_DO", "TAX_INV", "CS_TAX", "ABB"] as const;
+const SALES_DOC_TYPES = ["INV_DO", "TAX_INV", "CS_TAX", "ABB", "DEP_IN"] as const;
 const OPEN_DOC_STATUSES = ["ISSUED", "COMPLETED", "PAID"] as const;
 const CASH_DOC_TYPES = new Set(["ABB", "CS_TAX"]);
 const MAX_BYTES = 4_500_000;
@@ -405,9 +405,10 @@ function toOpenBill(row: RawBill, allocated: number, customer: string | null): O
   const paid = roundMoney(Number(row.paid_amount ?? 0));
   const outstanding = roundMoney(Math.max(0, grand - paid));
   const unlinked = roundMoney(Math.max(0, grand - allocated));
-  const linkable = CASH_DOC_TYPES.has(row.doc_type)
-    ? roundMoney(Math.max(outstanding, unlinked))
-    : roundMoney(Math.min(outstanding, unlinked));
+  const linkable =
+    CASH_DOC_TYPES.has(row.doc_type) || row.doc_type === "DEP_IN"
+      ? roundMoney(Math.max(outstanding, unlinked))
+      : roundMoney(Math.min(outstanding, unlinked));
   return {
     id: row.id,
     doc_no: row.doc_no,

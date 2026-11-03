@@ -24,6 +24,15 @@ export type DocumentSummaryInput = {
   vatType: VatCalculationType;
   /** Percent, default 7. */
   vatRate?: number;
+  /**
+   * ยอดมัดจำที่รับมาแล้วแบบรวมภาษี (ก้อนที่ลูกค้าโอน)
+   * เช่น 1,500.00 จากใบ DEP_IN แบบ INCLUSIVE
+   */
+  depositGross?: number | null;
+  /** ฐานภาษีของมัดจำที่ถอดไว้แล้ว — ถ้าไม่ส่ง ระบบถอดจาก depositGross */
+  depositNet?: number | null;
+  /** VAT ของมัดจำที่ถอดไว้แล้ว */
+  depositVat?: number | null;
 };
 
 export type DocumentSummaryResult = {
@@ -43,6 +52,12 @@ export type DocumentSummaryResult = {
   grand_total: number;
   vat_rate: number;
   vat_type: VatCalculationType;
+  /** ยอดมัดจำรวมภาษีที่หักในบิลนี้ */
+  deposit_deducted: number;
+  /** ฐานภาษีมัดจำที่หัก */
+  deposit_net_deducted: number;
+  /** VAT มัดจำที่หัก */
+  deposit_vat_deducted: number;
 };
 
 function round2(value: number): number {
@@ -132,6 +147,49 @@ export function calculateDocumentSummary(
     net_before_vat = round2(grand_total - vat_amount);
   }
 
+  const depositGrossRaw = Number(input.depositGross ?? 0);
+  const deposit_deducted =
+    Number.isFinite(depositGrossRaw) && depositGrossRaw > 0
+      ? round2(depositGrossRaw)
+      : 0;
+  let deposit_net_deducted = 0;
+  let deposit_vat_deducted = 0;
+
+  if (deposit_deducted > 0 && vatType !== "NONE" && vatRate > 0) {
+    const givenNet = Number(input.depositNet);
+    const givenVat = Number(input.depositVat);
+    const givenSum =
+      (Number.isFinite(givenNet) ? givenNet : 0) +
+      (Number.isFinite(givenVat) ? givenVat : 0);
+    if (Number.isFinite(givenNet) && Number.isFinite(givenVat) && givenSum > 0) {
+      deposit_vat_deducted = round2(Math.max(0, givenVat));
+      deposit_net_deducted = round2(Math.max(0, givenNet));
+    } else {
+      deposit_vat_deducted = round2(
+        deposit_deducted * (vatRate / (100 + vatRate)),
+      );
+      deposit_net_deducted = round2(deposit_deducted - deposit_vat_deducted);
+    }
+  } else if (deposit_deducted > 0) {
+    deposit_net_deducted = deposit_deducted;
+  }
+
+  if (deposit_deducted > 0) {
+    if (vatType === "EXCLUSIVE" && vatRate > 0) {
+      net_before_vat = round2(net_before_vat - deposit_net_deducted);
+      vat_amount = round2(net_before_vat * (vatRate / 100));
+      grand_total = round2(net_before_vat + vat_amount);
+    } else if (vatType === "INCLUSIVE" && vatRate > 0) {
+      net_before_vat = round2(net_before_vat - deposit_net_deducted);
+      vat_amount = round2(vat_amount - deposit_vat_deducted);
+      grand_total = round2(grand_total - deposit_deducted);
+    } else {
+      grand_total = round2(grand_total - deposit_deducted);
+      net_before_vat = grand_total;
+      vat_amount = 0;
+    }
+  }
+
   return {
     total_amount,
     discount_amount,
@@ -141,5 +199,8 @@ export function calculateDocumentSummary(
     grand_total,
     vat_rate: vatRate,
     vat_type: vatType,
+    deposit_deducted,
+    deposit_net_deducted,
+    deposit_vat_deducted,
   };
 }

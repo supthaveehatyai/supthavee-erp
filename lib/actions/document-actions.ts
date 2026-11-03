@@ -29,6 +29,7 @@ import {
   resolveIssuedDocumentStatus,
 } from "@/lib/constants/document";
 import { billUrlsFromNotes, splitBillNotes } from "@/lib/procurement/bill-notes";
+import { isCancelAndReplaceDraft } from "@/lib/utils/cancel-replace-draft";
 import { revalidatePath } from "next/cache";
 import { logAuditTrail } from "@/lib/supabase/auditService";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
@@ -84,6 +85,7 @@ import type {
   GetSalesDocumentsResult,
   CloneDocumentToNewDraftResult,
   DocumentLineageChild,
+  LinkedDepositReceipt,
   DuplicateDocumentResult,
   IssueDocumentResult,
   PurchaseDocumentListItem,
@@ -1698,6 +1700,9 @@ export async function getDocumentByNo(
         tax_amount,
         grand_total,
         deposit_deducted,
+        deposit_net_deducted,
+        deposit_vat_deducted,
+        deposit_doc_id,
         paid_amount,
         vat_type,
         vat_rate,
@@ -1864,6 +1869,40 @@ export async function getDocumentByNo(
       }),
     );
 
+    const linkedDeposits: LinkedDepositReceipt[] = [];
+    {
+      const parentId = String(data.ref_document_id ?? "").trim();
+      const depositDocId = String(data.deposit_doc_id ?? "").trim();
+      const filters = [`ref_document_id.eq.${documentId}`];
+      if (parentId) filters.push(`ref_document_id.eq.${parentId}`);
+      if (depositDocId) filters.push(`id.eq.${depositDocId}`);
+      const { data: depositRows } = await supabase
+        .from("documents")
+        .select(
+          "id, doc_no, doc_date, status, grand_total, net_before_vat, vat_amount",
+        )
+        .eq("doc_type", "DEP_IN")
+        .or(filters.join(","))
+        .order("doc_date", { ascending: true });
+      const seen = new Set<string>();
+      for (const row of depositRows ?? []) {
+        const status = String(row.status ?? "");
+        if (status === "VOID" || status === "CANCELLED") continue;
+        const depositId = String(row.id);
+        if (seen.has(depositId)) continue;
+        seen.add(depositId);
+        linkedDeposits.push({
+          id: depositId,
+          doc_no: String(row.doc_no ?? ""),
+          doc_date: String(row.doc_date ?? "").slice(0, 10),
+          grand_total: Number(row.grand_total ?? 0),
+          net_before_vat: Number(row.net_before_vat ?? 0),
+          vat_amount: Number(row.vat_amount ?? 0),
+          status,
+        });
+      }
+    }
+
     const contact = unwrapJoin(
       data.contacts as
         | DocumentDetail["contact"]
@@ -2014,6 +2053,10 @@ export async function getDocumentByNo(
       tax_amount: Number(data.tax_amount ?? 0),
       grand_total: Number(data.grand_total ?? 0),
       deposit_deducted: Number(data.deposit_deducted ?? 0),
+      deposit_net_deducted: Number(data.deposit_net_deducted ?? 0),
+      deposit_vat_deducted: Number(data.deposit_vat_deducted ?? 0),
+      deposit_doc_id: (data.deposit_doc_id as string | null) ?? null,
+      linked_deposits: linkedDeposits,
       paid_amount: Number(data.paid_amount ?? 0),
       vat_type: (data.vat_type as DocumentDetail["vat_type"]) ?? null,
       vat_rate:
@@ -2234,7 +2277,9 @@ export async function updateDraftDocument(
 
     const { data: existing, error: existingError } = await supabase
       .from("documents")
-      .select("id, doc_no, doc_type, status, ref_document_id, contact_id, grand_total")
+      .select(
+        "id, doc_no, doc_type, status, ref_document_id, contact_id, grand_total, notes, deposit_deducted, deposit_net_deducted, deposit_vat_deducted, deposit_doc_id",
+      )
       .eq("id", documentId)
       .maybeSingle();
 
@@ -2277,9 +2322,11 @@ export async function updateDraftDocument(
     const contactId = resolvedContact.contactId;
     const contactPersonId = resolvedContact.contactPersonId;
 
-    const isReplacement =
-      Boolean(existing.ref_document_id) &&
-      String(existing.doc_type ?? "") !== "CN";
+    const isReplacement = isCancelAndReplaceDraft({
+      refDocumentId: existing.ref_document_id,
+      docType: String(existing.doc_type ?? ""),
+      notes: existing.notes,
+    });
 
     const nowIso = new Date().toISOString();
 
@@ -2386,6 +2433,9 @@ export async function updateDraftDocument(
       discountText,
       vatType,
       vatRate: Number.isFinite(vatRate) ? vatRate : 7,
+      depositGross: Number(existing.deposit_deducted ?? 0),
+      depositNet: Number(existing.deposit_net_deducted ?? 0),
+      depositVat: Number(existing.deposit_vat_deducted ?? 0),
     });
 
     const { error: headerError } = await supabase
@@ -2399,6 +2449,9 @@ export async function updateDraftDocument(
         tax_rate: summary.vat_rate,
         tax_amount: summary.vat_amount,
         grand_total: summary.grand_total,
+        deposit_deducted: summary.deposit_deducted,
+        deposit_net_deducted: summary.deposit_net_deducted,
+        deposit_vat_deducted: summary.deposit_vat_deducted,
         vat_type: summary.vat_type,
         vat_rate: summary.vat_rate,
         total_amount: summary.total_amount,
@@ -3590,6 +3643,129 @@ function sanitizeSearch(value: string): string {
     .trim();
 }
 
+type SalesDepositApply = {
+  deposit_deducted: number;
+  deposit_net_deducted: number;
+  deposit_vat_deducted: number;
+  deposit_doc_id: string | null;
+};
+
+function emptyDepositApply(): SalesDepositApply {
+  return {
+    deposit_deducted: 0,
+    deposit_net_deducted: 0,
+    deposit_vat_deducted: 0,
+    deposit_doc_id: null,
+  };
+}
+
+function readDepositNumber(
+  row: Record<string, unknown>,
+  keys: string[],
+): number | null {
+  for (const key of keys) {
+    if (row[key] == null || row[key] === "") continue;
+    const value = Number(row[key]);
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+/**
+ * รวมใบ DEP_IN ที่ยังไม่ยกเลิกของใบ SO
+ * ใช้ RPC `get_sales_order_deposit_summary` ก่อน แล้วค่อยอ่านเอกสารตรง
+ */
+async function loadSalesOrderDepositSummary(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  soDocumentId: string,
+): Promise<SalesDepositApply> {
+  const empty = emptyDepositApply();
+  const id = soDocumentId.trim();
+  if (!id) return empty;
+
+  const { data: rows, error } = await supabase
+    .from("documents")
+    .select(
+      "id, doc_no, doc_date, status, grand_total, net_before_vat, vat_amount, vat_type, created_at",
+    )
+    .eq("doc_type", "DEP_IN")
+    .eq("ref_document_id", id)
+    .order("created_at", { ascending: false });
+
+  const deposits = (rows ?? []).filter((row) => {
+    const status = String(row.status ?? "");
+    return status !== "VOID" && status !== "CANCELLED";
+  });
+
+  let fromRows = empty;
+  if (!error && deposits.length > 0) {
+    let gross = 0;
+    let net = 0;
+    let vat = 0;
+    for (const row of deposits) {
+      const rowGross = Number(row.grand_total ?? 0);
+      const rowNet = Number(row.net_before_vat ?? 0);
+      const rowVat = Number(row.vat_amount ?? 0);
+      gross += Number.isFinite(rowGross) ? rowGross : 0;
+      if (String(row.vat_type ?? "") === "INCLUSIVE" && rowNet + rowVat > 0) {
+        net += rowNet;
+        vat += rowVat;
+      } else if (rowGross > 0) {
+        const splitVat = Math.round(rowGross * (7 / 107) * 100) / 100;
+        vat += splitVat;
+        net += Math.round((rowGross - splitVat) * 100) / 100;
+      }
+    }
+    fromRows = {
+      deposit_deducted: Math.round(gross * 100) / 100,
+      deposit_net_deducted: Math.round(net * 100) / 100,
+      deposit_vat_deducted: Math.round(vat * 100) / 100,
+      deposit_doc_id: deposits[0]?.id ? String(deposits[0].id) : null,
+    };
+  }
+
+  if (fromRows.deposit_deducted > 0) return fromRows;
+
+  const rpc = await supabase.rpc("get_sales_order_deposit_summary", {
+    p_so_document_id: id,
+  });
+  const rpcRow = Array.isArray(rpc.data) ? rpc.data[0] : rpc.data;
+  if (!rpc.error && rpcRow && typeof rpcRow === "object") {
+    const record = rpcRow as Record<string, unknown>;
+    const gross = readDepositNumber(record, [
+      "deposit_deducted",
+      "deposit_gross",
+      "grand_total",
+    ]);
+    if (gross != null && gross > 0) {
+      const net = readDepositNumber(record, [
+        "deposit_net_deducted",
+        "deposit_net",
+        "net_before_vat",
+      ]);
+      const vat = readDepositNumber(record, [
+        "deposit_vat_deducted",
+        "deposit_vat",
+        "vat_amount",
+      ]);
+      const docId = record.deposit_doc_id ?? record.id;
+      return {
+        deposit_deducted: Math.round(gross * 100) / 100,
+        deposit_net_deducted:
+          net != null ? Math.round(Math.max(0, net) * 100) / 100 : fromRows.deposit_net_deducted,
+        deposit_vat_deducted:
+          vat != null ? Math.round(Math.max(0, vat) * 100) / 100 : fromRows.deposit_vat_deducted,
+        deposit_doc_id:
+          typeof docId === "string" && docId
+            ? docId
+            : fromRows.deposit_doc_id,
+      };
+    }
+  }
+
+  return fromRows;
+}
+
 /**
  * Convert a source document into a new DRAFT target document, copying
  * header commercial fields + line items. Supported lineage:
@@ -3736,7 +3912,7 @@ export async function convertDocument(
     // One active child only — QT already converted cannot convert again.
     const { data: existingChildren, error: childCheckError } = await supabase
       .from("documents")
-      .select("id, doc_no, status")
+      .select("id, doc_no, doc_type, status")
       .eq("ref_document_id", id)
       .order("created_at", { ascending: false });
 
@@ -3745,6 +3921,8 @@ export async function convertDocument(
     }
     const activeChild = (existingChildren ?? []).find((row) => {
       const status = String(row.status ?? "");
+      const childType = String(row.doc_type ?? "");
+      if (childType === "DEP_IN" || childType === "DEP_OUT") return false;
       return status !== "CANCELLED" && status !== "VOID";
     });
     if (activeChild) {
@@ -3783,16 +3961,46 @@ export async function convertDocument(
       return { data: null, error: owner.error };
     }
 
-    const forceExclusive =
-      targetDocType === "TAX_INV" || targetDocType === "CS_TAX";
+    const settlesDeposit =
+      (srcType === "SO" &&
+        (targetDocType === "INV_DO" ||
+          targetDocType === "ABB" ||
+          targetDocType === "TAX_INV" ||
+          targetDocType === "CS_TAX")) ||
+      (srcType === "INV_DO" &&
+        (targetDocType === "TAX_INV" || targetDocType === "CS_TAX"));
+    const targetVatType: VatCalculationType =
+      targetDocType === "TAX_INV" || targetDocType === "CS_TAX"
+        ? "EXCLUSIVE"
+        : targetDocType === "ABB" || targetDocType === "INV_DO"
+          ? "INCLUSIVE"
+          : isVatCalculationType(String(source.vat_type ?? ""))
+            ? (source.vat_type as VatCalculationType)
+            : "EXCLUSIVE";
     const vatRate = Number(source.vat_rate ?? source.tax_rate ?? 7);
-    const summary = forceExclusive
+    let depositSourceId = String(source.id);
+    if (settlesDeposit && srcType === "INV_DO") {
+      const { data: parentRow } = await supabase
+        .from("documents")
+        .select("ref_document_id")
+        .eq("id", source.id)
+        .maybeSingle();
+      const parentId = String(parentRow?.ref_document_id ?? "").trim();
+      if (parentId) depositSourceId = parentId;
+    }
+    const deposit = settlesDeposit
+      ? await loadSalesOrderDepositSummary(supabase, depositSourceId)
+      : emptyDepositApply();
+    const summary = settlesDeposit
       ? calculateDocumentSummary({
           lineTotals: sourceItems.map((item) => Number(item.line_total ?? 0)),
           discountText:
             typeof source.discount_text === "string" ? source.discount_text : null,
-          vatType: "EXCLUSIVE",
+          vatType: targetVatType,
           vatRate: Number.isFinite(vatRate) ? vatRate : 7,
+          depositGross: deposit.deposit_deducted,
+          depositNet: deposit.deposit_net_deducted,
+          depositVat: deposit.deposit_vat_deducted,
         })
       : null;
 
@@ -3824,8 +4032,13 @@ export async function convertDocument(
         grand_total: summary
           ? summary.grand_total
           : Number(source.grand_total ?? 0),
-        deposit_deducted: Number(source.deposit_deducted ?? 0),
-        vat_type: summary ? "EXCLUSIVE" : (source.vat_type ?? "EXCLUSIVE"),
+        deposit_deducted: summary
+          ? summary.deposit_deducted
+          : Number(source.deposit_deducted ?? 0),
+        deposit_net_deducted: summary ? summary.deposit_net_deducted : 0,
+        deposit_vat_deducted: summary ? summary.deposit_vat_deducted : 0,
+        deposit_doc_id: summary ? deposit.deposit_doc_id : null,
+        vat_type: summary ? summary.vat_type : (source.vat_type ?? "EXCLUSIVE"),
         vat_rate: summary
           ? summary.vat_rate
           : Number(source.vat_rate ?? source.tax_rate ?? 7),
@@ -3942,8 +4155,9 @@ export async function upgradeAbbToFullTaxInvoice(
       .from("documents")
       .select(
         `
-        id, doc_no, doc_type, status, contact_id, contact_person_id,
+        id, doc_no, doc_type, status, contact_id, contact_person_id, ref_document_id,
         discount_text, vat_rate, tax_rate, notes, sales_channel,
+        deposit_deducted, deposit_net_deducted, deposit_vat_deducted, deposit_doc_id,
         ecommerce_order_no, ecommerce_buyer_name, tracking_no, one_time_address,
         document_items!document_items_document_id_fkey (
           product_id, description, qty, uom_used, unit_price, unit_cost_price,
@@ -3974,12 +4188,29 @@ export async function upgradeAbbToFullTaxInvoice(
       ? source.document_items
       : [];
     const vatRate = Number(source.vat_rate ?? source.tax_rate ?? 7);
+    let deposit = {
+      deposit_deducted: Number(source.deposit_deducted ?? 0),
+      deposit_net_deducted: Number(source.deposit_net_deducted ?? 0),
+      deposit_vat_deducted: Number(source.deposit_vat_deducted ?? 0),
+      deposit_doc_id: source.deposit_doc_id
+        ? String(source.deposit_doc_id)
+        : null,
+    };
+    if (deposit.deposit_deducted <= 0 && source.ref_document_id) {
+      deposit = await loadSalesOrderDepositSummary(
+        supabase,
+        String(source.ref_document_id),
+      );
+    }
     const summary = calculateDocumentSummary({
       lineTotals: sourceItems.map((item) => Number(item.line_total ?? 0)),
       discountText:
         typeof source.discount_text === "string" ? source.discount_text : null,
       vatType: "EXCLUSIVE",
       vatRate: Number.isFinite(vatRate) ? vatRate : 7,
+      depositGross: deposit.deposit_deducted,
+      depositNet: deposit.deposit_net_deducted,
+      depositVat: deposit.deposit_vat_deducted,
     });
     const owner = await requireSessionUserId();
     if (!owner.ok) return { data: null, error: owner.error };
@@ -4010,6 +4241,10 @@ export async function upgradeAbbToFullTaxInvoice(
         tax_rate: summary.vat_rate,
         tax_amount: summary.vat_amount,
         grand_total: summary.grand_total,
+        deposit_deducted: summary.deposit_deducted,
+        deposit_net_deducted: summary.deposit_net_deducted,
+        deposit_vat_deducted: summary.deposit_vat_deducted,
+        deposit_doc_id: deposit.deposit_doc_id,
         vat_type: "EXCLUSIVE",
         vat_rate: summary.vat_rate,
         total_amount: summary.total_amount,

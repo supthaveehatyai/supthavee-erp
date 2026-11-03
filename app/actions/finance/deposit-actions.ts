@@ -372,6 +372,9 @@ export async function createDepositDocument(
     const remark = String(formData.get("remark") ?? "").trim() || null;
     const referenceNo =
       String(formData.get("reference_no") ?? "").trim() || null;
+    const refDocumentId =
+      String(formData.get("ref_document_id") ?? "").trim() || null;
+    const markPaid = String(formData.get("mark_paid") ?? "") === "1";
     const slipFile = formData.get("slip_file");
 
     if (docTypeRaw !== "DEP_IN" && docTypeRaw !== "DEP_OUT") {
@@ -452,6 +455,45 @@ export async function createDepositDocument(
       };
     }
 
+    let sourceDocNo: string | null = null;
+    if (refDocumentId) {
+      if (docType !== "DEP_IN") {
+        return {
+          success: false,
+          error: "ผูกเอกสารต้นทางได้เฉพาะใบรับเงินมัดจำ (DEP_IN)",
+        };
+      }
+      const { data: sourceDoc, error: sourceError } = await supabase
+        .from("documents")
+        .select("id, doc_no, doc_type, status, contact_id")
+        .eq("id", refDocumentId)
+        .maybeSingle();
+      if (sourceError || !sourceDoc) {
+        return {
+          success: false,
+          error: sourceError?.message ?? "ไม่พบเอกสารขายที่จะรับมัดจำ",
+        };
+      }
+      const sourceType = String(sourceDoc.doc_type ?? "");
+      const sourceStatus = String(sourceDoc.status ?? "");
+      if (sourceType !== "SO" && sourceType !== "QT") {
+        return {
+          success: false,
+          error: "รับเงินมัดจำจากหน้าบิลได้เฉพาะใบสั่งขาย (SO) หรือใบเสนอราคา (QT)",
+        };
+      }
+      if (sourceStatus !== "ISSUED" && sourceStatus !== "COMPLETED") {
+        return {
+          success: false,
+          error: "รับเงินมัดจำได้เมื่อเอกสารขายออกเลขแล้ว",
+        };
+      }
+      if (String(sourceDoc.contact_id ?? "") !== contactId) {
+        return { success: false, error: "ลูกค้าของใบมัดจำต้องตรงกับเอกสารขาย" };
+      }
+      sourceDocNo = String(sourceDoc.doc_no ?? "").trim() || null;
+    }
+
     // Running number — reuse existing helper (RPC architecture untouched)
     const numberResult = await generateDocumentNumber(docType, documentDate);
     if (!numberResult.data) {
@@ -473,10 +515,13 @@ export async function createDepositDocument(
     }
 
     const nowIso = new Date().toISOString();
-    const paymentStatus = resolveInitialPaymentStatus(docType);
+    const paymentStatus = markPaid
+      ? "PAID"
+      : resolveInitialPaymentStatus(docType);
     const status = resolveIssuedDocumentStatus(docType);
     const notesParts = [
       docType === "DEP_IN" ? "รับเงินมัดจำลูกค้า" : "จ่ายเงินมัดจำซัพพลายเออร์",
+      sourceDocNo ? `อ้างอิง ${sourceDocNo}` : null,
       `amount=${amount.toFixed(2)}`,
       `vat=${vatType}@${storedVatRate}%`,
       `net=${netTotal.toFixed(2)}`,
@@ -500,6 +545,8 @@ export async function createDepositDocument(
         status,
         doc_date: documentDate,
         contact_id: contactId,
+        ref_document_id: refDocumentId,
+        ref_doc_id: refDocumentId,
         sub_total: netTotal,
         discount_amount: 0,
         tax_rate: storedVatRate,
@@ -513,7 +560,7 @@ export async function createDepositDocument(
         vat_rate: storedVatRate,
         vat_type: vatType,
         deposit_deducted: 0,
-        paid_amount: 0,
+        paid_amount: markPaid ? grandTotal : 0,
         payment_status: paymentStatus,
         reference_no: referenceNo,
         attachment_url: slipUrl,
@@ -587,6 +634,9 @@ export async function createDepositDocument(
     revalidatePath("/finance/deposits");
     revalidatePath("/sales");
     revalidatePath("/purchases");
+    if (sourceDocNo) {
+      revalidatePath(`/sales/${encodeURIComponent(sourceDocNo)}`);
+    }
 
     return {
       success: true,

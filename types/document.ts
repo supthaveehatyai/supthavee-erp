@@ -364,6 +364,16 @@ export type DocumentDetailItem = {
 };
 
 /** Child document that references this row via `ref_document_id` (lineage). */
+export type LinkedDepositReceipt = {
+  id: string;
+  doc_no: string;
+  doc_date: string;
+  grand_total: number;
+  net_before_vat: number;
+  vat_amount: number;
+  status: string;
+};
+
 export type DocumentLineageChild = {
   id: string;
   doc_no: string;
@@ -396,6 +406,14 @@ export type DocumentDetail = {
    * (`documents.deposit_deducted`, DECIMAL NOT NULL DEFAULT 0).
    */
   deposit_deducted: number;
+  /** ฐานภาษีของมัดจำที่หักในบิลนี้ */
+  deposit_net_deducted?: number;
+  /** VAT ของมัดจำที่หักในบิลนี้ */
+  deposit_vat_deducted?: number;
+  /** ใบ DEP_IN หลักที่นำไปหัก */
+  deposit_doc_id?: string | null;
+  /** ใบมัดจำที่ผูกกับบิลนี้หรือบิลต้นทาง */
+  linked_deposits?: LinkedDepositReceipt[];
   /** Cumulative knock-off / cash paid — void blocked when > 0. */
   paid_amount: number;
   vat_type: VatCalculationType | null;

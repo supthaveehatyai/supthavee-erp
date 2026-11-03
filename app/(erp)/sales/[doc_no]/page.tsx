@@ -20,6 +20,7 @@ import {
   isSalesChannel,
 } from "@/lib/constants/document";
 import PrintDocumentTemplate from "@/components/sales/print-document-template";
+import { ReceiveDepositDialog } from "@/components/sales/receive-deposit-dialog";
 import { SalesPrintOptions } from "@/components/sales/sales-print-controls";
 import PrintPaymentReceiptTemplate from "@/components/finance/PrintPaymentReceiptTemplate";
 import PrintSettlementVoucherTemplate from "@/components/finance/PrintSettlementVoucherTemplate";
@@ -348,7 +349,19 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
     doc.status === "COMPLETED" ||
     doc.status === "ISSUED";
   const activeChildren = (doc.child_documents ?? []).filter(
-    (child) => child.status !== "CANCELLED" && child.status !== "VOID",
+    (child) =>
+      child.status !== "CANCELLED" &&
+      child.status !== "VOID" &&
+      child.doc_type !== "DEP_IN" &&
+      child.doc_type !== "DEP_OUT",
+  );
+  const canReceiveDeposit =
+    (doc.doc_type === "SO" || doc.doc_type === "QT") &&
+    (doc.status === "ISSUED" || doc.status === "COMPLETED");
+  const linkedDeposits = doc.linked_deposits ?? [];
+  const linkedDepositGross = linkedDeposits.reduce(
+    (sum, row) => sum + Number(row.grand_total ?? 0),
+    0,
   );
   const primaryChild = activeChildren[0] ?? null;
   const isAlreadyConverted = activeChildren.length > 0;
@@ -510,6 +523,17 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
             เปิดบิลใหม่
           </Link>
           {canPrint && <PrintDocumentButton className="h-10 gap-2" />}
+          {canReceiveDeposit ? (
+            <ReceiveDepositDialog
+              documentId={doc.id}
+              docNo={doc.doc_no}
+              contactId={doc.contact_id}
+              customerName={
+                doc.contact?.company_name?.trim() || "ลูกค้า"
+              }
+              orderTotal={Number(doc.grand_total ?? 0)}
+            />
+          ) : null}
           {canEditIssuedHeader ? (
             <SalesHeaderEditDialog
               documentId={doc.id}
@@ -890,6 +914,38 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                     label="ยอดรวมสินค้า"
                     value={`${formatMoney(subtotal)} ฿`}
                   />
+                  {depositDeducted > 0 ? (
+                    <>
+                      <SummaryRow
+                        label={
+                          linkedDeposits.length > 0
+                            ? `หักเงินมัดจำ (${linkedDeposits.map((row) => row.doc_no).join(", ")})`
+                            : "หักเงินมัดจำ (รวม VAT)"
+                        }
+                        value={`−${formatMoney(depositDeducted)} ฿`}
+                        negative
+                      />
+                      <SummaryRow
+                        label="ฐานภาษีมัดจำ / VAT มัดจำ"
+                        value={`${formatMoney(Number(doc.deposit_net_deducted ?? 0))} / ${formatMoney(Number(doc.deposit_vat_deducted ?? 0))} ฿`}
+                      />
+                    </>
+                  ) : linkedDeposits.length > 0 ? (
+                    <>
+                      {linkedDeposits.map((deposit) => (
+                        <SummaryRow
+                          key={deposit.id}
+                          label={`ใบมัดจำ ${deposit.doc_no}`}
+                          value={`${formatMoney(deposit.grand_total)} ฿`}
+                        />
+                      ))}
+                      <SummaryRow
+                        label="ยอดคงเหลือหลังหักมัดจำ"
+                        value={`${formatMoney(Math.max(0, grandTotal - linkedDepositGross))} ฿`}
+                        emphasize
+                      />
+                    </>
+                  ) : null}
                   <SummaryRow
                     label={`ส่วนลดท้ายบิล${doc.discount_text ? ` (${doc.discount_text})` : ""}`}
                     value={`−${formatMoney(discountAmount)} ฿`}

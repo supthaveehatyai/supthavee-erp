@@ -100,6 +100,15 @@ export type DocumentPrintSummaryProps = {
   showEmptyRows?: boolean;
   /** ใบรับสินค้า INC_VAT — แสดงฐานต้นทุน TAS 2 ชัดในกรอบสรุป */
   purchaseInclusiveLayout?: boolean;
+  /** หักเงินมัดจำบนใบกำกับภาษี / ABB */
+  depositDeduction?: {
+    gross: number;
+    net: number;
+    vat: number;
+    reference: string;
+  } | null;
+  /** มูลค่าหลังหักมัดจำก่อน VAT ของบิลนี้ */
+  netBeforeVat?: number | null;
 };
 
 export type PrintLayoutProps = {

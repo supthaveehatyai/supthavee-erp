@@ -131,6 +131,8 @@ export function DocumentPrintSummary({
   hideBahtText = false,
   showEmptyRows = false,
   purchaseInclusiveLayout = false,
+  depositDeduction = null,
+  netBeforeVat = null,
 }: DocumentPrintSummaryProps) {
   const vatType = normalizeVatType(vatTypeProp);
   const extractFromGrand = isRefundDocType(String(docType ?? ""));
@@ -176,6 +178,13 @@ export function DocumentPrintSummary({
   const showWht = safeWht > 0;
   const netPayable = showWht ? round2(safeGrand - safeWht) : safeGrand;
   const thaiBahtText = numberToThaiBaht(safeGrand);
+  const depositGross = round2(Math.max(0, Number(depositDeduction?.gross ?? 0)));
+  const showDeposit = depositGross > 0;
+  const settledNet = round2(
+    Number.isFinite(Number(netBeforeVat))
+      ? Number(netBeforeVat)
+      : baseAmount,
+  );
 
   const vatLabel =
     vatLabelProp?.trim() ||
@@ -209,6 +218,32 @@ export function DocumentPrintSummary({
             />
             <SummaryRow
               label="ยอดสุทธิ (Grand Total)"
+              value={formatMoney(safeGrand)}
+              emphasize
+            />
+          </>
+        ) : showDeposit ? (
+          <>
+            <SummaryRow label="รวมมูลค่าสินค้า" value={formatMoney(safeSubtotal)} />
+            <SummaryRow
+              label={`หักเงินมัดจำ ตามใบกำกับภาษีมัดจำ ${depositDeduction?.reference?.trim() || ""}`.trim()}
+              value={`−${formatMoney(depositGross)}`}
+            />
+            <SummaryRow
+              label="มูลค่ามัดจำก่อนภาษี"
+              value={formatMoney(Number(depositDeduction?.net ?? 0))}
+            />
+            <SummaryRow
+              label="ภาษีมูลค่าเพิ่มของเงินมัดจำ"
+              value={formatMoney(Number(depositDeduction?.vat ?? 0))}
+            />
+            <SummaryRow
+              label="มูลค่าสินค้าหลังหักเงินมัดจำ"
+              value={formatMoney(settledNet)}
+            />
+            <SummaryRow label={vatLabel} value={formatMoney(vatAmount)} />
+            <SummaryRow
+              label="ยอดชำระสุทธิ"
               value={formatMoney(safeGrand)}
               emphasize
             />

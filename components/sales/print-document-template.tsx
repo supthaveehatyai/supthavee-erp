@@ -60,6 +60,17 @@ export default async function PrintDocumentTemplate({
   const vatType = normalizePrintVatType(doc.vat_type);
   const hasVat = vatType !== "NONE" && vatType !== undefined;
   const grandTotal = Number(doc.grand_total ?? 0);
+  const depositGross = Number(doc.deposit_deducted ?? 0);
+  const depositDocs = doc.linked_deposits ?? [];
+  const showDepositOnPaper =
+    depositGross > 0 &&
+    (doc.doc_type === "ABB" ||
+      doc.doc_type === "TAX_INV" ||
+      doc.doc_type === "CS_TAX" ||
+      doc.doc_type === "INV_DO");
+  const depositReference =
+    depositDocs.map((row) => row.doc_no).filter(Boolean).join(", ") ||
+    "อ้างอิงใบมัดจำ";
   const partyLabel = documentPartyLabel(doc.doc_type);
   const heading = documentPrintHeading(doc.doc_type);
 
@@ -134,6 +145,20 @@ export default async function PrintDocumentTemplate({
             doc.doc_type === "PAY" || doc.doc_type === "REC"
               ? Number(doc.wht_amount ?? 0)
               : undefined
+          }
+          vatAmount={showDepositOnPaper ? Number(doc.vat_amount ?? 0) : undefined}
+          netBeforeVat={
+            showDepositOnPaper ? Number(doc.net_before_vat ?? 0) : undefined
+          }
+          depositDeduction={
+            showDepositOnPaper
+              ? {
+                  gross: depositGross,
+                  net: Number(doc.deposit_net_deducted ?? 0),
+                  vat: Number(doc.deposit_vat_deducted ?? 0),
+                  reference: depositReference,
+                }
+              : null
           }
         />
       }
