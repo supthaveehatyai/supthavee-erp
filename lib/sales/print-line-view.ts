@@ -11,6 +11,8 @@ export type PrintLineRow = {
   uom_used: string;
   unit_price: number;
   line_total: number;
+  gross_amount: number;
+  discount_label: string | null;
 };
 
 const TAX_PRINT_DOC_TYPES = new Set(["TAX_INV", "CS_TAX", "ABB"]);
@@ -45,8 +47,62 @@ function shortLabel(item: DocumentDetailItem): string {
   );
 }
 
+function moneyText(value: number): string {
+  return roundMoney(value).toLocaleString("th-TH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+export function lineDiscountPresentation(item: {
+  qty: number;
+  unit_price: number;
+  discount_text?: string | null;
+  discount_amount?: number | null;
+}): { note: string | null; label: string | null; gross: number } {
+  const text = String(item.discount_text ?? "").trim();
+  const amount = Number(item.discount_amount ?? 0);
+  const gross = roundMoney(Number(item.qty ?? 0) * Number(item.unit_price ?? 0));
+  const discounted = amount > 0.005 || text.length > 0;
+  if (!discounted) return { note: null, label: null, gross };
+  const value = amount > 0.005 ? roundMoney(amount) : gross;
+  if (text === "100%") {
+    return {
+      note: `(แถมฟรี ส่วนลด 100% มูลค่า ${moneyText(value)} ฿)`,
+      label: "ลด 100%",
+      gross,
+    };
+  }
+  const label = text ? `ลด ${text}` : `ลด ${moneyText(value)} ฿`;
+  return {
+    note: `(ส่วนลด ${text || moneyText(value)} มูลค่า ${moneyText(value)} ฿)`,
+    label,
+    gross,
+  };
+}
+
+function withDiscountNote(description: string, note: string | null): string {
+  if (!note || description.includes(note)) return description;
+  return `${description} ${note}`.trim();
+}
+
 function isZeroServiceLine(item: DocumentDetailItem): boolean {
   return item.is_service_item === true && Math.abs(Number(item.line_total ?? 0)) < 0.005;
+}
+
+function rowFromItem(item: DocumentDetailItem, description: string): PrintLineRow {
+  const discount = lineDiscountPresentation(item);
+  return {
+    key: item.id,
+    sku: item.product_id ? item.sku?.trim() || "—" : "SERVICE",
+    description: withDiscountNote(description, discount.note),
+    qty: Number(item.qty ?? 0),
+    uom_used: item.uom_used?.trim() || "—",
+    unit_price: Number(item.unit_price ?? 0),
+    line_total: Number(item.line_total ?? 0),
+    gross_amount: discount.gross,
+    discount_label: discount.label,
+  };
 }
 
 export function buildPrintLineRows(
@@ -59,42 +115,66 @@ export function buildPrintLineRows(
     : items;
 
   if (mode === "sku") {
-    return visible.map((item) => ({
-      key: item.id,
-      sku: item.product_id ? item.sku?.trim() || "—" : "SERVICE",
-      description: displayDocumentItemDescription(item.description, item.product_name),
-      qty: Number(item.qty ?? 0),
-      uom_used: item.uom_used?.trim() || "—",
-      unit_price: Number(item.unit_price ?? 0),
-      line_total: Number(item.line_total ?? 0),
-    }));
+    return visible.map((item) =>
+      rowFromItem(
+        item,
+        displayDocumentItemDescription(item.description, item.product_name),
+      ),
+    );
   }
 
-  const groups = new Map<string, PrintLineRow & { count: number }>();
+  const groups = new Map<
+    string,
+    PrintLineRow & { count: number; discountAmount: number; discountText: string }
+  >();
   for (const item of visible) {
     const label = shortLabel(item);
     const unit = netUnitPrice(item);
     const uom = item.uom_used?.trim() || "—";
-    const key = `${label}|${uom}|${unit.toFixed(2)}`;
+    const discountText = String(item.discount_text ?? "").trim();
+    const key = `${label}|${uom}|${unit.toFixed(2)}|${discountText}`;
     const existing = groups.get(key);
+    const gross = roundMoney(Number(item.qty ?? 0) * Number(item.unit_price ?? 0));
     if (existing) {
       existing.qty = roundMoney(existing.qty + Number(item.qty ?? 0));
       existing.line_total = roundMoney(existing.line_total + Number(item.line_total ?? 0));
+      existing.gross_amount = roundMoney(existing.gross_amount + gross);
+      existing.discountAmount = roundMoney(
+        existing.discountAmount + Number(item.discount_amount ?? 0),
+      );
       existing.count += 1;
       existing.sku = "รวม";
       continue;
     }
     groups.set(key, {
-      key,
-      sku: item.product_id ? item.sku?.trim() || "—" : "SERVICE",
-      description: label,
-      qty: Number(item.qty ?? 0),
-      uom_used: uom,
-      unit_price: unit,
-      line_total: Number(item.line_total ?? 0),
+      ...rowFromItem(item, label),
       count: 1,
+      discountAmount: Number(item.discount_amount ?? 0),
+      discountText,
     });
   }
 
-  return [...groups.values()].map(({ count: _count, ...row }) => row);
+  return [...groups.values()].map((row) => {
+    const discount = lineDiscountPresentation({
+      qty: row.qty,
+      unit_price: row.qty > 0 ? row.gross_amount / row.qty : row.unit_price,
+      discount_text: row.discountText,
+      discount_amount: row.discountAmount,
+    });
+    return {
+      key: row.key,
+      sku: row.sku,
+      description: withDiscountNote(shortLabelFromGrouped(row.description), discount.note),
+      qty: row.qty,
+      uom_used: row.uom_used,
+      unit_price: row.unit_price,
+      line_total: row.line_total,
+      gross_amount: row.gross_amount,
+      discount_label: discount.label,
+    };
+  });
+}
+
+function shortLabelFromGrouped(description: string): string {
+  return description.replace(/\s*\([^)]*ส่วนลด[^)]*\)\s*$/u, "").trim();
 }

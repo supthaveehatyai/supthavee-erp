@@ -16,10 +16,12 @@ import {
   createDraftDocument,
   getContactPersons,
   issueDocument,
+  searchProductsForSales,
 } from "@/lib/actions/document-actions";
 import { VAT_OPTIONS } from "@/lib/constants/accounting";
 import {
   DEFAULT_SALES_CREATE_DOC_TYPE,
+  defaultSalesVatType,
   isSalesContactRequired,
   isSalesTradingDocType,
   shouldHideSalesContactPicker,
@@ -75,8 +77,8 @@ import EcommerceOrderImporter from "@/components/sales/ecommerce-order-importer"
 import type { EcommerceOrderDraft, HandwrittenBillScan, ScannedSalesLine } from "@/types/sales-ocr";
 
 const INITIAL_DOC_TYPE: SalesTradingDocType = DEFAULT_SALES_CREATE_DOC_TYPE;
-const INITIAL_VAT_TYPE: VatCalculationType = "EXCLUSIVE";
 const DEFAULT_VAT_RATE = 7;
+const INCLUDED_IN_GARMENT_NOTE = "(รวมในราคาเสื้อแล้ว)";
 
 const SALES_TRADING_DOC_TYPE_OPTIONS: {
   value: SalesTradingDocType;
@@ -115,6 +117,16 @@ function calcLineTotal(qty: number, unitPrice: number): number {
   return Math.round(Math.max(0, raw) * 100) / 100;
 }
 
+function withIncludedNote(description: string): string {
+  if (description.includes("รวมในราคาเสื้อแล้ว")) return description;
+  const base = description.trim();
+  return base ? `${base} ${INCLUDED_IN_GARMENT_NOTE}` : INCLUDED_IN_GARMENT_NOTE;
+}
+
+function withoutIncludedNote(description: string): string {
+  return description.replace(/\s*\(รวมในราคาเสื้อแล้ว\)/g, "").replace(/\s+/g, " ").trim();
+}
+
 function createLineFromProduct(
   product: SalesProductSearchItem,
   qty = 1,
@@ -137,6 +149,7 @@ function createLineFromProduct(
     is_service_item: product.is_service === true,
     is_service: product.is_service === true,
     is_manufactured: product.is_manufactured === true,
+    catalog_unit_price: unitPrice,
   };
 }
 
@@ -164,6 +177,7 @@ export type SalesCreateWorkspaceProps = {
   customers: CustomerOption[];
   customersError?: string | null;
   openEcommerceImport?: boolean;
+  initialDocType?: SalesTradingDocType;
 };
 
 function lineFromScan(line: ScannedSalesLine): SalesLineItem {
@@ -176,6 +190,7 @@ function lineFromScan(line: ScannedSalesLine): SalesLineItem {
     uom_used: line.uom_used || (line.is_service_item ? "งาน" : "ตัว"),
     unit_price: line.unit_price,
     cost_price: line.cost_price,
+    catalog_unit_price: line.unit_price > 0 ? line.unit_price : undefined,
     discount_text: line.discount_text,
     discount_amount: line.discount_amount,
     line_total: line.line_total,
@@ -188,9 +203,13 @@ export default function SalesCreateWorkspace({
   customers,
   customersError = null,
   openEcommerceImport = false,
+  initialDocType = INITIAL_DOC_TYPE,
 }: SalesCreateWorkspaceProps) {
   const router = useRouter();
-  const [docType, setDocType] = useState<SalesTradingDocType>(INITIAL_DOC_TYPE);
+  const startingDocType = isSalesTradingDocType(initialDocType)
+    ? initialDocType
+    : INITIAL_DOC_TYPE;
+  const [docType, setDocType] = useState<SalesTradingDocType>(startingDocType);
   const [contactId, setContactId] = useState("");
   const [contactPersonId, setContactPersonId] = useState("");
   const [customerOptions, setCustomerOptions] = useState(customers);
@@ -201,7 +220,9 @@ export default function SalesCreateWorkspace({
   const [lastSavedDocNo, setLastSavedDocNo] = useState<string | null>(null);
   const [lineItems, setLineItems] = useState<SalesLineItem[]>([]);
   const [discountText, setDiscountText] = useState("");
-  const [vatType, setVatType] = useState<VatCalculationType>(INITIAL_VAT_TYPE);
+  const [vatType, setVatType] = useState<VatCalculationType>(
+    defaultSalesVatType(startingDocType),
+  );
   const [salesChannelFields, setSalesChannelFields] =
     useState<SalesChannelFieldsValue>(INITIAL_SALES_CHANNEL_FIELDS);
   const [docDate, setDocDate] = useState(
@@ -339,7 +360,7 @@ export default function SalesCreateWorkspace({
     setIsPersonsLoading(false);
     setLineItems([]);
     setDiscountText("");
-    setVatType(INITIAL_VAT_TYPE);
+    setVatType(defaultSalesVatType(docType));
     setSalesChannelFields(INITIAL_SALES_CHANNEL_FIELDS);
     setDocDate(new Date().toISOString().slice(0, 10));
     setHandwrittenDocRef("");
@@ -350,6 +371,7 @@ export default function SalesCreateWorkspace({
     if (!isSalesTradingDocType(next)) return;
     clearLastSavedArtifact();
     setDocType(next);
+    setVatType(defaultSalesVatType(next));
   }
 
   function handleCustomerChange(nextContactId: string) {
@@ -447,34 +469,53 @@ export default function SalesCreateWorkspace({
   function includeServiceInGarment(key: string) {
     clearLastSavedArtifact();
     setLineItems((current) =>
-      current.map((row) =>
-        row.key === key
-          ? {
-              ...row,
-              unit_price: 0,
-              discount_text: "",
-              discount_amount: 0,
-              line_total: 0,
-            }
-          : row,
-      ),
+      current.map((row) => {
+        if (row.key !== key) return row;
+        const catalog =
+          row.unit_price > 0 ? row.unit_price : (row.catalog_unit_price ?? 0);
+        return {
+          ...row,
+          catalog_unit_price: catalog,
+          unit_price: 0,
+          discount_text: "",
+          discount_amount: 0,
+          line_total: 0,
+          description: withIncludedNote(row.description),
+        };
+      }),
     );
   }
 
   function giftServiceLine(key: string) {
     clearLastSavedArtifact();
-    setLineItems((current) =>
-      current.map((row) => {
-        if (row.key !== key) return row;
-        const gross = calcLineTotal(row.qty, row.unit_price);
-        return {
-          ...row,
-          discount_text: "100%",
-          discount_amount: gross,
-          line_total: 0,
-        };
-      }),
-    );
+    const row = lineItems.find((item) => item.key === key);
+    if (!row) return;
+    startTransition(async () => {
+      let unitPrice = row.unit_price > 0 ? row.unit_price : (row.catalog_unit_price ?? 0);
+      if (!(unitPrice > 0) && row.sku && row.sku !== "SERVICE") {
+        const found = await searchProductsForSales(row.sku);
+        const exact =
+          found.data.find((item) => item.id === row.product_id) ??
+          found.data.find((item) => item.sku === row.sku);
+        if (exact && exact.unit_price > 0) unitPrice = exact.unit_price;
+      }
+      const gross = calcLineTotal(row.qty, unitPrice);
+      setLineItems((current) =>
+        current.map((line) =>
+          line.key === key
+            ? {
+                ...line,
+                catalog_unit_price: unitPrice,
+                unit_price: unitPrice,
+                discount_text: "100%",
+                discount_amount: gross,
+                line_total: 0,
+                description: withoutIncludedNote(line.description),
+              }
+            : line,
+        ),
+      );
+    });
   }
 
   function removeLine(key: string) {
@@ -1019,6 +1060,10 @@ export default function SalesCreateWorkspace({
                         {row.is_service_item ? (
                           <ServiceLineShortcuts
                             disabled={isPending}
+                            includedActive={
+                              row.unit_price === 0 && row.discount_text.trim() !== "100%"
+                            }
+                            freeActive={row.discount_text.trim() === "100%"}
                             onIncludeInGarment={() => includeServiceInGarment(row.key)}
                             onFreeGift={() => giftServiceLine(row.key)}
                           />
@@ -1074,6 +1119,11 @@ export default function SalesCreateWorkspace({
                       </TableCell>
                       <TableCell className="px-4 text-right text-sm font-semibold tabular-nums text-slate-900">
                         {formatMoney(row.line_total)}
+                        {row.discount_text.trim() === "100%" ? (
+                          <span className="mt-0.5 block text-[10px] font-semibold text-emerald-700">
+                            ส่วนลด 100% (-{formatMoney(row.discount_amount)} ฿)
+                          </span>
+                        ) : null}
                       </TableCell>
                       <TableCell className="px-2">
                         <Button

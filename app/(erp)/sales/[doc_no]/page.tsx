@@ -66,6 +66,8 @@ import { SendToProductionButton } from "@/components/production/send-to-producti
 import { SalesMockupCard } from "@/components/sales/sales-mockup-card";
 import { SendBillToKanbanButton } from "@/components/sales/send-bill-to-kanban-button";
 import { SoLineItemProductionActions } from "@/components/sales/so-line-item-production-actions";
+import { lineDiscountPresentation } from "@/lib/sales/print-line-view";
+import { UpgradeAbbTaxButton } from "@/components/sales/upgrade-abb-tax-button";
 import { isTemporaryDraftDocNo } from "@/lib/utils/draft-document-no";
 import type { ManufacturedSendGroup } from "@/types/production";
 
@@ -353,8 +355,10 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   const isAlreadyConverted = activeChildren.length > 0;
   const canConvert =
     ((doc.doc_type === "QT" && doc.status === "COMPLETED") ||
-      (doc.doc_type === "SO" && doc.status === "ISSUED")) &&
+      ((doc.doc_type === "SO" || doc.doc_type === "INV_DO") &&
+        doc.status === "ISSUED")) &&
     !isAlreadyConverted;
+  const canUpgradeAbb = doc.doc_type === "ABB" && doc.status === "ISSUED";
   const canVoid =
     doc.status === "ISSUED" && Number(doc.paid_amount ?? 0) === 0;
   const canCreateCreditNote =
@@ -550,6 +554,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               sourceDocType={doc.doc_type}
             />
           )}
+          {canUpgradeAbb ? <UpgradeAbbTaxButton documentId={doc.id} /> : null}
           {canEditDraft && (
             <Link
               href={`/sales/edit/${encodeURIComponent(doc.id)}`}
@@ -1063,11 +1068,14 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                             {item.sku ?? "—"}
                           </TableCell>
                           <TableCell className="max-w-[18rem] px-4 text-sm text-slate-700">
-                            <span className="line-clamp-2">
+                            <span className="line-clamp-3">
                               {displayDocumentItemDescription(
                                 item.description,
                                 item.product_name,
                               )}
+                              {lineDiscountPresentation(item).note
+                                ? ` ${lineDiscountPresentation(item).note}`
+                                : ""}
                             </span>
                             {item.is_manufactured || item.is_service || item.is_service_item
                               ? productionStatusBadge(
@@ -1108,7 +1116,19 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                             {formatMoney(item.unit_price)}
                           </TableCell>
                           <TableCell className="px-4 text-right text-sm font-semibold tabular-nums text-slate-900">
-                            {formatMoney(item.line_total)}
+                            {lineDiscountPresentation(item).label ? (
+                              <div>
+                                <div className="text-xs font-normal text-slate-400 line-through">
+                                  {formatMoney(lineDiscountPresentation(item).gross)}
+                                </div>
+                                <div>
+                                  {formatMoney(item.line_total)} (
+                                  {lineDiscountPresentation(item).label})
+                                </div>
+                              </div>
+                            ) : (
+                              formatMoney(item.line_total)
+                            )}
                           </TableCell>
                         </TableRow>
                       ))

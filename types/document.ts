@@ -266,6 +266,8 @@ export type SalesLineItem = {
   is_service?: boolean;
   /** `product_models.is_manufactured` */
   is_manufactured?: boolean;
+  /** ราคาขายมาตรฐานตอนเลือก SKU — ใช้คืนราคาเมื่อกดแถมฟรีหลังตั้งราคาเป็น 0 */
+  catalog_unit_price?: number;
 };
 
 export type CompleteDocumentLineInput = {
@@ -515,6 +517,8 @@ export type SalesDocumentFilters = {
   search?: string;
   from?: string;
   to?: string;
+  /** จำกัดประเภทบนหน้ารายการขาย เช่น QT หรือ TAX_INV+CS_TAX */
+  docTypes?: string[];
 };
 
 /** Shared list filters (sales + purchase) — same shape as URL search params. */

@@ -40,9 +40,15 @@ const SO_OPTIONS: Option[] = [
   { type: "ABB", label: "สร้างใบสำคัญเงินสด (ABB)" },
 ];
 
+const INV_DO_OPTIONS: Option[] = [
+  { type: "TAX_INV", label: "สร้างใบกำกับภาษีเงินเชื่อ (TAX_INV)" },
+  { type: "CS_TAX", label: "สร้างใบกำกับภาษีเงินสด (CS_TAX)" },
+];
+
 function getOptions(docType: DocumentType): Option[] {
   if (docType === "QT") return QT_OPTIONS;
   if (docType === "SO") return SO_OPTIONS;
+  if (docType === "INV_DO") return INV_DO_OPTIONS;
   return [];
 }
 

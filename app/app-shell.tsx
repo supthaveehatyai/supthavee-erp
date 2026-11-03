@@ -53,9 +53,7 @@ const navigationGroups: NavigationGroup[] = [
       {
         label: "เอกสารขาย",
         href: "/sales",
-        excludePaths: ["/sales/orders"],
       },
-      { label: "ใบสั่งขาย (SO)", href: "/sales/orders" },
       {
         label: "เอกสารซื้อ",
         href: "/purchases",

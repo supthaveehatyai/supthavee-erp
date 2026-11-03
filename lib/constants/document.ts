@@ -343,6 +343,8 @@ export const SO_CONVERT_TARGETS = [
   "CS_TAX",
   "ABB",
 ] as const;
+/** INV_DO ที่ออกแล้ว → ใบกำกับภาษีเต็มรูป (เงินเชื่อหรือเงินสด) */
+export const INV_DO_CONVERT_TARGETS = ["TAX_INV", "CS_TAX"] as const;
 
 /** Union of all convertible target doc types. */
 export const CONVERT_TARGET_DOC_TYPES = [
@@ -351,7 +353,21 @@ export const CONVERT_TARGET_DOC_TYPES = [
 ] as const;
 
 /** Source doc types that support conversion. */
-export const CONVERTIBLE_SOURCE_DOC_TYPES = ["QT", "SO"] as const;
+export const CONVERTIBLE_SOURCE_DOC_TYPES = ["QT", "SO", "INV_DO"] as const;
+
+/** เหตุผลยกเลิก ABB เมื่อออกใบกำกับภาษีเต็มรูปแทน */
+export const ABB_FULL_TAX_VOID_REASON =
+  "ยกเลิกใบกำกับภาษีอย่างย่อเพื่อออกใบกำกับภาษีเต็มรูปแทน";
+
+/** SO / INV_DO / ABB เปิดบิลแบบ VAT ใน, ที่เหลือของชุดขายเป็น VAT นอก */
+export function defaultSalesVatType(
+  docType: string,
+): "INCLUSIVE" | "EXCLUSIVE" {
+  if (docType === "SO" || docType === "INV_DO" || docType === "ABB") {
+    return "INCLUSIVE";
+  }
+  return "EXCLUSIVE";
+}
 
 /** Credit invoices — open AR/AP until paid (Knock-off). */
 export const CREDIT_DOC_TYPES = [

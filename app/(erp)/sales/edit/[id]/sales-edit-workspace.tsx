@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import {
   getContactPersons,
   issueDocument,
+  searchProductsForSales,
   updateDraftDocument,
 } from "@/lib/actions/document-actions";
 import { VAT_OPTIONS } from "@/lib/constants/accounting";
@@ -84,6 +85,18 @@ function calcLineTotal(qty: number, unitPrice: number): number {
   return Math.round(Math.max(0, qty * unitPrice) * 100) / 100;
 }
 
+const INCLUDED_IN_GARMENT_NOTE = "(รวมในราคาเสื้อแล้ว)";
+
+function withIncludedNote(description: string): string {
+  if (description.includes("รวมในราคาเสื้อแล้ว")) return description;
+  const base = description.trim();
+  return base ? `${base} ${INCLUDED_IN_GARMENT_NOTE}` : INCLUDED_IN_GARMENT_NOTE;
+}
+
+function withoutIncludedNote(description: string): string {
+  return description.replace(/\s*\(รวมในราคาเสื้อแล้ว\)/g, "").replace(/\s+/g, " ").trim();
+}
+
 function createLineFromProduct(
   product: SalesProductSearchItem,
   qty = 1,
@@ -106,6 +119,7 @@ function createLineFromProduct(
     is_service_item: product.is_service === true,
     is_service: product.is_service === true,
     is_manufactured: product.is_manufactured === true,
+    catalog_unit_price: unitPrice,
   };
 }
 
@@ -146,6 +160,7 @@ function linesFromDocument(doc: DocumentDetail): SalesLineItem[] {
     image_url: item.image_url ?? null,
     is_service: item.is_service === true || item.is_service_item === true,
     is_manufactured: item.is_manufactured === true,
+    catalog_unit_price: Number(item.unit_price ?? 0) > 0 ? Number(item.unit_price ?? 0) : undefined,
   }));
 }
 
@@ -393,34 +408,53 @@ export default function SalesEditWorkspace({
   function includeServiceInGarment(key: string) {
     if (isReplacement) return;
     setLineItems((current) =>
-      current.map((row) =>
-        row.key === key
-          ? {
-              ...row,
-              unit_price: 0,
-              discount_text: "",
-              discount_amount: 0,
-              line_total: 0,
-            }
-          : row,
-      ),
+      current.map((row) => {
+        if (row.key !== key) return row;
+        const catalog =
+          row.unit_price > 0 ? row.unit_price : (row.catalog_unit_price ?? 0);
+        return {
+          ...row,
+          catalog_unit_price: catalog,
+          unit_price: 0,
+          discount_text: "",
+          discount_amount: 0,
+          line_total: 0,
+          description: withIncludedNote(row.description),
+        };
+      }),
     );
   }
 
   function giftServiceLine(key: string) {
     if (isReplacement) return;
-    setLineItems((current) =>
-      current.map((row) => {
-        if (row.key !== key) return row;
-        const gross = calcLineTotal(row.qty, row.unit_price);
-        return {
-          ...row,
-          discount_text: "100%",
-          discount_amount: gross,
-          line_total: 0,
-        };
-      }),
-    );
+    const row = lineItems.find((item) => item.key === key);
+    if (!row) return;
+    startTransition(async () => {
+      let unitPrice = row.unit_price > 0 ? row.unit_price : (row.catalog_unit_price ?? 0);
+      if (!(unitPrice > 0) && row.sku && row.sku !== "SERVICE") {
+        const found = await searchProductsForSales(row.sku);
+        const exact =
+          found.data.find((item) => item.id === row.product_id) ??
+          found.data.find((item) => item.sku === row.sku);
+        if (exact && exact.unit_price > 0) unitPrice = exact.unit_price;
+      }
+      const gross = calcLineTotal(row.qty, unitPrice);
+      setLineItems((current) =>
+        current.map((line) =>
+          line.key === key
+            ? {
+                ...line,
+                catalog_unit_price: unitPrice,
+                unit_price: unitPrice,
+                discount_text: "100%",
+                discount_amount: gross,
+                line_total: 0,
+                description: withoutIncludedNote(line.description),
+              }
+            : line,
+        ),
+      );
+    });
   }
 
   function removeLine(key: string) {
@@ -850,6 +884,10 @@ export default function SalesEditWorkspace({
                         {!isReplacement && row.is_service_item ? (
                           <ServiceLineShortcuts
                             disabled={isPending}
+                            includedActive={
+                              row.unit_price === 0 && row.discount_text.trim() !== "100%"
+                            }
+                            freeActive={row.discount_text.trim() === "100%"}
                             onIncludeInGarment={() => includeServiceInGarment(row.key)}
                             onFreeGift={() => giftServiceLine(row.key)}
                           />
@@ -915,6 +953,11 @@ export default function SalesEditWorkspace({
                       </TableCell>
                       <TableCell className="px-3 text-right text-sm font-semibold tabular-nums">
                         {formatMoney(row.line_total)}
+                        {row.discount_text.trim() === "100%" ? (
+                          <span className="mt-0.5 block text-[10px] font-semibold text-emerald-700">
+                            ส่วนลด 100% (-{formatMoney(row.discount_amount)} ฿)
+                          </span>
+                        ) : null}
                       </TableCell>
                       {!isReplacement ? (
                         <TableCell className="px-3">

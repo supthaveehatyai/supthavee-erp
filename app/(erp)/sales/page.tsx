@@ -6,6 +6,7 @@ import { getSalesDocuments } from "@/lib/actions/document-actions";
 import { formatShortDateTh, formatThaiDate } from "@/lib/utils/date-formatter";
 import type { DocumentStatus, DocumentType } from "@/types/document";
 import DocumentFilter from "@/components/documents/document-filter";
+import { SalesDocTypePills } from "@/components/sales/sales-doc-type-pills";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -33,6 +34,7 @@ type PageProps = {
     search?: string;
     from?: string;
     to?: string;
+    kind?: string;
   }>;
 };
 
@@ -121,13 +123,30 @@ function FilterFallback() {
 
 export default async function SalesDocumentsPage({ searchParams }: PageProps) {
   const params = await searchParams;
+  const kind = String(params.kind ?? "").trim().toUpperCase();
+  const docTypes =
+    kind === "QT"
+      ? ["QT"]
+      : kind === "SO"
+        ? ["SO"]
+        : kind === "INV_DO"
+          ? ["INV_DO"]
+          : kind === "TAX"
+            ? ["TAX_INV", "CS_TAX"]
+            : kind === "ABB"
+              ? ["ABB"]
+              : undefined;
   const filters = {
     search: params.search,
     from: params.from,
     to: params.to,
+    docTypes,
   };
   const hasActiveFilters = Boolean(
-    filters.search?.trim() || filters.from?.trim() || filters.to?.trim(),
+    filters.search?.trim() ||
+      filters.from?.trim() ||
+      filters.to?.trim() ||
+      docTypes,
   );
 
   const { data: documents, error } = await getSalesDocuments(filters);
@@ -147,13 +166,6 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <Link
-            href="/sales/orders/create"
-            className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-4 text-sm font-semibold text-violet-800 shadow-sm transition hover:bg-violet-100"
-          >
-            <Plus className="size-4" />
-            เปิดใบสั่งขาย (SO)
-          </Link>
           <Link
             href="/sales/reconcile"
             className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-4 text-sm font-semibold text-sky-900 shadow-sm transition hover:bg-sky-100"
@@ -190,6 +202,7 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
             </CardDescription>
           </div>
           <Suspense fallback={<FilterFallback />}>
+            <SalesDocTypePills />
             <DocumentFilter searchPlaceholder="ชื่อเล่น / ชื่อลูกค้า / เลขที่เอกสาร" />
           </Suspense>
         </CardHeader>

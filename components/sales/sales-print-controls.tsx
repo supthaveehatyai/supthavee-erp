@@ -170,7 +170,18 @@ export function SalesPrintLineTable({
                 {formatMoney(item.unit_price)}
               </td>
               <td className="py-1.5 text-right font-medium tabular-nums text-neutral-900">
-                {formatMoney(item.line_total)}
+                {item.discount_label ? (
+                  <div>
+                    <div className="text-[10px] text-neutral-400 line-through">
+                      {formatMoney(item.gross_amount)}
+                    </div>
+                    <div>
+                      {formatMoney(item.line_total)} ({item.discount_label})
+                    </div>
+                  </div>
+                ) : (
+                  formatMoney(item.line_total)
+                )}
               </td>
             </tr>
           ))

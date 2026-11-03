@@ -10,8 +10,10 @@
  */
 
 import {
+  ABB_FULL_TAX_VOID_REASON,
   CONVERT_TARGET_DOC_TYPES,
   CONVERTIBLE_SOURCE_DOC_TYPES,
+  INV_DO_CONVERT_TARGETS,
   QT_CONVERT_TARGETS,
   SO_CONVERT_TARGETS,
   DOCUMENT_TYPE_PREFIX,
@@ -2716,7 +2718,7 @@ export async function issueDocument(
     const { data: document, error: documentError } = await supabase
       .from("documents")
       .select(
-        "id, doc_no, doc_type, status, grand_total, paid_amount, doc_date, sales_channel",
+        "id, doc_no, doc_type, status, grand_total, paid_amount, doc_date, sales_channel, ref_document_id",
       )
       .eq("id", id)
       .maybeSingle();
@@ -2868,15 +2870,31 @@ export async function issueDocument(
       needsOfficialNumber = false;
     }
 
-    const stockOutLinesRaw = isStockOutDocType(docType)
-      ? lineItems
-          .filter((row) => Boolean(row.product_id) && row.is_service_item !== true)
-          .map((row) => ({
-            product_id: row.product_id as string,
-            qty: Math.round(Number(row.qty ?? 0)),
-          }))
-          .filter((row) => row.qty > 0)
-      : [];
+    let skipStockAlreadyIssued = false;
+    if (
+      (docType === "TAX_INV" || docType === "CS_TAX") &&
+      document.ref_document_id
+    ) {
+      const { data: sourceDoc } = await supabase
+        .from("documents")
+        .select("id, doc_type, status")
+        .eq("id", String(document.ref_document_id))
+        .maybeSingle();
+      skipStockAlreadyIssued =
+        String(sourceDoc?.doc_type ?? "") === "INV_DO" &&
+        String(sourceDoc?.status ?? "") === "ISSUED";
+    }
+
+    const stockOutLinesRaw =
+      isStockOutDocType(docType) && !skipStockAlreadyIssued
+        ? lineItems
+            .filter((row) => Boolean(row.product_id) && row.is_service_item !== true)
+            .map((row) => ({
+              product_id: row.product_id as string,
+              qty: Math.round(Number(row.qty ?? 0)),
+            }))
+            .filter((row) => row.qty > 0)
+        : [];
 
     const serviceIds = await loadServiceProductIdSet(
       supabase,
@@ -3325,7 +3343,14 @@ export async function getSalesDocuments(
         )
       `,
       )
-      .in("doc_type", [...SALES_DOC_TYPES]);
+      .in(
+        "doc_type",
+        (filters?.docTypes?.length
+          ? filters.docTypes.filter((value) =>
+              (SALES_DOC_TYPES as readonly string[]).includes(value),
+            )
+          : [...SALES_DOC_TYPES]) as string[],
+      );
 
     if (search) {
       const pattern = `%${search}%`;
@@ -3653,7 +3678,7 @@ export async function convertDocument(
     ) {
       return {
         data: null,
-        error: "แปลงเอกสารได้เฉพาะ QT หรือ SO เท่านั้น",
+        error: "แปลงเอกสารได้เฉพาะ QT, SO หรือ INV_DO เท่านั้น",
       };
     }
 
@@ -3688,6 +3713,21 @@ export async function convertDocument(
           error: "แปลง SO → บิลขายได้เมื่อสถานะเป็น ISSUED เท่านั้น",
         };
       }
+    } else if (srcType === "INV_DO") {
+      if (
+        !(INV_DO_CONVERT_TARGETS as readonly string[]).includes(targetDocType)
+      ) {
+        return {
+          data: null,
+          error: "ใบส่งของ (INV_DO) แปลงได้เป็น TAX_INV หรือ CS_TAX เท่านั้น",
+        };
+      }
+      if (source.status !== "ISSUED") {
+        return {
+          data: null,
+          error: "แปลง INV_DO เป็นใบกำกับภาษีได้เมื่อสถานะเป็น ISSUED เท่านั้น",
+        };
+      }
     }
     if (!source.contact_id) {
       return { data: null, error: "เอกสารต้นทางไม่มีข้อมูลลูกค้า" };
@@ -3709,7 +3749,12 @@ export async function convertDocument(
     });
     if (activeChild) {
       const childNo = String(activeChild.doc_no ?? "");
-      const srcLabel = srcType === "QT" ? "ใบเสนอราคา" : "ใบสั่งขาย";
+      const srcLabel =
+        srcType === "QT"
+          ? "ใบเสนอราคา"
+          : srcType === "INV_DO"
+            ? "ใบส่งของ"
+            : "ใบสั่งขาย";
       return {
         data: null,
         error: childNo
@@ -3738,6 +3783,19 @@ export async function convertDocument(
       return { data: null, error: owner.error };
     }
 
+    const forceExclusive =
+      targetDocType === "TAX_INV" || targetDocType === "CS_TAX";
+    const vatRate = Number(source.vat_rate ?? source.tax_rate ?? 7);
+    const summary = forceExclusive
+      ? calculateDocumentSummary({
+          lineTotals: sourceItems.map((item) => Number(item.line_total ?? 0)),
+          discountText:
+            typeof source.discount_text === "string" ? source.discount_text : null,
+          vatType: "EXCLUSIVE",
+          vatRate: Number.isFinite(vatRate) ? vatRate : 7,
+        })
+      : null;
+
     const ecommerce = ecommerceFieldsFromSource(source);
 
     const { data: created, error: createError } = await supabase
@@ -3751,22 +3809,35 @@ export async function convertDocument(
         contact_id: source.contact_id,
         contact_person_id: source.contact_person_id ?? null,
         ref_document_id: source.id,
-        // Keep legacy column in sync when present in older environments.
         ref_doc_id: source.id,
-        sub_total: Number(source.sub_total ?? 0),
-        discount_amount: Number(source.discount_amount ?? 0),
+        sub_total: summary ? summary.total_amount : Number(source.sub_total ?? 0),
+        discount_amount: summary
+          ? summary.discount_amount
+          : Number(source.discount_amount ?? 0),
         discount_text: source.discount_text ?? null,
-        tax_rate: Number(source.tax_rate ?? 7),
-        tax_amount: Number(source.tax_amount ?? 0),
+        tax_rate: summary ? summary.vat_rate : Number(source.tax_rate ?? 7),
+        tax_amount: summary
+          ? summary.vat_amount
+          : Number(source.tax_amount ?? 0),
         wht_rate: Number(source.wht_rate ?? 0),
         wht_amount: Number(source.wht_amount ?? 0),
-        grand_total: Number(source.grand_total ?? 0),
+        grand_total: summary
+          ? summary.grand_total
+          : Number(source.grand_total ?? 0),
         deposit_deducted: Number(source.deposit_deducted ?? 0),
-        vat_type: source.vat_type ?? "EXCLUSIVE",
-        vat_rate: Number(source.vat_rate ?? source.tax_rate ?? 7),
-        total_amount: Number(source.total_amount ?? source.sub_total ?? 0),
-        net_before_vat: Number(source.net_before_vat ?? 0),
-        vat_amount: Number(source.vat_amount ?? source.tax_amount ?? 0),
+        vat_type: summary ? "EXCLUSIVE" : (source.vat_type ?? "EXCLUSIVE"),
+        vat_rate: summary
+          ? summary.vat_rate
+          : Number(source.vat_rate ?? source.tax_rate ?? 7),
+        total_amount: summary
+          ? summary.total_amount
+          : Number(source.total_amount ?? source.sub_total ?? 0),
+        net_before_vat: summary
+          ? summary.net_before_vat
+          : Number(source.net_before_vat ?? 0),
+        vat_amount: summary
+          ? summary.vat_amount
+          : Number(source.vat_amount ?? source.tax_amount ?? 0),
         payment_status: resolveInitialPaymentStatus(targetDocType),
         notes,
         sales_channel: ecommerce.sales_channel,
@@ -3849,6 +3920,166 @@ export async function convertDocument(
     const message =
       err instanceof Error ? err.message : "แปลงเอกสารไม่สำเร็จ";
     return { data: null, error: message };
+  }
+}
+
+/**
+ * ยกเลิก ABB ที่ออกแล้ว แล้วเปิดร่างใบกำกับภาษีเต็มรูป VAT นอก
+ */
+export async function upgradeAbbToFullTaxInvoice(
+  documentId: string,
+  targetDocType: "TAX_INV" | "CS_TAX",
+): Promise<ConvertDocumentResult> {
+  try {
+    const id = documentId?.trim() ?? "";
+    if (!id) return { data: null, error: "ไม่พบรหัสเอกสาร" };
+    if (targetDocType !== "TAX_INV" && targetDocType !== "CS_TAX") {
+      return { data: null, error: "เลือกได้เฉพาะ TAX_INV หรือ CS_TAX" };
+    }
+
+    const supabase = createSupabaseServerClient();
+    const { data: source, error: sourceError } = await supabase
+      .from("documents")
+      .select(
+        `
+        id, doc_no, doc_type, status, contact_id, contact_person_id,
+        discount_text, vat_rate, tax_rate, notes, sales_channel,
+        ecommerce_order_no, ecommerce_buyer_name, tracking_no, one_time_address,
+        document_items!document_items_document_id_fkey (
+          product_id, description, qty, uom_used, unit_price, unit_cost_price,
+          discount_text, discount_amount, line_total, sort_order, is_service_item,
+          mockup_image_url
+        )
+      `,
+      )
+      .eq("id", id)
+      .maybeSingle();
+
+    if (sourceError) return { data: null, error: sourceError.message };
+    if (!source) return { data: null, error: "ไม่พบเอกสาร" };
+    if (String(source.doc_type) !== "ABB" || String(source.status) !== "ISSUED") {
+      return {
+        data: null,
+        error: "เปลี่ยนเป็นใบกำกับภาษีเต็มรูปได้เฉพาะ ABB สถานะ ISSUED",
+      };
+    }
+
+    const voided = await voidDocumentAction({
+      documentId: id,
+      voidReason: ABB_FULL_TAX_VOID_REASON,
+    });
+    if (voided.error) return { data: null, error: voided.error };
+
+    const sourceItems = Array.isArray(source.document_items)
+      ? source.document_items
+      : [];
+    const vatRate = Number(source.vat_rate ?? source.tax_rate ?? 7);
+    const summary = calculateDocumentSummary({
+      lineTotals: sourceItems.map((item) => Number(item.line_total ?? 0)),
+      discountText:
+        typeof source.discount_text === "string" ? source.discount_text : null,
+      vatType: "EXCLUSIVE",
+      vatRate: Number.isFinite(vatRate) ? vatRate : 7,
+    });
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: null, error: owner.error };
+
+    const ecommerce = ecommerceFieldsFromSource(source);
+    const newDocNo = generateDraftDocumentNo();
+    const notes = [
+      typeof source.notes === "string" ? source.notes.trim() : "",
+      `เปลี่ยนจากใบกำกับภาษีอย่างย่อ ${source.doc_no}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const { data: created, error: createError } = await supabase
+      .from("documents")
+      .insert({
+        doc_no: newDocNo,
+        doc_type: targetDocType,
+        status: "DRAFT" satisfies DocumentStatus,
+        doc_date: new Date().toISOString().slice(0, 10),
+        contact_id: source.contact_id,
+        contact_person_id: source.contact_person_id ?? null,
+        ref_document_id: source.id,
+        ref_doc_id: source.id,
+        sub_total: summary.total_amount,
+        discount_amount: summary.discount_amount,
+        discount_text: source.discount_text ?? null,
+        tax_rate: summary.vat_rate,
+        tax_amount: summary.vat_amount,
+        grand_total: summary.grand_total,
+        vat_type: "EXCLUSIVE",
+        vat_rate: summary.vat_rate,
+        total_amount: summary.total_amount,
+        net_before_vat: summary.net_before_vat,
+        vat_amount: summary.vat_amount,
+        payment_status: resolveInitialPaymentStatus(targetDocType),
+        notes,
+        sales_channel: ecommerce.sales_channel,
+        ecommerce_order_no: ecommerce.ecommerce_order_no,
+        ecommerce_buyer_name: ecommerce.ecommerce_buyer_name,
+        tracking_no: ecommerce.tracking_no,
+        one_time_address: ecommerce.one_time_address,
+        created_by: owner.userId,
+        updated_at: new Date().toISOString(),
+      })
+      .select("id, doc_no")
+      .single();
+
+    if (createError || !created) {
+      return {
+        data: null,
+        error:
+          createError?.message ??
+          "ยกเลิก ABB แล้ว แต่สร้างใบกำกับภาษีเต็มรูปไม่สำเร็จ",
+      };
+    }
+
+    const newDocumentId = created.id as string;
+    if (sourceItems.length > 0) {
+      const { error: itemsError } = await supabase.from("document_items").insert(
+        sourceItems.map((item, index) => ({
+          document_id: newDocumentId,
+          product_id: item.product_id ?? null,
+          description: item.description ?? null,
+          qty: Number(item.qty ?? 0),
+          uom_used: item.uom_used ?? null,
+          unit_price: Number(item.unit_price ?? 0),
+          unit_cost_price: Number(item.unit_cost_price ?? 0),
+          discount_text: item.discount_text ?? null,
+          discount_amount: Number(item.discount_amount ?? 0),
+          line_total: Number(item.line_total ?? 0),
+          sort_order: typeof item.sort_order === "number" ? item.sort_order : index,
+          is_service_item: item.is_service_item === true,
+          mockup_image_url: item.mockup_image_url ?? null,
+        })),
+      );
+      if (itemsError) {
+        await supabase.from("documents").delete().eq("id", newDocumentId);
+        return {
+          data: null,
+          error: itemsError.message ?? "คัดลอกรายการไปใบกำกับภาษีเต็มรูปไม่สำเร็จ",
+        };
+      }
+    }
+
+    revalidatePath("/sales");
+    revalidatePath(`/sales/${encodeURIComponent(String(source.doc_no ?? ""))}`);
+    return {
+      data: {
+        document_id: newDocumentId,
+        doc_no: (created.doc_no as string) || newDocNo,
+        doc_type: targetDocType,
+      },
+      error: null,
+    };
+  } catch (err) {
+    return {
+      data: null,
+      error: err instanceof Error ? err.message : "เปลี่ยนเป็นใบกำกับภาษีเต็มรูปไม่สำเร็จ",
+    };
   }
 }
 
@@ -4207,7 +4438,10 @@ export async function voidDocumentAction(
     }
 
     const paidAmount = Number(beforeDoc.paid_amount ?? 0);
-    if (paidAmount > 0) {
+    const abbUpgrade =
+      String(beforeDoc.doc_type ?? "") === "ABB" &&
+      voidReason === ABB_FULL_TAX_VOID_REASON;
+    if (paidAmount > 0 && !abbUpgrade) {
       return {
         data: null,
         error: "เอกสารมียอดชำระแล้ว — ต้องยกเลิกการตัดชำระ (payments) ก่อน",

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { listActiveCustomers } from "@/lib/actions/document-actions";
+import { isSalesTradingDocType } from "@/lib/constants/document";
 import SalesCreateWorkspace from "./sales-create-workspace";
 
 export const metadata: Metadata = {
@@ -11,7 +12,7 @@ export const metadata: Metadata = {
 export const maxDuration = 60;
 
 type PageProps = {
-  searchParams: Promise<{ import?: string }>;
+  searchParams: Promise<{ import?: string; doc_type?: string }>;
 };
 
 /**
@@ -20,6 +21,7 @@ type PageProps = {
  */
 export default async function CreateSalesDocumentPage({ searchParams }: PageProps) {
   const params = await searchParams;
+  const requestedType = String(params.doc_type ?? "").trim().toUpperCase();
   const customersResult = await listActiveCustomers();
 
   return (
@@ -27,6 +29,9 @@ export default async function CreateSalesDocumentPage({ searchParams }: PageProp
       customers={customersResult.data}
       customersError={customersResult.error}
       openEcommerceImport={params.import === "ecommerce"}
+      initialDocType={
+        isSalesTradingDocType(requestedType) ? requestedType : undefined
+      }
     />
   );
 }
