@@ -20,15 +20,18 @@ export function SalesHeaderEditDialog({
   documentId,
   docDate,
   notes,
+  referenceNo,
 }: {
   documentId: string;
   docDate: string;
   notes: string;
+  referenceNo: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [date, setDate] = useState(docDate.slice(0, 10));
+  const [slipNo, setSlipNo] = useState(referenceNo);
   const [remark, setRemark] = useState(notes);
 
   function onSave() {
@@ -38,6 +41,7 @@ export function SalesHeaderEditDialog({
         document_id: documentId,
         doc_date: date,
         notes: remark.trim() || null,
+        reference_no: slipNo.trim() || null,
       });
       if (result.error || !result.data) {
         toast.error(result.error ?? "แก้ไขหัวบิลไม่สำเร็จ");
@@ -64,7 +68,7 @@ export function SalesHeaderEditDialog({
           <DialogHeader>
             <DialogTitle>แก้ไขหัวบิลที่ออกแล้ว</DialogTitle>
             <DialogDescription>
-              ปรับวันที่และหมายเหตุโดยไม่ยกเลิกเอกสาร และไม่แก้รายการสินค้า
+              ปรับวันที่ เลขสลิป และหมายเหตุโดยไม่ยกเลิกเอกสาร และไม่แก้รายการสินค้า
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -76,6 +80,16 @@ export function SalesHeaderEditDialog({
                 value={date}
                 disabled={pending}
                 onChange={(event) => setDate(event.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="issued-reference-no">เลขที่อ้างอิง / เลขสลิป</Label>
+              <Input
+                id="issued-reference-no"
+                value={slipNo}
+                disabled={pending}
+                onChange={(event) => setSlipNo(event.target.value)}
+                placeholder="เลขสลิปโอนเงิน / เลขที่บิลอ้างอิง"
               />
             </div>
             <div className="space-y-1.5">

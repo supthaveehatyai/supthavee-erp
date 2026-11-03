@@ -3304,6 +3304,7 @@ export async function updateSalesDocumentDirect(input: {
   document_id: string;
   doc_date: string;
   notes: string | null;
+  reference_no?: string | null;
 }) {
   try {
     const owner = await requireSessionUserId();
@@ -3318,6 +3319,7 @@ export async function updateSalesDocumentDirect(input: {
 
     const supabase = createSupabaseServerClient();
     const notes = input.notes?.trim() ?? "";
+    const referenceNo = input.reference_no?.trim() ?? "";
     const rpcClient = supabase as unknown as {
       rpc: (
         fn: "update_sales_document_direct",
@@ -3329,6 +3331,7 @@ export async function updateSalesDocumentDirect(input: {
       p_doc_date: docDate,
       p_notes: notes,
       p_remark: notes,
+      p_reference_no: referenceNo || null,
     });
     if (saved.error) return { data: null, error: saved.error.message };
 

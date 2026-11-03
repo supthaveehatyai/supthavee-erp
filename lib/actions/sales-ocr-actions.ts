@@ -26,6 +26,7 @@ import {
 import {
   ecommerceImagePrompt,
   handwrittenBillPrompt,
+  transferSlipPrompt,
   isServiceSalesLabel,
   lineAmounts,
   normalizeIsoDate,
@@ -738,6 +739,58 @@ export async function issueImportedEcommerceOrders(
     return {
       data: null,
       error: error instanceof Error ? error.message : "ออกบิลออเดอร์ไม่สำเร็จ",
+    };
+  }
+}
+
+export async function parseTransferSlipOcr(formData: FormData): Promise<{
+  data: {
+    doc_date: string | null;
+    reference_no: string | null;
+    amount: number | null;
+  } | null;
+  error: string | null;
+}> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: null, error: owner.error };
+
+    const file = formData.get("file");
+    if (!(file instanceof File) || file.size <= 0) {
+      return { data: null, error: "ไม่พบไฟล์สลิป" };
+    }
+    if (file.size > MAX_BYTES) {
+      return { data: null, error: "ไฟล์สลิปใหญ่เกิน 8MB" };
+    }
+    const mimeType = file.type || "image/jpeg";
+    if (!ALLOWED_BILL_MIME.has(mimeType)) {
+      return { data: null, error: "รองรับเฉพาะรูป JPG, PNG, WEBP หรือ PDF" };
+    }
+
+    const generated = await readGeminiText(transferSlipPrompt(), file, mimeType);
+    if ("error" in generated) return { data: null, error: generated.error };
+
+    const parsed = parseJsonObject(generated.text);
+    const docDate = normalizeIsoDate(String(parsed.transfer_date ?? ""));
+    const reference = String(parsed.reference_no ?? "").trim().slice(0, 80);
+    const amountRaw = Number(String(parsed.amount ?? "").replace(/,/g, ""));
+    const amount =
+      Number.isFinite(amountRaw) && amountRaw > 0
+        ? Math.round(amountRaw * 100) / 100
+        : null;
+
+    return {
+      data: {
+        doc_date: docDate,
+        reference_no: reference || null,
+        amount,
+      },
+      error: null,
+    };
+  } catch (error) {
+    return {
+      data: null,
+      error: error instanceof Error ? error.message : "อ่านสลิปไม่สำเร็จ",
     };
   }
 }

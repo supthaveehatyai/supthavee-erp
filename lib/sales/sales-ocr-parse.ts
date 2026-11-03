@@ -146,6 +146,17 @@ vat_type is EXCLUSIVE, INCLUSIVE, or NONE.
 `.trim();
 }
 
+export function transferSlipPrompt(): string {
+  return `
+You read a Thai bank transfer slip (สลิปโอนเงิน) from a photo or PDF.
+Return ONLY JSON, no markdown.
+transfer_date must be Gregorian YYYY-MM-DD. If the slip shows a Buddhist year such as "02 พ.ย. 2569", subtract 543 (2569-543=2026) and return 2026-11-02.
+reference_no is the slip reference or transaction id copied exactly, for example 202611022lglURDtdhTd9jfp. Use "" if absent.
+amount is the transferred money as a plain number without commas. Use 0 if absent.
+{"transfer_date":"","reference_no":"","amount":0}
+`.trim();
+}
+
 export function ecommerceImagePrompt(channelHint: string): string {
   return `
 You read a Shopee or Lazada seller screenshot, order export photo, or shipping label.

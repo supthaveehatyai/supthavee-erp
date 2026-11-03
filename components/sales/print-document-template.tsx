@@ -9,6 +9,7 @@ import {
 import { SalesPrintLineTable } from "@/components/sales/sales-print-controls";
 import type { DocumentDetail } from "@/types/document";
 import type { PrintPaperSize, PrintVatType } from "@/types/print-document";
+import { stripDepositNoteMetadata } from "@/lib/utils/deposit-note";
 import { cn } from "@/lib/utils";
 
 function formatMoney(value: number): string {
@@ -217,13 +218,19 @@ export default async function PrintDocumentTemplate({
         </section>
       ) : null}
 
-      {doc.notes?.trim() ? (
+      {(doc.doc_type === "DEP_IN"
+        ? stripDepositNoteMetadata(doc.notes) ||
+          stripDepositNoteMetadata(doc.remark)
+        : doc.notes?.trim()) ? (
         <section className="mt-3 rounded-md border border-neutral-300 bg-neutral-50 px-3 py-2">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
             {doc.doc_type === "CN" ? "อ้างอิงเอกสารต้นทาง" : "หมายเหตุ / Remark"}
           </p>
           <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-neutral-800">
-            {doc.notes.trim()}
+            {doc.doc_type === "DEP_IN"
+              ? stripDepositNoteMetadata(doc.notes) ||
+                stripDepositNoteMetadata(doc.remark)
+              : doc.notes?.trim()}
           </p>
         </section>
       ) : null}

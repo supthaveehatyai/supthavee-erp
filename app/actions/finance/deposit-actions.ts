@@ -519,17 +519,21 @@ export async function createDepositDocument(
       ? "PAID"
       : resolveInitialPaymentStatus(docType);
     const status = resolveIssuedDocumentStatus(docType);
-    const notesParts = [
-      docType === "DEP_IN" ? "รับเงินมัดจำลูกค้า" : "จ่ายเงินมัดจำซัพพลายเออร์",
-      sourceDocNo ? `อ้างอิง ${sourceDocNo}` : null,
-      `amount=${amount.toFixed(2)}`,
-      `vat=${vatType}@${storedVatRate}%`,
-      `net=${netTotal.toFixed(2)}`,
-      `vat_amt=${vatAmount.toFixed(2)}`,
-      `grand=${grandTotal.toFixed(2)}`,
-      referenceNo ? `ref=${referenceNo}` : null,
-      remark ? `remark=${remark}` : null,
-    ].filter(Boolean);
+    const depositTitle =
+      docType === "DEP_IN"
+        ? sourceDocNo
+          ? `รับเงินมัดจำลูกค้า (อ้างอิง ${sourceDocNo})`
+          : "รับเงินมัดจำลูกค้า"
+        : sourceDocNo
+          ? `จ่ายเงินมัดจำซัพพลายเออร์ (อ้างอิง ${sourceDocNo})`
+          : "จ่ายเงินมัดจำซัพพลายเออร์";
+    const cleanRemark = String(remark ?? "")
+      .replace(/\|/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const notes = cleanRemark
+      ? `${depositTitle}\n${cleanRemark}`
+      : depositTitle;
 
     const owner = await requireSessionUserId();
     if (!owner.ok) {
@@ -569,7 +573,7 @@ export async function createDepositDocument(
           slipFile instanceof File && slipFile.size > 0
             ? slipFile.name.slice(0, 255)
             : null,
-        notes: notesParts.join(" | "),
+        notes,
         created_by: owner.userId,
         updated_at: nowIso,
       })

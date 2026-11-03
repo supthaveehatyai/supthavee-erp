@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { HandCoins, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { createDepositDocument } from "@/app/actions/finance/deposit-actions";
+import { parseTransferSlipOcr } from "@/lib/actions/sales-ocr-actions";
+import { formatBuddhistSlash } from "@/lib/utils/deposit-note";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -60,8 +62,12 @@ export function ReceiveDepositDialog({
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [vatType, setVatType] = useState<VatCalculationType>("INCLUSIVE");
+  const [documentDate, setDocumentDate] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
   const [referenceNo, setReferenceNo] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [isReadingSlip, setIsReadingSlip] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const half = Math.round(Math.max(0, orderTotal) * 50) / 100;
@@ -79,6 +85,36 @@ export function ReceiveDepositDialog({
     setAmount(value > 0 ? value.toFixed(2) : "");
   }
 
+  async function readSlip(file: File | null) {
+    if (!file || file.size <= 0) {
+      setSlipFile(null);
+      return;
+    }
+    setSlipFile(file);
+    setIsReadingSlip(true);
+    try {
+      const formData = new FormData();
+      formData.set("file", file);
+      const result = await parseTransferSlipOcr(formData);
+      if (result.error || !result.data) {
+        toast.error(result.error ?? "อ่านสลิปไม่สำเร็จ");
+        return;
+      }
+      if (result.data.doc_date) {
+        setDocumentDate(result.data.doc_date);
+        toast.success(
+          `ดึงวันที่โอนจากสลิป: ${formatBuddhistSlash(result.data.doc_date)} อัตโนมัติ`,
+        );
+      }
+      if (result.data.reference_no) setReferenceNo(result.data.reference_no);
+      if (result.data.amount && !(Number(amount) > 0)) {
+        setAmount(result.data.amount.toFixed(2));
+      }
+    } finally {
+      setIsReadingSlip(false);
+    }
+  }
+
   function handleSubmit() {
     const raw = Number(amount);
     if (!Number.isFinite(raw) || raw <= 0) {
@@ -88,12 +124,11 @@ export function ReceiveDepositDialog({
     const formData = new FormData();
     formData.set("doc_type", "DEP_IN");
     formData.set("contact_id", contactId);
-    formData.set("document_date", new Date().toISOString().slice(0, 10));
+    formData.set("document_date", documentDate);
     formData.set("amount", raw.toFixed(2));
     formData.set("vat_type", vatType);
     formData.set("vat_rate", "7");
     formData.set("reference_no", referenceNo.trim());
-    formData.set("remark", `รับมัดจำจาก ${docNo}`);
     formData.set("ref_document_id", documentId);
     formData.set("mark_paid", "1");
     if (slipFile) formData.set("slip_file", slipFile);
@@ -158,6 +193,15 @@ export function ReceiveDepositDialog({
               </Button>
             </div>
             <div className="space-y-1.5">
+              <Label htmlFor="deposit-date">วันที่รับเงินมัดจำ</Label>
+              <Input
+                id="deposit-date"
+                type="date"
+                value={documentDate}
+                onChange={(event) => setDocumentDate(event.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
               <Label htmlFor="deposit-amount">ยอดมัดจำก้อนกลม</Label>
               <Input
                 id="deposit-amount"
@@ -209,8 +253,7 @@ export function ReceiveDepositDialog({
               onDrop={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                const file = event.dataTransfer.files?.[0] ?? null;
-                setSlipFile(file && file.size > 0 ? file : null);
+                void readSlip(event.dataTransfer.files?.[0] ?? null);
               }}
             >
               <Label htmlFor="deposit-slip">แนบสลิปโอนเงิน</Label>
@@ -219,11 +262,12 @@ export function ReceiveDepositDialog({
                 type="file"
                 accept="image/jpeg,image/png,image/webp,application/pdf"
                 onChange={(event) => {
-                  const file = event.target.files?.[0] ?? null;
-                  setSlipFile(file && file.size > 0 ? file : null);
+                  void readSlip(event.target.files?.[0] ?? null);
                 }}
               />
-              {slipFile ? (
+              {isReadingSlip ? (
+                <p className="text-xs text-slate-500">กำลังอ่านวันที่และเลขสลิป...</p>
+              ) : slipFile ? (
                 <p className="text-xs text-slate-500">{slipFile.name}</p>
               ) : null}
             </div>
@@ -232,7 +276,7 @@ export function ReceiveDepositDialog({
           <DialogFooter>
             <Button
               type="button"
-              disabled={isPending}
+              disabled={isPending || isReadingSlip}
               onClick={handleSubmit}
               className="bg-amber-600 hover:bg-amber-700"
             >

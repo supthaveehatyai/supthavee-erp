@@ -59,6 +59,7 @@ import VoidDocumentActions from "./void-document-actions";
 import DuplicateDocumentButton from "./duplicate-document-button";
 import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
 import { VoidedDocumentAlert } from "@/components/shared/document/voided-document-alert";
+import { stripDepositNoteMetadata } from "@/lib/utils/deposit-note";
 import { resolveVoidRemark } from "@/lib/utils/void-remark";
 import { displayDocumentItemDescription, stripCreditNoteLineMeta } from "@/lib/utils/credit-note-line";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
@@ -538,7 +539,12 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
             <SalesHeaderEditDialog
               documentId={doc.id}
               docDate={doc.doc_date}
-              notes={doc.notes ?? ""}
+              notes={
+                doc.doc_type === "DEP_IN"
+                  ? stripDepositNoteMetadata(doc.notes)
+                  : (doc.notes ?? "")
+              }
+              referenceNo={doc.reference_no ?? ""}
             />
           ) : null}
           {canSendKanban || showBatchMto ? (
@@ -676,7 +682,11 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
           </Card>
         ) : null}
 
-        {doc.status !== "VOID" && doc.notes?.trim() ? (
+        {doc.status !== "VOID" &&
+        (doc.doc_type === "DEP_IN"
+          ? stripDepositNoteMetadata(doc.notes) ||
+            stripDepositNoteMetadata(doc.remark)
+          : doc.notes?.trim()) ? (
           <Card className="border-slate-200 bg-slate-50/60 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-base">
@@ -690,7 +700,10 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
             </CardHeader>
             <CardContent>
               <p className="whitespace-pre-wrap text-sm text-slate-800">
-                {doc.notes.trim()}
+                {doc.doc_type === "DEP_IN"
+                  ? stripDepositNoteMetadata(doc.notes) ||
+                    stripDepositNoteMetadata(doc.remark)
+                  : doc.notes?.trim()}
               </p>
             </CardContent>
           </Card>

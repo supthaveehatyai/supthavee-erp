@@ -10,7 +10,10 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2, FileUp, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { createDepositDocument } from "@/app/actions/finance/deposit-actions";
+import { parseTransferSlipOcr } from "@/lib/actions/sales-ocr-actions";
+import { formatBuddhistSlash } from "@/lib/utils/deposit-note";
 import type { DepositTab } from "@/types/deposit";
 import CustomerCombobox from "@/app/(erp)/sales/create/customer-combobox";
 import VendorCombobox from "@/components/procurement/VendorCombobox";
@@ -71,6 +74,7 @@ export function DepositCreateForm({
   const [referenceNo, setReferenceNo] = useState("");
   const [remark, setRemark] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [isReadingSlip, setIsReadingSlip] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isDepIn = docType === "DEP_IN";
@@ -93,9 +97,39 @@ export function DepositCreateForm({
         ? "กรอกยอดก่อน VAT (Net) — ระบบจะบวก VAT ให้"
         : "กรอกยอดมัดจำสุทธิ (ไม่มี VAT)";
 
+  async function readSlip(file: File) {
+    setSlipFile(file);
+    setIsReadingSlip(true);
+    try {
+      const formData = new FormData();
+      formData.set("file", file);
+      const result = await parseTransferSlipOcr(formData);
+      if (result.error || !result.data) {
+        toast.error(result.error ?? "อ่านสลิปไม่สำเร็จ");
+        return;
+      }
+      if (result.data.doc_date) {
+        setDocumentDate(result.data.doc_date);
+        toast.success(
+          `ดึงวันที่โอนจากสลิป: ${formatBuddhistSlash(result.data.doc_date)} อัตโนมัติ`,
+        );
+      }
+      if (result.data.reference_no) setReferenceNo(result.data.reference_no);
+      if (result.data.amount && !(Number(amount) > 0)) {
+        setAmount(result.data.amount.toFixed(2));
+      }
+    } finally {
+      setIsReadingSlip(false);
+    }
+  }
+
   function handleSlipChange(files: FileList | null) {
     const file = files?.[0] ?? null;
-    setSlipFile(file && file.size > 0 ? file : null);
+    if (!file || file.size <= 0) {
+      setSlipFile(null);
+      return;
+    }
+    void readSlip(file);
   }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -288,7 +322,18 @@ export function DepositCreateForm({
             <Label htmlFor="slip_file">
               อัปโหลดสลิปโอนเงิน (Slip Attachment)
             </Label>
-            <div className="flex flex-col gap-2 rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div
+              className="flex flex-col gap-2 rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                handleSlipChange(event.dataTransfer.files);
+              }}
+            >
               <div className="flex items-start gap-3 text-sm text-slate-600">
                 <FileUp
                   className={cn(
@@ -301,9 +346,11 @@ export function DepositCreateForm({
                     แนบไฟล์รูปภาพ หรือ PDF (สูงสุด 10MB)
                   </p>
                   <p className="text-xs text-slate-500">
-                    {slipFile
-                      ? `เลือกแล้ว: ${slipFile.name}`
-                      : "ยังไม่ได้เลือกไฟล์ — ไม่บังคับ แต่แนะนำให้แนบหลักฐาน"}
+                    {isReadingSlip
+                      ? "กำลังอ่านวันที่และเลขสลิป..."
+                      : slipFile
+                        ? `เลือกแล้ว: ${slipFile.name}`
+                        : "ยังไม่ได้เลือกไฟล์ — ไม่บังคับ แต่แนะนำให้แนบหลักฐาน"}
                   </p>
                 </div>
               </div>
