@@ -12,11 +12,16 @@ const ACCEPT = ".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,appli
 type HandwrittenBillDropzoneProps = {
   disabled?: boolean;
   onScanned: (scan: HandwrittenBillScan) => void;
+  /** bar = ปุ่มสูง 40px ลากไฟล์วางได้ทันที */
+  variant?: "card" | "bar";
+  onRequestExpand?: () => void;
 };
 
 export default function HandwrittenBillDropzone({
   disabled = false,
   onScanned,
+  variant = "card",
+  onRequestExpand,
 }: HandwrittenBillDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
@@ -74,6 +79,31 @@ export default function HandwrittenBillDropzone({
     setIsDragging(false);
     if (disabled || isScanning) return;
     await scanFile(event.dataTransfer.files?.[0]);
+  }
+
+  if (variant === "bar") {
+    return (
+      <button
+        type="button"
+        disabled={disabled || isScanning}
+        onClick={() => onRequestExpand?.()}
+        onDragEnter={handleDragEnter}
+        onDragOver={allowDrop}
+        onDragLeave={handleDragLeave}
+        onDrop={(event) => {
+          void handleDrop(event);
+        }}
+        className={cn(
+          "inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold",
+          isDragging
+            ? "border-blue-500 bg-blue-50 text-blue-800"
+            : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50",
+        )}
+      >
+        {isScanning ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" />}
+        📷 สแกนบิลมือ (OCR)
+      </button>
+    );
   }
 
   return (

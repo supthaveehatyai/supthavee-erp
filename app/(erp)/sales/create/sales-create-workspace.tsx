@@ -71,6 +71,7 @@ import SalesChannelFields, {
   INITIAL_SALES_CHANNEL_FIELDS,
   type SalesChannelFieldsValue,
 } from "@/components/sales/sales-channel-fields";
+import { GoodsQtyBadge } from "@/components/sales/goods-qty-badge";
 import HandwrittenBillDropzone from "@/components/sales/handwritten-bill-dropzone";
 import EcommerceOrderImporter from "@/components/sales/ecommerce-order-importer";
 import type { EcommerceOrderDraft, HandwrittenBillScan, ScannedSalesLine } from "@/types/sales-ocr";
@@ -230,6 +231,7 @@ export default function SalesCreateWorkspace({
   const [notes, setNotes] = useState("");
   const [mockupUrl, setMockupUrl] = useState("");
   const [ecommerceOpen, setEcommerceOpen] = useState(openEcommerceImport);
+  const [ocrOpen, setOcrOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const scanKey = useRef(0);
 
@@ -685,42 +687,52 @@ export default function SalesCreateWorkspace({
   }
 
   const linesSubtotal = billSummary.total_amount;
+  const saveDisabled =
+    isPending || lineItems.length === 0 || (contactRequired && !contactId);
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 sm:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <div className="grid size-11 place-items-center rounded-xl bg-blue-50 text-blue-600">
-            <Receipt className="size-5" />
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="grid size-9 place-items-center rounded-lg bg-blue-50 text-blue-600">
+            <Receipt className="size-4" />
           </div>
           <div>
             <h1 className="text-xl font-bold tracking-tight text-slate-900">
               เปิดบิลขาย
             </h1>
-            <p className="mt-0.5 text-sm text-slate-500">
-              เลือกวันที่ย้อนหลังได้ · ค้นชื่อเล่นลูกค้า · รายการบริการ · ออกเลข ABB / SP / LZ
+            <p className="text-xs text-slate-500">
+              เลือกวันที่ย้อนหลังได้ · ค้นชื่อเล่นลูกค้า · ออกเลข ABB / SP / LZ
             </p>
           </div>
         </div>
-        {lastSavedDocNo && (
-          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
-            ล่าสุด: {lastSavedDocNo}
-          </span>
-        )}
+        <div className="flex h-10 items-center gap-2">
+          <HandwrittenBillDropzone
+            variant="bar"
+            disabled={isPending}
+            onScanned={applyHandwrittenScan}
+            onRequestExpand={() => setOcrOpen((open) => !open)}
+          />
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => setEcommerceOpen(true)}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm font-semibold text-violet-900 hover:bg-violet-100 disabled:opacity-60"
+          >
+            <ShoppingCart className="size-4" />
+            นำเข้า Shopee / Lazada
+          </button>
+          {lastSavedDocNo ? (
+            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+              ล่าสุด: {lastSavedDocNo}
+            </span>
+          ) : null}
+        </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+      {ocrOpen ? (
         <HandwrittenBillDropzone disabled={isPending} onScanned={applyHandwrittenScan} />
-        <button
-          type="button"
-          disabled={isPending}
-          onClick={() => setEcommerceOpen(true)}
-          className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-5 text-center text-sm font-semibold text-violet-900 transition hover:bg-violet-100 disabled:opacity-60"
-        >
-          <ShoppingCart className="size-5" />
-          🛒 นำเข้าออเดอร์ Shopee / Lazada
-        </button>
-      </div>
+      ) : null}
 
       <EcommerceOrderImporter
         open={ecommerceOpen}
@@ -739,18 +751,37 @@ export default function SalesCreateWorkspace({
       )}
 
       <Card className="sticky top-0 z-10 border-slate-200 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">หัวเอกสาร</CardTitle>
-          <CardDescription>
-            <code className="text-[11px]">doc_type</code> ·{" "}
-            <code className="text-[11px]">contact_id</code> ·{" "}
-            <code className="text-[11px]">contact_person_id</code> — เลขที่บิล
-            PREFIX-YYMM-XXXX
-          </CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 pb-3">
+          <div>
+            <CardTitle className="text-base">หัวเอกสาร</CardTitle>
+            <CardDescription>
+              ประเภท · ช่องทาง · วันที่ · ลูกค้า · หมายเหตุ
+            </CardDescription>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={saveDisabled}
+              className="bg-blue-800 text-white hover:bg-blue-900"
+              onClick={() => handleCreateDraft(true)}
+            >
+              ออกบิลทันที
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={saveDisabled}
+              onClick={() => handleCreateDraft(false)}
+            >
+              บันทึกร่าง
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <form
-            className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+            className="grid grid-cols-1 gap-3 sm:grid-cols-4"
             onSubmit={(event) => {
               event.preventDefault();
               handleCreateDraft(false);
@@ -774,6 +805,49 @@ export default function SalesCreateWorkspace({
               </select>
             </div>
 
+            <SalesChannelFields
+              section="channel"
+              value={salesChannelFields}
+              onChange={(next) => {
+                clearLastSavedArtifact();
+                setSalesChannelFields(next);
+              }}
+              disabled={isPending}
+              docType={docType}
+            />
+
+            <div className="space-y-1.5">
+              <Label htmlFor="doc-date">วันที่เอกสาร (doc_date)</Label>
+              <Input
+                id="doc-date"
+                type="date"
+                value={docDate}
+                disabled={isPending}
+                onChange={(event) => {
+                  clearLastSavedArtifact();
+                  setDocDate(event.target.value);
+                }}
+                className="h-10"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="handwritten-doc-ref">
+                อ้างอิงบิลมือ (handwritten_doc_ref)
+              </Label>
+              <Input
+                id="handwritten-doc-ref"
+                value={handwrittenDocRef}
+                disabled={isPending}
+                placeholder="เช่น เล่มที่ 21 เลขที่ 5"
+                onChange={(event) => {
+                  clearLastSavedArtifact();
+                  setHandwrittenDocRef(event.target.value);
+                }}
+                className="h-10"
+              />
+            </div>
+
             {hideContactPicker ? (
               <div className="space-y-1.5 sm:col-span-2">
                 <Label>ลูกค้า</Label>
@@ -784,9 +858,9 @@ export default function SalesCreateWorkspace({
               </div>
             ) : (
               <>
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 sm:col-span-2">
               <Label>
-                ลูกค้า{" "}
+                ลูกค้า + ชื่อเล่น{" "}
                 {walkInOptional ? (
                   <span className="font-normal text-slate-500">(ไม่บังคับ)</span>
                 ) : (
@@ -841,40 +915,8 @@ export default function SalesCreateWorkspace({
             )}
 
             <div className="space-y-1.5">
-              <Label htmlFor="doc-date">วันที่เอกสาร (doc_date)</Label>
-              <Input
-                id="doc-date"
-                type="date"
-                value={docDate}
-                disabled={isPending}
-                onChange={(event) => {
-                  clearLastSavedArtifact();
-                  setDocDate(event.target.value);
-                }}
-                className="h-10"
-              />
-            </div>
-
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="handwritten-doc-ref">
-                อ้างอิงบิลมือ (handwritten_doc_ref)
-              </Label>
-              <Input
-                id="handwritten-doc-ref"
-                value={handwrittenDocRef}
-                disabled={isPending}
-                placeholder='เช่น เล่มที่ 21 เลขที่ 5'
-                onChange={(event) => {
-                  clearLastSavedArtifact();
-                  setHandwrittenDocRef(event.target.value);
-                }}
-                className="h-10"
-              />
-            </div>
-
-            <div className="space-y-1.5 sm:col-span-2 lg:col-span-2">
               <Label htmlFor="sales-notes">
-                หมายเหตุ / ชื่องาน / เลขใบสั่งซื้อลูกค้า (notes)
+                หมายเหตุ / ชื่องาน (notes)
               </Label>
               <Input
                 id="sales-notes"
@@ -890,6 +932,7 @@ export default function SalesCreateWorkspace({
             </div>
 
             <SalesChannelFields
+              section="details"
               value={salesChannelFields}
               onChange={(next) => {
                 clearLastSavedArtifact();
@@ -897,38 +940,8 @@ export default function SalesCreateWorkspace({
               }}
               disabled={isPending}
               docType={docType}
-              platformClassName="sm:col-span-2 lg:col-span-4"
+              platformClassName="sm:col-span-4"
             />
-
-            <div className="flex flex-col gap-2 sm:col-span-2 sm:flex-row lg:col-span-4">
-              <Button
-                type="button"
-                disabled={
-                  isPending ||
-                  lineItems.length === 0 ||
-                  (contactRequired && !contactId)
-                }
-                className="h-10 flex-1 gap-2 bg-blue-800 text-white hover:bg-blue-900"
-                onClick={() => handleCreateDraft(true)}
-              >
-                {isPending
-                  ? "กำลังบันทึก..."
-                  : "✅ บันทึกและออกบิลขายทันที (ออกเลขจริง + ตัดสต็อก)"}
-              </Button>
-              <Button
-                type="submit"
-                variant="outline"
-                disabled={
-                  isPending ||
-                  lineItems.length === 0 ||
-                  (contactRequired && !contactId)
-                }
-                className="h-10 gap-2"
-              >
-                <FilePlus2 className="size-4" />
-                {isPending ? "กำลังบันทึก..." : "💾 บันทึกร่าง (Draft)"}
-              </Button>
-            </div>
           </form>
         </CardContent>
       </Card>
@@ -972,6 +985,7 @@ export default function SalesCreateWorkspace({
                 ? `${lineItems.length} รายการ · รวม ${formatMoney(linesSubtotal)} ฿`
                 : "เลือกรุ่นสินค้าจาก Model Matrix เพื่อเพิ่มลงบิล"}
             </CardDescription>
+            <GoodsQtyBadge rows={lineItems} className="mt-2" />
           </div>
           <Button
             type="button"
@@ -1233,6 +1247,29 @@ export default function SalesCreateWorkspace({
                   </dd>
                 </div>
               </dl>
+              <GoodsQtyBadge rows={lineItems} className="mt-3" />
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  disabled={saveDisabled}
+                  className="h-10 w-auto gap-2 bg-blue-800 px-5 text-white hover:bg-blue-900"
+                  onClick={() => handleCreateDraft(true)}
+                >
+                  {isPending
+                    ? "กำลังบันทึก..."
+                    : "✅ บันทึกและออกบิลขายทันที"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={saveDisabled}
+                  className="h-10 w-auto gap-2 px-5"
+                  onClick={() => handleCreateDraft(false)}
+                >
+                  <FilePlus2 className="size-4" />
+                  {isPending ? "กำลังบันทึก..." : "บันทึกร่าง"}
+                </Button>
+              </div>
             </div>
           </div>
         </CardContent>

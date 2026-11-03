@@ -62,6 +62,8 @@ export type SalesChannelFieldsProps = {
   docType?: string;
   /** col-span ของกล่องฟิลด์แพลตฟอร์ม เมื่ออยู่ใน CSS grid ของฟอร์ม */
   platformClassName?: string;
+  /** channel = เฉพาะ dropdown, details = ฟิลด์แพลตฟอร์ม/ขาจร */
+  section?: "all" | "channel" | "details";
 };
 
 export default function SalesChannelFields({
@@ -70,6 +72,7 @@ export default function SalesChannelFields({
   disabled = false,
   docType,
   platformClassName,
+  section = "all",
 }: SalesChannelFieldsProps) {
   const showPlatformFields = isEcommercePlatformChannel(value.sales_channel);
   const showWalkInFields = shouldShowWalkInOptionalFields({
@@ -81,8 +84,7 @@ export default function SalesChannelFields({
     onChange({ ...value, ...partial });
   }
 
-  return (
-    <>
+  const channelSelect = (
       <div className="space-y-1.5">
         <Label htmlFor="sales-channel">ช่องทางขาย</Label>
         <Select
@@ -103,7 +105,13 @@ export default function SalesChannelFields({
           ))}
         </Select>
       </div>
+  );
 
+  if (section === "channel") return channelSelect;
+
+  const details =
+    showPlatformFields || showWalkInFields ? (
+      <>
       {showPlatformFields ? (
         <div
           className={cn(
@@ -227,6 +235,15 @@ export default function SalesChannelFields({
           </div>
         </div>
       ) : null}
+      </>
+    ) : null;
+
+  if (section === "details") return details;
+
+  return (
+    <>
+      {channelSelect}
+      {details}
     </>
   );
 }

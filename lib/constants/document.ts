@@ -543,6 +543,17 @@ export const AR_REC_INVOICE_DOC_TYPES = [
 ] as const;
 
 /**
+ * บิลขายที่หน้ารับชำระตัดยอดได้
+ * SO อยู่ในรายการหลังซิงค์ deposit_deducted บน documents
+ */
+export const AR_COLLECTIBLE_DOC_TYPES = [
+  "SO",
+  "INV_DO",
+  "TAX_INV",
+  "CS_TAX",
+] as const;
+
+/**
  * บิลขายที่อนุญาตให้ตัดหนี้สูญ (AR Write-off)
  * BN อยู่ที่ `doc_headers` — ใช้เป็นตัวกรองบิล ไม่ใช่เป้าหมาย allocation
  */

@@ -7,6 +7,7 @@ import {
   defaultPrintNameMode,
   type PrintNameMode,
 } from "@/lib/sales/print-line-view";
+import { summarizeGoodsQty } from "@/lib/sales/goods-qty-summary";
 import type { DocumentDetailItem } from "@/types/document";
 
 type PrintViewDetail = {
@@ -135,6 +136,7 @@ export function SalesPrintLineTable({
   }, [docNo, followDocumentDefaults]);
 
   const rows = buildPrintLineRows(items, nameMode, hideZeroServiceLines);
+  const goodsQty = summarizeGoodsQty(items);
 
   return (
     <table className="w-full border-collapse text-left text-xs">
@@ -187,6 +189,15 @@ export function SalesPrintLineTable({
           ))
         )}
       </tbody>
+      {goodsQty.label ? (
+        <tfoot>
+          <tr>
+            <td colSpan={7} className="pt-2 text-[11px] font-semibold text-neutral-800">
+              {goodsQty.label}
+            </td>
+          </tr>
+        </tfoot>
+      ) : null}
     </table>
   );
 }

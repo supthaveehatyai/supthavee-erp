@@ -61,6 +61,8 @@ export type PaymentKnockoffFormProps = {
   availableDeposits?: AvailableDeposit[];
   bankAccounts: BankAccount[];
   contactId: string;
+  /** ติ๊กบิลนี้ให้เมื่อเปิดจาก ?doc_id= */
+  presetInvoiceId?: string;
   /** Open BN documents for this contact (from Server Component). */
   billingNotes?: OpenBillingNoteOption[];
 };
@@ -71,10 +73,14 @@ type LineState = {
   wht_amount: number;
 };
 
-function emptyLines(invoices: UnpaidInvoice[]): LineState[] {
+function emptyLines(
+  invoices: UnpaidInvoice[],
+  presetInvoiceId = "",
+): LineState[] {
   return invoices.map((inv) => ({
     invoice_id: inv.id,
-    allocated_amount: 0,
+    allocated_amount:
+      presetInvoiceId && inv.id === presetInvoiceId ? inv.remaining_balance : 0,
     wht_amount: 0,
   }));
 }
@@ -92,6 +98,7 @@ export function PaymentKnockoffForm({
   availableDeposits = [],
   bankAccounts,
   contactId,
+  presetInvoiceId = "",
   billingNotes = [],
 }: PaymentKnockoffFormProps) {
   const router = useRouter();
@@ -112,7 +119,7 @@ export function PaymentKnockoffForm({
   const [referenceNo, setReferenceNo] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
   const [lines, setLines] = useState<LineState[]>(() =>
-    emptyLines(initialInvoices),
+    emptyLines(initialInvoices, presetInvoiceId),
   );
   const [depositAmounts, setDepositAmounts] = useState<Record<string, string>>(
     {},
@@ -120,10 +127,14 @@ export function PaymentKnockoffForm({
 
   useEffect(() => {
     setInvoices(initialInvoices);
-    setLines(emptyLines(initialInvoices));
+    setLines(emptyLines(initialInvoices, presetInvoiceId));
+    const preset = initialInvoices.find((row) => row.id === presetInvoiceId);
+    if (preset && preset.remaining_balance > 0) {
+      setAmount(preset.remaining_balance.toFixed(2));
+    }
     setSelectedBillingNoteId("");
     setDepositAmounts({});
-  }, [initialInvoices]);
+  }, [initialInvoices, presetInvoiceId]);
 
   function applyInvoiceList(nextInvoices: UnpaidInvoice[]) {
     setInvoices(nextInvoices);

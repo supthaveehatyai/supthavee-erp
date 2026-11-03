@@ -13,12 +13,13 @@ import {
 export const dynamic = "force-dynamic";
 
 type PaymentsPageProps = {
-  searchParams: Promise<{ contact_id?: string }>;
+  searchParams: Promise<{ contact_id?: string; doc_id?: string }>;
 };
 
 export default async function PaymentsPage({ searchParams }: PaymentsPageProps) {
   const params = await searchParams;
   const selectedContactId = params.contact_id?.trim() || "";
+  const presetDocumentId = params.doc_id?.trim() || "";
 
   const [debtors, bankAccountsResult, paymentContext, billingNotesResult] =
     await Promise.all([
@@ -42,12 +43,13 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
         />
       </div>
       <ARPaymentClient
-      key={selectedContactId || "summary"}
+      key={`${selectedContactId || "summary"}:${presetDocumentId}`}
       debtors={debtors}
       invoices={paymentContext.invoices}
       availableDeposits={paymentContext.availableDeposits}
       bankAccounts={bankAccounts}
       selectedContactId={selectedContactId}
+      presetDocumentId={presetDocumentId}
       billingNotes={billingNotesResult.data}
     />
     </>

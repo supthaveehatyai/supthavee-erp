@@ -20,7 +20,9 @@ import {
   isSalesChannel,
 } from "@/lib/constants/document";
 import PrintDocumentTemplate from "@/components/sales/print-document-template";
+import { GoodsQtyBadge } from "@/components/sales/goods-qty-badge";
 import { ReceiveDepositDialog } from "@/components/sales/receive-deposit-dialog";
+import { ReceivePaymentDialog } from "@/components/sales/receive-payment-dialog";
 import { SalesPrintOptions } from "@/components/sales/sales-print-controls";
 import PrintPaymentReceiptTemplate from "@/components/finance/PrintPaymentReceiptTemplate";
 import PrintSettlementVoucherTemplate from "@/components/finance/PrintSettlementVoucherTemplate";
@@ -359,6 +361,21 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   const canReceiveDeposit =
     (doc.doc_type === "SO" || doc.doc_type === "QT") &&
     (doc.status === "ISSUED" || doc.status === "COMPLETED");
+  const amountDue = Math.max(
+    0,
+    Math.round(
+      (Number(doc.grand_total ?? 0) -
+        Number(doc.deposit_deducted ?? 0) -
+        Number(doc.paid_amount ?? 0)) *
+        100,
+    ) / 100,
+  );
+  const canReceivePayment =
+    (doc.doc_type === "SO" ||
+      doc.doc_type === "INV_DO" ||
+      doc.doc_type === "TAX_INV") &&
+    doc.status === "ISSUED" &&
+    amountDue > 0;
   const linkedDeposits = doc.linked_deposits ?? [];
   const linkedDepositGross = linkedDeposits.reduce(
     (sum, row) => sum + Number(row.grand_total ?? 0),
@@ -534,6 +551,16 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               }
               orderTotal={Number(doc.grand_total ?? 0)}
               salesChannel={doc.sales_channel}
+            />
+          ) : null}
+          {canReceivePayment ? (
+            <ReceivePaymentDialog
+              documentId={doc.id}
+              docNo={doc.doc_no}
+              grandTotal={Number(doc.grand_total ?? 0)}
+              depositDeducted={Number(doc.deposit_deducted ?? 0)}
+              paidAmount={Number(doc.paid_amount ?? 0)}
+              amountDue={amountDue}
             />
           ) : null}
           {canEditIssuedHeader ? (
@@ -808,6 +835,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2.5">
+              <GoodsQtyBadge rows={doc.items} />
               {isReceiptDoc ? (
                 <>
                   <SummaryRow
@@ -1067,6 +1095,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               <CardDescription>
                 {doc.items.length} รายการ — แสดงแบบอ่านอย่างเดียว
               </CardDescription>
+              <GoodsQtyBadge rows={doc.items} className="mt-2" />
             </CardHeader>
             <CardContent className="space-y-4 p-4 sm:p-6">
               {hasProductionWork ? (

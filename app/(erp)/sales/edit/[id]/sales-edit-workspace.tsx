@@ -29,6 +29,7 @@ import {
 } from "@/lib/utils/document-summary";
 import { isCancelAndReplaceDraft } from "@/lib/utils/cancel-replace-draft";
 import { displayDocumentItemDescription } from "@/lib/utils/credit-note-line";
+import { GoodsQtyBadge } from "@/components/sales/goods-qty-badge";
 import { ServiceLineShortcuts } from "@/components/sales/service-line-shortcuts";
 import { SalesMockupCard } from "@/components/sales/sales-mockup-card";
 import { moneyAfterQtyPrice } from "@/lib/sales/service-line-price";
@@ -569,8 +570,13 @@ export default function SalesEditWorkspace({
     });
   }
 
+  const saveDisabled =
+    isPending ||
+    (contactRequired && !contactId) ||
+    (!isReplacement && lineItems.length === 0);
+
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 sm:p-6">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3">
           <div className="grid size-11 place-items-center rounded-xl bg-blue-50 text-blue-600">
@@ -623,23 +629,50 @@ export default function SalesEditWorkspace({
       ) : null}
 
       <Card className="border-slate-200 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">หัวเอกสาร</CardTitle>
-          <CardDescription>
-            {isReplacement
-              ? "โหมดทดแทน — แก้ไขได้เฉพาะลูกค้า ผู้ติดต่อ และหมายเหตุ (รายการ/ยอดถูกล็อก)"
-              : "ประเภทเอกสารและเลขที่ร่างถูกล็อก — แก้ไขลูกค้า / รายการ / หมายเหตุได้"}
-          </CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 pb-3">
+          <div>
+            <CardTitle className="text-base">หัวเอกสาร</CardTitle>
+            <CardDescription>
+              {isReplacement
+                ? "โหมดทดแทน — แก้ไขได้เฉพาะลูกค้า ผู้ติดต่อ และหมายเหตุ"
+                : `${initialDocument.doc_no} · แก้ไขลูกค้า / รายการ / หมายเหตุได้`}
+            </CardDescription>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            {!isReplacement ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={saveDisabled}
+                className="bg-blue-800 text-white hover:bg-blue-900"
+                onClick={() => handleSave(true)}
+              >
+                ออกบิลทันที
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={saveDisabled}
+              onClick={() => handleSave(false)}
+            >
+              บันทึกร่าง
+            </Button>
+          </div>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-4">
           <div className="space-y-1.5">
-            <Label>ประเภทเอกสาร</Label>
-            <Input value={initialDocument.doc_type} disabled readOnly />
+            <Label>ประเภทเอกสาร (doc_type)</Label>
+            <Input value={initialDocument.doc_type} disabled readOnly className="h-10" />
           </div>
-          <div className="space-y-1.5">
-            <Label>เลขที่เอกสาร</Label>
-            <Input value={initialDocument.doc_no} disabled readOnly />
-          </div>
+          <SalesChannelFields
+            section="channel"
+            value={salesChannelFields}
+            onChange={setSalesChannelFields}
+            disabled={isPending}
+            docType={initialDocument.doc_type}
+          />
           <div className="space-y-1.5">
             <Label htmlFor="doc-date">วันที่เอกสาร (doc_date)</Label>
             <Input
@@ -648,11 +681,25 @@ export default function SalesEditWorkspace({
               value={docDate}
               disabled={isPending}
               onChange={(event) => setDocDate(event.target.value)}
+              className="h-10"
             />
           </div>
           <div className="space-y-1.5">
+            <Label htmlFor="handwritten-doc-ref">
+              อ้างอิงบิลมือ (handwritten_doc_ref)
+            </Label>
+            <Input
+              id="handwritten-doc-ref"
+              value={handwrittenDocRef}
+              onChange={(event) => setHandwrittenDocRef(event.target.value)}
+              disabled={isPending}
+              placeholder="เช่น เล่มที่ 21 เลขที่ 5"
+              className="h-10"
+            />
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
             <Label>
-              ลูกค้า{" "}
+              ลูกค้า + ชื่อเล่น{" "}
               {walkInOptional ? (
                 <span className="font-normal text-slate-500">(ไม่บังคับ)</span>
               ) : null}
@@ -710,64 +757,24 @@ export default function SalesEditWorkspace({
           </div>
           )}
           <div className="space-y-1.5">
-            <Label htmlFor="vat-type">ประเภท VAT</Label>
-            <select
-              id="vat-type"
-              value={vatType}
-              onChange={(event) =>
-                setVatType(event.target.value as VatCalculationType)
-              }
-              disabled={isPending || isReplacement}
-              className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60"
-            >
-              {VAT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="discount-text">ส่วนลดท้ายบิล</Label>
+            <Label htmlFor="notes">หมายเหตุ / ชื่องาน (notes)</Label>
             <Input
-              id="discount-text"
-              value={discountText}
-              onChange={(event) => setDiscountText(event.target.value)}
-              disabled={isPending || isReplacement}
-              placeholder='เช่น 10% หรือ 500'
+              id="notes"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              disabled={isPending}
+              placeholder="เช่น งานสกรีนเสื้อโปโล"
+              className="h-10"
             />
           </div>
           <SalesChannelFields
+            section="details"
             value={salesChannelFields}
             onChange={setSalesChannelFields}
             disabled={isPending}
             docType={initialDocument.doc_type}
-            platformClassName="sm:col-span-2 lg:col-span-3"
+            platformClassName="sm:col-span-4"
           />
-          <div className="space-y-1.5 sm:col-span-2 lg:col-span-3">
-            <Label htmlFor="handwritten-doc-ref">
-              อ้างอิงบิลมือ (handwritten_doc_ref)
-            </Label>
-            <Input
-              id="handwritten-doc-ref"
-              value={handwrittenDocRef}
-              onChange={(event) => setHandwrittenDocRef(event.target.value)}
-              disabled={isPending}
-              placeholder="เช่น เล่มที่ 21 เลขที่ 5"
-            />
-          </div>
-          <div className="space-y-1.5 sm:col-span-2 lg:col-span-3">
-            <Label htmlFor="notes">หมายเหตุ (notes)</Label>
-            <textarea
-              id="notes"
-              rows={3}
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              disabled={isPending}
-              placeholder="เช่น ออกทดแทนเอกสารเลขที่ ..."
-              className="flex w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"
-            />
-          </div>
         </CardContent>
       </Card>
 
@@ -792,6 +799,7 @@ export default function SalesEditWorkspace({
               ? "ล็อกตามมาตรฐานสรรพากร — แสดงอย่างเดียว ห้ามเพิ่ม/แก้/ลบ"
               : "เพิ่ม / แก้จำนวน / ราคาได้ก่อนออกเอกสาร"}
           </CardDescription>
+          <GoodsQtyBadge rows={lineItems} className="mt-2" />
         </CardHeader>
         <CardContent className="space-y-4">
           {!isReplacement ? (
@@ -984,7 +992,39 @@ export default function SalesEditWorkspace({
           </div>
 
           <div className="flex flex-wrap items-end justify-between gap-4 border-t border-slate-100 pt-4">
-            <div className="space-y-1 text-sm text-slate-600">
+            <div className="space-y-3 text-sm text-slate-600">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="vat-type">ประเภท VAT</Label>
+                  <select
+                    id="vat-type"
+                    value={vatType}
+                    onChange={(event) =>
+                      setVatType(event.target.value as VatCalculationType)
+                    }
+                    disabled={isPending || isReplacement}
+                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60"
+                  >
+                    {VAT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="discount-text">ส่วนลดท้ายบิล</Label>
+                  <Input
+                    id="discount-text"
+                    value={discountText}
+                    onChange={(event) => setDiscountText(event.target.value)}
+                    disabled={isPending || isReplacement}
+                    placeholder="เช่น 10% หรือ 500"
+                    className="h-10"
+                  />
+                </div>
+              </div>
+              <GoodsQtyBadge rows={lineItems} />
               {billSummary.deposit_deducted > 0 ? (
                 <p>
                   หักเงินมัดจำ (รวม VAT):{" "}
@@ -1028,32 +1068,22 @@ export default function SalesEditWorkspace({
                 </span>
               </p>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="flex flex-wrap justify-end gap-2">
               {!isReplacement ? (
                 <Button
                   type="button"
-                  disabled={
-                    isPending ||
-                    (contactRequired && !contactId) ||
-                    lineItems.length === 0
-                  }
-                  className="h-10 gap-2 bg-blue-800 text-white hover:bg-blue-900"
+                  disabled={saveDisabled}
+                  className="h-10 w-auto gap-2 bg-blue-800 px-5 text-white hover:bg-blue-900"
                   onClick={() => handleSave(true)}
                 >
-                  {isPending
-                    ? "กำลังบันทึก..."
-                    : "✅ บันทึกและออกบิลขายทันที (ออกเลขจริง + ตัดสต็อก)"}
+                  {isPending ? "กำลังบันทึก..." : "✅ บันทึกและออกบิลขายทันที"}
                 </Button>
               ) : null}
               <Button
                 type="button"
                 variant="outline"
-                disabled={
-                  isPending ||
-                  (contactRequired && !contactId) ||
-                  (!isReplacement && lineItems.length === 0)
-                }
-                className="h-10 gap-2"
+                disabled={saveDisabled}
+                className="h-10 w-auto gap-2 px-5"
                 onClick={() => handleSave(false)}
               >
                 <Save className="size-4" />

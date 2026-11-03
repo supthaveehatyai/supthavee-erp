@@ -46,6 +46,7 @@ export type ARPaymentClientProps = {
   availableDeposits: AvailableDeposit[];
   bankAccounts: BankAccount[];
   selectedContactId: string;
+  presetDocumentId?: string;
   billingNotes?: OpenBillingNoteOption[];
 };
 
@@ -159,6 +160,7 @@ export function ARPaymentClient({
   availableDeposits,
   bankAccounts,
   selectedContactId,
+  presetDocumentId = "",
   billingNotes = [],
 }: ARPaymentClientProps) {
   const router = useRouter();
@@ -526,6 +528,7 @@ export function ARPaymentClient({
                   availableDeposits={availableDeposits}
                   bankAccounts={bankAccounts}
                   contactId={selectedContactId}
+                  presetInvoiceId={presetDocumentId}
                   billingNotes={billingNotes}
                 />
               </>
