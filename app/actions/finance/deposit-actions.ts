@@ -19,6 +19,7 @@ import {
   resolveInitialPaymentStatus,
   resolveIssuedDocumentStatus,
 } from "@/lib/constants/document";
+import { paymentChannelFields } from "@/lib/actions/finance/receipt-sweep-actions";
 import { revalidateApprovalCenterIfPending } from "@/lib/approval/revalidate-approval";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { generateDraftDocumentNo } from "@/lib/utils/draft-document-no";
@@ -547,6 +548,13 @@ export async function createDepositDocument(
     if (!owner.ok) {
       return { success: false, error: owner.error };
     }
+    const receiptChannel =
+      docType === "DEP_IN"
+        ? await paymentChannelFields({
+            channel: String(formData.get("payment_channel") ?? ""),
+            otherBankName: String(formData.get("other_bank_name") ?? ""),
+          })
+        : null;
 
     // 1) Primary ledger — documents
     const { data: document, error: documentError } = await supabase
@@ -576,6 +584,15 @@ export async function createDepositDocument(
         payment_status: paymentStatus,
         reference_no: referenceNo,
         sales_channel: salesChannel,
+        ...(receiptChannel
+          ? {
+              payment_channel: receiptChannel.payment_channel,
+              bank_account_id: receiptChannel.bank_account_id,
+              receiving_bank_label: receiptChannel.receiving_bank_label,
+              is_swept_to_company: receiptChannel.is_swept_to_company,
+              swept_to_company_at: receiptChannel.swept_to_company_at,
+            }
+          : {}),
         attachment_url: slipUrl,
         attached_file_url: slipUrl,
         original_file_name:

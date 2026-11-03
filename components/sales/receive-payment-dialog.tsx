@@ -6,6 +6,8 @@ import { Loader2, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { receiveSalesDocumentPayment } from "@/lib/actions/finance/payment";
 import { parseTransferSlipOcr } from "@/lib/actions/sales-ocr-actions";
+import { PaymentChannelPicker } from "@/components/finance/payment-channel-picker";
+import { classifySlipPayee, type PaymentChannel } from "@/lib/finance/payment-channel";
 import { formatBuddhistSlash } from "@/lib/utils/deposit-note";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,6 +53,8 @@ export function ReceivePaymentDialog({
     new Date().toISOString().slice(0, 10),
   );
   const [amount, setAmount] = useState(amountDue.toFixed(2));
+  const [paymentChannel, setPaymentChannel] = useState<PaymentChannel>("COMPANY_BANK");
+  const [otherBankName, setOtherBankName] = useState("");
   const [whtRate, setWhtRate] = useState<"0" | "1" | "3">("0");
   const [referenceNo, setReferenceNo] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
@@ -83,6 +87,12 @@ export function ReceivePaymentDialog({
         );
       }
       if (result.data.reference_no) setReferenceNo(result.data.reference_no);
+      const payee = classifySlipPayee(result.data.payee_name, result.data.payee_account);
+      if (payee) {
+        setPaymentChannel(payee.channel);
+        setOtherBankName(payee.otherBankName);
+        toast.message(payee.notice);
+      }
     } finally {
       setIsReadingSlip(false);
     }
@@ -99,6 +109,8 @@ export function ReceivePaymentDialog({
     formData.set("amount", settle.toFixed(2));
     formData.set("wht_rate", whtRate);
     formData.set("reference_no", referenceNo.trim());
+    formData.set("payment_channel", paymentChannel);
+    formData.set("other_bank_name", otherBankName);
     if (slipFile) formData.set("slip_file", slipFile);
 
     startTransition(async () => {
@@ -176,6 +188,15 @@ export function ReceivePaymentDialog({
                 WHT {formatMoney(wht)} ฿ · รับเงินสด/โอน {formatMoney(cash)} ฿
               </p>
             </div>
+            <PaymentChannelPicker
+              value={paymentChannel}
+              otherBankName={otherBankName}
+              disabled={isPending}
+              onChange={(channel, name) => {
+                setPaymentChannel(channel);
+                setOtherBankName(name);
+              }}
+            />
             <div className="space-y-1.5">
               <Label htmlFor="receipt-ref">เลขที่อ้างอิงสลิป</Label>
               <Input

@@ -748,6 +748,8 @@ export async function parseTransferSlipOcr(formData: FormData): Promise<{
     doc_date: string | null;
     reference_no: string | null;
     amount: number | null;
+    payee_name: string | null;
+    payee_account: string | null;
   } | null;
   error: string | null;
 }> {
@@ -778,12 +780,16 @@ export async function parseTransferSlipOcr(formData: FormData): Promise<{
       Number.isFinite(amountRaw) && amountRaw > 0
         ? Math.round(amountRaw * 100) / 100
         : null;
+    const payeeName = String(parsed.payee_name ?? "").trim().slice(0, 120);
+    const payeeAccount = String(parsed.payee_account ?? "").trim().slice(0, 40);
 
     return {
       data: {
         doc_date: docDate,
         reference_no: reference || null,
         amount,
+        payee_name: payeeName || null,
+        payee_account: payeeAccount || null,
       },
       error: null,
     };

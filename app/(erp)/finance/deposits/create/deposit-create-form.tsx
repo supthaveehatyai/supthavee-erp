@@ -13,6 +13,8 @@ import { ArrowLeft, CheckCircle2, FileUp, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { createDepositDocument } from "@/app/actions/finance/deposit-actions";
 import { parseTransferSlipOcr } from "@/lib/actions/sales-ocr-actions";
+import { PaymentChannelPicker } from "@/components/finance/payment-channel-picker";
+import { classifySlipPayee, type PaymentChannel } from "@/lib/finance/payment-channel";
 import { formatBuddhistSlash } from "@/lib/utils/deposit-note";
 import type { DepositTab } from "@/types/deposit";
 import CustomerCombobox from "@/app/(erp)/sales/create/customer-combobox";
@@ -73,6 +75,8 @@ export function DepositCreateForm({
   );
   const [referenceNo, setReferenceNo] = useState("");
   const [remark, setRemark] = useState("");
+  const [paymentChannel, setPaymentChannel] = useState<PaymentChannel>("COMPANY_BANK");
+  const [otherBankName, setOtherBankName] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
   const [isReadingSlip, setIsReadingSlip] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +122,12 @@ export function DepositCreateForm({
       if (result.data.amount && !(Number(amount) > 0)) {
         setAmount(result.data.amount.toFixed(2));
       }
+      const payee = classifySlipPayee(result.data.payee_name, result.data.payee_account);
+      if (payee) {
+        setPaymentChannel(payee.channel);
+        setOtherBankName(payee.otherBankName);
+        toast.message(payee.notice);
+      }
     } finally {
       setIsReadingSlip(false);
     }
@@ -145,6 +155,10 @@ export function DepositCreateForm({
     formData.set("vat_rate", String(DEFAULT_VAT_RATE));
     formData.set("reference_no", referenceNo);
     formData.set("remark", remark);
+    if (docType === "DEP_IN") {
+      formData.set("payment_channel", paymentChannel);
+      formData.set("other_bank_name", otherBankName);
+    }
 
     if (slipFile) {
       formData.set("slip_file", slipFile);
@@ -291,6 +305,18 @@ export function DepositCreateForm({
               <p className="text-[11px] text-slate-400">{amountHint}</p>
             </div>
           </div>
+
+          {isDepIn ? (
+            <PaymentChannelPicker
+              value={paymentChannel}
+              otherBankName={otherBankName}
+              disabled={isPending}
+              onChange={(channel, name) => {
+                setPaymentChannel(channel);
+                setOtherBankName(name);
+              }}
+            />
+          ) : null}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">

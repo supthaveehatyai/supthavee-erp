@@ -153,7 +153,9 @@ Return ONLY JSON, no markdown.
 transfer_date must be Gregorian YYYY-MM-DD. If the slip shows a Buddhist year such as "02 พ.ย. 2569", subtract 543 (2569-543=2026) and return 2026-11-02.
 reference_no is the slip reference or transaction id copied exactly, for example 202611022lglURDtdhTd9jfp. Use "" if absent.
 amount is the transferred money as a plain number without commas. Use 0 if absent.
-{"transfer_date":"","reference_no":"","amount":0}
+payee_name is the recipient account name exactly as printed. Use "" if absent.
+payee_account is the recipient account number exactly as printed, for example 902-0-74651-0. Use "" if absent.
+{"transfer_date":"","reference_no":"","amount":0,"payee_name":"","payee_account":""}
 `.trim();
 }
 

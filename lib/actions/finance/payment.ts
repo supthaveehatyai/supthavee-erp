@@ -15,6 +15,7 @@ import {
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import { syncBillingNotesAfterInvoicePayment } from "@/lib/actions/finance/billing-note-status";
+import { paymentChannelFields } from "@/lib/actions/finance/receipt-sweep-actions";
 import { roundMoney } from "@/lib/utils/payment-fifo";
 import { currentBangkokTime, paymentTimestampIso } from "@/lib/utils/payment-timestamp";
 import {
@@ -1165,6 +1166,10 @@ export async function receiveSalesDocumentPayment(
       slipStoragePath = uploaded.path;
     }
 
+    const receiptChannel = await paymentChannelFields({
+      channel: String(formData.get("payment_channel") ?? ""),
+      otherBankName: String(formData.get("other_bank_name") ?? ""),
+    });
     const { error: updateError } = await supabase
       .from("documents")
       .update({
@@ -1175,6 +1180,11 @@ export async function receiveSalesDocumentPayment(
           ? document.reference_no
           : referenceNo,
         original_receipt_url: document.original_receipt_url ?? slipUrl,
+        payment_channel: receiptChannel.payment_channel,
+        bank_account_id: receiptChannel.bank_account_id,
+        receiving_bank_label: receiptChannel.receiving_bank_label,
+        is_swept_to_company: receiptChannel.is_swept_to_company,
+        swept_to_company_at: receiptChannel.swept_to_company_at,
         updated_at: new Date().toISOString(),
       })
       .eq("id", documentId);

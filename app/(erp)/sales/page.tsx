@@ -3,6 +3,8 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { FileText, Landmark, Plus, ShoppingCart } from "lucide-react";
 import { getSalesDocuments } from "@/lib/actions/document-actions";
+import { getUnsweptReceipts } from "@/lib/actions/finance/receipt-sweep-actions";
+import { UnsweptReceiptsCard } from "@/components/finance/unswept-receipts-card";
 import { formatShortDateTh, formatThaiDate } from "@/lib/utils/date-formatter";
 import type { DocumentStatus, DocumentType } from "@/types/document";
 import DocumentFilter from "@/components/documents/document-filter";
@@ -149,10 +151,14 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
       docTypes,
   );
 
-  const { data: documents, error } = await getSalesDocuments(filters);
+  const [{ data: documents, error }, unswept] = await Promise.all([
+    getSalesDocuments(filters),
+    getUnsweptReceipts(),
+  ]);
 
   return (
     <div className="space-y-6">
+      <UnsweptReceiptsCard rows={unswept.data} error={unswept.error} />
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
           <div className="flex items-center gap-2">

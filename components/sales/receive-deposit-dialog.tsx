@@ -6,6 +6,8 @@ import { HandCoins, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { createDepositDocument } from "@/app/actions/finance/deposit-actions";
 import { parseTransferSlipOcr } from "@/lib/actions/sales-ocr-actions";
+import { PaymentChannelPicker } from "@/components/finance/payment-channel-picker";
+import { classifySlipPayee, type PaymentChannel } from "@/lib/finance/payment-channel";
 import { formatBuddhistSlash } from "@/lib/utils/deposit-note";
 import { Button } from "@/components/ui/button";
 import {
@@ -67,6 +69,8 @@ export function ReceiveDepositDialog({
   const [documentDate, setDocumentDate] = useState(() =>
     new Date().toISOString().slice(0, 10),
   );
+  const [paymentChannel, setPaymentChannel] = useState<PaymentChannel>("COMPANY_BANK");
+  const [otherBankName, setOtherBankName] = useState("");
   const [referenceNo, setReferenceNo] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
   const [isReadingSlip, setIsReadingSlip] = useState(false);
@@ -112,6 +116,12 @@ export function ReceiveDepositDialog({
       if (result.data.amount && !(Number(amount) > 0)) {
         setAmount(result.data.amount.toFixed(2));
       }
+      const payee = classifySlipPayee(result.data.payee_name, result.data.payee_account);
+      if (payee) {
+        setPaymentChannel(payee.channel);
+        setOtherBankName(payee.otherBankName);
+        toast.message(payee.notice);
+      }
     } finally {
       setIsReadingSlip(false);
     }
@@ -131,6 +141,8 @@ export function ReceiveDepositDialog({
     formData.set("vat_type", vatType);
     formData.set("vat_rate", "7");
     formData.set("reference_no", referenceNo.trim());
+    formData.set("payment_channel", paymentChannel);
+    formData.set("other_bank_name", otherBankName);
     formData.set("ref_document_id", documentId);
     formData.set("sales_channel", String(salesChannel ?? "").trim());
     formData.set("mark_paid", "1");
@@ -238,6 +250,15 @@ export function ReceiveDepositDialog({
                   ? `ฐาน ${formatMoney(summary.net_before_vat)} ฿ + VAT ${formatMoney(summary.vat_amount)} ฿ = ยอดรับ ${formatMoney(summary.grand_total)} ฿`
                   : `ยอดมัดจำ ${formatMoney(summary.grand_total)} ฿ (ไม่มี VAT)`}
             </div>
+            <PaymentChannelPicker
+              value={paymentChannel}
+              otherBankName={otherBankName}
+              disabled={isPending}
+              onChange={(channel, name) => {
+                setPaymentChannel(channel);
+                setOtherBankName(name);
+              }}
+            />
             <div className="space-y-1.5">
               <Label htmlFor="deposit-ref">เลขที่อ้างอิงสลิป</Label>
               <Input
