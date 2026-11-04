@@ -35,7 +35,15 @@ import type {
 } from "@/types/bank-reconcile";
 import type { ParsedKtbLine } from "@/types/bank-reconcile";
 
-const SALES_DOC_TYPES = ["INV_DO", "TAX_INV", "CS_TAX", "ABB", "DEP_IN"] as const;
+const SALES_DOC_TYPES = [
+  "DEP_IN",
+  "ABB",
+  "CS_TAX",
+  "INV_DO",
+  "TAX_INV",
+  "SO",
+  "REC",
+] as const;
 const OPEN_DOC_STATUSES = ["ISSUED", "COMPLETED", "PAID"] as const;
 const CASH_DOC_TYPES = new Set(["ABB", "CS_TAX"]);
 const MAX_BYTES = 4_500_000;
@@ -272,7 +280,8 @@ export async function importKtbStatement(
     const imported = await insertFlexible(supabase, "bank_statement_imports", {
       bank_code: "KTB",
       account_no: parsed.account_no,
-      file_name: file.name.slice(0, 180),
+      file_name: file.name,
+      source_filename: file.name,
       source_kind: sourceKind,
       row_count: parsed.lines.length,
       created_by: owner.userId,
@@ -353,6 +362,8 @@ type RawBill = {
   paid_amount: number;
   payment_status: string;
   status: string;
+  payment_channel: string | null;
+  is_swept_to_company: boolean | null;
 };
 
 async function loadAllocatedSums(
@@ -405,8 +416,10 @@ function toOpenBill(row: RawBill, allocated: number, customer: string | null): O
   const paid = roundMoney(Number(row.paid_amount ?? 0));
   const outstanding = roundMoney(Math.max(0, grand - paid));
   const unlinked = roundMoney(Math.max(0, grand - allocated));
+  const companyReceipt =
+    row.payment_channel === "COMPANY_BANK" || row.is_swept_to_company === true;
   const linkable =
-    CASH_DOC_TYPES.has(row.doc_type) || row.doc_type === "DEP_IN"
+    CASH_DOC_TYPES.has(row.doc_type) || row.doc_type === "DEP_IN" || companyReceipt
       ? roundMoney(Math.max(outstanding, unlinked))
       : roundMoney(Math.min(outstanding, unlinked));
   return {
@@ -451,11 +464,18 @@ function asRawBill(row: Record<string, unknown>): RawBill {
     paid_amount: Number(row.paid_amount ?? 0),
     payment_status: String(row.payment_status ?? ""),
     status: String(row.status ?? ""),
+    payment_channel: row.payment_channel ? String(row.payment_channel) : null,
+    is_swept_to_company:
+      row.is_swept_to_company == null ? null : Boolean(row.is_swept_to_company),
   };
 }
 
+function isCompanyBankReceipt(row: RawBill): boolean {
+  return row.payment_channel === "COMPANY_BANK" || row.is_swept_to_company === true;
+}
+
 const BILL_SELECT =
-  "id, doc_no, doc_type, doc_date, sales_channel, contact_id, ecommerce_order_no, grand_total, paid_amount, payment_status, status";
+  "id, doc_no, doc_type, doc_date, sales_channel, contact_id, ecommerce_order_no, grand_total, paid_amount, payment_status, status, payment_channel, is_swept_to_company";
 
 export async function suggestBillMatches(
   statementLineId: string,
@@ -485,6 +505,7 @@ export async function suggestBillMatches(
       .select(BILL_SELECT)
       .in("doc_type", [...SALES_DOC_TYPES])
       .in("status", [...OPEN_DOC_STATUSES])
+      .or("payment_channel.eq.COMPANY_BANK,is_swept_to_company.eq.true")
       .gte("doc_date", from)
       .lte("doc_date", to)
       .order("doc_date", { ascending: false })
@@ -510,9 +531,12 @@ export async function suggestBillMatches(
     for (const row of [...(data ?? []).map((item) => asRawBill(item as Record<string, unknown>)), ...extra]) {
       merged.set(row.id, row);
     }
-    const bills = (await hydrateBills(supabase, [...merged.values()])).filter(
-      (bill) => bill.linkable_amount > MONEY_EPSILON,
-    );
+    const bills = (
+      await hydrateBills(
+        supabase,
+        [...merged.values()].filter(isCompanyBankReceipt),
+      )
+    ).filter((bill) => bill.linkable_amount > MONEY_EPSILON);
 
     const suggestions: BillMatchSuggestion[] = [];
     for (const bill of bills) {
@@ -584,6 +608,7 @@ export async function searchOpenSalesBills(
       .select(BILL_SELECT)
       .in("doc_type", [...SALES_DOC_TYPES])
       .in("status", [...OPEN_DOC_STATUSES])
+      .or("payment_channel.eq.COMPANY_BANK,is_swept_to_company.eq.true")
       .order("doc_date", { ascending: false })
       .limit(80);
     if (channel === "STORE") {
@@ -623,6 +648,7 @@ export async function searchOpenSalesBills(
           .in("contact_id", contactIds)
           .in("doc_type", [...SALES_DOC_TYPES])
           .in("status", [...OPEN_DOC_STATUSES])
+          .or("payment_channel.eq.COMPANY_BANK,is_swept_to_company.eq.true")
           .order("doc_date", { ascending: false })
           .limit(40);
         const known = new Set(rows.map((row) => row.id));

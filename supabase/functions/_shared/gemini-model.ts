@@ -190,17 +190,17 @@ export async function loadGeminiModelVersion(
   }
 }
 
-const OCR_MODEL_CASCADE = [
-  "gemini-3-flash",
-  "gemini-3.5-flash",
-  "gemini-3.6-flash",
-  "gemini-3.7-flash",
-  "gemini-3.8-flash",
-  "gemini-3.1-flash-lite",
-  "gemini-3.5-flash-lite",
+const GEMINI_FALLBACK_POOL = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-2.5-flash-lite-preview-06-17",
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash",
+  "gemini-1.5-flash-8b",
+  "gemini-1.5-pro",
 ];
 
-const RETIRED_OCR_MODELS = new Set(["gemini-2.0-flash"]);
+const RETIRED_OCR_MODELS = new Set<string>();
 
 const OCR_QUOTA_EXHAUSTED_MESSAGE =
   "โควตาฟรีรายวันครบกำหนดแล้ว (รีเซ็ตเวลา 14:00 น.) สามารถตรวจสอบโควตาหรือเปิด Billing ได้ที่ ai.dev/rate-limit";
@@ -210,7 +210,7 @@ function isCascadeFallback(status: number | undefined, message: string): boolean
     status === 429 ||
     status === 404 ||
     status === 503 ||
-    /quota exceeded|resource_exhausted|free_tier_requests|no longer available|not found|service unavailable/i.test(
+    /quota|rate-limit|rate limit|resource_exhausted|free_tier_requests|overloaded|no longer available|not found|service unavailable|โควตา/i.test(
       message,
     )
   );
@@ -259,18 +259,15 @@ export function parseEdgeModelCascade(value: unknown): string[] | null {
 }
 
 function ocrCascade(preferred: string, configured?: string[] | null): string[] {
-  const source = (configured && configured.length > 0 ? configured : OCR_MODEL_CASCADE)
+  const source = [
+    ...GEMINI_FALLBACK_POOL,
+    ...(configured && configured.length > 0 ? configured : []),
+  ]
     .map(cleanCascadeId)
     .filter((id) => id && !RETIRED_OCR_MODELS.has(id));
-  const base = [...new Set(source.length > 0 ? source : OCR_MODEL_CASCADE)];
+  const base = [...new Set(source.length > 0 ? source : GEMINI_FALLBACK_POOL)];
   const cleanedPreferred = cleanCascadeId(preferred);
-  if (
-    !cleanedPreferred ||
-    RETIRED_OCR_MODELS.has(cleanedPreferred) ||
-    !base.includes(cleanedPreferred)
-  ) {
-    return base;
-  }
+  if (!cleanedPreferred || RETIRED_OCR_MODELS.has(cleanedPreferred)) return base;
   return [cleanedPreferred, ...base.filter((id) => id !== cleanedPreferred)];
 }
 
@@ -324,3 +321,5 @@ export async function generateGeminiContent(options: {
   const detail = lastError instanceof Error ? lastError.message : "ไม่ทราบสาเหตุ";
   throw new Error(`เรียก Gemini ไม่สำเร็จ: ${detail}`);
 }
+
+export const generateWithGeminiFallback = generateGeminiContent;

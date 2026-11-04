@@ -13,7 +13,7 @@ export const OCR_MODEL_CASCADE = [
   "gemini-3.5-flash-lite",
 ] as const;
 
-const RETIRED_OCR_MODELS = new Set(["gemini-2.0-flash"]);
+const RETIRED_OCR_MODELS = new Set<string>();
 
 export const OCR_QUOTA_DAILY_LIMIT = 20;
 
@@ -41,7 +41,9 @@ export function isGeminiQuotaError(
   message: string,
 ): boolean {
   if (status === 429) return true;
-  return /quota exceeded|resource_exhausted|free_tier_requests/i.test(message);
+  return /quota|rate-limit|rate limit|resource_exhausted|free_tier_requests|โควตา/i.test(
+    message,
+  );
 }
 
 /** 429, retired model 404, or a short Gemini outage — move to the next id. */
@@ -50,7 +52,7 @@ export function isGeminiCascadeFallbackError(
   message: string,
 ): boolean {
   if (status === 429 || status === 404 || status === 503) return true;
-  return /quota exceeded|resource_exhausted|free_tier_requests|no longer available|not found|service unavailable/i.test(
+  return /quota|rate-limit|rate limit|resource_exhausted|free_tier_requests|overloaded|no longer available|not found|service unavailable|โควตา/i.test(
     message,
   );
 }

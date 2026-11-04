@@ -6,7 +6,7 @@ import type { ParsedKtbLine } from "@/types/bank-reconcile";
 export const KTB_STATEMENT_PASSWORD = "0905564000520";
 
 const HEADER_ALIASES: Record<string, string[]> = {
-  date: ["วันที่ทำรายการ", "วันที่รายการ", "วันที่", "transaction date", "value date", "date"],
+  date: ["วันที่/ เวลา", "วันที่/เวลา", "วันที่ทำรายการ", "วันที่รายการ", "วันที่", "transaction date", "value date", "date"],
   time: ["เวลาทำรายการ", "เวลา", "time"],
   code: ["รหัสรายการ", "รหัสทำรายการ", "รหัส", "txn code", "code"],
   description: [
@@ -20,10 +20,20 @@ const HEADER_ALIASES: Record<string, string[]> = {
   withdrawal: ["จำนวนเงินถอน", "ยอดเงินถอน", "ยอดถอน", "ถอนเงิน", "ถอน", "withdrawal", "debit"],
   deposit: ["จำนวนเงินฝาก", "ยอดเงินฝาก", "ยอดฝาก", "ฝากเงิน", "ฝาก", "deposit", "credit"],
   balance: ["ยอดเงินคงเหลือ", "ยอดคงเหลือ", "คงเหลือ", "balance"],
+  signed: ["ถอนเงิน/ฝากเงิน", "ฝากเงิน/ถอนเงิน"],
+  cheque: ["หมายเลขเช็ค", "เลขที่เช็ค"],
 };
 
+const SUMMARY_ROW =
+  /ยอดคงเหลือยกมา|ยอดยกมา|ยอดยกไป|รายการถอนเงิน|รายการฝากเงิน|opening balance|closing balance/i;
+
 function headerKey(value: string): string {
-  return value.normalize("NFKC").toLocaleLowerCase("th").replace(/\s+/g, " ").trim();
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase("th")
+    .replace(/\s*\/\s*/g, "/")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function pickColumn(headers: string[], aliases: string[]): number {
@@ -296,26 +306,42 @@ function rowsToLines(rows: string[][]): ParsedKtbLine[] {
   const headers = rows[headerIndex];
   const dateCol = pickColumn(headers, HEADER_ALIASES.date);
   const timeCol = pickColumn(headers, HEADER_ALIASES.time);
-  const codeCol = pickColumn(headers, HEADER_ALIASES.code);
+  const codeCol = pickColumn(headers, [...HEADER_ALIASES.cheque, ...HEADER_ALIASES.code]);
   const descriptionCol = pickColumn(headers, HEADER_ALIASES.description);
-  const withdrawalCol = pickColumn(headers, HEADER_ALIASES.withdrawal);
-  const depositCol = pickColumn(headers, HEADER_ALIASES.deposit);
+  const listCol = headers.findIndex((header) => headerKey(header) === "รายการ");
+  const signedCol = pickColumn(headers, HEADER_ALIASES.signed);
+  const withdrawalCol =
+    signedCol >= 0 ? -1 : pickColumn(headers, HEADER_ALIASES.withdrawal);
+  const depositCol = signedCol >= 0 ? -1 : pickColumn(headers, HEADER_ALIASES.deposit);
   const balanceCol = pickColumn(headers, HEADER_ALIASES.balance);
   const lines: ParsedKtbLine[] = [];
   const seen = new Set<string>();
 
   for (const row of rows.slice(headerIndex + 1)) {
+    const rowText = row.join(" ");
+    if (SUMMARY_ROW.test(rowText)) continue;
     const description = descriptionCol >= 0 ? row[descriptionCol] ?? "" : "";
-    if (/^รวม|ยอดยกมา|ยอดยกไป|opening balance|closing balance/i.test(description.trim())) {
-      continue;
-    }
+    const itemText =
+      listCol >= 0 && listCol !== descriptionCol ? row[listCol] ?? "" : "";
+    const narrative = [itemText, description].filter(Boolean).join(" ").trim();
+    const signed = signedCol >= 0 ? parseAmount(row[signedCol] ?? "") : null;
+    const depositAmount =
+      signed != null ? (signed > 0 ? signed : 0) : depositCol >= 0 ? parseAmount(row[depositCol] ?? "") : null;
+    const withdrawalAmount =
+      signed != null
+        ? signed < 0
+          ? Math.abs(signed)
+          : 0
+        : withdrawalCol >= 0
+          ? parseAmount(row[withdrawalCol] ?? "")
+          : null;
     const line = finalizeLine({
       tx_date: dateCol >= 0 ? dateCell(row[dateCol] ?? "") : "",
-      tx_time: timeCol >= 0 ? timeCell(row[timeCol] ?? "") : "",
+      tx_time: timeCol >= 0 && timeCol !== dateCol ? timeCell(row[timeCol] ?? "") : "",
       tx_code: codeCol >= 0 ? row[codeCol] ?? "" : "",
-      description,
-      withdrawal_amount: withdrawalCol >= 0 ? parseAmount(row[withdrawalCol] ?? "") : null,
-      deposit_amount: depositCol >= 0 ? parseAmount(row[depositCol] ?? "") : null,
+      description: narrative,
+      withdrawal_amount: withdrawalAmount,
+      deposit_amount: depositAmount,
       balance_amount: balanceCol >= 0 ? parseAmount(row[balanceCol] ?? "") : null,
     });
     if (!line || seen.has(line.row_hash)) continue;

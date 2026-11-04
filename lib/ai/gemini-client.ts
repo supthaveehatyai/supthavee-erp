@@ -34,6 +34,17 @@ type GoogleModelRow = {
 
 const MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 
+/** Shared pool: quota / 404 / 503 on one id moves to the next without failing the user. */
+export const GEMINI_FALLBACK_POOL = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-2.5-flash-lite-preview-06-17",
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash",
+  "gemini-1.5-flash-8b",
+  "gemini-1.5-pro",
+] as const;
+
 export const GEMINI_API_KEY_MISSING_MESSAGE =
   "ไม่พบ GEMINI_API_KEY ทั้งบน Vercel (Environment Variables) และ Supabase Secrets";
 
@@ -236,20 +247,35 @@ export class GeminiQuotaExhaustedError extends Error {
   }
 }
 
+function geminiFallbackModels(
+  preferredModel: string,
+  extra?: string[] | null,
+): string[] {
+  const preferred = cleanGeminiModelId(preferredModel);
+  const configured = buildOcrModelCascade("", extra);
+  return [
+    ...new Set(
+      [preferred, ...GEMINI_FALLBACK_POOL, ...configured].filter(
+        (model) => model.length > 0,
+      ),
+    ),
+  ];
+}
+
 /**
- * One generateContent call per invoice. Models already at quota are skipped.
- * 429, 404, and 503 mark that model exhausted and try the next id.
+ * Tries the shared fallback pool in order. Quota, rate limit, 404, and 503
+ * only warn and move to the next model.
  */
-export async function generateGeminiContent(options: {
+export async function generateWithGeminiFallback(options: {
   apiKey: string;
-  preferredModel: string;
+  preferredModel?: string | null;
   parts: GeminiPart[];
   modelCascade?: string[] | null;
   skipModels?: string[] | null;
   onModelOutcome?: (outcome: { model: string; exhausted: boolean }) => Promise<void>;
 }): Promise<GeminiGenerateResult> {
-  const preferred = cleanGeminiModelId(options.preferredModel);
-  const cascade = buildOcrModelCascade(preferred, options.modelCascade);
+  const preferred = cleanGeminiModelId(options.preferredModel ?? "");
+  const cascade = geminiFallbackModels(preferred, options.modelCascade);
   const skipped = new Set(
     (options.skipModels ?? []).map((model) => model.replace(/^models\//, "").trim()),
   );
@@ -299,4 +325,19 @@ export async function generateGeminiContent(options: {
 
   const detail = lastError instanceof Error ? lastError.message : "ไม่ทราบสาเหตุ";
   throw new Error(`เรียก Gemini ไม่สำเร็จ: ${detail}`);
+}
+
+/**
+ * One generateContent call per invoice. Models already at quota are skipped.
+ * 429, 404, and 503 mark that model exhausted and try the next id.
+ */
+export async function generateGeminiContent(options: {
+  apiKey: string;
+  preferredModel: string;
+  parts: GeminiPart[];
+  modelCascade?: string[] | null;
+  skipModels?: string[] | null;
+  onModelOutcome?: (outcome: { model: string; exhausted: boolean }) => Promise<void>;
+}): Promise<GeminiGenerateResult> {
+  return generateWithGeminiFallback(options);
 }
