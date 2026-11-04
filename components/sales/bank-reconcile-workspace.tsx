@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
+import Link from "next/link";
 import { Landmark, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -14,12 +15,14 @@ import {
   searchOpenSalesBills,
   suggestBillMatches,
   unmatchBankStatementLine,
+  unmatchStatementLineAllocation,
 } from "@/lib/actions/bank-reconcile-actions";
 import { formatShortDateTh } from "@/lib/utils/date-formatter";
 import { cn } from "@/lib/utils";
 import type {
   BankStatementLineView,
   BillMatchSuggestion,
+  MatchedStatementDocument,
   OpenSalesBill,
 } from "@/types/bank-reconcile";
 import { Button } from "@/components/ui/button";
@@ -70,8 +73,56 @@ function billCaption(bill: OpenSalesBill): string {
   return `${bill.doc_no} · ${when}${slip}${customer} · ตัดได้ ${money(bill.linkable_amount)}${detail}`;
 }
 
+function amountNotes(doc: MatchedStatementDocument): string {
+  const notes: string[] = [];
+  if (doc.deposit_deducted > 0.05) notes.push(`หักมัดจำ ${money(doc.deposit_deducted)}`);
+  if (doc.wht_amount > 0.05) notes.push(`หัก ณ ที่จ่าย ${money(doc.wht_amount)}`);
+  return notes.length > 0 ? ` (${notes.join(" ")})` : "";
+}
+
+function MatchStatusCell({ line }: { line: BankStatementLineView }) {
+  const documents = line.matched_documents ?? [];
+  const docNos =
+    line.matched_doc_nos || documents.map((doc) => doc.doc_no).filter(Boolean).join(", ");
+  const customers = [...new Set(documents.map((doc) => doc.customer_name).filter(Boolean))];
+  if (line.reconcile_status === "MATCHED" && !docNos && line.expense_memo.trim()) {
+    return (
+      <span className="inline-flex max-w-[220px] rounded-md bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700">
+        ✅ MATCHED · {line.expense_memo.trim()}
+      </span>
+    );
+  }
+  if (line.reconcile_status === "MATCHED" && docNos) {
+    return (
+      <div className="max-w-[220px]">
+        <span className="inline-flex rounded-md bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700">
+          ✅ MATCHED · {docNos}
+        </span>
+        {customers.length > 0 ? (
+          <div className="mt-0.5 truncate text-[11px] font-normal text-slate-500">
+            {customers.join(" · ")}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+  if (documents.length > 0) {
+    return (
+      <div className="max-w-[220px]">
+        <div>{line.reconcile_status}</div>
+        <div className="truncate text-[11px] font-semibold text-emerald-700">{docNos}</div>
+        {customers[0] ? (
+          <div className="truncate text-[11px] text-slate-500">{customers.join(" · ")}</div>
+        ) : null}
+      </div>
+    );
+  }
+  return <>{line.reconcile_status}</>;
+}
+
 export default function BankReconcileWorkspace() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -356,6 +407,50 @@ export default function BankReconcileWorkspace() {
     }
   }
 
+  async function releaseMatchedDocument(documentId: string, mode: "replace" | "clear") {
+    if (!selected) return;
+    const lineId = selected.id;
+    const payingLine = isWithdrawal(selected);
+    const txDate = selected.tx_date;
+    const description = selected.description;
+    setIsWorking(true);
+    try {
+      const result = await unmatchStatementLineAllocation(lineId, documentId);
+      if (result.error || !result.data) {
+        toast.error(result.error ?? "ยกเลิกการชนยอดไม่สำเร็จ");
+        return;
+      }
+      toast.success(
+        mode === "replace" ? "ปลดคู่แล้ว เลือกบิลใหม่ได้ทันที" : "ยกเลิกการชนยอดของบิลนี้แล้ว",
+      );
+      const refreshed = await listBankStatementLines(scope);
+      setLines(refreshed.data);
+      setListError(refreshed.error);
+      const next = refreshed.data.find((line) => line.id === lineId) ?? null;
+      setPicked({});
+      setSuggestions([]);
+      if (!next) {
+        setSelectedId(null);
+        setBills([]);
+        return;
+      }
+      setSelectedId(next.id);
+      const found = payingLine
+        ? await searchOpenPurchaseBills({ keyword, tx_date: txDate })
+        : await searchOpenSalesBills({
+            keyword,
+            tx_date: txDate,
+            sales_channel: channel || null,
+            description,
+          });
+      if (found.error) toast.error(found.error);
+      setBills(found.data);
+      if (mode === "replace") searchInputRef.current?.focus();
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
   const duplicateWarnings = useMemo(() => {
     const seen = new Set<string>();
     const warnings: { date: string; amount: number; count: number }[] = [];
@@ -574,8 +669,8 @@ export default function BankReconcileWorkspace() {
                           "—"
                         )}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-xs">
-                        {line.reconcile_status}
+                      <td className="px-3 py-2 text-xs">
+                        <MatchStatusCell line={line} />
                       </td>
                     </tr>
                   ))
@@ -592,16 +687,92 @@ export default function BankReconcileWorkspace() {
             </p>
           ) : (
             <>
-              {selected.reconcile_status === "MATCHED" ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="border-amber-300 text-amber-800 hover:bg-amber-50"
-                  disabled={isWorking}
-                  onClick={() => void unmatchSelected()}
-                >
-                  🔄 ยกเลิกการชนยอด (Unmatch)
-                </Button>
+              {selected.matched_documents.length > 0 ||
+              (selected.reconcile_status === "MATCHED" && selected.expense_memo.trim()) ? (
+                <div className="space-y-3 rounded-2xl border-2 border-emerald-400 bg-emerald-50/70 p-3">
+                  <h3 className="text-sm font-semibold text-emerald-800">
+                    ✅ เอกสารที่ชนยอดกับรายการนี้แล้ว
+                  </h3>
+                  {selected.expense_memo.trim() ? (
+                    <p className="text-xs text-emerald-900">
+                      บันทึกรายจ่าย: {selected.expense_memo.trim()}
+                    </p>
+                  ) : null}
+                  {selected.matched_documents.map((doc) => (
+                    <article
+                      key={doc.document_id || doc.doc_no}
+                      className="space-y-2 rounded-xl border border-emerald-200 bg-white p-3"
+                    >
+                      <div className="text-sm font-semibold text-slate-900">
+                        {doc.doc_no}{" "}
+                        <span className="font-medium text-slate-500">({doc.doc_type})</span>
+                        <span className="font-normal text-slate-600">
+                          {" "}
+                          · {formatShortDateTh(doc.doc_date)}
+                        </span>
+                        {doc.parent_doc_no ? (
+                          <span className="ml-2 inline-flex rounded-md bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700">
+                            ต่อยอดจาก {doc.parent_doc_no}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="text-xs text-slate-600">
+                        {doc.customer_name || "ไม่ระบุลูกค้า"}
+                        {doc.handwritten_doc_ref
+                          ? ` · อ้างอิงบิลมือ ${doc.handwritten_doc_ref}`
+                          : ""}
+                        {doc.reference_no ? ` · เลขสลิป ${doc.reference_no}` : ""}
+                      </p>
+                      <p className="text-xs text-slate-700">
+                        ยอดเต็มบิล: ฿{money(doc.grand_total)}
+                        {amountNotes(doc)}
+                      </p>
+                      <p className="text-sm font-semibold text-emerald-800">
+                        ยอดที่ชนกับรายการนี้: ฿{money(doc.allocated_amount)}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Link
+                          href={`/sales/${encodeURIComponent(doc.doc_no)}`}
+                          target="_blank"
+                          className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-800 hover:bg-slate-50"
+                        >
+                          🔍 เปิดดูบิล
+                        </Link>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={isWorking}
+                          onClick={() => void releaseMatchedDocument(doc.document_id, "replace")}
+                        >
+                          ✏️ เปลี่ยนบิล / แก้ไขการชนยอด
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="border-amber-300 text-amber-800 hover:bg-amber-50"
+                          disabled={isWorking}
+                          onClick={() => void releaseMatchedDocument(doc.document_id, "clear")}
+                        >
+                          🔄 ยกเลิกการชนยอด (Unmatch)
+                        </Button>
+                      </div>
+                    </article>
+                  ))}
+                  {selected.matched_documents.length === 0 &&
+                  selected.reconcile_status === "MATCHED" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-amber-300 text-amber-800 hover:bg-amber-50"
+                      disabled={isWorking}
+                      onClick={() => void unmatchSelected()}
+                    >
+                      🔄 ยกเลิกการชนยอด (Unmatch)
+                    </Button>
+                  ) : null}
+                </div>
               ) : null}
               <div>
                 <h2 className={cn("text-sm font-semibold", paying ? "text-rose-700" : "text-slate-800")}>
@@ -651,6 +822,7 @@ export default function BankReconcileWorkspace() {
 
               <div className="grid gap-2 sm:grid-cols-[1fr_140px_auto]">
                 <input
+                  ref={searchInputRef}
                   value={keyword}
                   onChange={(event) => setKeyword(event.target.value)}
                   placeholder={paying ? "เลขเอกสาร / ชื่อเจ้าหนี้" : "เลขบิล / ชื่อลูกค้า / ชื่อเล่น"}

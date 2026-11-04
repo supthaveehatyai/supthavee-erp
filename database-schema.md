@@ -84,6 +84,10 @@ CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names, column names, views, 
 
 \- `get\_reconcile\_candidate\_documents()` และ Trigger `trg\_sync\_parent\_child\_document\_settlement` — ยอดตัดได้ของบิลขายคือ `grand\_total - deposit\_deducted - wht\_amount - allocated` โดยไม่หัก `wht\_amount` ซ้ำ และไม่แสดง `SO` ที่ถูกแปลงเป็น `CS\_TAX` / `TAX\_INV` / `INV\_DO` / `ABB` ที่ออกเลขแล้ว
 
+\- `get\_statement\_lines\_with\_matches(p\_import\_id uuid DEFAULT NULL)` คืนรายการเดินบัญชีพร้อม `matched\_doc\_nos` และ `matched\_documents` (เลขที่บิล, ลูกค้า, อ้างอิงบิลมือ, เลขสลิป, ยอดเต็ม, มัดจำ, หัก ณ ที่จ่าย, ยอดที่ชน, เลขใบสั่งขายต้นทาง)
+
+\- `unmatch\_statement\_line\_allocation(p\_statement\_line\_id uuid, p\_document\_id uuid DEFAULT NULL)` ปลดคู่ชนยอดทั้งบรรทัด หรือเฉพาะบิลที่ระบุ แล้วคืนบิลกลับเข้าลิสต์รอชน
+
 \- `reclassify\_document\_payment\_channel(p\_document\_id, p\_new\_channel, p\_bank\_account\_id)` (ย้ายบิลออกจากหน้าชนยอด KTB ไปช่องทาง `CASH` หรือ `OTHER\_BANK`)
 
 ###### \- `expenses` (บิลค่าใช้จ่าย / OPEX — PK: `id`, ซิงก์คอลัมน์เลขเอกสาร `expense\_no` = `doc\_no` = `document\_no`, ซิงก์วันที่ `expense\_date` = `doc\_date`, ซิงก์รายละเอียด `description` = `remark`, ซิงก์หมวดหมู่ `category` = `expense\_category`, `contact\_id` FK → `contacts.id`, `vendor\_name`, `vendor\_tax\_id`, `tax\_invoice\_no`, `reference\_no`, `vehicle\_plate`, `tax\_type` \[`INCLUSIVE` | `EXCLUSIVE` | `NO\_VAT`], `tax\_invoice\_status`, `accounting\_tax\_tier`, `net\_amount`, `sub\_total`, `amount`, `vat\_rate`, `vat\_amount`, `wht\_rate`, `wht\_amount`, `total\_amount`, และ \*\*`grand\_total` เป็น `GENERATED ALWAYS AS (net\_amount + vat\_amount) STORED` ห้ามส่งค่าเข้า Insert/Update เด็ดขาด\*\*, `bank\_account\_id` \[Single FK → `mst\_bank\_accounts.id`], `attachment\_url`, `payment\_slip\_url`, `status`, `payment\_status`)

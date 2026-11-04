@@ -23,6 +23,7 @@ import { createSupabaseServerClient } from "@/lib/supabase-server";
 import type {
   BankMatchAllocationInput,
   BankStatementLineView,
+  MatchedStatementDocument,
   BillMatchSuggestion,
   ConfirmBankMatchInput,
   ConfirmBankMatchResult,
@@ -80,6 +81,54 @@ function isMissingColumn(message: string): string | null {
 
 function isSchemaMiss(message: string): boolean {
   return /Could not find the table|PGRST205|schema cache|does not exist/i.test(message);
+}
+
+function isMissingFunction(message: string): boolean {
+  return /Could not find the function|PGRST202/i.test(message);
+}
+
+function parseMatchedDocuments(value: unknown): MatchedStatementDocument[] {
+  let raw: unknown = value;
+  if (typeof value === "string") {
+    try {
+      raw = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      const row = (item ?? {}) as Record<string, unknown>;
+      const parent = String(row.parent_doc_no ?? "").trim();
+      return {
+        document_id: String(row.document_id ?? row.id ?? ""),
+        doc_no: String(row.doc_no ?? ""),
+        doc_type: String(row.doc_type ?? ""),
+        doc_date: String(row.doc_date ?? "").slice(0, 10),
+        customer_name: String(row.customer_name ?? row.customer_label ?? "").trim(),
+        handwritten_doc_ref: String(row.handwritten_doc_ref ?? "").trim(),
+        reference_no: String(row.reference_no ?? "").trim(),
+        grand_total: roundMoney(Number(row.grand_total ?? 0)),
+        deposit_deducted: roundMoney(Number(row.deposit_deducted ?? 0)),
+        wht_amount: roundMoney(Number(row.wht_amount ?? 0)),
+        allocated_amount: roundMoney(Number(row.allocated_amount ?? 0)),
+        parent_doc_no: parent || null,
+      };
+    })
+    .filter((doc) => doc.document_id || doc.doc_no);
+}
+
+function matchedDocNos(value: unknown, documents: MatchedStatementDocument[]): string {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? "").trim()).filter(Boolean).join(", ");
+  }
+  const text = String(value ?? "").trim();
+  if (text && text !== "null") return text;
+  return documents
+    .map((doc) => doc.doc_no)
+    .filter(Boolean)
+    .join(", ");
 }
 
 async function readGeminiText(
@@ -211,6 +260,7 @@ async function upsertLines(
 
 function mapLine(row: Record<string, unknown>): BankStatementLineView {
   const balance = row.balance_amount;
+  const matchedDocuments = parseMatchedDocuments(row.matched_documents);
   return {
     id: String(row.id ?? ""),
     tx_date: String(row.tx_date ?? "").slice(0, 10),
@@ -230,6 +280,8 @@ function mapLine(row: Record<string, unknown>): BankStatementLineView {
     expense_memo: String(row.expense_memo ?? ""),
     reconcile_status: String(row.reconcile_status ?? "UNMATCHED"),
     matched_amount: roundMoney(Number(row.matched_amount ?? 0)),
+    matched_documents: matchedDocuments,
+    matched_doc_nos: matchedDocNos(row.matched_doc_nos, matchedDocuments),
   };
 }
 
@@ -319,6 +371,158 @@ export async function importKtbStatement(
   }
 }
 
+function filterStatementLines(
+  lines: BankStatementLineView[],
+  scope: "deposits" | "withdrawals" | "all",
+): BankStatementLineView[] {
+  const sorted = [...lines].sort((left, right) => right.tx_date.localeCompare(left.tx_date));
+  if (scope === "withdrawals") {
+    return sorted.filter((line) => line.withdrawal_amount > 0).slice(0, 200);
+  }
+  if (scope === "deposits") {
+    return sorted
+      .filter(
+        (line) =>
+          line.deposit_amount > 0 &&
+          (line.reconcile_status === "UNMATCHED" ||
+            line.reconcile_status === "PARTIAL" ||
+            line.reconcile_status === "MATCHED"),
+      )
+      .slice(0, 200);
+  }
+  return sorted.slice(0, 400);
+}
+
+async function attachMatchedDocuments(
+  supabase: Db,
+  lines: BankStatementLineView[],
+): Promise<BankStatementLineView[]> {
+  if (lines.length === 0) return lines;
+  const allocations: {
+    statement_line_id: string;
+    document_id: string;
+    allocated_amount: number;
+  }[] = [];
+  const lineIds = lines.map((line) => line.id);
+  for (let index = 0; index < lineIds.length; index += 80) {
+    const slice = lineIds.slice(index, index + 80);
+    const { data, error } = await supabase
+      .from("bank_reconciliation_allocations")
+      .select("statement_line_id, document_id, allocated_amount")
+      .in("statement_line_id", slice)
+      .limit(1000);
+    if (error) {
+      if (isSchemaMiss(error.message)) return lines;
+      throw new Error(error.message);
+    }
+    for (const row of data ?? []) {
+      allocations.push({
+        statement_line_id: String(row.statement_line_id ?? ""),
+        document_id: String(row.document_id ?? ""),
+        allocated_amount: roundMoney(Number(row.allocated_amount ?? 0)),
+      });
+    }
+  }
+  const documentIds = [...new Set(allocations.map((row) => row.document_id).filter(Boolean))];
+  const documents = new Map<string, Record<string, unknown>>();
+  const reader = supabase as unknown as {
+    from: (table: string) => {
+      select: (columns: string) => {
+        in: (
+          column: string,
+          values: string[],
+        ) => Promise<{ data: Record<string, unknown>[] | null; error: { message: string } | null }>;
+      };
+    };
+  };
+  let columns =
+    "id, doc_no, doc_type, doc_date, contact_id, reference_no, handwritten_doc_ref, grand_total, deposit_deducted, wht_amount, ref_document_id";
+  for (let index = 0; index < documentIds.length; index += 80) {
+    const slice = documentIds.slice(index, index + 80);
+    let pending = slice;
+    for (let attempt = 0; attempt < 6 && pending.length > 0; attempt += 1) {
+      const loaded = await reader.from("documents").select(columns).in("id", pending);
+      if (!loaded.error) {
+        for (const row of loaded.data ?? []) documents.set(String(row.id ?? ""), row);
+        pending = [];
+        break;
+      }
+      const missing = isMissingColumn(loaded.error.message);
+      if (missing && columns.includes(missing)) {
+        columns = columns
+          .split(",")
+          .map((part) => part.trim())
+          .filter((part) => part !== missing)
+          .join(", ");
+        continue;
+      }
+      if (isSchemaMiss(loaded.error.message)) return lines;
+      throw new Error(loaded.error.message);
+    }
+  }
+  const contactIds = [
+    ...new Set(
+      [...documents.values()].map((row) => String(row.contact_id ?? "")).filter(Boolean),
+    ),
+  ];
+  const customers = new Map<string, string>();
+  for (let index = 0; index < contactIds.length; index += 80) {
+    const slice = contactIds.slice(index, index + 80);
+    const { data } = await supabase
+      .from("contacts")
+      .select("id, company_name, nickname")
+      .in("id", slice);
+    for (const row of data ?? []) {
+      const company = String(row.company_name ?? "").trim();
+      const nickname = String(row.nickname ?? "").trim();
+      customers.set(String(row.id), company || nickname);
+    }
+  }
+  const parentIds = [
+    ...new Set(
+      [...documents.values()].map((row) => String(row.ref_document_id ?? "")).filter(Boolean),
+    ),
+  ];
+  const parents = new Map<string, string>();
+  for (let index = 0; index < parentIds.length; index += 80) {
+    const slice = parentIds.slice(index, index + 80);
+    const { data } = await supabase.from("documents").select("id, doc_no").in("id", slice);
+    for (const row of data ?? []) parents.set(String(row.id), String(row.doc_no ?? ""));
+  }
+  const byLine = new Map<string, MatchedStatementDocument[]>();
+  for (const allocation of allocations) {
+    const doc = documents.get(allocation.document_id);
+    if (!doc) continue;
+    const parentId = String(doc.ref_document_id ?? "");
+    const parentNo = parentId ? parents.get(parentId) ?? "" : "";
+    const matched: MatchedStatementDocument = {
+      document_id: allocation.document_id,
+      doc_no: String(doc.doc_no ?? ""),
+      doc_type: String(doc.doc_type ?? ""),
+      doc_date: String(doc.doc_date ?? "").slice(0, 10),
+      customer_name: customers.get(String(doc.contact_id ?? "")) ?? "",
+      handwritten_doc_ref: String(doc.handwritten_doc_ref ?? "").trim(),
+      reference_no: String(doc.reference_no ?? "").trim(),
+      grand_total: roundMoney(Number(doc.grand_total ?? 0)),
+      deposit_deducted: roundMoney(Number(doc.deposit_deducted ?? 0)),
+      wht_amount: roundMoney(Number(doc.wht_amount ?? 0)),
+      allocated_amount: allocation.allocated_amount,
+      parent_doc_no: parentNo || null,
+    };
+    const bucket = byLine.get(allocation.statement_line_id) ?? [];
+    bucket.push(matched);
+    byLine.set(allocation.statement_line_id, bucket);
+  }
+  return lines.map((line) => {
+    const matchedDocuments = byLine.get(line.id) ?? [];
+    return {
+      ...line,
+      matched_documents: matchedDocuments,
+      matched_doc_nos: matchedDocuments.map((doc) => doc.doc_no).filter(Boolean).join(", "),
+    };
+  });
+}
+
 export async function listBankStatementLines(
   scope: "deposits" | "withdrawals" | "all" = "deposits",
 ): Promise<ListBankLinesResult> {
@@ -326,6 +530,26 @@ export async function listBankStatementLines(
     const owner = await requireSessionUserId();
     if (!owner.ok) return { data: [], error: owner.error };
     const supabase = createSupabaseServerClient();
+    const rpcClient = supabase as unknown as {
+      rpc: (
+        fn: "get_statement_lines_with_matches",
+        args: { p_import_id: string | null },
+      ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    };
+    const rpc = await rpcClient.rpc("get_statement_lines_with_matches", { p_import_id: null });
+    if (!rpc.error) {
+      const rows = (Array.isArray(rpc.data) ? rpc.data : []) as Record<string, unknown>[];
+      const mapped = rows.map((row) => mapLine(row));
+      const hasMatchPayload = rows.some(
+        (row) => "matched_documents" in row || "matched_doc_nos" in row,
+      );
+      const withMatches = hasMatchPayload ? mapped : await attachMatchedDocuments(supabase, mapped);
+      return { data: filterStatementLines(withMatches, scope), error: null };
+    }
+    if (!isMissingFunction(rpc.error.message) && !isSchemaMiss(rpc.error.message)) {
+      return { data: [], error: rpc.error.message };
+    }
+
     let query = supabase
       .from("bank_statement_lines")
       .select(
@@ -336,7 +560,7 @@ export async function listBankStatementLines(
     if (scope === "deposits") {
       query = query
         .gt("deposit_amount", 0)
-        .in("reconcile_status", ["UNMATCHED", "PARTIAL"]);
+        .in("reconcile_status", ["UNMATCHED", "PARTIAL", "MATCHED"]);
     } else if (scope === "withdrawals") {
       query = query.gt("withdrawal_amount", 0);
     }
@@ -349,10 +573,8 @@ export async function listBankStatementLines(
           : error.message,
       };
     }
-    return {
-      data: (data ?? []).map((row) => mapLine(row as Record<string, unknown>)),
-      error: null,
-    };
+    const mapped = (data ?? []).map((row) => mapLine(row as Record<string, unknown>));
+    return { data: await attachMatchedDocuments(supabase, mapped), error: null };
   } catch (error) {
     return {
       data: [],
@@ -905,6 +1127,8 @@ export async function unmatchBankStatementLine(
     const lineId = statementLineId?.trim() ?? "";
     if (!lineId) return { data: null, error: "ไม่พบรายการเดินบัญชี" };
     const supabase = createSupabaseServerClient();
+    const released = await callUnmatchAllocationRpc(supabase, lineId, null);
+    if (released.handled) return released.result;
     const { data: allocations, error: allocationError } = await supabase
       .from("bank_reconciliation_allocations")
       .select("id, document_id, allocated_amount")
@@ -991,6 +1215,167 @@ export async function unmatchBankStatementLine(
       error: error instanceof Error ? error.message : "ยกเลิกการชนยอดไม่สำเร็จ",
     };
   }
+}
+
+export async function unmatchStatementLineAllocation(
+  statementLineId: string,
+  documentId?: string | null,
+): Promise<ConfirmBankMatchResult> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: null, error: owner.error };
+    const lineId = statementLineId?.trim() ?? "";
+    const docId = documentId?.trim() ?? "";
+    if (!lineId) return { data: null, error: "ไม่พบรายการเดินบัญชี" };
+    if (!docId) return unmatchBankStatementLine(lineId);
+    const supabase = createSupabaseServerClient();
+    const released = await callUnmatchAllocationRpc(supabase, lineId, docId);
+    if (released.handled) return released.result;
+    return unmatchOneAllocationLocal(supabase, lineId, docId);
+  } catch (error) {
+    return {
+      data: null,
+      error: error instanceof Error ? error.message : "ยกเลิกการชนยอดไม่สำเร็จ",
+    };
+  }
+}
+
+async function callUnmatchAllocationRpc(
+  supabase: Db,
+  lineId: string,
+  documentId: string | null,
+): Promise<{ handled: boolean; result: ConfirmBankMatchResult }> {
+  const rpcClient = supabase as unknown as {
+    rpc: (
+      fn: "unmatch_statement_line_allocation",
+      args: { p_statement_line_id: string; p_document_id: string | null },
+    ) => Promise<{ data: unknown; error: { message: string } | null }>;
+  };
+  const saved = await rpcClient.rpc("unmatch_statement_line_allocation", {
+    p_statement_line_id: lineId,
+    p_document_id: documentId,
+  });
+  if (!saved.error) {
+    revalidatePath("/sales");
+    revalidatePath("/sales/reconcile");
+    const payload = (saved.data ?? {}) as Record<string, unknown>;
+    return {
+      handled: true,
+      result: {
+        data: {
+          reconcile_status: String(payload.reconcile_status ?? "UNMATCHED"),
+          matched_amount: roundMoney(Number(payload.matched_amount ?? 0)),
+          warnings: [],
+        },
+        error: null,
+      },
+    };
+  }
+  if (isMissingFunction(saved.error.message)) {
+    return { handled: false, result: { data: null, error: saved.error.message } };
+  }
+  return { handled: true, result: { data: null, error: saved.error.message } };
+}
+
+async function unmatchOneAllocationLocal(
+  supabase: Db,
+  lineId: string,
+  documentId: string,
+): Promise<ConfirmBankMatchResult> {
+  const { data: allocation, error: allocationError } = await supabase
+    .from("bank_reconciliation_allocations")
+    .select("id, document_id, allocated_amount")
+    .eq("statement_line_id", lineId)
+    .eq("document_id", documentId)
+    .maybeSingle();
+  if (allocationError) return { data: null, error: allocationError.message };
+  if (!allocation) return { data: null, error: "ไม่พบคู่ชนยอดของบิลนี้" };
+
+  const amount = roundMoney(Number(allocation.allocated_amount ?? 0));
+  const creditTypes = new Set(["SO", "INV_DO", "TAX_INV"]);
+  const snapshots: { id: string; docNo: string; paid: number; status: string }[] = [];
+  const { data: doc } = await supabase
+    .from("documents")
+    .select("id, doc_no, doc_type, grand_total, paid_amount, deposit_deducted, payment_status")
+    .eq("id", documentId)
+    .maybeSingle();
+  if (doc && creditTypes.has(String(doc.doc_type ?? "")) && amount > 0) {
+    const paid = roundMoney(Number(doc.paid_amount ?? 0));
+    const nextPaid = roundMoney(Math.max(0, paid - amount));
+    const grand = roundMoney(Number(doc.grand_total ?? 0));
+    const deposit = roundMoney(Number(doc.deposit_deducted ?? 0));
+    const nextStatus =
+      nextPaid + deposit + MONEY_EPSILON >= grand
+        ? "PAID"
+        : nextPaid > MONEY_EPSILON
+          ? "PARTIAL"
+          : "UNPAID";
+    snapshots.push({
+      id: documentId,
+      docNo: String(doc.doc_no ?? ""),
+      paid,
+      status: String(doc.payment_status ?? ""),
+    });
+    const { error: updateError } = await supabase
+      .from("documents")
+      .update({
+        paid_amount: nextPaid,
+        payment_status: nextStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", documentId);
+    if (updateError) return { data: null, error: updateError.message };
+    await syncPaymentToDocHeader(supabase, {
+      documentId,
+      docNo: String(doc.doc_no ?? ""),
+      paidAmount: nextPaid,
+      paymentStatus: nextStatus,
+    });
+  }
+
+  const { error: deleteError } = await supabase
+    .from("bank_reconciliation_allocations")
+    .delete()
+    .eq("id", allocation.id);
+  if (deleteError) {
+    await restorePayments(supabase, snapshots);
+    return { data: null, error: deleteError.message };
+  }
+
+  const { data: remaining, error: remainingError } = await supabase
+    .from("bank_reconciliation_allocations")
+    .select("allocated_amount")
+    .eq("statement_line_id", lineId);
+  if (remainingError) return { data: null, error: remainingError.message };
+  const matched = roundMoney(
+    (remaining ?? []).reduce((sum, row) => sum + Number(row.allocated_amount ?? 0), 0),
+  );
+  const { data: lineRow } = await supabase
+    .from("bank_statement_lines")
+    .select("deposit_amount, withdrawal_amount")
+    .eq("id", lineId)
+    .maybeSingle();
+  const deposit = roundMoney(Number(lineRow?.deposit_amount ?? 0));
+  const withdrawal = roundMoney(Number(lineRow?.withdrawal_amount ?? 0));
+  const movement = deposit > 0 ? deposit : withdrawal;
+  const status =
+    matched <= MONEY_EPSILON
+      ? "UNMATCHED"
+      : matched + MONEY_EPSILON >= movement && movement > 0
+        ? "MATCHED"
+        : "PARTIAL";
+  const { error: lineError } = await supabase
+    .from("bank_statement_lines")
+    .update({
+      matched_amount: matched,
+      reconcile_status: status,
+      ...(status === "UNMATCHED" ? { expense_memo: null } : {}),
+    })
+    .eq("id", lineId);
+  if (lineError) return { data: null, error: lineError.message };
+  revalidatePath("/sales");
+  revalidatePath("/sales/reconcile");
+  return { data: { reconcile_status: status, matched_amount: matched, warnings: [] }, error: null };
 }
 
 async function syncPaymentToDocHeader(

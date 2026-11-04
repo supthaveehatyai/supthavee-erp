@@ -1,3 +1,18 @@
+export type MatchedStatementDocument = {
+  document_id: string;
+  doc_no: string;
+  doc_type: string;
+  doc_date: string;
+  customer_name: string;
+  handwritten_doc_ref: string;
+  reference_no: string;
+  grand_total: number;
+  deposit_deducted: number;
+  wht_amount: number;
+  allocated_amount: number;
+  parent_doc_no: string | null;
+};
+
 export type BankStatementLineView = {
   id: string;
   tx_date: string;
@@ -12,6 +27,8 @@ export type BankStatementLineView = {
   expense_memo: string;
   reconcile_status: "UNMATCHED" | "PARTIAL" | "MATCHED" | string;
   matched_amount: number;
+  matched_doc_nos: string;
+  matched_documents: MatchedStatementDocument[];
 };
 
 export type ParsedKtbLine = {
