@@ -60,6 +60,7 @@ export default function CustomerCombobox({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [nicknameDraft, setNicknameDraft] = useState("");
+  const [nicknameOpen, setNicknameOpen] = useState(false);
   const [isSavingNickname, setIsSavingNickname] = useState(false);
 
   const selected = options.find((item) => item.id === value);
@@ -88,6 +89,7 @@ export default function CustomerCombobox({
         return;
       }
       onNicknameChange?.(result.data.id, result.data.nickname);
+      setNicknameOpen(false);
       toast.success(
         result.data.nickname
           ? `บันทึกชื่อเล่น ${result.data.nickname} แล้ว`
@@ -175,7 +177,7 @@ export default function CustomerCombobox({
         </Command>
       </PopoverContent>
     </Popover>
-    {selected ? (
+    {selected && nicknameOpen ? (
       <div className="mt-1.5 flex gap-1.5">
         <input
           value={nicknameDraft}
@@ -203,6 +205,15 @@ export default function CustomerCombobox({
           {isSavingNickname ? "กำลังบันทึก..." : "บันทึกชื่อเล่น"}
         </Button>
       </div>
+    ) : selected ? (
+      <button
+        type="button"
+        className="mt-1 text-xs font-medium text-slate-500 hover:text-slate-800"
+        disabled={disabled}
+        onClick={() => setNicknameOpen(true)}
+      >
+        ✏️ แก้ชื่อเล่น
+      </button>
     ) : null}
   </div>
   );

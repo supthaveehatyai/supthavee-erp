@@ -29,7 +29,17 @@ import {
 } from "@/lib/utils/document-summary";
 import { isCancelAndReplaceDraft } from "@/lib/utils/cancel-replace-draft";
 import { displayDocumentItemDescription } from "@/lib/utils/credit-note-line";
+import { CashReceiptPaymentBox } from "@/components/sales/cash-receipt-payment-box";
 import { GoodsQtyBadge } from "@/components/sales/goods-qty-badge";
+import {
+  bankAccountDisplay,
+  initialBankAccountId,
+  initialCashReceiptChannel,
+  paymentChannelLabel,
+  selectedBankAccount,
+  type ActiveBankAccount,
+  type PaymentChannel,
+} from "@/lib/finance/payment-channel";
 import { ServiceLineShortcuts } from "@/components/sales/service-line-shortcuts";
 import { SalesMockupCard } from "@/components/sales/sales-mockup-card";
 import { moneyAfterQtyPrice } from "@/lib/sales/service-line-price";
@@ -169,12 +179,14 @@ export type SalesEditWorkspaceProps = {
   document: DocumentDetail;
   customers: CustomerOption[];
   customersError?: string | null;
+  bankAccounts?: ActiveBankAccount[];
 };
 
 export default function SalesEditWorkspace({
   document: initialDocument,
   customers,
   customersError = null,
+  bankAccounts = [],
 }: SalesEditWorkspaceProps) {
   const [contactId, setContactId] = useState(initialDocument.contact_id);
   const [contactPersonId, setContactPersonId] = useState(
@@ -216,6 +228,27 @@ export default function SalesEditWorkspace({
     useState<SalesChannelFieldsValue>(() =>
       salesChannelFieldsFromDocument(initialDocument),
     );
+  const [headerOpen, setHeaderOpen] = useState(true);
+  const [paymentChannel, setPaymentChannel] = useState<PaymentChannel>(() =>
+    initialCashReceiptChannel({
+      docType: initialDocument.doc_type,
+      salesChannel: initialDocument.sales_channel,
+      storedChannel: initialDocument.payment_channel,
+    }),
+  );
+  const [bankAccountId, setBankAccountId] = useState<string | null>(() =>
+    initialBankAccountId(
+      bankAccounts,
+      initialCashReceiptChannel({
+        docType: initialDocument.doc_type,
+        salesChannel: initialDocument.sales_channel,
+        storedChannel: initialDocument.payment_channel,
+      }),
+      initialDocument.bank_account_id,
+      initialDocument.receiving_bank_label,
+    ),
+  );
+  const [slipUrl, setSlipUrl] = useState(initialDocument.original_receipt_url ?? "");
   const [isPending, startTransition] = useTransition();
   const preserveInitialPersonRef = useRef(true);
   const isReplacement = isCancelAndReplaceDraft({
@@ -524,6 +557,25 @@ export default function SalesEditWorkspace({
         tracking_no: header.data.tracking_no,
         one_time_address: header.data.one_time_address,
         attachment_url: mockupUrl.trim() || null,
+        ...(initialDocument.doc_type === "ABB" || initialDocument.doc_type === "CS_TAX"
+          ? {
+              payment_channel: paymentChannel,
+              bank_account_id:
+                selectedBankAccount(bankAccounts, paymentChannel, bankAccountId)?.id ??
+                null,
+              receiving_bank_label: (() => {
+                const account = selectedBankAccount(
+                  bankAccounts,
+                  paymentChannel,
+                  bankAccountId,
+                );
+                return account
+                  ? bankAccountDisplay(account)
+                  : paymentChannelLabel(paymentChannel);
+              })(),
+              original_receipt_url: slipUrl.trim() || null,
+            }
+          : {}),
         items: isReplacement
           ? undefined
           : lineItems.map((row, index) => ({
@@ -634,6 +686,29 @@ export default function SalesEditWorkspace({
       ) : null}
 
       <Card className="border-slate-200 shadow-sm">
+        {headerOpen ? null : (
+          <div className="flex h-11 max-h-11 items-center justify-between gap-3 px-4">
+            <p className="truncate text-sm font-medium text-slate-800">
+              {initialDocument.doc_type === "ABB"
+                ? "ใบเสร็จอย่างย่อ (ABB)"
+                : initialDocument.doc_type === "CS_TAX"
+                  ? "ใบกำกับเงินสด (CS_TAX)"
+                  : initialDocument.doc_type}{" "}
+              · {docDate.slice(8, 10)}/{docDate.slice(5, 7)}/{docDate.slice(0, 4)} ·{" "}
+              {selectedCustomerName || "ยังไม่เลือกลูกค้า"}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-8 shrink-0 px-2 text-xs"
+              onClick={() => setHeaderOpen(true)}
+            >
+              🔽 ขยายหัวเอกสาร
+            </Button>
+          </div>
+        )}
+        {headerOpen ? (
+        <>
         <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 pb-3">
           <div>
             <CardTitle className="text-base">หัวเอกสาร</CardTitle>
@@ -644,6 +719,14 @@ export default function SalesEditWorkspace({
             </CardDescription>
           </div>
           <div className="flex shrink-0 gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setHeaderOpen(false)}
+            >
+              🔼 ย่อหัวเอกสาร
+            </Button>
             {!isReplacement ? (
               <Button
                 type="button"
@@ -783,6 +866,8 @@ export default function SalesEditWorkspace({
             platformClassName="sm:col-span-4"
           />
         </CardContent>
+        </>
+        ) : null}
       </Card>
 
       {needsProductionMockup ? (
@@ -1032,6 +1117,24 @@ export default function SalesEditWorkspace({
                 </div>
               </div>
               <GoodsQtyBadge rows={lineItems} />
+              {initialDocument.doc_type === "ABB" ||
+              initialDocument.doc_type === "CS_TAX" ? (
+                <CashReceiptPaymentBox
+                  channel={paymentChannel}
+                  bankAccountId={bankAccountId}
+                  accounts={bankAccounts}
+                  referenceNo={handwrittenDocRef}
+                  slipUrl={slipUrl}
+                  disabled={isPending}
+                  onChannelChange={(next, accountId) => {
+                    setPaymentChannel(next);
+                    setBankAccountId(accountId);
+                  }}
+                  onReferenceChange={setHandwrittenDocRef}
+                  onSlipUrlChange={setSlipUrl}
+                  onSlipDate={setDocDate}
+                />
+              ) : null}
               {billSummary.deposit_deducted > 0 ? (
                 <p>
                   หักเงินมัดจำ (รวม VAT):{" "}

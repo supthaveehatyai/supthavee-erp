@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import {
   getDocumentById,
+  listActiveBankAccounts,
   listActiveCustomers,
 } from "@/lib/actions/document-actions";
 import { SALES_DOC_TYPES } from "@/lib/constants/document";
@@ -38,9 +39,10 @@ export default async function EditSalesDocumentPage({ params }: PageProps) {
     notFound();
   }
 
-  const [documentResult, customersResult] = await Promise.all([
+  const [documentResult, customersResult, bankAccounts] = await Promise.all([
     getDocumentById(documentId),
     listActiveCustomers(),
+    listActiveBankAccounts(),
   ]);
 
   if (documentResult.error || !documentResult.data) {
@@ -61,6 +63,7 @@ export default async function EditSalesDocumentPage({ params }: PageProps) {
       document={doc}
       customers={customersResult.data}
       customersError={customersResult.error}
+      bankAccounts={bankAccounts.data}
     />
   );
 }

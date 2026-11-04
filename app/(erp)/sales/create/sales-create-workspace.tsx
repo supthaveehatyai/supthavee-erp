@@ -71,7 +71,17 @@ import SalesChannelFields, {
   INITIAL_SALES_CHANNEL_FIELDS,
   type SalesChannelFieldsValue,
 } from "@/components/sales/sales-channel-fields";
+import { CashReceiptPaymentBox } from "@/components/sales/cash-receipt-payment-box";
 import { GoodsQtyBadge } from "@/components/sales/goods-qty-badge";
+import {
+  bankAccountDisplay,
+  initialBankAccountId,
+  initialCashReceiptChannel,
+  paymentChannelLabel,
+  selectedBankAccount,
+  type ActiveBankAccount,
+  type PaymentChannel,
+} from "@/lib/finance/payment-channel";
 import HandwrittenBillDropzone from "@/components/sales/handwritten-bill-dropzone";
 import EcommerceOrderImporter from "@/components/sales/ecommerce-order-importer";
 import type { EcommerceOrderDraft, HandwrittenBillScan, ScannedSalesLine } from "@/types/sales-ocr";
@@ -178,6 +188,7 @@ export type SalesCreateWorkspaceProps = {
   customersError?: string | null;
   openEcommerceImport?: boolean;
   initialDocType?: SalesTradingDocType;
+  bankAccounts?: ActiveBankAccount[];
 };
 
 function lineFromScan(line: ScannedSalesLine): SalesLineItem {
@@ -204,6 +215,7 @@ export default function SalesCreateWorkspace({
   customersError = null,
   openEcommerceImport = false,
   initialDocType = INITIAL_DOC_TYPE,
+  bankAccounts = [],
 }: SalesCreateWorkspaceProps) {
   const startingDocType = isSalesTradingDocType(initialDocType)
     ? initialDocType
@@ -232,6 +244,23 @@ export default function SalesCreateWorkspace({
   const [mockupUrl, setMockupUrl] = useState("");
   const [ecommerceOpen, setEcommerceOpen] = useState(openEcommerceImport);
   const [ocrOpen, setOcrOpen] = useState(false);
+  const [headerOpen, setHeaderOpen] = useState(true);
+  const [paymentChannel, setPaymentChannel] = useState<PaymentChannel>(() =>
+    initialCashReceiptChannel({
+      docType: startingDocType,
+      salesChannel: "STORE",
+    }),
+  );
+  const [bankAccountId, setBankAccountId] = useState<string | null>(() =>
+    initialBankAccountId(
+      bankAccounts,
+      initialCashReceiptChannel({
+        docType: startingDocType,
+        salesChannel: "STORE",
+      }),
+    ),
+  );
+  const [slipUrl, setSlipUrl] = useState("");
   const [isPending, startTransition] = useTransition();
   const scanKey = useRef(0);
 
@@ -642,6 +671,25 @@ export default function SalesCreateWorkspace({
         tracking_no: header.data.tracking_no,
         one_time_address: header.data.one_time_address,
         attachment_url: mockupUrl.trim() || null,
+        ...(docType === "ABB" || docType === "CS_TAX"
+          ? {
+              payment_channel: paymentChannel,
+              bank_account_id:
+                selectedBankAccount(bankAccounts, paymentChannel, bankAccountId)?.id ??
+                null,
+              receiving_bank_label: (() => {
+                const account = selectedBankAccount(
+                  bankAccounts,
+                  paymentChannel,
+                  bankAccountId,
+                );
+                return account
+                  ? bankAccountDisplay(account)
+                  : paymentChannelLabel(paymentChannel);
+              })(),
+              original_receipt_url: slipUrl.trim() || null,
+            }
+          : {}),
         items: lineItems.map((row, index) => ({
           product_id: row.product_id || null,
           description: row.description,
@@ -753,7 +801,27 @@ export default function SalesCreateWorkspace({
         </p>
       )}
 
-      <Card className="sticky top-0 z-10 border-slate-200 shadow-sm">
+      <Card className="border-slate-200 shadow-sm">
+        {headerOpen ? null : (
+          <div className="flex h-11 max-h-11 items-center justify-between gap-3 px-4">
+            <p className="truncate text-sm font-medium text-slate-800">
+              {SALES_TRADING_DOC_TYPE_OPTIONS.find((option) => option.value === docType)
+                ?.label ?? docType}{" "}
+              · {docDate.slice(8, 10)}/{docDate.slice(5, 7)}/{docDate.slice(0, 4)} ·{" "}
+              {selectedCustomerName || "ยังไม่เลือกลูกค้า"}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-8 shrink-0 px-2 text-xs"
+              onClick={() => setHeaderOpen(true)}
+            >
+              🔽 ขยายหัวเอกสาร
+            </Button>
+          </div>
+        )}
+        {headerOpen ? (
+        <>
         <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 pb-3">
           <div>
             <CardTitle className="text-base">หัวเอกสาร</CardTitle>
@@ -762,6 +830,14 @@ export default function SalesCreateWorkspace({
             </CardDescription>
           </div>
           <div className="flex shrink-0 gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setHeaderOpen(false)}
+            >
+              🔼 ย่อหัวเอกสาร
+            </Button>
             <Button
               type="button"
               size="sm"
@@ -949,6 +1025,8 @@ export default function SalesCreateWorkspace({
             />
           </form>
         </CardContent>
+        </>
+        ) : null}
       </Card>
 
       {needsProductionMockup ? (
@@ -1253,6 +1331,25 @@ export default function SalesCreateWorkspace({
                 </div>
               </dl>
               <GoodsQtyBadge rows={lineItems} className="mt-3" />
+              {docType === "ABB" || docType === "CS_TAX" ? (
+                <div className="mt-4">
+                  <CashReceiptPaymentBox
+                    channel={paymentChannel}
+                    bankAccountId={bankAccountId}
+                    accounts={bankAccounts}
+                    referenceNo={handwrittenDocRef}
+                    slipUrl={slipUrl}
+                    disabled={isPending}
+                    onChannelChange={(next, accountId) => {
+                      setPaymentChannel(next);
+                      setBankAccountId(accountId);
+                    }}
+                    onReferenceChange={setHandwrittenDocRef}
+                    onSlipUrlChange={setSlipUrl}
+                    onSlipDate={setDocDate}
+                  />
+                </div>
+              ) : null}
               <div className="mt-4 flex flex-wrap justify-end gap-2">
                 <Button
                   type="button"

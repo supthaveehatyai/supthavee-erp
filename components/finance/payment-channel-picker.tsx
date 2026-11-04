@@ -7,7 +7,6 @@ import {
   bankAccountDisplay,
   CASH_RECEIPT_LABEL,
   COMPANY_BANK_LABEL,
-  OTHER_BANK_LABEL,
   type ActiveBankAccount,
   type PaymentChannel,
 } from "@/lib/finance/payment-channel";
@@ -16,7 +15,7 @@ import { cn } from "@/lib/utils";
 const OPTIONS: Array<{ value: PaymentChannel; label: string }> = [
   { value: "COMPANY_BANK", label: `🏦 ${COMPANY_BANK_LABEL}` },
   { value: "CASH", label: `💵 ${CASH_RECEIPT_LABEL}` },
-  { value: "OTHER_BANK", label: `📱 ${OTHER_BANK_LABEL}` },
+  { value: "OTHER_BANK", label: "📱 โอนเข้าบัญชีบุคคล / บัญชีอื่น (รอโอนเข้าบริษัท)" },
 ];
 
 export function PaymentChannelPicker({

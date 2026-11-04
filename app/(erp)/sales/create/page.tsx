@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { listActiveCustomers } from "@/lib/actions/document-actions";
+import { listActiveBankAccounts, listActiveCustomers } from "@/lib/actions/document-actions";
 import { isSalesTradingDocType } from "@/lib/constants/document";
 import SalesCreateWorkspace from "./sales-create-workspace";
 
@@ -22,7 +22,10 @@ type PageProps = {
 export default async function CreateSalesDocumentPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const requestedType = String(params.doc_type ?? "").trim().toUpperCase();
-  const customersResult = await listActiveCustomers();
+  const [customersResult, bankAccounts] = await Promise.all([
+    listActiveCustomers(),
+    listActiveBankAccounts(),
+  ]);
 
   return (
     <SalesCreateWorkspace
@@ -32,6 +35,7 @@ export default async function CreateSalesDocumentPage({ searchParams }: PageProp
       initialDocType={
         isSalesTradingDocType(requestedType) ? requestedType : undefined
       }
+      bankAccounts={bankAccounts.data}
     />
   );
 }

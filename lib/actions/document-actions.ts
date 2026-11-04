@@ -36,6 +36,7 @@ import { logAuditTrail } from "@/lib/supabase/auditService";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { getSystemSettings } from "@/lib/actions/settings";
 import { requireSessionUserId } from "@/lib/auth/current-user";
+import { paymentChannelFields } from "@/lib/actions/finance/receipt-sweep-actions";
 import {
   normalizeActiveBankAccount,
   type ActiveBankAccount,
@@ -523,6 +524,29 @@ async function loadSalesDraftProducts(
   };
 }
 
+async function cashReceiptDocumentFields(input: {
+  docType: string;
+  payment_channel?: string | null;
+  bank_account_id?: string | null;
+  receiving_bank_label?: string | null;
+  original_receipt_url?: string | null;
+}) {
+  if (input.docType !== "ABB" && input.docType !== "CS_TAX") return {};
+  const fields = await paymentChannelFields({
+    channel: input.payment_channel || "CASH",
+    bankAccountId: input.bank_account_id,
+    receivingBankLabel: input.receiving_bank_label,
+  });
+  return {
+    payment_channel: fields.payment_channel,
+    bank_account_id: fields.bank_account_id,
+    receiving_bank_label: fields.receiving_bank_label,
+    is_swept_to_company: fields.is_swept_to_company,
+    swept_to_company_at: fields.swept_to_company_at,
+    original_receipt_url: input.original_receipt_url?.trim() || null,
+  };
+}
+
 function stampProductionMockup<T extends { product_id: string | null; is_service_item?: boolean }>(
   rows: T[],
   attachmentUrl: string | null,
@@ -648,6 +672,13 @@ export async function createDraftDocument(
 
     const nowIso = new Date().toISOString();
     const draftStatus: DocumentStatus = "DRAFT";
+    const receiptFields = await cashReceiptDocumentFields({
+      docType,
+      payment_channel: payload.payment_channel,
+      bank_account_id: payload.bank_account_id,
+      receiving_bank_label: payload.receiving_bank_label,
+      original_receipt_url: payload.original_receipt_url,
+    });
 
     const { data: document, error: documentError } = await supabase
       .from("documents")
@@ -684,6 +715,7 @@ export async function createDraftDocument(
         reference_no: normalizeHandwrittenDocRef(payload.handwritten_doc_ref),
         attachment_url: attachmentUrl,
         attached_file_url: attachmentUrl,
+        ...receiptFields,
         created_by: owner.userId,
         updated_at: nowIso,
       })
@@ -2379,6 +2411,13 @@ export async function updateDraftDocument(
     });
 
     const nowIso = new Date().toISOString();
+    const receiptFields = await cashReceiptDocumentFields({
+      docType: String(existing.doc_type ?? ""),
+      payment_channel: payload.payment_channel,
+      bank_account_id: payload.bank_account_id,
+      receiving_bank_label: payload.receiving_bank_label,
+      original_receipt_url: payload.original_receipt_url,
+    });
 
     // Revenue Department: replacement draft — contact + notes only.
     if (isReplacement) {
@@ -2401,6 +2440,7 @@ export async function updateDraftDocument(
                 attached_file_url: normalizeAttachmentUrl(payload.attachment_url),
               }
             : {}),
+          ...receiptFields,
           updated_at: nowIso,
         })
         .eq("id", documentId)
@@ -2521,6 +2561,7 @@ export async function updateDraftDocument(
               attached_file_url: attachmentUrl,
             }
           : {}),
+        ...receiptFields,
         updated_at: nowIso,
       })
       .eq("id", documentId)
@@ -3358,6 +3399,7 @@ export async function updateSalesDocumentDirect(input: {
   payment_channel?: string | null;
   receiving_bank_label?: string | null;
   bank_account_id?: string | null;
+  slip_url?: string | null;
 }) {
   try {
     const owner = await requireSessionUserId();
@@ -3388,6 +3430,7 @@ export async function updateSalesDocumentDirect(input: {
       p_payment_channel: input.payment_channel?.trim() || null,
       p_receiving_bank_label: input.receiving_bank_label?.trim() || null,
       p_bank_account_id: input.bank_account_id?.trim() || null,
+      p_slip_url: input.slip_url?.trim() || null,
     });
     if (saved.error) return { data: null, error: saved.error.message };
 

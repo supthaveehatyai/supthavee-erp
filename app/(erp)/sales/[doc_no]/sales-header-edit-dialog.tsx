@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation";
 import { Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { PaymentChannelPicker } from "@/components/finance/payment-channel-picker";
+import { CashReceiptPaymentBox } from "@/components/sales/cash-receipt-payment-box";
 import { updateSalesDocumentDirect } from "@/lib/actions/document-actions";
 import {
   bankAccountDisplay,
   initialBankAccountId,
-  isPaymentChannel,
+  initialCashReceiptChannel,
   paymentChannelLabel,
   selectedBankAccount,
   type ActiveBankAccount,
@@ -35,6 +36,9 @@ export function SalesHeaderEditDialog({
   receivingBankLabel,
   storedBankAccountId,
   bankAccounts = [],
+  docType,
+  salesChannel,
+  slipUrl = "",
 }: {
   documentId: string;
   docDate: string;
@@ -44,6 +48,9 @@ export function SalesHeaderEditDialog({
   receivingBankLabel?: string | null;
   storedBankAccountId?: string | null;
   bankAccounts?: ActiveBankAccount[];
+  docType?: string;
+  salesChannel?: string | null;
+  slipUrl?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -51,9 +58,12 @@ export function SalesHeaderEditDialog({
   const [date, setDate] = useState(docDate.slice(0, 10));
   const [slipNo, setSlipNo] = useState(referenceNo);
   const [remark, setRemark] = useState(notes);
-  const initialChannel: PaymentChannel = isPaymentChannel(paymentChannel)
-    ? paymentChannel
-    : "COMPANY_BANK";
+  const cashReceipt = docType === "ABB" || docType === "CS_TAX";
+  const initialChannel: PaymentChannel = initialCashReceiptChannel({
+    docType: docType ?? "",
+    salesChannel,
+    storedChannel: paymentChannel,
+  });
   const [channel, setChannel] = useState<PaymentChannel>(initialChannel);
   const [bankAccountId, setBankAccountId] = useState<string | null>(() =>
     initialBankAccountId(
@@ -63,6 +73,7 @@ export function SalesHeaderEditDialog({
       receivingBankLabel,
     ),
   );
+  const [receiptUrl, setReceiptUrl] = useState(slipUrl);
 
   function onSave() {
     if (pending) return;
@@ -78,6 +89,7 @@ export function SalesHeaderEditDialog({
           const account = selectedBankAccount(bankAccounts, channel, bankAccountId);
           return account ? bankAccountDisplay(account) : paymentChannelLabel(channel);
         })(),
+        slip_url: receiptUrl.trim() || null,
       });
       if (result.error || !result.data) {
         toast.error(result.error ?? "แก้ไขหัวบิลไม่สำเร็จ");
@@ -128,16 +140,34 @@ export function SalesHeaderEditDialog({
                 placeholder="เลขสลิปโอนเงิน / เลขที่บิลอ้างอิง"
               />
             </div>
-            <PaymentChannelPicker
-              value={channel}
-              bankAccountId={bankAccountId}
-              accounts={bankAccounts}
-              disabled={pending}
-              onChange={(next, accountId) => {
-                setChannel(next);
-                setBankAccountId(accountId);
-              }}
-            />
+            {cashReceipt ? (
+              <CashReceiptPaymentBox
+                channel={channel}
+                bankAccountId={bankAccountId}
+                accounts={bankAccounts}
+                referenceNo={slipNo}
+                slipUrl={receiptUrl}
+                disabled={pending}
+                onChannelChange={(next, accountId) => {
+                  setChannel(next);
+                  setBankAccountId(accountId);
+                }}
+                onReferenceChange={setSlipNo}
+                onSlipUrlChange={setReceiptUrl}
+                onSlipDate={setDate}
+              />
+            ) : (
+              <PaymentChannelPicker
+                value={channel}
+                bankAccountId={bankAccountId}
+                accounts={bankAccounts}
+                disabled={pending}
+                onChange={(next, accountId) => {
+                  setChannel(next);
+                  setBankAccountId(accountId);
+                }}
+              />
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="issued-notes">หมายเหตุ / ชื่องาน</Label>
               <textarea

@@ -148,6 +148,11 @@ export type CreateDraftDocumentInput = {
   one_time_address?: string | null;
   /** Mockup สกรีน/ปัก/ผลิต — `documents.attachment_url` และ `attached_file_url` */
   attachment_url?: string | null;
+  /** ABB / CS_TAX — ช่องทางรับเงินและสลิป */
+  payment_channel?: string | null;
+  bank_account_id?: string | null;
+  receiving_bank_label?: string | null;
+  original_receipt_url?: string | null;
 };
 
 export type CreateDraftDocumentResult = {
@@ -185,6 +190,11 @@ export type UpdateDraftDocumentInput = {
   one_time_address?: string | null;
   /** Mockup สกรีน/ปัก/ผลิต — `documents.attachment_url` และ `attached_file_url` */
   attachment_url?: string | null;
+  /** ABB / CS_TAX — ช่องทางรับเงินและสลิป */
+  payment_channel?: string | null;
+  bank_account_id?: string | null;
+  receiving_bank_label?: string | null;
+  original_receipt_url?: string | null;
 };
 
 export type UpdateDraftDocumentResult = {

@@ -68,6 +68,25 @@ export function receiptMethodText(input: {
   return stored;
 }
 
+export function initialCashReceiptChannel(input: {
+  docType: string;
+  salesChannel?: string | null;
+  storedChannel?: string | null;
+}): PaymentChannel {
+  if (isPaymentChannel(input.storedChannel)) return input.storedChannel;
+  const channel = String(input.salesChannel ?? "STORE").trim().toUpperCase();
+  const storefront =
+    channel === "STORE" ||
+    channel === "DIRECT" ||
+    channel === "RETAIL" ||
+    channel === "WHOLESALE" ||
+    channel === "";
+  if ((input.docType === "ABB" || input.docType === "CS_TAX") && storefront) {
+    return "CASH";
+  }
+  return "COMPANY_BANK";
+}
+
 export function isSweptOnReceipt(channel: PaymentChannel): boolean {
   return channel === "COMPANY_BANK";
 }

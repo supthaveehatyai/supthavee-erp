@@ -5,6 +5,7 @@
  * Client island only; persistence stays in Server Actions.
  */
 
+import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -78,6 +79,10 @@ export default function SalesChannelFields({
   section = "all",
 }: SalesChannelFieldsProps) {
   const showPlatformFields = isEcommercePlatformChannel(value.sales_channel);
+  const walkInFilled = Boolean(
+    value.ecommerce_buyer_name.trim() || value.one_time_address.trim(),
+  );
+  const [walkInOpen, setWalkInOpen] = useState(walkInFilled);
   const showWalkInFields = shouldShowRetailBuyerFields({
     docType: docType ?? "",
     salesChannel: value.sales_channel,
@@ -193,7 +198,20 @@ export default function SalesChannelFields({
         </div>
       ) : null}
 
-      {showWalkInFields ? (
+      {showWalkInFields && !walkInOpen ? (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setWalkInOpen(true)}
+          className={cn(
+            "h-9 rounded-lg border border-dashed border-amber-300 bg-amber-50 px-3 text-left text-xs font-semibold text-amber-950 hover:bg-amber-100",
+            platformClassName,
+          )}
+        >
+          + ระบุชื่อผู้ซื้อจร / ที่อยู่บนใบเสร็จ (Optional)
+        </button>
+      ) : null}
+      {showWalkInFields && walkInOpen ? (
         <div
           className={cn(
             "grid gap-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4 sm:grid-cols-2",

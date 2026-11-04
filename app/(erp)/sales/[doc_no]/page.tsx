@@ -330,7 +330,10 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
     ? await getDepositAllocationHistory(doc.id)
     : { data: [], error: null };
   const docSlipFallback =
-    doc.attachment_url?.trim() || doc.attached_file_url?.trim() || "";
+    doc.original_receipt_url?.trim() ||
+    doc.attached_file_url?.trim() ||
+    doc.attachment_url?.trim() ||
+    "";
   const slipMeta = await getPaymentTransactionStorageMetaByDocumentId(
     doc.id,
     docSlipFallback || null,
@@ -590,6 +593,9 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               receivingBankLabel={doc.receiving_bank_label}
               storedBankAccountId={doc.bank_account_id}
               bankAccounts={bankAccounts.data}
+              docType={doc.doc_type}
+              salesChannel={doc.sales_channel}
+              slipUrl={doc.original_receipt_url ?? ""}
             />
           ) : null}
           {canSendKanban || showBatchMto ? (
