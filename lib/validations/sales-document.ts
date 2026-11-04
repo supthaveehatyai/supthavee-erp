@@ -4,6 +4,7 @@ import {
   SALES_CHANNELS,
   isEcommercePlatformChannel,
   isStorefrontSalesChannel,
+  isRetailWalkInContactName,
   isWalkInCashDocType,
   type SalesChannelCode,
 } from "@/lib/constants/document";
@@ -140,6 +141,7 @@ export const salesDocumentDraftHeaderSchema = z
     ecommerce_buyer_name: optionalBoundedText(255, "ชื่อลูกค้าสำหรับออกบิล "),
     tracking_no: optionalBoundedText(100, "เลขพัสดุ "),
     one_time_address: optionalBoundedText(2000, "ที่อยู่ One-Time "),
+    contact_company_name: z.string().nullish(),
   })
   .superRefine((value, ctx) => {
     if (
@@ -168,7 +170,9 @@ export const salesDocumentDraftHeaderSchema = z
   .transform((value) => {
     const isPlatform = isEcommercePlatformChannel(value.sales_channel);
     const keepWalkInSnapshot =
-      isPlatform || isWalkInCashDocType(value.doc_type);
+      isPlatform ||
+      isWalkInCashDocType(value.doc_type) ||
+      isRetailWalkInContactName(value.contact_company_name);
     return {
       doc_type: value.doc_type,
       contact_id: value.contact_id,

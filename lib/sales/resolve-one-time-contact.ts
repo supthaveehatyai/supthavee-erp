@@ -8,8 +8,10 @@
 
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import {
+  RETAIL_WALK_IN_CONTACT_NAME,
   SYSTEM_CONTACTS,
   isEcommercePlatformChannel,
+  isStorefrontSalesChannel,
   isWalkInCashDocType,
   resolveSystemDummyContactId,
   type SalesChannelCode,
@@ -81,11 +83,13 @@ export async function resolveOneTimeCustomerContactId(input: {
   }
 
   const channel = input.salesChannel as SalesChannelCode;
-  const systemId = resolveSystemDummyContactId(channel);
-  if (systemId) {
-    const dummy = await assignSystemDummy(systemId, channel);
-    if (!dummy.ok) return dummy;
-    return { ok: true, contactId: dummy.contactId, assignedDummy: true };
+  if (channel === "SHOPEE" || channel === "LAZADA") {
+    const systemId = resolveSystemDummyContactId(channel);
+    if (systemId) {
+      const dummy = await assignSystemDummy(systemId, channel);
+      if (!dummy.ok) return dummy;
+      return { ok: true, contactId: dummy.contactId, assignedDummy: true };
+    }
   }
 
   if (isEcommercePlatformChannel(channel) && channel === "TIKTOK") {
@@ -103,7 +107,11 @@ export async function resolveOneTimeCustomerContactId(input: {
     };
   }
 
-  if (isWalkInCashDocType(input.docType)) {
+  if (isWalkInCashDocType(input.docType) || isStorefrontSalesChannel(channel)) {
+    const byName = await findActiveContactByNames([RETAIL_WALK_IN_CONTACT_NAME]);
+    if (byName) {
+      return { ok: true, contactId: byName, assignedDummy: true };
+    }
     const dummy = await assignSystemDummy(
       SYSTEM_CONTACTS.CASH_STORE,
       "CASH_STORE",

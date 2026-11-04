@@ -13,6 +13,7 @@ import {
   CREDIT_NOTE_SOURCE_DOC_TYPES,
   CREDIT_NOTE_SOURCE_STATUSES,
   SALES_DOC_TYPES,
+  formatRetailWalkInCustomerName,
   salesChannelLabel,
   getDocumentTypeLabel,
   isEcommercePlatformChannel,
@@ -763,7 +764,10 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               <p className="text-base font-semibold text-slate-900">
-                {doc.contact?.company_name ?? "—"}
+                {formatRetailWalkInCustomerName(
+                  doc.contact?.company_name,
+                  doc.ecommerce_buyer_name,
+                ) || "—"}
               </p>
               {doc.contact?.tax_id && (
                 <p className="text-slate-600">

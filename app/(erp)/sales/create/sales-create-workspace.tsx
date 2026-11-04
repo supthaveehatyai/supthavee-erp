@@ -255,6 +255,8 @@ export default function SalesCreateWorkspace({
     docType,
     salesChannel: salesChannelFields.sales_channel,
   });
+  const selectedCustomerName =
+    customerOptions.find((row) => row.id === contactId)?.company_name ?? "";
   const walkInOptional = shouldShowWalkInOptionalFields({
     docType,
     salesChannel: salesChannelFields.sales_channel,
@@ -610,6 +612,7 @@ export default function SalesCreateWorkspace({
     const header = parseSalesDocumentDraftHeader({
       doc_type: docType,
       contact_id: hideContactPicker ? null : contactId,
+      contact_company_name: selectedCustomerName,
       ...salesChannelFields,
     });
     if (!header.ok) {
@@ -814,6 +817,7 @@ export default function SalesCreateWorkspace({
               }}
               disabled={isPending}
               docType={docType}
+              contactName={selectedCustomerName}
             />
 
             <div className="space-y-1.5">
@@ -940,6 +944,7 @@ export default function SalesCreateWorkspace({
               }}
               disabled={isPending}
               docType={docType}
+              contactName={selectedCustomerName}
               platformClassName="sm:col-span-4"
             />
           </form>

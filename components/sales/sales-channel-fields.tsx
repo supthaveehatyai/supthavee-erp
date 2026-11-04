@@ -15,7 +15,7 @@ import {
   isEcommercePlatformChannel,
   isSalesChannel,
   selectableSalesChannel,
-  shouldShowWalkInOptionalFields,
+  shouldShowRetailBuyerFields,
   type SalesChannelCode,
 } from "@/lib/constants/document";
 import { cn } from "@/lib/utils";
@@ -60,6 +60,8 @@ export type SalesChannelFieldsProps = {
   disabled?: boolean;
   /** ประเภทเอกสาร — ใช้เปิดบล็อกขาจร (ABB / CS_TAX + STORE) */
   docType?: string;
+  /** ชื่อคู่ค้าที่เลือก — เปิดกล่องผู้ซื้อจรเมื่อเป็นลูกค้าปลีกหน้าร้าน */
+  contactName?: string | null;
   /** col-span ของกล่องฟิลด์แพลตฟอร์ม เมื่ออยู่ใน CSS grid ของฟอร์ม */
   platformClassName?: string;
   /** channel = เฉพาะ dropdown, details = ฟิลด์แพลตฟอร์ม/ขาจร */
@@ -71,13 +73,15 @@ export default function SalesChannelFields({
   onChange,
   disabled = false,
   docType,
+  contactName,
   platformClassName,
   section = "all",
 }: SalesChannelFieldsProps) {
   const showPlatformFields = isEcommercePlatformChannel(value.sales_channel);
-  const showWalkInFields = shouldShowWalkInOptionalFields({
+  const showWalkInFields = shouldShowRetailBuyerFields({
     docType: docType ?? "",
     salesChannel: value.sales_channel,
+    contactName,
   });
 
   function patch(partial: Partial<SalesChannelFieldsValue>) {
@@ -198,28 +202,28 @@ export default function SalesChannelFields({
         >
           <div className="space-y-1.5 sm:col-span-2">
             <p className="text-xs font-semibold text-amber-900">
-              ข้อมูลลูกค้าขาจร (Optional)
+              ข้อมูลลูกค้าจร / ชื่อผู้ซื้อหน้าร้าน (Optional)
             </p>
             <p className="text-[11px] text-amber-800/80">
-              ไม่บังคับเลือกลูกค้าใน Master — ถ้าว่าง ระบบใช้บัญชีเงินสดหน้าร้านอัตโนมัติ
+              พิมพ์ชื่อลูกค้าจรกำกับบิลได้ เช่น คุณสมชาย 081-xxx-xxxx
             </p>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="walk-in-buyer-name">ชื่อนักเรียน / ผู้ซื้อ</Label>
+            <Label htmlFor="walk-in-buyer-name">ชื่อผู้ซื้อ / ชื่องาน</Label>
             <Input
               id="walk-in-buyer-name"
               name="ecommerce_buyer_name"
               value={value.ecommerce_buyer_name}
               disabled={disabled}
               maxLength={255}
-              placeholder="เช่น เด็กชายสมชาย ใจดี"
+              placeholder="เช่น คุณสมชาย 081-xxx-xxxx"
               onChange={(event) =>
                 patch({ ecommerce_buyer_name: event.target.value })
               }
             />
           </div>
           <div className="space-y-1.5 sm:col-span-2">
-            <Label htmlFor="walk-in-address">ที่อยู่ One-Time</Label>
+            <Label htmlFor="walk-in-address">ที่อยู่/เบอร์โทรบนใบเสร็จ</Label>
             <Textarea
               id="walk-in-address"
               name="one_time_address"

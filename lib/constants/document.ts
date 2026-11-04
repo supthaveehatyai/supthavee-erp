@@ -191,6 +191,28 @@ export function shouldHideSalesContactPicker(input: {
   return isEcommercePlatformChannel(input.salesChannel);
 }
 
+/** คู่ค้ามาตรฐานสำหรับบิลปลีกหน้าร้าน */
+export const RETAIL_WALK_IN_CONTACT_NAME = "ลูกค้าทั่วไป (ขายปลีกหน้าร้าน)";
+
+export function isRetailWalkInContactName(
+  name: string | null | undefined,
+): boolean {
+  return String(name ?? "").trim() === RETAIL_WALK_IN_CONTACT_NAME;
+}
+
+/** รายการขายและหน้าบิล: ต่อชื่อผู้ซื้อจรท้ายคู่ค้ามาตรฐาน */
+export function formatRetailWalkInCustomerName(
+  companyName: string | null | undefined,
+  buyerName: string | null | undefined,
+): string {
+  const company = String(companyName ?? "").trim();
+  const buyer = String(buyerName ?? "").trim();
+  if (isRetailWalkInContactName(company) && buyer) {
+    return `${company} — ${buyer}`;
+  }
+  return company;
+}
+
 /** STORE + ABB/CS_TAX — ช่องลูกค้าไม่บังคับ และแสดงฟิลด์ขาจร */
 export function shouldShowWalkInOptionalFields(input: {
   docType: string;
@@ -200,6 +222,16 @@ export function shouldShowWalkInOptionalFields(input: {
     ? input.salesChannel
     : DEFAULT_SALES_CHANNEL;
   return isStorefrontSalesChannel(channel) && isWalkInCashDocType(input.docType);
+}
+
+/** กล่องชื่อผู้ซื้อจร — ABB หน้าร้าน หรือเมื่อเลือกคู่ค้าปลีกหน้าร้าน */
+export function shouldShowRetailBuyerFields(input: {
+  docType: string;
+  salesChannel: string | null | undefined;
+  contactName?: string | null;
+}): boolean {
+  if (isRetailWalkInContactName(input.contactName)) return true;
+  return shouldShowWalkInOptionalFields(input);
 }
 
 /** บังคับเลือกลูกค้าจริง — ไม่ใช่ E-Commerce และไม่ใช่เงินสดหน้าร้าน */

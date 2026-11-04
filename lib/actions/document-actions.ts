@@ -22,6 +22,7 @@ import {
   PURCHASE_DOC_TYPES,
   SALES_DOC_TYPES,
   STOCK_OUT_DOC_TYPES,
+  formatRetailWalkInCustomerName,
   isFinanceHeaderOnlyDocType,
   isSalesChannel,
   isSalesTradingDocType,
@@ -3450,6 +3451,7 @@ export async function getSalesDocuments(
         grand_total,
         payment_status,
         contact_id,
+        ecommerce_buyer_name,
         contacts:contact_id (
           company_name
         )
@@ -3510,9 +3512,10 @@ export async function getSalesDocuments(
         created_at: row.created_at as string,
         grand_total: Number(row.grand_total ?? 0),
         contact_id: row.contact_id as string,
-        customer_name:
-          (contact as { company_name?: string | null } | null)?.company_name ??
-          null,
+        customer_name: formatRetailWalkInCustomerName(
+          (contact as { company_name?: string | null } | null)?.company_name,
+          (row as { ecommerce_buyer_name?: string | null }).ecommerce_buyer_name,
+        ) || null,
         payment_status: String(row.payment_status ?? "UNPAID"),
         is_billed: billedDocNos.has(docNo),
       };
@@ -4000,7 +4003,10 @@ export async function convertDocument(
       };
     }
 
-    const docDate = new Date().toISOString().slice(0, 10);
+    const sourceDocDate = String(source.doc_date ?? "").slice(0, 10);
+    const docDate = /^\d{4}-\d{2}-\d{2}$/.test(sourceDocDate)
+      ? sourceDocDate
+      : new Date().toISOString().slice(0, 10);
     // Late Numbering — converted target stays DRAFT with temporary doc_no.
     const newDocNo = generateDraftDocumentNo();
     const draftStatus: DocumentStatus = "DRAFT";

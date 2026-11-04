@@ -231,6 +231,10 @@ export default function SalesEditWorkspace({
     docType: initialDocument.doc_type,
     salesChannel: salesChannelFields.sales_channel,
   });
+  const selectedCustomerName =
+    customerOptions.find((row) => row.id === contactId)?.company_name ??
+    initialDocument.contact?.company_name ??
+    "";
   const walkInOptional = shouldShowWalkInOptionalFields({
     docType: initialDocument.doc_type,
     salesChannel: salesChannelFields.sales_channel,
@@ -490,6 +494,7 @@ export default function SalesEditWorkspace({
     const header = parseSalesDocumentDraftHeader({
       doc_type: initialDocument.doc_type,
       contact_id: hideContactPicker ? null : contactId,
+      contact_company_name: selectedCustomerName,
       ...salesChannelFields,
     });
     if (!header.ok) {
@@ -672,6 +677,7 @@ export default function SalesEditWorkspace({
             onChange={setSalesChannelFields}
             disabled={isPending}
             docType={initialDocument.doc_type}
+            contactName={selectedCustomerName}
           />
           <div className="space-y-1.5">
             <Label htmlFor="doc-date">วันที่เอกสาร (doc_date)</Label>
@@ -773,6 +779,7 @@ export default function SalesEditWorkspace({
             onChange={setSalesChannelFields}
             disabled={isPending}
             docType={initialDocument.doc_type}
+            contactName={selectedCustomerName}
             platformClassName="sm:col-span-4"
           />
         </CardContent>
