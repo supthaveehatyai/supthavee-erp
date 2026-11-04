@@ -52,9 +52,13 @@ export type OpenSalesBill = {
   paid_amount: number;
   outstanding: number;
   deposit_deducted: number;
-  /** Amount still available to tie to a bank line. */
+  /** Amount still available to tie to a bank line (`reconcilable_amount`). */
   linkable_amount: number;
   payment_status: string;
+  created_at: string;
+  reference_no: string;
+  /** Bills on the same date with the same reconcilable amount. */
+  same_amount_count: number;
 };
 
 export type BillMatchSuggestion = OpenSalesBill & {
@@ -72,6 +76,19 @@ export type SearchOpenBillsInput = {
   keyword?: string;
   tx_date?: string;
   sales_channel?: string | null;
+  /** Bank line text, used to rank a matching slip reference first. */
+  description?: string | null;
+};
+
+export type AutoMatchUniqueResult = {
+  data: { matched: number; skipped: number; errors: string[] } | null;
+  error: string | null;
+};
+
+export type ReclassifyPaymentChannelInput = {
+  document_id: string;
+  payment_channel: "CASH" | "OTHER_BANK";
+  bank_account_id?: string | null;
 };
 
 export type SearchOpenBillsResult = {

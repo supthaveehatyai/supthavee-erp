@@ -29,7 +29,9 @@ import type {
   ConfirmWithdrawalInput,
   ImportKtbStatementResult,
   ListBankLinesResult,
+  AutoMatchUniqueResult,
   OpenSalesBill,
+  ReclassifyPaymentChannelInput,
   SearchOpenBillsInput,
   SearchOpenBillsResult,
   SuggestBillMatchesResult,
@@ -374,6 +376,8 @@ type RawBill = {
   payment_channel: string | null;
   is_swept_to_company: boolean | null;
   deposit_deducted: number;
+  created_at: string;
+  reference_no: string;
 };
 
 async function loadAllocatedSums(
@@ -421,18 +425,25 @@ async function loadCustomerLabels(
   return labels;
 }
 
+function reconcilableAmount(row: RawBill, allocated: number): number {
+  const grand = roundMoney(Number(row.grand_total ?? 0));
+  const paid = roundMoney(Number(row.paid_amount ?? 0));
+  const depositDeducted = roundMoney(Number(row.deposit_deducted ?? 0));
+  const used = roundMoney(allocated);
+  if (row.doc_type === "ABB" || row.doc_type === "CS_TAX" || row.doc_type === "DEP_IN") {
+    return roundMoney(Math.max(0, grand - used));
+  }
+  if (row.doc_type === "SO" || row.doc_type === "INV_DO" || row.doc_type === "TAX_INV") {
+    return roundMoney(Math.max(0, grand - depositDeducted - paid - used));
+  }
+  return roundMoney(Math.max(0, grand - paid - used));
+}
+
 function toOpenBill(row: RawBill, allocated: number, customer: string | null): OpenSalesBill {
   const grand = roundMoney(Number(row.grand_total ?? 0));
   const paid = roundMoney(Number(row.paid_amount ?? 0));
   const depositDeducted = roundMoney(Number(row.deposit_deducted ?? 0));
   const outstanding = roundMoney(Math.max(0, grand - depositDeducted - paid));
-  const settledTypes = new Set(["ABB", "CS_TAX", "DEP_IN"]);
-  const depositAware = new Set(["SO", "INV_DO", "TAX_INV"]);
-  const linkable = settledTypes.has(row.doc_type)
-    ? roundMoney(Math.max(0, grand - allocated))
-    : depositAware.has(row.doc_type)
-      ? roundMoney(Math.max(0, grand - depositDeducted - paid - allocated))
-      : roundMoney(Math.max(0, grand - paid - allocated));
   return {
     id: row.id,
     doc_no: row.doc_no,
@@ -444,8 +455,11 @@ function toOpenBill(row: RawBill, allocated: number, customer: string | null): O
     paid_amount: paid,
     outstanding,
     deposit_deducted: depositDeducted,
-    linkable_amount: linkable,
+    linkable_amount: reconcilableAmount(row, allocated),
     payment_status: row.payment_status,
+    created_at: row.created_at,
+    reference_no: row.reference_no,
+    same_amount_count: 1,
   };
 }
 
@@ -480,6 +494,108 @@ function asRawBill(row: Record<string, unknown>): RawBill {
     is_swept_to_company:
       row.is_swept_to_company == null ? null : Boolean(row.is_swept_to_company),
     deposit_deducted: Number(row.deposit_deducted ?? 0),
+    created_at: String(row.created_at ?? ""),
+    reference_no: String(row.reference_no ?? "").trim(),
+  };
+}
+
+function stampDuplicateCounts(bills: OpenSalesBill[]): OpenSalesBill[] {
+  const counts = new Map<string, number>();
+  for (const bill of bills) {
+    const key = `${bill.doc_date}|${bill.linkable_amount.toFixed(2)}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return bills.map((bill) => ({
+    ...bill,
+    same_amount_count:
+      counts.get(`${bill.doc_date}|${bill.linkable_amount.toFixed(2)}`) ?? 1,
+  }));
+}
+
+function orderCandidateBills(bills: OpenSalesBill[], description: string): OpenSalesBill[] {
+  const text = description.toLowerCase();
+  return [...bills].sort((left, right) => {
+    const leftSlip =
+      left.reference_no && text.includes(left.reference_no.toLowerCase()) ? 0 : 1;
+    const rightSlip =
+      right.reference_no && text.includes(right.reference_no.toLowerCase()) ? 0 : 1;
+    if (leftSlip !== rightSlip) return leftSlip - rightSlip;
+    return left.created_at.localeCompare(right.created_at);
+  });
+}
+
+async function loadReconcileCandidates(
+  supabase: Db,
+): Promise<{ bills: OpenSalesBill[]; error: string | null }> {
+  const rpcClient = supabase as unknown as {
+    rpc: (
+      fn: "get_reconcile_candidate_documents",
+    ) => Promise<{ data: unknown; error: { message: string } | null }>;
+  };
+  const rpc = await rpcClient.rpc("get_reconcile_candidate_documents");
+  if (!rpc.error) {
+    const rows = (Array.isArray(rpc.data) ? rpc.data : []) as Record<string, unknown>[];
+    const kept = rows.filter((row) => {
+      const channel = row.payment_channel ? String(row.payment_channel) : "";
+      if (!channel) return true;
+      return channel === "COMPANY_BANK" || row.is_swept_to_company === true;
+    });
+    const hasRpcAmount = kept.some(
+      (row) => row.reconcilable_amount != null && row.reconcilable_amount !== "",
+    );
+    if (!hasRpcAmount) {
+      const bills = await hydrateBills(
+        supabase,
+        kept.map((row) => asRawBill(row)),
+      );
+      return {
+        bills: bills.filter((bill) => bill.linkable_amount > MONEY_EPSILON),
+        error: null,
+      };
+    }
+    const needsLabels = kept.some(
+      (row) => !String(row.customer_label ?? row.customer_name ?? "").trim() && row.contact_id,
+    );
+    const labels = needsLabels
+      ? await loadCustomerLabels(
+          supabase,
+          kept.map((row) => String(row.contact_id ?? "")),
+        )
+      : new Map<string, string>();
+    const bills = kept
+      .map((row) => {
+        const raw = asRawBill(row);
+        const named =
+          String(row.customer_label ?? row.customer_name ?? "").trim() ||
+          labels.get(raw.contact_id ?? "") ||
+          null;
+        const bill = toOpenBill(raw, 0, named);
+        bill.linkable_amount = roundMoney(Number(row.reconcilable_amount));
+        return bill;
+      })
+      .filter((bill) => bill.linkable_amount > MONEY_EPSILON);
+    return { bills, error: null };
+  }
+  if (!isSchemaMiss(rpc.error.message) && !/Could not find the function/i.test(rpc.error.message)) {
+    return { bills: [], error: rpc.error.message };
+  }
+
+  const { data, error } = await supabase
+    .from("documents")
+    .select(BILL_SELECT)
+    .in("doc_type", [...SALES_DOC_TYPES])
+    .in("status", [...OPEN_DOC_STATUSES])
+    .or("payment_channel.eq.COMPANY_BANK,is_swept_to_company.eq.true")
+    .order("created_at", { ascending: true })
+    .limit(800);
+  if (error) return { bills: [], error: error.message };
+  const bills = await hydrateBills(
+    supabase,
+    (data ?? []).map((row) => asRawBill(row as Record<string, unknown>)),
+  );
+  return {
+    bills: bills.filter((bill) => bill.linkable_amount > MONEY_EPSILON),
+    error: null,
   };
 }
 
@@ -488,7 +604,7 @@ function isCompanyBankReceipt(row: RawBill): boolean {
 }
 
 const BILL_SELECT =
-  "id, doc_no, doc_type, doc_date, sales_channel, contact_id, ecommerce_order_no, grand_total, paid_amount, deposit_deducted, payment_status, status, payment_channel, is_swept_to_company";
+  "id, doc_no, doc_type, doc_date, created_at, reference_no, sales_channel, contact_id, ecommerce_order_no, grand_total, paid_amount, deposit_deducted, payment_status, status, payment_channel, is_swept_to_company";
 const PURCHASE_DOC_TYPES = ["PO", "AP_TAX", "AP_INV", "AP_CASH", "DEP_OUT", "PAY"] as const;
 
 export async function suggestBillMatches(
@@ -514,17 +630,11 @@ export async function suggestBillMatches(
 
     const from = shiftIso(line.tx_date, -7);
     const to = shiftIso(line.tx_date, 7);
-    const { data, error } = await supabase
-      .from("documents")
-      .select(BILL_SELECT)
-      .in("doc_type", [...SALES_DOC_TYPES])
-      .in("status", [...OPEN_DOC_STATUSES])
-      .or("payment_channel.eq.COMPANY_BANK,is_swept_to_company.eq.true")
-      .gte("doc_date", from)
-      .lte("doc_date", to)
-      .order("doc_date", { ascending: false })
-      .limit(400);
-    if (error) return { data: [], error: error.message };
+    const loaded = await loadReconcileCandidates(supabase);
+    if (loaded.error) return { data: [], error: loaded.error };
+    const data = loaded.bills.filter(
+      (bill) => bill.doc_date >= from && bill.doc_date <= to,
+    );
 
     const refs = [
       ...(line.description.match(/[A-Z]{2,6}-\d{4}-\d{3,5}/g) ?? []),
@@ -541,16 +651,17 @@ export async function suggestBillMatches(
       extra = (named ?? []).map((row) => asRawBill(row as Record<string, unknown>));
     }
 
-    const merged = new Map<string, RawBill>();
-    for (const row of [...(data ?? []).map((item) => asRawBill(item as Record<string, unknown>)), ...extra]) {
-      merged.set(row.id, row);
-    }
-    const bills = (
+    const extraBills = (
       await hydrateBills(
         supabase,
-        [...merged.values()].filter(isCompanyBankReceipt),
+        extra.filter(isCompanyBankReceipt),
       )
     ).filter((bill) => bill.linkable_amount > MONEY_EPSILON);
+    const merged = new Map<string, OpenSalesBill>();
+    for (const bill of [...data, ...extraBills]) merged.set(bill.id, bill);
+    const bills = stampDuplicateCounts(
+      orderCandidateBills([...merged.values()], line.description),
+    );
 
     const suggestions: BillMatchSuggestion[] = [];
     for (const bill of bills) {
@@ -559,7 +670,10 @@ export async function suggestBillMatches(
       if (dated && sameMoney(bill.linkable_amount, remaining)) {
         suggestions.push({
           ...bill,
-          reason: "ยอดตรงกับเงินฝาก",
+          reason:
+            bill.same_amount_count > 1
+              ? `ยอด ${bill.linkable_amount.toFixed(2)} ซ้ำ ${bill.same_amount_count} บิลในวันนี้ — ยืนยันเอง`
+              : "ยอดตรงกับเงินฝาก",
           suggested_amount: bill.linkable_amount,
           suggested_fee: 0,
         });
@@ -615,72 +729,239 @@ export async function searchOpenSalesBills(
     const owner = await requireSessionUserId();
     if (!owner.ok) return { data: [], error: owner.error };
     const supabase = createSupabaseServerClient();
-    const keyword = input.keyword?.trim() ?? "";
+    const keyword = input.keyword?.trim().toLowerCase() ?? "";
     const channel = input.sales_channel?.trim() || "";
-    let query = supabase
-      .from("documents")
-      .select(BILL_SELECT)
-      .in("doc_type", [...SALES_DOC_TYPES])
-      .in("status", [...OPEN_DOC_STATUSES])
-      .or("payment_channel.eq.COMPANY_BANK,is_swept_to_company.eq.true")
-      .order("doc_date", { ascending: false })
-      .limit(80);
-    if (channel === "STORE") {
-      query = query.in("sales_channel", [
-        "STORE",
-        "DIRECT",
-        "RETAIL",
-        "WHOLESALE",
-      ]);
-    } else if (channel) {
-      query = query.eq("sales_channel", channel);
-    }
+    const loaded = await loadReconcileCandidates(supabase);
+    if (loaded.error) return { data: [], error: loaded.error };
     const txDate = input.tx_date?.slice(0, 10) ?? "";
-    if (/^\d{4}-\d{2}-\d{2}$/.test(txDate) && !keyword) {
-      query = query.gte("doc_date", shiftIso(txDate, -31)).lte("doc_date", shiftIso(txDate, 31));
-    }
-    if (keyword) {
-      const safe = keyword.replace(/[%_,]/g, " ").trim();
-      query = query.or(`doc_no.ilike.%${safe}%,ecommerce_order_no.ilike.%${safe}%`);
-    }
-    const { data, error } = await query;
-    if (error) return { data: [], error: error.message };
-
-    let rows = (data ?? []).map((row) => asRawBill(row as Record<string, unknown>));
-    if (keyword && /[ก-๙a-z]/i.test(keyword)) {
-      const safe = keyword.replace(/[%_,()"\\]/g, " ").trim();
-      const { data: contacts } = await supabase
-        .from("contacts")
-        .select("id")
-        .or(`nickname.ilike.%${safe}%,company_name.ilike.%${safe}%`)
-        .limit(12);
-      const contactIds = (contacts ?? []).map((row) => String(row.id));
-      if (contactIds.length > 0) {
-        const { data: byContact } = await supabase
-          .from("documents")
-          .select(BILL_SELECT)
-          .in("contact_id", contactIds)
-          .in("doc_type", [...SALES_DOC_TYPES])
-          .in("status", [...OPEN_DOC_STATUSES])
-          .or("payment_channel.eq.COMPANY_BANK,is_swept_to_company.eq.true")
-          .order("doc_date", { ascending: false })
-          .limit(40);
-        const known = new Set(rows.map((row) => row.id));
-        for (const row of byContact ?? []) {
-          const bill = asRawBill(row as Record<string, unknown>);
-          if (!known.has(bill.id)) rows.push(bill);
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(txDate) ? shiftIso(txDate, -31) : "";
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(txDate) ? shiftIso(txDate, 31) : "";
+    const bills = loaded.bills.filter((bill) => {
+      if (channel === "STORE") {
+        if (!["STORE", "DIRECT", "RETAIL", "WHOLESALE"].includes(bill.sales_channel ?? "")) {
+          return false;
         }
+      } else if (channel && bill.sales_channel !== channel) {
+        return false;
       }
-    }
-
-    const bills = (await hydrateBills(supabase, rows)).filter(
-      (bill) => bill.linkable_amount > MONEY_EPSILON,
-    );
-    return { data: bills.slice(0, 40), error: null };
+      if (!keyword && from && (bill.doc_date < from || bill.doc_date > to)) return false;
+      if (!keyword) return true;
+      const haystack = `${bill.doc_no} ${bill.reference_no} ${bill.customer_label ?? ""} ${bill.doc_type}`.toLowerCase();
+      return haystack.includes(keyword);
+    });
+    return {
+      data: stampDuplicateCounts(
+        orderCandidateBills(bills, input.description ?? ""),
+      ).slice(0, 40),
+      error: null,
+    };
   } catch (error) {
     return {
       data: [],
       error: error instanceof Error ? error.message : "ค้นหาบิลขายไม่สำเร็จ",
+    };
+  }
+}
+
+export async function autoMatchUniqueDeposits(): Promise<AutoMatchUniqueResult> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: null, error: owner.error };
+    const supabase = createSupabaseServerClient();
+    const loaded = await loadReconcileCandidates(supabase);
+    if (loaded.error) return { data: null, error: loaded.error };
+    const { data: lineRows, error: lineError } = await supabase
+      .from("bank_statement_lines")
+      .select("id, tx_date, deposit_amount, matched_amount, reconcile_status")
+      .gt("deposit_amount", 0)
+      .in("reconcile_status", ["UNMATCHED", "PARTIAL"])
+      .order("tx_date", { ascending: true })
+      .limit(400);
+    if (lineError) return { data: null, error: lineError.message };
+
+    const openLines = (lineRows ?? [])
+      .map((row) => ({
+        id: String(row.id ?? ""),
+        tx_date: String(row.tx_date ?? "").slice(0, 10),
+        remaining: roundMoney(
+          Number(row.deposit_amount ?? 0) - Number(row.matched_amount ?? 0),
+        ),
+      }))
+      .filter((line) => line.remaining > MONEY_EPSILON);
+    const lineCounts = new Map<string, number>();
+    for (const line of openLines) {
+      const key = `${line.tx_date}|${line.remaining.toFixed(2)}`;
+      lineCounts.set(key, (lineCounts.get(key) ?? 0) + 1);
+    }
+
+    const usedBills = new Set<string>();
+    let matched = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+    for (const line of openLines) {
+      const key = `${line.tx_date}|${line.remaining.toFixed(2)}`;
+      const candidates = loaded.bills.filter(
+        (bill) =>
+          !usedBills.has(bill.id) &&
+          bill.doc_date === line.tx_date &&
+          bill.linkable_amount.toFixed(2) === line.remaining.toFixed(2),
+      );
+      if ((lineCounts.get(key) ?? 0) !== 1 || candidates.length !== 1) {
+        skipped += 1;
+        continue;
+      }
+      const bill = candidates[0];
+      const result = await confirmBankMatch({
+        statement_line_id: line.id,
+        allocations: [{ document_id: bill.id, allocated_amount: bill.linkable_amount }],
+        platform_fee_diff: 0,
+      });
+      if (result.error || !result.data) {
+        errors.push(`${bill.doc_no}: ${result.error ?? "ชนยอดไม่สำเร็จ"}`);
+        skipped += 1;
+        continue;
+      }
+      usedBills.add(bill.id);
+      matched += 1;
+    }
+    return { data: { matched, skipped, errors }, error: null };
+  } catch (error) {
+    return {
+      data: null,
+      error: error instanceof Error ? error.message : "ชนยอดอัตโนมัติไม่สำเร็จ",
+    };
+  }
+}
+
+export async function reclassifyDocumentPaymentChannel(
+  input: ReclassifyPaymentChannelInput,
+): Promise<{ data: { document_id: string } | null; error: string | null }> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: null, error: owner.error };
+    const documentId = input.document_id?.trim() ?? "";
+    if (!documentId) return { data: null, error: "ไม่พบเอกสาร" };
+    if (input.payment_channel !== "CASH" && input.payment_channel !== "OTHER_BANK") {
+      return { data: null, error: "ช่องทางที่เลือกไม่รองรับ" };
+    }
+    const supabase = createSupabaseServerClient();
+    const rpcClient = supabase as unknown as {
+      rpc: (
+        fn: "reclassify_document_payment_channel",
+        args: Record<string, unknown>,
+      ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    };
+    const saved = await rpcClient.rpc("reclassify_document_payment_channel", {
+      p_document_id: documentId,
+      p_new_channel: input.payment_channel,
+      p_bank_account_id: input.bank_account_id?.trim() || null,
+    });
+    if (saved.error) return { data: null, error: saved.error.message };
+    revalidatePath("/sales");
+    revalidatePath("/sales/reconcile");
+    revalidatePath("/finance/deposits");
+    return { data: { document_id: documentId }, error: null };
+  } catch (error) {
+    return {
+      data: null,
+      error: error instanceof Error ? error.message : "ย้ายช่องทางรับเงินไม่สำเร็จ",
+    };
+  }
+}
+
+export async function unmatchBankStatementLine(
+  statementLineId: string,
+): Promise<ConfirmBankMatchResult> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: null, error: owner.error };
+    const lineId = statementLineId?.trim() ?? "";
+    if (!lineId) return { data: null, error: "ไม่พบรายการเดินบัญชี" };
+    const supabase = createSupabaseServerClient();
+    const { data: allocations, error: allocationError } = await supabase
+      .from("bank_reconciliation_allocations")
+      .select("id, document_id, allocated_amount")
+      .eq("statement_line_id", lineId);
+    if (allocationError && !isSchemaMiss(allocationError.message)) {
+      return { data: null, error: allocationError.message };
+    }
+
+    const creditTypes = new Set(["SO", "INV_DO", "TAX_INV"]);
+    const snapshots: { id: string; docNo: string; paid: number; status: string }[] = [];
+    for (const row of allocations ?? []) {
+      const documentId = String(row.document_id ?? "");
+      const amount = roundMoney(Number(row.allocated_amount ?? 0));
+      if (!documentId || amount <= 0) continue;
+      const { data: doc, error } = await supabase
+        .from("documents")
+        .select("id, doc_no, doc_type, grand_total, paid_amount, deposit_deducted, payment_status")
+        .eq("id", documentId)
+        .maybeSingle();
+      if (error || !doc) continue;
+      if (!creditTypes.has(String(doc.doc_type ?? ""))) continue;
+      const paid = roundMoney(Number(doc.paid_amount ?? 0));
+      const nextPaid = roundMoney(Math.max(0, paid - amount));
+      const grand = roundMoney(Number(doc.grand_total ?? 0));
+      const deposit = roundMoney(Number(doc.deposit_deducted ?? 0));
+      const nextStatus =
+        nextPaid + deposit + MONEY_EPSILON >= grand ? "PAID" : nextPaid > MONEY_EPSILON ? "PARTIAL" : "UNPAID";
+      snapshots.push({
+        id: documentId,
+        docNo: String(doc.doc_no ?? ""),
+        paid,
+        status: String(doc.payment_status ?? ""),
+      });
+      const { error: updateError } = await supabase
+        .from("documents")
+        .update({
+          paid_amount: nextPaid,
+          payment_status: nextStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", documentId);
+      if (updateError) {
+        await restorePayments(supabase, snapshots.slice(0, -1));
+        return { data: null, error: updateError.message };
+      }
+      await syncPaymentToDocHeader(supabase, {
+        documentId,
+        docNo: String(doc.doc_no ?? ""),
+        paidAmount: nextPaid,
+        paymentStatus: nextStatus,
+      });
+    }
+
+    if ((allocations ?? []).length > 0) {
+      const { error: deleteError } = await supabase
+        .from("bank_reconciliation_allocations")
+        .delete()
+        .eq("statement_line_id", lineId);
+      if (deleteError) {
+        await restorePayments(supabase, snapshots);
+        return { data: null, error: deleteError.message };
+      }
+    }
+
+    const { error: lineError } = await supabase
+      .from("bank_statement_lines")
+      .update({
+        matched_amount: 0,
+        reconcile_status: "UNMATCHED",
+        expense_memo: null,
+      })
+      .eq("id", lineId);
+    if (lineError) return { data: null, error: lineError.message };
+
+    revalidatePath("/sales");
+    revalidatePath("/sales/reconcile");
+    return {
+      data: { reconcile_status: "UNMATCHED", matched_amount: 0, warnings: [] },
+      error: null,
+    };
+  } catch (error) {
+    return {
+      data: null,
+      error: error instanceof Error ? error.message : "ยกเลิกการชนยอดไม่สำเร็จ",
     };
   }
 }

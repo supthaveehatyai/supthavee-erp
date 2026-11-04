@@ -4,13 +4,16 @@ import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent 
 import { Landmark, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  autoMatchUniqueDeposits,
   confirmBankMatch,
   confirmWithdrawalRecord,
   importKtbStatement,
   listBankStatementLines,
+  reclassifyDocumentPaymentChannel,
   searchOpenPurchaseBills,
   searchOpenSalesBills,
   suggestBillMatches,
+  unmatchBankStatementLine,
 } from "@/lib/actions/bank-reconcile-actions";
 import { formatShortDateTh } from "@/lib/utils/date-formatter";
 import { cn } from "@/lib/utils";
@@ -41,15 +44,28 @@ function isWithdrawal(line: BankStatementLineView): boolean {
   return line.withdrawal_amount > 0.05 && line.deposit_amount <= 0.05;
 }
 
+function issuedTime(iso: string): string {
+  const date = new Date(iso);
+  if (!iso || Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Bangkok",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(date);
+}
+
 function billCaption(bill: OpenSalesBill): string {
-  const head = `${formatShortDateTh(bill.doc_date)} · ${bill.customer_label || bill.doc_type} · ตัดได้ ${money(bill.linkable_amount)}`;
-  if (
+  const time = issuedTime(bill.created_at);
+  const when = `${formatShortDateTh(bill.doc_date)}${time ? ` (เวลา ${time})` : ""}`;
+  const slip = bill.reference_no ? ` · สลิป ${bill.reference_no}` : "";
+  const customer = bill.customer_label ? ` · ${bill.customer_label}` : "";
+  const deposit =
     bill.deposit_deducted > 0.05 &&
     (bill.doc_type === "SO" || bill.doc_type === "INV_DO" || bill.doc_type === "TAX_INV")
-  ) {
-    return `${head} (ยอดเต็ม ${money(bill.grand_total)} หักมัดจำ ${money(bill.deposit_deducted)})`;
-  }
-  return head;
+      ? ` (ยอดเต็ม ${money(bill.grand_total)} หักมัดจำ ${money(bill.deposit_deducted)})`
+      : "";
+  return `${bill.doc_no} · ${when}${slip}${customer} · ตัดได้ ${money(bill.linkable_amount)}${deposit}`;
 }
 
 export default function BankReconcileWorkspace() {
@@ -157,6 +173,7 @@ export default function BankReconcileWorkspace() {
           keyword: hint,
           tx_date: line.tx_date,
           sales_channel: channel || null,
+          description: line.description,
         }),
       ]);
       if (suggested.error) toast.error(suggested.error);
@@ -276,6 +293,84 @@ export default function BankReconcileWorkspace() {
     }
   }
 
+  async function runAutoMatch() {
+    setIsWorking(true);
+    try {
+      const result = await autoMatchUniqueDeposits();
+      if (result.error || !result.data) {
+        toast.error(result.error ?? "ชนยอดอัตโนมัติไม่สำเร็จ");
+        return;
+      }
+      toast.success(
+        `ชนยอดอัตโนมัติ ${result.data.matched} คู่ · ข้ามยอดซ้ำหรือไม่ตรง ${result.data.skipped} รายการ`,
+      );
+      for (const warning of result.data.errors) toast.warning(warning);
+      setSelectedId(null);
+      await loadLines(scope);
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
+  async function reclassifyBill(documentId: string, paymentChannel: "CASH" | "OTHER_BANK") {
+    setIsWorking(true);
+    try {
+      const result = await reclassifyDocumentPaymentChannel({
+        document_id: documentId,
+        payment_channel: paymentChannel,
+      });
+      if (result.error || !result.data) {
+        toast.error(result.error ?? "ย้ายช่องทางรับเงินไม่สำเร็จ");
+        return;
+      }
+      toast.success(
+        paymentChannel === "CASH"
+          ? "ย้ายไปเงินสดหน้าร้าน รอโอนเข้าบัญชีบริษัทแล้ว"
+          : "ย้ายไปบัญชีอื่น รอโอนเข้าบัญชีบริษัทแล้ว",
+      );
+      setBills((current) => current.filter((bill) => bill.id !== documentId));
+      setSuggestions((current) => current.filter((bill) => bill.id !== documentId));
+      setPicked((current) => ({ ...current, [documentId]: false }));
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
+  async function unmatchSelected() {
+    if (!selected || selected.reconcile_status !== "MATCHED") return;
+    setIsWorking(true);
+    try {
+      const result = await unmatchBankStatementLine(selected.id);
+      if (result.error || !result.data) {
+        toast.error(result.error ?? "ยกเลิกการชนยอดไม่สำเร็จ");
+        return;
+      }
+      toast.success("ยกเลิกการชนยอดแล้ว");
+      setSelectedId(null);
+      setPicked({});
+      await loadLines(scope);
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
+  const duplicateWarnings = useMemo(() => {
+    const seen = new Set<string>();
+    const warnings: { date: string; amount: number; count: number }[] = [];
+    for (const bill of bills) {
+      if (bill.same_amount_count <= 1) continue;
+      const key = `${bill.doc_date}|${bill.linkable_amount.toFixed(2)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      warnings.push({
+        date: bill.doc_date,
+        amount: bill.linkable_amount,
+        count: bill.same_amount_count,
+      });
+    }
+    return warnings;
+  }, [bills]);
+
   async function runSearch() {
     if (!selected) return;
     setIsWorking(true);
@@ -286,6 +381,7 @@ export default function BankReconcileWorkspace() {
             keyword,
             tx_date: selected.tx_date,
             sales_channel: channel || null,
+            description: selected.description,
           });
       if (found.error) toast.error(found.error);
       setBills(found.data);
@@ -395,6 +491,16 @@ export default function BankReconcileWorkspace() {
                 </button>
               ))}
             </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-8 w-fit px-3 text-xs"
+              disabled={isWorking}
+              onClick={() => void runAutoMatch()}
+            >
+              {isWorking ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : null}
+              ⚡ ชนยอดอัตโนมัติ (เฉพาะคู่ที่ยอดตรง 1-ต่อ-1 ไม่ซ้ำ)
+            </Button>
             {scope === "all" ? (
               <p className="text-xs text-slate-600">
                 ยอดรวมรับ{" "}
@@ -484,6 +590,17 @@ export default function BankReconcileWorkspace() {
             </p>
           ) : (
             <>
+              {selected.reconcile_status === "MATCHED" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-amber-300 text-amber-800 hover:bg-amber-50"
+                  disabled={isWorking}
+                  onClick={() => void unmatchSelected()}
+                >
+                  🔄 ยกเลิกการชนยอด (Unmatch)
+                </Button>
+              ) : null}
               <div>
                 <h2 className={cn("text-sm font-semibold", paying ? "text-rose-700" : "text-slate-800")}>
                   {paying
@@ -503,7 +620,12 @@ export default function BankReconcileWorkspace() {
                   {suggestions.map((suggestion) => (
                     <div
                       key={suggestion.id}
-                      className="flex items-center justify-between gap-2 rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2"
+                      className={cn(
+                        "flex items-center justify-between gap-2 rounded-xl border px-3 py-2",
+                        suggestion.same_amount_count > 1
+                          ? "border-amber-200 bg-amber-50"
+                          : "border-emerald-100 bg-emerald-50/60",
+                      )}
                     >
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium">{suggestion.doc_no}</div>
@@ -548,14 +670,27 @@ export default function BankReconcileWorkspace() {
                 </Button>
               </div>
 
+              {!paying && duplicateWarnings.length > 0 ? (
+                <div className="space-y-1">
+                  {duplicateWarnings.map((warning) => (
+                    <p
+                      key={`${warning.date}-${warning.amount}`}
+                      className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800"
+                    >
+                      ⚠️ มียอด {money(warning.amount)} ซ้ำกัน {warning.count} บิลในวันนี้ — แนะนำเรียงตามเวลา/เลขสลิป
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+
               <div className="max-h-72 overflow-auto rounded-xl border border-slate-100">
                 {bills.length === 0 ? (
                   <p className="px-3 py-6 text-center text-sm text-slate-400">ไม่พบบิลที่ยังตัดได้</p>
                 ) : (
                   bills.map((bill) => (
-                    <label
+                    <div
                       key={bill.id}
-                      className="flex cursor-pointer items-start gap-2 border-b border-slate-100 px-3 py-2 text-sm last:border-0"
+                      className="flex items-start gap-2 border-b border-slate-100 px-3 py-2 text-sm last:border-0"
                     >
                       <input
                         type="checkbox"
@@ -569,12 +704,31 @@ export default function BankReconcileWorkspace() {
                         }}
                       />
                       <span className="min-w-0 flex-1">
-                        <span className="font-medium">{bill.doc_no}</span>
-                        <span className="mt-0.5 block text-[11px] text-slate-500">
+                        <span className="block text-[13px] leading-5 text-slate-800">
                           {billCaption(bill)}
                         </span>
+                        {!paying ? (
+                          <span className="mt-1 flex flex-wrap gap-1">
+                            <button
+                              type="button"
+                              className="rounded-md border border-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 hover:bg-slate-50"
+                              disabled={isWorking}
+                              onClick={() => void reclassifyBill(bill.id, "CASH")}
+                            >
+                              💵 เปลี่ยนเป็นเงินสด
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-md border border-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 hover:bg-slate-50"
+                              disabled={isWorking}
+                              onClick={() => void reclassifyBill(bill.id, "OTHER_BANK")}
+                            >
+                              📱 ย้ายไปบัญชีอื่น
+                            </button>
+                          </span>
+                        ) : null}
                       </span>
-                    </label>
+                    </div>
                   ))
                 )}
               </div>

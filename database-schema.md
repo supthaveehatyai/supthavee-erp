@@ -80,6 +80,10 @@ CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names, column names, views, 
 
 \- `bank\_reconciliation\_allocations` (ชนยอดเงินฝากกับบิลขาย — FK: `statement\_line\_id`, FK: `document\_id`, `allocated\_amount`, `platform\_fee\_diff`, `created\_by`)
 
+\- `get\_reconcile\_candidate\_documents()` (บิลขายที่ยังชนกับเงินฝาก KTB ได้ — `reconcilable\_amount` ของ `ABB` / `CS\_TAX` / `DEP\_IN` = `grand\_total - allocated` โดยไม่หัก `paid\_amount`, ของ `SO` / `INV\_DO` / `TAX\_INV` = `grand\_total - deposit\_deducted - paid\_amount - allocated`)
+
+\- `reclassify\_document\_payment\_channel(p\_document\_id, p\_new\_channel, p\_bank\_account\_id)` (ย้ายบิลออกจากหน้าชนยอด KTB ไปช่องทาง `CASH` หรือ `OTHER\_BANK`)
+
 ###### \- `expenses` (บิลค่าใช้จ่าย / OPEX — PK: `id`, ซิงก์คอลัมน์เลขเอกสาร `expense\_no` = `doc\_no` = `document\_no`, ซิงก์วันที่ `expense\_date` = `doc\_date`, ซิงก์รายละเอียด `description` = `remark`, ซิงก์หมวดหมู่ `category` = `expense\_category`, `contact\_id` FK → `contacts.id`, `vendor\_name`, `vendor\_tax\_id`, `tax\_invoice\_no`, `reference\_no`, `vehicle\_plate`, `tax\_type` \[`INCLUSIVE` | `EXCLUSIVE` | `NO\_VAT`], `tax\_invoice\_status`, `accounting\_tax\_tier`, `net\_amount`, `sub\_total`, `amount`, `vat\_rate`, `vat\_amount`, `wht\_rate`, `wht\_amount`, `total\_amount`, และ \*\*`grand\_total` เป็น `GENERATED ALWAYS AS (net\_amount + vat\_amount) STORED` ห้ามส่งค่าเข้า Insert/Update เด็ดขาด\*\*, `bank\_account\_id` \[Single FK → `mst\_bank\_accounts.id`], `attachment\_url`, `payment\_slip\_url`, `status`, `payment\_status`)
 
 ###### \- `expense\_items` (รายการย่อยของบิลค่าใช้จ่าย — PK: `id`, FK: `expense\_id` → `expenses.id` ON DELETE CASCADE, `line\_no`, `item\_description`, `quantity`, `unit\_name`, `unit\_price`, `discount\_amount`, `line\_total`)
