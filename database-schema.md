@@ -68,6 +68,8 @@ CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names, column names, views, 
 
 \- `documents.payment\_channel` (`COMPANY\_BANK` | `CASH` | `OTHER\_BANK`), `bank\_account\_id` → `mst\_bank\_accounts`, `receiving\_bank\_label`, `is\_swept\_to\_company`, `swept\_to\_company\_at`, `swept\_batch\_ref` — แยกช่องทางรับเงินและติดตามยอดเงินสด/บัญชีอื่นที่ยังไม่โอนเข้าบัญชีบริษัท. RPC `get\_unswept\_receipts\_summary()`
 
+\- `documents` ค่าขนส่งฝากส่งของบิลขาย: `shipping\_fee`, `shipping\_method` [`VAN` | `FLASH` | `KERRY` | `THAILAND\_POST` | `OTHER`], `shipping\_vat\_mode` [`EXEMPT` | `NONE`], `shipping\_tracking\_no`. บวกเข้า `grand\_total` หลัง VAT และไม่เข้า `net\_before\_vat` ตามประมวลรัษฎากร ม.81(1)(ณ). `update\_sales\_document\_direct` รับ `p\_shipping\_fee`, `p\_shipping\_method`, `p\_shipping\_vat\_mode`, `p\_shipping\_tracking\_no`
+
 \- `documents` ภาษีหัก ณ ที่จ่าย: `wht\_rate`, `wht\_amount`, `net\_received\_amount`, `wht\_attachment\_url`, `wht\_status` [`NONE` | `PENDING\_CERT` | `RECEIVED`]. ฐานคำนวณคือ `net\_before\_vat - deposit\_net\_deducted` ไม่ใช่ `grand\_total`. RPC `attach\_sales\_document\_wht\_certificate(p\_document\_id, p\_wht\_rate, p\_wht\_amount, p\_wht\_attachment\_url)` ใช้แนบใบ 50 ทวิย้อนหลัง
 
 \- `doc\_headers` (ตารางคู่ขนาน — `contact\_id` ปลด `NOT NULL` แล้วเพื่อรองรับบิลขายหน้าร้าน `ABB` และ E-Commerce, `reference\_no` ซิงค์จาก `documents.reference\_no` / `handwritten\_doc\_ref`, `payment\_status`, `paid\_amount`)

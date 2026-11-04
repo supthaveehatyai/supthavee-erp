@@ -52,6 +52,10 @@ import {
   type VatCalculationType,
 } from "@/lib/utils/document-summary";
 import {
+  normalizeSalesShipping,
+  type SalesShippingFields,
+} from "@/lib/utils/sales-shipping";
+import {
   generateDraftDocumentNo,
   isTemporaryDraftDocNo,
 } from "@/lib/utils/draft-document-no";
@@ -567,6 +571,72 @@ function stampProductionMockup<T extends { product_id: string | null; is_service
  * number from `generate_document_no` is assigned only in `issueDocument`.
  * Returns `{ document_id, document_no }` for the sales UI.
  */
+async function loadSalesShipping(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  documentId: string,
+): Promise<SalesShippingFields | null> {
+  const reader = supabase as unknown as {
+    from: (table: string) => {
+      select: (columns: string) => {
+        eq: (column: string, value: string) => {
+          maybeSingle: () => Promise<{
+            data: Record<string, unknown> | null;
+            error: { message: string } | null;
+          }>;
+        };
+      };
+    };
+  };
+  const loaded = await reader
+    .from("documents")
+    .select("shipping_fee, shipping_method, shipping_vat_mode, shipping_tracking_no")
+    .eq("id", documentId)
+    .maybeSingle();
+  if (loaded.error || !loaded.data) return null;
+  return normalizeSalesShipping({
+    shipping_fee: Number(loaded.data.shipping_fee ?? 0),
+    shipping_method: loaded.data.shipping_method ? String(loaded.data.shipping_method) : null,
+    shipping_tracking_no: loaded.data.shipping_tracking_no
+      ? String(loaded.data.shipping_tracking_no)
+      : null,
+  });
+}
+
+async function persistSalesShipping(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  documentId: string,
+  input: {
+    shipping_fee?: number | null;
+    shipping_method?: string | null;
+    shipping_tracking_no?: string | null;
+  },
+): Promise<string | null> {
+  const shipping = normalizeSalesShipping(input);
+  let patch: Record<string, unknown> = {
+    shipping_fee: shipping.shipping_fee,
+    shipping_method: shipping.shipping_method,
+    shipping_vat_mode: shipping.shipping_vat_mode,
+    shipping_tracking_no: shipping.shipping_tracking_no,
+  };
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const { error } = await supabase
+      .from("documents")
+      .update(patch as never)
+      .eq("id", documentId);
+    if (!error) return null;
+    const missing = /Could not find the '([^']+)' column/i.exec(error.message)?.[1];
+    if (missing && missing in patch) {
+      delete patch[missing];
+      patch = { ...patch };
+      if (Object.keys(patch).length === 0) return null;
+      continue;
+    }
+    if (/does not exist|schema cache/i.test(error.message)) return null;
+    return error.message;
+  }
+  return "บันทึกค่าขนส่งไม่สำเร็จ";
+}
+
 export async function createDraftDocument(
   payload: CreateDraftDocumentInput,
 ): Promise<CreateDraftDocumentResult> {
@@ -663,11 +733,13 @@ export async function createDraftDocument(
     const discountText = payload.discount_text?.trim() || null;
 
     // Always recompute server-side — never trust client money totals alone.
+    const shipping = normalizeSalesShipping(payload);
     const summary = calculateDocumentSummary({
       lineTotals: lineRows.map((row) => Number(row.line_total)),
       discountText,
       vatType,
       vatRate: Number.isFinite(vatRate) ? vatRate : 7,
+      shippingFee: shipping.shipping_fee,
     });
 
     const nowIso = new Date().toISOString();
@@ -730,6 +802,11 @@ export async function createDraftDocument(
     }
 
     const documentId = document.id as string;
+    const shippingError = await persistSalesShipping(supabase, documentId, shipping);
+    if (shippingError) {
+      await supabase.from("documents").delete().eq("id", documentId);
+      return { data: null, error: shippingError };
+    }
     const savedDocNo = (document.doc_no as string) || documentNo;
     const headerSyncError = await syncHandwrittenRefToDocHeader(supabase, {
       documentId,
@@ -2110,6 +2187,8 @@ export async function getDocumentByNo(
       notes,
       (data.attachment_url as string | null) ?? null,
     );
+    const shipping =
+      (await loadSalesShipping(supabase, documentId)) ?? normalizeSalesShipping({});
 
     const detail: DocumentDetail = {
       id: documentId,
@@ -2147,6 +2226,10 @@ export async function getDocumentByNo(
       freight_tax_mode: (data.freight_tax_mode as string | null) ?? null,
       dest_freight_cost:
         data.dest_freight_cost == null ? null : Number(data.dest_freight_cost),
+      shipping_fee: shipping.shipping_fee,
+      shipping_method: shipping.shipping_method,
+      shipping_vat_mode: shipping.shipping_vat_mode,
+      shipping_tracking_no: shipping.shipping_tracking_no,
       sales_channel: (() => {
         const channelRaw = String(data.sales_channel ?? "").trim().toUpperCase();
         return isSalesChannel(channelRaw) ? channelRaw : null;
@@ -2531,6 +2614,12 @@ export async function updateDraftDocument(
     const vatRate = Number(payload.vat_rate ?? 7);
     const discountText = payload.discount_text?.trim() || null;
 
+    const shipping = normalizeSalesShipping({
+      ...payload,
+      shipping_tracking_no:
+        payload.shipping_tracking_no ??
+        (await loadSalesShipping(supabase, documentId))?.shipping_tracking_no,
+    });
     const summary = calculateDocumentSummary({
       lineTotals: lineRows.map((row) => Number(row.line_total)),
       discountText,
@@ -2539,6 +2628,7 @@ export async function updateDraftDocument(
       depositGross: Number(existing.deposit_deducted ?? 0),
       depositNet: Number(existing.deposit_net_deducted ?? 0),
       depositVat: Number(existing.deposit_vat_deducted ?? 0),
+      shippingFee: shipping.shipping_fee,
     });
 
     const { error: headerError } = await supabase
@@ -2586,6 +2676,8 @@ export async function updateDraftDocument(
         error: headerError.message ?? "อัปเดตหัวเอกสารไม่สำเร็จ",
       };
     }
+    const shippingError = await persistSalesShipping(supabase, documentId, shipping);
+    if (shippingError) return { data: null, error: shippingError };
 
     const headerSyncError = await syncHandwrittenRefToDocHeader(supabase, {
       documentId,
@@ -3118,6 +3210,11 @@ export async function issueDocument(
       ? parsed.ledgerCount
       : 0;
     const nextStatus = parsed.status || issuedStatus;
+    const issuedShipping = await loadSalesShipping(supabase, id);
+    if (issuedShipping) {
+      const shippingError = await persistSalesShipping(supabase, id, issuedShipping);
+      if (shippingError) return { data: null, error: shippingError };
+    }
 
     // Audit Trail (non-blocking) — DRAFT → ISSUED / COMPLETED
     fireDocumentAuditLog({
@@ -3414,6 +3511,9 @@ export async function updateSalesDocumentDirect(input: {
   bank_account_id?: string | null;
   slip_url?: string | null;
   discount_amount: number;
+  shipping_fee?: number | null;
+  shipping_method?: string | null;
+  shipping_tracking_no?: string | null;
 }) {
   try {
     const owner = await requireSessionUserId();
@@ -3428,6 +3528,10 @@ export async function updateSalesDocumentDirect(input: {
     const discountAmount = Math.round(Number(input.discount_amount) * 100) / 100;
     if (!Number.isFinite(discountAmount) || discountAmount < 0) {
       return { data: null, error: "ส่วนลดท้ายบิลต้องเป็นตัวเลขไม่ติดลบ" };
+    }
+    const shipping = normalizeSalesShipping(input);
+    if (shipping.shipping_fee < 0) {
+      return { data: null, error: "ค่าขนส่งต้องเป็นตัวเลขไม่ติดลบ" };
     }
 
     const supabase = createSupabaseServerClient();
@@ -3450,6 +3554,10 @@ export async function updateSalesDocumentDirect(input: {
       p_bank_account_id: input.bank_account_id?.trim() || null,
       p_slip_url: input.slip_url?.trim() || null,
       p_discount_amount: discountAmount,
+      p_shipping_fee: shipping.shipping_fee,
+      p_shipping_method: shipping.shipping_method,
+      p_shipping_vat_mode: shipping.shipping_vat_mode,
+      p_shipping_tracking_no: shipping.shipping_tracking_no,
     });
     if (saved.error) return { data: null, error: saved.error.message };
 
@@ -4179,6 +4287,8 @@ export async function convertDocument(
     const deposit = settlesDeposit
       ? await loadSalesOrderDepositSummary(supabase, depositSourceId)
       : emptyDepositApply();
+    const sourceShipping =
+      (await loadSalesShipping(supabase, source.id)) ?? normalizeSalesShipping({});
     const summary = settlesDeposit
       ? calculateDocumentSummary({
           lineTotals: sourceItems.map((item) => Number(item.line_total ?? 0)),
@@ -4189,6 +4299,7 @@ export async function convertDocument(
           depositGross: deposit.deposit_deducted,
           depositNet: deposit.deposit_net_deducted,
           depositVat: deposit.deposit_vat_deducted,
+          shippingFee: sourceShipping.shipping_fee,
         })
       : null;
 
@@ -4275,6 +4386,12 @@ export async function convertDocument(
       );
       if (copyError) return { data: null, error: copyError };
     }
+    const shippingCopyError = await persistSalesShipping(
+      supabase,
+      newDocumentId,
+      sourceShipping,
+    );
+    if (shippingCopyError) return { data: null, error: shippingCopyError };
 
     if (sourceItems.length > 0) {
       const itemsPayload = sourceItems.map((item, index) => ({
@@ -4405,6 +4522,8 @@ export async function upgradeAbbToFullTaxInvoice(
         String(source.ref_document_id),
       );
     }
+    const sourceShipping =
+      (await loadSalesShipping(supabase, source.id)) ?? normalizeSalesShipping({});
     const summary = calculateDocumentSummary({
       lineTotals: sourceItems.map((item) => Number(item.line_total ?? 0)),
       discountText:
@@ -4414,6 +4533,7 @@ export async function upgradeAbbToFullTaxInvoice(
       depositGross: deposit.deposit_deducted,
       depositNet: deposit.deposit_net_deducted,
       depositVat: deposit.deposit_vat_deducted,
+      shippingFee: sourceShipping.shipping_fee,
     });
     const owner = await requireSessionUserId();
     if (!owner.ok) return { data: null, error: owner.error };
@@ -4477,6 +4597,12 @@ export async function upgradeAbbToFullTaxInvoice(
     }
 
     const newDocumentId = created.id as string;
+    const shippingCopyError = await persistSalesShipping(
+      supabase,
+      newDocumentId,
+      sourceShipping,
+    );
+    if (shippingCopyError) return { data: null, error: shippingCopyError };
     if (sourceItems.length > 0) {
       const { error: itemsError } = await supabase.from("document_items").insert(
         sourceItems.map((item, index) => ({

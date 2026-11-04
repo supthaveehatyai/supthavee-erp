@@ -109,6 +109,9 @@ export type DocumentPrintSummaryProps = {
   } | null;
   /** มูลค่าหลังหักมัดจำก่อน VAT ของบิลนี้ */
   netBeforeVat?: number | null;
+  /** ค่าขนส่งฝากส่งที่ไม่คิด VAT — แสดงเหนือยอดสุทธิเมื่อ > 0 */
+  shippingFee?: number | null;
+  shippingMethodLabel?: string | null;
 };
 
 export type PrintLayoutProps = {

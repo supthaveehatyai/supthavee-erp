@@ -56,6 +56,7 @@ export function ReceivePaymentDialog({
   netBeforeVat,
   depositNetDeducted = 0,
   vatRate = 7,
+  shippingFee = 0,
   bankAccounts = [],
 }: {
   documentId: string;
@@ -67,6 +68,7 @@ export function ReceivePaymentDialog({
   netBeforeVat: number;
   depositNetDeducted?: number;
   vatRate?: number;
+  shippingFee?: number;
   bankAccounts?: ActiveBankAccount[];
 }) {
   const router = useRouter();
@@ -100,6 +102,7 @@ export function ReceivePaymentDialog({
     depositDeducted,
     paidAmount,
     vatRate,
+    shippingFee,
   });
   const suggestedWht = salesWhtAmount(whtBase, Number(whtRate));
   const wht = roundMoney(whtText.trim() === "" ? 0 : Number(whtText));
@@ -163,6 +166,7 @@ export function ReceivePaymentDialog({
       depositDeducted,
       paidAmount,
       vatRate,
+      shippingFee,
     });
     setWhtText(salesWhtAmount(nextBase, Number(whtRate)).toFixed(2));
   }

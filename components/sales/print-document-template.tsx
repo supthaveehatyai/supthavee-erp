@@ -11,6 +11,7 @@ import type { DocumentDetail } from "@/types/document";
 import type { PrintPaperSize, PrintVatType } from "@/types/print-document";
 import { receiptMethodText } from "@/lib/finance/payment-channel";
 import { stripDepositNoteMetadata } from "@/lib/utils/deposit-note";
+import { salesShippingMethodLabel } from "@/lib/utils/sales-shipping";
 import { cn } from "@/lib/utils";
 
 function formatMoney(value: number): string {
@@ -162,6 +163,8 @@ export default async function PrintDocumentTemplate({
                 }
               : null
           }
+          shippingFee={isDepositDoc ? 0 : Number(doc.shipping_fee ?? 0)}
+          shippingMethodLabel={salesShippingMethodLabel(doc.shipping_method)}
         />
       }
     >

@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SalesShippingFields } from "@/components/sales/sales-shipping-fields";
 
 function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
@@ -52,6 +53,9 @@ export function SalesHeaderEditDialog({
   slipUrl = "",
   goodsTotal,
   discountAmount,
+  shippingFee = 0,
+  shippingMethod = "",
+  shippingTrackingNo = "",
 }: {
   documentId: string;
   docDate: string;
@@ -66,6 +70,9 @@ export function SalesHeaderEditDialog({
   slipUrl?: string;
   goodsTotal: number;
   discountAmount: number;
+  shippingFee?: number;
+  shippingMethod?: string;
+  shippingTrackingNo?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -90,22 +97,35 @@ export function SalesHeaderEditDialog({
   );
   const [receiptUrl, setReceiptUrl] = useState(slipUrl);
   const [discountText, setDiscountText] = useState(() => discountAmount.toFixed(2));
+  const [shippingText, setShippingText] = useState(() => roundMoney(shippingFee).toFixed(2));
+  const [carrier, setCarrier] = useState(shippingMethod);
   const goods = roundMoney(goodsTotal);
   const parsedDiscount = discountText.trim() === "" ? 0 : Number(discountText);
   const discountValue = roundMoney(parsedDiscount);
   const discountReady = Number.isFinite(parsedDiscount) && parsedDiscount >= 0;
-  const nextNet = roundMoney(goods - (discountReady ? discountValue : 0));
+  const parsedShipping = shippingText.trim() === "" ? 0 : Number(shippingText);
+  const shippingValue = roundMoney(parsedShipping);
+  const shippingReady = Number.isFinite(parsedShipping) && parsedShipping >= 0;
+  const nextNet = roundMoney(
+    goods - (discountReady ? discountValue : 0) + (shippingReady ? shippingValue : 0),
+  );
 
   function openDialog() {
     setDate(docDate.slice(0, 10));
     setSlipNo(referenceNo);
     setRemark(notes);
     setDiscountText(roundMoney(discountAmount).toFixed(2));
+    setShippingText(roundMoney(shippingFee).toFixed(2));
+    setCarrier(shippingMethod);
     setOpen(true);
   }
 
   function onSave() {
     if (pending) return;
+    if (!shippingReady) {
+      toast.error("ค่าขนส่งต้องเป็นตัวเลขไม่ติดลบ");
+      return;
+    }
     if (!discountReady || discountValue - goods > 0.005) {
       toast.error(
         discountValue - goods > 0.005
@@ -128,6 +148,9 @@ export function SalesHeaderEditDialog({
         })(),
         slip_url: receiptUrl.trim() || null,
         discount_amount: discountValue,
+        shipping_fee: shippingValue,
+        shipping_method: carrier || null,
+        shipping_tracking_no: shippingTrackingNo.trim() || null,
       });
       if (result.error || !result.data) {
         toast.error(result.error ?? "แก้ไขหัวบิลไม่สำเร็จ");
@@ -219,10 +242,20 @@ export function SalesHeaderEditDialog({
                 onChange={(event) => setDiscountText(event.target.value)}
               />
               <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                ยอดรวมสินค้า {money(goods)} − ส่วนลด {money(discountReady ? discountValue : 0)} ={" "}
+                ยอดรวมสินค้า {money(goods)} − ส่วนลด {money(discountReady ? discountValue : 0)} +
+                ค่าขนส่ง {money(shippingReady ? shippingValue : 0)} (ไม่คิด VAT) ={" "}
                 <span className="font-semibold text-slate-900">ยอดสุทธิใหม่ {money(nextNet)}</span>
               </p>
             </div>
+            <SalesShippingFields
+              fee={shippingText}
+              method={carrier}
+              disabled={pending}
+              feeId="issued-shipping-fee"
+              methodId="issued-shipping-method"
+              onFeeChange={setShippingText}
+              onMethodChange={setCarrier}
+            />
             <div className="space-y-1.5">
               <Label htmlFor="issued-notes">หมายเหตุ / ชื่องาน</Label>
               <textarea

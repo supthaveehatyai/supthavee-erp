@@ -33,6 +33,11 @@ export type DocumentSummaryInput = {
   depositNet?: number | null;
   /** VAT ของมัดจำที่ถอดไว้แล้ว */
   depositVat?: number | null;
+  /**
+   * ค่าขนส่งฝากส่งตามจริง — บวกเข้า grand_total หลัง VAT
+   * ไม่เข้าฐาน VAT และไม่เข้า net_before_vat (ม.81(1)(ณ))
+   */
+  shippingFee?: number | null;
 };
 
 export type DocumentSummaryResult = {
@@ -58,6 +63,8 @@ export type DocumentSummaryResult = {
   deposit_net_deducted: number;
   /** VAT มัดจำที่หัก */
   deposit_vat_deducted: number;
+  /** ค่าขนส่งที่ไม่คิด VAT */
+  shipping_fee: number;
 };
 
 function round2(value: number): number {
@@ -190,6 +197,13 @@ export function calculateDocumentSummary(
     }
   }
 
+  const shippingRaw = Number(input.shippingFee ?? 0);
+  const shipping_fee =
+    Number.isFinite(shippingRaw) && shippingRaw > 0 ? round2(shippingRaw) : 0;
+  if (shipping_fee > 0) {
+    grand_total = round2(grand_total + shipping_fee);
+  }
+
   return {
     total_amount,
     discount_amount,
@@ -202,5 +216,6 @@ export function calculateDocumentSummary(
     deposit_deducted,
     deposit_net_deducted,
     deposit_vat_deducted,
+    shipping_fee,
   };
 }

@@ -133,6 +133,8 @@ export function DocumentPrintSummary({
   purchaseInclusiveLayout = false,
   depositDeduction = null,
   netBeforeVat = null,
+  shippingFee = null,
+  shippingMethodLabel = null,
 }: DocumentPrintSummaryProps) {
   const vatType = normalizeVatType(vatTypeProp);
   const extractFromGrand = isRefundDocType(String(docType ?? ""));
@@ -142,6 +144,8 @@ export function DocumentPrintSummary({
     safeFreight > 0 ? round2(Math.max(0, safeSubtotal - safeFreight)) : safeSubtotal;
   const safeDiscount = round2(Math.max(0, discountAmount));
   const safeGrand = round2(grandTotal);
+  const safeShipping = round2(Math.max(0, Number(shippingFee ?? 0)));
+  const shippingLabel = `ค่าขนส่ง (${shippingMethodLabel?.trim() || "ไม่คิด VAT"})`;
   const safeWht = round2(Math.max(0, Number(withholdingTaxAmount ?? 0)));
   const safeVatRate =
     vatType === "NONE"
@@ -216,6 +220,9 @@ export function DocumentPrintSummary({
               label={`ภาษีมูลค่าเพิ่ม ${safeVatRate}% (VAT)`}
               value={formatMoney(vatAmount)}
             />
+            {safeShipping > 0 ? (
+              <SummaryRow label={shippingLabel} value={`+${formatMoney(safeShipping)}`} />
+            ) : null}
             <SummaryRow
               label="ยอดสุทธิ (Grand Total)"
               value={formatMoney(safeGrand)}
@@ -242,6 +249,9 @@ export function DocumentPrintSummary({
               value={formatMoney(settledNet)}
             />
             <SummaryRow label={vatLabel} value={formatMoney(vatAmount)} />
+            {safeShipping > 0 ? (
+              <SummaryRow label={shippingLabel} value={`+${formatMoney(safeShipping)}`} />
+            ) : null}
             <SummaryRow
               label="ยอดชำระสุทธิ"
               value={formatMoney(safeGrand)}
@@ -306,6 +316,10 @@ export function DocumentPrintSummary({
 
         {showVat ? (
           <SummaryRow label={vatLabel} value={formatMoney(vatAmount)} />
+        ) : null}
+
+        {safeShipping > 0 ? (
+          <SummaryRow label={shippingLabel} value={`+${formatMoney(safeShipping)}`} />
         ) : null}
 
         <SummaryRow

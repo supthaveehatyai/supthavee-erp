@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { FilePlus2, Receipt, ShoppingCart, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { SalesShippingFields } from "@/components/sales/sales-shipping-fields";
 import {
   createDraftDocument,
   getContactPersons,
@@ -261,6 +262,8 @@ export default function SalesCreateWorkspace({
     ),
   );
   const [slipUrl, setSlipUrl] = useState("");
+  const [shippingFee, setShippingFee] = useState("0");
+  const [shippingMethod, setShippingMethod] = useState("");
   const [isPending, startTransition] = useTransition();
   const scanKey = useRef(0);
 
@@ -308,8 +311,9 @@ export default function SalesCreateWorkspace({
         discountText,
         vatType,
         vatRate: DEFAULT_VAT_RATE,
+        shippingFee: Number(shippingFee) || 0,
       }),
-    [lineItems, discountText, vatType],
+    [lineItems, discountText, vatType, shippingFee],
   );
   const needsProductionMockup = useMemo(
     () =>
@@ -665,6 +669,8 @@ export default function SalesCreateWorkspace({
         net_before_vat: billSummary.net_before_vat,
         vat_amount: billSummary.vat_amount,
         grand_total: billSummary.grand_total,
+        shipping_fee: Number(shippingFee) || 0,
+        shipping_method: shippingMethod || null,
         sales_channel: header.data.sales_channel,
         ecommerce_order_no: header.data.ecommerce_order_no,
         ecommerce_buyer_name: header.data.ecommerce_buyer_name,
@@ -1279,6 +1285,19 @@ export default function SalesCreateWorkspace({
                   ใส่ % สำหรับเปอร์เซ็นต์ หรือตัวเลขล้วนสำหรับจำนวนเงินบาท
                 </p>
               </div>
+              <SalesShippingFields
+                fee={shippingFee}
+                method={shippingMethod}
+                disabled={isPending}
+                onFeeChange={(value) => {
+                  clearLastSavedArtifact();
+                  setShippingFee(value);
+                }}
+                onMethodChange={(value) => {
+                  clearLastSavedArtifact();
+                  setShippingMethod(value);
+                }}
+              />
             </div>
 
             <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
@@ -1304,7 +1323,7 @@ export default function SalesCreateWorkspace({
                 </div>
                 <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-2.5">
                   <dt className="text-slate-600">
-                    ยอดหลังหักส่วนลด (Net Before VAT)
+                    ยอดสินค้าก่อนภาษี (Net Before VAT)
                   </dt>
                   <dd className="font-semibold tabular-nums text-slate-900">
                     {formatMoney(billSummary.net_before_vat)} ฿
@@ -1321,6 +1340,16 @@ export default function SalesCreateWorkspace({
                     {formatMoney(billSummary.vat_amount)} ฿
                   </dd>
                 </div>
+                {billSummary.shipping_fee > 0 ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-slate-600">
+                      ค่าขนส่ง (ไม่คิด VAT / เบิกตามจริง)
+                    </dt>
+                    <dd className="font-semibold tabular-nums text-slate-900">
+                      +{formatMoney(billSummary.shipping_fee)} ฿
+                    </dd>
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-between gap-3 border-t border-slate-300 pt-3">
                   <dt className="text-base font-bold text-slate-900">
                     ยอดสุทธิ (Grand Total)

@@ -17,6 +17,8 @@ export function salesWhtBase(input: {
   depositDeducted?: number;
   paidAmount?: number;
   vatRate?: number;
+  /** Freight reimbursed on the bill. Excluded from the service WHT base. */
+  shippingFee?: number;
 }): number {
   const pay = roundWhtMoney(input.payAmount);
   const remaining = roundWhtMoney(input.remainingGrand);
@@ -29,7 +31,8 @@ export function salesWhtBase(input: {
   const priorPaid = roundWhtMoney(input.paidAmount ?? 0);
   if (settlingRemainder && priorPaid <= 0.05) return fullBase;
 
-  const gross = roundWhtMoney(input.grandTotal);
+  const shipping = roundWhtMoney(Math.max(0, input.shippingFee ?? 0));
+  const gross = roundWhtMoney(Math.max(0, input.grandTotal - shipping));
   const depositGross = roundWhtMoney(input.depositDeducted ?? 0);
   const original = roundWhtMoney(Math.max(0, gross - depositGross));
   const denominator = original > 0 ? original : gross;

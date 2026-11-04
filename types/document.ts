@@ -153,6 +153,11 @@ export type CreateDraftDocumentInput = {
   bank_account_id?: string | null;
   receiving_bank_label?: string | null;
   original_receipt_url?: string | null;
+  /** ค่าขนส่งฝากส่งตามจริง ไม่เข้าฐาน VAT */
+  shipping_fee?: number | null;
+  shipping_method?: string | null;
+  shipping_vat_mode?: string | null;
+  shipping_tracking_no?: string | null;
 };
 
 export type CreateDraftDocumentResult = {
@@ -195,6 +200,11 @@ export type UpdateDraftDocumentInput = {
   bank_account_id?: string | null;
   receiving_bank_label?: string | null;
   original_receipt_url?: string | null;
+  /** ค่าขนส่งฝากส่งตามจริง ไม่เข้าฐาน VAT */
+  shipping_fee?: number | null;
+  shipping_method?: string | null;
+  shipping_vat_mode?: string | null;
+  shipping_tracking_no?: string | null;
 };
 
 export type UpdateDraftDocumentResult = {
@@ -436,6 +446,11 @@ export type DocumentDetail = {
   freight_tax_mode?: string | null;
   /** ค่าขนส่งปลายทาง — เข้าต้นทุนสินค้า แต่ไม่รวมหนี้ผู้ขาย */
   dest_freight_cost?: number | null;
+  /** ค่าขนส่งฝากส่งของบิลขาย — ไม่เข้าฐาน VAT */
+  shipping_fee?: number | null;
+  shipping_method?: string | null;
+  shipping_vat_mode?: string | null;
+  shipping_tracking_no?: string | null;
   /** Phase 19 — ช่องทางขาย; NULL = ลูกค้า B2B ปกติ */
   sales_channel?: SalesChannel | null;
   ecommerce_order_no?: string | null;

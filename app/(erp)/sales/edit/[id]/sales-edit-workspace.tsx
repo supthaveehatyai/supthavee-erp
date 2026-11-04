@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AlertTriangle, ArrowLeft, Pencil, Save, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { SalesShippingFields } from "@/components/sales/sales-shipping-fields";
 import {
   getContactPersons,
   issueDocument,
@@ -249,6 +250,12 @@ export default function SalesEditWorkspace({
     ),
   );
   const [slipUrl, setSlipUrl] = useState(initialDocument.original_receipt_url ?? "");
+  const [shippingFee, setShippingFee] = useState(
+    Number(initialDocument.shipping_fee ?? 0).toFixed(2),
+  );
+  const [shippingMethod, setShippingMethod] = useState(
+    initialDocument.shipping_method ?? "",
+  );
   const [isPending, startTransition] = useTransition();
   const preserveInitialPersonRef = useRef(true);
   const isReplacement = isCancelAndReplaceDraft({
@@ -294,8 +301,9 @@ export default function SalesEditWorkspace({
         depositGross: Number(initialDocument.deposit_deducted ?? 0),
         depositNet: Number(initialDocument.deposit_net_deducted ?? 0),
         depositVat: Number(initialDocument.deposit_vat_deducted ?? 0),
+        shippingFee: Number(shippingFee) || 0,
       }),
-    [lineItems, discountText, vatType, initialDocument],
+    [lineItems, discountText, vatType, initialDocument, shippingFee],
   );
   const needsProductionMockup = useMemo(
     () =>
@@ -551,6 +559,9 @@ export default function SalesEditWorkspace({
         net_before_vat: billSummary.net_before_vat,
         vat_amount: billSummary.vat_amount,
         grand_total: billSummary.grand_total,
+        shipping_fee: Number(shippingFee) || 0,
+        shipping_method: shippingMethod || null,
+        shipping_tracking_no: initialDocument.shipping_tracking_no ?? null,
         sales_channel: header.data.sales_channel,
         ecommerce_order_no: header.data.ecommerce_order_no,
         ecommerce_buyer_name: header.data.ecommerce_buyer_name,
@@ -1115,6 +1126,13 @@ export default function SalesEditWorkspace({
                     className="h-10"
                   />
                 </div>
+                <SalesShippingFields
+                  fee={shippingFee}
+                  method={shippingMethod}
+                  disabled={isPending || isReplacement}
+                  onFeeChange={setShippingFee}
+                  onMethodChange={setShippingMethod}
+                />
               </div>
               <GoodsQtyBadge rows={lineItems} />
               {initialDocument.doc_type === "ABB" ||
@@ -1167,6 +1185,14 @@ export default function SalesEditWorkspace({
                   )}
                 </span>
               </p>
+              {billSummary.shipping_fee > 0 ? (
+                <p>
+                  ค่าขนส่ง (ไม่คิด VAT / เบิกตามจริง):{" "}
+                  <span className="font-semibold tabular-nums text-slate-900">
+                    +{formatMoney(billSummary.shipping_fee)}
+                  </span>
+                </p>
+              ) : null}
               <p>
                 รวมสุทธิ:{" "}
                 <span className="text-base font-bold tabular-nums text-blue-700">

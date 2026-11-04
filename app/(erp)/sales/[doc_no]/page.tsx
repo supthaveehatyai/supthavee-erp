@@ -29,6 +29,7 @@ import { SalesPrintOptions } from "@/components/sales/sales-print-controls";
 import PrintPaymentReceiptTemplate from "@/components/finance/PrintPaymentReceiptTemplate";
 import PrintSettlementVoucherTemplate from "@/components/finance/PrintSettlementVoucherTemplate";
 import { computePrintVatBreakdown } from "@/components/shared/print/DocumentPrintSummary";
+import { salesShippingMethodLabel } from "@/lib/utils/sales-shipping";
 import {
   loadSourceDepositVat,
   resolveRefundInheritedVat,
@@ -581,6 +582,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               netBeforeVat={netBeforeVat}
               depositNetDeducted={Number(doc.deposit_net_deducted ?? 0)}
               vatRate={vatRate}
+              shippingFee={Number(doc.shipping_fee ?? 0)}
               bankAccounts={bankAccounts.data}
             />
           ) : null}
@@ -603,6 +605,9 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               slipUrl={doc.original_receipt_url ?? ""}
               goodsTotal={subtotal}
               discountAmount={discountAmount}
+              shippingFee={Number(doc.shipping_fee ?? 0)}
+              shippingMethod={doc.shipping_method ?? ""}
+              shippingTrackingNo={doc.shipping_tracking_no ?? ""}
             />
           ) : null}
           {canSendKanban || showBatchMto ? (
@@ -1062,6 +1067,12 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                     label={`ภาษีมูลค่าเพิ่ม ${vatRate}%`}
                     value={`${formatMoney(vatAmount)} ฿`}
                   />
+                  {Number(doc.shipping_fee ?? 0) > 0 ? (
+                    <SummaryRow
+                      label={`ค่าขนส่ง (${salesShippingMethodLabel(doc.shipping_method)})`}
+                      value={`+${formatMoney(Number(doc.shipping_fee ?? 0))} ฿`}
+                    />
+                  ) : null}
                   <div className="border-t border-slate-200 pt-2.5">
                     <SummaryRow
                       label="ยอดสุทธิ (Grand Total)"
@@ -1078,6 +1089,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                       depositNetDeducted={Number(doc.deposit_net_deducted ?? 0)}
                       depositDeducted={depositDeducted}
                       vatRate={vatRate}
+                      shippingFee={Number(doc.shipping_fee ?? 0)}
                       whtRate={Number(doc.wht_rate ?? 0)}
                       whtAmount={Number(doc.wht_amount ?? 0)}
                       netReceivedAmount={Number(doc.net_received_amount ?? 0)}

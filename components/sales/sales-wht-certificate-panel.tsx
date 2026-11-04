@@ -42,6 +42,7 @@ export function SalesWhtCertificatePanel({
   depositNetDeducted,
   depositDeducted,
   vatRate,
+  shippingFee = 0,
   whtRate,
   whtAmount,
   netReceivedAmount,
@@ -55,6 +56,7 @@ export function SalesWhtCertificatePanel({
   depositNetDeducted: number;
   depositDeducted: number;
   vatRate: number;
+  shippingFee?: number;
   whtRate: number;
   whtAmount: number;
   netReceivedAmount: number;
@@ -87,6 +89,7 @@ export function SalesWhtCertificatePanel({
     depositDeducted,
     paidAmount: 0,
     vatRate,
+    shippingFee,
   });
 
   function openDialog() {
