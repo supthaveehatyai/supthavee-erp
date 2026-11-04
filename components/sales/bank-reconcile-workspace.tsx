@@ -5,8 +5,10 @@ import { Landmark, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   confirmBankMatch,
+  confirmWithdrawalRecord,
   importKtbStatement,
   listBankStatementLines,
+  searchOpenPurchaseBills,
   searchOpenSalesBills,
   suggestBillMatches,
 } from "@/lib/actions/bank-reconcile-actions";
@@ -33,12 +35,29 @@ function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+type LineScope = "deposits" | "withdrawals" | "all";
+
+function isWithdrawal(line: BankStatementLineView): boolean {
+  return line.withdrawal_amount > 0.05 && line.deposit_amount <= 0.05;
+}
+
+function billCaption(bill: OpenSalesBill): string {
+  const head = `${formatShortDateTh(bill.doc_date)} · ${bill.customer_label || bill.doc_type} · ตัดได้ ${money(bill.linkable_amount)}`;
+  if (
+    bill.deposit_deducted > 0.05 &&
+    (bill.doc_type === "SO" || bill.doc_type === "INV_DO" || bill.doc_type === "TAX_INV")
+  ) {
+    return `${head} (ยอดเต็ม ${money(bill.grand_total)} หักมัดจำ ${money(bill.deposit_deducted)})`;
+  }
+  return head;
+}
+
 export default function BankReconcileWorkspace() {
   const inputRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
-  const [scope, setScope] = useState<"open" | "all">("open");
+  const [scope, setScope] = useState<LineScope>("deposits");
   const [lines, setLines] = useState<BankStatementLineView[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -48,12 +67,29 @@ export default function BankReconcileWorkspace() {
   const [channel, setChannel] = useState("");
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [fee, setFee] = useState(0);
+  const [expenseMemo, setExpenseMemo] = useState("");
   const [isWorking, setIsWorking] = useState(false);
 
   const selected = lines.find((line) => line.id === selectedId) ?? null;
-  const room = selected
-    ? roundMoney(Math.max(0, selected.deposit_amount - selected.matched_amount))
+  const paying = selected ? isWithdrawal(selected) : false;
+  const movement = selected
+    ? paying
+      ? selected.withdrawal_amount
+      : selected.deposit_amount
     : 0;
+  const room = selected ? roundMoney(Math.max(0, movement - selected.matched_amount)) : 0;
+  const totals = useMemo(() => {
+    const received = roundMoney(
+      lines.reduce((sum, line) => sum + (line.deposit_amount > 0 ? line.deposit_amount : 0), 0),
+    );
+    const paid = roundMoney(
+      lines.reduce(
+        (sum, line) => sum + (line.withdrawal_amount > 0 ? line.withdrawal_amount : 0),
+        0,
+      ),
+    );
+    return { received, paid };
+  }, [lines]);
   const pickedBills = useMemo(
     () => bills.filter((bill) => picked[bill.id]),
     [bills, picked],
@@ -89,7 +125,7 @@ export default function BankReconcileWorkspace() {
     setFee(roundMoney(Math.max(0, pickedTotal - room)));
   }, [pickedTotal, room]);
 
-  async function loadLines(nextScope: "open" | "all") {
+  async function loadLines(nextScope: LineScope) {
     const result = await listBankStatementLines(nextScope);
     setLines(result.data);
     setListError(result.error);
@@ -102,8 +138,19 @@ export default function BankReconcileWorkspace() {
     setBills([]);
     const hint = /[ก-๙]/.test(line.payer_hint) ? line.payer_hint : "";
     setKeyword(hint);
+    setExpenseMemo(line.expense_memo ?? "");
     setIsWorking(true);
     try {
+      if (isWithdrawal(line)) {
+        const found = await searchOpenPurchaseBills({
+          keyword: hint,
+          tx_date: line.tx_date,
+        });
+        if (found.error) toast.error(found.error);
+        setSuggestions([]);
+        setBills(found.data);
+        return;
+      }
       const [suggested, found] = await Promise.all([
         suggestBillMatches(line.id),
         searchOpenSalesBills({
@@ -177,8 +224,34 @@ export default function BankReconcileWorkspace() {
     }
   }
 
+  async function confirmWithdrawal() {
+    if (!selected || !paying) return;
+    setIsWorking(true);
+    try {
+      const result = await confirmWithdrawalRecord({
+        statement_line_id: selected.id,
+        allocations: pickedBills.map((bill) => ({
+          document_id: bill.id,
+          allocated_amount: bill.linkable_amount,
+        })),
+        expense_memo: expenseMemo,
+      });
+      if (result.error || !result.data) {
+        toast.error(result.error ?? "บันทึกยอดจ่ายไม่สำเร็จ");
+        return;
+      }
+      toast.success(`บันทึกยอดจ่ายแล้ว สถานะ ${result.data.reconcile_status}`);
+      setSelectedId(null);
+      setPicked({});
+      setExpenseMemo("");
+      await loadLines(scope);
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
   async function confirmPicked() {
-    if (!selected || !canConfirm) return;
+    if (!selected || paying || !canConfirm) return;
     setIsWorking(true);
     try {
       const result = await confirmBankMatch({
@@ -207,11 +280,13 @@ export default function BankReconcileWorkspace() {
     if (!selected) return;
     setIsWorking(true);
     try {
-      const found = await searchOpenSalesBills({
-        keyword,
-        tx_date: selected.tx_date,
-        sales_channel: channel || null,
-      });
+      const found = paying
+        ? await searchOpenPurchaseBills({ keyword, tx_date: selected.tx_date })
+        : await searchOpenSalesBills({
+            keyword,
+            tx_date: selected.tx_date,
+            sales_channel: channel || null,
+          });
       if (found.error) toast.error(found.error);
       setBills(found.data);
       setPicked({});
@@ -295,23 +370,39 @@ export default function BankReconcileWorkspace() {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-          <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
+          <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3">
             <h2 className="text-sm font-semibold text-slate-800">รายการเดินบัญชี</h2>
-            <div className="flex gap-1">
-              {(["open", "all"] as const).map((value) => (
+            <div className="flex flex-wrap gap-1.5">
+              {(
+                [
+                  ["deposits", "🟢 เงินฝากรอชน"],
+                  ["withdrawals", "🔴 รายการจ่าย/ถอนเงิน"],
+                  ["all", "📋 ทั้งหมด (รับ + จ่าย)"],
+                ] as const
+              ).map(([value, label]) => (
                 <button
                   key={value}
                   type="button"
                   onClick={() => setScope(value)}
                   className={cn(
-                    "rounded-lg px-2.5 py-1 text-xs font-medium",
-                    scope === value ? "bg-sky-100 text-sky-800" : "text-slate-500",
+                    "rounded-full border px-3 py-1 text-xs font-medium",
+                    scope === value
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-200 text-slate-600",
                   )}
                 >
-                  {value === "open" ? "เงินฝากที่ยังไม่ชน" : "ทั้งหมด"}
+                  {label}
                 </button>
               ))}
             </div>
+            {scope === "all" ? (
+              <p className="text-xs text-slate-600">
+                ยอดรวมรับ{" "}
+                <span className="font-semibold text-emerald-600">+{money(totals.received)}</span>
+                {" · "}ยอดรวมจ่าย{" "}
+                <span className="font-semibold text-rose-600">-{money(totals.paid)}</span>
+              </p>
+            ) : null}
           </div>
           <div className="max-h-[640px] overflow-auto">
             <table className="w-full text-left text-sm">
@@ -319,7 +410,7 @@ export default function BankReconcileWorkspace() {
                 <tr>
                   <th className="px-3 py-2">วันที่</th>
                   <th className="px-3 py-2">รายการ</th>
-                  <th className="px-3 py-2 text-right">ฝาก</th>
+                  <th className="px-3 py-2 text-right">ยอดเงิน (รับ / จ่าย)</th>
                   <th className="px-3 py-2">สถานะ</th>
                 </tr>
               </thead>
@@ -352,8 +443,28 @@ export default function BankReconcileWorkspace() {
                           {line.payer_hint || line.tx_code}
                         </div>
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-right font-medium">
-                        {line.deposit_amount > 0 ? money(line.deposit_amount) : "—"}
+                      <td className="whitespace-nowrap px-3 py-2 text-right">
+                        {isWithdrawal(line) ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-600">
+                              ถอน/จ่าย
+                            </span>
+                            <span className="rounded bg-rose-50 px-1.5 py-0.5 font-semibold text-rose-600">
+                              -{money(line.withdrawal_amount)}
+                            </span>
+                          </span>
+                        ) : line.deposit_amount > 0 ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600">
+                              รับโอน
+                            </span>
+                            <span className="rounded bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-600">
+                              +{money(line.deposit_amount)}
+                            </span>
+                          </span>
+                        ) : (
+                          "—"
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-xs">
                         {line.reconcile_status}
@@ -374,15 +485,19 @@ export default function BankReconcileWorkspace() {
           ) : (
             <>
               <div>
-                <h2 className="text-sm font-semibold text-slate-800">
-                  เงินฝากคงเหลือ {money(room)} บาท
+                <h2 className={cn("text-sm font-semibold", paying ? "text-rose-700" : "text-slate-800")}>
+                  {paying
+                    ? `🔴 ชนยอดรายการจ่าย / ถอนเงิน (-${money(selected.withdrawal_amount)} บาท)`
+                    : `เงินฝากคงเหลือ ${money(room)} บาท`}
                 </h2>
                 <p className="text-xs text-slate-500">
-                  ยอดฝาก {money(selected.deposit_amount)} · ชนแล้ว {money(selected.matched_amount)}
+                  {paying
+                    ? `ยอดจ่าย ${money(selected.withdrawal_amount)} · บันทึกแล้ว ${money(selected.matched_amount)}`
+                    : `ยอดฝาก ${money(selected.deposit_amount)} · ชนแล้ว ${money(selected.matched_amount)}`}
                 </p>
               </div>
 
-              {suggestions.length > 0 ? (
+              {!paying && suggestions.length > 0 ? (
                 <div className="space-y-2">
                   <p className="text-xs font-semibold text-slate-600">บิลที่ระบบแนะนำ</p>
                   {suggestions.map((suggestion) => (
@@ -393,8 +508,7 @@ export default function BankReconcileWorkspace() {
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium">{suggestion.doc_no}</div>
                         <div className="truncate text-[11px] text-slate-500">
-                          {suggestion.reason} · {suggestion.customer_label || suggestion.doc_type} ·{" "}
-                          {money(suggestion.suggested_amount)}
+                          {suggestion.reason} · {billCaption(suggestion)}
                         </div>
                       </div>
                       <Button
@@ -415,13 +529,14 @@ export default function BankReconcileWorkspace() {
                 <input
                   value={keyword}
                   onChange={(event) => setKeyword(event.target.value)}
-                  placeholder="เลขบิล / ชื่อลูกค้า / ชื่อเล่น"
+                  placeholder={paying ? "เลขเอกสาร / ชื่อเจ้าหนี้" : "เลขบิล / ชื่อลูกค้า / ชื่อเล่น"}
                   className="h-10 rounded-md border border-slate-200 px-3 text-sm"
                 />
                 <select
                   value={channel}
                   onChange={(event) => setChannel(event.target.value)}
-                  className="h-10 rounded-md border border-slate-200 px-2 text-sm"
+                  disabled={paying}
+                  className="h-10 rounded-md border border-slate-200 px-2 text-sm disabled:bg-slate-50"
                 >
                   <option value="">ทุกช่องทาง</option>
                   <option value="SHOPEE">Shopee</option>
@@ -455,9 +570,8 @@ export default function BankReconcileWorkspace() {
                       />
                       <span className="min-w-0 flex-1">
                         <span className="font-medium">{bill.doc_no}</span>
-                        <span className="mt-0.5 block truncate text-[11px] text-slate-500">
-                          {formatShortDateTh(bill.doc_date)} · {bill.customer_label || bill.doc_type} ·
-                          ตัดได้ {money(bill.linkable_amount)}
+                        <span className="mt-0.5 block text-[11px] text-slate-500">
+                          {billCaption(bill)}
                         </span>
                       </span>
                     </label>
@@ -465,6 +579,19 @@ export default function BankReconcileWorkspace() {
                 )}
               </div>
 
+              {paying ? (
+                <label className="block text-sm text-slate-700">
+                  📝 บันทึกช่วยจำรายจ่าย (กรณีไม่มีบิลในระบบ / ค่าใช้จ่ายทั่วไป)
+                  <textarea
+                    rows={2}
+                    value={expenseMemo}
+                    onChange={(event) => setExpenseMemo(event.target.value)}
+                    placeholder="เช่น ค่าเสื้อ บจก.ทวีทรัพย์อาภรณ์ หรือ ค่าขนส่ง LLT"
+                    className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2"
+                  />
+                </label>
+              ) : null}
+              {!paying ? (
               <label className="block text-sm text-slate-700">
                 ส่วนต่างค่าธรรมเนียมแพลตฟอร์ม / หัก ณ ที่จ่าย
                 <input
@@ -476,13 +603,30 @@ export default function BankReconcileWorkspace() {
                   className="mt-1 h-10 w-full rounded-md border border-slate-200 px-3"
                 />
               </label>
+              ) : null}
+              {!paying ? (
               <p className="text-xs text-slate-500">
                 รวมบิล {money(pickedTotal)} − ส่วนต่าง {money(fee)} = เงินสด {money(cash)}
               </p>
+              ) : null}
+              {paying ? (
+                <Button
+                  disabled={
+                    isWorking ||
+                    selected.reconcile_status === "MATCHED" ||
+                    (pickedBills.length === 0 && expenseMemo.trim().length === 0)
+                  }
+                  onClick={() => void confirmWithdrawal()}
+                >
+                  {isWorking ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+                  ยืนยันบันทึกยอดจ่าย
+                </Button>
+              ) : (
               <Button disabled={!canConfirm || isWorking} onClick={() => void confirmPicked()}>
                 {isWorking ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
                 ยืนยันการชนยอด
               </Button>
+              )}
             </>
           )}
         </section>

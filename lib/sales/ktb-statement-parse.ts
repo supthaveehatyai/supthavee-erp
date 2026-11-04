@@ -270,8 +270,14 @@ function finalizeLine(input: {
   if (!txDate) return null;
   const txTime = padTime(input.tx_time || split.time);
   const description = (input.description ?? "").replace(/\s+/g, " ").trim().slice(0, 1000);
-  const withdrawal = roundMoney(Math.abs(input.withdrawal_amount ?? 0));
-  const deposit = roundMoney(Math.abs(input.deposit_amount ?? 0));
+  let withdrawal = roundMoney(input.withdrawal_amount ?? 0);
+  let deposit = roundMoney(input.deposit_amount ?? 0);
+  if (deposit < 0 && withdrawal <= 0) {
+    withdrawal = roundMoney(Math.abs(deposit));
+    deposit = 0;
+  }
+  if (withdrawal < 0) withdrawal = roundMoney(Math.abs(withdrawal));
+  deposit = roundMoney(Math.max(0, deposit));
   const balance =
     input.balance_amount == null || !Number.isFinite(input.balance_amount)
       ? null
@@ -286,6 +292,7 @@ function finalizeLine(input: {
     withdrawal_amount: withdrawal,
     deposit_amount: deposit,
     balance_amount: balance,
+    tx_direction: (withdrawal > 0 && deposit <= 0 ? "OUT" : "IN") as "IN" | "OUT",
   };
   return { ...line, row_hash: statementRowHash(line) };
 }
@@ -369,7 +376,7 @@ Return ONLY JSON, no markdown.
 Convert every Buddhist year (พ.ศ.) to Gregorian YYYY-MM-DD by subtracting 543.
 A 2-digit year such as 69 means พ.ศ. 2569, then 2569-543=2026.
 tx_time is HH:mm:ss or "".
-withdrawal_amount is money out. deposit_amount is money in. Use 0 when that side is blank.
+The signed amount column ถอนเงิน/ฝากเงิน: a negative number is money out. Put it in withdrawal_amount as a positive number and set deposit_amount to 0. A positive number is money in: deposit_amount = that number and withdrawal_amount = 0. Never leave a real payment as zero.
 balance_amount is the running balance, or null when absent.
 payer_hint is the counterparty name or their bank account number when visible, else "".
 tx_code is the bank transaction code, else "".

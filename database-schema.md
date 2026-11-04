@@ -76,7 +76,7 @@ CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names, column names, views, 
 
 \- `bank\_statement\_imports` (หัวไฟล์ Statement กรุงไทย — `bank\_code` [`KTB`], `account\_no`, `file\_name`, `source\_filename` ส่งคู่กับ `file\_name` ทุกครั้งที่นำเข้า, `source\_kind`, `row\_count`, `created\_by`)
 
-\- `bank\_statement\_lines` (รายการเดินบัญชี — FK: `import\_id`, `tx\_date`, `tx\_time`, `tx\_code`, `description`, `payer\_hint`, `withdrawal\_amount`, `deposit\_amount`, `balance\_amount`, `row\_hash` TEXT UNIQUE สำหรับ upsert กันไฟล์ซ้อนวัน, `reconcile\_status` [`UNMATCHED` | `PARTIAL` | `MATCHED`], `matched\_amount`)
+\- `bank\_statement\_lines` (รายการเดินบัญชี — FK: `import\_id`, `tx\_date`, `tx\_time`, `tx\_code`, `description`, `payer\_hint`, `withdrawal\_amount`, `deposit\_amount`, `tx\_direction` [`IN` | `OUT`], `expense\_memo`, `balance\_amount`, `row\_hash` TEXT UNIQUE สำหรับ upsert กันไฟล์ซ้อนวัน, `reconcile\_status` [`UNMATCHED` | `PARTIAL` | `MATCHED`], `matched\_amount`)
 
 \- `bank\_reconciliation\_allocations` (ชนยอดเงินฝากกับบิลขาย — FK: `statement\_line\_id`, FK: `document\_id`, `allocated\_amount`, `platform\_fee\_diff`, `created\_by`)
 

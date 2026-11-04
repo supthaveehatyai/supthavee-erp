@@ -26,6 +26,7 @@ import type {
   BillMatchSuggestion,
   ConfirmBankMatchInput,
   ConfirmBankMatchResult,
+  ConfirmWithdrawalInput,
   ImportKtbStatementResult,
   ListBankLinesResult,
   OpenSalesBill,
@@ -45,7 +46,6 @@ const SALES_DOC_TYPES = [
   "REC",
 ] as const;
 const OPEN_DOC_STATUSES = ["ISSUED", "COMPLETED", "PAID"] as const;
-const CASH_DOC_TYPES = new Set(["ABB", "CS_TAX"]);
 const MAX_BYTES = 4_500_000;
 const MONEY_EPSILON = 0.05;
 
@@ -162,6 +162,7 @@ async function upsertLines(
     payer_hint: line.payer_hint || null,
     withdrawal_amount: line.withdrawal_amount,
     deposit_amount: line.deposit_amount,
+    tx_direction: line.tx_direction,
     balance_amount: line.balance_amount,
     row_hash: line.row_hash,
     reconcile_status: "UNMATCHED",
@@ -219,6 +220,12 @@ function mapLine(row: Record<string, unknown>): BankStatementLineView {
     deposit_amount: roundMoney(Number(row.deposit_amount ?? 0)),
     balance_amount:
       balance == null || balance === "" ? null : roundMoney(Number(balance)),
+    tx_direction:
+      String(row.tx_direction ?? "") === "OUT" ||
+      Number(row.withdrawal_amount ?? 0) > 0
+        ? "OUT"
+        : "IN",
+    expense_memo: String(row.expense_memo ?? ""),
     reconcile_status: String(row.reconcile_status ?? "UNMATCHED"),
     matched_amount: roundMoney(Number(row.matched_amount ?? 0)),
   };
@@ -311,7 +318,7 @@ export async function importKtbStatement(
 }
 
 export async function listBankStatementLines(
-  scope: "open" | "all" = "open",
+  scope: "deposits" | "withdrawals" | "all" = "deposits",
 ): Promise<ListBankLinesResult> {
   try {
     const owner = await requireSessionUserId();
@@ -320,14 +327,16 @@ export async function listBankStatementLines(
     let query = supabase
       .from("bank_statement_lines")
       .select(
-        "id, tx_date, tx_time, tx_code, description, payer_hint, withdrawal_amount, deposit_amount, balance_amount, reconcile_status, matched_amount",
+        "id, tx_date, tx_time, tx_code, description, payer_hint, withdrawal_amount, deposit_amount, balance_amount, tx_direction, expense_memo, reconcile_status, matched_amount",
       )
       .order("tx_date", { ascending: false })
-      .limit(200);
-    if (scope === "open") {
+      .limit(scope === "all" ? 400 : 200);
+    if (scope === "deposits") {
       query = query
         .gt("deposit_amount", 0)
         .in("reconcile_status", ["UNMATCHED", "PARTIAL"]);
+    } else if (scope === "withdrawals") {
+      query = query.gt("withdrawal_amount", 0);
     }
     const { data, error } = await query;
     if (error) {
@@ -364,6 +373,7 @@ type RawBill = {
   status: string;
   payment_channel: string | null;
   is_swept_to_company: boolean | null;
+  deposit_deducted: number;
 };
 
 async function loadAllocatedSums(
@@ -414,14 +424,15 @@ async function loadCustomerLabels(
 function toOpenBill(row: RawBill, allocated: number, customer: string | null): OpenSalesBill {
   const grand = roundMoney(Number(row.grand_total ?? 0));
   const paid = roundMoney(Number(row.paid_amount ?? 0));
-  const outstanding = roundMoney(Math.max(0, grand - paid));
-  const unlinked = roundMoney(Math.max(0, grand - allocated));
-  const companyReceipt =
-    row.payment_channel === "COMPANY_BANK" || row.is_swept_to_company === true;
-  const linkable =
-    CASH_DOC_TYPES.has(row.doc_type) || row.doc_type === "DEP_IN" || companyReceipt
-      ? roundMoney(Math.max(outstanding, unlinked))
-      : roundMoney(Math.min(outstanding, unlinked));
+  const depositDeducted = roundMoney(Number(row.deposit_deducted ?? 0));
+  const outstanding = roundMoney(Math.max(0, grand - depositDeducted - paid));
+  const settledTypes = new Set(["ABB", "CS_TAX", "DEP_IN"]);
+  const depositAware = new Set(["SO", "INV_DO", "TAX_INV"]);
+  const linkable = settledTypes.has(row.doc_type)
+    ? roundMoney(Math.max(0, grand - allocated))
+    : depositAware.has(row.doc_type)
+      ? roundMoney(Math.max(0, grand - depositDeducted - paid - allocated))
+      : roundMoney(Math.max(0, grand - paid - allocated));
   return {
     id: row.id,
     doc_no: row.doc_no,
@@ -432,6 +443,7 @@ function toOpenBill(row: RawBill, allocated: number, customer: string | null): O
     grand_total: grand,
     paid_amount: paid,
     outstanding,
+    deposit_deducted: depositDeducted,
     linkable_amount: linkable,
     payment_status: row.payment_status,
   };
@@ -467,6 +479,7 @@ function asRawBill(row: Record<string, unknown>): RawBill {
     payment_channel: row.payment_channel ? String(row.payment_channel) : null,
     is_swept_to_company:
       row.is_swept_to_company == null ? null : Boolean(row.is_swept_to_company),
+    deposit_deducted: Number(row.deposit_deducted ?? 0),
   };
 }
 
@@ -475,7 +488,8 @@ function isCompanyBankReceipt(row: RawBill): boolean {
 }
 
 const BILL_SELECT =
-  "id, doc_no, doc_type, doc_date, sales_channel, contact_id, ecommerce_order_no, grand_total, paid_amount, payment_status, status, payment_channel, is_swept_to_company";
+  "id, doc_no, doc_type, doc_date, sales_channel, contact_id, ecommerce_order_no, grand_total, paid_amount, deposit_deducted, payment_status, status, payment_channel, is_swept_to_company";
+const PURCHASE_DOC_TYPES = ["PO", "AP_TAX", "AP_INV", "AP_CASH", "DEP_OUT", "PAY"] as const;
 
 export async function suggestBillMatches(
   statementLineId: string,
@@ -757,7 +771,7 @@ export async function confirmBankMatch(
 
     const { data: docs, error: docsError } = await supabase
       .from("documents")
-      .select("id, doc_no, doc_type, status, grand_total, paid_amount, payment_status")
+      .select("id, doc_no, doc_type, status, grand_total, paid_amount, deposit_deducted, payment_status")
       .in(
         "id",
         allocations.map((row) => row.document_id),
@@ -803,7 +817,10 @@ export async function confirmBankMatch(
         bill,
         paymentDelta: delta,
         nextPaid,
-        nextStatus: nextPaid + MONEY_EPSILON >= open.grand_total ? "PAID" : "PARTIAL",
+        nextStatus:
+          nextPaid + open.deposit_deducted + MONEY_EPSILON >= open.grand_total
+            ? "PAID"
+            : "PARTIAL",
       });
     }
 
@@ -901,6 +918,130 @@ export async function confirmBankMatch(
     return {
       data: null,
       error: error instanceof Error ? error.message : "ยืนยันการชนยอดไม่สำเร็จ",
+    };
+  }
+}
+
+export async function searchOpenPurchaseBills(input: {
+  keyword?: string;
+  tx_date?: string;
+}): Promise<SearchOpenBillsResult> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: [], error: owner.error };
+    const supabase = createSupabaseServerClient();
+    let query = supabase
+      .from("documents")
+      .select(BILL_SELECT)
+      .in("doc_type", [...PURCHASE_DOC_TYPES])
+      .not("status", "in", "(VOID,CANCELLED)")
+      .order("doc_date", { ascending: false })
+      .limit(80);
+    const txDate = input.tx_date?.slice(0, 10) ?? "";
+    const keyword = input.keyword?.trim().toLowerCase() ?? "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(txDate)) {
+      query = query.gte("doc_date", shiftIso(txDate, -60)).lte("doc_date", shiftIso(txDate, 14));
+    }
+    const { data, error } = await query;
+    if (error) return { data: [], error: error.message };
+    const bills = (await hydrateBills(
+      supabase,
+      (data ?? []).map((row) => asRawBill(row as Record<string, unknown>)),
+    ))
+      .filter((bill) => bill.linkable_amount > MONEY_EPSILON)
+      .filter((bill) => {
+        if (!keyword) return true;
+        const haystack = `${bill.doc_no} ${bill.customer_label ?? ""} ${bill.doc_type}`.toLowerCase();
+        return haystack.includes(keyword);
+      });
+    return { data: bills.slice(0, 40), error: null };
+  } catch (error) {
+    return {
+      data: [],
+      error: error instanceof Error ? error.message : "ค้นหาเอกสารจ่ายไม่สำเร็จ",
+    };
+  }
+}
+
+export async function confirmWithdrawalRecord(
+  input: ConfirmWithdrawalInput,
+): Promise<ConfirmBankMatchResult> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: null, error: owner.error };
+    const lineId = input.statement_line_id?.trim() ?? "";
+    const memo = String(input.expense_memo ?? "").trim();
+    const allocations = (input.allocations ?? []).filter(
+      (row) => row.document_id && row.allocated_amount > 0,
+    );
+    if (!lineId) return { data: null, error: "ไม่พบรายการเดินบัญชี" };
+    if (allocations.length === 0 && !memo) {
+      return { data: null, error: "เลือกเอกสารจ่าย หรือกรอกบันทึกช่วยจำรายจ่าย" };
+    }
+
+    const supabase = createSupabaseServerClient();
+    const { data: lineRow, error: lineError } = await supabase
+      .from("bank_statement_lines")
+      .select("id, withdrawal_amount, matched_amount, reconcile_status")
+      .eq("id", lineId)
+      .maybeSingle();
+    if (lineError || !lineRow) {
+      return { data: null, error: lineError?.message ?? "ไม่พบรายการเดินบัญชี" };
+    }
+    const withdrawal = roundMoney(Number(lineRow.withdrawal_amount ?? 0));
+    const matched = roundMoney(Number(lineRow.matched_amount ?? 0));
+    if (withdrawal <= 0) return { data: null, error: "รายการนี้ไม่ใช่ยอดจ่าย" };
+    if (String(lineRow.reconcile_status ?? "") === "MATCHED") {
+      return { data: null, error: "รายการนี้บันทึกยอดจ่ายแล้ว" };
+    }
+
+    const gross = roundMoney(
+      allocations.reduce((sum, row) => sum + Number(row.allocated_amount ?? 0), 0),
+    );
+    if (gross - (withdrawal - matched) > MONEY_EPSILON) {
+      return { data: null, error: "ยอดเอกสารจ่ายเกินยอดถอนคงเหลือ" };
+    }
+
+    for (const row of allocations) {
+      const inserted = await insertFlexible(supabase, "bank_reconciliation_allocations", {
+        statement_line_id: lineId,
+        document_id: row.document_id,
+        allocated_amount: roundMoney(row.allocated_amount),
+        platform_fee_diff: 0,
+        created_by: owner.userId,
+      });
+      if (inserted.error) return { data: null, error: inserted.error };
+    }
+
+    const covered =
+      memo.length > 0 ||
+      allocations.length === 0 ||
+      gross + MONEY_EPSILON >= withdrawal - matched;
+    const nextMatched = covered ? withdrawal : roundMoney(matched + gross);
+    const { error: updateError } = await supabase
+      .from("bank_statement_lines")
+      .update({
+        expense_memo: memo || null,
+        tx_direction: "OUT",
+        matched_amount: nextMatched,
+        reconcile_status: covered ? "MATCHED" : "PARTIAL",
+      })
+      .eq("id", lineId);
+    if (updateError) return { data: null, error: updateError.message };
+
+    revalidatePath("/sales/reconcile");
+    return {
+      data: {
+        reconcile_status: covered ? "MATCHED" : "PARTIAL",
+        matched_amount: nextMatched,
+        warnings: [],
+      },
+      error: null,
+    };
+  } catch (error) {
+    return {
+      data: null,
+      error: error instanceof Error ? error.message : "บันทึกยอดจ่ายไม่สำเร็จ",
     };
   }
 }

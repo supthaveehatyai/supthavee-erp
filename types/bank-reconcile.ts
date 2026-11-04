@@ -8,6 +8,8 @@ export type BankStatementLineView = {
   withdrawal_amount: number;
   deposit_amount: number;
   balance_amount: number | null;
+  tx_direction: "IN" | "OUT" | string;
+  expense_memo: string;
   reconcile_status: "UNMATCHED" | "PARTIAL" | "MATCHED" | string;
   matched_amount: number;
 };
@@ -21,6 +23,7 @@ export type ParsedKtbLine = {
   withdrawal_amount: number;
   deposit_amount: number;
   balance_amount: number | null;
+  tx_direction: "IN" | "OUT";
   row_hash: string;
 };
 
@@ -48,6 +51,7 @@ export type OpenSalesBill = {
   grand_total: number;
   paid_amount: number;
   outstanding: number;
+  deposit_deducted: number;
   /** Amount still available to tie to a bank line. */
   linkable_amount: number;
   payment_status: string;
@@ -84,6 +88,12 @@ export type ConfirmBankMatchInput = {
   statement_line_id: string;
   allocations: BankMatchAllocationInput[];
   platform_fee_diff: number;
+};
+
+export type ConfirmWithdrawalInput = {
+  statement_line_id: string;
+  allocations: BankMatchAllocationInput[];
+  expense_memo?: string | null;
 };
 
 export type ConfirmBankMatchResult = {
