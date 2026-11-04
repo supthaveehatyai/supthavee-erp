@@ -50,6 +50,11 @@ export type UnpaidInvoice = {
    */
   remaining_balance: number;
   contact_id: string;
+  /** `documents.net_before_vat` — WHT base before this bill's deposit net. */
+  net_before_vat?: number;
+  deposit_net_deducted?: number;
+  deposit_deducted?: number;
+  vat_rate?: number | null;
 };
 
 export type CustomerPaymentContext = {

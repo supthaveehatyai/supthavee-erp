@@ -16,6 +16,7 @@ import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import { syncBillingNotesAfterInvoicePayment } from "@/lib/actions/finance/billing-note-status";
 import { paymentChannelFields } from "@/lib/actions/finance/receipt-sweep-actions";
+import { salesWhtAmount, salesWhtBase } from "@/lib/finance/wht-base";
 import { roundMoney } from "@/lib/utils/payment-fifo";
 import { currentBangkokTime, paymentTimestampIso } from "@/lib/utils/payment-timestamp";
 import {
@@ -84,7 +85,10 @@ type InvoiceDocRow = {
   payment_status: string | null;
   grand_total: number | string | null;
   total_amount: number | string | null;
+  net_before_vat?: number | string | null;
   deposit_deducted: number | string | null;
+  deposit_net_deducted?: number | string | null;
+  vat_rate?: number | string | null;
   paid_amount: number | string | null;
   contact_id: string | null;
   allocations?: NestedAllocationRow[] | NestedAllocationRow | null;
@@ -256,7 +260,10 @@ export async function getUnpaidInvoicesByCustomer(
         payment_status,
         grand_total,
         total_amount,
+        net_before_vat,
         deposit_deducted,
+        deposit_net_deducted,
+        vat_rate,
         paid_amount,
         contact_id,
         ${OUTSTANDING_ALLOCATION_EMBED}
@@ -305,6 +312,10 @@ export async function getUnpaidInvoicesByCustomer(
           allocation_sources: allocationSources,
           remaining_balance: remaining,
           contact_id: doc.contact_id ?? trimmed,
+          net_before_vat: roundMoney(toMoney(doc.net_before_vat)),
+          deposit_net_deducted: roundMoney(toMoney(doc.deposit_net_deducted)),
+          deposit_deducted: depositDeducted,
+          vat_rate: doc.vat_rate == null ? null : Number(doc.vat_rate),
         } satisfies UnpaidInvoice;
       })
       .filter((inv) => inv.remaining_balance > 0);
@@ -1088,6 +1099,29 @@ export async function processPaymentKnockoff(
 
 const SALES_PAYMENT_DOC_TYPES = new Set(["SO", "INV_DO", "TAX_INV"]);
 
+async function updateSalesReceipt(
+  supabase: SupabaseClient,
+  documentId: string,
+  patch: Record<string, unknown>,
+): Promise<string | null> {
+  let current = { ...patch };
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const { error } = await supabase
+      .from("documents")
+      .update(current as never)
+      .eq("id", documentId);
+    if (!error) return null;
+    const missing = /Could not find the '([^']+)' column/i.exec(error.message)?.[1];
+    if (missing && missing in current) {
+      delete current[missing];
+      current = { ...current };
+      continue;
+    }
+    return error.message;
+  }
+  return "บันทึกรับชำระไม่สำเร็จ";
+}
+
 /** รับชำระบนหน้าบิลขาย — อัปเดต paid_amount / payment_status ที่ documents เท่านั้น */
 export async function receiveSalesDocumentPayment(
   formData: FormData,
@@ -1104,15 +1138,17 @@ export async function receiveSalesDocumentPayment(
     const referenceNo =
       String(formData.get("reference_no") ?? "").trim() || null;
     const whtRateRaw = Number(formData.get("wht_rate") ?? 0);
-    const whtRate = whtRateRaw === 1 || whtRateRaw === 3 ? whtRateRaw : 0;
+    const whtRate = [1, 2, 3, 5].includes(whtRateRaw) ? whtRateRaw : 0;
     const slipFile = formData.get("slip_file");
+    const whtAttachmentUrl =
+      String(formData.get("wht_attachment_url") ?? "").trim() || null;
 
     if (!documentId) return { success: false, error: "ไม่พบเอกสารที่จะรับชำระ" };
 
     const { data: document, error: documentError } = await supabase
       .from("documents")
       .select(
-        "id, doc_no, doc_type, status, is_voided, grand_total, deposit_deducted, paid_amount, wht_amount, reference_no, original_receipt_url",
+        "id, doc_no, doc_type, status, is_voided, grand_total, net_before_vat, deposit_deducted, deposit_net_deducted, vat_rate, paid_amount, wht_rate, wht_amount, net_received_amount, wht_attachment_url, wht_status, reference_no, original_receipt_url",
       )
       .eq("id", documentId)
       .maybeSingle();
@@ -1150,7 +1186,41 @@ export async function receiveSalesDocumentPayment(
       };
     }
 
-    const wht = roundMoney((settle * whtRate) / 100);
+    const docRow = document as typeof document & {
+      net_before_vat?: number | string | null;
+      deposit_net_deducted?: number | string | null;
+      vat_rate?: number | string | null;
+      net_received_amount?: number | string | null;
+      wht_attachment_url?: string | null;
+    };
+    const whtBase = salesWhtBase({
+      payAmount: settle,
+      remainingGrand: outstanding,
+      grandTotal: grand,
+      netBeforeVat: toMoney(docRow.net_before_vat),
+      depositNetDeducted: toMoney(docRow.deposit_net_deducted),
+      depositDeducted: deposit,
+      paidAmount: paid,
+      vatRate: docRow.vat_rate == null ? 7 : Number(docRow.vat_rate),
+    });
+    const submittedWht = formData.get("wht_amount");
+    const parsedWht =
+      submittedWht == null || String(submittedWht).trim() === ""
+        ? null
+        : roundMoney(Number(submittedWht));
+    const wht =
+      parsedWht != null && Number.isFinite(parsedWht) && parsedWht >= 0
+        ? parsedWht
+        : salesWhtAmount(whtBase, whtRate);
+    if (wht - settle > MONEY_EPS) {
+      return { success: false, error: "ยอดหัก ณ ที่จ่ายเกินยอดที่ตัดบิล" };
+    }
+    const cashReceived = roundMoney(Math.max(0, settle - wht));
+    const nextWht = roundMoney(toMoney(document.wht_amount) + wht);
+    const nextNetReceived = roundMoney(toMoney(docRow.net_received_amount) + cashReceived);
+    const nextWhtUrl = whtAttachmentUrl ?? docRow.wht_attachment_url ?? null;
+    const nextWhtStatus =
+      nextWht <= MONEY_EPS ? "NONE" : nextWhtUrl ? "RECEIVED" : "PENDING_CERT";
     const nextPaid = roundMoney(paid + settle);
     const covered = roundMoney(nextPaid + deposit);
     const paymentStatus = covered + MONEY_EPS >= grand ? "PAID" : "PARTIAL";
@@ -1172,24 +1242,26 @@ export async function receiveSalesDocumentPayment(
       bankAccountId: String(formData.get("bank_account_id") ?? ""),
       receivingBankLabel: String(formData.get("receiving_bank_label") ?? ""),
     });
-    const { error: updateError } = await supabase
-      .from("documents")
-      .update({
-        paid_amount: nextPaid,
-        payment_status: paymentStatus,
-        wht_amount: roundMoney(toMoney(document.wht_amount) + wht),
-        reference_no: document.reference_no?.trim()
-          ? document.reference_no
-          : referenceNo,
-        original_receipt_url: document.original_receipt_url ?? slipUrl,
-        payment_channel: receiptChannel.payment_channel,
-        bank_account_id: receiptChannel.bank_account_id,
-        receiving_bank_label: receiptChannel.receiving_bank_label,
-        is_swept_to_company: receiptChannel.is_swept_to_company,
-        swept_to_company_at: receiptChannel.swept_to_company_at,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", documentId);
+    const updateErrorMessage = await updateSalesReceipt(supabase, documentId, {
+      paid_amount: nextPaid,
+      payment_status: paymentStatus,
+      wht_rate: whtRate > 0 ? whtRate : Number(document.wht_rate ?? 0),
+      wht_amount: nextWht,
+      net_received_amount: nextNetReceived,
+      wht_attachment_url: nextWhtUrl,
+      wht_status: nextWhtStatus,
+      reference_no: document.reference_no?.trim()
+        ? document.reference_no
+        : referenceNo,
+      original_receipt_url: document.original_receipt_url ?? slipUrl,
+      payment_channel: receiptChannel.payment_channel,
+      bank_account_id: receiptChannel.bank_account_id,
+      receiving_bank_label: receiptChannel.receiving_bank_label,
+      is_swept_to_company: receiptChannel.is_swept_to_company,
+      swept_to_company_at: receiptChannel.swept_to_company_at,
+      updated_at: new Date().toISOString(),
+    });
+    const updateError = updateErrorMessage ? { message: updateErrorMessage } : null;
 
     if (updateError) {
       await removeUploadedSlip(supabase, slipStoragePath);

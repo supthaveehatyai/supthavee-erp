@@ -24,6 +24,7 @@ import PrintDocumentTemplate from "@/components/sales/print-document-template";
 import { GoodsQtyBadge } from "@/components/sales/goods-qty-badge";
 import { ReceiveDepositDialog } from "@/components/sales/receive-deposit-dialog";
 import { ReceivePaymentDialog } from "@/components/sales/receive-payment-dialog";
+import { SalesWhtCertificatePanel } from "@/components/sales/sales-wht-certificate-panel";
 import { SalesPrintOptions } from "@/components/sales/sales-print-controls";
 import PrintPaymentReceiptTemplate from "@/components/finance/PrintPaymentReceiptTemplate";
 import PrintSettlementVoucherTemplate from "@/components/finance/PrintSettlementVoucherTemplate";
@@ -577,6 +578,9 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               depositDeducted={Number(doc.deposit_deducted ?? 0)}
               paidAmount={Number(doc.paid_amount ?? 0)}
               amountDue={amountDue}
+              netBeforeVat={netBeforeVat}
+              depositNetDeducted={Number(doc.deposit_net_deducted ?? 0)}
+              vatRate={vatRate}
               bankAccounts={bankAccounts.data}
             />
           ) : null}
@@ -1065,6 +1069,22 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                       emphasize
                     />
                   </div>
+                  {doc.status !== "VOID" ? (
+                    <SalesWhtCertificatePanel
+                      documentId={doc.id}
+                      docNo={doc.doc_no}
+                      grandTotal={grandTotal}
+                      netBeforeVat={netBeforeVat}
+                      depositNetDeducted={Number(doc.deposit_net_deducted ?? 0)}
+                      depositDeducted={depositDeducted}
+                      vatRate={vatRate}
+                      whtRate={Number(doc.wht_rate ?? 0)}
+                      whtAmount={Number(doc.wht_amount ?? 0)}
+                      netReceivedAmount={Number(doc.net_received_amount ?? 0)}
+                      whtAttachmentUrl={doc.wht_attachment_url}
+                      whtStatus={doc.wht_status}
+                    />
+                  ) : null}
                 </>
               )}
               {showSlipViewer && !isSettlementDoc ? (

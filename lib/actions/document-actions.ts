@@ -1781,6 +1781,8 @@ export async function getDocumentByNo(
         dest_freight_cost,
         wht_rate,
         wht_amount,
+        net_received_amount,
+        wht_status,
         payment_status,
         payment_channel,
         bank_account_id,
@@ -2156,6 +2158,17 @@ export async function getDocumentByNo(
       one_time_address: (data.one_time_address as string | null) ?? null,
       wht_rate: Number(data.wht_rate ?? 0),
       wht_amount: Number(data.wht_amount ?? 0),
+      net_received_amount: Number(
+        (data as { net_received_amount?: number | string | null }).net_received_amount ?? 0,
+      ),
+      wht_status: ((): DocumentDetail["wht_status"] => {
+        const raw = String(
+          (data as { wht_status?: string | null }).wht_status ?? "",
+        );
+        if (raw === "NONE" || raw === "PENDING_CERT" || raw === "RECEIVED") return raw;
+        if (Number(data.wht_amount ?? 0) <= 0) return "NONE";
+        return data.wht_attachment_url ? "RECEIVED" : "PENDING_CERT";
+      })(),
       payment_status: String(data.payment_status ?? "Pending"),
       payment_channel: (data.payment_channel as string | null) ?? null,
       bank_account_id: (data.bank_account_id as string | null) ?? null,
@@ -5378,6 +5391,62 @@ export async function duplicateDocument(
  *
  * FormData keys: `file` (File | Blob)
  */
+export async function attachSalesDocumentWhtCertificate(input: {
+  document_id: string;
+  wht_rate: number;
+  wht_amount: number;
+  wht_attachment_url?: string | null;
+}): Promise<{ data: { document_id: string } | null; error: string | null }> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: null, error: owner.error };
+    const documentId = input.document_id?.trim() ?? "";
+    if (!documentId) return { data: null, error: "ไม่พบเอกสาร" };
+    const whtRate = Math.round(Number(input.wht_rate) * 100) / 100;
+    const whtAmount = Math.round(Number(input.wht_amount) * 100) / 100;
+    if (!Number.isFinite(whtRate) || whtRate < 0) {
+      return { data: null, error: "อัตราหัก ณ ที่จ่ายไม่ถูกต้อง" };
+    }
+    if (!Number.isFinite(whtAmount) || whtAmount < 0) {
+      return { data: null, error: "ยอดหัก ณ ที่จ่ายไม่ถูกต้อง" };
+    }
+    if (whtRate <= 0 && whtAmount <= 0) {
+      return { data: null, error: "ระบุอัตราหรือยอดหัก ณ ที่จ่าย" };
+    }
+
+    const supabase = createSupabaseServerClient();
+    const rpcClient = supabase as unknown as {
+      rpc: (
+        fn: "attach_sales_document_wht_certificate",
+        args: Record<string, unknown>,
+      ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    };
+    const saved = await rpcClient.rpc("attach_sales_document_wht_certificate", {
+      p_document_id: documentId,
+      p_wht_rate: whtRate,
+      p_wht_amount: whtAmount,
+      p_wht_attachment_url: input.wht_attachment_url?.trim() || null,
+    });
+    if (saved.error) return { data: null, error: saved.error.message };
+
+    const { data: doc } = await supabase
+      .from("documents")
+      .select("doc_no")
+      .eq("id", documentId)
+      .maybeSingle();
+    revalidatePath("/sales");
+    revalidatePath("/finance/payments");
+    const docNo = String(doc?.doc_no ?? "");
+    if (docNo) revalidatePath(`/sales/${encodeURIComponent(docNo)}`);
+    return { data: { document_id: documentId }, error: null };
+  } catch (error) {
+    return {
+      data: null,
+      error: error instanceof Error ? error.message : "แนบใบหัก ณ ที่จ่ายไม่สำเร็จ",
+    };
+  }
+}
+
 export async function uploadDocumentImage(
   formData: FormData,
 ): Promise<UploadDocumentImageResult> {

@@ -14,6 +14,11 @@ import type { OpenBillingNoteOption } from "@/types/billing";
 import { processPaymentKnockoff } from "@/lib/actions/finance/payment";
 import { allocateFifo, roundMoney } from "@/lib/utils/payment-fifo";
 import {
+  salesWhtAmount,
+  salesWhtBase,
+  SALES_WHT_RATE_OPTIONS,
+} from "@/lib/finance/wht-base";
+import {
   checkedDepositIdsFromAmounts,
   redistributeCheckedDeposits,
 } from "@/lib/utils/deposit-apply";
@@ -111,6 +116,7 @@ export function PaymentKnockoffForm({
 
   const [amount, setAmount] = useState("");
   const [whtAmount, setWhtAmount] = useState("");
+  const [whtRate, setWhtRate] = useState("0");
   const [paymentDate, setPaymentDate] = useState(todayIsoLocal);
   const [paymentTime, setPaymentTime] = useState(currentBangkokTime);
   const [bankAccountId, setBankAccountId] = useState(
@@ -177,6 +183,11 @@ export function PaymentKnockoffForm({
         allocation_sources: sourcesByInvoiceId.get(row.id) ?? [],
         remaining_balance: row.outstanding,
         contact_id: row.contact_id || contactId,
+        net_before_vat: initialInvoices.find((inv) => inv.id === row.id)?.net_before_vat,
+        deposit_net_deducted: initialInvoices.find((inv) => inv.id === row.id)
+          ?.deposit_net_deducted,
+        deposit_deducted: initialInvoices.find((inv) => inv.id === row.id)?.deposit_deducted,
+        vat_rate: initialInvoices.find((inv) => inv.id === row.id)?.vat_rate,
       }));
 
       const creditNotes = initialInvoices.filter((row) =>
@@ -245,6 +256,31 @@ export function PaymentKnockoffForm({
     recSummary.netCash >= 0 &&
     netCashGuard.success;
   const netPaymentAmount = recSummary.netCash;
+  const whtBaseTotal = useMemo(
+    () =>
+      roundMoney(
+        lines.reduce((sum, line) => {
+          const invoice = invoices.find((row) => row.id === line.invoice_id);
+          if (!invoice || line.allocated_amount <= 0 || isCreditNoteDocType(invoice.doc_type)) {
+            return sum;
+          }
+          return (
+            sum +
+            salesWhtBase({
+              payAmount: line.allocated_amount,
+              remainingGrand: invoice.remaining_balance,
+              grandTotal: invoice.grand_total,
+              netBeforeVat: invoice.net_before_vat ?? 0,
+              depositNetDeducted: invoice.deposit_net_deducted ?? 0,
+              depositDeducted: invoice.deposit_deducted ?? 0,
+              paidAmount: invoice.paid_amount,
+              vatRate: invoice.vat_rate ?? 7,
+            })
+          );
+        }, 0),
+      ),
+    [lines, invoices],
+  );
 
   const allocationsJson = useMemo(() => JSON.stringify(lines), [lines]);
   const depositsJson = useMemo(
@@ -324,6 +360,7 @@ export function PaymentKnockoffForm({
     baseDepositAmounts: Record<string, string> = depositAmounts,
   ) {
     const split = splitRecAllocationTotals(nextLines, invoices);
+    const lineWht = roundMoney(nextLines.reduce((sum, line) => sum + line.wht_amount, 0));
     const leftoverAfterCn = roundMoney(
       Math.max(0, split.totalInvoices - split.totalCnApplied),
     );
@@ -341,7 +378,46 @@ export function PaymentKnockoffForm({
         totalInvoices: split.totalInvoices,
         totalCnApplied: split.totalCnApplied,
         depositApplied: nextDepositTotal,
-        whtAmount: wht,
+        whtAmount: lineWht > 0 ? lineWht : wht,
+      }),
+    );
+  }
+
+  function whtForAllocation(invoice: UnpaidInvoice, payAmount: number, rate: string): number {
+    if (isCreditNoteDocType(invoice.doc_type) || Number(rate) <= 0 || payAmount <= 0) return 0;
+    const base = salesWhtBase({
+      payAmount,
+      remainingGrand: invoice.remaining_balance,
+      grandTotal: invoice.grand_total,
+      netBeforeVat: invoice.net_before_vat ?? 0,
+      depositNetDeducted: invoice.deposit_net_deducted ?? 0,
+      depositDeducted: invoice.deposit_deducted ?? 0,
+      paidAmount: invoice.paid_amount,
+      vatRate: invoice.vat_rate ?? 7,
+    });
+    return salesWhtAmount(base, Number(rate));
+  }
+
+  function applyWhtRate(nextRate: string, sourceLines: LineState[] = lines) {
+    setWhtRate(nextRate);
+    const next = sourceLines.map((line) => {
+      const invoice = invoices.find((row) => row.id === line.invoice_id);
+      if (!invoice) return line;
+      return {
+        ...line,
+        wht_amount: whtForAllocation(invoice, line.allocated_amount, nextRate),
+      };
+    });
+    const totalWht = roundMoney(next.reduce((sum, line) => sum + line.wht_amount, 0));
+    setWhtAmount(totalWht > 0 ? totalWht.toFixed(2) : "");
+    setLines(next);
+    const split = splitRecAllocationTotals(next, invoices);
+    syncNetCashFromSummary(
+      summarizeRecPayment({
+        totalInvoices: split.totalInvoices,
+        totalCnApplied: split.totalCnApplied,
+        depositApplied: depositTotal,
+        whtAmount: totalWht,
       }),
     );
   }
@@ -407,11 +483,22 @@ export function PaymentKnockoffForm({
     if (isCn && field === "wht_amount") return;
 
     const value = roundMoney(Math.max(0, Number(raw) || 0));
-    const next = lines.map((line) =>
-      line.invoice_id === invoiceId
-        ? { ...line, [field]: value, ...(isCn ? { wht_amount: 0 } : {}) }
-        : line,
-    );
+    const next = lines.map((line) => {
+      if (line.invoice_id !== invoiceId) return line;
+      if (isCn) return { ...line, [field]: value, wht_amount: 0 };
+      if (field === "allocated_amount" && Number(whtRate) > 0 && invoice) {
+        return {
+          ...line,
+          allocated_amount: value,
+          wht_amount: whtForAllocation(invoice, value, whtRate),
+        };
+      }
+      return { ...line, [field]: value };
+    });
+    if (field === "wht_amount" || Number(whtRate) > 0) {
+      const totalWht = roundMoney(next.reduce((sum, line) => sum + line.wht_amount, 0));
+      setWhtAmount(totalWht > 0 ? totalWht.toFixed(2) : "");
+    }
     applyInvoiceTotalAndDeposits(next);
   }
 
@@ -424,10 +511,11 @@ export function PaymentKnockoffForm({
       if (!checked) {
         return { ...line, allocated_amount: 0, wht_amount: 0 };
       }
+      const allocated = roundMoney(invoice.remaining_balance);
       return {
         ...line,
-        allocated_amount: roundMoney(invoice.remaining_balance),
-        wht_amount: isCn ? 0 : line.wht_amount,
+        allocated_amount: allocated,
+        wht_amount: isCn ? 0 : whtForAllocation(invoice, allocated, whtRate),
       };
     });
     applyInvoiceTotalAndDeposits(next);
@@ -449,11 +537,16 @@ export function PaymentKnockoffForm({
       setDepositAmounts(nextDeposits);
       return;
     }
-    const next = invoices.map((inv) => ({
-      invoice_id: inv.id,
-      allocated_amount: roundMoney(inv.remaining_balance),
-      wht_amount: 0,
-    }));
+    const next = invoices.map((inv) => {
+      const allocated = roundMoney(inv.remaining_balance);
+      return {
+        invoice_id: inv.id,
+        allocated_amount: allocated,
+        wht_amount: whtForAllocation(inv, allocated, whtRate),
+      };
+    });
+    const totalWht = roundMoney(next.reduce((sum, line) => sum + line.wht_amount, 0));
+    setWhtAmount(totalWht > 0 ? totalWht.toFixed(2) : "");
     applyInvoiceTotalAndDeposits(next);
   }
 
@@ -685,7 +778,20 @@ export function PaymentKnockoffForm({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="wht_amount">ยอดหัก ณ ที่จ่าย (WHT)</Label>
+            <Label htmlFor="wht_rate">อัตราหัก ณ ที่จ่าย จากฐานก่อน VAT</Label>
+            <select
+              id="wht_rate"
+              value={whtRate}
+              onChange={(event) => applyWhtRate(event.target.value)}
+              className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
+            >
+              {SALES_WHT_RATE_OPTIONS.map((rate) => (
+                <option key={rate} value={String(rate)}>
+                  {rate === 0 ? "ไม่หัก ณ ที่จ่าย" : `${rate}% ของฐานก่อน VAT`}
+                </option>
+              ))}
+            </select>
+            <Label htmlFor="wht_amount">ยอดภาษีหัก ณ ที่จ่าย (บาท)</Label>
             <Input
               id="wht_amount"
               name="wht_amount"
@@ -697,6 +803,7 @@ export function PaymentKnockoffForm({
               value={whtAmount}
               onChange={(e) => {
                 setWhtAmount(e.target.value);
+                setWhtRate("0");
                 const nextWht = roundMoney(Number(e.target.value) || 0);
                 const split = splitRecAllocationTotals(lines, invoices);
                 syncNetCashFromSummary(
@@ -709,6 +816,13 @@ export function PaymentKnockoffForm({
                 );
               }}
             />
+            <p className="text-xs text-slate-600">
+              ฐานก่อน VAT{" "}
+              {whtBaseTotal.toLocaleString("th-TH", { minimumFractionDigits: 2 })} ฿ · หัก ณ
+              ที่จ่าย ({whtRate}%) ={" "}
+              {wht.toLocaleString("th-TH", { minimumFractionDigits: 2 })} ฿ · ยอดโอนเข้าบัญชีจริง ={" "}
+              {netPaymentAmount.toLocaleString("th-TH", { minimumFractionDigits: 2 })} ฿
+            </p>
           </div>
 
           <div className="flex items-end">

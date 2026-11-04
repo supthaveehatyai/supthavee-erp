@@ -5,7 +5,13 @@ import { useRouter } from "next/navigation";
 import { Loader2, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { receiveSalesDocumentPayment } from "@/lib/actions/finance/payment";
+import { uploadDocumentImage } from "@/lib/actions/document-actions";
 import { parseTransferSlipOcr } from "@/lib/actions/sales-ocr-actions";
+import {
+  salesWhtAmount,
+  salesWhtBase,
+  SALES_WHT_RATE_OPTIONS,
+} from "@/lib/finance/wht-base";
 import { PaymentChannelPicker } from "@/components/finance/payment-channel-picker";
 import {
   bankAccountDisplay,
@@ -47,6 +53,9 @@ export function ReceivePaymentDialog({
   depositDeducted,
   paidAmount,
   amountDue,
+  netBeforeVat,
+  depositNetDeducted = 0,
+  vatRate = 7,
   bankAccounts = [],
 }: {
   documentId: string;
@@ -55,6 +64,9 @@ export function ReceivePaymentDialog({
   depositDeducted: number;
   paidAmount: number;
   amountDue: number;
+  netBeforeVat: number;
+  depositNetDeducted?: number;
+  vatRate?: number;
   bankAccounts?: ActiveBankAccount[];
 }) {
   const router = useRouter();
@@ -67,15 +79,31 @@ export function ReceivePaymentDialog({
   const [bankAccountId, setBankAccountId] = useState<string | null>(() =>
     initialBankAccountId(bankAccounts, "COMPANY_BANK"),
   );
-  const [whtRate, setWhtRate] = useState<"0" | "1" | "3">("0");
+  const [whtRate, setWhtRate] = useState("0");
+  const [whtText, setWhtText] = useState("0.00");
+  const [whtEdited, setWhtEdited] = useState(false);
   const [referenceNo, setReferenceNo] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [whtUrl, setWhtUrl] = useState("");
+  const [whtFileName, setWhtFileName] = useState("");
   const [isReadingSlip, setIsReadingSlip] = useState(false);
+  const [isUploadingWht, setIsUploadingWht] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const settle = roundMoney(Number(amount));
-  const wht = roundMoney((settle * Number(whtRate)) / 100);
-  const cash = roundMoney(Math.max(0, settle - wht));
+  const whtBase = salesWhtBase({
+    payAmount: settle,
+    remainingGrand: amountDue,
+    grandTotal,
+    netBeforeVat,
+    depositNetDeducted,
+    depositDeducted,
+    paidAmount,
+    vatRate,
+  });
+  const suggestedWht = salesWhtAmount(whtBase, Number(whtRate));
+  const wht = roundMoney(whtText.trim() === "" ? 0 : Number(whtText));
+  const cash = roundMoney(Math.max(0, settle - (Number.isFinite(wht) ? wht : 0)));
 
   async function readSlip(file: File | null) {
     if (!file || file.size <= 0) {
@@ -116,9 +144,62 @@ export function ReceivePaymentDialog({
     }
   }
 
+  function applyWhtRate(nextRate: string) {
+    setWhtRate(nextRate);
+    setWhtEdited(false);
+    setWhtText(salesWhtAmount(whtBase, Number(nextRate)).toFixed(2));
+  }
+
+  function applySettleAmount(nextAmount: string) {
+    setAmount(nextAmount);
+    if (whtEdited) return;
+    const nextSettle = roundMoney(Number(nextAmount));
+    const nextBase = salesWhtBase({
+      payAmount: nextSettle,
+      remainingGrand: amountDue,
+      grandTotal,
+      netBeforeVat,
+      depositNetDeducted,
+      depositDeducted,
+      paidAmount,
+      vatRate,
+    });
+    setWhtText(salesWhtAmount(nextBase, Number(whtRate)).toFixed(2));
+  }
+
+  async function uploadWht(file: File | null) {
+    if (!file || file.size <= 0) {
+      setWhtUrl("");
+      setWhtFileName("");
+      return;
+    }
+    setIsUploadingWht(true);
+    try {
+      const uploadData = new FormData();
+      uploadData.set("file", file);
+      const uploaded = await uploadDocumentImage(uploadData);
+      if (uploaded.error || !uploaded.data?.url) {
+        toast.error(uploaded.error ?? "อัปโหลดใบ 50 ทวิไม่สำเร็จ");
+        return;
+      }
+      setWhtUrl(uploaded.data.url);
+      setWhtFileName(file.name);
+    } finally {
+      setIsUploadingWht(false);
+    }
+  }
+
   function handleSubmit() {
     if (!(settle > 0)) {
       toast.error("กรุณาระบุยอดที่รับชำระ");
+      return;
+    }
+    if (!Number.isFinite(wht) || wht < 0) {
+      toast.error("ยอดภาษีหัก ณ ที่จ่ายไม่ถูกต้อง");
+      return;
+    }
+    if (wht - settle > 0.05) {
+      toast.error("ยอดหัก ณ ที่จ่ายเกินยอดที่ตัดบิล");
       return;
     }
     const formData = new FormData();
@@ -126,6 +207,8 @@ export function ReceivePaymentDialog({
     formData.set("payment_date", paymentDate);
     formData.set("amount", settle.toFixed(2));
     formData.set("wht_rate", whtRate);
+    formData.set("wht_amount", wht.toFixed(2));
+    formData.set("wht_attachment_url", whtUrl);
     formData.set("reference_no", referenceNo.trim());
     const account = selectedBankAccount(bankAccounts, paymentChannel, bankAccountId);
     formData.set("payment_channel", paymentChannel);
@@ -192,7 +275,7 @@ export function ReceivePaymentDialog({
                 id="receipt-amount"
                 inputMode="decimal"
                 value={amount}
-                onChange={(event) => setAmount(event.target.value)}
+                onChange={(event) => applySettleAmount(event.target.value)}
               />
             </div>
             <div className="space-y-1.5">
@@ -200,15 +283,29 @@ export function ReceivePaymentDialog({
               <select
                 id="receipt-wht"
                 value={whtRate}
-                onChange={(event) => setWhtRate(event.target.value as "0" | "1" | "3")}
+                onChange={(event) => applyWhtRate(event.target.value)}
                 className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
               >
-                <option value="0">ไม่หัก ณ ที่จ่าย</option>
-                <option value="1">หัก ณ ที่จ่าย 1%</option>
-                <option value="3">หัก ณ ที่จ่าย 3%</option>
+                {SALES_WHT_RATE_OPTIONS.map((rate) => (
+                  <option key={rate} value={String(rate)}>
+                    {rate === 0 ? "ไม่หัก ณ ที่จ่าย" : `หัก ณ ที่จ่าย ${rate}%`}
+                  </option>
+                ))}
               </select>
-              <p className="text-xs text-slate-500">
-                WHT {formatMoney(wht)} ฿ · รับเงินสด/โอน {formatMoney(cash)} ฿
+              <Label htmlFor="receipt-wht-amount">ยอดภาษีหัก ณ ที่จ่าย (บาท)</Label>
+              <Input
+                id="receipt-wht-amount"
+                inputMode="decimal"
+                value={whtText}
+                onChange={(event) => {
+                  setWhtEdited(true);
+                  setWhtText(event.target.value);
+                }}
+              />
+              <p className="text-xs text-slate-600">
+                ฐานก่อน VAT {formatMoney(whtBase)} ฿ · หัก ณ ที่จ่าย ({whtRate}%) ={" "}
+                {formatMoney(Number.isFinite(wht) ? wht : suggestedWht)} ฿ · ยอดโอนเข้าบัญชีจริง ={" "}
+                {formatMoney(cash)} ฿
               </p>
             </div>
             <PaymentChannelPicker
@@ -256,11 +353,42 @@ export function ReceivePaymentDialog({
                 <p className="text-xs text-slate-500">{slipFile.name}</p>
               ) : null}
             </div>
+            {Number(whtRate) > 0 || wht > 0.005 ? (
+              <div
+                className="space-y-1.5"
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void uploadWht(event.dataTransfer.files?.[0] ?? null);
+                }}
+              >
+                <Label htmlFor="receipt-wht-file">
+                  📄 แนบหนังสือรับรองหัก ณ ที่จ่าย (50 ทวิ) — แนบตอนนี้หรือแนบภายหลังได้
+                </Label>
+                <Input
+                  id="receipt-wht-file"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                  onChange={(event) => {
+                    void uploadWht(event.target.files?.[0] ?? null);
+                  }}
+                />
+                {isUploadingWht ? (
+                  <p className="text-xs text-slate-500">กำลังอัปโหลดใบ 50 ทวิ...</p>
+                ) : whtFileName ? (
+                  <p className="text-xs text-slate-500">{whtFileName}</p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
           <DialogFooter>
             <Button
               type="button"
-              disabled={isPending || isReadingSlip}
+              disabled={isPending || isReadingSlip || isUploadingWht}
               className="bg-emerald-600 hover:bg-emerald-700"
               onClick={handleSubmit}
             >

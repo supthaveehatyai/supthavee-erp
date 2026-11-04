@@ -444,6 +444,10 @@ export type DocumentDetail = {
   one_time_address?: string | null;
   wht_rate: number;
   wht_amount: number;
+  /** Cash/transfer actually received after WHT (`documents.net_received_amount`). */
+  net_received_amount: number;
+  /** `documents.wht_status` */
+  wht_status: "NONE" | "PENDING_CERT" | "RECEIVED";
   payment_status: string;
   /** `documents.payment_channel` — COMPANY_BANK | CASH | OTHER_BANK */
   payment_channel?: string | null;
