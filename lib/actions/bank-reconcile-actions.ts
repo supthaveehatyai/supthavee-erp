@@ -376,6 +376,7 @@ type RawBill = {
   payment_channel: string | null;
   is_swept_to_company: boolean | null;
   deposit_deducted: number;
+  wht_amount: number;
   created_at: string;
   reference_no: string;
 };
@@ -429,12 +430,20 @@ function reconcilableAmount(row: RawBill, allocated: number): number {
   const grand = roundMoney(Number(row.grand_total ?? 0));
   const paid = roundMoney(Number(row.paid_amount ?? 0));
   const depositDeducted = roundMoney(Number(row.deposit_deducted ?? 0));
+  const wht = roundMoney(Number(row.wht_amount ?? 0));
   const used = roundMoney(allocated);
-  if (row.doc_type === "ABB" || row.doc_type === "CS_TAX" || row.doc_type === "DEP_IN") {
+  if (row.doc_type === "DEP_IN") {
     return roundMoney(Math.max(0, grand - used));
   }
-  if (row.doc_type === "SO" || row.doc_type === "INV_DO" || row.doc_type === "TAX_INV") {
-    return roundMoney(Math.max(0, grand - depositDeducted - paid - used));
+  if (
+    row.doc_type === "ABB" ||
+    row.doc_type === "CS_TAX" ||
+    row.doc_type === "SO" ||
+    row.doc_type === "INV_DO" ||
+    row.doc_type === "TAX_INV" ||
+    row.doc_type === "REC"
+  ) {
+    return roundMoney(Math.max(0, grand - depositDeducted - wht - used));
   }
   return roundMoney(Math.max(0, grand - paid - used));
 }
@@ -455,6 +464,7 @@ function toOpenBill(row: RawBill, allocated: number, customer: string | null): O
     paid_amount: paid,
     outstanding,
     deposit_deducted: depositDeducted,
+    wht_amount: roundMoney(Number(row.wht_amount ?? 0)),
     linkable_amount: reconcilableAmount(row, allocated),
     payment_status: row.payment_status,
     created_at: row.created_at,
@@ -494,6 +504,7 @@ function asRawBill(row: Record<string, unknown>): RawBill {
     is_swept_to_company:
       row.is_swept_to_company == null ? null : Boolean(row.is_swept_to_company),
     deposit_deducted: Number(row.deposit_deducted ?? 0),
+    wht_amount: Number(row.wht_amount ?? 0),
     created_at: String(row.created_at ?? ""),
     reference_no: String(row.reference_no ?? "").trim(),
   };
@@ -524,6 +535,30 @@ function orderCandidateBills(bills: OpenSalesBill[], description: string): OpenS
   });
 }
 
+async function hideConvertedSalesOrders(
+  supabase: Db,
+  bills: OpenSalesBill[],
+): Promise<OpenSalesBill[]> {
+  const soIds = bills.filter((bill) => bill.doc_type === "SO").map((bill) => bill.id);
+  if (soIds.length === 0) return bills;
+  const hidden = new Set<string>();
+  for (let index = 0; index < soIds.length; index += 80) {
+    const slice = soIds.slice(index, index + 80);
+    const { data, error } = await supabase
+      .from("documents")
+      .select("ref_document_id")
+      .in("ref_document_id", slice)
+      .in("doc_type", [...CONVERTED_CHILD_DOC_TYPES])
+      .in("status", ["ISSUED", "COMPLETED", "PAID"]);
+    if (error) {
+      if (isSchemaMiss(error.message)) return bills;
+      throw new Error(error.message);
+    }
+    for (const row of data ?? []) hidden.add(String(row.ref_document_id ?? ""));
+  }
+  return bills.filter((bill) => !(bill.doc_type === "SO" && hidden.has(bill.id)));
+}
+
 async function loadReconcileCandidates(
   supabase: Db,
 ): Promise<{ bills: OpenSalesBill[]; error: string | null }> {
@@ -540,41 +575,29 @@ async function loadReconcileCandidates(
       if (!channel) return true;
       return channel === "COMPANY_BANK" || row.is_swept_to_company === true;
     });
-    const hasRpcAmount = kept.some(
-      (row) => row.reconcilable_amount != null && row.reconcilable_amount !== "",
-    );
-    if (!hasRpcAmount) {
-      const bills = await hydrateBills(
-        supabase,
-        kept.map((row) => asRawBill(row)),
+    const rpcAmountWhenWhtMissing = new Map<string, number>();
+    for (const row of kept) {
+      const hasWht = row.wht_amount != null && row.wht_amount !== "";
+      if (hasWht) continue;
+      if (row.reconcilable_amount == null || row.reconcilable_amount === "") continue;
+      rpcAmountWhenWhtMissing.set(
+        String(row.id ?? ""),
+        roundMoney(Number(row.reconcilable_amount)),
       );
-      return {
-        bills: bills.filter((bill) => bill.linkable_amount > MONEY_EPSILON),
-        error: null,
-      };
     }
-    const needsLabels = kept.some(
-      (row) => !String(row.customer_label ?? row.customer_name ?? "").trim() && row.contact_id,
+    const hydrated = await hydrateBills(
+      supabase,
+      kept.map((row) => asRawBill(row)),
     );
-    const labels = needsLabels
-      ? await loadCustomerLabels(
-          supabase,
-          kept.map((row) => String(row.contact_id ?? "")),
-        )
-      : new Map<string, string>();
-    const bills = kept
-      .map((row) => {
-        const raw = asRawBill(row);
-        const named =
-          String(row.customer_label ?? row.customer_name ?? "").trim() ||
-          labels.get(raw.contact_id ?? "") ||
-          null;
-        const bill = toOpenBill(raw, 0, named);
-        bill.linkable_amount = roundMoney(Number(row.reconcilable_amount));
-        return bill;
-      })
-      .filter((bill) => bill.linkable_amount > MONEY_EPSILON);
-    return { bills, error: null };
+    for (const bill of hydrated) {
+      const rpcAmount = rpcAmountWhenWhtMissing.get(bill.id);
+      if (rpcAmount != null) bill.linkable_amount = rpcAmount;
+    }
+    const bills = await hideConvertedSalesOrders(supabase, hydrated);
+    return {
+      bills: bills.filter((bill) => bill.linkable_amount > MONEY_EPSILON),
+      error: null,
+    };
   }
   if (!isSchemaMiss(rpc.error.message) && !/Could not find the function/i.test(rpc.error.message)) {
     return { bills: [], error: rpc.error.message };
@@ -589,9 +612,12 @@ async function loadReconcileCandidates(
     .order("created_at", { ascending: true })
     .limit(800);
   if (error) return { bills: [], error: error.message };
-  const bills = await hydrateBills(
+  const bills = await hideConvertedSalesOrders(
     supabase,
-    (data ?? []).map((row) => asRawBill(row as Record<string, unknown>)),
+    await hydrateBills(
+      supabase,
+      (data ?? []).map((row) => asRawBill(row as Record<string, unknown>)),
+    ),
   );
   return {
     bills: bills.filter((bill) => bill.linkable_amount > MONEY_EPSILON),
@@ -604,7 +630,8 @@ function isCompanyBankReceipt(row: RawBill): boolean {
 }
 
 const BILL_SELECT =
-  "id, doc_no, doc_type, doc_date, created_at, reference_no, sales_channel, contact_id, ecommerce_order_no, grand_total, paid_amount, deposit_deducted, payment_status, status, payment_channel, is_swept_to_company";
+  "id, doc_no, doc_type, doc_date, created_at, reference_no, sales_channel, contact_id, ecommerce_order_no, grand_total, paid_amount, deposit_deducted, wht_amount, payment_status, status, payment_channel, is_swept_to_company";
+const CONVERTED_CHILD_DOC_TYPES = ["CS_TAX", "TAX_INV", "INV_DO", "ABB"] as const;
 const PURCHASE_DOC_TYPES = ["PO", "AP_TAX", "AP_INV", "AP_CASH", "DEP_OUT", "PAY"] as const;
 
 export async function suggestBillMatches(

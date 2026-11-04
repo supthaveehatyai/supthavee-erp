@@ -82,7 +82,7 @@ CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names, column names, views, 
 
 \- `bank\_reconciliation\_allocations` (ชนยอดเงินฝากกับบิลขาย — FK: `statement\_line\_id`, FK: `document\_id`, `allocated\_amount`, `platform\_fee\_diff`, `created\_by`)
 
-\- `get\_reconcile\_candidate\_documents()` (บิลขายที่ยังชนกับเงินฝาก KTB ได้ — `reconcilable\_amount` ของ `ABB` / `CS\_TAX` / `DEP\_IN` = `grand\_total - allocated` โดยไม่หัก `paid\_amount`, ของ `SO` / `INV\_DO` / `TAX\_INV` = `grand\_total - deposit\_deducted - paid\_amount - allocated`)
+\- `get\_reconcile\_candidate\_documents()` และ Trigger `trg\_sync\_parent\_child\_document\_settlement` — ยอดตัดได้ของบิลขายคือ `grand\_total - deposit\_deducted - wht\_amount - allocated` โดยไม่หัก `wht\_amount` ซ้ำ และไม่แสดง `SO` ที่ถูกแปลงเป็น `CS\_TAX` / `TAX\_INV` / `INV\_DO` / `ABB` ที่ออกเลขแล้ว
 
 \- `reclassify\_document\_payment\_channel(p\_document\_id, p\_new\_channel, p\_bank\_account\_id)` (ย้ายบิลออกจากหน้าชนยอด KTB ไปช่องทาง `CASH` หรือ `OTHER\_BANK`)
 

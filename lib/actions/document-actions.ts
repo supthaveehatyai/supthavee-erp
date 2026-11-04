@@ -3897,6 +3897,67 @@ async function loadSalesOrderDepositSummary(
  *   SO (ISSUED)    → INV_DO / TAX_INV / CS_TAX / ABB
  * Service Role only — Zero Client-Side Fetching.
  */
+async function copySalesSettlementFields(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  sourceId: string,
+  targetId: string,
+): Promise<string | null> {
+  const reader = supabase as unknown as {
+    from: (table: string) => {
+      select: (columns: string) => {
+        eq: (
+          column: string,
+          value: string,
+        ) => {
+          maybeSingle: () => Promise<{
+            data: Record<string, unknown> | null;
+            error: { message: string } | null;
+          }>;
+        };
+      };
+    };
+  };
+  const loaded = await reader
+    .from("documents")
+    .select(
+      "payment_channel, bank_account_id, receiving_bank_label, reference_no, handwritten_doc_ref, original_receipt_url, wht_rate, wht_amount, net_received_amount, wht_attachment_url, wht_status",
+    )
+    .eq("id", sourceId)
+    .maybeSingle();
+  if (loaded.error || !loaded.data) return loaded.error?.message ?? null;
+  const row = loaded.data;
+  const whtAmount = Number(row.wht_amount ?? 0);
+  let patch: Record<string, unknown> = {
+    payment_channel: row.payment_channel ?? null,
+    bank_account_id: row.bank_account_id ?? null,
+    receiving_bank_label: row.receiving_bank_label ?? null,
+    reference_no: row.reference_no ?? null,
+    handwritten_doc_ref: row.handwritten_doc_ref ?? null,
+    original_receipt_url: row.original_receipt_url ?? null,
+    wht_rate: Number(row.wht_rate ?? 0),
+    wht_amount: whtAmount,
+    net_received_amount: Number(row.net_received_amount ?? 0),
+    wht_attachment_url: row.wht_attachment_url ?? null,
+    wht_status:
+      row.wht_status ?? (whtAmount > 0 ? "PENDING_CERT" : "NONE"),
+  };
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const { error } = await supabase
+      .from("documents")
+      .update(patch as never)
+      .eq("id", targetId);
+    if (!error) return null;
+    const missing = /Could not find the '([^']+)' column/i.exec(error.message)?.[1];
+    if (missing && missing in patch) {
+      delete patch[missing];
+      patch = { ...patch };
+      continue;
+    }
+    return error.message;
+  }
+  return "คัดลอกข้อมูลชำระเงินและใบหัก ณ ที่จ่ายไม่สำเร็จ";
+}
+
 export async function convertDocument(
   sourceDocId: string,
   targetDocType: ConvertTargetDocType,
@@ -4200,6 +4261,20 @@ export async function convertDocument(
     }
 
     const newDocumentId = created.id as string;
+    const inheritSettlement =
+      (srcType === "SO" || srcType === "INV_DO") &&
+      (targetDocType === "CS_TAX" ||
+        targetDocType === "TAX_INV" ||
+        targetDocType === "INV_DO" ||
+        targetDocType === "ABB");
+    if (inheritSettlement) {
+      const copyError = await copySalesSettlementFields(
+        supabase,
+        source.id,
+        newDocumentId,
+      );
+      if (copyError) return { data: null, error: copyError };
+    }
 
     if (sourceItems.length > 0) {
       const itemsPayload = sourceItems.map((item, index) => ({

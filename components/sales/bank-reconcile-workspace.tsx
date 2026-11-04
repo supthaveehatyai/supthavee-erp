@@ -60,12 +60,14 @@ function billCaption(bill: OpenSalesBill): string {
   const when = `${formatShortDateTh(bill.doc_date)}${time ? ` (เวลา ${time})` : ""}`;
   const slip = bill.reference_no ? ` · สลิป ${bill.reference_no}` : "";
   const customer = bill.customer_label ? ` · ${bill.customer_label}` : "";
-  const deposit =
-    bill.deposit_deducted > 0.05 &&
-    (bill.doc_type === "SO" || bill.doc_type === "INV_DO" || bill.doc_type === "TAX_INV")
-      ? ` (ยอดเต็ม ${money(bill.grand_total)} หักมัดจำ ${money(bill.deposit_deducted)})`
+  const breakdown: string[] = [];
+  if (bill.deposit_deducted > 0.05) breakdown.push(`หักมัดจำ ${money(bill.deposit_deducted)}`);
+  if (bill.wht_amount > 0.05) breakdown.push(`หัก ณ ที่จ่าย ${money(bill.wht_amount)}`);
+  const detail =
+    breakdown.length > 0
+      ? ` (ยอดเต็ม ${money(bill.grand_total)} ${breakdown.join(" ")})`
       : "";
-  return `${bill.doc_no} · ${when}${slip}${customer} · ตัดได้ ${money(bill.linkable_amount)}${deposit}`;
+  return `${bill.doc_no} · ${when}${slip}${customer} · ตัดได้ ${money(bill.linkable_amount)}${detail}`;
 }
 
 export default function BankReconcileWorkspace() {

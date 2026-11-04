@@ -52,6 +52,7 @@ export type OpenSalesBill = {
   paid_amount: number;
   outstanding: number;
   deposit_deducted: number;
+  wht_amount: number;
   /** Amount still available to tie to a bank line (`reconcilable_amount`). */
   linkable_amount: number;
   payment_status: string;
