@@ -27,6 +27,17 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+function roundMoney(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function money(value: number): string {
+  return value.toLocaleString("th-TH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 export function SalesHeaderEditDialog({
   documentId,
   docDate,
@@ -39,6 +50,8 @@ export function SalesHeaderEditDialog({
   docType,
   salesChannel,
   slipUrl = "",
+  goodsTotal,
+  discountAmount,
 }: {
   documentId: string;
   docDate: string;
@@ -51,6 +64,8 @@ export function SalesHeaderEditDialog({
   docType?: string;
   salesChannel?: string | null;
   slipUrl?: string;
+  goodsTotal: number;
+  discountAmount: number;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -74,9 +89,31 @@ export function SalesHeaderEditDialog({
     ),
   );
   const [receiptUrl, setReceiptUrl] = useState(slipUrl);
+  const [discountText, setDiscountText] = useState(() => discountAmount.toFixed(2));
+  const goods = roundMoney(goodsTotal);
+  const parsedDiscount = discountText.trim() === "" ? 0 : Number(discountText);
+  const discountValue = roundMoney(parsedDiscount);
+  const discountReady = Number.isFinite(parsedDiscount) && parsedDiscount >= 0;
+  const nextNet = roundMoney(goods - (discountReady ? discountValue : 0));
+
+  function openDialog() {
+    setDate(docDate.slice(0, 10));
+    setSlipNo(referenceNo);
+    setRemark(notes);
+    setDiscountText(roundMoney(discountAmount).toFixed(2));
+    setOpen(true);
+  }
 
   function onSave() {
     if (pending) return;
+    if (!discountReady || discountValue - goods > 0.005) {
+      toast.error(
+        discountValue - goods > 0.005
+          ? "ส่วนลดท้ายบิลต้องไม่เกินยอดรวมสินค้า"
+          : "ส่วนลดท้ายบิลต้องเป็นตัวเลขไม่ติดลบ",
+      );
+      return;
+    }
     startTransition(async () => {
       const result = await updateSalesDocumentDirect({
         document_id: documentId,
@@ -90,6 +127,7 @@ export function SalesHeaderEditDialog({
           return account ? bankAccountDisplay(account) : paymentChannelLabel(channel);
         })(),
         slip_url: receiptUrl.trim() || null,
+        discount_amount: discountValue,
       });
       if (result.error || !result.data) {
         toast.error(result.error ?? "แก้ไขหัวบิลไม่สำเร็จ");
@@ -106,7 +144,7 @@ export function SalesHeaderEditDialog({
       <Button
         type="button"
         className="h-10 gap-2 bg-blue-800 text-white hover:bg-blue-900"
-        onClick={() => setOpen(true)}
+        onClick={openDialog}
       >
         <Pencil className="size-4" />
         ✏️ แก้ไขข้อมูลหัวบิล / วันที่ / หมายเหตุ
@@ -116,7 +154,7 @@ export function SalesHeaderEditDialog({
           <DialogHeader>
             <DialogTitle>แก้ไขหัวบิลที่ออกแล้ว</DialogTitle>
             <DialogDescription>
-              ปรับวันที่ เลขสลิป ช่องทางรับเงิน และหมายเหตุโดยไม่ยกเลิกเอกสาร
+              ปรับวันที่ เลขสลิป ส่วนลดท้ายบิล ช่องทางรับเงิน และหมายเหตุโดยไม่ยกเลิกเอกสาร
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -168,6 +206,23 @@ export function SalesHeaderEditDialog({
                 }}
               />
             )}
+            <div className="space-y-1.5">
+              <Label htmlFor="issued-discount-amount">ส่วนลดท้ายบิล (บาท)</Label>
+              <Input
+                id="issued-discount-amount"
+                type="number"
+                min={0}
+                step="0.01"
+                inputMode="decimal"
+                value={discountText}
+                disabled={pending}
+                onChange={(event) => setDiscountText(event.target.value)}
+              />
+              <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                ยอดรวมสินค้า {money(goods)} − ส่วนลด {money(discountReady ? discountValue : 0)} ={" "}
+                <span className="font-semibold text-slate-900">ยอดสุทธิใหม่ {money(nextNet)}</span>
+              </p>
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="issued-notes">หมายเหตุ / ชื่องาน</Label>
               <textarea

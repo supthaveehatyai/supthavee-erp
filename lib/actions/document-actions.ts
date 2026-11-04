@@ -3400,6 +3400,7 @@ export async function updateSalesDocumentDirect(input: {
   receiving_bank_label?: string | null;
   bank_account_id?: string | null;
   slip_url?: string | null;
+  discount_amount: number;
 }) {
   try {
     const owner = await requireSessionUserId();
@@ -3410,6 +3411,10 @@ export async function updateSalesDocumentDirect(input: {
     if (!documentId) return { data: null, error: "ไม่พบรหัสเอกสาร" };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(docDate)) {
       return { data: null, error: "วันที่เอกสารไม่ถูกต้อง" };
+    }
+    const discountAmount = Math.round(Number(input.discount_amount) * 100) / 100;
+    if (!Number.isFinite(discountAmount) || discountAmount < 0) {
+      return { data: null, error: "ส่วนลดท้ายบิลต้องเป็นตัวเลขไม่ติดลบ" };
     }
 
     const supabase = createSupabaseServerClient();
@@ -3431,6 +3436,7 @@ export async function updateSalesDocumentDirect(input: {
       p_receiving_bank_label: input.receiving_bank_label?.trim() || null,
       p_bank_account_id: input.bank_account_id?.trim() || null,
       p_slip_url: input.slip_url?.trim() || null,
+      p_discount_amount: discountAmount,
     });
     if (saved.error) return { data: null, error: saved.error.message };
 

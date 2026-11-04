@@ -406,6 +406,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   const canVoid =
     doc.status === "ISSUED" && Number(doc.paid_amount ?? 0) === 0;
   const canCreateCreditNote =
+    doc.doc_type !== "ABB" &&
     (CREDIT_NOTE_SOURCE_DOC_TYPES as readonly string[]).includes(doc.doc_type) &&
     (CREDIT_NOTE_SOURCE_STATUSES as readonly string[]).includes(doc.status);
   /** MTO — SO ISSUED ที่มีสินค้า is_manufactured หรือเอกสารบริการเดิม (สกรีน/ปัก) */
@@ -596,6 +597,8 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               docType={doc.doc_type}
               salesChannel={doc.sales_channel}
               slipUrl={doc.original_receipt_url ?? ""}
+              goodsTotal={subtotal}
+              discountAmount={discountAmount}
             />
           ) : null}
           {canSendKanban || showBatchMto ? (
