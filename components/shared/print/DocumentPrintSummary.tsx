@@ -135,6 +135,7 @@ export function DocumentPrintSummary({
   netBeforeVat = null,
   shippingFee = null,
   shippingMethodLabel = null,
+  salesCollection = null,
 }: DocumentPrintSummaryProps) {
   const vatType = normalizeVatType(vatTypeProp);
   const extractFromGrand = isRefundDocType(String(docType ?? ""));
@@ -180,8 +181,11 @@ export function DocumentPrintSummary({
   const showBaseBeforeVat =
     showVat && (vatType === "INCLUSIVE" || extractFromGrand) && baseAmount > 0;
   const showWht = safeWht > 0;
-  const netPayable = showWht ? round2(safeGrand - safeWht) : safeGrand;
-  const thaiBahtText = numberToThaiBaht(safeGrand);
+  const collectionGrand = salesCollection
+    ? round2(salesCollection.grand)
+    : null;
+  const netPayable = collectionGrand ?? (showWht ? round2(safeGrand - safeWht) : safeGrand);
+  const thaiBahtText = numberToThaiBaht(collectionGrand ?? safeGrand);
   const depositGross = round2(Math.max(0, Number(depositDeduction?.gross ?? 0)));
   const showDeposit = depositGross > 0;
   const settledNet = round2(
@@ -206,7 +210,49 @@ export function DocumentPrintSummary({
       )}
     >
       <div className="space-y-1.5 border border-neutral-300 bg-white p-2.5">
-        {purchaseInclusiveLayout && vatType === "INCLUSIVE" ? (
+        {salesCollection ? (
+          <>
+            <SummaryRow
+              label="รวมเป็นเงิน (ค่าสินค้า)"
+              value={formatMoney(salesCollection.goods)}
+            />
+            {salesCollection.discount > 0 ? (
+              <SummaryRow
+                label="หักส่วนลด"
+                value={`−${formatMoney(salesCollection.discount)}`}
+              />
+            ) : null}
+            {salesCollection.deposit > 0 ? (
+              <SummaryRow
+                label={`หักเงินมัดจำรับล่วงหน้า${
+                  salesCollection.depositDocNo
+                    ? ` (${salesCollection.depositDocNo})`
+                    : ""
+                }`}
+                value={`−${formatMoney(salesCollection.deposit)}`}
+              />
+            ) : null}
+            <SummaryRow
+              label="มูลค่าสินค้า/บริการหลังหักมัดจำ (ก่อน VAT)"
+              value={formatMoney(salesCollection.netBeforeVat)}
+            />
+            <SummaryRow
+              label={`ภาษีมูลค่าเพิ่ม ${salesCollection.vatRate}%`}
+              value={formatMoney(salesCollection.vatAmount)}
+            />
+            {salesCollection.shipping > 0 ? (
+              <SummaryRow
+                label="ค่าขนส่ง (ยกเว้น VAT)"
+                value={`+${formatMoney(salesCollection.shipping)}`}
+              />
+            ) : null}
+            <SummaryRow
+              label="ยอดสุทธิที่ต้องชำระ (Grand Total)"
+              value={formatMoney(salesCollection.grand)}
+              emphasize
+            />
+          </>
+        ) : purchaseInclusiveLayout && vatType === "INCLUSIVE" ? (
           <>
             <SummaryRow
               label="รวมมูลค่าสินค้า (รวมภาษี)"

@@ -27,6 +27,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SalesShippingFields } from "@/components/sales/sales-shipping-fields";
+import {
+  isVatCalculationType,
+  salesPayableTotals,
+} from "@/lib/utils/document-summary";
 
 function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
@@ -56,6 +60,9 @@ export function SalesHeaderEditDialog({
   shippingFee = 0,
   shippingMethod = "",
   shippingTrackingNo = "",
+  depositDeducted = 0,
+  vatType = "INCLUSIVE",
+  pricesIncludeVat = false,
 }: {
   documentId: string;
   docDate: string;
@@ -73,6 +80,10 @@ export function SalesHeaderEditDialog({
   shippingFee?: number;
   shippingMethod?: string;
   shippingTrackingNo?: string;
+  depositDeducted?: number;
+  vatType?: string | null;
+  /** ราคารายการรวม VAT แล้ว — ใบกำกับเต็มรูปแค่แยกฐานภาษี ไม่บวก 7% ซ้ำ */
+  pricesIncludeVat?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -106,9 +117,17 @@ export function SalesHeaderEditDialog({
   const parsedShipping = shippingText.trim() === "" ? 0 : Number(shippingText);
   const shippingValue = roundMoney(parsedShipping);
   const shippingReady = Number.isFinite(parsedShipping) && parsedShipping >= 0;
-  const nextNet = roundMoney(
-    goods - (discountReady ? discountValue : 0) + (shippingReady ? shippingValue : 0),
-  );
+  const storedVatMode = isVatCalculationType(String(vatType ?? ""))
+    ? String(vatType)
+    : "INCLUSIVE";
+  const vatMode = pricesIncludeVat ? "INCLUSIVE" : storedVatMode;
+  const preview = salesPayableTotals({
+    goodsSubtotal: goods,
+    discountAmount: discountReady ? discountValue : 0,
+    depositDeducted,
+    vatType: vatMode as "INCLUSIVE" | "EXCLUSIVE" | "NONE",
+    shippingFee: shippingReady ? shippingValue : 0,
+  });
 
   function openDialog() {
     setDate(docDate.slice(0, 10));
@@ -242,9 +261,18 @@ export function SalesHeaderEditDialog({
                 onChange={(event) => setDiscountText(event.target.value)}
               />
               <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                ยอดรวมสินค้า {money(goods)} − ส่วนลด {money(discountReady ? discountValue : 0)} +
-                ค่าขนส่ง {money(shippingReady ? shippingValue : 0)} (ไม่คิด VAT) ={" "}
-                <span className="font-semibold text-slate-900">ยอดสุทธิใหม่ {money(nextNet)}</span>
+                ค่าสินค้า {money(goods)} ฿
+                {preview.discount_amount > 0
+                  ? ` - ส่วนลด ${money(preview.discount_amount)} ฿`
+                  : ""}
+                {" "}- หักมัดจำ {money(preview.deposit_deducted)} ฿
+                {vatMode === "EXCLUSIVE"
+                  ? ` + ภาษีมูลค่าเพิ่ม ${money(preview.vat_amount)} ฿`
+                  : ""}
+                {" "}+ ค่าขนส่ง {money(preview.shipping_fee)} ฿ ={" "}
+                <span className="font-semibold text-slate-900">
+                  ยอดเรียกเก็บสุทธิ {money(preview.grand_total)} ฿
+                </span>
               </p>
             </div>
             <SalesShippingFields

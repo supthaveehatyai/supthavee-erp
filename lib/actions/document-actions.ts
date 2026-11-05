@@ -49,6 +49,8 @@ import {
 import {
   calculateDocumentSummary,
   isVatCalculationType,
+  parseBillDiscountAmount,
+  salesPayableTotals,
   type VatCalculationType,
 } from "@/lib/utils/document-summary";
 import {
@@ -2031,7 +2033,7 @@ export async function getDocumentByNo(
       const { data: depositRows } = await supabase
         .from("documents")
         .select(
-          "id, doc_no, doc_date, status, grand_total, net_before_vat, vat_amount",
+          "id, doc_no, doc_date, status, grand_total, net_before_vat, vat_amount, original_receipt_url",
         )
         .eq("doc_type", "DEP_IN")
         .or(filters.join(","))
@@ -2051,6 +2053,9 @@ export async function getDocumentByNo(
           net_before_vat: Number(row.net_before_vat ?? 0),
           vat_amount: Number(row.vat_amount ?? 0),
           status,
+          original_receipt_url: String(
+            (row as { original_receipt_url?: string | null }).original_receipt_url ?? "",
+          ).trim() || null,
         });
       }
     }
@@ -3882,6 +3887,32 @@ type SalesDepositApply = {
   deposit_doc_id: string | null;
 };
 
+async function loadStoredSalesDeposit(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  documentId: string,
+): Promise<SalesDepositApply> {
+  const { data, error } = await supabase
+    .from("documents")
+    .select(
+      "deposit_deducted, deposit_net_deducted, deposit_vat_deducted, deposit_doc_id",
+    )
+    .eq("id", documentId)
+    .maybeSingle();
+  if (error || !data) return emptyDepositApply();
+  const row = data as {
+    deposit_deducted?: number | string | null;
+    deposit_net_deducted?: number | string | null;
+    deposit_vat_deducted?: number | string | null;
+    deposit_doc_id?: string | null;
+  };
+  return {
+    deposit_deducted: Number(row.deposit_deducted ?? 0),
+    deposit_net_deducted: Number(row.deposit_net_deducted ?? 0),
+    deposit_vat_deducted: Number(row.deposit_vat_deducted ?? 0),
+    deposit_doc_id: row.deposit_doc_id ? String(row.deposit_doc_id) : null,
+  };
+}
+
 function emptyDepositApply(): SalesDepositApply {
   return {
     deposit_deducted: 0,
@@ -4289,16 +4320,44 @@ export async function convertDocument(
       : emptyDepositApply();
     const sourceShipping =
       (await loadSalesShipping(supabase, source.id)) ?? normalizeSalesShipping({});
-    const summary = settlesDeposit
-      ? calculateDocumentSummary({
-          lineTotals: sourceItems.map((item) => Number(item.line_total ?? 0)),
-          discountText:
-            typeof source.discount_text === "string" ? source.discount_text : null,
-          vatType: targetVatType,
+    const storedDeposit = await loadStoredSalesDeposit(supabase, source.id);
+    const appliedDeposit: SalesDepositApply =
+      storedDeposit.deposit_deducted > 0
+        ? {
+            deposit_deducted: storedDeposit.deposit_deducted,
+            deposit_net_deducted:
+              storedDeposit.deposit_net_deducted > 0
+                ? storedDeposit.deposit_net_deducted
+                : deposit.deposit_net_deducted,
+            deposit_vat_deducted:
+              storedDeposit.deposit_vat_deducted > 0
+                ? storedDeposit.deposit_vat_deducted
+                : deposit.deposit_vat_deducted,
+            deposit_doc_id: storedDeposit.deposit_doc_id ?? deposit.deposit_doc_id,
+          }
+        : deposit;
+    const goodsSubtotal = sourceItems.reduce(
+      (sum, item) => sum + Number(item.line_total ?? 0),
+      0,
+    );
+    const sourceVatType: VatCalculationType = isVatCalculationType(
+      String(source.vat_type ?? ""),
+    )
+      ? (source.vat_type as VatCalculationType)
+      : "INCLUSIVE";
+    const payableVatType: VatCalculationType =
+      targetDocType === "TAX_INV" || targetDocType === "CS_TAX"
+        ? sourceVatType === "EXCLUSIVE"
+          ? "EXCLUSIVE"
+          : "INCLUSIVE"
+        : targetVatType;
+    const payable = settlesDeposit
+      ? salesPayableTotals({
+          goodsSubtotal,
+          discountAmount: Number(source.discount_amount ?? 0),
+          depositDeducted: appliedDeposit.deposit_deducted,
+          vatType: payableVatType,
           vatRate: Number.isFinite(vatRate) ? vatRate : 7,
-          depositGross: deposit.deposit_deducted,
-          depositNet: deposit.deposit_net_deducted,
-          depositVat: deposit.deposit_vat_deducted,
           shippingFee: sourceShipping.shipping_fee,
         })
       : null;
@@ -4317,38 +4376,46 @@ export async function convertDocument(
         contact_person_id: source.contact_person_id ?? null,
         ref_document_id: source.id,
         ref_doc_id: source.id,
-        sub_total: summary ? summary.total_amount : Number(source.sub_total ?? 0),
-        discount_amount: summary
-          ? summary.discount_amount
+        sub_total: payable
+          ? payable.goods_subtotal
+          : Number(source.sub_total ?? 0),
+        discount_amount: payable
+          ? payable.discount_amount
           : Number(source.discount_amount ?? 0),
         discount_text: source.discount_text ?? null,
-        tax_rate: summary ? summary.vat_rate : Number(source.tax_rate ?? 7),
-        tax_amount: summary
-          ? summary.vat_amount
+        tax_rate: payable
+          ? Number.isFinite(vatRate)
+            ? vatRate
+            : 7
+          : Number(source.tax_rate ?? 7),
+        tax_amount: payable
+          ? payable.vat_amount
           : Number(source.tax_amount ?? 0),
         wht_rate: Number(source.wht_rate ?? 0),
         wht_amount: Number(source.wht_amount ?? 0),
-        grand_total: summary
-          ? summary.grand_total
+        grand_total: payable
+          ? payable.grand_total
           : Number(source.grand_total ?? 0),
-        deposit_deducted: summary
-          ? summary.deposit_deducted
+        deposit_deducted: payable
+          ? appliedDeposit.deposit_deducted
           : Number(source.deposit_deducted ?? 0),
-        deposit_net_deducted: summary ? summary.deposit_net_deducted : 0,
-        deposit_vat_deducted: summary ? summary.deposit_vat_deducted : 0,
-        deposit_doc_id: summary ? deposit.deposit_doc_id : null,
-        vat_type: summary ? summary.vat_type : (source.vat_type ?? "EXCLUSIVE"),
-        vat_rate: summary
-          ? summary.vat_rate
+        deposit_net_deducted: payable ? appliedDeposit.deposit_net_deducted : 0,
+        deposit_vat_deducted: payable ? appliedDeposit.deposit_vat_deducted : 0,
+        deposit_doc_id: payable ? appliedDeposit.deposit_doc_id : null,
+        vat_type: payable ? targetVatType : (source.vat_type ?? "EXCLUSIVE"),
+        vat_rate: payable
+          ? Number.isFinite(vatRate)
+            ? vatRate
+            : 7
           : Number(source.vat_rate ?? source.tax_rate ?? 7),
-        total_amount: summary
-          ? summary.total_amount
+        total_amount: payable
+          ? payable.goods_subtotal
           : Number(source.total_amount ?? source.sub_total ?? 0),
-        net_before_vat: summary
-          ? summary.net_before_vat
+        net_before_vat: payable
+          ? payable.net_before_vat
           : Number(source.net_before_vat ?? 0),
-        vat_amount: summary
-          ? summary.vat_amount
+        vat_amount: payable
+          ? payable.vat_amount
           : Number(source.vat_amount ?? source.tax_amount ?? 0),
         payment_status: resolveInitialPaymentStatus(targetDocType),
         notes,
@@ -4524,15 +4591,19 @@ export async function upgradeAbbToFullTaxInvoice(
     }
     const sourceShipping =
       (await loadSalesShipping(supabase, source.id)) ?? normalizeSalesShipping({});
-    const summary = calculateDocumentSummary({
-      lineTotals: sourceItems.map((item) => Number(item.line_total ?? 0)),
-      discountText:
+    const goodsSubtotal = sourceItems.reduce(
+      (sum, item) => sum + Number(item.line_total ?? 0),
+      0,
+    );
+    const summary = salesPayableTotals({
+      goodsSubtotal,
+      discountAmount: parseBillDiscountAmount(
+        goodsSubtotal,
         typeof source.discount_text === "string" ? source.discount_text : null,
-      vatType: "EXCLUSIVE",
+      ),
+      depositDeducted: deposit.deposit_deducted,
+      vatType: "INCLUSIVE",
       vatRate: Number.isFinite(vatRate) ? vatRate : 7,
-      depositGross: deposit.deposit_deducted,
-      depositNet: deposit.deposit_net_deducted,
-      depositVat: deposit.deposit_vat_deducted,
       shippingFee: sourceShipping.shipping_fee,
     });
     const owner = await requireSessionUserId();
@@ -4558,19 +4629,19 @@ export async function upgradeAbbToFullTaxInvoice(
         contact_person_id: source.contact_person_id ?? null,
         ref_document_id: source.id,
         ref_doc_id: source.id,
-        sub_total: summary.total_amount,
+        sub_total: summary.goods_subtotal,
         discount_amount: summary.discount_amount,
         discount_text: source.discount_text ?? null,
-        tax_rate: summary.vat_rate,
+        tax_rate: Number.isFinite(vatRate) ? vatRate : 7,
         tax_amount: summary.vat_amount,
         grand_total: summary.grand_total,
-        deposit_deducted: summary.deposit_deducted,
-        deposit_net_deducted: summary.deposit_net_deducted,
-        deposit_vat_deducted: summary.deposit_vat_deducted,
+        deposit_deducted: deposit.deposit_deducted,
+        deposit_net_deducted: deposit.deposit_net_deducted,
+        deposit_vat_deducted: deposit.deposit_vat_deducted,
         deposit_doc_id: deposit.deposit_doc_id,
         vat_type: "EXCLUSIVE",
-        vat_rate: summary.vat_rate,
-        total_amount: summary.total_amount,
+        vat_rate: Number.isFinite(vatRate) ? vatRate : 7,
+        total_amount: summary.goods_subtotal,
         net_before_vat: summary.net_before_vat,
         vat_amount: summary.vat_amount,
         payment_status: resolveInitialPaymentStatus(targetDocType),

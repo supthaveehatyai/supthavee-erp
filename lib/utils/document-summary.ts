@@ -96,6 +96,87 @@ export function parseBillDiscountAmount(
   return round2(Math.min(val, base));
 }
 
+export type SalesPayableTotals = {
+  goods_subtotal: number;
+  discount_amount: number;
+  deposit_deducted: number;
+  /** สินค้าหลังส่วนลดและหักมัดจำ ทั้งก้อนตามโหมด VAT ของบิล */
+  goods_after_deposit: number;
+  net_before_vat: number;
+  vat_amount: number;
+  shipping_fee: number;
+  /** ยอดที่ต้องเรียกเก็บ: หลังหักมัดจำ และบวกค่าขนส่งที่ยกเว้น VAT */
+  grand_total: number;
+};
+
+/**
+ * ยอดเรียกเก็บของบิลขายที่หักมัดจำแล้วบวกค่าขนส่งนอก VAT
+ * INCLUSIVE: ถอด VAT จากยอดสินค้าที่เหลือหลังหักมัดจำ
+ * EXCLUSIVE: VAT 7% คิดจากฐานหลังหักมัดจำ แล้วบวกค่าขนส่งทีหลัง
+ */
+export function salesPayableTotals(input: {
+  goodsSubtotal: number;
+  discountAmount?: number | null;
+  depositDeducted?: number | null;
+  vatType: VatCalculationType;
+  vatRate?: number | null;
+  shippingFee?: number | null;
+}): SalesPayableTotals {
+  const goods = round2(Number(input.goodsSubtotal ?? 0));
+  const discountRaw = Number(input.discountAmount ?? 0);
+  const discount = round2(
+    Number.isFinite(discountRaw) ? Math.min(Math.max(0, discountRaw), goods) : 0,
+  );
+  const depositRaw = Number(input.depositDeducted ?? 0);
+  const deposit = round2(Number.isFinite(depositRaw) ? Math.max(0, depositRaw) : 0);
+  const shippingRaw = Number(input.shippingFee ?? 0);
+  const shipping = round2(Number.isFinite(shippingRaw) ? Math.max(0, shippingRaw) : 0);
+  const rateRaw = Number(input.vatRate ?? 7);
+  const vatRate = Number.isFinite(rateRaw) && rateRaw >= 0 ? rateRaw : 7;
+  const goodsAfter = round2(Math.max(0, goods - discount - deposit));
+  const vatType = isVatCalculationType(input.vatType) ? input.vatType : "EXCLUSIVE";
+
+  if (vatType === "NONE" || vatRate === 0) {
+    return {
+      goods_subtotal: goods,
+      discount_amount: discount,
+      deposit_deducted: deposit,
+      goods_after_deposit: goodsAfter,
+      net_before_vat: goodsAfter,
+      vat_amount: 0,
+      shipping_fee: shipping,
+      grand_total: round2(goodsAfter + shipping),
+    };
+  }
+
+  if (vatType === "EXCLUSIVE") {
+    const vat = round2(goodsAfter * (vatRate / 100));
+    return {
+      goods_subtotal: goods,
+      discount_amount: discount,
+      deposit_deducted: deposit,
+      goods_after_deposit: goodsAfter,
+      net_before_vat: goodsAfter,
+      vat_amount: vat,
+      shipping_fee: shipping,
+      grand_total: round2(goodsAfter + vat + shipping),
+    };
+  }
+
+  const net = round2(goodsAfter / (1 + vatRate / 100));
+  const vat = round2(goodsAfter - net);
+  return {
+    goods_subtotal: goods,
+    discount_amount: discount,
+    deposit_deducted: deposit,
+    goods_after_deposit: goodsAfter,
+    net_before_vat: net,
+    vat_amount: vat,
+    shipping_fee: shipping,
+    grand_total: round2(goodsAfter + shipping),
+  };
+}
+
 export function isVatCalculationType(
   value: string,
 ): value is VatCalculationType {

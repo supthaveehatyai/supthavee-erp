@@ -12,6 +12,7 @@ import type { PrintPaperSize, PrintVatType } from "@/types/print-document";
 import { receiptMethodText } from "@/lib/finance/payment-channel";
 import { stripDepositNoteMetadata } from "@/lib/utils/deposit-note";
 import { salesShippingMethodLabel } from "@/lib/utils/sales-shipping";
+import { salesPayableTotals } from "@/lib/utils/document-summary";
 import { cn } from "@/lib/utils";
 
 function formatMoney(value: number): string {
@@ -74,6 +75,41 @@ export default async function PrintDocumentTemplate({
   const depositReference =
     depositDocs.map((row) => row.doc_no).filter(Boolean).join(", ") ||
     "อ้างอิงใบมัดจำ";
+  const salesPaper =
+    doc.doc_type === "SO" ||
+    doc.doc_type === "ABB" ||
+    doc.doc_type === "TAX_INV" ||
+    doc.doc_type === "CS_TAX" ||
+    doc.doc_type === "INV_DO";
+  const salesPayable = salesPaper
+    ? salesPayableTotals({
+        goodsSubtotal: Number(doc.sub_total ?? subtotal),
+        discountAmount,
+        depositDeducted: depositGross,
+        vatType,
+        vatRate,
+        shippingFee: Number(doc.shipping_fee ?? 0),
+      })
+    : null;
+  const storedNet = roundMoney(Number(doc.net_before_vat ?? 0));
+  const storedVat = roundMoney(Number(doc.vat_amount ?? doc.tax_amount ?? 0));
+  const storedGrand = roundMoney(grandTotal);
+  const storedCollectsRemainder =
+    salesPayable != null &&
+    storedNet > 0 &&
+    Math.abs(storedNet + storedVat - salesPayable.goods_after_deposit) <= 0.05 &&
+    Math.abs(
+      storedGrand - (salesPayable.goods_after_deposit + salesPayable.shipping_fee),
+    ) <= 0.05;
+  const printedNet = storedCollectsRemainder
+    ? storedNet
+    : (salesPayable?.net_before_vat ?? 0);
+  const printedVat = storedCollectsRemainder
+    ? storedVat
+    : (salesPayable?.vat_amount ?? 0);
+  const printedGrand = storedCollectsRemainder
+    ? storedGrand
+    : (salesPayable?.grand_total ?? 0);
   const partyLabel = documentPartyLabel(doc.doc_type);
   const heading = documentPrintHeading(doc.doc_type);
 
@@ -165,6 +201,21 @@ export default async function PrintDocumentTemplate({
           }
           shippingFee={isDepositDoc ? 0 : Number(doc.shipping_fee ?? 0)}
           shippingMethodLabel={salesShippingMethodLabel(doc.shipping_method)}
+          salesCollection={
+            salesPayable
+              ? {
+                  goods: salesPayable.goods_subtotal,
+                  discount: salesPayable.discount_amount,
+                  deposit: salesPayable.deposit_deducted,
+                  depositDocNo: depositDocs.map((row) => row.doc_no).filter(Boolean).join(", "),
+                  netBeforeVat: printedNet,
+                  vatAmount: printedVat,
+                  vatRate: vatType === "NONE" ? 0 : vatRate,
+                  shipping: salesPayable.shipping_fee,
+                  grand: printedGrand,
+                }
+              : null
+          }
         />
       }
     >

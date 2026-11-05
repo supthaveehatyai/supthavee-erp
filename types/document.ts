@@ -392,6 +392,7 @@ export type LinkedDepositReceipt = {
   net_before_vat: number;
   vat_amount: number;
   status: string;
+  original_receipt_url?: string | null;
 };
 
 export type DocumentLineageChild = {

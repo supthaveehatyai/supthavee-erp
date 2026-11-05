@@ -112,6 +112,21 @@ export type DocumentPrintSummaryProps = {
   /** ค่าขนส่งฝากส่งที่ไม่คิด VAT — แสดงเหนือยอดสุทธิเมื่อ > 0 */
   shippingFee?: number | null;
   shippingMethodLabel?: string | null;
+  /**
+   * สรุปเรียกเก็บของ SO / ABB / TAX_INV / CS_TAX / INV_DO
+   * ยอดสุดท้ายคือหลังหักมัดจำและบวกค่าขนส่งแล้ว
+   */
+  salesCollection?: {
+    goods: number;
+    discount: number;
+    deposit: number;
+    depositDocNo: string;
+    netBeforeVat: number;
+    vatAmount: number;
+    vatRate: number;
+    shipping: number;
+    grand: number;
+  } | null;
 };
 
 export type PrintLayoutProps = {

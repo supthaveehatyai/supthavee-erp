@@ -31,6 +31,10 @@ import PrintSettlementVoucherTemplate from "@/components/finance/PrintSettlement
 import { computePrintVatBreakdown } from "@/components/shared/print/DocumentPrintSummary";
 import { salesShippingMethodLabel } from "@/lib/utils/sales-shipping";
 import {
+  isVatCalculationType,
+  salesPayableTotals,
+} from "@/lib/utils/document-summary";
+import {
   loadSourceDepositVat,
   resolveRefundInheritedVat,
 } from "@/lib/finance/refund-print-vat";
@@ -331,20 +335,14 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   const depositHistoryResult = isDepositDoc
     ? await getDepositAllocationHistory(doc.id)
     : { data: [], error: null };
-  const docSlipFallback =
-    doc.original_receipt_url?.trim() ||
-    doc.attached_file_url?.trim() ||
-    doc.attachment_url?.trim() ||
-    "";
+  const receiptSlipUrl = doc.original_receipt_url?.trim() || "";
   const slipMeta = await getPaymentTransactionStorageMetaByDocumentId(
     doc.id,
-    docSlipFallback || null,
+    receiptSlipUrl || null,
   );
   const slipUrl = slipMeta.display_url ?? "";
   const showSlipViewer =
-    slipMeta.storage_tier === "NAS" ||
-    Boolean(slipUrl) ||
-    Boolean(docSlipFallback);
+    slipMeta.storage_tier === "NAS" || Boolean(slipUrl) || Boolean(receiptSlipUrl);
   const isCreditNote = doc.doc_type === "CN";
   const canIssue = doc.status === "DRAFT";
   const canIssueCreditNote = isCreditNote && canIssue;
@@ -371,14 +369,37 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   const canReceiveDeposit =
     (doc.doc_type === "SO" || doc.doc_type === "QT") &&
     (doc.status === "ISSUED" || doc.status === "COMPLETED");
+  const salesCollectibleTypes = new Set([
+    "SO",
+    "ABB",
+    "TAX_INV",
+    "CS_TAX",
+    "INV_DO",
+  ]);
+  const rawVatType = String(doc.vat_type ?? "");
+  const salesVatType = isVatCalculationType(rawVatType) ? rawVatType : "INCLUSIVE";
+  const storedGrand = Number(doc.grand_total ?? 0);
+  const storedDeposit = Number(doc.deposit_deducted ?? 0);
+  const salesCollectible = salesCollectibleTypes.has(doc.doc_type)
+    ? salesPayableTotals({
+        goodsSubtotal: Number(doc.sub_total ?? doc.total_amount ?? 0),
+        discountAmount: Number(doc.discount_amount ?? 0),
+        depositDeducted: storedDeposit,
+        vatType: salesVatType,
+        vatRate: Number(doc.vat_rate ?? doc.tax_rate ?? 7),
+        shippingFee: Number(doc.shipping_fee ?? 0),
+      }).grand_total
+    : null;
+  const paidAmount = Number(doc.paid_amount ?? 0);
+  const collectibleBase =
+    salesCollectible == null
+      ? Math.max(0, storedGrand - storedDeposit)
+      : Math.abs(storedGrand - salesCollectible) <= 0.05
+        ? storedGrand
+        : Math.max(storedGrand - storedDeposit, 0);
   const amountDue = Math.max(
     0,
-    Math.round(
-      (Number(doc.grand_total ?? 0) -
-        Number(doc.deposit_deducted ?? 0) -
-        Number(doc.paid_amount ?? 0)) *
-        100,
-    ) / 100,
+    Math.round((collectibleBase - paidAmount) * 100) / 100,
   );
   const canReceivePayment =
     (doc.doc_type === "SO" ||
@@ -393,6 +414,26 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   });
   const slipReference = doc.reference_no?.trim() || "";
   const linkedDeposits = doc.linked_deposits ?? [];
+  const depositSlips = (
+    await Promise.all(
+      linkedDeposits
+        .filter((row) => Boolean(row.original_receipt_url?.trim()))
+        .map(async (row) => {
+          const meta = await getPaymentTransactionStorageMetaByDocumentId(
+            row.id,
+            row.original_receipt_url,
+          );
+          const url = meta.display_url || row.original_receipt_url?.trim() || "";
+          return {
+            id: row.id,
+            docNo: row.doc_no,
+            url,
+            tier: meta.storage_tier,
+            nasPath: meta.nas_path,
+          };
+        }),
+    )
+  ).filter((row) => Boolean(row.url));
   const linkedDepositGross = linkedDeposits.reduce(
     (sum, row) => sum + Number(row.grand_total ?? 0),
     0,
@@ -531,6 +572,19 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                 {doc.doc_no}
               </h1>
               {statusBadge(doc.status)}
+              {doc.doc_type === "SO" &&
+              amountDue > 0.01 &&
+              (doc.payment_status === "PARTIAL" ||
+                Number(doc.deposit_deducted ?? 0) > 0) ? (
+                <Badge className="border-orange-200 bg-orange-50 text-orange-800 hover:bg-orange-50">
+                  ⏳ รับมัดจำแล้ว · ค้างชำระส่วนที่เหลือ{" "}
+                  {amountDue.toLocaleString("th-TH", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}{" "}
+                  ฿
+                </Badge>
+              ) : null}
               {isCreditNoteIssued ? (
                 <Badge className="border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-100">
                   Form Lock
@@ -608,6 +662,21 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               shippingFee={Number(doc.shipping_fee ?? 0)}
               shippingMethod={doc.shipping_method ?? ""}
               shippingTrackingNo={doc.shipping_tracking_no ?? ""}
+              depositDeducted={Number(doc.deposit_deducted ?? 0)}
+              vatType={doc.vat_type}
+              pricesIncludeVat={
+                salesVatType !== "EXCLUSIVE" ||
+                Math.abs(
+                  Number(doc.net_before_vat ?? 0) +
+                    Number(doc.vat_amount ?? doc.tax_amount ?? 0) -
+                    Math.max(
+                      0,
+                      Number(doc.sub_total ?? doc.total_amount ?? 0) -
+                        Number(doc.discount_amount ?? 0) -
+                        Number(doc.deposit_deducted ?? 0),
+                    ),
+                ) <= 0.05
+              }
             />
           ) : null}
           {canSendKanban || showBatchMto ? (
@@ -1099,6 +1168,24 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                   ) : null}
                 </>
               )}
+              {depositSlips.map((slip) => (
+                <AttachmentSheetViewer
+                  key={slip.id}
+                  fileUrl={slip.url}
+                  storageTier={slip.tier}
+                  nasPath={slip.nasPath}
+                  title={`สลิปเงินมัดจำ · ${slip.docNo}`}
+                  trigger={
+                    <button
+                      type="button"
+                      className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
+                    >
+                      <Eye className="size-4" />
+                      ดูสลิปเงินมัดจำ ({slip.docNo})
+                    </button>
+                  }
+                />
+              ))}
               {showSlipViewer && !isSettlementDoc ? (
                 <AttachmentSheetViewer
                   fileUrl={slipUrl}
@@ -1111,7 +1198,9 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                       className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 text-sm font-semibold text-blue-800 transition hover:bg-blue-100"
                     >
                       <Eye className="size-4" />
-                      ดูสลิปโอนเงิน
+                      {depositSlips.length > 0
+                        ? "ดูสลิปชำระส่วนที่เหลือ"
+                        : "ดูสลิปโอนเงิน"}
                     </button>
                   }
                 />

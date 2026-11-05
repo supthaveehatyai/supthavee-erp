@@ -15,7 +15,7 @@ export type PrintLineRow = {
   discount_label: string | null;
 };
 
-const TAX_PRINT_DOC_TYPES = new Set(["TAX_INV", "CS_TAX", "ABB"]);
+const TAX_PRINT_DOC_TYPES = new Set(["TAX_INV", "CS_TAX", "ABB", "INV_DO"]);
 
 export function defaultPrintNameMode(docType: string): PrintNameMode {
   return TAX_PRINT_DOC_TYPES.has(docType) ? "short" : "sku";
