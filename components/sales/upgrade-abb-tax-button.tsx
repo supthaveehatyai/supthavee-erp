@@ -51,7 +51,7 @@ export function UpgradeAbbTaxButton({ documentId }: { documentId: string }) {
             className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50"
             onClick={() => upgrade("CS_TAX")}
           >
-            ใบกำกับภาษีเงินสด (CS_TAX)
+            ใบเสร็จรับเงิน / ใบกำกับภาษี (CS_TAX)
           </button>
         </div>
       ) : null}

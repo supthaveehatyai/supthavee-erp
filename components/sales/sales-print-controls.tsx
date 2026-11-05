@@ -16,7 +16,16 @@ type PrintViewDetail = {
   nameMode?: PrintNameMode;
   hideZeroServiceLines?: boolean;
   showSignatures?: boolean;
+  showReceiverSignature?: boolean;
 };
+
+function isCashReceiptDoc(docType: string): boolean {
+  return docType === "CS_TAX" || docType === "REC" || docType === "DEP_IN" || docType === "ABB";
+}
+
+function isDeliveryDoc(docType: string): boolean {
+  return docType === "TAX_INV" || docType === "INV_DO" || docType === "SO";
+}
 
 function defaultShowSignatures(docType: string): boolean {
   return docType !== "ABB";
@@ -47,11 +56,14 @@ export function SalesPrintOptions({
   const [showSignatures, setShowSignatures] = useState(() =>
     defaultShowSignatures(docType),
   );
+  const [showReceiverSignature, setShowReceiverSignature] = useState(false);
+  const lineOptions = docType !== "REC" && docType !== "DEP_IN";
 
   useEffect(() => {
     setNameMode(defaultPrintNameMode(docType));
     setHideZeroServiceLines(defaultHideZeroServiceLines(docType));
     setShowSignatures(defaultShowSignatures(docType));
+    setShowReceiverSignature(false);
   }, [docNo, docType]);
 
   function publish(next: PrintViewDetail) {
@@ -63,58 +75,79 @@ export function SalesPrintOptions({
       <legend className="px-1 text-[11px] font-semibold text-slate-500">
         รูปแบบบนกระดาษพิมพ์
       </legend>
-      <label className="flex items-start gap-2">
-        <input
-          type="radio"
-          name={`sales-print-name-${docNo}`}
-          className="mt-0.5"
-          checked={nameMode === "short"}
-          onChange={() => {
-            setNameMode("short");
-            publish({ docNo, nameMode: "short" });
-          }}
-        />
-        <span>ใช้ชื่อย่อสินค้า (short_name) และยุบรวมรายการ</span>
-      </label>
-      <label className="flex items-start gap-2">
-        <input
-          type="radio"
-          name={`sales-print-name-${docNo}`}
-          className="mt-0.5"
-          checked={nameMode === "sku"}
-          onChange={() => {
-            setNameMode("sku");
-            publish({ docNo, nameMode: "sku" });
-          }}
-        />
-        <span>แสดงรายละเอียดเต็มตาม SKU</span>
-      </label>
-      <label className="flex items-start gap-2">
-        <input
-          type="checkbox"
-          className="mt-0.5"
-          checked={hideZeroServiceLines}
-          onChange={(event) => {
-            const checked = event.target.checked;
-            setHideZeroServiceLines(checked);
-            publish({ docNo, hideZeroServiceLines: checked });
-          }}
-        />
-        <span>ซ่อนรายการบริการราคา 0 บาท บนใบกำกับภาษี</span>
-      </label>
-      <label className="flex items-start gap-2">
-        <input
-          type="checkbox"
-          className="mt-0.5"
-          checked={showSignatures}
-          onChange={(event) => {
-            const checked = event.target.checked;
-            setShowSignatures(checked);
-            publish({ docNo, showSignatures: checked });
-          }}
-        />
-        <span>แสดงช่องลงนามท้ายเอกสาร (ผู้รับเงิน / ผู้รับของ)</span>
-      </label>
+      {lineOptions ? (
+        <>
+          <label className="flex items-start gap-2">
+            <input
+              type="radio"
+              name={`sales-print-name-${docNo}`}
+              className="mt-0.5"
+              checked={nameMode === "short"}
+              onChange={() => {
+                setNameMode("short");
+                publish({ docNo, nameMode: "short" });
+              }}
+            />
+            <span>ใช้ชื่อย่อสินค้า (short_name) และยุบรวมรายการ</span>
+          </label>
+          <label className="flex items-start gap-2">
+            <input
+              type="radio"
+              name={`sales-print-name-${docNo}`}
+              className="mt-0.5"
+              checked={nameMode === "sku"}
+              onChange={() => {
+                setNameMode("sku");
+                publish({ docNo, nameMode: "sku" });
+              }}
+            />
+            <span>แสดงรายละเอียดเต็มตาม SKU</span>
+          </label>
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={hideZeroServiceLines}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setHideZeroServiceLines(checked);
+                publish({ docNo, hideZeroServiceLines: checked });
+              }}
+            />
+            <span>ซ่อนรายการบริการราคา 0 บาท บนใบกำกับภาษี</span>
+          </label>
+        </>
+      ) : null}
+      {docType === "ABB" ? (
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={showSignatures}
+            onChange={(event) => {
+              const checked = event.target.checked;
+              setShowSignatures(checked);
+              publish({ docNo, showSignatures: checked });
+            }}
+          />
+          <span>แสดงช่องลงนามท้ายเอกสาร (ผู้รับเงิน / ผู้มีอำนาจลงนาม)</span>
+        </label>
+      ) : null}
+      {isCashReceiptDoc(docType) && (docType !== "ABB" || showSignatures) ? (
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={showReceiverSignature}
+            onChange={(event) => {
+              const checked = event.target.checked;
+              setShowReceiverSignature(checked);
+              publish({ docNo, showReceiverSignature: checked });
+            }}
+          />
+          <span>แสดงช่องลงนามผู้รับของเพิ่มเติม</span>
+        </label>
+      ) : null}
     </fieldset>
   );
 }
@@ -129,13 +162,18 @@ function PrintSignatureLine({ label }: { label: string }) {
   );
 }
 
-function usePrintSignatures(docNo: string, docType: string): boolean {
+function usePrintSignatureChoices(docNo: string, docType: string): {
+  showSignatures: boolean;
+  showReceiverSignature: boolean;
+} {
   const [showSignatures, setShowSignatures] = useState(() =>
     defaultShowSignatures(docType),
   );
+  const [showReceiverSignature, setShowReceiverSignature] = useState(false);
 
   useEffect(() => {
     setShowSignatures(defaultShowSignatures(docType));
+    setShowReceiverSignature(false);
   }, [docNo, docType]);
 
   useEffect(() => {
@@ -145,15 +183,18 @@ function usePrintSignatures(docNo: string, docType: string): boolean {
       if (typeof detail.showSignatures === "boolean") {
         setShowSignatures(detail.showSignatures);
       }
+      if (typeof detail.showReceiverSignature === "boolean") {
+        setShowReceiverSignature(detail.showReceiverSignature);
+      }
     }
     window.addEventListener(PRINT_VIEW_EVENT, onView);
     return () => window.removeEventListener(PRINT_VIEW_EVENT, onView);
   }, [docNo]);
 
-  return showSignatures;
+  return { showSignatures, showReceiverSignature };
 }
 
-/** ช่องเซ็นคู่ในคอลัมน์ซ้ายของใบกำกับภาษี — ABB ปิดไว้เป็นค่าเริ่มต้น */
+/** ช่องลงนามท้ายกระดาษตามประเภทเอกสาร */
 export function SalesPrintSignaturePair({
   docNo,
   docType,
@@ -161,17 +202,26 @@ export function SalesPrintSignaturePair({
   docNo: string;
   docType: string;
 }) {
-  const showSignatures = usePrintSignatures(docNo, docType);
-  if (!showSignatures) return null;
+  const { showSignatures, showReceiverSignature } = usePrintSignatureChoices(docNo, docType);
+  if (isDeliveryDoc(docType)) {
+    return (
+      <div className="grid grid-cols-2 gap-2 pt-1">
+        <PrintSignatureLine label="ผู้รับของ / ผู้รับสินค้า" />
+        <PrintSignatureLine label="ผู้ส่งของ / ผู้จัดทำ" />
+      </div>
+    );
+  }
+  if (docType === "ABB" && !showSignatures) return null;
+  if (!isCashReceiptDoc(docType)) return null;
   return (
-    <div className="grid grid-cols-2 gap-2 pt-1">
-      <PrintSignatureLine label="ผู้รับเงิน / ผู้จัดทำ" />
-      <PrintSignatureLine label="ผู้รับของ" />
+    <div className={showReceiverSignature ? "grid grid-cols-2 gap-2 pt-1" : "max-w-[9rem] pt-1"}>
+      <PrintSignatureLine label="ผู้รับเงิน / ผู้มีอำนาจลงนาม" />
+      {showReceiverSignature ? <PrintSignatureLine label="ผู้รับของ" /> : null}
     </div>
   );
 }
 
-/** ช่องเซ็นมาตรฐานของเอกสารที่ไม่ได้ใช้ส่วนท้ายแบบแบ่งซ้าย-ขวา */
+/** ช่องเซ็นของเอกสารที่ไม่ได้ใช้ส่วนท้ายแบบแบ่งซ้าย-ขวา */
 export function SalesPrintStandardFooter({
   docNo,
   docType,
@@ -181,7 +231,10 @@ export function SalesPrintStandardFooter({
   docType: string;
   receivedLabel?: string;
 }) {
-  const showSignatures = usePrintSignatures(docNo, docType);
+  const { showSignatures } = usePrintSignatureChoices(docNo, docType);
+  if (isCashReceiptDoc(docType) || isDeliveryDoc(docType)) {
+    return <SalesPrintSignaturePair docNo={docNo} docType={docType} />;
+  }
   if (!showSignatures) return null;
   return (
     <DocumentPrintFooter

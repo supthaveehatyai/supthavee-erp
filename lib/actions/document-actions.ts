@@ -2207,14 +2207,16 @@ export async function getDocumentByNo(
         ).trim() || null;
     const parentId = String(data.ref_document_id ?? "").trim();
     let parentDocNo: string | null = null;
+    let parentDocDate: string | null = null;
     if (parentId) {
       const parentLookup = await supabase
         .from("documents")
-        .select("doc_no")
+        .select("doc_no, doc_date")
         .eq("id", parentId)
         .maybeSingle();
       if (!parentLookup.error && parentLookup.data?.doc_no) {
         parentDocNo = String(parentLookup.data.doc_no);
+        parentDocDate = String(parentLookup.data.doc_date ?? "").slice(0, 10) || null;
       }
     }
 
@@ -2229,6 +2231,7 @@ export async function getDocumentByNo(
       contact_person_id: (data.contact_person_id as string | null) ?? null,
       ref_document_id: (data.ref_document_id as string | null) ?? null,
       parent_doc_no: parentDocNo,
+      parent_doc_date: parentDocDate,
       handwritten_doc_ref: handwrittenDocRef,
       sub_total: Number(data.sub_total ?? 0),
       discount_amount: Number(data.discount_amount ?? 0),

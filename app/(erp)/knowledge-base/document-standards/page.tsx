@@ -99,7 +99,7 @@ const SALES_DOCS: DocRow[] = [
   },
   {
     code: "CS_TAX",
-    nameTh: "ใบกำกับเงินสด",
+    nameTh: "ใบเสร็จรับเงิน / ใบกำกับภาษี",
     nameEn: "Cash Tax Invoice",
     role: "ขายเงินสด + ใบกำกับภาษี",
     stock: "ตัดสต็อก OUT",

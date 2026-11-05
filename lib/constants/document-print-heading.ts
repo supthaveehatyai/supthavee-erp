@@ -14,9 +14,15 @@ const VENDOR_DOC_TYPES = new Set([
 const HEADINGS: Record<string, { title: string; subtitle: string }> = {
   QT: { title: "ใบเสนอราคา", subtitle: "(QUOTATION)" },
   SO: { title: "ใบสั่งขาย", subtitle: "(SALES ORDER)" },
-  INV_DO: { title: "ใบส่งของ / แจ้งหนี้", subtitle: "(DELIVERY ORDER & INVOICE)" },
-  TAX_INV: { title: "ใบกำกับภาษี", subtitle: "(TAX INVOICE)" },
-  CS_TAX: { title: "ใบกำกับเงินสด", subtitle: "(CASH TAX INVOICE)" },
+  INV_DO: { title: "ใบส่งของ / ใบแจ้งหนี้", subtitle: "(DELIVERY ORDER / INVOICE)" },
+  TAX_INV: {
+    title: "ใบกำกับภาษี / ใบส่งของ / ใบแจ้งหนี้",
+    subtitle: "(TAX INVOICE / DELIVERY ORDER / INVOICE)",
+  },
+  CS_TAX: {
+    title: "ใบเสร็จรับเงิน / ใบกำกับภาษี",
+    subtitle: "(RECEIPT / TAX INVOICE)",
+  },
   ABB: {
     title: "บิลเงินสด / ใบกำกับภาษีอย่างย่อ",
     subtitle: "(ABBREVIATED TAX INVOICE)",

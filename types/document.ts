@@ -418,6 +418,7 @@ export type DocumentDetail = {
   ref_document_id: string | null;
   /** เลขที่เอกสารต้นทางจาก `ref_document_id` */
   parent_doc_no?: string | null;
+  parent_doc_date?: string | null;
   /** เลขบิลมือ เช่น เล่มที่ 21 เลขที่ 22 */
   handwritten_doc_ref?: string | null;
   sub_total: number;

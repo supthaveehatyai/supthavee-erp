@@ -34,15 +34,15 @@ const QT_OPTIONS: Option[] = [
 ];
 
 const SO_OPTIONS: Option[] = [
-  { type: "INV_DO", label: "สร้างใบส่งของ (INV_DO)" },
-  { type: "TAX_INV", label: "สร้างใบกำกับภาษี (TAX_INV)" },
-  { type: "CS_TAX", label: "สร้างใบกำกับเงินสด (CS_TAX)" },
+  { type: "INV_DO", label: "สร้างใบส่งของ / ใบแจ้งหนี้ (INV_DO)" },
+  { type: "TAX_INV", label: "สร้างใบกำกับภาษี / ใบส่งของ / ใบแจ้งหนี้ (TAX_INV)" },
+  { type: "CS_TAX", label: "สร้างใบเสร็จรับเงิน / ใบกำกับภาษี (CS_TAX)" },
   { type: "ABB", label: "สร้างใบสำคัญเงินสด (ABB)" },
 ];
 
 const INV_DO_OPTIONS: Option[] = [
   { type: "TAX_INV", label: "สร้างใบกำกับภาษีเงินเชื่อ (TAX_INV)" },
-  { type: "CS_TAX", label: "สร้างใบกำกับภาษีเงินสด (CS_TAX)" },
+  { type: "CS_TAX", label: "สร้างใบเสร็จรับเงิน / ใบกำกับภาษี (CS_TAX)" },
 ];
 
 function getOptions(docType: DocumentType): Option[] {

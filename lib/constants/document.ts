@@ -465,7 +465,7 @@ export const CASH_DOC_TYPES = ["CS_TAX", "ABB", "AP_CASH"] as const;
 
 /**
  * Phase 19 — ภาษีขาย (ภ.พ.30 Output Tax)
- * ใบกำกับภาษีขาย / ใบกำกับเงินสด / ใบเสร็จอย่างย่อ
+ * ใบกำกับภาษีขาย / ใบเสร็จรับเงินใบกำกับภาษี / ใบกำกับภาษีอย่างย่อ
  */
 export const OUTPUT_TAX_DOC_TYPES = ["TAX_INV", "CS_TAX", "ABB"] as const;
 

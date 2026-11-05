@@ -197,6 +197,11 @@ export default async function PrintDocumentTemplate({
       paperSize={resolvedPaperSize}
       documentId="sales-print-document"
       showSignatureFooter={false}
+      stackContent={
+        doc.doc_type === "CS_TAX" ||
+        doc.doc_type === "TAX_INV" ||
+        doc.doc_type === "REC"
+      }
       className={cn("mt-2 print:mt-0", className)}
       bottom={
         <div
@@ -252,6 +257,14 @@ export default async function PrintDocumentTemplate({
           shippingMethodLabel={salesShippingMethodLabel(doc.shipping_method)}
           hideBahtText={salesTaxPaper}
           className={salesTaxPaper ? "ml-0 w-full max-w-none text-[10.5px]" : undefined}
+          collectionGrandLabel={
+            doc.doc_type === "CS_TAX" ||
+            doc.doc_type === "ABB" ||
+            doc.doc_type === "DEP_IN" ||
+            doc.doc_type === "REC"
+              ? "ยอดสุทธิ (Grand Total)"
+              : "ยอดสุทธิที่ต้องชำระ (Grand Total)"
+          }
           salesCollection={
             salesPayable
               ? {

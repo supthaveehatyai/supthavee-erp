@@ -703,7 +703,7 @@ export default function SalesEditWorkspace({
               {initialDocument.doc_type === "ABB"
                 ? "ใบเสร็จอย่างย่อ (ABB)"
                 : initialDocument.doc_type === "CS_TAX"
-                  ? "ใบกำกับเงินสด (CS_TAX)"
+                  ? "ใบเสร็จรับเงิน / ใบกำกับภาษี (CS_TAX)"
                   : initialDocument.doc_type}{" "}
               · {docDate.slice(8, 10)}/{docDate.slice(5, 7)}/{docDate.slice(0, 4)} ·{" "}
               {selectedCustomerName || "ยังไม่เลือกลูกค้า"}

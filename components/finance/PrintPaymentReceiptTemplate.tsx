@@ -2,6 +2,9 @@ import { PrintLayout } from "@/components/shared/print/PrintLayout";
 import { DocumentPrintSummary } from "@/components/shared/print/DocumentPrintSummary";
 import { getDocumentPrintPaperSize } from "@/lib/actions/settings";
 import { documentPrintHeading } from "@/lib/constants/document-print-heading";
+import { SalesPrintSignaturePair } from "@/components/sales/sales-print-controls";
+import { receiptMethodText } from "@/lib/finance/payment-channel";
+import { formatThaiDate } from "@/lib/utils/date-formatter";
 import type { DocumentDetail } from "@/types/document";
 import type { DocumentAllocationRow } from "@/types/document-allocation";
 import type { PrintVatType } from "@/types/print-document";
@@ -94,20 +97,40 @@ export default async function PrintPaymentReceiptTemplate({
   const vatType = normalizePrintVatType(doc.vat_type);
   const vatRate = Number(doc.vat_rate ?? doc.tax_rate ?? 7);
   const paperSize = await getDocumentPrintPaperSize(mode);
+  const isSalesReceipt = mode === "REC";
+  const parentNo = doc.parent_doc_no?.trim() || "";
+  const parentDate = doc.parent_doc_date?.trim() || "";
+  const officialReference =
+    isSalesReceipt && parentNo
+      ? `อ้างอิงใบกำกับภาษี/ใบส่งของ: ${parentNo}${
+          parentDate ? ` (ลว. ${formatThaiDate(parentDate)})` : ""
+        }`
+      : null;
+  const whtRate = Number(doc.wht_rate ?? 0);
+  const netReceived = Number(doc.net_received_amount ?? 0);
+  const paymentMethod = receiptMethodText({
+    payment_channel: doc.payment_channel,
+    receiving_bank_label: doc.receiving_bank_label,
+    is_swept_to_company: doc.is_swept_to_company,
+  });
 
   return (
     <PrintLayout
       title={heading.title}
       titleSubtitle={heading.subtitle}
-      headerVariant="goods-receipt"
+      headerVariant={isSalesReceipt ? "sales-tax" : "goods-receipt"}
       documentNo={doc.doc_no}
       date={doc.doc_date}
-      status={`${doc.status} · ${doc.payment_status}`}
-      docType={mode}
+      status={isSalesReceipt ? null : `${doc.status} · ${doc.payment_status}`}
+      docType={isSalesReceipt ? null : mode}
       partyLabel={partyLabel}
       customerData={doc.contact}
-      referenceNo={doc.reference_no}
+      referenceNo={isSalesReceipt ? null : doc.reference_no}
+      officialReference={officialReference}
+      contactPersonName={doc.contact_person?.name}
       paperSize={paperSize}
+      stackContent={isSalesReceipt}
+      showSignatureFooter={!isSalesReceipt}
       documentId="payment-print-document"
       className={cn("mt-2 print:mt-0", className)}
       footer={{
@@ -125,6 +148,14 @@ export default async function PrintPaymentReceiptTemplate({
           vatRate={vatRate}
           grandTotal={netFromAllocations}
           withholdingTaxAmount={whtAmount || allocatedWht || undefined}
+          collectionGrandLabel={isSalesReceipt ? "ยอดสุทธิ (Grand Total)" : undefined}
+          whtRowLabel={
+            whtAmount > 0
+              ? `หักภาษี ณ ที่จ่าย${whtRate > 0 ? ` (${whtRate}%)` : ""}`
+              : undefined
+          }
+          netReceivedLabel="ยอดรับชำระสุทธิ (Net Received)"
+          netReceivedAmount={whtAmount > 0 ? netReceived : undefined}
         />
       }
     >
@@ -271,6 +302,14 @@ export default async function PrintPaymentReceiptTemplate({
           ) : null}
         </table>
       </section>
+      {isSalesReceipt ? (
+        <section className="mt-2 space-y-1 text-[10.5px] text-neutral-800">
+          <p>
+            ช่องทางรับชำระ: {paymentMethod || "—"}
+          </p>
+          <SalesPrintSignaturePair docNo={doc.doc_no} docType="REC" />
+        </section>
+      ) : null}
     </PrintLayout>
   );
 }

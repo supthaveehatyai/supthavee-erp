@@ -24,6 +24,7 @@ import PrintDocumentTemplate from "@/components/sales/print-document-template";
 import { GoodsQtyBadge } from "@/components/sales/goods-qty-badge";
 import { ReceiveDepositDialog } from "@/components/sales/receive-deposit-dialog";
 import { ReceivePaymentDialog } from "@/components/sales/receive-payment-dialog";
+import { IssueSalesReceiptButton } from "./issue-sales-receipt-button";
 import { SalesWhtCertificatePanel } from "@/components/sales/sales-wht-certificate-panel";
 import { SalesPrintOptions } from "@/components/sales/sales-print-controls";
 import PrintPaymentReceiptTemplate from "@/components/finance/PrintPaymentReceiptTemplate";
@@ -401,6 +402,18 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
     0,
     Math.round((collectibleBase - paidAmount) * 100) / 100,
   );
+  const hasReceiptChild = (doc.child_documents ?? []).some(
+    (child) =>
+      child.doc_type === "REC" &&
+      child.status !== "VOID" &&
+      child.status !== "CANCELLED",
+  );
+  const canIssueOfficialReceipt =
+    (doc.doc_type === "TAX_INV" || doc.doc_type === "INV_DO") &&
+    doc.payment_status === "PAID" &&
+    doc.status !== "VOID" &&
+    doc.status !== "DRAFT" &&
+    !hasReceiptChild;
   const canReceivePayment =
     (doc.doc_type === "SO" ||
       doc.doc_type === "INV_DO" ||
@@ -653,7 +666,11 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               vatRate={vatRate}
               shippingFee={Number(doc.shipping_fee ?? 0)}
               bankAccounts={bankAccounts.data}
+              docType={doc.doc_type}
             />
+          ) : null}
+          {canIssueOfficialReceipt ? (
+            <IssueSalesReceiptButton documentId={doc.id} />
           ) : null}
           {canEditIssuedHeader ? (
             <SalesHeaderEditDialog
@@ -751,7 +768,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
             </Link>
           )}
         </div>
-        {!isReceiptDoc && !isSettlementDoc ? (
+        {!isSettlementDoc ? (
           <SalesPrintOptions docNo={doc.doc_no} docType={doc.doc_type} />
         ) : null}
       </div>

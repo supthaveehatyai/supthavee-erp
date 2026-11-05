@@ -78,6 +78,7 @@ export async function DocumentPrintHeader({
   paperSize,
   contactPersonName,
   customerCompact = false,
+  officialReference,
 }: DocumentPrintHeaderProps) {
   const settingsResult = await getSystemSettings();
   const company = settingsResult.success ? settingsResult.data : null;
@@ -171,6 +172,11 @@ export async function DocumentPrintHeader({
             <p className="text-[10.5px] text-neutral-800">
               วันที่: {formatDisplayDate(date)}
             </p>
+            {officialReference?.trim() ? (
+              <p className="mt-0.5 text-[9px] font-semibold leading-snug text-neutral-800">
+                {officialReference.trim()}
+              </p>
+            ) : null}
           </div>
         </div>
         <div className="my-1.5 border-y border-slate-200 px-2.5 py-1.5 text-[10.5px] leading-snug text-neutral-800">

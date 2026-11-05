@@ -97,10 +97,10 @@ const SALES_TRADING_DOC_TYPE_OPTIONS: {
 }[] = [
   { value: "QT", label: "ใบเสนอราคา (QT)" },
   { value: "SO", label: "ใบสั่งขาย (SO)" },
-  { value: "INV_DO", label: "ใบส่งของ / แจ้งหนี้ (INV_DO)" },
-  { value: "TAX_INV", label: "ใบกำกับภาษี (TAX_INV)" },
-  { value: "CS_TAX", label: "ใบกำกับเงินสด (CS_TAX)" },
-  { value: "ABB", label: "ใบเสร็จอย่างย่อ (ABB)" },
+  { value: "INV_DO", label: "ใบส่งของ / ใบแจ้งหนี้ (INV_DO)" },
+  { value: "TAX_INV", label: "ใบกำกับภาษี / ใบส่งของ / ใบแจ้งหนี้ (TAX_INV)" },
+  { value: "CS_TAX", label: "ใบเสร็จรับเงิน / ใบกำกับภาษี (CS_TAX)" },
+  { value: "ABB", label: "บิลเงินสด / ใบกำกับภาษีอย่างย่อ (ABB)" },
 ];
 
 const ITEM_COLUMNS = [

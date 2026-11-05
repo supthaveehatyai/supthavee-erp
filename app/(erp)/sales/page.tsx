@@ -56,7 +56,7 @@ function docTypeLabel(docType: DocumentType): string {
     DEP: "ใบมัดจำ",
     INV_DO: "ใบส่งของ",
     TAX_INV: "ใบกำกับภาษี",
-    CS_TAX: "ใบกำกับเงินสด",
+    CS_TAX: "ใบเสร็จรับเงิน / ใบกำกับภาษี",
     REC: "ใบเสร็จรับเงิน",
     CN: "ใบลดหนี้",
     AR_REFUND: "ใบสำคัญจ่ายเงินคืน (Refund Payment)",

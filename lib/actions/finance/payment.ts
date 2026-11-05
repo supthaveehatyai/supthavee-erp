@@ -38,6 +38,7 @@ import type {
   UnpaidInvoice,
 } from "@/types/payment";
 import { getAvailableDepositsForContact } from "@/lib/actions/finance/available-deposits";
+import { issueReceiptForTaxInvoice } from "@/lib/actions/sales-receipt-actions";
 import {
   OUTSTANDING_ALLOCATION_EMBED,
   mapAllocationSources,
@@ -1172,7 +1173,13 @@ export async function receiveSalesDocumentPayment(
     const grand = toMoney(document.grand_total);
     const deposit = toMoney(document.deposit_deducted);
     const paid = toMoney(document.paid_amount);
-    const outstanding = resolveRemainingAmount(grand, deposit, paid);
+    const docType = String(document.doc_type ?? "");
+    const depositAlreadyOnGrand = docType === "TAX_INV" || docType === "INV_DO";
+    const outstanding = resolveRemainingAmount(
+      grand,
+      depositAlreadyOnGrand ? 0 : deposit,
+      paid,
+    );
     if (outstanding <= MONEY_EPS) {
       return { success: false, error: "บิลนี้ไม่มียอดค้างชำระ" };
     }
@@ -1198,8 +1205,10 @@ export async function receiveSalesDocumentPayment(
       remainingGrand: outstanding,
       grandTotal: grand,
       netBeforeVat: toMoney(docRow.net_before_vat),
-      depositNetDeducted: toMoney(docRow.deposit_net_deducted),
-      depositDeducted: deposit,
+      depositNetDeducted: depositAlreadyOnGrand
+        ? 0
+        : toMoney(docRow.deposit_net_deducted),
+      depositDeducted: depositAlreadyOnGrand ? 0 : deposit,
       paidAmount: paid,
       vatRate: docRow.vat_rate == null ? 7 : Number(docRow.vat_rate),
     });
@@ -1222,7 +1231,9 @@ export async function receiveSalesDocumentPayment(
     const nextWhtStatus =
       nextWht <= MONEY_EPS ? "NONE" : nextWhtUrl ? "RECEIVED" : "PENDING_CERT";
     const nextPaid = roundMoney(paid + settle);
-    const covered = roundMoney(nextPaid + deposit);
+    const covered = depositAlreadyOnGrand
+      ? nextPaid
+      : roundMoney(nextPaid + deposit);
     const paymentStatus = covered + MONEY_EPS >= grand ? "PAID" : "PARTIAL";
     const paymentDate = /^\d{4}-\d{2}-\d{2}$/.test(paymentDateRaw)
       ? paymentDateRaw
@@ -1274,10 +1285,27 @@ export async function receiveSalesDocumentPayment(
       revalidatePath(`/sales/${encodeURIComponent(document.doc_no)}`);
     }
 
+    const wantReceipt = String(formData.get("issue_receipt") ?? "") === "1";
+    let issuedReceiptNo: string | null = null;
+    let receiptError: string | null = null;
+    if (
+      wantReceipt &&
+      paymentStatus === "PAID" &&
+      (docType === "TAX_INV" || docType === "INV_DO")
+    ) {
+      const issued = await issueReceiptForTaxInvoice({
+        sourceDocumentId: documentId,
+        receiptDate: paymentDate,
+      });
+      if (issued.data?.doc_no) issuedReceiptNo = issued.data.doc_no;
+      else receiptError = issued.error ?? "ออกใบเสร็จรับเงินไม่สำเร็จ";
+    }
+
     return {
       success: true,
       error: null,
-      receipt_doc_no: `${document.doc_no ?? ""} · ${paymentDate} · ${paymentStatus}`,
+      receipt_doc_no: issuedReceiptNo,
+      receipt_error: receiptError,
     };
   } catch (error) {
     await removeUploadedSlip(supabase, slipStoragePath);

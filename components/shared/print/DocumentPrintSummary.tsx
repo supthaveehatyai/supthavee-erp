@@ -136,6 +136,11 @@ export function DocumentPrintSummary({
   shippingFee = null,
   shippingMethodLabel = null,
   salesCollection = null,
+  collectionNetLabel = null,
+  collectionGrandLabel = null,
+  whtRowLabel = null,
+  netReceivedLabel = null,
+  netReceivedAmount = null,
 }: DocumentPrintSummaryProps) {
   const vatType = normalizeVatType(vatTypeProp);
   const extractFromGrand = isRefundDocType(String(docType ?? ""));
@@ -233,7 +238,12 @@ export function DocumentPrintSummary({
               />
             ) : null}
             <SummaryRow
-              label="มูลค่าสินค้า/บริการหลังหักมัดจำ (ก่อน VAT)"
+              label={
+                collectionNetLabel?.trim() ||
+                (salesCollection.deposit > 0
+                  ? "มูลค่าสินค้า/บริการหลังหักมัดจำ (ก่อน VAT)"
+                  : "มูลค่าสินค้า/บริการ (ก่อน VAT)")
+              }
               value={formatMoney(salesCollection.netBeforeVat)}
             />
             <SummaryRow
@@ -247,7 +257,7 @@ export function DocumentPrintSummary({
               />
             ) : null}
             <SummaryRow
-              label="ยอดสุทธิที่ต้องชำระ (Grand Total)"
+              label={collectionGrandLabel?.trim() || "ยอดสุทธิที่ต้องชำระ (Grand Total)"}
               value={formatMoney(salesCollection.grand)}
               emphasize
             />
@@ -369,7 +379,10 @@ export function DocumentPrintSummary({
         ) : null}
 
         <SummaryRow
-          label={showEmptyRows ? "ยอดสุทธิ (Grand Total)" : "ยอดสุทธิ"}
+          label={
+            collectionGrandLabel?.trim() ||
+            (showEmptyRows ? "ยอดสุทธิ (Grand Total)" : "ยอดสุทธิ")
+          }
           value={formatMoney(safeGrand)}
           emphasize
         />
@@ -379,12 +392,16 @@ export function DocumentPrintSummary({
         {showWht ? (
           <>
             <SummaryRow
-              label="หักภาษี ณ ที่จ่าย"
+              label={whtRowLabel?.trim() || "หักภาษี ณ ที่จ่าย"}
               value={`−${formatMoney(safeWht)}`}
             />
             <SummaryRow
-              label="ยอดชำระสุทธิ"
-              value={formatMoney(netPayable)}
+              label={netReceivedLabel?.trim() || "ยอดชำระสุทธิ"}
+              value={formatMoney(
+                netReceivedAmount != null && Number.isFinite(Number(netReceivedAmount))
+                  ? round2(Number(netReceivedAmount))
+                  : netPayable,
+              )}
               emphasize
             />
           </>

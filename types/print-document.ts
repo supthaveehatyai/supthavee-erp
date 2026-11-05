@@ -52,6 +52,8 @@ export type DocumentPrintHeaderProps = {
   contactPersonName?: string | null;
   /** แถบลูกค้า 1–2 บรรทัด สำหรับ ABB */
   customerCompact?: boolean;
+  /** บรรทัดอ้างอิงใต้เลขที่เอกสาร เช่น ใบกำกับภาษีต้นทางของ REC */
+  officialReference?: string | null;
 };
 
 export type DocumentPrintFooterProps = {
@@ -131,6 +133,16 @@ export type DocumentPrintSummaryProps = {
     shipping: number;
     grand: number;
   } | null;
+  /** ป้ายฐานภาษีของบิลขายเมื่อใช้ salesCollection */
+  collectionNetLabel?: string | null;
+  /** ป้ายยอดสุทธิของบิลขายเมื่อใช้ salesCollection */
+  collectionGrandLabel?: string | null;
+  /** ป้ายบรรทัดหัก ณ ที่จ่าย */
+  whtRowLabel?: string | null;
+  /** ป้ายยอดรับสุทธิเมื่อมีหัก ณ ที่จ่าย */
+  netReceivedLabel?: string | null;
+  /** ใช้ยอดนี้แทน grand - wht เมื่อเอกสารเก็บ net_received_amount ไว้แล้ว */
+  netReceivedAmount?: number | null;
 };
 
 export type PrintLayoutProps = {
@@ -147,8 +159,11 @@ export type PrintLayoutProps = {
   headerVariant?: "default" | "goods-receipt" | "sales-tax";
   contactPersonName?: string | null;
   customerCompact?: boolean;
+  officialReference?: string | null;
   /** ซ่อนแถวเซ็นชื่อท้ายกระดาษ เมื่อลายเซ็นถูกวางคู่กับกล่องยอดเงินแล้ว */
   showSignatureFooter?: boolean;
+  /** ไม่ดันส่วนท้ายไปก้นกระดาษ เพื่อไม่ให้เกิดช่องว่างกลางหน้า */
+  stackContent?: boolean;
   /** ไม่ล็อกขนาดกระดาษ เพื่อให้ผู้ใช้เลือก A4 หรือ A5 ในหน้าต่างพิมพ์ */
   respectPrinterPaper?: boolean;
   children: ReactNode;

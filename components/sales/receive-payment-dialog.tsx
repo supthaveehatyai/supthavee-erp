@@ -58,6 +58,7 @@ export function ReceivePaymentDialog({
   vatRate = 7,
   shippingFee = 0,
   bankAccounts = [],
+  docType = "",
 }: {
   documentId: string;
   docNo: string;
@@ -70,6 +71,7 @@ export function ReceivePaymentDialog({
   vatRate?: number;
   shippingFee?: number;
   bankAccounts?: ActiveBankAccount[];
+  docType?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -91,6 +93,8 @@ export function ReceivePaymentDialog({
   const [isReadingSlip, setIsReadingSlip] = useState(false);
   const [isUploadingWht, setIsUploadingWht] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const canIssueReceipt = docType === "TAX_INV" || docType === "INV_DO";
+  const [issueReceipt, setIssueReceipt] = useState(docType === "TAX_INV");
 
   const settle = roundMoney(Number(amount));
   const whtBase = salesWhtBase({
@@ -222,11 +226,21 @@ export function ReceivePaymentDialog({
       account ? bankAccountDisplay(account) : paymentChannelLabel(paymentChannel),
     );
     if (slipFile) formData.set("slip_file", slipFile);
+    if (canIssueReceipt && issueReceipt) formData.set("issue_receipt", "1");
 
     startTransition(async () => {
       const result = await receiveSalesDocumentPayment(formData);
       if (!result.success) {
         toast.error(result.error ?? "รับชำระไม่สำเร็จ");
+        return;
+      }
+      if (result.receipt_error) {
+        toast.error(result.receipt_error);
+      }
+      const receiptNo = result.receipt_doc_no?.trim() || "";
+      if (receiptNo) {
+        toast.success(`บันทึกการรับชำระและออกใบเสร็จ ${receiptNo} แล้ว`);
+        window.location.assign(`/sales/${encodeURIComponent(receiptNo)}`);
         return;
       }
       toast.success(`บันทึกการรับชำระ ${docNo} แล้ว`);
@@ -387,6 +401,18 @@ export function ReceivePaymentDialog({
                   <p className="text-xs text-slate-500">{whtFileName}</p>
                 ) : null}
               </div>
+            ) : null}
+            {canIssueReceipt ? (
+              <label className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={issueReceipt}
+                  disabled={isPending}
+                  onChange={(event) => setIssueReceipt(event.target.checked)}
+                />
+                <span>ออกใบเสร็จรับเงิน (REC) อัตโนมัติทันทีหลังบันทึกการรับชำระเงิน</span>
+              </label>
             ) : null}
           </div>
           <DialogFooter>

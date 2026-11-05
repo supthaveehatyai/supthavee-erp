@@ -64,7 +64,9 @@ export async function PrintLayout({
   paperSize = "A4",
   contactPersonName,
   customerCompact = false,
+  officialReference,
   showSignatureFooter = true,
+  stackContent = false,
 }: PrintLayoutProps) {
   const preview = PAPER_PREVIEW[paperSize] ?? PAPER_PREVIEW.A4;
   const abbSheet = headerVariant === "sales-tax" && paperSize === "A5-Portrait";
@@ -83,7 +85,8 @@ export async function PrintLayout({
         id={documentId}
         data-paper-size={paperSize}
         className={cn(
-          "erp-print-document mx-auto flex flex-col justify-between bg-white text-black",
+          "erp-print-document mx-auto flex flex-col bg-white text-black",
+          stackContent ? "justify-start" : "justify-between",
           abbSheet
             ? "max-w-[148mm] min-h-[200mm] p-4 text-[11px] leading-snug print:w-[148mm] print:max-w-[148mm] print:p-[6mm_8mm]"
             : [preview.frame, preview.printMin, preview.padding],
@@ -109,6 +112,7 @@ export async function PrintLayout({
           paperSize={paperSize}
           contactPersonName={contactPersonName}
           customerCompact={customerCompact}
+          officialReference={officialReference}
         />
 
         <section
