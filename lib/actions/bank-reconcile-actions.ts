@@ -640,33 +640,52 @@ async function loadCustomerLabels(
   return labels;
 }
 
+/** บิลเหล่านี้เก็บ grand_total หลังหักมัดจำแล้ว — ห้ามลบ deposit_deducted ซ้ำ */
+function depositAlreadyNetted(docType: string): boolean {
+  return (
+    docType === "ABB" ||
+    docType === "CS_TAX" ||
+    docType === "TAX_INV" ||
+    docType === "INV_DO" ||
+    docType === "DEP_IN"
+  );
+}
+
 function reconcilableAmount(row: RawBill, allocated: number): number {
   const grand = roundMoney(Number(row.grand_total ?? 0));
   const paid = roundMoney(Number(row.paid_amount ?? 0));
   const depositDeducted = roundMoney(Number(row.deposit_deducted ?? 0));
   const wht = roundMoney(Number(row.wht_amount ?? 0));
   const used = roundMoney(allocated);
-  if (row.doc_type === "DEP_IN") {
-    return roundMoney(Math.max(0, grand - used));
+  if (row.doc_type === "SO" || row.doc_type === "QT") {
+    return roundMoney(Math.max(0, grand - depositDeducted - wht - used));
   }
-  if (
-    row.doc_type === "ABB" ||
-    row.doc_type === "CS_TAX" ||
-    row.doc_type === "SO" ||
-    row.doc_type === "INV_DO" ||
-    row.doc_type === "TAX_INV" ||
-    row.doc_type === "REC"
-  ) {
+  if (depositAlreadyNetted(row.doc_type)) {
+    return roundMoney(Math.max(0, grand - wht - used));
+  }
+  if (row.doc_type === "REC") {
     return roundMoney(Math.max(0, grand - depositDeducted - wht - used));
   }
   return roundMoney(Math.max(0, grand - paid - used));
+}
+
+function paymentCoversBill(
+  paid: number,
+  deposit: number,
+  grand: number,
+  docType: string,
+): boolean {
+  const settled = depositAlreadyNetted(docType) ? paid : paid + deposit;
+  return settled + MONEY_EPSILON >= grand;
 }
 
 function toOpenBill(row: RawBill, allocated: number, customer: string | null): OpenSalesBill {
   const grand = roundMoney(Number(row.grand_total ?? 0));
   const paid = roundMoney(Number(row.paid_amount ?? 0));
   const depositDeducted = roundMoney(Number(row.deposit_deducted ?? 0));
-  const outstanding = roundMoney(Math.max(0, grand - depositDeducted - paid));
+  const outstanding = depositAlreadyNetted(row.doc_type)
+    ? roundMoney(Math.max(0, grand - paid))
+    : roundMoney(Math.max(0, grand - depositDeducted - paid));
   return {
     id: row.id,
     doc_no: row.doc_no,
@@ -789,22 +808,19 @@ async function loadReconcileCandidates(
       if (!channel) return true;
       return channel === "COMPANY_BANK" || row.is_swept_to_company === true;
     });
-    const rpcAmountWhenWhtMissing = new Map<string, number>();
+    const rpcAmounts = new Map<string, number>();
     for (const row of kept) {
-      const hasWht = row.wht_amount != null && row.wht_amount !== "";
-      if (hasWht) continue;
       if (row.reconcilable_amount == null || row.reconcilable_amount === "") continue;
-      rpcAmountWhenWhtMissing.set(
-        String(row.id ?? ""),
-        roundMoney(Number(row.reconcilable_amount)),
-      );
+      const amount = Number(row.reconcilable_amount);
+      if (!Number.isFinite(amount)) continue;
+      rpcAmounts.set(String(row.id ?? ""), roundMoney(amount));
     }
     const hydrated = await hydrateBills(
       supabase,
       kept.map((row) => asRawBill(row)),
     );
     for (const bill of hydrated) {
-      const rpcAmount = rpcAmountWhenWhtMissing.get(bill.id);
+      const rpcAmount = rpcAmounts.get(bill.id);
       if (rpcAmount != null) bill.linkable_amount = rpcAmount;
     }
     const bills = await hideConvertedSalesOrders(supabase, hydrated);
@@ -1146,8 +1162,11 @@ export async function unmatchBankStatementLine(
       const nextPaid = roundMoney(Math.max(0, paid - amount));
       const grand = roundMoney(Number(doc.grand_total ?? 0));
       const deposit = roundMoney(Number(doc.deposit_deducted ?? 0));
-      const nextStatus =
-        nextPaid + deposit + MONEY_EPSILON >= grand ? "PAID" : nextPaid > MONEY_EPSILON ? "PARTIAL" : "UNPAID";
+      const nextStatus = paymentCoversBill(nextPaid, deposit, grand, String(doc.doc_type ?? ""))
+        ? "PAID"
+        : nextPaid > MONEY_EPSILON
+          ? "PARTIAL"
+          : "UNPAID";
       snapshots.push({
         id: documentId,
         docNo: String(doc.doc_no ?? ""),
@@ -1296,12 +1315,11 @@ async function unmatchOneAllocationLocal(
     const nextPaid = roundMoney(Math.max(0, paid - amount));
     const grand = roundMoney(Number(doc.grand_total ?? 0));
     const deposit = roundMoney(Number(doc.deposit_deducted ?? 0));
-    const nextStatus =
-      nextPaid + deposit + MONEY_EPSILON >= grand
-        ? "PAID"
-        : nextPaid > MONEY_EPSILON
-          ? "PARTIAL"
-          : "UNPAID";
+    const nextStatus = paymentCoversBill(nextPaid, deposit, grand, String(doc.doc_type ?? ""))
+      ? "PAID"
+      : nextPaid > MONEY_EPSILON
+        ? "PARTIAL"
+        : "UNPAID";
     snapshots.push({
       id: documentId,
       docNo: String(doc.doc_no ?? ""),
@@ -1502,10 +1520,14 @@ export async function confirmBankMatch(
         bill,
         paymentDelta: delta,
         nextPaid,
-        nextStatus:
-          nextPaid + open.deposit_deducted + MONEY_EPSILON >= open.grand_total
-            ? "PAID"
-            : "PARTIAL",
+        nextStatus: paymentCoversBill(
+          nextPaid,
+          open.deposit_deducted,
+          open.grand_total,
+          open.doc_type,
+        )
+          ? "PAID"
+          : "PARTIAL",
       });
     }
 

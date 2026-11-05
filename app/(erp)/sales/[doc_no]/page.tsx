@@ -1143,11 +1143,25 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                     />
                   ) : null}
                   <div className="border-t border-slate-200 pt-2.5">
-                    <SummaryRow
-                      label="ยอดสุทธิ (Grand Total)"
-                      value={`${formatMoney(grandTotal)} ฿`}
-                      emphasize
-                    />
+                    {doc.doc_type === "SO" && depositDeducted > 0 ? (
+                      <>
+                        <SummaryRow
+                          label="ยอดรวมทั้งบิล (ก่อนหักมัดจำ)"
+                          value={`${formatMoney(grandTotal)} ฿`}
+                        />
+                        <SummaryRow
+                          label="ยอดสุทธิที่ต้องชำระ (หลังหักมัดจำ)"
+                          value={`${formatMoney(Math.max(0, grandTotal - depositDeducted))} ฿`}
+                          emphasize
+                        />
+                      </>
+                    ) : (
+                      <SummaryRow
+                        label="ยอดสุทธิ (Grand Total)"
+                        value={`${formatMoney(grandTotal)} ฿`}
+                        emphasize
+                      />
+                    )}
                   </div>
                   {doc.status !== "VOID" ? (
                     <SalesWhtCertificatePanel

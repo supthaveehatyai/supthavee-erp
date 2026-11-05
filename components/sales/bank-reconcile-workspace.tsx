@@ -81,24 +81,49 @@ function issuedTime(iso: string): string {
   }).format(date);
 }
 
+function depositAlreadyNetted(docType: string): boolean {
+  return (
+    docType === "ABB" ||
+    docType === "CS_TAX" ||
+    docType === "TAX_INV" ||
+    docType === "INV_DO" ||
+    docType === "DEP_IN"
+  );
+}
+
 function billCaption(bill: OpenSalesBill): string {
   const time = issuedTime(bill.created_at);
   const when = `${formatShortDateTh(bill.doc_date)}${time ? ` (เวลา ${time})` : ""}`;
   const slip = bill.reference_no ? ` · สลิป ${bill.reference_no}` : "";
   const customer = bill.customer_label ? ` · ${bill.customer_label}` : "";
+  const netted = depositAlreadyNetted(bill.doc_type);
   const breakdown: string[] = [];
-  if (bill.deposit_deducted > 0.05) breakdown.push(`หักมัดจำ ${money(bill.deposit_deducted)}`);
+  const fullAmount =
+    netted && bill.deposit_deducted > 0.05
+      ? roundMoney(bill.grand_total + bill.deposit_deducted)
+      : bill.grand_total;
+  if (bill.deposit_deducted > 0.05) {
+    breakdown.push(
+      netted
+        ? `หักมัดจำแล้ว ${money(bill.deposit_deducted)}`
+        : `หักมัดจำ ${money(bill.deposit_deducted)}`,
+    );
+  }
   if (bill.wht_amount > 0.05) breakdown.push(`หัก ณ ที่จ่าย ${money(bill.wht_amount)}`);
   const detail =
-    breakdown.length > 0
-      ? ` (ยอดเต็ม ${money(bill.grand_total)} ${breakdown.join(" ")})`
-      : "";
+    breakdown.length > 0 ? ` (ยอดเต็ม ${money(fullAmount)} ${breakdown.join(" ")})` : "";
   return `${bill.doc_no} · ${when}${slip}${customer} · ตัดได้ ${money(bill.linkable_amount)}${detail}`;
 }
 
 function amountNotes(doc: MatchedStatementDocument): string {
   const notes: string[] = [];
-  if (doc.deposit_deducted > 0.05) notes.push(`หักมัดจำ ${money(doc.deposit_deducted)}`);
+  if (doc.deposit_deducted > 0.05) {
+    notes.push(
+      depositAlreadyNetted(doc.doc_type)
+        ? `หักมัดจำแล้ว ${money(doc.deposit_deducted)}`
+        : `หักมัดจำ ${money(doc.deposit_deducted)}`,
+    );
+  }
   if (doc.wht_amount > 0.05) notes.push(`หัก ณ ที่จ่าย ${money(doc.wht_amount)}`);
   return notes.length > 0 ? ` (${notes.join(" ")})` : "";
 }
@@ -763,7 +788,12 @@ export default function BankReconcileWorkspace() {
                         {doc.reference_no ? ` · เลขสลิป ${doc.reference_no}` : ""}
                       </p>
                       <p className="text-xs text-slate-700">
-                        ยอดเต็มบิล: ฿{money(doc.grand_total)}
+                        ยอดเต็มบิล: ฿
+                        {money(
+                          depositAlreadyNetted(doc.doc_type) && doc.deposit_deducted > 0.05
+                            ? roundMoney(doc.grand_total + doc.deposit_deducted)
+                            : doc.grand_total,
+                        )}
                         {amountNotes(doc)}
                       </p>
                       <p className="text-sm font-semibold text-emerald-800">
