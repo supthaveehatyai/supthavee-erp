@@ -44,10 +44,14 @@ export type DocumentPrintHeaderProps = {
   docType?: string | null;
   /** บรรทัดภาษาอังกฤษใต้ชื่อเอกสาร เช่น (GOODS RECEIPT & AP VOUCHER) */
   titleSubtitle?: string | null;
-  /** `goods-receipt` จัดหัวเอกสารกระชับสำหรับ A4/A5 */
-  headerVariant?: "default" | "goods-receipt";
+  /** `goods-receipt` จัดหัวเอกสารกระชับสำหรับ A4/A5 · `sales-tax` หัวใบกำกับภาษีขาย */
+  headerVariant?: "default" | "goods-receipt" | "sales-tax";
   /** ขนาดกระดาษที่กำลังแสดง — ใช้จัดหัวบริษัทให้พอดี A5 แนวตั้ง */
   paperSize?: PrintPaperSize;
+  /** ผู้ติดต่อของลูกค้า — แสดงในแถบลูกค้าของใบกำกับภาษี */
+  contactPersonName?: string | null;
+  /** แถบลูกค้า 1–2 บรรทัด สำหรับ ABB */
+  customerCompact?: boolean;
 };
 
 export type DocumentPrintFooterProps = {
@@ -140,7 +144,11 @@ export type PrintLayoutProps = {
   referenceNo?: string | null;
   docType?: string | null;
   titleSubtitle?: string | null;
-  headerVariant?: "default" | "goods-receipt";
+  headerVariant?: "default" | "goods-receipt" | "sales-tax";
+  contactPersonName?: string | null;
+  customerCompact?: boolean;
+  /** ซ่อนแถวเซ็นชื่อท้ายกระดาษ เมื่อลายเซ็นถูกวางคู่กับกล่องยอดเงินแล้ว */
+  showSignatureFooter?: boolean;
   /** ไม่ล็อกขนาดกระดาษ เพื่อให้ผู้ใช้เลือก A4 หรือ A5 ในหน้าต่างพิมพ์ */
   respectPrinterPaper?: boolean;
   children: ReactNode;

@@ -101,11 +101,15 @@ export function SalesPrintLineTable({
   docType,
   items,
   followDocumentDefaults = false,
+  dense = false,
+  hideQtyFoot = false,
 }: {
   docNo: string;
   docType: string;
   items: DocumentDetailItem[];
   followDocumentDefaults?: boolean;
+  dense?: boolean;
+  hideQtyFoot?: boolean;
 }) {
   const [nameMode, setNameMode] = useState<PrintNameMode>(() =>
     followDocumentDefaults ? defaultPrintNameMode(docType) : "sku",
@@ -139,20 +143,21 @@ export function SalesPrintLineTable({
   const goodsQty = summarizeGoodsQty(items);
   const showSku = nameMode !== "short";
   const columnCount = showSku ? 7 : 6;
+  const cell = dense ? "py-1 px-1.5 text-[10.5px]" : "py-1.5 pr-2";
 
   return (
-    <table className="w-full border-collapse text-left text-xs">
+    <table className={dense ? "w-full border-collapse text-left text-[10.5px]" : "w-full border-collapse text-left text-xs"}>
       <thead>
         <tr className="border-b border-neutral-400">
-          <th className="py-1.5 pr-2 font-semibold text-neutral-700">#</th>
+          <th className={`${cell} font-semibold text-neutral-700`}>#</th>
           {showSku ? (
-            <th className="py-1.5 pr-2 font-semibold text-neutral-700">SKU</th>
+            <th className={`${cell} font-semibold text-neutral-700`}>SKU</th>
           ) : null}
-          <th className="py-1.5 pr-2 font-semibold text-neutral-700">รายละเอียด</th>
-          <th className="py-1.5 pr-2 text-right font-semibold text-neutral-700">จำนวน</th>
-          <th className="py-1.5 pr-2 text-center font-semibold text-neutral-700">หน่วย</th>
-          <th className="py-1.5 pr-2 text-right font-semibold text-neutral-700">ราคา/หน่วย</th>
-          <th className="py-1.5 text-right font-semibold text-neutral-700">รวม</th>
+          <th className={`${cell} font-semibold text-neutral-700`}>รายละเอียด</th>
+          <th className={`${cell} text-right font-semibold text-neutral-700`}>จำนวน</th>
+          <th className={`${cell} text-center font-semibold text-neutral-700`}>หน่วย</th>
+          <th className={`${cell} text-right font-semibold text-neutral-700`}>ราคา/หน่วย</th>
+          <th className={`${cell} text-right font-semibold text-neutral-700`}>รวม</th>
         </tr>
       </thead>
       <tbody>
@@ -165,19 +170,19 @@ export function SalesPrintLineTable({
         ) : (
           rows.map((item, index) => (
             <tr key={item.key} className="border-b border-neutral-200 align-top">
-              <td className="py-1.5 pr-2 tabular-nums text-neutral-500">{index + 1}</td>
+              <td className={`${cell} tabular-nums text-neutral-500`}>{index + 1}</td>
               {showSku ? (
-                <td className="py-1.5 pr-2 font-mono text-[11px] font-medium text-neutral-800">
+                <td className={`${cell} font-mono font-medium text-neutral-800`}>
                   {item.sku}
                 </td>
               ) : null}
-              <td className="max-w-[12rem] py-1.5 pr-2 text-neutral-800">{item.description}</td>
-              <td className="py-1.5 pr-2 text-right tabular-nums text-neutral-800">{item.qty}</td>
-              <td className="py-1.5 pr-2 text-center text-neutral-600">{item.uom_used}</td>
-              <td className="py-1.5 pr-2 text-right tabular-nums text-neutral-800">
+              <td className={`${cell} max-w-[12rem] text-neutral-800`}>{item.description}</td>
+              <td className={`${cell} text-right tabular-nums text-neutral-800`}>{item.qty}</td>
+              <td className={`${cell} text-center text-neutral-600`}>{item.uom_used}</td>
+              <td className={`${cell} text-right tabular-nums text-neutral-800`}>
                 {formatMoney(item.unit_price)}
               </td>
-              <td className="py-1.5 text-right font-medium tabular-nums text-neutral-900">
+              <td className={`${cell} text-right font-medium tabular-nums text-neutral-900`}>
                 {item.discount_label ? (
                   <div>
                     <div className="text-[10px] text-neutral-400 line-through">
@@ -195,7 +200,7 @@ export function SalesPrintLineTable({
           ))
         )}
       </tbody>
-      {goodsQty.label ? (
+      {goodsQty.label && !hideQtyFoot ? (
         <tfoot>
           <tr>
             <td colSpan={columnCount} className="pt-2 text-[11px] font-semibold text-neutral-800">

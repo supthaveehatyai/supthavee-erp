@@ -591,6 +591,21 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                 </Badge>
               ) : null}
             </div>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              {doc.handwritten_doc_ref?.trim() ? (
+                <Badge className="border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-50">
+                  📒 อ้างอิงบิลมือ: {doc.handwritten_doc_ref.trim()}
+                </Badge>
+              ) : null}
+              {doc.parent_doc_no?.trim() ? (
+                <Link
+                  href={`/sales/${encodeURIComponent(doc.parent_doc_no.trim())}`}
+                  className="inline-flex h-6 items-center rounded-md border border-sky-200 bg-sky-50 px-2 text-xs font-semibold text-sky-800 hover:bg-sky-100"
+                >
+                  🔗 สร้างต่อยอดจาก: {doc.parent_doc_no.trim()}
+                </Link>
+              ) : null}
+            </div>
             <p className="mt-0.5 text-sm text-slate-500">
               {isSettlementDoc
                 ? settlementTitle
@@ -775,21 +790,24 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               <Link2 className="size-4" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold">
-                เอกสารถูกอ้างอิงไปแล้ว: นำไปสร้างเป็นเอกสาร{" "}
-                <Link
-                  href={`/sales/${encodeURIComponent(primaryChild.doc_no)}`}
-                  className="font-mono underline decoration-sky-400 underline-offset-2 hover:text-sky-800"
-                >
-                  {primaryChild.doc_no}
-                </Link>
-              </p>
+              <p className="text-sm font-semibold">เอกสารที่สร้างต่อยอดจากบิลนี้</p>
+              <ul className="mt-1 space-y-1 text-sm">
+                {activeChildren.map((child) => (
+                  <li key={child.id}>
+                    <Link
+                      href={`/sales/${encodeURIComponent(child.doc_no)}`}
+                      className="font-mono font-semibold underline decoration-sky-400 underline-offset-2 hover:text-sky-800"
+                    >
+                      🔗 {child.doc_no}
+                    </Link>
+                    <span className="ml-2 text-xs text-sky-800/80">
+                      {child.doc_type} · {child.status}
+                    </span>
+                  </li>
+                ))}
+              </ul>
               <p className="mt-0.5 text-xs text-sky-800/80">
-                ประเภท {primaryChild.doc_type} · สถานะ {primaryChild.status}
-                {activeChildren.length > 1
-                  ? ` · รวม ${activeChildren.length} เอกสารต่อยอด`
-                  : ""}
-                {" — "}ไม่สามารถสร้างเอกสารต่อยอดซ้ำได้
+                ไม่สามารถสร้างเอกสารต่อยอดซ้ำได้
               </p>
             </div>
             <Badge className="border-sky-200 bg-white text-sky-800 hover:bg-white">
@@ -1437,7 +1455,9 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
 
         <p className="text-center text-xs text-slate-400">
           ตัวอย่างสำหรับพิมพ์ — กด &quot;พิมพ์เอกสาร&quot; เพื่อสั่งพิมพ์เฉพาะแผ่นนี้
-          (ขนาดกระดาษตามประเภทเอกสาร: A4 / A5 Landscape)
+          {doc.doc_type === "ABB"
+            ? "(ขนาดกระดาษสำหรับ ABB: A5 แนวตั้ง (A5 Portrait) — กระชับจบใน 1 ใบ)"
+            : "(ขนาดกระดาษตามประเภทเอกสาร: A4 / A5 Landscape)"}
         </p>
       </div>
 

@@ -2194,6 +2194,29 @@ export async function getDocumentByNo(
     );
     const shipping =
       (await loadSalesShipping(supabase, documentId)) ?? normalizeSalesShipping({});
+    const handwrittenLookup = await supabase
+      .from("documents")
+      .select("handwritten_doc_ref")
+      .eq("id", documentId)
+      .maybeSingle();
+    const handwrittenDocRef = handwrittenLookup.error
+      ? null
+      : String(
+          (handwrittenLookup.data as { handwritten_doc_ref?: string | null } | null)
+            ?.handwritten_doc_ref ?? "",
+        ).trim() || null;
+    const parentId = String(data.ref_document_id ?? "").trim();
+    let parentDocNo: string | null = null;
+    if (parentId) {
+      const parentLookup = await supabase
+        .from("documents")
+        .select("doc_no")
+        .eq("id", parentId)
+        .maybeSingle();
+      if (!parentLookup.error && parentLookup.data?.doc_no) {
+        parentDocNo = String(parentLookup.data.doc_no);
+      }
+    }
 
     const detail: DocumentDetail = {
       id: documentId,
@@ -2205,6 +2228,8 @@ export async function getDocumentByNo(
       contact_id: data.contact_id as string,
       contact_person_id: (data.contact_person_id as string | null) ?? null,
       ref_document_id: (data.ref_document_id as string | null) ?? null,
+      parent_doc_no: parentDocNo,
+      handwritten_doc_ref: handwrittenDocRef,
       sub_total: Number(data.sub_total ?? 0),
       discount_amount: Number(data.discount_amount ?? 0),
       discount_text: (data.discount_text as string | null) ?? null,
@@ -3612,11 +3637,17 @@ export async function getSalesDocuments(
       contactIds = (matchedContacts ?? []).map((c) => c.id as string);
     }
 
-    // Base query — sales allow-list ONLY (blocks purchase PO/PAY leakage).
-    let query = supabase
-      .from("documents")
-      .select(
-        `
+    const docTypes = (
+      filters?.docTypes?.length
+        ? filters.docTypes.filter((value) =>
+            (SALES_DOC_TYPES as readonly string[]).includes(value),
+          )
+        : [...SALES_DOC_TYPES]
+    ) as string[];
+    const pattern = search ? `%${search}%` : "";
+
+    async function loadRows(includeHandwritten: boolean) {
+      const selectSql = `
         id,
         doc_no,
         doc_type,
@@ -3626,53 +3657,68 @@ export async function getSalesDocuments(
         grand_total,
         payment_status,
         contact_id,
+        reference_no,
+        ${includeHandwritten ? "handwritten_doc_ref," : ""}
         ecommerce_buyer_name,
         contacts:contact_id (
           company_name
         )
-      `,
-      )
-      .in(
-        "doc_type",
-        (filters?.docTypes?.length
-          ? filters.docTypes.filter((value) =>
-              (SALES_DOC_TYPES as readonly string[]).includes(value),
-            )
-          : [...SALES_DOC_TYPES]) as string[],
-      );
-
-    if (search) {
-      const pattern = `%${search}%`;
-      if (contactIds.length > 0) {
-        query = query.or(
-          `doc_no.ilike.${pattern},contact_id.in.(${contactIds.join(",")})`,
-        );
-      } else {
-        query = query.ilike("doc_no", pattern);
+      `;
+      let query = supabase
+        .from("documents")
+        .select(selectSql)
+        .in("doc_type", docTypes);
+      if (search) {
+        const parts = [
+          `doc_no.ilike.${pattern}`,
+          `reference_no.ilike.${pattern}`,
+        ];
+        if (includeHandwritten) parts.push(`handwritten_doc_ref.ilike.${pattern}`);
+        if (contactIds.length > 0) {
+          parts.push(`contact_id.in.(${contactIds.join(",")})`);
+        }
+        query = query.or(parts.join(","));
       }
+      if (from) query = query.gte("doc_date", from);
+      if (to) query = query.lte("doc_date", to);
+      return query.order("created_at", { ascending: false }).limit(safeLimit);
     }
 
-    if (from) {
-      query = query.gte("doc_date", from);
+    let { data, error } = await loadRows(true);
+    if (error && /handwritten_doc_ref/i.test(error.message)) {
+      const retry = await loadRows(false);
+      data = retry.data;
+      error = retry.error;
     }
-    if (to) {
-      query = query.lte("doc_date", to);
-    }
-
-    const { data, error } = await query
-      .order("created_at", { ascending: false })
-      .limit(safeLimit);
 
     if (error) {
       return { data: [], error: error.message };
     }
 
-    const docNos = (data ?? [])
+    const list = (data ?? []) as unknown as Array<{
+      id: string;
+      doc_no: string;
+      doc_type: string;
+      status: string;
+      doc_date: string;
+      created_at: string;
+      grand_total: number | null;
+      payment_status: string | null;
+      contact_id: string;
+      reference_no?: string | null;
+      handwritten_doc_ref?: string | null;
+      ecommerce_buyer_name?: string | null;
+      contacts:
+        | { company_name?: string | null }
+        | { company_name?: string | null }[]
+        | null;
+    }>;
+    const docNos = list
       .map((row) => String(row.doc_no ?? "").trim())
       .filter((docNo) => docNo.length > 0);
     const billedDocNos = await loadBilledSalesDocNos(supabase, docNos);
 
-    const rows: SalesDocumentListItem[] = (data ?? []).map((row) => {
+    const rows: SalesDocumentListItem[] = list.map((row) => {
       const contact = Array.isArray(row.contacts)
         ? row.contacts[0]
         : row.contacts;
@@ -3693,6 +3739,12 @@ export async function getSalesDocuments(
         ) || null,
         payment_status: String(row.payment_status ?? "UNPAID"),
         is_billed: billedDocNos.has(docNo),
+        reference_no: String(
+          (row as { reference_no?: string | null }).reference_no ?? "",
+        ).trim() || null,
+        handwritten_doc_ref: String(
+          (row as { handwritten_doc_ref?: string | null }).handwritten_doc_ref ?? "",
+        ).trim() || null,
       };
     });
 
@@ -4277,11 +4329,10 @@ export async function convertDocument(
       ? source.document_items
       : [];
 
-    const refNote = `แปลงจาก ${source.doc_no}`;
     const notes =
       typeof source.notes === "string" && source.notes.trim()
-        ? `${source.notes.trim()}\n${refNote}`
-        : refNote;
+        ? source.notes.trim()
+        : null;
 
     const owner = await requireSessionUserId();
     if (!owner.ok) {

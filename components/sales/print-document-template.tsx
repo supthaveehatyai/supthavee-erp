@@ -13,6 +13,8 @@ import { receiptMethodText } from "@/lib/finance/payment-channel";
 import { stripDepositNoteMetadata } from "@/lib/utils/deposit-note";
 import { salesShippingMethodLabel } from "@/lib/utils/sales-shipping";
 import { salesPayableTotals } from "@/lib/utils/document-summary";
+import { summarizeGoodsQty } from "@/lib/sales/goods-qty-summary";
+import { numberToThaiBaht } from "@/lib/utils/thai-baht-text";
 import { cn } from "@/lib/utils";
 
 function formatMoney(value: number): string {
@@ -24,6 +26,26 @@ function formatMoney(value: number): string {
 
 function roundMoney(value: number): number {
   return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+}
+
+const CONVERSION_NOTE = /^แปลงจาก\s+[A-Z0-9\-]+$/;
+
+function customerFacingPrintNotes(value: string | null | undefined): string {
+  return (value ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !CONVERSION_NOTE.test(line))
+    .join("\n");
+}
+
+function PrintSignature({ label }: { label: string }) {
+  return (
+    <div className="text-center text-[10px] text-neutral-800">
+      <div className="mx-auto mb-1 h-6 w-full max-w-[7.5rem] border-b border-neutral-500" />
+      <p className="font-semibold">({label})</p>
+      <p className="mt-0.5 text-neutral-600">วันที่ ....../....../..........</p>
+    </div>
+  );
 }
 
 function normalizePrintVatType(value: string | null | undefined): PrintVatType {
@@ -114,7 +136,22 @@ export default async function PrintDocumentTemplate({
   const heading = documentPrintHeading(doc.doc_type);
 
   const resolvedPaperSize =
-    paperSize ?? (await getDocumentPrintPaperSize(doc.doc_type));
+    doc.doc_type === "ABB"
+      ? "A5-Portrait"
+      : (paperSize ?? (await getDocumentPrintPaperSize(doc.doc_type)));
+  const salesTaxPaper = salesPaper && !isDepositDoc;
+  const printNotes = customerFacingPrintNotes(
+    doc.doc_type === "DEP_IN"
+      ? stripDepositNoteMetadata(doc.notes) || stripDepositNoteMetadata(doc.remark)
+      : doc.notes,
+  );
+  const goodsQty = summarizeGoodsQty(doc.items);
+  const qtyLine = goodsQty.buckets.length
+    ? `📦 รวมจำนวนสินค้า: ${goodsQty.buckets
+        .map((bucket) => `${bucket.qty.toLocaleString("th-TH")} ${bucket.uom}`)
+        .join(" · ")} (${goodsQty.lineCount.toLocaleString("th-TH")} รายการ)`
+    : "";
+  const payableGrand = salesPayable ? printedGrand : grandTotal;
   const compact = resolvedPaperSize !== "A4";
   const buyerName = doc.ecommerce_buyer_name?.trim() || "";
   const oneTimeAddress = doc.one_time_address?.trim() || "";
@@ -152,17 +189,20 @@ export default async function PrintDocumentTemplate({
     <PrintLayout
       title={heading.title}
       titleSubtitle={heading.subtitle}
-      headerVariant="goods-receipt"
+      headerVariant={salesTaxPaper ? "sales-tax" : "goods-receipt"}
       documentNo={doc.doc_no}
       date={doc.doc_date}
-      dueDate={doc.due_date}
-      status={doc.status}
-      docType={doc.doc_type}
-      referenceNo={printReferenceNo}
+      dueDate={salesTaxPaper ? null : doc.due_date}
+      status={salesTaxPaper ? null : doc.status}
+      docType={salesTaxPaper ? null : doc.doc_type}
+      referenceNo={salesTaxPaper ? null : printReferenceNo}
       partyLabel={partyLabel}
       customerData={printCustomer}
+      contactPersonName={doc.contact_person?.name}
+      customerCompact={doc.doc_type === "ABB"}
       paperSize={resolvedPaperSize}
       documentId="sales-print-document"
+      showSignatureFooter={!salesTaxPaper}
       className={cn("mt-2 print:mt-0", className)}
       footer={{
         preparedLabel: "ผู้จัดทำ",
@@ -171,6 +211,30 @@ export default async function PrintDocumentTemplate({
         compact: true,
       }}
       bottom={
+        <div
+          className={
+            salesTaxPaper
+              ? "mt-2 grid grid-cols-12 gap-3 break-inside-avoid border-t border-slate-300 pt-2"
+              : undefined
+          }
+        >
+          {salesTaxPaper ? (
+            <div className="col-span-7 space-y-1.5 text-[10.5px] leading-snug text-neutral-800">
+              {qtyLine ? <p className="font-semibold">{qtyLine}</p> : null}
+              {printNotes ? (
+                <p className="whitespace-pre-wrap">
+                  <span className="font-semibold">หมายเหตุ: </span>
+                  {printNotes}
+                </p>
+              ) : null}
+              <p className="font-bold">({numberToThaiBaht(payableGrand)})</p>
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <PrintSignature label="ผู้รับเงิน / ผู้จัดทำ" />
+                <PrintSignature label="ผู้รับของ" />
+              </div>
+            </div>
+          ) : null}
+          <div className={salesTaxPaper ? "col-span-5" : undefined}>
         <DocumentPrintSummary
           subtotal={isDepositDoc ? grandTotal : subtotal}
           freightCost={isDepositDoc ? 0 : freightCost}
@@ -201,6 +265,8 @@ export default async function PrintDocumentTemplate({
           }
           shippingFee={isDepositDoc ? 0 : Number(doc.shipping_fee ?? 0)}
           shippingMethodLabel={salesShippingMethodLabel(doc.shipping_method)}
+          hideBahtText={salesTaxPaper}
+          className={salesTaxPaper ? "ml-0 w-full max-w-none text-[10.5px]" : undefined}
           salesCollection={
             salesPayable
               ? {
@@ -217,6 +283,8 @@ export default async function PrintDocumentTemplate({
               : null
           }
         />
+          </div>
+        </div>
       }
     >
       <section className={compact ? "mt-2" : "mt-1"}>
@@ -258,6 +326,8 @@ export default async function PrintDocumentTemplate({
             docType={doc.doc_type}
             items={doc.items}
             followDocumentDefaults={followDocumentDefaults}
+            dense={doc.doc_type === "ABB"}
+            hideQtyFoot={salesTaxPaper}
           />
         )}
       </section>
@@ -289,10 +359,11 @@ export default async function PrintDocumentTemplate({
         </section>
       ) : null}
 
-      {(doc.doc_type === "DEP_IN"
+      {!salesTaxPaper &&
+      (doc.doc_type === "DEP_IN"
         ? stripDepositNoteMetadata(doc.notes) ||
           stripDepositNoteMetadata(doc.remark)
-        : doc.notes?.trim()) ? (
+        : printNotes) ? (
         <section className="mt-3 rounded-md border border-neutral-300 bg-neutral-50 px-3 py-2">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
             {doc.doc_type === "CN" ? "อ้างอิงเอกสารต้นทาง" : "หมายเหตุ / Remark"}
@@ -301,12 +372,12 @@ export default async function PrintDocumentTemplate({
             {doc.doc_type === "DEP_IN"
               ? stripDepositNoteMetadata(doc.notes) ||
                 stripDepositNoteMetadata(doc.remark)
-              : doc.notes?.trim()}
+              : printNotes}
           </p>
         </section>
       ) : null}
 
-      {doc.contact_person?.name ? (
+      {!salesTaxPaper && doc.contact_person?.name ? (
         <p className="mt-2 text-[10px] text-neutral-500">
           ผู้ติดต่อ: {doc.contact_person.name}
         </p>

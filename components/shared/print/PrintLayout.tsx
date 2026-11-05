@@ -24,7 +24,8 @@ const PAPER_PREVIEW: Record<
   },
 };
 
-function pageRuleFor(paperSize: PrintPaperSize): string {
+function pageRuleFor(paperSize: PrintPaperSize, abbSheet: boolean): string {
+  if (abbSheet) return "@page { size: A5 portrait; margin: 6mm 8mm; }";
   switch (paperSize) {
     case "A5-Portrait":
       return "@page { size: A5 portrait; margin: 8mm; }";
@@ -61,8 +62,12 @@ export async function PrintLayout({
   className,
   documentId = "erp-print-document",
   paperSize = "A4",
+  contactPersonName,
+  customerCompact = false,
+  showSignatureFooter = true,
 }: PrintLayoutProps) {
   const preview = PAPER_PREVIEW[paperSize] ?? PAPER_PREVIEW.A4;
+  const abbSheet = headerVariant === "sales-tax" && paperSize === "A5-Portrait";
 
   return (
     <>
@@ -70,7 +75,7 @@ export async function PrintLayout({
         dangerouslySetInnerHTML={{
           __html: respectPrinterPaper
             ? "@media print { @page { margin: 6mm; } }"
-            : `@media print { ${pageRuleFor(paperSize)} }`,
+            : `@media print { ${pageRuleFor(paperSize, abbSheet)} }`,
         }}
       />
 
@@ -79,12 +84,12 @@ export async function PrintLayout({
         data-paper-size={paperSize}
         className={cn(
           "erp-print-document mx-auto flex flex-col justify-between bg-white text-black",
-          preview.frame,
-          preview.printMin,
-          preview.padding,
+          abbSheet
+            ? "max-w-[148mm] min-h-[200mm] p-4 text-[11px] leading-snug print:w-[148mm] print:max-w-[148mm] print:p-[6mm_8mm]"
+            : [preview.frame, preview.printMin, preview.padding],
           "shadow-lg ring-1 ring-black/5",
-          "print:mx-auto print:w-full print:max-w-none print:shadow-none print:ring-0",
-          "print:bg-white",
+          "print:mx-auto print:shadow-none print:ring-0 print:bg-white",
+          abbSheet ? "print:w-[148mm] print:max-w-[148mm]" : "print:w-full print:max-w-none",
           className,
         )}
       >
@@ -102,21 +107,27 @@ export async function PrintLayout({
           titleSubtitle={titleSubtitle}
           headerVariant={headerVariant}
           paperSize={paperSize}
+          contactPersonName={contactPersonName}
+          customerCompact={customerCompact}
         />
 
         <section
           className={cn(
             "erp-print-content text-neutral-900",
-            headerVariant === "goods-receipt" ? "mt-2 text-[10px]" : "mt-3 text-[11px]",
+            headerVariant === "sales-tax"
+              ? "mt-0 text-[10.5px]"
+              : headerVariant === "goods-receipt"
+                ? "mt-2 text-[10px]"
+                : "mt-3 text-[11px]",
           )}
         >
           {children}
         </section>
         </div>
 
-        <div className="mt-4">
+        <div className={headerVariant === "sales-tax" ? "mt-1" : "mt-4"}>
           {bottom}
-          <DocumentPrintFooter {...footer} />
+          {showSignatureFooter ? <DocumentPrintFooter {...footer} /> : null}
         </div>
       </article>
     </>

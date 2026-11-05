@@ -416,6 +416,10 @@ export type DocumentDetail = {
    * Edit UI/server may only change customer/contact (not line items / amounts).
    */
   ref_document_id: string | null;
+  /** เลขที่เอกสารต้นทางจาก `ref_document_id` */
+  parent_doc_no?: string | null;
+  /** เลขบิลมือ เช่น เล่มที่ 21 เลขที่ 22 */
+  handwritten_doc_ref?: string | null;
   sub_total: number;
   discount_amount: number;
   discount_text: string | null;
@@ -566,6 +570,8 @@ export type SalesDocumentListItem = {
   payment_status: string;
   /** True when this doc_no is already on a billing note. */
   is_billed: boolean;
+  reference_no: string | null;
+  handwritten_doc_ref: string | null;
 };
 
 export type SalesDocumentFilters = {

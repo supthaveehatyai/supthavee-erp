@@ -76,6 +76,8 @@ export async function DocumentPrintHeader({
   titleSubtitle,
   headerVariant = "default",
   paperSize,
+  contactPersonName,
+  customerCompact = false,
 }: DocumentPrintHeaderProps) {
   const settingsResult = await getSystemSettings();
   const company = settingsResult.success ? settingsResult.data : null;
@@ -116,6 +118,78 @@ export async function DocumentPrintHeader({
     phone: customerPhone || undefined,
     email: customerEmail || undefined,
   });
+
+  if (headerVariant === "sales-tax") {
+    const companyTitle = branchName
+      ? `${companyName} (${branchName})`
+      : companyName;
+    const companyTaxPhone = [
+      companyTaxId ? `เลขประจำตัวผู้เสียภาษี: ${companyTaxId}` : "",
+      companyPhone ? `โทร: ${companyPhone}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const contactName = contactPersonName?.trim() || "";
+    return (
+      <header className="text-neutral-900">
+        <div className="flex w-full flex-row flex-nowrap items-start justify-between gap-2">
+          <div className="flex w-[62%] min-w-0 items-start gap-1.5">
+            <div
+              className={
+                customerCompact
+                  ? "flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded border border-neutral-300 bg-neutral-50"
+                  : "flex size-10 shrink-0 items-center justify-center overflow-hidden rounded border border-neutral-300 bg-neutral-50"
+              }
+            >
+              {logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={logoUrl}
+                  alt={companyName}
+                  className="max-h-full max-w-full object-contain p-0.5"
+                />
+              ) : (
+                <span className="text-[10px] font-black tracking-tight text-neutral-800">ST</span>
+              )}
+            </div>
+            <div className="min-w-0 flex-1 text-[10px] leading-tight text-neutral-800">
+              <p className="font-bold text-neutral-950">{companyTitle}</p>
+              {companyAddress ? <p className="text-neutral-700">{companyAddress}</p> : null}
+              {companyTaxPhone ? <p className="text-neutral-700">{companyTaxPhone}</p> : null}
+            </div>
+          </div>
+          <div className="w-[38%] shrink-0 text-right leading-tight">
+            <p className="text-[12px] font-bold text-neutral-950">{title}</p>
+            {titleSubtitle?.trim() ? (
+              <p className="text-[8px] font-semibold tracking-tight text-slate-600">
+                {titleSubtitle.trim()}
+              </p>
+            ) : null}
+            <p className="mt-1 font-mono text-[11px] font-bold text-neutral-950">
+              เลขที่เอกสาร: {documentNo}
+            </p>
+            <p className="text-[10.5px] text-neutral-800">
+              วันที่: {formatDisplayDate(date)}
+            </p>
+          </div>
+        </div>
+        <div className="my-1.5 border-y border-slate-200 px-2.5 py-1.5 text-[10.5px] leading-snug text-neutral-800">
+          <p>
+            <span className="font-semibold">ลูกค้า:</span> {customerName}
+            {contactName ? ` · ผู้ติดต่อ: ${contactName}` : ""}
+          </p>
+          {customerAddress ? <p>{customerAddress}</p> : null}
+          {!customerCompact && (customerTaxId || customerPhone) ? (
+            <p className="text-neutral-700">
+              {customerTaxId ? `เลขประจำตัวผู้เสียภาษี: ${customerTaxId}` : ""}
+              {customerTaxId && customerPhone ? " · " : ""}
+              {customerPhone ? `โทร: ${customerPhone}` : ""}
+            </p>
+          ) : null}
+        </div>
+      </header>
+    );
+  }
 
   if (headerVariant === "goods-receipt") {
     return (

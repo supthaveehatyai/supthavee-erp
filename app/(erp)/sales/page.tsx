@@ -209,7 +209,7 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
           </div>
           <Suspense fallback={<FilterFallback />}>
             <SalesDocTypePills />
-            <DocumentFilter searchPlaceholder="ชื่อเล่น / ชื่อลูกค้า / เลขที่เอกสาร" />
+            <DocumentFilter searchPlaceholder="ชื่อเล่น / ชื่อลูกค้า / เลขที่เอกสาร / บิลมือ / เลขสลิป" />
           </Suspense>
         </CardHeader>
         <CardContent className="px-0 sm:px-6">
@@ -257,7 +257,12 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
                         {formatShortDateTh(doc.doc_date || doc.created_at)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap font-mono text-sm font-semibold text-slate-900">
-                        {doc.doc_no}
+                        <div>{doc.doc_no}</div>
+                        {doc.handwritten_doc_ref ? (
+                          <div className="mt-0.5 font-sans text-[10px] font-medium text-amber-800">
+                            📒 {doc.handwritten_doc_ref}
+                          </div>
+                        ) : null}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         <span className="text-sm text-slate-700">
