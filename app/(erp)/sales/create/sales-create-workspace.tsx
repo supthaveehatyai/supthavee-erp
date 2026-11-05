@@ -192,6 +192,18 @@ export type SalesCreateWorkspaceProps = {
   bankAccounts?: ActiveBankAccount[];
 };
 
+function findDefaultWalkinContact(
+  rows: CustomerOption[],
+): CustomerOption | undefined {
+  return rows.find(
+    (contact) =>
+      contact.is_walkin_default === true ||
+      contact.company_name?.includes("ลูกค้าทั่วไป (ขายปลีกหน้าร้าน)") ||
+      (Boolean(contact.nickname?.includes("ลูกค้าปลีก")) &&
+        Boolean(contact.nickname?.includes("ลูกค้าหน้าร้าน"))),
+  );
+}
+
 function lineFromScan(line: ScannedSalesLine): SalesLineItem {
   return {
     key: `scan-${line.sku}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -222,7 +234,11 @@ export default function SalesCreateWorkspace({
     ? initialDocType
     : INITIAL_DOC_TYPE;
   const [docType, setDocType] = useState<SalesTradingDocType>(startingDocType);
-  const [contactId, setContactId] = useState("");
+  const [contactId, setContactId] = useState(() =>
+    startingDocType === "ABB"
+      ? (findDefaultWalkinContact(customers)?.id ?? "")
+      : "",
+  );
   const [contactPersonId, setContactPersonId] = useState("");
   const [customerOptions, setCustomerOptions] = useState(customers);
   const [contactPersons, setContactPersons] = useState<ContactPersonOption[]>(
@@ -297,6 +313,17 @@ export default function SalesCreateWorkspace({
   useEffect(() => {
     setCustomerOptions(customers);
   }, [customers]);
+
+  const defaultWalkinContact = useMemo(
+    () => findDefaultWalkinContact(customerOptions),
+    [customerOptions],
+  );
+
+  useEffect(() => {
+    if (docType !== "ABB" || hideContactPicker || contactId) return;
+    if (!defaultWalkinContact) return;
+    setContactId(defaultWalkinContact.id);
+  }, [docType, hideContactPicker, contactId, defaultWalkinContact]);
 
   useEffect(() => {
     if (!hideContactPicker) return;
@@ -388,14 +415,17 @@ export default function SalesCreateWorkspace({
 
   /** Full hard reset to initial blank form (after successful save). */
   function resetFormToInitial() {
-    setDocType(INITIAL_DOC_TYPE);
-    setContactId("");
+    const nextDocType = docType === "ABB" ? docType : INITIAL_DOC_TYPE;
+    setDocType(nextDocType);
+    setContactId(
+      nextDocType === "ABB" ? (defaultWalkinContact?.id ?? "") : "",
+    );
     setContactPersonId("");
     setContactPersons([]);
     setIsPersonsLoading(false);
     setLineItems([]);
     setDiscountText("");
-    setVatType(defaultSalesVatType(docType));
+    setVatType(defaultSalesVatType(nextDocType));
     setSalesChannelFields(INITIAL_SALES_CHANNEL_FIELDS);
     setDocDate(new Date().toISOString().slice(0, 10));
     setHandwrittenDocRef("");
@@ -405,6 +435,18 @@ export default function SalesCreateWorkspace({
   function handleDocTypeChange(next: string) {
     if (!isSalesTradingDocType(next)) return;
     clearLastSavedArtifact();
+    const leavingFullTaxInvoice =
+      docType === "ABB" && (next === "TAX_INV" || next === "CS_TAX");
+    if (
+      leavingFullTaxInvoice &&
+      defaultWalkinContact &&
+      contactId === defaultWalkinContact.id
+    ) {
+      setContactId("");
+      setContactPersonId("");
+    } else if (next === "ABB" && !contactId && defaultWalkinContact) {
+      setContactId(defaultWalkinContact.id);
+    }
     setDocType(next);
     setVatType(defaultSalesVatType(next));
   }

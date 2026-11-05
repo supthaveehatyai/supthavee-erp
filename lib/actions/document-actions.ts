@@ -1043,18 +1043,41 @@ export async function listActiveBankAccounts(): Promise<{
 export async function listActiveCustomers(): Promise<GetCustomersResult> {
   try {
     const supabase = createSupabaseServerClient();
-    const { data, error } = await supabase
-      .from("contacts")
-      .select("id, company_name, nickname")
-      .contains("contact_roles", ["Customer"])
-      .eq("is_active", true)
-      .order("company_name");
 
-    if (error) return { data: [], error: error.message };
-    const customers: CustomerOption[] = (data ?? []).map((row) => ({
+    type CustomerQueryRow = {
+      id: string;
+      company_name: string;
+      nickname: string | null;
+      is_walkin_default?: boolean | null;
+    };
+
+    async function queryCustomers(includeWalkinFlag: boolean) {
+      const columns = includeWalkinFlag
+        ? "id, company_name, nickname, is_walkin_default"
+        : "id, company_name, nickname";
+      const result = await supabase
+        .from("contacts")
+        .select(columns)
+        .contains("contact_roles", ["Customer"])
+        .eq("is_active", true)
+        .order("company_name");
+      return {
+        data: (result.data ?? null) as CustomerQueryRow[] | null,
+        error: result.error,
+      };
+    }
+
+    let loaded = await queryCustomers(true);
+    if (loaded.error && /is_walkin_default/i.test(loaded.error.message)) {
+      loaded = await queryCustomers(false);
+    }
+    if (loaded.error) return { data: [], error: loaded.error.message };
+
+    const customers: CustomerOption[] = (loaded.data ?? []).map((row) => ({
       id: row.id,
       company_name: row.company_name,
       nickname: row.nickname?.trim() || null,
+      is_walkin_default: row.is_walkin_default === true,
     }));
     return { data: customers, error: null };
   } catch (err) {

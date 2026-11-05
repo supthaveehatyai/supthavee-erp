@@ -68,6 +68,8 @@ export type CustomerOption = {
   company_name: string;
   /** ชื่อเล่นลูกค้าหน้าร้าน เช่น พี่ก๊ก, พี่รัตน์ — `contacts.nickname` */
   nickname?: string | null;
+  /** ลูกค้าปลีกหน้าร้านที่ใช้เป็นค่าเริ่มต้นของบิล ABB */
+  is_walkin_default?: boolean | null;
 };
 
 export type ContactPersonOption = {
