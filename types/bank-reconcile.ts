@@ -27,6 +27,9 @@ export type BankStatementLineView = {
   expense_memo: string;
   reconcile_status: "UNMATCHED" | "PARTIAL" | "MATCHED" | string;
   matched_amount: number;
+  /** Line-level amount already tied, from `get_statement_lines_with_matches`. */
+  allocated_amount: number;
+  allocated_total: number;
   matched_doc_nos: string;
   matched_documents: MatchedStatementDocument[];
 };

@@ -132,7 +132,7 @@ export function buildPrintLineRows(
     const unit = netUnitPrice(item);
     const uom = item.uom_used?.trim() || "—";
     const discountText = String(item.discount_text ?? "").trim();
-    const key = `${label}|${uom}|${unit.toFixed(2)}|${discountText}`;
+    const key = `${label}|${uom}|${unit.toFixed(2)}`;
     const existing = groups.get(key);
     const gross = roundMoney(Number(item.qty ?? 0) * Number(item.unit_price ?? 0));
     if (existing) {
@@ -167,7 +167,7 @@ export function buildPrintLineRows(
       description: withDiscountNote(shortLabelFromGrouped(row.description), discount.note),
       qty: row.qty,
       uom_used: row.uom_used,
-      unit_price: row.unit_price,
+      unit_price: row.qty > 0 ? roundMoney(row.line_total / row.qty) : roundMoney(row.unit_price),
       line_total: row.line_total,
       gross_amount: row.gross_amount,
       discount_label: discount.label,

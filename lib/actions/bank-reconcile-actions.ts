@@ -278,8 +278,10 @@ function mapLine(row: Record<string, unknown>): BankStatementLineView {
         ? "OUT"
         : "IN",
     expense_memo: String(row.expense_memo ?? ""),
-    reconcile_status: String(row.reconcile_status ?? "UNMATCHED"),
+    reconcile_status: String(row.match_status ?? row.reconcile_status ?? "UNMATCHED"),
     matched_amount: roundMoney(Number(row.matched_amount ?? 0)),
+    allocated_amount: roundMoney(Number(row.allocated_amount ?? 0)),
+    allocated_total: roundMoney(Number(row.allocated_total ?? row.matched_amount ?? 0)),
     matched_documents: matchedDocuments,
     matched_doc_nos: matchedDocNos(row.matched_doc_nos, matchedDocuments),
   };
@@ -373,22 +375,14 @@ export async function importKtbStatement(
 
 function filterStatementLines(
   lines: BankStatementLineView[],
-  scope: "deposits" | "withdrawals" | "all",
+  scope: "deposits" | "withdrawals" | "all" | "matched",
 ): BankStatementLineView[] {
   const sorted = [...lines].sort((left, right) => right.tx_date.localeCompare(left.tx_date));
   if (scope === "withdrawals") {
     return sorted.filter((line) => line.withdrawal_amount > 0).slice(0, 200);
   }
   if (scope === "deposits") {
-    return sorted
-      .filter(
-        (line) =>
-          line.deposit_amount > 0 &&
-          (line.reconcile_status === "UNMATCHED" ||
-            line.reconcile_status === "PARTIAL" ||
-            line.reconcile_status === "MATCHED"),
-      )
-      .slice(0, 200);
+    return sorted.filter((line) => line.deposit_amount > 0).slice(0, 400);
   }
   return sorted.slice(0, 400);
 }
@@ -524,7 +518,7 @@ async function attachMatchedDocuments(
 }
 
 export async function listBankStatementLines(
-  scope: "deposits" | "withdrawals" | "all" = "deposits",
+  scope: "deposits" | "withdrawals" | "all" | "matched" = "deposits",
 ): Promise<ListBankLinesResult> {
   try {
     const owner = await requireSessionUserId();
@@ -556,11 +550,9 @@ export async function listBankStatementLines(
         "id, tx_date, tx_time, tx_code, description, payer_hint, withdrawal_amount, deposit_amount, balance_amount, tx_direction, expense_memo, reconcile_status, matched_amount",
       )
       .order("tx_date", { ascending: false })
-      .limit(scope === "all" ? 400 : 200);
+      .limit(scope === "withdrawals" ? 200 : 400);
     if (scope === "deposits") {
-      query = query
-        .gt("deposit_amount", 0)
-        .in("reconcile_status", ["UNMATCHED", "PARTIAL", "MATCHED"]);
+      query = query.gt("deposit_amount", 0);
     } else if (scope === "withdrawals") {
       query = query.gt("withdrawal_amount", 0);
     }

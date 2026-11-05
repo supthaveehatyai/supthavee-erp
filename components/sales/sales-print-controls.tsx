@@ -137,13 +137,17 @@ export function SalesPrintLineTable({
 
   const rows = buildPrintLineRows(items, nameMode, hideZeroServiceLines);
   const goodsQty = summarizeGoodsQty(items);
+  const showSku = nameMode !== "short";
+  const columnCount = showSku ? 7 : 6;
 
   return (
     <table className="w-full border-collapse text-left text-xs">
       <thead>
         <tr className="border-b border-neutral-400">
           <th className="py-1.5 pr-2 font-semibold text-neutral-700">#</th>
-          <th className="py-1.5 pr-2 font-semibold text-neutral-700">SKU</th>
+          {showSku ? (
+            <th className="py-1.5 pr-2 font-semibold text-neutral-700">SKU</th>
+          ) : null}
           <th className="py-1.5 pr-2 font-semibold text-neutral-700">รายละเอียด</th>
           <th className="py-1.5 pr-2 text-right font-semibold text-neutral-700">จำนวน</th>
           <th className="py-1.5 pr-2 text-center font-semibold text-neutral-700">หน่วย</th>
@@ -154,7 +158,7 @@ export function SalesPrintLineTable({
       <tbody>
         {rows.length === 0 ? (
           <tr>
-            <td colSpan={7} className="py-6 text-center text-neutral-400">
+            <td colSpan={columnCount} className="py-6 text-center text-neutral-400">
               ไม่มีรายการสินค้า
             </td>
           </tr>
@@ -162,9 +166,11 @@ export function SalesPrintLineTable({
           rows.map((item, index) => (
             <tr key={item.key} className="border-b border-neutral-200 align-top">
               <td className="py-1.5 pr-2 tabular-nums text-neutral-500">{index + 1}</td>
-              <td className="py-1.5 pr-2 font-mono text-[11px] font-medium text-neutral-800">
-                {item.sku}
-              </td>
+              {showSku ? (
+                <td className="py-1.5 pr-2 font-mono text-[11px] font-medium text-neutral-800">
+                  {item.sku}
+                </td>
+              ) : null}
               <td className="max-w-[12rem] py-1.5 pr-2 text-neutral-800">{item.description}</td>
               <td className="py-1.5 pr-2 text-right tabular-nums text-neutral-800">{item.qty}</td>
               <td className="py-1.5 pr-2 text-center text-neutral-600">{item.uom_used}</td>
@@ -192,7 +198,7 @@ export function SalesPrintLineTable({
       {goodsQty.label ? (
         <tfoot>
           <tr>
-            <td colSpan={7} className="pt-2 text-[11px] font-semibold text-neutral-800">
+            <td colSpan={columnCount} className="pt-2 text-[11px] font-semibold text-neutral-800">
               {goodsQty.label}
             </td>
           </tr>

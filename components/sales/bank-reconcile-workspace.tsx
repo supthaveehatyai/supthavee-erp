@@ -41,7 +41,30 @@ function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-type LineScope = "deposits" | "withdrawals" | "all";
+type LineScope = "deposits" | "matched" | "withdrawals" | "all";
+
+function lineSettlement(line: BankStatementLineView): {
+  allocatedAmount: number;
+  remainingAmount: number;
+  lineTotal: number;
+  isMatched: boolean;
+} {
+  const documents = Array.isArray(line.matched_documents) ? line.matched_documents : [];
+  const docsSum = documents.reduce((sum, doc) => sum + Number(doc.allocated_amount ?? 0), 0);
+  const allocatedAmount = roundMoney(
+    Math.max(Number(line.allocated_total ?? 0), Number(line.allocated_amount ?? 0), docsSum),
+  );
+  const lineTotal =
+    Number(line.deposit_amount ?? 0) > 0
+      ? Number(line.deposit_amount ?? 0)
+      : Number(line.withdrawal_amount ?? 0);
+  const remainingAmount = roundMoney(Math.max(0, Number((lineTotal - allocatedAmount).toFixed(2))));
+  const isMatched =
+    (allocatedAmount > 0 && remainingAmount <= 0.01) ||
+    (documents.length > 0 && remainingAmount <= 0.01) ||
+    Boolean(line.expense_memo?.trim());
+  return { allocatedAmount, remainingAmount, lineTotal, isMatched };
+}
 
 function isWithdrawal(line: BankStatementLineView): boolean {
   return line.withdrawal_amount > 0.05 && line.deposit_amount <= 0.05;
@@ -85,19 +108,28 @@ function MatchStatusCell({ line }: { line: BankStatementLineView }) {
   const docNos =
     line.matched_doc_nos || documents.map((doc) => doc.doc_no).filter(Boolean).join(", ");
   const customers = [...new Set(documents.map((doc) => doc.customer_name).filter(Boolean))];
-  if (line.reconcile_status === "MATCHED" && !docNos && line.expense_memo.trim()) {
-    return (
-      <span className="inline-flex max-w-[220px] rounded-md bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700">
-        ✅ MATCHED · {line.expense_memo.trim()}
-      </span>
-    );
-  }
-  if (line.reconcile_status === "MATCHED" && docNos) {
+  const settlement = lineSettlement(line);
+  if (settlement.isMatched && !docNos && line.expense_memo.trim()) {
     return (
       <div className="max-w-[220px]">
         <span className="inline-flex rounded-md bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700">
-          ✅ MATCHED · {docNos}
+          ✅ MATCHED
         </span>
+        <div className="mt-0.5 text-[11px] font-medium text-emerald-800">
+          {line.expense_memo.trim()}
+        </div>
+      </div>
+    );
+  }
+  if (settlement.isMatched) {
+    return (
+      <div className="max-w-[220px]">
+        <span className="inline-flex rounded-md bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700">
+          ✅ MATCHED
+        </span>
+        {docNos ? (
+          <div className="mt-0.5 text-[11px] font-semibold text-emerald-800">{docNos}</div>
+        ) : null}
         {customers.length > 0 ? (
           <div className="mt-0.5 truncate text-[11px] font-normal text-slate-500">
             {customers.join(" · ")}
@@ -139,14 +171,21 @@ export default function BankReconcileWorkspace() {
   const [expenseMemo, setExpenseMemo] = useState("");
   const [isWorking, setIsWorking] = useState(false);
 
+  const visibleLines = useMemo(() => {
+    if (scope === "deposits") {
+      return lines.filter(
+        (line) => line.deposit_amount > 0 && !lineSettlement(line).isMatched,
+      );
+    }
+    if (scope === "matched") {
+      return lines.filter((line) => lineSettlement(line).isMatched);
+    }
+    return lines;
+  }, [lines, scope]);
   const selected = lines.find((line) => line.id === selectedId) ?? null;
+  const selectedSettlement = selected ? lineSettlement(selected) : null;
   const paying = selected ? isWithdrawal(selected) : false;
-  const movement = selected
-    ? paying
-      ? selected.withdrawal_amount
-      : selected.deposit_amount
-    : 0;
-  const room = selected ? roundMoney(Math.max(0, movement - selected.matched_amount)) : 0;
+  const room = selectedSettlement?.remainingAmount ?? 0;
   const totals = useMemo(() => {
     const received = roundMoney(
       lines.reduce((sum, line) => sum + (line.deposit_amount > 0 ? line.deposit_amount : 0), 0),
@@ -390,7 +429,7 @@ export default function BankReconcileWorkspace() {
   }
 
   async function unmatchSelected() {
-    if (!selected || selected.reconcile_status !== "MATCHED") return;
+    if (!selected || !lineSettlement(selected).isMatched) return;
     setIsWorking(true);
     try {
       const result = await unmatchBankStatementLine(selected.id);
@@ -569,6 +608,7 @@ export default function BankReconcileWorkspace() {
               {(
                 [
                   ["deposits", "🟢 เงินฝากรอชน"],
+                  ["matched", "✅ ชนยอดแล้ว (Matched)"],
                   ["withdrawals", "🔴 รายการจ่าย/ถอนเงิน"],
                   ["all", "📋 ทั้งหมด (รับ + จ่าย)"],
                 ] as const
@@ -618,14 +658,14 @@ export default function BankReconcileWorkspace() {
                 </tr>
               </thead>
               <tbody>
-                {lines.length === 0 ? (
+                {visibleLines.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="px-3 py-8 text-center text-slate-400">
                       ยังไม่มีรายการ
                     </td>
                   </tr>
                 ) : (
-                  lines.map((line) => (
+                  visibleLines.map((line) => (
                     <tr
                       key={line.id}
                       className={cn(
@@ -687,8 +727,7 @@ export default function BankReconcileWorkspace() {
             </p>
           ) : (
             <>
-              {selected.matched_documents.length > 0 ||
-              (selected.reconcile_status === "MATCHED" && selected.expense_memo.trim()) ? (
+              {selected.matched_documents.length > 0 || selectedSettlement?.isMatched ? (
                 <div className="space-y-3 rounded-2xl border-2 border-emerald-400 bg-emerald-50/70 p-3">
                   <h3 className="text-sm font-semibold text-emerald-800">
                     ✅ เอกสารที่ชนยอดกับรายการนี้แล้ว
@@ -760,8 +799,7 @@ export default function BankReconcileWorkspace() {
                       </div>
                     </article>
                   ))}
-                  {selected.matched_documents.length === 0 &&
-                  selected.reconcile_status === "MATCHED" ? (
+                  {selected.matched_documents.length === 0 && selectedSettlement?.isMatched ? (
                     <Button
                       type="button"
                       variant="outline"
@@ -778,12 +816,12 @@ export default function BankReconcileWorkspace() {
                 <h2 className={cn("text-sm font-semibold", paying ? "text-rose-700" : "text-slate-800")}>
                   {paying
                     ? `🔴 ชนยอดรายการจ่าย / ถอนเงิน (-${money(selected.withdrawal_amount)} บาท)`
-                    : `เงินฝากคงเหลือ ${money(room)} บาท`}
+                    : `เงินฝากคงเหลือ ${money(selectedSettlement?.remainingAmount ?? 0)} บาท`}
                 </h2>
                 <p className="text-xs text-slate-500">
                   {paying
-                    ? `ยอดจ่าย ${money(selected.withdrawal_amount)} · บันทึกแล้ว ${money(selected.matched_amount)}`
-                    : `ยอดฝาก ${money(selected.deposit_amount)} · ชนแล้ว ${money(selected.matched_amount)}`}
+                    ? `ยอดจ่าย ${money(selected.withdrawal_amount)} · ชนแล้ว ${money(selectedSettlement?.allocatedAmount ?? 0)}`
+                    : `ยอดฝาก ${money(selected.deposit_amount)} · ชนแล้ว ${money(selectedSettlement?.allocatedAmount ?? 0)}`}
                 </p>
               </div>
 
@@ -941,7 +979,7 @@ export default function BankReconcileWorkspace() {
                 <Button
                   disabled={
                     isWorking ||
-                    selected.reconcile_status === "MATCHED" ||
+                    (selectedSettlement?.remainingAmount ?? 0) <= 0.01 ||
                     (pickedBills.length === 0 && expenseMemo.trim().length === 0)
                   }
                   onClick={() => void confirmWithdrawal()}
