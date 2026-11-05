@@ -8,13 +8,19 @@ import {
   type PrintNameMode,
 } from "@/lib/sales/print-line-view";
 import { summarizeGoodsQty } from "@/lib/sales/goods-qty-summary";
+import { DocumentPrintFooter } from "@/components/shared/print/DocumentPrintFooter";
 import type { DocumentDetailItem } from "@/types/document";
 
 type PrintViewDetail = {
   docNo: string;
   nameMode?: PrintNameMode;
   hideZeroServiceLines?: boolean;
+  showSignatures?: boolean;
 };
+
+function defaultShowSignatures(docType: string): boolean {
+  return docType !== "ABB";
+}
 
 const PRINT_VIEW_EVENT = "supthavee-sales-print-view";
 
@@ -38,10 +44,14 @@ export function SalesPrintOptions({
   const [hideZeroServiceLines, setHideZeroServiceLines] = useState(() =>
     defaultHideZeroServiceLines(docType),
   );
+  const [showSignatures, setShowSignatures] = useState(() =>
+    defaultShowSignatures(docType),
+  );
 
   useEffect(() => {
     setNameMode(defaultPrintNameMode(docType));
     setHideZeroServiceLines(defaultHideZeroServiceLines(docType));
+    setShowSignatures(defaultShowSignatures(docType));
   }, [docNo, docType]);
 
   function publish(next: PrintViewDetail) {
@@ -92,7 +102,94 @@ export function SalesPrintOptions({
         />
         <span>ซ่อนรายการบริการราคา 0 บาท บนใบกำกับภาษี</span>
       </label>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={showSignatures}
+          onChange={(event) => {
+            const checked = event.target.checked;
+            setShowSignatures(checked);
+            publish({ docNo, showSignatures: checked });
+          }}
+        />
+        <span>แสดงช่องลงนามท้ายเอกสาร (ผู้รับเงิน / ผู้รับของ)</span>
+      </label>
     </fieldset>
+  );
+}
+
+function PrintSignatureLine({ label }: { label: string }) {
+  return (
+    <div className="text-center text-[10px] text-neutral-800">
+      <div className="mx-auto mb-1 h-6 w-full max-w-[7.5rem] border-b border-neutral-500" />
+      <p className="font-semibold">({label})</p>
+      <p className="mt-0.5 text-neutral-600">วันที่ ....../....../..........</p>
+    </div>
+  );
+}
+
+function usePrintSignatures(docNo: string, docType: string): boolean {
+  const [showSignatures, setShowSignatures] = useState(() =>
+    defaultShowSignatures(docType),
+  );
+
+  useEffect(() => {
+    setShowSignatures(defaultShowSignatures(docType));
+  }, [docNo, docType]);
+
+  useEffect(() => {
+    function onView(event: Event) {
+      const detail = (event as CustomEvent<PrintViewDetail>).detail;
+      if (!detail || detail.docNo !== docNo) return;
+      if (typeof detail.showSignatures === "boolean") {
+        setShowSignatures(detail.showSignatures);
+      }
+    }
+    window.addEventListener(PRINT_VIEW_EVENT, onView);
+    return () => window.removeEventListener(PRINT_VIEW_EVENT, onView);
+  }, [docNo]);
+
+  return showSignatures;
+}
+
+/** ช่องเซ็นคู่ในคอลัมน์ซ้ายของใบกำกับภาษี — ABB ปิดไว้เป็นค่าเริ่มต้น */
+export function SalesPrintSignaturePair({
+  docNo,
+  docType,
+}: {
+  docNo: string;
+  docType: string;
+}) {
+  const showSignatures = usePrintSignatures(docNo, docType);
+  if (!showSignatures) return null;
+  return (
+    <div className="grid grid-cols-2 gap-2 pt-1">
+      <PrintSignatureLine label="ผู้รับเงิน / ผู้จัดทำ" />
+      <PrintSignatureLine label="ผู้รับของ" />
+    </div>
+  );
+}
+
+/** ช่องเซ็นมาตรฐานของเอกสารที่ไม่ได้ใช้ส่วนท้ายแบบแบ่งซ้าย-ขวา */
+export function SalesPrintStandardFooter({
+  docNo,
+  docType,
+  receivedLabel = "ผู้รับของ",
+}: {
+  docNo: string;
+  docType: string;
+  receivedLabel?: string;
+}) {
+  const showSignatures = usePrintSignatures(docNo, docType);
+  if (!showSignatures) return null;
+  return (
+    <DocumentPrintFooter
+      preparedLabel="ผู้จัดทำ"
+      receivedLabel={receivedLabel}
+      approvedLabel="ผู้อนุมัติ"
+      compact
+    />
   );
 }
 

@@ -6,7 +6,11 @@ import {
   isSalesChannel,
   salesChannelLabel,
 } from "@/lib/constants/document";
-import { SalesPrintLineTable } from "@/components/sales/sales-print-controls";
+import {
+  SalesPrintLineTable,
+  SalesPrintSignaturePair,
+  SalesPrintStandardFooter,
+} from "@/components/sales/sales-print-controls";
 import type { DocumentDetail } from "@/types/document";
 import type { PrintPaperSize, PrintVatType } from "@/types/print-document";
 import { receiptMethodText } from "@/lib/finance/payment-channel";
@@ -36,16 +40,6 @@ function customerFacingPrintNotes(value: string | null | undefined): string {
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !CONVERSION_NOTE.test(line))
     .join("\n");
-}
-
-function PrintSignature({ label }: { label: string }) {
-  return (
-    <div className="text-center text-[10px] text-neutral-800">
-      <div className="mx-auto mb-1 h-6 w-full max-w-[7.5rem] border-b border-neutral-500" />
-      <p className="font-semibold">({label})</p>
-      <p className="mt-0.5 text-neutral-600">วันที่ ....../....../..........</p>
-    </div>
-  );
 }
 
 function normalizePrintVatType(value: string | null | undefined): PrintVatType {
@@ -202,14 +196,8 @@ export default async function PrintDocumentTemplate({
       customerCompact={doc.doc_type === "ABB"}
       paperSize={resolvedPaperSize}
       documentId="sales-print-document"
-      showSignatureFooter={!salesTaxPaper}
+      showSignatureFooter={false}
       className={cn("mt-2 print:mt-0", className)}
-      footer={{
-        preparedLabel: "ผู้จัดทำ",
-        receivedLabel: isDepositDoc ? "ผู้รับ/จ่ายเงิน" : "ผู้รับของ",
-        approvedLabel: "ผู้อนุมัติ",
-        compact: true,
-      }}
       bottom={
         <div
           className={
@@ -228,10 +216,7 @@ export default async function PrintDocumentTemplate({
                 </p>
               ) : null}
               <p className="font-bold">({numberToThaiBaht(payableGrand)})</p>
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <PrintSignature label="ผู้รับเงิน / ผู้จัดทำ" />
-                <PrintSignature label="ผู้รับของ" />
-              </div>
+              <SalesPrintSignaturePair docNo={doc.doc_no} docType={doc.doc_type} />
             </div>
           ) : null}
           <div className={salesTaxPaper ? "col-span-5" : undefined}>
@@ -284,6 +269,13 @@ export default async function PrintDocumentTemplate({
           }
         />
           </div>
+          {salesTaxPaper ? null : (
+            <SalesPrintStandardFooter
+              docNo={doc.doc_no}
+              docType={doc.doc_type}
+              receivedLabel={isDepositDoc ? "ผู้รับ/จ่ายเงิน" : "ผู้รับของ"}
+            />
+          )}
         </div>
       }
     >
