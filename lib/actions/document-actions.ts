@@ -38,6 +38,7 @@ import { getSystemSettings } from "@/lib/actions/settings";
 import { requireSessionUserId } from "@/lib/auth/current-user";
 import { paymentChannelFields } from "@/lib/actions/finance/receipt-sweep-actions";
 import {
+  CASH_RECEIPT_LABEL,
   normalizeActiveBankAccount,
   type ActiveBankAccount,
 } from "@/lib/finance/payment-channel";
@@ -3593,6 +3594,8 @@ export async function updateSalesDocumentDirect(input: {
     const supabase = createSupabaseServerClient();
     const notes = input.notes?.trim() ?? "";
     const referenceNo = input.reference_no?.trim() ?? "";
+    const paymentChannel = input.payment_channel?.trim() || null;
+    const cashReceipt = paymentChannel === "CASH";
     const rpcClient = supabase as unknown as {
       rpc: (
         fn: "update_sales_document_direct",
@@ -3605,9 +3608,11 @@ export async function updateSalesDocumentDirect(input: {
       p_notes: notes,
       p_remark: notes,
       p_reference_no: referenceNo || null,
-      p_payment_channel: input.payment_channel?.trim() || null,
-      p_receiving_bank_label: input.receiving_bank_label?.trim() || null,
-      p_bank_account_id: input.bank_account_id?.trim() || null,
+      p_payment_channel: paymentChannel,
+      p_receiving_bank_label: cashReceipt
+        ? CASH_RECEIPT_LABEL
+        : input.receiving_bank_label?.trim() || null,
+      p_bank_account_id: cashReceipt ? null : input.bank_account_id?.trim() || null,
       p_slip_url: input.slip_url?.trim() || null,
       p_discount_amount: discountAmount,
       p_shipping_fee: shipping.shipping_fee,

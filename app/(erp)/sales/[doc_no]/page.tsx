@@ -420,11 +420,14 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
       doc.doc_type === "TAX_INV") &&
     doc.status === "ISSUED" &&
     amountDue > 0;
-  const receiptMethod = receiptMethodText({
-    payment_channel: doc.payment_channel,
-    receiving_bank_label: doc.receiving_bank_label,
-    is_swept_to_company: doc.is_swept_to_company,
-  });
+  const receiptMethod =
+    String(doc.payment_channel ?? "").trim() === "CASH"
+      ? "💵 เงินสดหน้าร้าน"
+      : receiptMethodText({
+          payment_channel: doc.payment_channel,
+          receiving_bank_label: doc.receiving_bank_label,
+          is_swept_to_company: doc.is_swept_to_company,
+        });
   const slipReference = doc.reference_no?.trim() || "";
   const linkedDeposits = doc.linked_deposits ?? [];
   const depositSlips = (

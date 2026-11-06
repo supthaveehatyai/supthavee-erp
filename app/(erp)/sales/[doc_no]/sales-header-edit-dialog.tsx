@@ -9,6 +9,7 @@ import { CashReceiptPaymentBox } from "@/components/sales/cash-receipt-payment-b
 import { updateSalesDocumentDirect } from "@/lib/actions/document-actions";
 import {
   bankAccountDisplay,
+  CASH_RECEIPT_LABEL,
   initialBankAccountId,
   initialCashReceiptChannel,
   paymentChannelLabel,
@@ -99,12 +100,19 @@ export function SalesHeaderEditDialog({
   });
   const [channel, setChannel] = useState<PaymentChannel>(initialChannel);
   const [bankAccountId, setBankAccountId] = useState<string | null>(() =>
-    initialBankAccountId(
-      bankAccounts,
-      initialChannel,
-      storedBankAccountId,
-      receivingBankLabel,
-    ),
+    initialChannel === "CASH"
+      ? null
+      : initialBankAccountId(
+          bankAccounts,
+          initialChannel,
+          storedBankAccountId,
+          receivingBankLabel,
+        ),
+  );
+  const [receivingLabel, setReceivingLabel] = useState(() =>
+    initialChannel === "CASH"
+      ? CASH_RECEIPT_LABEL
+      : receivingBankLabel?.trim() || paymentChannelLabel(initialChannel),
   );
   const [receiptUrl, setReceiptUrl] = useState(slipUrl);
   const [discountText, setDiscountText] = useState(() => discountAmount.toFixed(2));
@@ -129,13 +137,50 @@ export function SalesHeaderEditDialog({
     shippingFee: shippingReady ? shippingValue : 0,
   });
 
+  function applyChannel(next: PaymentChannel, accountId: string | null) {
+    if (next === "CASH") {
+      setChannel("CASH");
+      setBankAccountId(null);
+      setReceivingLabel(CASH_RECEIPT_LABEL);
+      return;
+    }
+    setChannel(next);
+    setBankAccountId(accountId);
+    const account = selectedBankAccount(bankAccounts, next, accountId);
+    setReceivingLabel(
+      account ? bankAccountDisplay(account) : paymentChannelLabel(next),
+    );
+  }
+
   function openDialog() {
+    const nextChannel = initialCashReceiptChannel({
+      docType: docType ?? "",
+      salesChannel,
+      storedChannel: paymentChannel,
+    });
     setDate(docDate.slice(0, 10));
     setSlipNo(referenceNo);
     setRemark(notes);
     setDiscountText(roundMoney(discountAmount).toFixed(2));
     setShippingText(roundMoney(shippingFee).toFixed(2));
     setCarrier(shippingMethod);
+    setChannel(nextChannel);
+    setBankAccountId(
+      nextChannel === "CASH"
+        ? null
+        : initialBankAccountId(
+            bankAccounts,
+            nextChannel,
+            storedBankAccountId,
+            receivingBankLabel,
+          ),
+    );
+    setReceivingLabel(
+      nextChannel === "CASH"
+        ? CASH_RECEIPT_LABEL
+        : receivingBankLabel?.trim() || paymentChannelLabel(nextChannel),
+    );
+    setReceiptUrl(slipUrl);
     setOpen(true);
   }
 
@@ -153,18 +198,23 @@ export function SalesHeaderEditDialog({
       );
       return;
     }
+    const cashReceipt = channel === "CASH";
+    const account = cashReceipt
+      ? null
+      : selectedBankAccount(bankAccounts, channel, bankAccountId);
     startTransition(async () => {
       const result = await updateSalesDocumentDirect({
         document_id: documentId,
         doc_date: date,
         notes: remark.trim() || null,
         reference_no: slipNo.trim() || null,
-        payment_channel: channel,
-        bank_account_id: selectedBankAccount(bankAccounts, channel, bankAccountId)?.id ?? null,
-        receiving_bank_label: (() => {
-          const account = selectedBankAccount(bankAccounts, channel, bankAccountId);
-          return account ? bankAccountDisplay(account) : paymentChannelLabel(channel);
-        })(),
+        payment_channel: cashReceipt ? "CASH" : channel,
+        bank_account_id: cashReceipt ? null : (account?.id ?? null),
+        receiving_bank_label: cashReceipt
+          ? CASH_RECEIPT_LABEL
+          : account
+            ? bankAccountDisplay(account)
+            : receivingLabel,
         slip_url: receiptUrl.trim() || null,
         discount_amount: discountValue,
         shipping_fee: shippingValue,
@@ -228,10 +278,7 @@ export function SalesHeaderEditDialog({
                 referenceNo={slipNo}
                 slipUrl={receiptUrl}
                 disabled={pending}
-                onChannelChange={(next, accountId) => {
-                  setChannel(next);
-                  setBankAccountId(accountId);
-                }}
+                onChannelChange={applyChannel}
                 onReferenceChange={setSlipNo}
                 onSlipUrlChange={setReceiptUrl}
                 onSlipDate={setDate}
@@ -242,10 +289,7 @@ export function SalesHeaderEditDialog({
                 bankAccountId={bankAccountId}
                 accounts={bankAccounts}
                 disabled={pending}
-                onChange={(next, accountId) => {
-                  setChannel(next);
-                  setBankAccountId(accountId);
-                }}
+                onChange={applyChannel}
               />
             )}
             <div className="space-y-1.5">
