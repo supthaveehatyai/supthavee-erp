@@ -53,6 +53,8 @@ import {
 import {
   deactivateProductsByIds,
   deleteProductModel,
+  deleteSkusSafelyAction,
+  getProductOnHandQty,
   getProductsForCatalog,
 } from "@/lib/actions/product-actions";
 import type {
@@ -1071,6 +1073,10 @@ export default function ProductsClient() {
   const [deleteTarget, setDeleteTarget] = useState<ProductGroup | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [onHandByProductId, setOnHandByProductId] = useState<Record<string, number>>({});
+  const [skuDeleteKey, setSkuDeleteKey] = useState<string | null>(null);
+  const stockKnownRef = useRef(new Set<string>());
+  const stockInflightRef = useRef(new Set<string>());
 
   const [editTarget, setEditTarget] = useState<ProductGroup | null>(null);
   const [editForm, setEditForm] = useState<BatchEditForm | null>(null);
@@ -1105,6 +1111,9 @@ export default function ProductsClient() {
   const loadProducts = useCallback(async () => {
     setIsLoading(true);
     setLoadError("");
+    stockKnownRef.current.clear();
+    stockInflightRef.current.clear();
+    setOnHandByProductId({});
     const catalog = await getProductsForCatalog();
 
     if (catalog.error) {
@@ -1491,6 +1500,36 @@ export default function ProductsClient() {
     () => buildGroupedProducts(filteredProducts, sizeSortIndex),
     [filteredProducts, sizeSortIndex],
   );
+
+  useEffect(() => {
+    const missing: string[] = [];
+    for (const group of productGroups) {
+      if (!expandedGroups.has(group.key)) continue;
+      for (const colorGroup of group.colorGroups) {
+        if (!expandedColorGroups.has(`${group.key}::${colorGroup.key}`)) continue;
+        for (const product of colorGroup.products) {
+          if (
+            stockKnownRef.current.has(product.id) ||
+            stockInflightRef.current.has(product.id)
+          ) {
+            continue;
+          }
+          missing.push(product.id);
+        }
+      }
+    }
+    if (missing.length === 0) return;
+    for (const id of missing) stockInflightRef.current.add(id);
+    void getProductOnHandQty(missing).then((result) => {
+      for (const id of missing) stockInflightRef.current.delete(id);
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      for (const id of missing) stockKnownRef.current.add(id);
+      setOnHandByProductId((current) => ({ ...current, ...result.data }));
+    });
+  }, [productGroups, expandedGroups, expandedColorGroups]);
 
   const editSizeLabels = useMemo(() => {
     if (!editTarget) return [];
@@ -2489,6 +2528,63 @@ export default function ProductsClient() {
     }
   }
 
+  function colorDisplayName(color: string): string {
+    const name = color.trim();
+    return name.startsWith("สี") ? name : `สี${name}`;
+  }
+
+  async function deleteColorSkus(colorGroup: ColorSubGroup, pendingKey: string) {
+    if (skuDeleteKey) return;
+    const skus = [
+      ...new Set(
+        colorGroup.products.map((product) => product.sku.trim()).filter(Boolean),
+      ),
+    ];
+    if (skus.length === 0) {
+      toast.error("ไม่พบรหัส SKU ของสีนี้");
+      return;
+    }
+    const colorName = colorDisplayName(colorGroup.color);
+    const confirmed = window.confirm(
+      `ยืนยันการลบ "${colorName}" จำนวน ${skus.length} SKU (${skus.join(", ")}) หรือไม่? (ลบได้เฉพาะรหัสที่ยังไม่เคยออกบิลและสต็อกเป็น 0 เท่านั้น)`,
+    );
+    if (!confirmed) return;
+
+    setSkuDeleteKey(pendingKey);
+    try {
+      const result = await deleteSkusSafelyAction(skus);
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(`ลบ ${colorName} แล้ว`);
+      await loadProducts();
+    } finally {
+      setSkuDeleteKey(null);
+    }
+  }
+
+  async function deleteSizeSku(product: Product) {
+    if (skuDeleteKey) return;
+    const sku = product.sku.trim();
+    if (!sku) {
+      toast.error("ไม่พบรหัส SKU ของไซส์นี้");
+      return;
+    }
+    setSkuDeleteKey(`sku:${product.id}`);
+    try {
+      const result = await deleteSkusSafelyAction([sku]);
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(`ลบไซส์ ${product.size || sku} แล้ว`);
+      await loadProducts();
+    } finally {
+      setSkuDeleteKey(null);
+    }
+  }
+
   async function confirmDeactivateGroup() {
     if (!deactivateTarget) return;
     setIsDeactivating(true);
@@ -3245,7 +3341,18 @@ export default function ProductsClient() {
                                         : "ปิดใช้งาน"}
                                   </span>
                                 </td>
-                                <td className="px-5 py-3" />
+                                <td className="px-5 py-3 text-right">
+                                  <button
+                                    type="button"
+                                    disabled={skuDeleteKey === colorKey}
+                                    onClick={() => {
+                                      void deleteColorSkus(colorGroup, colorKey);
+                                    }}
+                                    className="text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-md px-2.5 py-1 text-xs disabled:opacity-50"
+                                  >
+                                    🗑️ ลบสีนี้
+                                  </button>
+                                </td>
                               </tr>
 
                               {isColorExpanded &&
@@ -3284,24 +3391,45 @@ export default function ProductsClient() {
                                       </div>
                                     </td>
                                     <td className="px-5 py-3" colSpan={2}>
-                                      <span
-                                        className={`inline-flex items-center gap-1.5 text-[11px] font-medium ${
-                                          product.is_active
-                                            ? "text-emerald-700"
-                                            : "text-slate-400"
-                                        }`}
-                                      >
+                                      <div className="flex items-center justify-between gap-2">
                                         <span
-                                          className={`size-1.5 rounded-full ${
+                                          className={`inline-flex items-center gap-1.5 text-[11px] font-medium ${
                                             product.is_active
-                                              ? "bg-emerald-500"
-                                              : "bg-slate-300"
+                                              ? "text-emerald-700"
+                                              : "text-slate-400"
                                           }`}
-                                        />
-                                        {product.is_active
-                                          ? "ใช้งาน"
-                                          : "ปิดใช้งาน"}
-                                      </span>
+                                        >
+                                          <span
+                                            className={`size-1.5 rounded-full ${
+                                              product.is_active
+                                                ? "bg-emerald-500"
+                                                : "bg-slate-300"
+                                            }`}
+                                          />
+                                          {product.is_active
+                                            ? "ใช้งาน"
+                                            : "ปิดใช้งาน"}
+                                        </span>
+                                        {Object.prototype.hasOwnProperty.call(
+                                          onHandByProductId,
+                                          product.id,
+                                        ) &&
+                                        Math.abs(onHandByProductId[product.id] ?? 0) <
+                                          0.0005 ? (
+                                          <button
+                                            type="button"
+                                            aria-label={`ลบไซส์ ${product.size || product.sku}`}
+                                            disabled={skuDeleteKey === `sku:${product.id}`}
+                                            onClick={(event) => {
+                                              event.stopPropagation();
+                                              void deleteSizeSku(product);
+                                            }}
+                                            className="grid size-7 place-items-center rounded-md border border-rose-200 text-xs text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                                          >
+                                            🗑️
+                                          </button>
+                                        ) : null}
+                                      </div>
                                     </td>
                                   </tr>
                                 ))}

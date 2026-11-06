@@ -8,7 +8,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server-admin";
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { getCurrentAuthUser, requireSessionUserId } from "@/lib/auth/current-user";
+import { fetchOnHandQtyByProductIds } from "@/lib/inventory/ledger-balances";
 import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import type { DeleteProductModelResult } from "@/types/product-matrix";
 
@@ -242,5 +243,75 @@ export async function deactivateProductsByIds(productIds: string[]) {
     const message =
       err instanceof Error ? err.message : "ปิดการใช้งานสินค้าไม่สำเร็จ";
     return { error: message };
+  }
+}
+
+function readDeleteSkuPayloadError(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const row = payload as Record<string, unknown>;
+  if (row.success === false || row.ok === false) {
+    return String(row.error ?? row.message ?? "ลบ SKU ไม่สำเร็จ");
+  }
+  const message = String(row.error ?? "").trim();
+  return message || null;
+}
+
+/** ลบ SKU ที่ยังไม่เคยออกบิลและสต็อกเป็น 0 ผ่าน `delete_skus_safely`. */
+export async function deleteSkusSafelyAction(skus: string[]) {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) return { error: owner.error };
+
+  const unique = [
+    ...new Set(skus.map((sku) => String(sku ?? "").trim()).filter(Boolean)),
+  ];
+  if (unique.length === 0) return { error: "ไม่พบรหัส SKU ที่ต้องการลบ" };
+
+  try {
+    const supabaseAdmin = createClient();
+    const rpcClient = supabaseAdmin as unknown as {
+      rpc: (
+        fn: "delete_skus_safely",
+        args: { p_skus: string[] },
+      ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    };
+    const deleted = await rpcClient.rpc("delete_skus_safely", { p_skus: unique });
+    if (deleted.error) {
+      if (/Could not find the function|PGRST202/i.test(deleted.error.message)) {
+        return { error: "ยังไม่พบฟังก์ชันลบ SKU บนฐานข้อมูลที่แอปเชื่อมอยู่" };
+      }
+      return { error: deleted.error.message };
+    }
+    const payloadError = readDeleteSkuPayloadError(deleted.data);
+    if (payloadError) return { error: payloadError };
+
+    revalidatePath(PRODUCTS_PATH);
+    revalidatePath("/inventory/ledger");
+    return { error: null as string | null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "ลบ SKU ไม่สำเร็จ";
+    return { error: message };
+  }
+}
+
+/** ยอดคงเหลือของ SKU ที่กำลังกางดู — ใช้ตัดสินว่าไซส์นั้นลบได้หรือไม่ */
+export async function getProductOnHandQty(productIds: string[]) {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) return { data: {} as Record<string, number>, error: owner.error };
+
+  const ids = [
+    ...new Set(productIds.map((id) => String(id ?? "").trim()).filter(Boolean)),
+  ];
+  if (ids.length === 0) return { data: {} as Record<string, number>, error: null };
+
+  try {
+    const supabaseAdmin = createClient();
+    const balances = await fetchOnHandQtyByProductIds(supabaseAdmin, ids);
+    if (balances.error) return { data: {} as Record<string, number>, error: balances.error };
+    const data: Record<string, number> = {};
+    for (const [id, qty] of balances.balances) data[id] = qty;
+    return { data, error: null as string | null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "โหลดยอดสต็อกไม่สำเร็จ";
+    return { data: {} as Record<string, number>, error: message };
   }
 }
