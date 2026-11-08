@@ -26,6 +26,7 @@ export function CashReceiptPaymentBox({
   onReferenceChange,
   onSlipUrlChange,
   onSlipDate,
+  hideReferenceField = false,
 }: {
   channel: PaymentChannel;
   bankAccountId: string | null;
@@ -37,6 +38,8 @@ export function CashReceiptPaymentBox({
   onReferenceChange: (value: string) => void;
   onSlipUrlChange: (url: string) => void;
   onSlipDate?: (isoDate: string) => void;
+  /** ซ่อนช่องเลขสลิปเมื่อหน้าจอมีช่องอ้างอิงอยู่แล้ว */
+  hideReferenceField?: boolean;
 }) {
   const [reading, setReading] = useState(false);
   const showSlip = channel === "COMPANY_BANK" || channel === "OTHER_BANK";
@@ -93,17 +96,19 @@ export function CashReceiptPaymentBox({
       />
       {showSlip ? (
         <>
-          <div className="space-y-1.5">
-            <Label htmlFor="cash-receipt-slip-ref">เลขที่อ้างอิงสลิป</Label>
-            <Input
-              id="cash-receipt-slip-ref"
-              value={referenceNo}
-              disabled={disabled || reading}
-              placeholder="เลขสลิปโอนเงิน"
-              onChange={(event) => onReferenceChange(event.target.value)}
-              className="h-10"
-            />
-          </div>
+          {hideReferenceField ? null : (
+            <div className="space-y-1.5">
+              <Label htmlFor="cash-receipt-slip-ref">เลขที่อ้างอิงสลิป</Label>
+              <Input
+                id="cash-receipt-slip-ref"
+                value={referenceNo}
+                disabled={disabled || reading}
+                placeholder="เลขสลิปโอนเงิน"
+                onChange={(event) => onReferenceChange(event.target.value)}
+                className="h-10"
+              />
+            </div>
+          )}
           <div
             className="space-y-1.5"
             onDragOver={(event) => {

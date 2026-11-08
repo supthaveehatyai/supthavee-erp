@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
@@ -18,13 +19,6 @@ import {
   type PaymentChannel,
 } from "@/lib/finance/payment-channel";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SalesShippingFields } from "@/components/sales/sales-shipping-fields";
@@ -190,6 +184,20 @@ export function SalesHeaderEditDialog({
     setOpen(true);
   }
 
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !pending) setOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, pending]);
+
   function onSave() {
     if (pending) return;
     if (!shippingReady) {
@@ -256,15 +264,46 @@ export function SalesHeaderEditDialog({
         <Pencil className="size-4" />
         ✏️ แก้ไขข้อมูลหัวบิล / วันที่ / หมายเหตุ
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>แก้ไขหัวบิลที่ออกแล้ว</DialogTitle>
-            <DialogDescription>
-              ปรับวันที่ เลขสลิป ส่วนลดท้ายบิล ช่องทางรับเงิน และหมายเหตุโดยไม่ยกเลิกเอกสาร
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
+      {open
+        ? createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 overflow-y-auto"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !pending) setOpen(false);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="issued-header-title"
+            className="w-full max-w-xl max-h-[88vh] flex flex-col rounded-2xl bg-white shadow-2xl overflow-hidden"
+          >
+            <div className="shrink-0 border-b border-slate-200 px-6 py-3.5 flex items-center justify-between bg-white">
+              <h2 id="issued-header-title" className="text-base font-semibold text-slate-900">
+                แก้ไขหัวบิลที่ออกแล้ว
+              </h2>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  className="h-8 bg-blue-800 px-2.5 text-xs text-white hover:bg-blue-900"
+                  disabled={pending}
+                  onClick={onSave}
+                >
+                  {pending ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                  บันทึกหัวบิล
+                </Button>
+                <button
+                  type="button"
+                  aria-label="ปิด"
+                  disabled={pending}
+                  onClick={() => setOpen(false)}
+                  className="grid size-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-3.5">
             <div className="space-y-1.5">
               <Label htmlFor="issued-doc-date">วันที่เอกสาร</Label>
               <Input
@@ -302,6 +341,7 @@ export function SalesHeaderEditDialog({
                 onReferenceChange={setSlipNo}
                 onSlipUrlChange={setReceiptUrl}
                 onSlipDate={setDate}
+                hideReferenceField
               />
             ) : (
               <PaymentChannelPicker
@@ -312,39 +352,52 @@ export function SalesHeaderEditDialog({
                 onChange={applyChannel}
               />
             )}
-            <div className="space-y-1.5">
-              <Label htmlFor="issued-discount-amount">ส่วนลดท้ายบิล (บาท)</Label>
-              <Input
-                id="issued-discount-amount"
-                type="number"
-                min={0}
-                step="0.01"
-                inputMode="decimal"
-                value={discountText}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="issued-discount-amount">ส่วนลดท้ายบิล (บาท)</Label>
+                <Input
+                  id="issued-discount-amount"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  inputMode="decimal"
+                  value={discountText}
+                  disabled={pending}
+                  onChange={(event) => setDiscountText(event.target.value)}
+                />
+              </div>
+              <SalesShippingFields
+                fee={shippingText}
+                method={carrier}
                 disabled={pending}
-                onChange={(event) => setDiscountText(event.target.value)}
+                feeId="issued-shipping-fee"
+                methodId="issued-shipping-method"
+                showMethod={false}
+                onFeeChange={setShippingText}
+                onMethodChange={setCarrier}
               />
-              <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                ค่าสินค้า {money(goods)} ฿
-                {preview.discount_amount > 0
-                  ? ` - ส่วนลด ${money(preview.discount_amount)} ฿`
-                  : ""}
-                {" "}- หักมัดจำ {money(preview.deposit_deducted)} ฿
-                {vatMode === "EXCLUSIVE"
-                  ? ` + ภาษีมูลค่าเพิ่ม ${money(preview.vat_amount)} ฿`
-                  : ""}
-                {" "}+ ค่าขนส่ง {money(preview.shipping_fee)} ฿ ={" "}
-                <span className="font-semibold text-slate-900">
-                  ยอดเรียกเก็บสุทธิ {money(preview.grand_total)} ฿
-                </span>
-              </p>
             </div>
+            <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              ค่าสินค้า {money(goods)} ฿
+              {preview.discount_amount > 0
+                ? ` - ส่วนลด ${money(preview.discount_amount)} ฿`
+                : ""}
+              {" "}- หักมัดจำ {money(preview.deposit_deducted)} ฿
+              {vatMode === "EXCLUSIVE"
+                ? ` + ภาษีมูลค่าเพิ่ม ${money(preview.vat_amount)} ฿`
+                : ""}
+              {" "}+ ค่าขนส่ง {money(preview.shipping_fee)} ฿ ={" "}
+              <span className="font-semibold text-slate-900">
+                ยอดเรียกเก็บสุทธิ {money(preview.grand_total)} ฿
+              </span>
+            </p>
             <SalesShippingFields
               fee={shippingText}
               method={carrier}
               disabled={pending}
-              feeId="issued-shipping-fee"
+              feeId="issued-shipping-fee-method"
               methodId="issued-shipping-method"
+              showFee={false}
               onFeeChange={setShippingText}
               onMethodChange={setCarrier}
             />
@@ -359,7 +412,8 @@ export function SalesHeaderEditDialog({
                 className="flex w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
             </div>
-            <div className="flex justify-end gap-2">
+            </div>
+            <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-6 py-3.5 flex items-center justify-end gap-2.5">
               <Button type="button" variant="outline" disabled={pending} onClick={() => setOpen(false)}>
                 ยกเลิก
               </Button>
@@ -374,8 +428,10 @@ export function SalesHeaderEditDialog({
               </Button>
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>,
+        document.body,
+      )
+        : null}
     </>
   );
 }

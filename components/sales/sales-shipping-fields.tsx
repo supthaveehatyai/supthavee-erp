@@ -12,6 +12,8 @@ export function SalesShippingFields({
   methodId = "shipping-method",
   onFeeChange,
   onMethodChange,
+  showFee = true,
+  showMethod = true,
 }: {
   fee: string;
   method: string;
@@ -20,12 +22,16 @@ export function SalesShippingFields({
   methodId?: string;
   onFeeChange: (value: string) => void;
   onMethodChange: (value: string) => void;
+  showFee?: boolean;
+  showMethod?: boolean;
 }) {
   const amount = Number(fee);
-  const showMethod = (Number.isFinite(amount) && amount > 0) || Boolean(method);
+  const methodVisible =
+    showMethod && ((Number.isFinite(amount) && amount > 0) || Boolean(method));
 
   return (
     <>
+      {showFee ? (
       <div className="space-y-1.5">
         <Label htmlFor={feeId}>ค่าขนส่ง (บาท)</Label>
         <Input
@@ -44,7 +50,8 @@ export function SalesShippingFields({
           ค่าฝากส่งตามจริง ไม่นำไปคิด VAT 7% ของสินค้า
         </p>
       </div>
-      {showMethod ? (
+      ) : null}
+      {methodVisible ? (
         <div className="space-y-1.5">
           <Label htmlFor={methodId}>ผู้ให้บริการขนส่ง</Label>
           <select
