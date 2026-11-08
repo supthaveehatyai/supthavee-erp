@@ -17,6 +17,13 @@ import type {
 } from "@/types/bank-account";
 
 const BANK_ACCOUNTS_PATH = "/finance/bank-accounts";
+
+function revalidateBankAccountPages() {
+  revalidatePath(BANK_ACCOUNTS_PATH);
+  revalidatePath("/sales/create");
+  revalidatePath("/sales");
+  revalidatePath("/sales", "layout");
+}
 /** Strict table target — never `bank_accounts` / never `account_number`. */
 const MST_BANK_ACCOUNTS_TABLE = "mst_bank_accounts" as const;
 const POSTGRES_UNIQUE_VIOLATION = "23505";
@@ -163,7 +170,7 @@ export async function createBankAccount(
       return { success: false, error: "ไม่สามารถสร้างบัญชีได้" };
     }
 
-    revalidatePath(BANK_ACCOUNTS_PATH);
+    revalidateBankAccountPages();
     return { success: true, error: null };
   } catch (err) {
     console.error("[createBankAccount]", err);
@@ -211,7 +218,7 @@ export async function toggleBankAccountStatus(
       };
     }
 
-    revalidatePath(BANK_ACCOUNTS_PATH);
+    revalidateBankAccountPages();
     return { success: true, error: null };
   } catch (err) {
     console.error("[toggleBankAccountStatus]", err);

@@ -1010,23 +1010,39 @@ export async function createDocument(
   }
 }
 
-/** Active bank book from `public.get_active_bank_accounts()`. */
+/** สมุดบัญชีที่เปิดใช้ จาก `mst_bank_accounts` โดยตรง */
 export async function listActiveBankAccounts(): Promise<{
   data: ActiveBankAccount[];
   error: string | null;
 }> {
   try {
     const supabase = createSupabaseServerClient();
-    const rpcClient = supabase as unknown as {
-      rpc: (
-        fn: "get_active_bank_accounts",
-        args?: Record<string, never>,
-      ) => Promise<{ data: unknown; error: { message: string } | null }>;
-    };
-    const result = await rpcClient.rpc("get_active_bank_accounts");
-    if (result.error) return { data: [], error: result.error.message };
-    const payload = result.data;
-    const rows = Array.isArray(payload) ? payload : [];
+    const fullColumns =
+      "id, bank_name, account_no, account_name, branch_name, is_active, created_at, sort_order, account_channel, is_primary_company, display_label";
+    const baseColumns =
+      "id, bank_name, account_no, account_name, branch_name, is_active, created_at";
+
+    async function loadRows(columns: string, orderBySort: boolean) {
+      let query = supabase
+        .from("mst_bank_accounts")
+        .select(columns)
+        .eq("is_active", true);
+      if (orderBySort) query = query.order("sort_order", { ascending: true });
+      return query.order("created_at", { ascending: true });
+    }
+
+    let loaded = await loadRows(fullColumns, true);
+    if (
+      loaded.error &&
+      /sort_order|account_channel|is_primary_company|display_label/i.test(
+        loaded.error.message,
+      )
+    ) {
+      loaded = await loadRows(baseColumns, false);
+    }
+    if (loaded.error) return { data: [], error: loaded.error.message };
+
+    const rows = (loaded.data ?? []) as unknown[];
     return {
       data: rows
         .map(normalizeActiveBankAccount)

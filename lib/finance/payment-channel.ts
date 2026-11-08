@@ -97,10 +97,39 @@ export type ActiveBankAccount = {
   account_no: string;
   account_name: string;
   branch_name: string | null;
+  is_active?: boolean | null;
+  /** บัญชีนิติบุคคลหลักของบริษัท — ไม่ใช้ชื่อ “ทรัพย์ทวี” เป็นตัวตัด */
+  is_primary_company?: boolean | null;
+  account_channel?: string | null;
   is_company_account: boolean;
   channel_type: "COMPANY_BANK" | "OTHER_BANK";
   display_label: string;
 };
+
+/** บัญชีนิติบุคคลหลักเท่านั้นที่อยู่ช่องทางโอนเข้าบริษัท */
+export function isPrimaryCompanyBank(account: {
+  is_primary_company?: boolean | null;
+  account_channel?: string | null;
+  account_no?: string | null;
+  account_number?: string | null;
+  account_name?: string | null;
+}): boolean {
+  if (typeof account.is_primary_company === "boolean") {
+    return account.is_primary_company;
+  }
+  if (account.account_channel) {
+    return account.account_channel === "COMPANY_BANK";
+  }
+  const accNo = String(account.account_no ?? account.account_number ?? "").replace(/\D/g, "");
+  const accName = String(account.account_name ?? "").trim();
+  return (
+    accNo === "9020746510" ||
+    accName.includes("บจ.") ||
+    accName.includes("บจก.") ||
+    accName.includes("บริษัท") ||
+    accName.includes("หจก.")
+  );
+}
 
 export type UnsweptReceiptRow = {
   id: string;
@@ -125,22 +154,28 @@ export function normalizeActiveBankAccount(raw: unknown): ActiveBankAccount | nu
   const row = raw as Record<string, unknown>;
   const id = String(row.id ?? "").trim();
   if (!id) return null;
-  const isCompany = row.is_company_account === true || row.is_company_account === "true";
-  const channelRaw = String(row.channel_type ?? "").trim();
-  const channelType =
-    channelRaw === "COMPANY_BANK" || channelRaw === "OTHER_BANK"
-      ? channelRaw
-      : isCompany
-        ? "COMPANY_BANK"
-        : "OTHER_BANK";
+  const accountNo = String(row.account_no ?? row.account_number ?? "").trim();
+  const accountName = String(row.account_name ?? "").trim();
+  const accountChannel = String(row.account_channel ?? "").trim();
+  const primaryFlag =
+    typeof row.is_primary_company === "boolean" ? row.is_primary_company : null;
+  const primary = isPrimaryCompanyBank({
+    is_primary_company: primaryFlag,
+    account_channel: accountChannel || null,
+    account_no: accountNo,
+    account_name: accountName,
+  });
   return {
     id,
     bank_name: String(row.bank_name ?? "").trim(),
-    account_no: String(row.account_no ?? "").trim(),
-    account_name: String(row.account_name ?? "").trim(),
+    account_no: accountNo,
+    account_name: accountName,
     branch_name: row.branch_name == null ? null : String(row.branch_name),
-    is_company_account: isCompany,
-    channel_type: channelType,
+    is_active: row.is_active === false ? false : true,
+    is_primary_company: primaryFlag,
+    account_channel: accountChannel || null,
+    is_company_account: primary,
+    channel_type: primary ? "COMPANY_BANK" : "OTHER_BANK",
     display_label: String(row.display_label ?? "").trim(),
   };
 }
@@ -157,10 +192,14 @@ export function accountsForChannel(
   channel: PaymentChannel,
 ): ActiveBankAccount[] {
   if (channel === "COMPANY_BANK") {
-    return accounts.filter((account) => account.is_company_account);
+    return accounts.filter(
+      (account) => account.is_active !== false && isPrimaryCompanyBank(account),
+    );
   }
   if (channel === "OTHER_BANK") {
-    return accounts.filter((account) => !account.is_company_account);
+    return accounts.filter(
+      (account) => account.is_active !== false && !isPrimaryCompanyBank(account),
+    );
   }
   return [];
 }
@@ -218,7 +257,7 @@ export function resolveSlipBankAccount(
   const matched = matchBankAccountBySlip(accounts, payeeAccount);
   if (matched) {
     const channel: PaymentChannel =
-      matched.is_company_account || matched.channel_type === "COMPANY_BANK"
+      isPrimaryCompanyBank(matched)
         ? "COMPANY_BANK"
         : "OTHER_BANK";
     return {
@@ -246,7 +285,9 @@ export function otherAccountSweepLines(
     receiving_bank_label?: string | null;
   }>,
 ): Array<{ id: string; label: string; amount: number }> {
-  const others = accounts.filter((account) => !account.is_company_account);
+  const others = accounts.filter(
+    (account) => account.is_active !== false && !isPrimaryCompanyBank(account),
+  );
   const totals = new Map(others.map((account) => [account.id, 0]));
   for (const row of rows) {
     if (row.payment_channel !== "OTHER_BANK") continue;
@@ -279,10 +320,7 @@ export function classifySlipPayee(
   const name = String(payeeName ?? "").trim();
   const account = String(payeeAccount ?? "").replace(/\s+/g, "");
   const digits = account.replace(/\D/g, "");
-  const isCompany =
-    name.includes("ทรัพย์ทวี") ||
-    account.includes("6510") ||
-    digits.includes("6510");
+  const isCompany = digits.includes("9020746510") || digits.endsWith("6510");
   if (isCompany) {
     return {
       channel: "COMPANY_BANK",
