@@ -203,6 +203,7 @@ export default async function PrintDocumentTemplate({
         doc.doc_type === "REC"
       }
       className={cn("mt-2 print:mt-0", className)}
+      watermark={doc.status === "VOID" ? "VOID / ยกเลิกแล้ว" : null}
       bottom={
         <div
           className={

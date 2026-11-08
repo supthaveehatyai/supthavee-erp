@@ -63,12 +63,12 @@ import {
 } from "@/components/ui/table";
 import IssueDocumentButton from "./issue-document-button";
 import { SalesHeaderEditDialog } from "./sales-header-edit-dialog";
+import { VoidSalesDocumentButton } from "./void-sales-document-button";
 import IssueCreditNoteButton from "./issue-credit-note-button";
 import DeleteDraftDocumentButton from "./delete-draft-document-button";
 import VoidDocumentActions from "./void-document-actions";
 import DuplicateDocumentButton from "./duplicate-document-button";
 import PrintDocumentButton from "@/components/finance/PrintDocumentButton";
-import { VoidedDocumentAlert } from "@/components/shared/document/voided-document-alert";
 import { receiptMethodText } from "@/lib/finance/payment-channel";
 import { stripDepositNoteMetadata } from "@/lib/utils/deposit-note";
 import { resolveVoidRemark } from "@/lib/utils/void-remark";
@@ -571,9 +571,12 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6 print:max-w-none print:gap-0 print:p-0">
       {doc.status === "VOID" ? (
-        <VoidedDocumentAlert
-          remark={resolveVoidRemark(doc.remark, doc.void_reason, doc.notes)}
-        />
+        <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800 print:hidden">
+          🚫 เอกสารนี้ถูกยกเลิกแล้ว (VOID) — สาเหตุ:{" "}
+          {doc.void_reason?.trim() ||
+            resolveVoidRemark(doc.remark, doc.void_reason, doc.notes) ||
+            "—"}
+        </div>
       ) : null}
 
       {/* Screen-only chrome / actions */}
@@ -678,6 +681,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
           {canEditIssuedHeader ? (
             <SalesHeaderEditDialog
               documentId={doc.id}
+              docNo={doc.doc_no}
               docDate={doc.doc_date}
               notes={
                 doc.doc_type === "DEP_IN"
@@ -713,6 +717,9 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                 ) <= 0.05
               }
             />
+          ) : null}
+          {doc.status !== "VOID" ? (
+            <VoidSalesDocumentButton documentId={doc.id} docNo={doc.doc_no} />
           ) : null}
           {canSendKanban || showBatchMto ? (
             <SendToProductionButton

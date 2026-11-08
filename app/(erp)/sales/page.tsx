@@ -80,7 +80,14 @@ function statusBadge(status: DocumentStatus) {
       </Badge>
     );
   }
-  if (status === "CANCELLED" || status === "VOID") {
+  if (status === "VOID") {
+    return (
+      <Badge className="border-red-200 bg-red-50 text-red-700 hover:bg-red-50">
+        VOID (ยกเลิก)
+      </Badge>
+    );
+  }
+  if (status === "CANCELLED") {
     return (
       <Badge className="border-red-200 bg-red-50 text-red-700 hover:bg-red-50">
         {status}
@@ -245,7 +252,9 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  documents.map((doc) => (
+                  documents.map((doc) => {
+                    const voided = doc.status === "VOID";
+                    return (
                     <TableRow
                       key={doc.id}
                       className="border-b border-slate-100 odd:bg-white even:bg-slate-50/90 hover:bg-blue-50/60 transition-colors"
@@ -280,7 +289,13 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
                           {doc.customer_name || "—"}
                         </span>
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-right font-medium tabular-nums text-slate-900">
+                      <TableCell
+                        className={`whitespace-nowrap text-right font-medium tabular-nums ${
+                          voided
+                            ? "text-red-700 line-through decoration-red-400"
+                            : "text-slate-900"
+                        }`}
+                      >
                         {formatMoney(doc.grand_total)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
@@ -298,7 +313,8 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
                         </Link>
                       </TableCell>
                     </TableRow>
-                  ))
+                    );
+                  })
                 )}
               </TableBody>
             </Table>

@@ -44,8 +44,13 @@ function money(value: number): string {
   });
 }
 
+function documentMonthKey(value: string): string {
+  return value.trim().slice(0, 7);
+}
+
 export function SalesHeaderEditDialog({
   documentId,
+  docNo,
   docDate,
   notes,
   referenceNo,
@@ -66,6 +71,7 @@ export function SalesHeaderEditDialog({
   pricesIncludeVat = false,
 }: {
   documentId: string;
+  docNo: string;
   docDate: string;
   notes: string;
   referenceNo: string;
@@ -225,8 +231,17 @@ export function SalesHeaderEditDialog({
         toast.error(result.error ?? "แก้ไขหัวบิลไม่สำเร็จ");
         return;
       }
-      toast.success("บันทึกหัวบิลแล้ว");
+      const nextDocNo = result.data.doc_no?.trim() || result.data.document_no?.trim() || "";
+      toast.success(
+        nextDocNo && nextDocNo !== docNo
+          ? `บันทึกหัวบิลแล้ว — เลขที่เอกสารใหม่ ${nextDocNo}`
+          : "บันทึกหัวบิลแล้ว",
+      );
       setOpen(false);
+      if (nextDocNo && nextDocNo !== docNo) {
+        router.replace(`/sales/${encodeURIComponent(nextDocNo)}`);
+        return;
+      }
       router.refresh();
     });
   }
@@ -259,6 +274,11 @@ export function SalesHeaderEditDialog({
                 disabled={pending}
                 onChange={(event) => setDate(event.target.value)}
               />
+              {documentMonthKey(date) !== documentMonthKey(docDate) ? (
+                <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-medium text-sky-800">
+                  ℹ️ การเปลี่ยนวันที่ข้ามเดือน ระบบจะรันเลขที่เอกสารใหม่ให้ตรงกับงวดเดือนของวันที่เลือกโดยอัตโนมัติ
+                </p>
+              ) : null}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="issued-reference-no">เลขที่อ้างอิง / เลขสลิป</Label>

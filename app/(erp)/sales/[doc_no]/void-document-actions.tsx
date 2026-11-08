@@ -7,13 +7,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { FilePlus2, Loader2, Ban } from "lucide-react";
+import { FilePlus2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   cloneDocumentToNewDraft,
   voidDocumentAction,
 } from "@/lib/actions/document-actions";
-import { DOCUMENT_ACTIONS } from "@/lib/constants/document-actions";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -152,23 +151,6 @@ export default function VoidDocumentActions({
 
   return (
     <>
-      <Button
-        type="button"
-        variant="destructive"
-        className="h-10 gap-2"
-        disabled={isSaving}
-        onClick={() => openConfirm("void")}
-      >
-        {isSaving && confirmMode === "void" ? (
-          <Loader2 className="size-4 animate-spin" />
-        ) : (
-          <Ban className="size-4" />
-        )}
-        {isSaving && confirmMode === "void"
-          ? "กำลังดำเนินการ..."
-          : DOCUMENT_ACTIONS.VOID}
-      </Button>
-
       <Button
         type="button"
         variant="outline"

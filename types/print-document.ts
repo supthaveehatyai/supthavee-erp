@@ -164,6 +164,8 @@ export type PrintLayoutProps = {
   showSignatureFooter?: boolean;
   /** ไม่ดันส่วนท้ายไปก้นกระดาษ เพื่อไม่ให้เกิดช่องว่างกลางหน้า */
   stackContent?: boolean;
+  /** ลายน้ำทับกระดาษพิมพ์ เช่น เอกสาร VOID */
+  watermark?: string | null;
   /** ไม่ล็อกขนาดกระดาษ เพื่อให้ผู้ใช้เลือก A4 หรือ A5 ในหน้าต่างพิมพ์ */
   respectPrinterPaper?: boolean;
   children: ReactNode;

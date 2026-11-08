@@ -131,6 +131,7 @@ export default async function PrintPaymentReceiptTemplate({
       paperSize={paperSize}
       stackContent={isSalesReceipt}
       showSignatureFooter={!isSalesReceipt}
+      watermark={doc.status === "VOID" ? "VOID / ยกเลิกแล้ว" : null}
       documentId="payment-print-document"
       className={cn("mt-2 print:mt-0", className)}
       footer={{

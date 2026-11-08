@@ -107,6 +107,7 @@ export default async function PrintSettlementVoucherTemplate({
       paperSize={paperSize}
       documentId="settlement-print-document"
       className={cn("mt-2 print:mt-0", className)}
+      watermark={doc.status === "VOID" ? "VOID / ยกเลิกแล้ว" : null}
       footer={{
         preparedLabel: "ผู้จัดทำ",
         receivedLabel: "ผู้เกี่ยวข้อง",

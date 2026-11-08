@@ -67,6 +67,7 @@ export async function PrintLayout({
   officialReference,
   showSignatureFooter = true,
   stackContent = false,
+  watermark,
 }: PrintLayoutProps) {
   const preview = PAPER_PREVIEW[paperSize] ?? PAPER_PREVIEW.A4;
   const abbSheet = headerVariant === "sales-tax" && paperSize === "A5-Portrait";
@@ -85,7 +86,7 @@ export async function PrintLayout({
         id={documentId}
         data-paper-size={paperSize}
         className={cn(
-          "erp-print-document mx-auto flex flex-col bg-white text-black",
+          "erp-print-document relative mx-auto flex flex-col bg-white text-black",
           stackContent ? "justify-start" : "justify-between",
           abbSheet
             ? "max-w-[148mm] min-h-[200mm] p-4 text-[11px] leading-snug print:w-[148mm] print:max-w-[148mm] print:p-[6mm_8mm]"
@@ -96,6 +97,13 @@ export async function PrintLayout({
           className,
         )}
       >
+        {watermark?.trim() ? (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center overflow-hidden">
+            <p className="-rotate-12 select-none text-center text-5xl font-black tracking-widest text-red-600/35">
+              {watermark.trim()}
+            </p>
+          </div>
+        ) : null}
         <div className="min-h-0">
         <DocumentPrintHeader
           title={title}

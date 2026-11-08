@@ -3602,6 +3602,13 @@ export async function updateSalesDocumentDirect(input: {
         args: Record<string, unknown>,
       ) => Promise<{ data: unknown; error: { message: string } | null }>;
     };
+    const { data: currentRow } = await supabase
+      .from("documents")
+      .select("doc_no")
+      .eq("id", documentId)
+      .maybeSingle();
+    const previousDocNo = String(currentRow?.doc_no ?? "").trim();
+
     const saved = await rpcClient.rpc("update_sales_document_direct", {
       p_document_id: documentId,
       p_doc_date: docDate,
@@ -3622,15 +3629,20 @@ export async function updateSalesDocumentDirect(input: {
     });
     if (saved.error) return { data: null, error: saved.error.message };
 
-    const payload = (Array.isArray(saved.data) ? saved.data[0] : saved.data) as
-      | { doc_no?: string }
-      | null;
-    const docNo = String(payload?.doc_no ?? "");
+    const docNo = readIssuedDocNo(saved.data) || previousDocNo;
     revalidatePath("/sales");
     revalidatePath("/finance/deposits");
     revalidatePath("/sales/orders");
-    if (docNo) revalidatePath(`/sales/${encodeURIComponent(docNo)}`);
-    return { data: { document_id: documentId, document_no: docNo }, error: null };
+    if (previousDocNo) {
+      revalidatePath(`/sales/${encodeURIComponent(previousDocNo)}`);
+    }
+    if (docNo && docNo !== previousDocNo) {
+      revalidatePath(`/sales/${encodeURIComponent(docNo)}`);
+    }
+    return {
+      data: { document_id: documentId, document_no: docNo, doc_no: docNo },
+      error: null,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : "แก้ไขหัวบิลขายไม่สำเร็จ";
     return { data: null, error: message };
@@ -5045,6 +5057,18 @@ function parseVoidTransactionRpc(rpcData: unknown): {
   };
 }
 
+function readIssuedDocNo(payload: unknown): string {
+  if (typeof payload === "string") return payload.trim();
+  if (Array.isArray(payload)) return readIssuedDocNo(payload[0]);
+  if (!payload || typeof payload !== "object") return "";
+  const row = payload as Record<string, unknown>;
+  for (const key of ["doc_no", "document_no", "new_doc_no"]) {
+    const value = String(row[key] ?? "").trim();
+    if (value && value !== "null") return value;
+  }
+  return "";
+}
+
 function readVoidText(value: unknown): string {
   if (value == null) return "";
   if (typeof value !== "string" && typeof value !== "number") return "";
@@ -5100,6 +5124,64 @@ function resolveVoidActionPayload(
     documentId: readVoidText(input),
     voidReason: readVoidText(maybeReason),
   };
+}
+
+/** ยกเลิกเอกสารขายผ่าน `void_sales_document` — คืนสต็อก ปลดคู่ชนธนาคาร และคงเลขที่เอกสาร */
+export async function voidSalesDocumentAction(
+  documentId: string,
+  voidReason: string,
+) {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) return { error: owner.error };
+
+  const id = documentId?.trim() ?? "";
+  const reason = voidReason?.trim() ?? "";
+  if (!id) return { error: "ไม่พบรหัสเอกสาร" };
+  if (!reason) return { error: "กรุณาระบุสาเหตุการยกเลิก" };
+
+  try {
+    const supabase = createSupabaseServerClient();
+    const { data: currentRow } = await supabase
+      .from("documents")
+      .select("doc_no")
+      .eq("id", id)
+      .maybeSingle();
+    const docNo = String(currentRow?.doc_no ?? "").trim();
+
+    const rpcClient = supabase as unknown as {
+      rpc: (
+        fn: "void_sales_document",
+        args: { p_document_id: string; p_void_reason: string },
+      ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    };
+    const voided = await rpcClient.rpc("void_sales_document", {
+      p_document_id: id,
+      p_void_reason: reason,
+    });
+    if (voided.error) {
+      if (/Could not find the function|PGRST202/i.test(voided.error.message)) {
+        return { error: "ยังไม่พบฟังก์ชันยกเลิกเอกสารขายบนฐานข้อมูลที่แอปเชื่อมอยู่" };
+      }
+      return { error: voided.error.message };
+    }
+    if (voided.data && typeof voided.data === "object" && !Array.isArray(voided.data)) {
+      const row = voided.data as Record<string, unknown>;
+      if (row.success === false || row.ok === false) {
+        return { error: String(row.error ?? row.message ?? "ยกเลิกเอกสารไม่สำเร็จ") };
+      }
+      const payloadError = String(row.error ?? "").trim();
+      if (payloadError) return { error: payloadError };
+    }
+
+    revalidatePath("/sales");
+    revalidatePath("/sales/reconcile");
+    revalidatePath("/inventory/ledger");
+    if (docNo) revalidatePath(`/sales/${encodeURIComponent(docNo)}`);
+    return { error: null as string | null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "ยกเลิกเอกสารไม่สำเร็จ";
+    return { error: message };
+  }
 }
 
 /**
