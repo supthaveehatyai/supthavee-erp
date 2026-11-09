@@ -67,6 +67,10 @@ function toDraftItems(payload: SaveSalesOrderDraftInput) {
     discount_amount: item.discount_amount,
     line_total: item.line_total,
     sort_order: item.sort_order ?? index,
+    bundle_kit_id: item.bundle_kit_id ?? null,
+    is_bundle_header: item.is_bundle_header === true,
+    bundle_components: item.bundle_components,
+    is_service_item: item.is_bundle_header ? false : item.is_service_item,
   }));
 }
 

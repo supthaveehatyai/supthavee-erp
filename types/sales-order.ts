@@ -29,6 +29,9 @@ export type SalesOrderLineItem = {
   model_id: string | null;
   model_code: string | null;
   is_manufactured: boolean;
+  bundle_kit_id?: string | null;
+  is_bundle_header?: boolean;
+  bundle_components?: CreateDraftDocumentItemInput["bundle_components"];
 };
 
 export type SaveSalesOrderDraftInput = {

@@ -1330,7 +1330,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
             <CardHeader className="pb-3">
               <CardTitle className="text-base">รายการสินค้า</CardTitle>
               <CardDescription>
-                {doc.items.length} รายการ — แสดงแบบอ่านอย่างเดียว
+                {doc.items.filter((item) => !item.is_bundle_component).length} รายการ — แสดงแบบอ่านอย่างเดียว
               </CardDescription>
               <GoodsQtyBadge rows={doc.items} className="mt-2" />
             </CardHeader>
@@ -1377,8 +1377,15 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      doc.items.map((item, index) => (
-                        <TableRow key={item.id}>
+                      doc.items.map((item) => {
+                        const component = item.is_bundle_component === true;
+                        const lineNo = component
+                          ? ""
+                          : doc.items
+                              .filter((row) => !row.is_bundle_component)
+                              .findIndex((row) => row.id === item.id) + 1;
+                        return (
+                        <TableRow key={item.id} className={component ? "bg-slate-50" : undefined}>
                           <TableCell className="px-3">
                             <LineItemProductThumb
                               imageUrl={item.image_url}
@@ -1386,13 +1393,16 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                             />
                           </TableCell>
                           <TableCell className="px-4 text-xs tabular-nums text-slate-500">
-                            {index + 1}
+                            {lineNo || ""}
                           </TableCell>
                           <TableCell className="px-4 font-mono text-xs font-semibold text-slate-800">
-                            {item.sku ?? "—"}
+                            {component ? item.sku ?? "—" : item.sku ?? "—"}
                           </TableCell>
                           <TableCell className="max-w-[18rem] px-4 text-sm text-slate-700">
-                            <span className="line-clamp-3">
+                            <span className={component ? "block pl-3 text-slate-500" : "line-clamp-3"}>
+                              {component && !String(item.description ?? "").trim().startsWith("↳")
+                                ? "↳ "
+                                : ""}
                               {displayDocumentItemDescription(
                                 item.description,
                                 item.product_name,
@@ -1458,7 +1468,8 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                             )}
                           </TableCell>
                         </TableRow>
-                      ))
+                        );
+                      })
                     )}
                   </TableBody>
                 </Table>

@@ -30,6 +30,8 @@ import {
 } from "@/lib/utils/document-summary";
 import { isCancelAndReplaceDraft } from "@/lib/utils/cancel-replace-draft";
 import { displayDocumentItemDescription } from "@/lib/utils/credit-note-line";
+import { salesBundleDraftFields } from "@/lib/sales/bundle-lines";
+import { BundleLineDetails } from "@/components/sales/bundle-line-details";
 import { CashReceiptPaymentBox } from "@/components/sales/cash-receipt-payment-box";
 import { GoodsQtyBadge } from "@/components/sales/goods-qty-badge";
 import {
@@ -156,24 +158,49 @@ function createServiceLine(): SalesLineItem {
 }
 
 function linesFromDocument(doc: DocumentDetail): SalesLineItem[] {
-  return doc.items.map((item, index) => ({
-    key: item.id || `${item.product_id ?? "line"}-${index}`,
-    product_id: item.product_id,
-    sku: item.product_id ? (item.sku ?? "—") : "SERVICE",
-    is_service_item: item.is_service_item === true || !item.product_id,
-    description: item.description || item.product_name || "",
-    qty: Number(item.qty ?? 0),
-    uom_used: item.uom_used?.trim() || "ตัว",
-    unit_price: Number(item.unit_price ?? 0),
-    cost_price: Number(item.unit_cost_price ?? 0),
-    discount_text: item.discount_text ?? "",
-    discount_amount: Number(item.discount_amount ?? 0),
-    line_total: Number(item.line_total ?? 0),
-    image_url: item.image_url ?? null,
-    is_service: item.is_service === true || item.is_service_item === true,
-    is_manufactured: item.is_manufactured === true,
-    catalog_unit_price: Number(item.unit_price ?? 0) > 0 ? Number(item.unit_price ?? 0) : undefined,
-  }));
+  const children = new Map<string, DocumentDetail["items"]>();
+  for (const item of doc.items) {
+    if (!item.is_bundle_component || !item.parent_item_id) continue;
+    const list = children.get(item.parent_item_id) ?? [];
+    list.push(item);
+    children.set(item.parent_item_id, list);
+  }
+  return doc.items
+    .filter((item) => !item.is_bundle_component)
+    .map((item, index) => ({
+      key: item.id || `${item.product_id ?? "line"}-${index}`,
+      product_id: item.product_id,
+      sku: item.is_bundle_header ? item.sku || "ชุด" : item.product_id ? item.sku ?? "—" : "SERVICE",
+      is_service_item: item.is_bundle_header
+        ? false
+        : item.is_service_item === true || !item.product_id,
+      description: item.is_bundle_header
+        ? item.model_short_name || item.description || item.product_name || ""
+        : item.description || item.product_name || "",
+      qty: Number(item.qty ?? 0),
+      uom_used: item.uom_used?.trim() || (item.is_bundle_header ? "ชุด" : "ตัว"),
+      unit_price: Number(item.unit_price ?? 0),
+      cost_price: Number(item.unit_cost_price ?? 0),
+      discount_text: item.discount_text ?? "",
+      discount_amount: Number(item.discount_amount ?? 0),
+      line_total: Number(item.line_total ?? 0),
+      image_url: item.image_url ?? null,
+      is_service: item.is_bundle_header
+        ? false
+        : item.is_service === true || item.is_service_item === true,
+      is_manufactured: item.is_manufactured === true,
+      catalog_unit_price:
+        Number(item.unit_price ?? 0) > 0 ? Number(item.unit_price ?? 0) : undefined,
+      bundle_kit_id: item.bundle_kit_id ?? null,
+      is_bundle_header: item.is_bundle_header === true,
+      bundle_components: (children.get(item.id) ?? []).map((child) => ({
+        product_id: child.product_id ?? "",
+        sku: child.sku ?? "",
+        description: child.description || child.product_name || child.sku || "",
+        qty: Number(child.qty ?? 0),
+        unit_cost_price: Number(child.unit_cost_price ?? 0),
+      })),
+    }));
 }
 
 export type SalesEditWorkspaceProps = {
@@ -411,6 +438,13 @@ export default function SalesEditWorkspace({
     );
   }
 
+  function handleAddBundleLines(lines: SalesLineItem[]) {
+    if (lines.length === 0 || isReplacement) return;
+    setLineItems((current) => [...current, ...lines]);
+    const kits = lines.reduce((sum, line) => sum + line.qty, 0);
+    toast.success(`เพิ่มชุดเซ็ต ${kits} ชุดลงบิลแล้ว`);
+  }
+
   function updateLineQty(key: string, qtyRaw: string) {
     if (isReplacement) return;
     const qty = Number.parseFloat(qtyRaw);
@@ -590,7 +624,6 @@ export default function SalesEditWorkspace({
         items: isReplacement
           ? undefined
           : lineItems.map((row, index) => ({
-              product_id: row.product_id || null,
               description: row.description,
               qty: row.qty,
               uom_used: row.uom_used,
@@ -600,7 +633,7 @@ export default function SalesEditWorkspace({
               discount_amount: row.discount_amount,
               line_total: row.line_total,
               sort_order: index,
-              is_service_item: !row.product_id || row.is_service_item === true,
+              ...salesBundleDraftFields(row),
             })),
       });
 
@@ -909,6 +942,7 @@ export default function SalesEditWorkspace({
             <div className="flex flex-col gap-3">
               <ModelMatrixPicker
                 onAddToBill={handleAddToBill}
+                onAddBundleLines={handleAddBundleLines}
                 disabled={isPending}
               />
               <Button
@@ -959,8 +993,9 @@ export default function SalesEditWorkspace({
                   </TableRow>
                 ) : (
                   lineItems.map((row, index) => {
+                    const bundleLine = row.is_bundle_header === true;
                     const serviceLine =
-                      row.is_service_item === true || !row.product_id;
+                      !bundleLine && (row.is_service_item === true || !row.product_id);
                     return (
                     <TableRow key={row.key}>
                       <TableCell className="px-3">
@@ -992,6 +1027,11 @@ export default function SalesEditWorkspace({
                             }
                             className="h-9"
                           />
+                        ) : bundleLine ? (
+                          <BundleLineDetails
+                            description={row.description}
+                            components={row.bundle_components}
+                          />
                         ) : (
                           displayDocumentItemDescription(row.description)
                         )}
@@ -1012,6 +1052,8 @@ export default function SalesEditWorkspace({
                           <span className="text-sm tabular-nums text-slate-800">
                             {row.qty}
                           </span>
+                        ) : bundleLine ? (
+                          <span className="text-sm tabular-nums text-slate-800">{row.qty}</span>
                         ) : (
                           <Input
                             type="number"

@@ -57,6 +57,7 @@ import {
   getProductOnHandQty,
   getProductsForCatalog,
 } from "@/lib/actions/product-actions";
+import { BundleKitsManager } from "@/components/products/bundle-kits-manager";
 import type {
   ExistingProductModel,
   LoadableProductModel,
@@ -1015,6 +1016,7 @@ export default function ProductsClient() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const vendorIdFromQuery = searchParams.get("vendorId")?.trim() || "";
+  const [bundleOpen, setBundleOpen] = useState(false);
 
   function openModelPreview(modelId: string | null | undefined) {
     const id = modelId?.trim() || "";
@@ -2981,6 +2983,13 @@ export default function ProductsClient() {
             </div>
             <button
               type="button"
+              onClick={() => setBundleOpen((open) => !open)}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
+            >
+              📦 จัดการชุดเซ็ตจับคู่ (Bundle Kits)
+            </button>
+            <button
+              type="button"
               onClick={() => void openDialog(vendorIdFromQuery)}
               className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
@@ -2998,6 +3007,8 @@ export default function ProductsClient() {
           </div>
         )}
       </header>
+
+      {bundleOpen ? <BundleKitsManager onClose={() => setBundleOpen(false)} /> : null}
 
       <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">

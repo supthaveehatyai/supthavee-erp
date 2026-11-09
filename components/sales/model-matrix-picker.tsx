@@ -18,6 +18,10 @@ import {
   getModelMatrixForSale,
   searchProductModels,
 } from "@/lib/actions/product.actions";
+import { searchBundleKits } from "@/lib/actions/product-actions";
+import { BundlePickerDialog } from "@/components/sales/bundle-picker-dialog";
+import type { BundleKitSearchHit } from "@/types/bundle-kit";
+import type { SalesLineItem } from "@/types/document";
 import type {
   ModelMatrixForSale,
   ModelMatrixSkuRow,
@@ -82,6 +86,8 @@ export type ModelMatrixPickerProps = {
   manufacturedOnly?: boolean;
   /** บรรทัดที่มีจำนวน > 0 จาก Matrix Dialog */
   onAddToBill: (items: ModelMatrixBillItem[]) => void;
+  /** แถวหัวชุดเซ็ตที่จับคู่สี/ไซส์ครบแล้ว */
+  onAddBundleLines?: (lines: SalesLineItem[]) => void;
 };
 
 function formatMoney(value: number): string {
@@ -216,6 +222,7 @@ export default function ModelMatrixPicker({
   placeholder = "ค้นหารหัสรุ่นหรือชื่อรุ่นสินค้า...",
   manufacturedOnly = false,
   onAddToBill,
+  onAddBundleLines,
 }: ModelMatrixPickerProps) {
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -223,6 +230,9 @@ export default function ModelMatrixPicker({
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [results, setResults] = useState<ProductModelSearchItem[]>([]);
+  const [kitResults, setKitResults] = useState<BundleKitSearchHit[]>([]);
+  const [bundleKitId, setBundleKitId] = useState<string | null>(null);
+  const [bundleOpen, setBundleOpen] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isSearchPending, startSearchTransition] = useTransition();
 
@@ -256,6 +266,7 @@ export default function ModelMatrixPicker({
 
     if (debouncedQuery.length < 1) {
       setResults([]);
+      setKitResults([]);
       setSearchError(null);
       return;
     }
@@ -263,18 +274,25 @@ export default function ModelMatrixPicker({
     let active = true;
     startSearchTransition(async () => {
       try {
-        const result = await searchProductModels(
-          debouncedQuery,
-          manufacturedOnly ? { manufacturedOnly: true } : undefined,
-        );
+        const [result, kits] = await Promise.all([
+          searchProductModels(
+            debouncedQuery,
+            manufacturedOnly ? { manufacturedOnly: true } : undefined,
+          ),
+          manufacturedOnly
+            ? Promise.resolve({ data: [] as BundleKitSearchHit[], error: null })
+            : searchBundleKits(debouncedQuery),
+        ]);
         if (!active) return;
         if (!result.success) {
           setSearchError(result.error);
           setResults([]);
+          setKitResults([]);
           return;
         }
-        setSearchError(null);
+        setSearchError(kits.error);
         setResults(result.data);
+        setKitResults(kits.data);
       } catch (err) {
         if (!active) return;
         setSearchError(
@@ -294,7 +312,14 @@ export default function ModelMatrixPicker({
     setQuery("");
     setDebouncedQuery("");
     setResults([]);
+    setKitResults([]);
     setSearchError(null);
+  }
+
+  function openBundle(kit: BundleKitSearchHit) {
+    closeSearch();
+    setBundleKitId(kit.id);
+    setBundleOpen(true);
   }
 
   function openMatrixForModel(model: ProductModelSearchItem) {
@@ -443,12 +468,42 @@ export default function ModelMatrixPicker({
               {!searchError &&
               !isSearchPending &&
               debouncedQuery.length > 0 &&
-              results.length === 0 ? (
+              results.length === 0 &&
+              kitResults.length === 0 ? (
                 <CommandEmpty>
                   {manufacturedOnly
                     ? "ไม่พบรุ่นผลิตเอง (is_manufactured) ที่ตรงกับคำค้น"
                     : "ไม่พบรุ่นสินค้าที่ตรงกับคำค้น"}
                 </CommandEmpty>
+              ) : null}
+
+              {!searchError && kitResults.length > 0 ? (
+                <CommandGroup heading={`ชุดเซ็ต (${kitResults.length})`}>
+                  {kitResults.map((kit) => (
+                    <CommandItem
+                      key={kit.id}
+                      value={`${kit.kit_code} ${kit.kit_name}`}
+                      onSelect={() => openBundle(kit)}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        openBundle(kit);
+                      }}
+                      className="cursor-pointer items-center gap-2 py-2"
+                    >
+                      <span className="shrink-0 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-200">
+                        📦 ชุดเซ็ต
+                      </span>
+                      <span className="min-w-0 truncate text-sm">
+                        {kit.kit_code} — {kit.short_name || kit.kit_name} (
+                        {kit.base_price.toLocaleString("th-TH", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}{" "}
+                        ฿/ชุด)
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
               ) : null}
 
               {!searchError && results.length > 0 ? (
@@ -718,6 +773,12 @@ export default function ModelMatrixPicker({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <BundlePickerDialog
+        kitId={bundleKitId}
+        open={bundleOpen}
+        onOpenChange={setBundleOpen}
+        onConfirm={(lines) => onAddBundleLines?.(lines)}
+      />
     </div>
   );
 }

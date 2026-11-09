@@ -118,6 +118,19 @@ export type CreateDraftDocumentItemInput = {
   sort_order?: number;
   /** true เมื่อเป็นค่าบริการที่ไม่มี SKU สต็อก (`document_items.is_service_item`) */
   is_service_item?: boolean;
+  /** แถวแม่ของชุดเซ็ต — ไม่ตัดสต็อก */
+  bundle_kit_id?: string | null;
+  is_bundle_header?: boolean;
+  /** แถวลูกเสื้อ/กางเกงที่ตัดสต็อกจริง ราคาขายเป็น 0 */
+  bundle_components?: SalesBundleComponentLine[];
+};
+
+export type SalesBundleComponentLine = {
+  product_id: string;
+  sku: string;
+  description: string;
+  qty: number;
+  unit_cost_price: number;
 };
 
 export type CreateDraftDocumentInput = {
@@ -290,6 +303,9 @@ export type SalesLineItem = {
   is_manufactured?: boolean;
   /** ราคาขายมาตรฐานตอนเลือก SKU — ใช้คืนราคาเมื่อกดแถมฟรีหลังตั้งราคาเป็น 0 */
   catalog_unit_price?: number;
+  bundle_kit_id?: string | null;
+  is_bundle_header?: boolean;
+  bundle_components?: SalesBundleComponentLine[];
 };
 
 export type CompleteDocumentLineInput = {
@@ -383,6 +399,10 @@ export type DocumentDetailItem = {
   /** document_items.is_sent_to_production — หรือ derive จาก production_status */
   is_sent_to_production: boolean;
   production_job_no: string | null;
+  bundle_kit_id?: string | null;
+  parent_item_id?: string | null;
+  is_bundle_header?: boolean;
+  is_bundle_component?: boolean;
 };
 
 /** Child document that references this row via `ref_document_id` (lineage). */

@@ -42,6 +42,8 @@ import type {
 import ModelMatrixPicker, {
   type ModelMatrixBillItem,
 } from "@/components/sales/model-matrix-picker";
+import { BundleLineDetails } from "@/components/sales/bundle-line-details";
+import { salesBundleDraftFields } from "@/lib/sales/bundle-lines";
 import { ServiceLineShortcuts } from "@/components/sales/service-line-shortcuts";
 import { SalesMockupCard } from "@/components/sales/sales-mockup-card";
 import { moneyAfterQtyPrice } from "@/lib/sales/service-line-price";
@@ -499,6 +501,14 @@ export default function SalesCreateWorkspace({
     );
   }
 
+  function handleAddBundleLines(lines: SalesLineItem[]) {
+    if (lines.length === 0) return;
+    clearLastSavedArtifact();
+    setLineItems((current) => [...current, ...lines]);
+    const kits = lines.reduce((sum, line) => sum + line.qty, 0);
+    toast.success(`เพิ่มชุดเซ็ต ${kits} ชุดลงบิลแล้ว`);
+  }
+
   function updateLineQty(key: string, qtyRaw: string) {
     clearLastSavedArtifact();
     const qty = Number.parseFloat(qtyRaw);
@@ -739,7 +749,6 @@ export default function SalesCreateWorkspace({
             }
           : {}),
         items: lineItems.map((row, index) => ({
-          product_id: row.product_id || null,
           description: row.description,
           qty: row.qty,
           uom_used: row.uom_used,
@@ -749,7 +758,7 @@ export default function SalesCreateWorkspace({
           discount_amount: row.discount_amount,
           line_total: row.line_total,
           sort_order: index,
-          is_service_item: !row.product_id || row.is_service_item === true,
+          ...salesBundleDraftFields(row),
         })),
       });
 
@@ -1099,6 +1108,7 @@ export default function SalesCreateWorkspace({
         <CardContent>
           <ModelMatrixPicker
             disabled={isPending}
+            onAddBundleLines={handleAddBundleLines}
             onAddToBill={handleAddToBill}
           />
           <p className="mt-2 text-[11px] text-slate-500">
@@ -1169,7 +1179,12 @@ export default function SalesCreateWorkspace({
                         {row.sku}
                       </TableCell>
                       <TableCell className="max-w-[16rem] px-4 text-sm text-slate-700">
-                        {row.product_id ? (
+                        {row.is_bundle_header ? (
+                          <BundleLineDetails
+                            description={row.description}
+                            components={row.bundle_components}
+                          />
+                        ) : row.product_id ? (
                           <span className="line-clamp-2">{row.description}</span>
                         ) : (
                           <Input
@@ -1201,21 +1216,25 @@ export default function SalesCreateWorkspace({
                         ) : null}
                       </TableCell>
                       <TableCell className="px-4">
-                        <Input
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={row.qty}
-                          disabled={isPending}
-                          onChange={(event) =>
-                            updateLineQty(row.key, event.target.value)
-                          }
-                          className="h-8 w-20 tabular-nums"
-                          aria-label={`จำนวน ${row.sku}`}
-                        />
+                        {row.is_bundle_header ? (
+                          <span className="text-sm tabular-nums text-slate-800">{row.qty}</span>
+                        ) : (
+                          <Input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={row.qty}
+                            disabled={isPending}
+                            onChange={(event) =>
+                              updateLineQty(row.key, event.target.value)
+                            }
+                            className="h-8 w-20 tabular-nums"
+                            aria-label={`จำนวน ${row.sku}`}
+                          />
+                        )}
                       </TableCell>
                       <TableCell className="px-4 text-xs text-slate-600">
-                        {row.product_id ? (
+                        {row.product_id || row.is_bundle_header ? (
                           row.uom_used
                         ) : (
                           <Input

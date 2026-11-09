@@ -92,9 +92,14 @@ function isZeroServiceLine(item: DocumentDetailItem): boolean {
 
 function rowFromItem(item: DocumentDetailItem, description: string): PrintLineRow {
   const discount = lineDiscountPresentation(item);
+  const sku = item.is_bundle_header
+    ? item.sku?.trim() || item.model_code?.trim() || "ชุด"
+    : item.product_id
+      ? item.sku?.trim() || "—"
+      : "SERVICE";
   return {
     key: item.id,
-    sku: item.product_id ? item.sku?.trim() || "—" : "SERVICE",
+    sku,
     description: withDiscountNote(description, discount.note),
     qty: Number(item.qty ?? 0),
     uom_used: item.uom_used?.trim() || "—",
@@ -110,9 +115,10 @@ export function buildPrintLineRows(
   mode: PrintNameMode,
   hideZeroServiceLines: boolean,
 ): PrintLineRow[] {
+  const printable = items.filter((item) => item.is_bundle_component !== true);
   const visible = hideZeroServiceLines
-    ? items.filter((item) => !isZeroServiceLine(item))
-    : items;
+    ? printable.filter((item) => !isZeroServiceLine(item))
+    : printable;
 
   if (mode === "sku") {
     return visible.map((item) =>

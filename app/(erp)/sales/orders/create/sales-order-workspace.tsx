@@ -36,6 +36,7 @@ import { formatThaiDate } from "@/lib/utils/date-formatter";
 import type {
   ContactPersonOption,
   DocumentDetail,
+  SalesLineItem,
   SalesProductSearchItem,
 } from "@/types/document";
 import type {
@@ -276,6 +277,34 @@ export default function SalesOrderWorkspace({
     );
   }
 
+  function handleAddBundleLines(lines: SalesLineItem[]) {
+    if (lines.length === 0) return;
+    setLineItems((current) => [
+      ...current,
+      ...lines.map((line) => ({
+        key: line.key,
+        product_id: line.product_id ?? "",
+        sku: line.sku,
+        description: line.description,
+        qty: line.qty,
+        uom_used: line.uom_used,
+        unit_price: line.unit_price,
+        cost_price: line.cost_price,
+        discount_text: line.discount_text,
+        discount_amount: line.discount_amount,
+        line_total: line.line_total,
+        image_url: line.image_url,
+        model_id: null,
+        model_code: line.sku,
+        is_manufactured: false,
+        bundle_kit_id: line.bundle_kit_id ?? null,
+        is_bundle_header: true,
+        bundle_components: line.bundle_components,
+      })),
+    ]);
+    toast.success(`เพิ่มชุดเซ็ต ${lines.reduce((sum, line) => sum + line.qty, 0)} ชุดลงบิลแล้ว`);
+  }
+
   function handleAddToBill(items: ModelMatrixBillItem[]) {
     if (items.length === 0) return;
     setLineItems((current) => {
@@ -390,7 +419,7 @@ export default function SalesOrderWorkspace({
       tracking_no: header.data.tracking_no,
       one_time_address: header.data.one_time_address,
       items: lineItems.map((row, index) => ({
-        product_id: row.product_id,
+        product_id: row.is_bundle_header ? null : row.product_id,
         description: row.description,
         qty: row.qty,
         uom_used: row.uom_used,
@@ -400,6 +429,10 @@ export default function SalesOrderWorkspace({
         discount_amount: row.discount_amount,
         line_total: row.line_total,
         sort_order: index,
+        bundle_kit_id: row.bundle_kit_id ?? null,
+        is_bundle_header: row.is_bundle_header === true,
+        bundle_components: row.bundle_components,
+        is_service_item: false,
       })),
     };
   }
@@ -699,8 +732,9 @@ export default function SalesOrderWorkspace({
           <ModelMatrixPicker
             manufacturedOnly={false}
             disabled={isBusy}
-            placeholder="ค้นหาเสื้อในสต็อก, งานสกรีน/ปัก หรือสินค้าผลิตเอง..."
+            placeholder="ค้นหาเสื้อในสต็อก, งานสกรีน/ปัก, สินค้าผลิตเอง หรือชุดเซ็ต..."
             onAddToBill={handleAddToBill}
+            onAddBundleLines={handleAddBundleLines}
           />
 
           <div className="overflow-x-auto rounded-xl border border-slate-200">
@@ -742,13 +776,18 @@ export default function SalesOrderWorkspace({
                         <p className="text-sm font-medium text-slate-800">
                           {row.description}
                         </p>
+                        {row.bundle_components?.map((component) => (
+                          <p key={component.product_id} className="text-[11px] text-slate-500">
+                            {component.description} × {component.qty}
+                          </p>
+                        ))}
                       </TableCell>
                       <TableCell>
                         <Input
                           type="number"
                           min={0}
                           step={1}
-                          disabled={isBusy}
+                          disabled={isBusy || row.is_bundle_header === true}
                           value={row.qty || ""}
                           onChange={(event) =>
                             updateLineQty(row.key, event.target.value)

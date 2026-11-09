@@ -81,6 +81,7 @@ import type {
   ConvertTargetDocType,
   CreateDocumentInput,
   CreateDocumentResult,
+  CreateDraftDocumentItemInput,
   CreateDraftDocumentInput,
   CreateDraftDocumentResult,
   CustomerOption,
@@ -347,6 +348,7 @@ function mapSalesDraftLine(
     line_total: number;
     sort_order?: number;
     is_service_item?: boolean;
+    is_bundle_header?: boolean;
   },
   index: number,
   lookup: {
@@ -379,8 +381,133 @@ function mapSalesDraftLine(
     discount_amount: Number.isFinite(discountAmount) ? discountAmount : 0,
     line_total: Number.isFinite(lineTotal) ? lineTotal : 0,
     sort_order: item.sort_order ?? index,
-    is_service_item: !productId || item.is_service_item === true,
+    is_service_item: item.is_bundle_header === true
+      ? false
+      : !productId || item.is_service_item === true,
   };
+}
+
+function collectDraftProductIds(items: CreateDraftDocumentItemInput[]): string[] {
+  const ids = new Set<string>();
+  for (const item of items) {
+    const productId = item.product_id?.trim() ?? "";
+    if (productId) ids.add(productId);
+    for (const component of item.bundle_components ?? []) {
+      const childId = component.product_id?.trim() ?? "";
+      if (childId) ids.add(childId);
+    }
+  }
+  return [...ids];
+}
+
+type ExpandedDraftRow = ReturnType<typeof mapSalesDraftLine> & {
+  id?: string;
+  is_bundle_header?: boolean;
+  is_bundle_component?: boolean;
+  bundle_kit_id?: string | null;
+  parent_item_id?: string | null;
+};
+
+function expandSalesDraftItems(
+  items: CreateDraftDocumentItemInput[],
+  lookup: {
+    costByProductId: Map<string, number>;
+    nameByProductId: Map<string, string>;
+    uomByProductId: Map<string, string>;
+  },
+): { rows: ExpandedDraftRow[]; error: string | null } {
+  const rows: ExpandedDraftRow[] = [];
+  let sort = 0;
+  for (const [index, item] of items.entries()) {
+    if (item.is_bundle_header === true) {
+      const components = item.bundle_components ?? [];
+      if (components.length === 0) {
+        return { rows: [], error: `รายการที่ ${index + 1}: ชุดเซ็ตไม่มีรายการเสื้อหรือกางเกง` };
+      }
+      const headerId = crypto.randomUUID();
+      const header = mapSalesDraftLine(
+        { ...item, is_service_item: false, uom_used: "ชุด" },
+        sort,
+        lookup,
+      );
+      rows.push({
+        ...header,
+        id: headerId,
+        uom_used: "ชุด",
+        is_service_item: false,
+        is_bundle_header: true,
+        is_bundle_component: false,
+        bundle_kit_id: item.bundle_kit_id ?? null,
+        parent_item_id: null,
+        sort_order: sort,
+      });
+      sort += 1;
+      for (const component of components) {
+        const productId = component.product_id?.trim() ?? "";
+        const qty = Number(component.qty);
+        if (!productId || !Number.isFinite(qty) || qty <= 0) {
+          return { rows: [], error: `รายการที่ ${index + 1}: ชิ้นส่วนในชุดเซ็ตไม่ครบ` };
+        }
+        const snapshotCost = lookup.costByProductId.has(productId)
+          ? lookup.costByProductId.get(productId)!
+          : Number(component.unit_cost_price ?? 0);
+        rows.push({
+          id: crypto.randomUUID(),
+          product_id: productId,
+          description: (
+            component.description?.trim() ||
+            lookup.nameByProductId.get(productId) ||
+            component.sku
+          ).slice(0, 255),
+          qty,
+          uom_used: lookup.uomByProductId.get(productId) || "ตัว",
+          unit_price: 0,
+          unit_cost_price: Number.isFinite(snapshotCost) ? snapshotCost : 0,
+          discount_text: null,
+          discount_amount: 0,
+          line_total: 0,
+          sort_order: sort,
+          is_service_item: false,
+          is_bundle_header: false,
+          is_bundle_component: true,
+          bundle_kit_id: item.bundle_kit_id ?? null,
+          parent_item_id: headerId,
+        });
+        sort += 1;
+      }
+      continue;
+    }
+    rows.push(mapSalesDraftLine(item, sort, lookup));
+    sort += 1;
+  }
+  return { rows, error: null };
+}
+
+async function insertSalesDocumentItems(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  rows: ExpandedDraftRow[],
+): Promise<string | null> {
+  const bundleKeys = ["bundle_kit_id", "parent_item_id", "is_bundle_header", "is_bundle_component"] as const;
+  async function insertBatch(batch: ExpandedDraftRow[]) {
+    if (batch.length === 0) return null;
+    const first = await supabase.from("document_items").insert(batch as never);
+    if (!first.error) return null;
+    const message = first.error.message ?? "";
+    if (!bundleKeys.some((key) => message.includes(key))) return message;
+    const stripped = batch.map((row) => {
+      const next = { ...row };
+      for (const key of bundleKeys) delete next[key];
+      return next;
+    });
+    const retry = await supabase.from("document_items").insert(stripped as never);
+    return retry.error?.message ?? null;
+  }
+
+  const parents = rows.filter((row) => !row.parent_item_id);
+  const children = rows.filter((row) => row.parent_item_id);
+  const parentError = await insertBatch(parents);
+  if (parentError) return parentError;
+  return insertBatch(children);
 }
 
 function normalizeHandwrittenDocRef(value: unknown): string | null {
@@ -702,27 +829,21 @@ export async function createDraftDocument(
     }
     const supabase = createSupabaseServerClient();
 
-    const productIds = [
-      ...new Set(
-        items
-          .map((item) => item.product_id?.trim() ?? "")
-          .filter((id) => id.length > 0),
-      ),
-    ];
+    const productIds = collectDraftProductIds(items);
     const productLookup = await loadSalesDraftProducts(supabase, productIds);
     if (!productLookup.ok) {
       return { data: null, error: productLookup.error };
     }
 
     const attachmentUrl = normalizeAttachmentUrl(payload.attachment_url);
+    const expanded = expandSalesDraftItems(items, {
+      costByProductId: productLookup.costByProductId,
+      nameByProductId: productLookup.nameByProductId,
+      uomByProductId: productLookup.uomByProductId,
+    });
+    if (expanded.error) return { data: null, error: expanded.error };
     const lineRows = stampProductionMockup(
-      items.map((item, index) =>
-        mapSalesDraftLine(item, index, {
-          costByProductId: productLookup.costByProductId,
-          nameByProductId: productLookup.nameByProductId,
-          uomByProductId: productLookup.uomByProductId,
-        }),
-      ),
+      expanded.rows,
       attachmentUrl,
       productLookup.productionProductIds,
     );
@@ -822,21 +943,19 @@ export async function createDraftDocument(
     }
 
     if (lineRows.length > 0) {
-      const itemsPayload = lineRows.map((row) => ({
-        ...row,
-        document_id: documentId,
-      }));
-
-      const { error: itemsError } = await supabase
-        .from("document_items")
-        .insert(itemsPayload);
+      const itemsError = await insertSalesDocumentItems(
+        supabase,
+        lineRows.map((row) => ({
+          ...row,
+          document_id: documentId,
+        })),
+      );
 
       if (itemsError) {
         await supabase.from("documents").delete().eq("id", documentId);
         return {
           data: null,
-          error:
-            itemsError.message ?? "บันทึกรายการสินค้าในเอกสารร่างไม่สำเร็จ",
+          error: itemsError ?? "บันทึกรายการสินค้าในเอกสารร่างไม่สำเร็จ",
         };
       }
     }
@@ -1850,8 +1969,48 @@ type NestedItemRow = {
   production_status?: string | null;
   is_sent_to_production?: boolean | null;
   is_service_item?: boolean | null;
+  bundle_kit_id?: string | null;
+  parent_item_id?: string | null;
+  is_bundle_header?: boolean | null;
+  is_bundle_component?: boolean | null;
   products: NestedProduct | NestedProduct[] | null;
 };
+
+async function applyBundleKitLabels(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  items: DocumentDetailItem[],
+) {
+  const ids = [
+    ...new Set(
+      items
+        .map((item) => item.bundle_kit_id?.trim() ?? "")
+        .filter((id) => id.length > 0),
+    ),
+  ];
+  if (ids.length === 0) return;
+  const result = await supabase
+    .from("mst_bundle_kits")
+    .select("id, kit_code, kit_name, short_name")
+    .in("id", ids);
+  if (result.error || !Array.isArray(result.data)) return;
+  const byId = new Map(
+    result.data.map((row) => [String(row.id ?? ""), row] as const),
+  );
+  for (const item of items) {
+    if (!item.is_bundle_header || !item.bundle_kit_id) continue;
+    const kit = byId.get(item.bundle_kit_id);
+    if (!kit) continue;
+    const kitCode = String(kit.kit_code ?? "").trim();
+    const kitName = String(kit.kit_name ?? "").trim();
+    const shortName = String(kit.short_name ?? "").trim();
+    if (kitCode) item.sku = kitCode;
+    if (kitName) {
+      item.product_name = kitName;
+      item.description = kitName;
+    }
+    if (shortName) item.model_short_name = shortName;
+  }
+}
 
 /**
  * Load a sales document by running number (`doc_no`) with items + customer.
@@ -1955,6 +2114,10 @@ export async function getDocumentByNo(
           production_status,
           is_sent_to_production,
           is_service_item,
+          bundle_kit_id,
+          parent_item_id,
+          is_bundle_header,
+          is_bundle_component,
           products!document_items_product_id_fkey (
             id,
             sku,
@@ -1987,13 +2150,19 @@ export async function getDocumentByNo(
       (error.message?.includes("mockup_image_url") ||
         error.message?.includes("is_sent_to_production") ||
         error.message?.includes("production_status") ||
+        error.message?.includes("bundle_kit_id") ||
+        error.message?.includes("is_bundle_") ||
         error.code === "42703")
     ) {
       const legacySelect = selectSql
         .replace(/\s*mockup_image_url,\s*/g, "\n          ")
         .replace(/\s*production_status,\s*/g, "\n          ")
         .replace(/\s*is_sent_to_production,\s*/g, "\n          ")
-        .replace(/\s*is_service_item,\s*/g, "\n          ");
+        .replace(/\s*is_service_item,\s*/g, "\n          ")
+        .replace(/\s*bundle_kit_id,\s*/g, "\n          ")
+        .replace(/\s*parent_item_id,\s*/g, "\n          ")
+        .replace(/\s*is_bundle_header,\s*/g, "\n          ")
+        .replace(/\s*is_bundle_component,\s*/g, "\n          ");
       const retry = await supabase
         .from("documents")
         .select(legacySelect)
@@ -2017,13 +2186,19 @@ export async function getDocumentByNo(
         (error.message?.includes("mockup_image_url") ||
           error.message?.includes("is_sent_to_production") ||
           error.message?.includes("production_status") ||
+          error.message?.includes("bundle_kit_id") ||
+          error.message?.includes("is_bundle_") ||
           error.code === "42703")
       ) {
         const legacySelect = selectSql
           .replace(/\s*mockup_image_url,\s*/g, "\n          ")
           .replace(/\s*production_status,\s*/g, "\n          ")
           .replace(/\s*is_sent_to_production,\s*/g, "\n          ")
-        .replace(/\s*is_service_item,\s*/g, "\n          ");
+        .replace(/\s*is_service_item,\s*/g, "\n          ")
+        .replace(/\s*bundle_kit_id,\s*/g, "\n          ")
+        .replace(/\s*parent_item_id,\s*/g, "\n          ")
+        .replace(/\s*is_bundle_header,\s*/g, "\n          ")
+        .replace(/\s*is_bundle_component,\s*/g, "\n          ");
         const retry = await supabase
           .from("documents")
           .select(legacySelect)
@@ -2147,6 +2322,8 @@ export async function getDocumentByNo(
           String(model?.id ?? product?.model_id ?? "").trim() || null;
         const isManufactured = model?.is_manufactured === true;
         const isService = model?.is_service === true;
+        const isBundleHeader = row.is_bundle_header === true;
+        const isBundleComponent = row.is_bundle_component === true;
         const linkedJob = modelId ? productionByModelId.get(modelId) : undefined;
 
         const rawStatus = String(row.production_status ?? "NONE")
@@ -2177,7 +2354,7 @@ export async function getDocumentByNo(
           discount_amount: Number(row.discount_amount ?? 0),
           line_total: Number(row.line_total ?? 0),
           sort_order: Number(row.sort_order ?? 0),
-          sku: product?.sku ?? null,
+          sku: isBundleHeader ? null : product?.sku ?? null,
           product_name: product?.name ?? model?.name ?? null,
           image_url: model?.image_url?.trim() || null,
           model_id: modelId,
@@ -2187,15 +2364,22 @@ export async function getDocumentByNo(
           model_short_name: model?.short_name?.trim() || null,
           category_name:
             unwrapJoin(model?.mst_categories)?.category_name?.trim() || null,
-          is_service_item:
-            row.is_service_item === true || !row.product_id || isService,
+          is_service_item: isBundleHeader
+            ? false
+            : row.is_service_item === true || !row.product_id || isService,
           mockup_image_url: row.mockup_image_url?.trim() || null,
           production_status: productionStatus,
           is_sent_to_production: isSentToProduction,
           production_job_no: linkedJob?.job_no || null,
+          bundle_kit_id: row.bundle_kit_id ?? null,
+          parent_item_id: row.parent_item_id ?? null,
+          is_bundle_header: isBundleHeader,
+          is_bundle_component: isBundleComponent,
         };
       })
       .sort((left, right) => left.sort_order - right.sort_order);
+
+    await applyBundleKitLabels(supabase, items);
 
     const notes = (data.notes as string | null) ?? null;
     const visibleNotes = splitBillNotes(notes).notes;
@@ -2654,27 +2838,21 @@ export async function updateDraftDocument(
       if (lineError) return { data: null, error: lineError };
     }
 
-    const productIds = [
-      ...new Set(
-        items
-          .map((item) => item.product_id?.trim() ?? "")
-          .filter((id) => id.length > 0),
-      ),
-    ];
+    const productIds = collectDraftProductIds(items);
     const productLookup = await loadSalesDraftProducts(supabase, productIds);
     if (!productLookup.ok) {
       return { data: null, error: productLookup.error };
     }
 
     const attachmentUrl = normalizeAttachmentUrl(payload.attachment_url);
+    const expanded = expandSalesDraftItems(items, {
+      costByProductId: productLookup.costByProductId,
+      nameByProductId: productLookup.nameByProductId,
+      uomByProductId: productLookup.uomByProductId,
+    });
+    if (expanded.error) return { data: null, error: expanded.error };
     const lineRows = stampProductionMockup(
-      items.map((item, index) =>
-        mapSalesDraftLine(item, index, {
-          costByProductId: productLookup.costByProductId,
-          nameByProductId: productLookup.nameByProductId,
-          uomByProductId: productLookup.uomByProductId,
-        }),
-      ),
+      expanded.rows,
       attachmentUrl,
       productLookup.productionProductIds,
     );
@@ -2773,7 +2951,8 @@ export async function updateDraftDocument(
       };
     }
 
-    const { error: itemsError } = await supabase.from("document_items").insert(
+    const itemsError = await insertSalesDocumentItems(
+      supabase,
       lineRows.map((row) => ({
         ...row,
         document_id: documentId,
@@ -2783,7 +2962,7 @@ export async function updateDraftDocument(
     if (itemsError) {
       return {
         data: null,
-        error: itemsError.message ?? "บันทึกรายการสินค้าไม่สำเร็จ",
+        error: itemsError ?? "บันทึกรายการสินค้าไม่สำเร็จ",
       };
     }
 

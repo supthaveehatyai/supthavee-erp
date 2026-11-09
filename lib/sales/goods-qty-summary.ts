@@ -1,6 +1,8 @@
 export type GoodsQtyLine = {
   is_service_item?: boolean | null;
   is_service?: boolean | null;
+  is_bundle_header?: boolean | null;
+  is_bundle_component?: boolean | null;
   product_id?: string | null;
   sku?: string | null;
   qty?: number | string | null;
@@ -19,6 +21,8 @@ export type GoodsQtySummary = {
 };
 
 function isGoodsLine(row: GoodsQtyLine): boolean {
+  if (row.is_bundle_component) return false;
+  if (row.is_bundle_header) return true;
   if (row.is_service_item || row.is_service) return false;
   if (!row.product_id) return false;
   if (String(row.sku ?? "").startsWith("SVC")) return false;
