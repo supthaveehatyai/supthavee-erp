@@ -17,6 +17,7 @@ export type LedgerFilterProps = {
   productId?: string;
   startDate?: string;
   endDate?: string;
+  stock?: string;
 };
 
 function buildLedgerUrl(next: {
@@ -24,16 +25,19 @@ function buildLedgerUrl(next: {
   productId?: string;
   startDate?: string;
   endDate?: string;
+  stock?: string;
 }): string {
   const params = new URLSearchParams();
   const q = next.q?.trim() ?? "";
   const productId = next.productId?.trim() ?? "";
   const startDate = next.startDate?.trim() ?? "";
   const endDate = next.endDate?.trim() ?? "";
+  const stock = next.stock?.trim() ?? "";
   if (q) params.set("q", q);
   if (productId) params.set("productId", productId);
   if (startDate) params.set("startDate", startDate);
   if (endDate) params.set("endDate", endDate);
+  if (stock === "negative" || stock === "positive") params.set("stock", stock);
   const qs = params.toString();
   return qs ? `/inventory/ledger?${qs}` : "/inventory/ledger";
 }
@@ -43,6 +47,7 @@ export function LedgerFilter({
   productId = "",
   startDate = "",
   endDate = "",
+  stock = "",
 }: LedgerFilterProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -52,9 +57,10 @@ export function LedgerFilter({
     productId?: string;
     startDate?: string;
     endDate?: string;
+    stock?: string;
   }) {
     startTransition(() => {
-      router.push(buildLedgerUrl(next), { scroll: false });
+      router.push(buildLedgerUrl({ stock, ...next }), { scroll: false });
     });
   }
 

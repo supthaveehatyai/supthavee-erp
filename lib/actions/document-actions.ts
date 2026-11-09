@@ -1892,6 +1892,11 @@ export async function completeDocument(
       approvalStatusFields(docType).approval_status,
     );
     revalidateApprovalCenterIfPending(pendingApproval);
+    revalidateStockSurfaces();
+    if (STOCK_SYNC_DOC_TYPES.has(docType) && !pendingApproval) {
+      const syncError = await syncDocumentStockLedger(supabase, documentId);
+      if (syncError) return { data: null, error: syncError };
+    }
 
     return {
       data: {
@@ -3492,6 +3497,11 @@ export async function issueDocument(
     });
 
     revalidateApprovalCenterIfPending(pendingApproval);
+    revalidateStockSurfaces();
+    if (STOCK_SYNC_DOC_TYPES.has(docType)) {
+      const syncError = await syncDocumentStockLedger(supabase, id);
+      if (syncError) return { data: null, error: syncError };
+    }
 
     return {
       data: {
@@ -3511,6 +3521,45 @@ export async function issueDocument(
       err instanceof Error ? err.message : "ออกเอกสาร (issueDocument) ไม่สำเร็จ";
     return { data: null, error: message };
   }
+}
+
+const STOCK_SYNC_DOC_TYPES = new Set(["INV_DO", "TAX_INV", "CS_TAX", "ABB"]);
+
+function revalidateStockSurfaces() {
+  revalidatePath("/inventory/ledger");
+  revalidatePath("/products");
+}
+
+/** Cloud RPC `sync_document_stock_ledger` — ฐาน local ที่ยังไม่มีฟังก์ชันจะข้ามไป */
+async function syncDocumentStockLedger(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  documentId: string,
+): Promise<string | null> {
+  const rpcClient = supabase as unknown as {
+    rpc: (
+      fn: "sync_document_stock_ledger",
+      args: { p_document_id: string },
+    ) => Promise<{ data: unknown; error: { message: string } | null }>;
+  };
+  const result = await rpcClient.rpc("sync_document_stock_ledger", {
+    p_document_id: documentId,
+  });
+  if (result.error) {
+    if (/Could not find the function|PGRST202|does not exist/i.test(result.error.message)) {
+      return null;
+    }
+    return result.error.message;
+  }
+  if (result.data && typeof result.data === "object" && !Array.isArray(result.data)) {
+    const row = result.data as Record<string, unknown>;
+    if (row.success === false || row.ok === false) {
+      return typeof row.error === "string" && row.error.trim()
+        ? row.error
+        : "ซิงก์การตัดสต็อกจากเอกสารไม่สำเร็จ";
+    }
+    if (typeof row.error === "string" && row.error.trim()) return row.error;
+  }
+  return null;
 }
 
 function parseIssueCreditNoteRpc(rpcData: unknown): {
@@ -4780,6 +4829,12 @@ export async function convertDocument(
       }
     }
 
+    if (STOCK_SYNC_DOC_TYPES.has(targetDocType)) {
+      const syncError = await syncDocumentStockLedger(supabase, newDocumentId);
+      if (syncError) return { data: null, error: syncError };
+    }
+    revalidateStockSurfaces();
+
     fireDocumentAuditLog({
       recordId: newDocumentId,
       auditEvent: "CONVERT",
@@ -4989,6 +5044,10 @@ export async function upgradeAbbToFullTaxInvoice(
         };
       }
     }
+
+    const syncError = await syncDocumentStockLedger(supabase, newDocumentId);
+    if (syncError) return { data: null, error: syncError };
+    revalidateStockSurfaces();
 
     revalidatePath("/sales");
     revalidatePath(`/sales/${encodeURIComponent(String(source.doc_no ?? ""))}`);
