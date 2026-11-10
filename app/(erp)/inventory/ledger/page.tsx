@@ -140,6 +140,7 @@ export default async function InventoryLedgerPage({ searchParams }: PageProps) {
           q={q}
           startDate={startDate}
           endDate={endDate}
+          stock={stock === "all" ? "" : stock}
         />
       ) : null}
 
@@ -150,6 +151,7 @@ export default async function InventoryLedgerPage({ searchParams }: PageProps) {
         q={q}
         startDate={startDate}
         endDate={endDate}
+        stock={stock === "all" ? "" : stock}
       />
     </div>
   );

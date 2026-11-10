@@ -36,15 +36,24 @@ function formatQty(value: number): string {
   });
 }
 
-function formatTxnDate(value: string): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
-  return new Intl.DateTimeFormat("th-TH", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(date);
+function bangkokCalendarDate(value: string | null | undefined): string | null {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const epochMs = Date.parse(trimmed);
+  if (!Number.isFinite(epochMs)) return null;
+  return new Date(epochMs + 7 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+/** YYYY-MM-DD หรือ timestamp (+07:00) → DD/MM/พ.ศ. โดยไม่ใช้ timezone ของเบราว์เซอร์ */
+function formatBuddhistDate(value: string | null | undefined): string {
+  const calendar =
+    /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? "").trim())
+      ? String(value).trim()
+      : bangkokCalendarDate(value);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(calendar ?? "");
+  if (!match) return "—";
+  return `${match[3]}/${match[2]}/${Number(match[1]) + 543}`;
 }
 
 function typeBadgeClass(type: string): string {
@@ -70,11 +79,13 @@ function buildUrlWithoutProductId(args: {
   q?: string;
   startDate?: string;
   endDate?: string;
+  stock?: string;
 }): string {
   const params = new URLSearchParams();
   if (args.q?.trim()) params.set("q", args.q.trim());
   if (args.startDate?.trim()) params.set("startDate", args.startDate.trim());
   if (args.endDate?.trim()) params.set("endDate", args.endDate.trim());
+  if (args.stock?.trim()) params.set("stock", args.stock.trim());
   const qs = params.toString();
   return qs ? `/inventory/ledger?${qs}` : "/inventory/ledger";
 }
@@ -87,6 +98,7 @@ export type LedgerSheetProps = {
   q?: string;
   startDate?: string;
   endDate?: string;
+  stock?: string;
 };
 
 export function LedgerSheet({
@@ -96,13 +108,14 @@ export function LedgerSheet({
   q = "",
   startDate = "",
   endDate = "",
+  stock = "",
 }: LedgerSheetProps) {
   const router = useRouter();
 
   function handleOpenChange(nextOpen: boolean) {
     if (nextOpen) return;
     router.push(
-      buildUrlWithoutProductId({ q, startDate, endDate }),
+      buildUrlWithoutProductId({ q, startDate, endDate, stock }),
       { scroll: false },
     );
   }
@@ -221,10 +234,22 @@ export function LedgerSheet({
                     data.movements.map((row) => {
                       const { qtyIn, qtyOut } = qtyInOut(row);
                       const type = String(row.transaction_type).toUpperCase();
+                      const postedIso = /^\d{4}-\d{2}-\d{2}$/.test(row.transaction_date)
+                        ? row.transaction_date
+                        : bangkokCalendarDate(row.transaction_date);
+                      const recordedIso = bangkokCalendarDate(row.recorded_at);
+                      const showRecorded = Boolean(
+                        recordedIso && postedIso && recordedIso !== postedIso,
+                      );
                       return (
                         <TableRow key={row.id} className="text-xs">
                           <TableCell className="px-3 py-2.5 whitespace-nowrap tabular-nums text-slate-700">
-                            {formatTxnDate(row.transaction_date)}
+                            <div>{formatBuddhistDate(row.transaction_date)}</div>
+                            {showRecorded ? (
+                              <div className="text-[10px] text-slate-400">
+                                บันทึก: {formatBuddhistDate(recordedIso)}
+                              </div>
+                            ) : null}
                           </TableCell>
                           <TableCell className="px-3 py-2.5 font-mono text-[11px] font-medium text-slate-800">
                             {row.document_no || "—"}

@@ -44,6 +44,8 @@ export type StockCardMovement = {
   signed_qty: number;
   running_balance: number;
   notes: string | null;
+  /** วันเวลาที่ระบบบันทึกแถว (`created_at`) ใช้แสดงการลงบัญชีย้อนหลัง */
+  recorded_at?: string | null;
 };
 
 export type ProductStockCardData = {
@@ -181,6 +183,7 @@ type DocumentJoin = {
 
 type LedgerRow = {
   id: string;
+  tx_date?: string | null;
   created_at: string | null;
   qty: number;
   trans_type: string;
@@ -264,6 +267,33 @@ function bangkokNextDayStart(dateStr: string): string | null {
   const mm = String(next.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(next.getUTCDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}T00:00:00+07:00`;
+}
+
+function normalizeIsoDate(value: string | null | undefined): string | null {
+  const head = String(value ?? "").trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(head) ? head : null;
+}
+
+/** วันที่ปฏิทินตาม Asia/Bangkok จาก timestamptz โดยไม่พึ่ง timezone ของรันไทม์ */
+function bangkokIsoDateFromTimestamp(isoTimestamp: string | null | undefined): string {
+  const epochMs = Date.parse(String(isoTimestamp ?? ""));
+  if (!Number.isFinite(epochMs)) return "";
+  return new Date(epochMs + 7 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+function isMissingTxDateColumnError(
+  err: { message?: string; code?: string } | null | undefined,
+): boolean {
+  if (!err) return false;
+  return /tx_date|42703|PGRST204/i.test(`${err.code ?? ""} ${err.message ?? ""}`);
+}
+
+/** วันเอกสารเดียวกัน: รับเข้าก่อนปรับปรุง แล้วจึงจ่ายออก */
+function txSortPriority(transType: string): number {
+  const type = String(transType ?? "").trim().toUpperCase();
+  if (type === "IN") return 0;
+  if (type === "ADJUST") return 1;
+  return 2;
 }
 
 /** Phase 4 document UUID embedded in sales OUT notes */
@@ -1209,19 +1239,18 @@ export async function getProductStockCard(
     return { success: false, error: "ไม่พบรหัสสินค้า (productId)" };
   }
 
-  const startBound = startDate?.trim()
-    ? bangkokDayStart(startDate.trim())
-    : null;
-  if (startDate?.trim() && !startBound) {
+  const startIso = startDate?.trim() ? normalizeIsoDate(startDate) : null;
+  if (startDate?.trim() && !startIso) {
     return { success: false, error: "รูปแบบ startDate ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD)" };
   }
 
-  const endExclusive = endDate?.trim()
-    ? bangkokNextDayStart(endDate.trim())
-    : null;
-  if (endDate?.trim() && !endExclusive) {
+  const endIso = endDate?.trim() ? normalizeIsoDate(endDate) : null;
+  if (endDate?.trim() && !endIso) {
     return { success: false, error: "รูปแบบ endDate ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD)" };
   }
+
+  const startBound = startIso ? bangkokDayStart(startIso) : null;
+  const endExclusive = endIso ? bangkokNextDayStart(endIso) : null;
 
   const supabase = createClient();
 
@@ -1284,24 +1313,54 @@ export async function getProductStockCard(
     color: product.color ?? null,
   };
 
+  // ชนิดที่ generate ไว้ยังไม่มี tx_date — คิวรีผ่านตัวกรองแบบสตริงแล้วถอยกลับถ้าคอลัมน์ไม่มี
+  type LedgerFilter = {
+    eq: (column: string, value: string) => LedgerFilter;
+    lt: (column: string, value: string) => LedgerFilter;
+    gte: (column: string, value: string) => LedgerFilter;
+    lte: (column: string, value: string) => LedgerFilter;
+    order: (column: string, options: { ascending: boolean }) => LedgerFilter;
+    range: (from: number, to: number) => PromiseLike<{
+      data: unknown;
+      error: { message: string; code?: string } | null;
+    }>;
+  };
+  const ledgerSelect = (columns: string): LedgerFilter =>
+    (
+      supabase.from("inventory_ledger") as unknown as {
+        select: (cols: string) => LedgerFilter;
+      }
+    ).select(columns);
+
   // ── Logic 2: Brought Forward (ยอดยกมา) ──────────────────────────────────
   // ไม่มี startDate → ยอดยกมา = 0
-  // มี startDate → SUM signed qty ของรายการที่ created_at < startDate
+  // มี startDate → รวม signed qty ของรายการที่ tx_date < startDate
   let broughtForward = 0;
 
-  if (startBound) {
-    const priorPage = await fetchAllPages<{
-      qty: number;
-      trans_type: string;
-    }>((from, to) =>
-      supabase
-        .from("inventory_ledger")
-        .select("qty, trans_type")
-        .eq("product_id", id)
-        .lt("created_at", startBound)
-        .order("id", { ascending: true })
-        .range(from, to),
-    );
+  if (startIso) {
+    const loadPrior = (column: "tx_date" | "created_at", bound: string) =>
+      fetchAllPages<{ qty: number; trans_type: string }>(async (from, to) => {
+        const result = await ledgerSelect("qty, trans_type")
+          .eq("product_id", id)
+          .lt(column, bound)
+          .order("id", { ascending: true })
+          .range(from, to);
+        return {
+          data: Array.isArray(result.data)
+            ? (result.data as Array<{ qty: number; trans_type: string }>)
+            : null,
+          error: result.error,
+        };
+      });
+
+    let priorPage = await loadPrior("tx_date", startIso);
+    if (
+      priorPage.error &&
+      isMissingTxDateColumnError(priorPage.error) &&
+      startBound
+    ) {
+      priorPage = await loadPrior("created_at", startBound);
+    }
 
     if (priorPage.error) {
       return {
@@ -1313,9 +1372,33 @@ export async function getProductStockCard(
     broughtForward = sumSignedQty(priorPage.data);
   }
 
-  // ── Logic 3: Movements ในช่วงวันที่ ──────────────────────────────────────
-  // Cloud: inventory_ledger โยงเอกสารที่ตาราง documents (ไม่ใช้ doc_headers)
-  const ledgerSelectWithDocuments = `
+  // ── Logic 3: Movements ในช่วงวันที่เอกสาร ────────────────────────────────
+  const ledgerSelectTxWithDocuments = `
+      id,
+      tx_date,
+      created_at,
+      qty,
+      trans_type,
+      notes,
+      document_id,
+      doc_header_id,
+      documents (
+        id,
+        doc_no,
+        doc_date
+      )
+    `;
+  const ledgerSelectTxBase = `
+      id,
+      tx_date,
+      created_at,
+      qty,
+      trans_type,
+      notes,
+      document_id,
+      doc_header_id
+    `;
+  const ledgerSelectCreatedWithDocuments = `
       id,
       created_at,
       qty,
@@ -1328,7 +1411,7 @@ export async function getProductStockCard(
         doc_date
       )
     `;
-  const ledgerSelectBase = `
+  const ledgerSelectCreatedBase = `
       id,
       created_at,
       qty,
@@ -1337,32 +1420,48 @@ export async function getProductStockCard(
       doc_header_id
     `;
 
-  const runLedgerQuery = (selectSql: string) =>
-    fetchAllPages<LedgerRow>((from, to) => {
-      let query = supabase
-        .from("inventory_ledger")
-        .select(selectSql)
-        .eq("product_id", id)
-        .order("created_at", { ascending: true })
-        .order("id", { ascending: true });
-
-      if (startBound) {
-        query = query.gte("created_at", startBound);
+  const runLedgerQuery = (selectSql: string, byTxDate: boolean) =>
+    fetchAllPages<LedgerRow>(async (from, to) => {
+      let query = ledgerSelect(selectSql).eq("product_id", id);
+      if (byTxDate) {
+        query = query
+          .order("tx_date", { ascending: true })
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true });
+        if (startIso) query = query.gte("tx_date", startIso);
+        if (endIso) query = query.lte("tx_date", endIso);
+      } else {
+        query = query
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true });
+        if (startBound) query = query.gte("created_at", startBound);
+        if (endExclusive) query = query.lt("created_at", endExclusive);
       }
-      if (endExclusive) {
-        query = query.lt("created_at", endExclusive);
-      }
-
-      return query.range(from, to).returns<LedgerRow[]>();
+      const result = await query.range(from, to);
+      return {
+        data: Array.isArray(result.data) ? (result.data as LedgerRow[]) : null,
+        error: result.error,
+      };
     });
 
-  let ledgerPage = await runLedgerQuery(ledgerSelectWithDocuments);
+  const loadLedger = async (byTxDate: boolean) => {
+    const withDocuments = byTxDate
+      ? ledgerSelectTxWithDocuments
+      : ledgerSelectCreatedWithDocuments;
+    const base = byTxDate ? ledgerSelectTxBase : ledgerSelectCreatedBase;
+    const first = await runLedgerQuery(withDocuments, byTxDate);
+    if (
+      first.error &&
+      /could not find a relationship/i.test(first.error.message)
+    ) {
+      return runLedgerQuery(base, byTxDate);
+    }
+    return first;
+  };
 
-  if (
-    ledgerPage.error &&
-    /could not find a relationship/i.test(ledgerPage.error.message)
-  ) {
-    ledgerPage = await runLedgerQuery(ledgerSelectBase);
+  let ledgerPage = await loadLedger(true);
+  if (ledgerPage.error && isMissingTxDateColumnError(ledgerPage.error)) {
+    ledgerPage = await loadLedger(false);
   }
 
   if (ledgerPage.error) {
@@ -1386,18 +1485,22 @@ export async function getProductStockCard(
     ),
   ];
   const docNoByDocumentId = new Map<string, string>();
+  const docDateByDocumentId = new Map<string, string>();
   if (documentIds.length > 0) {
     const idChunk = 200;
     for (let i = 0; i < documentIds.length; i += idChunk) {
       const chunk = documentIds.slice(i, i + idChunk);
-      const docsPage = await fetchAllPages<{ id: string; doc_no: string }>(
-        (from, to) =>
-          supabase
-            .from("documents")
-            .select("id, doc_no")
-            .in("id", chunk)
-            .order("id", { ascending: true })
-            .range(from, to),
+      const docsPage = await fetchAllPages<{
+        id: string;
+        doc_no: string;
+        doc_date: string | null;
+      }>((from, to) =>
+        supabase
+          .from("documents")
+          .select("id, doc_no, doc_date")
+          .in("id", chunk)
+          .order("id", { ascending: true })
+          .range(from, to),
       );
       if (docsPage.error) {
         return {
@@ -1409,13 +1512,41 @@ export async function getProductStockCard(
         if (doc.id && doc.doc_no) {
           docNoByDocumentId.set(doc.id, doc.doc_no);
         }
+        const docDate = normalizeIsoDate(doc.doc_date);
+        if (doc.id && docDate) {
+          docDateByDocumentId.set(doc.id, docDate);
+        }
       }
     }
   }
 
-  // ── Logic 4: Running Balance ────────────────────────────────────────────
+  const postingDateFor = (row: LedgerRow): string => {
+    const linkedId = ledgerLinkedDocumentId(row);
+    return (
+      normalizeIsoDate(row.tx_date) ??
+      normalizeIsoDate(unwrapJoin(row.documents)?.doc_date) ??
+      (linkedId ? (docDateByDocumentId.get(linkedId) ?? null) : null) ??
+      bangkokIsoDateFromTimestamp(row.created_at)
+    );
+  };
+
+  // ── Logic 4: Sorting & Running Balance ตามวันที่เอกสาร ───────────────────
+  const sortedMovements = [...rawMovements].sort((left, right) => {
+    const leftDate = postingDateFor(left);
+    const rightDate = postingDateFor(right);
+    if (leftDate !== rightDate) return leftDate < rightDate ? -1 : 1;
+    const priority =
+      txSortPriority(left.trans_type) - txSortPriority(right.trans_type);
+    if (priority !== 0) return priority;
+    const leftCreated = left.created_at ?? "";
+    const rightCreated = right.created_at ?? "";
+    if (leftCreated !== rightCreated) return leftCreated < rightCreated ? -1 : 1;
+    if (left.id === right.id) return 0;
+    return left.id < right.id ? -1 : 1;
+  });
+
   let running = broughtForward;
-  const movements: StockCardMovement[] = rawMovements.map((row) => {
+  const movements: StockCardMovement[] = sortedMovements.map((row) => {
     const transactionType = normalizeTransType(row.trans_type);
     const quantity = Math.abs(toQty(row.qty));
     const signed = signedQuantity(transactionType, toQty(row.qty));
@@ -1423,7 +1554,8 @@ export async function getProductStockCard(
 
     return {
       id: row.id,
-      transaction_date: row.created_at ?? "",
+      transaction_date: postingDateFor(row),
+      recorded_at: row.created_at ?? null,
       document_no: resolveDocumentNo(row, docNoByDocumentId),
       transaction_type: transactionType,
       quantity,

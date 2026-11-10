@@ -38,12 +38,14 @@ function buildLedgerHref(args: {
   productId: string;
   startDate?: string;
   endDate?: string;
+  stock?: string;
 }): string {
   const params = new URLSearchParams();
   if (args.q?.trim()) params.set("q", args.q.trim());
   params.set("productId", args.productId);
   if (args.startDate?.trim()) params.set("startDate", args.startDate.trim());
   if (args.endDate?.trim()) params.set("endDate", args.endDate.trim());
+  if (args.stock?.trim()) params.set("stock", args.stock.trim());
   return `/inventory/ledger?${params.toString()}`;
 }
 
@@ -53,6 +55,7 @@ export type StockCardMatrixProps = {
   q?: string;
   startDate?: string;
   endDate?: string;
+  stock?: string;
 };
 
 type OpenState = {
@@ -123,6 +126,7 @@ export function StockCardMatrix({
   q = "",
   startDate = "",
   endDate = "",
+  stock = "",
 }: StockCardMatrixProps) {
   const selection = selectedProductId
     ? findSelection(brands, selectedProductId)
@@ -364,6 +368,7 @@ export function StockCardMatrix({
                                                         size.product_id,
                                                       startDate,
                                                       endDate,
+                                                      stock,
                                                     })}
                                                     scroll={false}
                                                     className={cn(
