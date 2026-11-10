@@ -407,10 +407,10 @@ export type GoodsReceiptDocType = (typeof GOODS_RECEIPT_DOC_TYPES)[number];
  * Doc types that deduct stock on complete (sales outflow).
  */
 export const STOCK_OUT_DOC_TYPES = [
-  "ABB",
   "INV_DO",
   "TAX_INV",
   "CS_TAX",
+  "ABB",
 ] as const;
 
 /**

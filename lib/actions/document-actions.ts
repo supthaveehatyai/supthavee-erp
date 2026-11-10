@@ -402,6 +402,8 @@ function collectDraftProductIds(items: CreateDraftDocumentItemInput[]): string[]
 
 type ExpandedDraftRow = ReturnType<typeof mapSalesDraftLine> & {
   id?: string;
+  document_id?: string;
+  mockup_image_url?: string | null;
   is_bundle_header?: boolean;
   is_bundle_component?: boolean;
   bundle_kit_id?: string | null;
@@ -487,20 +489,29 @@ async function insertSalesDocumentItems(
   supabase: ReturnType<typeof createSupabaseServerClient>,
   rows: ExpandedDraftRow[],
 ): Promise<string | null> {
-  const bundleKeys = ["bundle_kit_id", "parent_item_id", "is_bundle_header", "is_bundle_component"] as const;
+  const optionalKeys = [
+    "bundle_kit_id",
+    "parent_item_id",
+    "is_bundle_header",
+    "is_bundle_component",
+    "mockup_image_url",
+  ] as const;
   async function insertBatch(batch: ExpandedDraftRow[]) {
     if (batch.length === 0) return null;
-    const first = await supabase.from("document_items").insert(batch as never);
-    if (!first.error) return null;
-    const message = first.error.message ?? "";
-    if (!bundleKeys.some((key) => message.includes(key))) return message;
-    const stripped = batch.map((row) => {
-      const next = { ...row };
-      for (const key of bundleKeys) delete next[key];
-      return next;
-    });
-    const retry = await supabase.from("document_items").insert(stripped as never);
-    return retry.error?.message ?? null;
+    let current = batch;
+    for (let attempt = 0; attempt < optionalKeys.length + 1; attempt += 1) {
+      const result = await supabase.from("document_items").insert(current as never);
+      if (!result.error) return null;
+      const message = result.error.message ?? "";
+      const missing = optionalKeys.filter((key) => message.includes(key));
+      if (missing.length === 0) return message;
+      current = current.map((row) => {
+        const next = { ...row };
+        for (const key of missing) delete next[key];
+        return next;
+      });
+    }
+    return "บันทึกรายการสินค้าไม่สำเร็จ";
   }
 
   const parents = rows.filter((row) => !row.parent_item_id);
@@ -508,6 +519,180 @@ async function insertSalesDocumentItems(
   const parentError = await insertBatch(parents);
   if (parentError) return parentError;
   return insertBatch(children);
+}
+
+type CopiedDocumentItem = {
+  id?: string | null;
+  product_id?: string | null;
+  description?: string | null;
+  qty?: number | string | null;
+  uom_used?: string | null;
+  unit_price?: number | string | null;
+  unit_cost_price?: number | string | null;
+  discount_text?: string | null;
+  discount_amount?: number | string | null;
+  line_total?: number | string | null;
+  sort_order?: number | null;
+  is_service_item?: boolean | null;
+  mockup_image_url?: string | null;
+  bundle_kit_id?: string | null;
+  parent_item_id?: string | null;
+  is_bundle_header?: boolean | null;
+  is_bundle_component?: boolean | null;
+};
+
+type CopySourceDocument = {
+  id: string;
+  doc_no?: string | null;
+  doc_type?: string | null;
+  status?: string | null;
+  doc_date?: string | null;
+  due_date?: string | null;
+  contact_id?: string | null;
+  contact_person_id?: string | null;
+  ref_document_id?: string | null;
+  sub_total?: number | string | null;
+  discount_amount?: number | string | null;
+  discount_text?: string | null;
+  tax_rate?: number | string | null;
+  tax_amount?: number | string | null;
+  wht_rate?: number | string | null;
+  wht_amount?: number | string | null;
+  grand_total?: number | string | null;
+  deposit_deducted?: number | string | null;
+  deposit_net_deducted?: number | string | null;
+  deposit_vat_deducted?: number | string | null;
+  deposit_doc_id?: string | null;
+  vat_type?: string | null;
+  vat_rate?: number | string | null;
+  total_amount?: number | string | null;
+  net_before_vat?: number | string | null;
+  vat_amount?: number | string | null;
+  notes?: string | null;
+  sales_channel?: string | null;
+  ecommerce_order_no?: string | null;
+  ecommerce_buyer_name?: string | null;
+  tracking_no?: string | null;
+  one_time_address?: string | null;
+  document_items?: CopiedDocumentItem[] | null;
+};
+
+const COPIED_ITEM_SELECT = `document_items!document_items_document_id_fkey (
+          id,
+          product_id,
+          description,
+          qty,
+          uom_used,
+          unit_price,
+          unit_cost_price,
+          discount_text,
+          discount_amount,
+          line_total,
+          sort_order,
+          is_service_item,
+          mockup_image_url,
+          bundle_kit_id,
+          parent_item_id,
+          is_bundle_header,
+          is_bundle_component
+        )`;
+
+const COPIED_ITEM_SELECT_LEGACY = `document_items!document_items_document_id_fkey (
+          product_id,
+          description,
+          qty,
+          uom_used,
+          unit_price,
+          unit_cost_price,
+          discount_text,
+          discount_amount,
+          line_total,
+          sort_order
+        )`;
+
+async function loadCopySourceDocument(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  id: string,
+  selectSql: string,
+): Promise<{
+  data: CopySourceDocument | null;
+  error: { message: string; code?: string } | null;
+}> {
+  const run = async (sql: string) => {
+    const result = await supabase.from("documents").select(sql).eq("id", id).maybeSingle();
+    return {
+      data:
+        result.data && typeof result.data === "object"
+          ? (result.data as CopySourceDocument)
+          : null,
+      error: result.error
+        ? { message: result.error.message, code: result.error.code }
+        : null,
+    };
+  };
+  const first = await run(selectSql);
+  if (
+    !first.error ||
+    !isMissingCopiedItemColumn(first.error) ||
+    !selectSql.includes(COPIED_ITEM_SELECT)
+  ) {
+    return first;
+  }
+  return run(selectSql.replace(COPIED_ITEM_SELECT, COPIED_ITEM_SELECT_LEGACY));
+}
+
+function isMissingCopiedItemColumn(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  const message = error.message ?? "";
+  return (
+    error.code === "42703" ||
+    error.code === "PGRST204" ||
+    /is_service_item|mockup_image_url|bundle_kit_id|parent_item_id|is_bundle_/i.test(message)
+  );
+}
+
+/**
+ * คัดลอกรายการไปเอกสารใหม่ พร้อม UUID ใหม่ของแถวแม่ชุดเซ็ต
+ * และชี้ parent_item_id ของแถวลูกไปที่แถวแม่ในเอกสารปลายทาง
+ */
+function copySalesDocumentItems(
+  documentId: string,
+  sourceItems: unknown,
+): ExpandedDraftRow[] {
+  const items = Array.isArray(sourceItems) ? (sourceItems as CopiedDocumentItem[]) : [];
+  const nextIdByOldId = new Map<string, string>();
+  for (const item of items) {
+    const oldId = String(item.id ?? "").trim();
+    if (oldId) nextIdByOldId.set(oldId, crypto.randomUUID());
+  }
+
+  return items.map((item, index) => {
+    const oldId = String(item.id ?? "").trim();
+    const oldParentId = String(item.parent_item_id ?? "").trim();
+    const newHeaderId = oldId ? nextIdByOldId.get(oldId) ?? null : null;
+    const remappedParentId = oldParentId ? nextIdByOldId.get(oldParentId) ?? null : null;
+    const productId = String(item.product_id ?? "").trim() || null;
+    return {
+      id: newHeaderId ?? crypto.randomUUID(),
+      document_id: documentId,
+      product_id: productId,
+      description: String(item.description ?? "").slice(0, 255),
+      qty: Number(item.qty ?? 0),
+      uom_used: String(item.uom_used ?? "").trim() || (productId ? "ตัว" : "งาน"),
+      unit_price: Number(item.unit_price ?? 0),
+      unit_cost_price: Number(item.unit_cost_price ?? 0),
+      discount_text: item.discount_text ?? null,
+      discount_amount: Number(item.discount_amount ?? 0),
+      line_total: Number(item.line_total ?? 0),
+      sort_order: typeof item.sort_order === "number" ? item.sort_order : index,
+      is_service_item: item.is_service_item === true,
+      mockup_image_url: item.mockup_image_url ?? null,
+      bundle_kit_id: item.bundle_kit_id ?? null,
+      parent_item_id: remappedParentId,
+      is_bundle_header: item.is_bundle_header === true,
+      is_bundle_component: item.is_bundle_component === true,
+    };
+  });
 }
 
 function normalizeHandwrittenDocRef(value: unknown): string | null {
@@ -4454,10 +4639,7 @@ export async function convertDocument(
 
     const supabase = createSupabaseServerClient();
 
-    const { data: source, error: sourceError } = await supabase
-      .from("documents")
-      .select(
-        `
+    const sourceSelect = `
         id,
         doc_no,
         doc_type,
@@ -4486,22 +4668,13 @@ export async function convertDocument(
         ecommerce_buyer_name,
         tracking_no,
         one_time_address,
-        document_items!document_items_document_id_fkey (
-          product_id,
-          description,
-          qty,
-          uom_used,
-          unit_price,
-          unit_cost_price,
-          discount_text,
-          discount_amount,
-          line_total,
-          sort_order
-        )
-      `,
-      )
-      .eq("id", id)
-      .maybeSingle();
+        ${COPIED_ITEM_SELECT}
+`;
+    const { data: source, error: sourceError } = await loadCopySourceDocument(
+      supabase,
+      id,
+      sourceSelect,
+    );
 
     if (sourceError) {
       return { data: null, error: sourceError.message };
@@ -4511,7 +4684,7 @@ export async function convertDocument(
     }
 
     // ── Validate source doc_type + target combination ──
-    const srcType = source.doc_type;
+    const srcType = String(source.doc_type ?? "");
     if (
       !(CONVERTIBLE_SOURCE_DOC_TYPES as readonly string[]).includes(srcType)
     ) {
@@ -4799,40 +4972,20 @@ export async function convertDocument(
     if (shippingCopyError) return { data: null, error: shippingCopyError };
 
     if (sourceItems.length > 0) {
-      const itemsPayload = sourceItems.map((item, index) => ({
-        document_id: newDocumentId,
-        product_id: item.product_id ?? null,
-        description: item.description ?? null,
-        qty: Number(item.qty ?? 0),
-        uom_used: item.uom_used ?? null,
-        unit_price: Number(item.unit_price ?? 0),
-        unit_cost_price: Number(item.unit_cost_price ?? 0),
-        discount_text: item.discount_text ?? null,
-        discount_amount: Number(item.discount_amount ?? 0),
-        line_total: Number(item.line_total ?? 0),
-        sort_order:
-          typeof item.sort_order === "number" ? item.sort_order : index,
-      }));
-
-      const { error: itemsError } = await supabase
-        .from("document_items")
-        .insert(itemsPayload);
+      const itemsError = await insertSalesDocumentItems(
+        supabase,
+        copySalesDocumentItems(newDocumentId, sourceItems),
+      );
 
       if (itemsError) {
         await supabase.from("documents").delete().eq("id", newDocumentId);
         return {
           data: null,
-          error:
-            itemsError.message ??
-            "คัดลอกรายการสินค้าไปเอกสารใหม่ไม่สำเร็จ — ยกเลิกเอกสารร่างแล้ว",
+          error: itemsError,
         };
       }
     }
 
-    if (STOCK_SYNC_DOC_TYPES.has(targetDocType)) {
-      const syncError = await syncDocumentStockLedger(supabase, newDocumentId);
-      if (syncError) return { data: null, error: syncError };
-    }
     revalidateStockSurfaces();
 
     fireDocumentAuditLog({
@@ -4882,23 +5035,18 @@ export async function upgradeAbbToFullTaxInvoice(
     }
 
     const supabase = createSupabaseServerClient();
-    const { data: source, error: sourceError } = await supabase
-      .from("documents")
-      .select(
-        `
+    const sourceSelect = `
         id, doc_no, doc_type, status, contact_id, contact_person_id, ref_document_id,
         discount_text, vat_rate, tax_rate, notes, sales_channel,
         deposit_deducted, deposit_net_deducted, deposit_vat_deducted, deposit_doc_id,
         ecommerce_order_no, ecommerce_buyer_name, tracking_no, one_time_address,
-        document_items!document_items_document_id_fkey (
-          product_id, description, qty, uom_used, unit_price, unit_cost_price,
-          discount_text, discount_amount, line_total, sort_order, is_service_item,
-          mockup_image_url
-        )
-      `,
-      )
-      .eq("id", id)
-      .maybeSingle();
+        ${COPIED_ITEM_SELECT}
+`;
+    const { data: source, error: sourceError } = await loadCopySourceDocument(
+      supabase,
+      id,
+      sourceSelect,
+    );
 
     if (sourceError) return { data: null, error: sourceError.message };
     if (!source) return { data: null, error: "ไม่พบเอกสาร" };
@@ -5019,34 +5167,19 @@ export async function upgradeAbbToFullTaxInvoice(
     );
     if (shippingCopyError) return { data: null, error: shippingCopyError };
     if (sourceItems.length > 0) {
-      const { error: itemsError } = await supabase.from("document_items").insert(
-        sourceItems.map((item, index) => ({
-          document_id: newDocumentId,
-          product_id: item.product_id ?? null,
-          description: item.description ?? null,
-          qty: Number(item.qty ?? 0),
-          uom_used: item.uom_used ?? null,
-          unit_price: Number(item.unit_price ?? 0),
-          unit_cost_price: Number(item.unit_cost_price ?? 0),
-          discount_text: item.discount_text ?? null,
-          discount_amount: Number(item.discount_amount ?? 0),
-          line_total: Number(item.line_total ?? 0),
-          sort_order: typeof item.sort_order === "number" ? item.sort_order : index,
-          is_service_item: item.is_service_item === true,
-          mockup_image_url: item.mockup_image_url ?? null,
-        })),
+      const itemsError = await insertSalesDocumentItems(
+        supabase,
+        copySalesDocumentItems(newDocumentId, sourceItems),
       );
       if (itemsError) {
         await supabase.from("documents").delete().eq("id", newDocumentId);
         return {
           data: null,
-          error: itemsError.message ?? "คัดลอกรายการไปใบกำกับภาษีเต็มรูปไม่สำเร็จ",
+          error: itemsError,
         };
       }
     }
 
-    const syncError = await syncDocumentStockLedger(supabase, newDocumentId);
-    if (syncError) return { data: null, error: syncError };
     revalidateStockSurfaces();
 
     revalidatePath("/sales");
@@ -5677,10 +5810,7 @@ export async function cloneDocumentToNewDraft(
 
     const supabase = createSupabaseServerClient();
 
-    const { data: source, error: sourceError } = await supabase
-      .from("documents")
-      .select(
-        `
+    const sourceSelect = `
         id,
         doc_no,
         doc_type,
@@ -5709,22 +5839,13 @@ export async function cloneDocumentToNewDraft(
         ecommerce_buyer_name,
         tracking_no,
         one_time_address,
-        document_items!document_items_document_id_fkey (
-          product_id,
-          description,
-          qty,
-          uom_used,
-          unit_price,
-          unit_cost_price,
-          discount_text,
-          discount_amount,
-          line_total,
-          sort_order
-        )
-      `,
-      )
-      .eq("id", id)
-      .maybeSingle();
+        ${COPIED_ITEM_SELECT}
+`;
+    const { data: source, error: sourceError } = await loadCopySourceDocument(
+      supabase,
+      id,
+      sourceSelect,
+    );
 
     if (sourceError) {
       return { data: null, error: sourceError.message };
@@ -5813,32 +5934,16 @@ export async function cloneDocumentToNewDraft(
     const newDocumentId = created.id as string;
 
     if (sourceItems.length > 0) {
-      const itemsPayload = sourceItems.map((item, index) => ({
-        document_id: newDocumentId,
-        product_id: item.product_id ?? null,
-        description: item.description ?? null,
-        qty: Number(item.qty ?? 0),
-        uom_used: item.uom_used ?? null,
-        unit_price: Number(item.unit_price ?? 0),
-        unit_cost_price: Number(item.unit_cost_price ?? 0),
-        discount_text: item.discount_text ?? null,
-        discount_amount: Number(item.discount_amount ?? 0),
-        line_total: Number(item.line_total ?? 0),
-        sort_order:
-          typeof item.sort_order === "number" ? item.sort_order : index,
-      }));
-
-      const { error: itemsError } = await supabase
-        .from("document_items")
-        .insert(itemsPayload);
+      const itemsError = await insertSalesDocumentItems(
+        supabase,
+        copySalesDocumentItems(newDocumentId, sourceItems),
+      );
 
       if (itemsError) {
         await supabase.from("documents").delete().eq("id", newDocumentId);
         return {
           data: null,
-          error:
-            itemsError.message ??
-            "คัดลอกรายการสินค้าไม่สำเร็จ — ยกเลิกเอกสารร่างแล้ว",
+          error: itemsError,
         };
       }
     }
@@ -5892,10 +5997,7 @@ export async function duplicateDocument(
 
     const supabase = createSupabaseServerClient();
 
-    const { data: source, error: sourceError } = await supabase
-      .from("documents")
-      .select(
-        `
+    const sourceSelect = `
         id,
         doc_no,
         doc_type,
@@ -5920,22 +6022,13 @@ export async function duplicateDocument(
         ecommerce_buyer_name,
         tracking_no,
         one_time_address,
-        document_items!document_items_document_id_fkey (
-          product_id,
-          description,
-          qty,
-          uom_used,
-          unit_price,
-          unit_cost_price,
-          discount_text,
-          discount_amount,
-          line_total,
-          sort_order
-        )
-      `,
-      )
-      .eq("id", id)
-      .maybeSingle();
+        ${COPIED_ITEM_SELECT}
+`;
+    const { data: source, error: sourceError } = await loadCopySourceDocument(
+      supabase,
+      id,
+      sourceSelect,
+    );
 
     if (sourceError) {
       return { data: null, error: sourceError.message };
@@ -6016,32 +6109,16 @@ export async function duplicateDocument(
     const newDocumentId = created.id as string;
 
     if (sourceItems.length > 0) {
-      const itemsPayload = sourceItems.map((item, index) => ({
-        document_id: newDocumentId,
-        product_id: item.product_id ?? null,
-        description: item.description ?? null,
-        qty: Number(item.qty ?? 0),
-        uom_used: item.uom_used ?? null,
-        unit_price: Number(item.unit_price ?? 0),
-        unit_cost_price: Number(item.unit_cost_price ?? 0),
-        discount_text: item.discount_text ?? null,
-        discount_amount: Number(item.discount_amount ?? 0),
-        line_total: Number(item.line_total ?? 0),
-        sort_order:
-          typeof item.sort_order === "number" ? item.sort_order : index,
-      }));
-
-      const { error: itemsError } = await supabase
-        .from("document_items")
-        .insert(itemsPayload);
+      const itemsError = await insertSalesDocumentItems(
+        supabase,
+        copySalesDocumentItems(newDocumentId, sourceItems),
+      );
 
       if (itemsError) {
         await supabase.from("documents").delete().eq("id", newDocumentId);
         return {
           data: null,
-          error:
-            itemsError.message ??
-            "คัดลอกรายการสินค้าไม่สำเร็จ — ยกเลิกเอกสารร่างแล้ว",
+          error: itemsError,
         };
       }
     }
