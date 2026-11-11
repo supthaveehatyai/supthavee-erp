@@ -4079,19 +4079,28 @@ export async function updateSalesDocumentDirect(input: {
 }
 
 /**
- * List sales documents (newest first) with customer name.
- * Optional URL-driven filters: search (doc_no / customer), doc_date from/to.
- * Service Role only — Zero Client-Side Fetching.
+ * List sales documents across the whole table.
+ * Search, payment filter, sort, and page are applied in Postgres
+ * (Service Role only — Zero Client-Side Fetching).
  */
 export async function getSalesDocuments(
   filters?: DocumentListFilters,
   limit = 50,
 ): Promise<GetSalesDocumentsResult> {
   try {
-    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    const page = Math.max(1, Number(filters?.page) || 1);
+    const pageSize = Math.min(
+      Math.max(Number(filters?.pageSize ?? limit) || 50, 10),
+      500,
+    );
+    const offset = (page - 1) * pageSize;
     const search = sanitizeSearch(filters?.search?.trim() ?? "");
     const from = normalizeDateParam(filters?.from);
     const to = normalizeDateParam(filters?.to);
+    const paymentStatus = filters?.paymentStatus ?? "ALL";
+    const sortBy = filters?.sortBy ?? "doc_date";
+    const sortDir = filters?.sortDir === "asc" ? "asc" : "desc";
+    const ascending = sortDir === "asc";
 
     const supabase = createSupabaseServerClient();
 
@@ -4101,21 +4110,21 @@ export async function getSalesDocuments(
         .from("contacts")
         .select("id")
         .or(`company_name.ilike.%${search}%,nickname.ilike.%${search}%`)
-        .limit(200);
+        .limit(500);
 
       if (contactError) {
-        return { data: [], error: contactError.message };
+        return { data: [], error: contactError.message, page, pageSize };
       }
       contactIds = (matchedContacts ?? []).map((c) => c.id as string);
     }
 
-    const docTypes = (
-      filters?.docTypes?.length
-        ? filters.docTypes.filter((value) =>
-            (SALES_DOC_TYPES as readonly string[]).includes(value),
-          )
-        : [...SALES_DOC_TYPES]
-    ) as string[];
+    const requestedTypes = filters?.docTypes?.filter((value) =>
+      (SALES_DOC_TYPES as readonly string[]).includes(value),
+    );
+    const docTypes =
+      requestedTypes && requestedTypes.length > 0
+        ? requestedTypes
+        : [...SALES_DOC_TYPES];
     const pattern = search ? `%${search}%` : "";
 
     async function loadRows(includeHandwritten: boolean) {
@@ -4138,12 +4147,29 @@ export async function getSalesDocuments(
       `;
       let query = supabase
         .from("documents")
-        .select(selectSql)
+        .select(selectSql, { count: "exact" })
         .in("doc_type", docTypes);
+
+      if (paymentStatus === "UNPAID") {
+        query = query
+          .in("payment_status", ["UNPAID", "PARTIAL", "Pending"])
+          .not("status", "in", "(VOID,CANCELLED)");
+      } else if (paymentStatus === "PAID") {
+        query = query
+          .eq("payment_status", "PAID")
+          .not("status", "in", "(VOID,CANCELLED)");
+      } else if (paymentStatus === "VOID") {
+        query = query.or(
+          "status.eq.VOID,status.eq.CANCELLED,payment_status.eq.VOID",
+        );
+      }
+
       if (search) {
         const parts = [
           `doc_no.ilike.${pattern}`,
           `reference_no.ilike.${pattern}`,
+          `ecommerce_buyer_name.ilike.${pattern}`,
+          `notes.ilike.${pattern}`,
         ];
         if (includeHandwritten) parts.push(`handwritten_doc_ref.ilike.${pattern}`);
         if (contactIds.length > 0) {
@@ -4153,18 +4179,55 @@ export async function getSalesDocuments(
       }
       if (from) query = query.gte("doc_date", from);
       if (to) query = query.lte("doc_date", to);
-      return query.order("created_at", { ascending: false }).limit(safeLimit);
+
+      if (sortBy === "doc_no") {
+        query = query
+          .order("doc_no", { ascending })
+          .order("doc_date", { ascending: false });
+      } else if (sortBy === "grand_total") {
+        query = query
+          .order("grand_total", { ascending })
+          .order("doc_date", { ascending: false });
+      } else if (sortBy === "created_at") {
+        query = query.order("created_at", { ascending });
+      } else {
+        query = query
+          .order("doc_date", { ascending })
+          .order("doc_no", { ascending })
+          .order("created_at", { ascending });
+      }
+
+      return query.range(offset, offset + pageSize - 1);
     }
 
-    let { data, error } = await loadRows(true);
-    if (error && /handwritten_doc_ref/i.test(error.message)) {
-      const retry = await loadRows(false);
-      data = retry.data;
-      error = retry.error;
+    const unpaidQuery = supabase
+      .from("documents")
+      .select("id", { count: "exact", head: true })
+      .in("doc_type", docTypes)
+      .in("payment_status", ["UNPAID", "PARTIAL", "Pending"])
+      .not("status", "in", "(VOID,CANCELLED)");
+
+    const [firstPage, unpaidResult] = await Promise.all([
+      loadRows(true),
+      unpaidQuery,
+    ]);
+    let loaded = firstPage;
+    if (loaded.error && /handwritten_doc_ref/i.test(loaded.error.message)) {
+      loaded = await loadRows(false);
     }
+
+    const unpaidCount = unpaidResult.count ?? 0;
+    const { data, error, count } = loaded;
 
     if (error) {
-      return { data: [], error: error.message };
+      return {
+        data: [],
+        error: error.message,
+        totalCount: 0,
+        unpaidCount,
+        page,
+        pageSize,
+      };
     }
 
     const list = (data ?? []) as unknown as Array<{
@@ -4220,7 +4283,14 @@ export async function getSalesDocuments(
       };
     });
 
-    return { data: rows, error: null };
+    return {
+      data: rows,
+      error: null,
+      totalCount: count ?? rows.length,
+      unpaidCount,
+      page,
+      pageSize,
+    };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "ดึงรายการเอกสารขายไม่สำเร็จ";

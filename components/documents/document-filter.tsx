@@ -6,7 +6,7 @@ import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
-const SEARCH_DEBOUNCE_MS = 300;
+const SEARCH_DEBOUNCE_MS = 350;
 
 export type DocumentFilterProps = {
   /** Placeholder for the search input (sales vs purchase wording). */
@@ -33,8 +33,22 @@ export default function DocumentFilter({
   const [from, setFrom] = useState(urlFrom);
   const [to, setTo] = useState(urlTo);
 
-  const latestRef = useRef({ search, from, to, urlSearch, pathname });
-  latestRef.current = { search, from, to, urlSearch, pathname };
+  const latestRef = useRef({
+    search,
+    from,
+    to,
+    urlSearch,
+    pathname,
+    query: searchParams.toString(),
+  });
+  latestRef.current = {
+    search,
+    from,
+    to,
+    urlSearch,
+    pathname,
+    query: searchParams.toString(),
+  };
 
   useEffect(() => {
     setSearch(urlSearch);
@@ -42,15 +56,12 @@ export default function DocumentFilter({
     setTo(urlTo);
   }, [urlSearch, urlFrom, urlTo]);
 
-  function replaceParams(next: {
-    search?: string;
-    from?: string;
-    to?: string;
-  }) {
-    const params = new URLSearchParams(searchParams.toString());
+  function commitFilters(next: { search: string; from: string; to: string }) {
+    const latest = latestRef.current;
+    const params = new URLSearchParams(latest.query);
 
-    const apply = (key: "search" | "from" | "to", value: string | undefined) => {
-      const trimmed = value?.trim() ?? "";
+    const apply = (key: "search" | "from" | "to", value: string) => {
+      const trimmed = value.trim();
       if (trimmed) params.set(key, trimmed);
       else params.delete(key);
     };
@@ -58,10 +69,13 @@ export default function DocumentFilter({
     apply("search", next.search);
     apply("from", next.from);
     apply("to", next.to);
+    params.delete("page");
 
     const qs = params.toString();
     startTransition(() => {
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+      router.replace(qs ? `${latest.pathname}?${qs}` : latest.pathname, {
+        scroll: false,
+      });
     });
   }
 
@@ -69,42 +83,40 @@ export default function DocumentFilter({
     const handle = window.setTimeout(() => {
       const latest = latestRef.current;
       if (latest.search.trim() === latest.urlSearch.trim()) return;
-
-      const params = new URLSearchParams();
-      const s = latest.search.trim();
-      const f = latest.from.trim();
-      const t = latest.to.trim();
-      if (s) params.set("search", s);
-      if (f) params.set("from", f);
-      if (t) params.set("to", t);
-
-      const qs = params.toString();
-      startTransition(() => {
-        router.replace(qs ? `${latest.pathname}?${qs}` : latest.pathname, {
-          scroll: false,
-        });
+      commitFilters({
+        search: latest.search,
+        from: latest.from,
+        to: latest.to,
       });
     }, SEARCH_DEBOUNCE_MS);
 
     return () => window.clearTimeout(handle);
-  }, [search, router, startTransition]);
+    // commitFilters reads the latest URL from a ref, so it stays stable for this debounce.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   function onFromChange(value: string) {
     setFrom(value);
-    replaceParams({ search, from: value, to });
+    commitFilters({ search, from: value, to });
   }
 
   function onToChange(value: string) {
     setTo(value);
-    replaceParams({ search, from, to: value });
+    commitFilters({ search, from, to: value });
   }
 
   function onClear() {
     setSearch("");
     setFrom("");
     setTo("");
+    const params = new URLSearchParams(latestRef.current.query);
+    params.delete("search");
+    params.delete("from");
+    params.delete("to");
+    params.delete("page");
+    const qs = params.toString();
     startTransition(() => {
-      router.replace(pathname, { scroll: false });
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     });
   }
 
@@ -128,6 +140,11 @@ export default function DocumentFilter({
               id="document-filter-search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                commitFilters({ search, from, to });
+              }}
               placeholder={searchPlaceholder}
               className="pl-9"
               autoComplete="off"

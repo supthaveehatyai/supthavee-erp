@@ -37,8 +37,61 @@ type PageProps = {
     from?: string;
     to?: string;
     kind?: string;
+    payment?: string;
+    sort?: string;
+    dir?: string;
+    page?: string;
+    pageSize?: string;
   }>;
 };
+
+type SalesQuery = {
+  search?: string;
+  from?: string;
+  to?: string;
+  kind?: string;
+  payment?: string;
+  sort?: string;
+  dir?: string;
+  page?: string;
+  pageSize?: string;
+};
+
+function parsePaymentStatus(
+  value: string,
+): "ALL" | "UNPAID" | "PAID" | "VOID" {
+  if (value === "UNPAID" || value === "PAID" || value === "VOID") return value;
+  return "ALL";
+}
+
+function parseSortBy(
+  value: string,
+): "doc_date" | "doc_no" | "grand_total" | "created_at" {
+  if (value === "doc_no" || value === "grand_total" || value === "created_at") {
+    return value;
+  }
+  return "doc_date";
+}
+
+function salesHref(
+  current: SalesQuery,
+  patch: Partial<Record<keyof SalesQuery, string | null>>,
+) {
+  const merged: SalesQuery = { ...current };
+  for (const [key, value] of Object.entries(patch) as [
+    keyof SalesQuery,
+    string | null,
+  ][]) {
+    if (value == null || value === "") delete merged[key];
+    else merged[key] = value;
+  }
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(merged)) {
+    if (value) params.set(key, value);
+  }
+  const qs = params.toString();
+  return qs ? `/sales?${qs}` : "/sales";
+}
 
 function formatMoney(value: number): string {
   return value.toLocaleString("th-TH", {
@@ -145,23 +198,62 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
             : kind === "ABB"
               ? ["ABB"]
               : undefined;
+  const paymentStatus = parsePaymentStatus(
+    String(params.payment ?? "ALL").trim().toUpperCase(),
+  );
+  const sortBy = parseSortBy(String(params.sort ?? "doc_date").trim());
+  const sortDir: "asc" | "desc" =
+    String(params.dir ?? "desc").trim().toLowerCase() === "asc" ? "asc" : "desc";
+  const page = Math.max(1, Number(params.page) || 1);
+  const pageSizeRaw = Number(params.pageSize);
+  const pageSize = pageSizeRaw === 100 || pageSizeRaw === 200 ? pageSizeRaw : 50;
+  const query: SalesQuery = {
+    search: params.search,
+    from: params.from,
+    to: params.to,
+    kind: params.kind,
+    payment: paymentStatus === "ALL" ? undefined : paymentStatus,
+    sort: sortBy === "doc_date" ? undefined : sortBy,
+    dir: sortBy === "doc_date" && sortDir === "desc" ? undefined : sortDir,
+    page: page <= 1 ? undefined : String(page),
+    pageSize: pageSize === 50 ? undefined : String(pageSize),
+  };
   const filters = {
     search: params.search,
     from: params.from,
     to: params.to,
     docTypes,
+    paymentStatus,
+    sortBy,
+    sortDir,
+    page,
+    pageSize,
   };
   const hasActiveFilters = Boolean(
     filters.search?.trim() ||
       filters.from?.trim() ||
       filters.to?.trim() ||
-      docTypes,
+      docTypes ||
+      paymentStatus !== "ALL",
   );
 
-  const [{ data: documents, error }, unswept] = await Promise.all([
-    getSalesDocuments(filters),
-    getUnsweptReceipts(),
-  ]);
+  const [{ data: documents, error, totalCount, unpaidCount }, unswept] =
+    await Promise.all([getSalesDocuments(filters), getUnsweptReceipts()]);
+  const total = totalCount ?? documents.length;
+  const fromRow = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const toRow = total === 0 ? 0 : Math.min(page * pageSize, total);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const sortMark = (column: "doc_date" | "doc_no" | "grand_total") =>
+    sortBy === column ? (sortDir === "asc" ? "↑" : "↓") : "↕";
+  const sortHref = (column: "doc_date" | "doc_no" | "grand_total") => {
+    const nextDir = sortBy === column && sortDir === "desc" ? "asc" : "desc";
+    const isDefault = column === "doc_date" && nextDir === "desc";
+    return salesHref(query, {
+      sort: isDefault ? null : column,
+      dir: isDefault ? null : nextDir,
+      page: null,
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -175,7 +267,7 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
             </h1>
           </div>
           <p className="text-sm text-slate-500">
-            ประวัติเอกสารขายทั้งหมด (เรียงจากใหม่ไปเก่า)
+            ค้นหา กรองบิลค้างชำระ และแบ่งหน้าจากฐานข้อมูลทั้งหมด
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -208,15 +300,43 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
           <div>
             <CardTitle className="text-base">รายการเอกสาร</CardTitle>
             <CardDescription>
-              {hasActiveFilters
-                ? `ผลการค้นหา ${documents.length} รายการ`
-                : `แสดงล่าสุด ${documents.length} รายการ`}
+              {`แสดง ${fromRow.toLocaleString("th-TH")}–${toRow.toLocaleString("th-TH")} จากทั้งหมด ${total.toLocaleString("th-TH")} รายการ`}
               {error ? ` — เกิดข้อผิดพลาด: ${error}` : null}
             </CardDescription>
           </div>
           <Suspense fallback={<FilterFallback />}>
             <SalesDocTypePills />
-            <DocumentFilter searchPlaceholder="ชื่อเล่น / ชื่อลูกค้า / เลขที่เอกสาร / บิลมือ / เลขสลิป" />
+            <div className="flex flex-wrap gap-1.5">
+              {(
+                [
+                  ["ALL", "ทั้งหมด"],
+                  ["UNPAID", `🔴 ค้างชำระ / รอรับเงิน (${(unpaidCount ?? 0).toLocaleString("th-TH")})`],
+                  ["PAID", "🟢 ชำระแล้ว (PAID)"],
+                  ["VOID", "🚫 ยกเลิกแล้ว (VOID)"],
+                ] as const
+              ).map(([id, label]) => {
+                const selected = paymentStatus === id;
+                return (
+                  <Link
+                    key={id}
+                    href={salesHref(query, {
+                      payment: id === "ALL" ? null : id,
+                      page: null,
+                    })}
+                    className={
+                      selected
+                        ? id === "UNPAID"
+                          ? "rounded-full bg-red-600 px-3 py-1 text-xs font-semibold text-white"
+                          : "rounded-full bg-blue-600 px-3 py-1 text-xs font-semibold text-white"
+                        : "rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                    }
+                  >
+                    {label}
+                  </Link>
+                );
+              })}
+            </div>
+            <DocumentFilter searchPlaceholder="ชื่อเล่น / ชื่อลูกค้า / เลขที่เอกสาร / บิลมือ / เลขสลิป / หมายเหตุ" />
           </Suspense>
         </CardHeader>
         <CardContent className="px-0 sm:px-6">
@@ -224,12 +344,22 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="whitespace-nowrap">วันที่</TableHead>
-                  <TableHead className="whitespace-nowrap">เลขที่เอกสาร</TableHead>
+                  <TableHead className="whitespace-nowrap">
+                    <Link href={sortHref("doc_date")} className="inline-flex items-center gap-1">
+                      วันที่ <span className="text-[10px]">{sortMark("doc_date")}</span>
+                    </Link>
+                  </TableHead>
+                  <TableHead className="whitespace-nowrap">
+                    <Link href={sortHref("doc_no")} className="inline-flex items-center gap-1">
+                      เลขที่เอกสาร <span className="text-[10px]">{sortMark("doc_no")}</span>
+                    </Link>
+                  </TableHead>
                   <TableHead className="whitespace-nowrap">ประเภท</TableHead>
                   <TableHead>ลูกค้า</TableHead>
                   <TableHead className="whitespace-nowrap text-right">
-                    ยอดสุทธิ
+                    <Link href={sortHref("grand_total")} className="inline-flex items-center gap-1">
+                      ยอดสุทธิ <span className="text-[10px]">{sortMark("grand_total")}</span>
+                    </Link>
                   </TableHead>
                   <TableHead className="whitespace-nowrap">สถานะ</TableHead>
                   <TableHead className="whitespace-nowrap text-right">
@@ -318,6 +448,54 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
                 )}
               </TableBody>
             </Table>
+          </div>
+          <div className="flex flex-col gap-3 border-t border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-600">
+              แสดง {fromRow.toLocaleString("th-TH")}–{toRow.toLocaleString("th-TH")} จากทั้งหมด {total.toLocaleString("th-TH")} รายการ
+            </p>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[50, 100, 200].map((size) => (
+                <Link
+                  key={size}
+                  href={salesHref(query, {
+                    pageSize: size === 50 ? null : String(size),
+                    page: null,
+                  })}
+                  className={
+                    pageSize === size
+                      ? "rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white"
+                      : "rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  }
+                >
+                  {size} รายการ
+                </Link>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              {page <= 1 ? (
+                <span className="text-slate-300">← ก่อนหน้า</span>
+              ) : (
+                <Link
+                  href={salesHref(query, { page: page - 1 <= 1 ? null : String(page - 1) })}
+                  className="font-medium text-slate-700 hover:text-slate-950"
+                >
+                  ← ก่อนหน้า
+                </Link>
+              )}
+              <span className="tabular-nums text-slate-600">
+                หน้า {page.toLocaleString("th-TH")} / {totalPages.toLocaleString("th-TH")}
+              </span>
+              {page >= totalPages ? (
+                <span className="text-slate-300">ถัดไป →</span>
+              ) : (
+                <Link
+                  href={salesHref(query, { page: String(page + 1) })}
+                  className="font-medium text-slate-700 hover:text-slate-950"
+                >
+                  ถัดไป →
+                </Link>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>

@@ -484,7 +484,10 @@ export async function sendSalesOrderToProduction(
 export async function getSalesOrders(
   filters?: { search?: string; from?: string; to?: string },
 ): Promise<GetSalesOrdersResult> {
-  const result = await getSalesDocuments(filters, 100);
+  const result = await getSalesDocuments(
+    { ...filters, docTypes: ["SO"], page: 1, pageSize: 100 },
+    100,
+  );
   if (result.error) {
     return { data: [], error: result.error };
   }

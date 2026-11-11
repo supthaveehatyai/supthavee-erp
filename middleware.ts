@@ -25,7 +25,25 @@ export async function middleware(request: NextRequest) {
     });
   }
 
+  if (isPrefetchWithSession(request)) {
+    return NextResponse.next();
+  }
+
   return updateSession(request);
+}
+
+function isPrefetchWithSession(request: NextRequest): boolean {
+  const purpose = (request.headers.get("purpose") ?? request.headers.get("x-purpose") ?? "")
+    .trim()
+    .toLowerCase();
+  const prefetchHeader = request.headers.get("x-middleware-prefetch")
+    ?? request.headers.get("next-router-prefetch");
+  const isPrefetch = purpose === "prefetch" || prefetchHeader === "1";
+  if (!isPrefetch) return false;
+  return request.cookies.getAll().some((cookie) => {
+    const name = cookie.name.toLowerCase();
+    return name.startsWith("sb-") && name.includes("auth-token") && cookie.value.length > 0;
+  });
 }
 
 export const config = {

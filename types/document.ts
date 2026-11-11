@@ -603,6 +603,12 @@ export type SalesDocumentFilters = {
   to?: string;
   /** จำกัดประเภทบนหน้ารายการขาย เช่น QT หรือ TAX_INV+CS_TAX */
   docTypes?: string[];
+  /** กรองสถานะรับเงิน ทั้งฐานข้อมูล ไม่ใช่เฉพาะหน้าที่แสดงอยู่ */
+  paymentStatus?: "ALL" | "UNPAID" | "PAID" | "VOID";
+  sortBy?: "doc_date" | "doc_no" | "grand_total" | "created_at";
+  sortDir?: "asc" | "desc";
+  page?: number;
+  pageSize?: number;
 };
 
 /** Shared list filters (sales + purchase) — same shape as URL search params. */
@@ -611,6 +617,10 @@ export type DocumentListFilters = SalesDocumentFilters;
 export type GetSalesDocumentsResult = {
   data: SalesDocumentListItem[];
   error: string | null;
+  totalCount?: number;
+  unpaidCount?: number;
+  page?: number;
+  pageSize?: number;
 };
 
 export type PurchaseDocumentListItem = {

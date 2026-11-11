@@ -21,6 +21,7 @@ export function SalesDocTypePills() {
     const next = new URLSearchParams(searchParams.toString());
     if (id === "all") next.delete("kind");
     else next.set("kind", id);
+    next.delete("page");
     const query = next.toString();
     router.replace(query ? `${pathname}?${query}` : pathname);
   }
