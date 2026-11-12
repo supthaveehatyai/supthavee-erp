@@ -604,7 +604,7 @@ export type SalesDocumentFilters = {
   /** จำกัดประเภทบนหน้ารายการขาย เช่น QT หรือ TAX_INV+CS_TAX */
   docTypes?: string[];
   /** กรองสถานะรับเงิน ทั้งฐานข้อมูล ไม่ใช่เฉพาะหน้าที่แสดงอยู่ */
-  paymentStatus?: "ALL" | "UNPAID" | "PAID" | "VOID";
+  paymentStatus?: "ALL" | "UNPAID" | "PAID" | "VOID" | "DRAFT";
   sortBy?: "doc_date" | "doc_no" | "grand_total" | "created_at";
   sortDir?: "asc" | "desc";
   page?: number;
@@ -619,6 +619,7 @@ export type GetSalesDocumentsResult = {
   error: string | null;
   totalCount?: number;
   unpaidCount?: number;
+  draftCount?: number;
   page?: number;
   pageSize?: number;
 };

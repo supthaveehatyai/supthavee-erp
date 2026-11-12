@@ -59,8 +59,15 @@ type SalesQuery = {
 
 function parsePaymentStatus(
   value: string,
-): "ALL" | "UNPAID" | "PAID" | "VOID" {
-  if (value === "UNPAID" || value === "PAID" || value === "VOID") return value;
+): "ALL" | "UNPAID" | "PAID" | "VOID" | "DRAFT" {
+  if (
+    value === "UNPAID" ||
+    value === "PAID" ||
+    value === "VOID" ||
+    value === "DRAFT"
+  ) {
+    return value;
+  }
   return "ALL";
 }
 
@@ -237,7 +244,7 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
       paymentStatus !== "ALL",
   );
 
-  const [{ data: documents, error, totalCount, unpaidCount }, unswept] =
+  const [{ data: documents, error, totalCount, unpaidCount, draftCount }, unswept] =
     await Promise.all([getSalesDocuments(filters), getUnsweptReceipts()]);
   const total = totalCount ?? documents.length;
   const fromRow = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -312,6 +319,7 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
                   ["ALL", "ทั้งหมด"],
                   ["UNPAID", `🔴 ค้างชำระ / รอรับเงิน (${(unpaidCount ?? 0).toLocaleString("th-TH")})`],
                   ["PAID", "🟢 ชำระแล้ว (PAID)"],
+                  ["DRAFT", `📝 บิลร่าง (${(draftCount ?? 0).toLocaleString("th-TH")})`],
                   ["VOID", "🚫 ยกเลิกแล้ว (VOID)"],
                 ] as const
               ).map(([id, label]) => {
@@ -327,7 +335,9 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
                       selected
                         ? id === "UNPAID"
                           ? "rounded-full bg-red-600 px-3 py-1 text-xs font-semibold text-white"
-                          : "rounded-full bg-blue-600 px-3 py-1 text-xs font-semibold text-white"
+                          : id === "DRAFT"
+                            ? "rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-white"
+                            : "rounded-full bg-blue-600 px-3 py-1 text-xs font-semibold text-white"
                         : "rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
                     }
                   >

@@ -22,6 +22,7 @@ import { VAT_OPTIONS } from "@/lib/constants/accounting";
 import {
   DEFAULT_SALES_CREATE_DOC_TYPE,
   defaultSalesVatType,
+  isSalesChannel,
   isSalesContactRequired,
   isSalesTradingDocType,
   shouldHideSalesContactPicker,
@@ -80,6 +81,7 @@ import {
   bankAccountDisplay,
   initialBankAccountId,
   initialCashReceiptChannel,
+  isPaymentChannel,
   paymentChannelLabel,
   selectedBankAccount,
   type ActiveBankAccount,
@@ -91,6 +93,139 @@ import type { EcommerceOrderDraft, HandwrittenBillScan, ScannedSalesLine } from 
 
 const INITIAL_DOC_TYPE: SalesTradingDocType = DEFAULT_SALES_CREATE_DOC_TYPE;
 const DEFAULT_VAT_RATE = 7;
+const SALES_CREATE_AUTOSAVE_KEY = "supthavee_sales_create_autosave_v1";
+const SUBMIT_TIMEOUT_MS = 25_000;
+
+type SalesCreateAutosave = {
+  docType: SalesTradingDocType;
+  salesChannel: SalesChannelFieldsValue;
+  docDate: string;
+  selectedContactId: string;
+  selectedContactPersonId: string;
+  handwrittenDocRef: string;
+  notes: string;
+  vatType: VatCalculationType;
+  discountText: string;
+  shippingFee: string;
+  shippingMethod: string;
+  paymentChannel: PaymentChannel;
+  bankAccountId: string | null;
+  items: SalesLineItem[];
+  pendingDraftId?: string | null;
+  pendingDraftNo?: string | null;
+};
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(
+        new Error(
+          "ใช้เวลานานเกิน 25 วินาที — กดปุ่มอีกครั้งเพื่อทำต่อจากร่างเดิม",
+        ),
+      );
+    }, ms);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        window.clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error("บันทึกบิลไม่สำเร็จ"));
+      },
+    );
+  });
+}
+
+function parseSalesCreateAutosave(raw: string): SalesCreateAutosave | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<SalesCreateAutosave>;
+    if (!Array.isArray(parsed.items) || parsed.items.length === 0) return null;
+    const docTypeRaw = String(parsed.docType ?? "");
+    if (!isSalesTradingDocType(docTypeRaw)) return null;
+
+    const items: SalesLineItem[] = [];
+    for (const row of parsed.items) {
+      if (!row || typeof row !== "object") continue;
+      const item = row as Partial<SalesLineItem>;
+      const qty = Number(item.qty);
+      if (!Number.isFinite(qty)) continue;
+      items.push({
+        key: String(item.key || `restore-${items.length}-${Date.now()}`),
+        product_id: item.product_id ? String(item.product_id) : null,
+        sku: String(item.sku ?? ""),
+        description: String(item.description ?? ""),
+        qty,
+        uom_used: String(item.uom_used ?? "ตัว"),
+        unit_price: Number(item.unit_price) || 0,
+        cost_price: Number(item.cost_price) || 0,
+        discount_text: String(item.discount_text ?? ""),
+        discount_amount: Number(item.discount_amount) || 0,
+        line_total: Number(item.line_total) || 0,
+        image_url: item.image_url ? String(item.image_url) : null,
+        is_service_item: item.is_service_item === true,
+        is_service: item.is_service === true,
+        is_manufactured: item.is_manufactured === true,
+        catalog_unit_price:
+          item.catalog_unit_price == null
+            ? undefined
+            : Number(item.catalog_unit_price) || 0,
+        bundle_kit_id: item.bundle_kit_id ? String(item.bundle_kit_id) : null,
+        is_bundle_header: item.is_bundle_header === true,
+        bundle_components: Array.isArray(item.bundle_components)
+          ? item.bundle_components
+          : undefined,
+      });
+    }
+    if (items.length === 0) return null;
+
+    const channel = parsed.salesChannel;
+    const channelCode = String(channel?.sales_channel ?? "");
+    const salesChannel: SalesChannelFieldsValue = isSalesChannel(channelCode)
+      ? {
+          sales_channel: channelCode,
+          ecommerce_order_no: String(channel?.ecommerce_order_no ?? ""),
+          ecommerce_buyer_name: String(channel?.ecommerce_buyer_name ?? ""),
+          tracking_no: String(channel?.tracking_no ?? ""),
+          one_time_address: String(channel?.one_time_address ?? ""),
+        }
+      : INITIAL_SALES_CHANNEL_FIELDS;
+    const docDate = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.docDate ?? ""))
+      ? String(parsed.docDate)
+      : new Date().toISOString().slice(0, 10);
+    const vatType: VatCalculationType =
+      parsed.vatType === "INCLUSIVE" ||
+      parsed.vatType === "EXCLUSIVE" ||
+      parsed.vatType === "NONE"
+        ? parsed.vatType
+        : "EXCLUSIVE";
+    const paymentRaw = String(parsed.paymentChannel ?? "");
+    const paymentChannel: PaymentChannel = isPaymentChannel(paymentRaw)
+      ? paymentRaw
+      : "CASH";
+
+    return {
+      docType: docTypeRaw,
+      salesChannel,
+      docDate,
+      selectedContactId: String(parsed.selectedContactId ?? ""),
+      selectedContactPersonId: String(parsed.selectedContactPersonId ?? ""),
+      handwrittenDocRef: String(parsed.handwrittenDocRef ?? ""),
+      notes: String(parsed.notes ?? ""),
+      vatType,
+      discountText: String(parsed.discountText ?? ""),
+      shippingFee: String(parsed.shippingFee ?? "0"),
+      shippingMethod: String(parsed.shippingMethod ?? ""),
+      paymentChannel,
+      bankAccountId: parsed.bankAccountId ? String(parsed.bankAccountId) : null,
+      items,
+      pendingDraftId: parsed.pendingDraftId ? String(parsed.pendingDraftId) : null,
+      pendingDraftNo: parsed.pendingDraftNo ? String(parsed.pendingDraftNo) : null,
+    };
+  } catch {
+    return null;
+  }
+}
 const INCLUDED_IN_GARMENT_NOTE = "(รวมในราคาเสื้อแล้ว)";
 
 const SALES_TRADING_DOC_TYPE_OPTIONS: {
@@ -283,7 +418,95 @@ export default function SalesCreateWorkspace({
   const [shippingFee, setShippingFee] = useState("0");
   const [shippingMethod, setShippingMethod] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [restoredNotice, setRestoredNotice] = useState(false);
+  const [autosaveReady, setAutosaveReady] = useState(false);
+  const pendingDraftIdRef = useRef<string | null>(null);
+  const pendingDraftNoRef = useRef<string | null>(null);
+  const autosavePausedRef = useRef(false);
+  const lineSignatureRef = useRef<string | null>(null);
+  const submitAttemptRef = useRef(0);
   const scanKey = useRef(0);
+  const formLocked = isPending || isSubmitting;
+
+  function formSnapshot(): SalesCreateAutosave {
+    return {
+      docType,
+      salesChannel: salesChannelFields,
+      docDate,
+      selectedContactId: contactId,
+      selectedContactPersonId: contactPersonId,
+      handwrittenDocRef,
+      notes,
+      vatType,
+      discountText,
+      shippingFee,
+      shippingMethod,
+      paymentChannel,
+      bankAccountId,
+      items: lineItems,
+      pendingDraftId: pendingDraftIdRef.current,
+      pendingDraftNo: pendingDraftNoRef.current,
+    };
+  }
+
+  function rememberDraft(id: string, docNo: string) {
+    pendingDraftIdRef.current = id;
+    pendingDraftNoRef.current = docNo;
+    if (autosavePausedRef.current) return;
+    try {
+      sessionStorage.setItem(
+        SALES_CREATE_AUTOSAVE_KEY,
+        JSON.stringify({
+          ...formSnapshot(),
+          pendingDraftId: id,
+          pendingDraftNo: docNo,
+        }),
+      );
+    } catch {
+      /* sessionStorage เต็มหรือถูกปิด */
+    }
+  }
+
+  function clearAutosave() {
+    autosavePausedRef.current = true;
+    pendingDraftIdRef.current = null;
+    pendingDraftNoRef.current = null;
+    try {
+      sessionStorage.removeItem(SALES_CREATE_AUTOSAVE_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function resetForm() {
+    clearAutosave();
+    autosavePausedRef.current = false;
+    lineSignatureRef.current = null;
+    setRestoredNotice(false);
+    setDocType(startingDocType);
+    setContactId(
+      startingDocType === "ABB"
+        ? (findDefaultWalkinContact(customers)?.id ?? "")
+        : "",
+    );
+    setContactPersonId("");
+    setLineItems([]);
+    setDiscountText("");
+    setVatType(defaultSalesVatType(startingDocType));
+    setSalesChannelFields(INITIAL_SALES_CHANNEL_FIELDS);
+    setDocDate(new Date().toISOString().slice(0, 10));
+    setHandwrittenDocRef("");
+    setNotes("");
+    const channel = initialCashReceiptChannel({
+      docType: startingDocType,
+      salesChannel: "STORE",
+    });
+    setPaymentChannel(channel);
+    setBankAccountId(initialBankAccountId(bankAccounts, channel));
+    setShippingFee("0");
+    setShippingMethod("");
+  }
 
   useEffect(() => {
     const preventBrowserFileOpen = (event: DragEvent) => {
@@ -296,6 +519,88 @@ export default function SalesCreateWorkspace({
       window.removeEventListener("drop", preventBrowserFileOpen);
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(SALES_CREATE_AUTOSAVE_KEY);
+      const saved = raw ? parseSalesCreateAutosave(raw) : null;
+      if (saved) {
+        setDocType(saved.docType);
+        setSalesChannelFields(saved.salesChannel);
+        setDocDate(saved.docDate);
+        setContactId(saved.selectedContactId);
+        setContactPersonId(saved.selectedContactPersonId);
+        setHandwrittenDocRef(saved.handwrittenDocRef);
+        setNotes(saved.notes);
+        setVatType(saved.vatType);
+        setDiscountText(saved.discountText);
+        setShippingFee(saved.shippingFee);
+        setShippingMethod(saved.shippingMethod);
+        setPaymentChannel(saved.paymentChannel);
+        setBankAccountId(saved.bankAccountId);
+        setLineItems(saved.items);
+        pendingDraftIdRef.current = saved.pendingDraftId ?? null;
+        pendingDraftNoRef.current = saved.pendingDraftNo ?? null;
+        setRestoredNotice(true);
+      }
+    } catch {
+      /* ข้อมูลเก่าเสียหาย — เริ่มฟอร์มว่าง */
+    } finally {
+      setAutosaveReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!autosaveReady) return;
+    const signature = JSON.stringify(
+      lineItems.map((row) => [
+        row.key,
+        row.product_id,
+        row.qty,
+        row.unit_price,
+        row.description,
+        row.discount_text,
+        row.uom_used,
+      ]),
+    );
+    if (lineSignatureRef.current == null) {
+      lineSignatureRef.current = signature;
+      return;
+    }
+    if (lineSignatureRef.current !== signature) {
+      pendingDraftIdRef.current = null;
+      pendingDraftNoRef.current = null;
+      lineSignatureRef.current = signature;
+    }
+  }, [autosaveReady, lineItems]);
+
+  useEffect(() => {
+    if (!autosaveReady || autosavePausedRef.current) return;
+    try {
+      sessionStorage.setItem(
+        SALES_CREATE_AUTOSAVE_KEY,
+        JSON.stringify(formSnapshot()),
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [
+    autosaveReady,
+    docType,
+    salesChannelFields,
+    docDate,
+    contactId,
+    contactPersonId,
+    handwrittenDocRef,
+    notes,
+    vatType,
+    discountText,
+    shippingFee,
+    shippingMethod,
+    paymentChannel,
+    bankAccountId,
+    lineItems,
+  ]);
 
   const hideContactPicker = shouldHideSalesContactPicker({
     docType,
@@ -672,7 +977,7 @@ export default function SalesCreateWorkspace({
     );
   }
 
-  function handleCreateDraft(issueNow: boolean) {
+  async function handleCreateDraft(issueNow: boolean) {
     if (contactRequired && !contactId) {
       toast.error("กรุณาเลือกลูกค้าก่อนสร้างเอกสาร");
       return;
@@ -705,98 +1010,125 @@ export default function SalesCreateWorkspace({
       return;
     }
 
-    startTransition(async () => {
-      const result = await createDraftDocument({
-        doc_type: docType,
-        contact_id: hideContactPicker ? null : contactId,
-        contact_person_id: hideContactPicker ? null : contactPersonId || null,
-        doc_date: docDate,
-        handwritten_doc_ref: handwrittenDocRef.trim() || null,
-        notes: notes.trim() || null,
-        discount_text: discountText.trim() || null,
-        vat_type: vatType,
-        vat_rate: DEFAULT_VAT_RATE,
-        total_amount: billSummary.total_amount,
-        discount_amount: billSummary.discount_amount,
-        net_before_vat: billSummary.net_before_vat,
-        vat_amount: billSummary.vat_amount,
-        grand_total: billSummary.grand_total,
-        shipping_fee: Number(shippingFee) || 0,
-        shipping_method: shippingMethod || null,
-        sales_channel: header.data.sales_channel,
-        ecommerce_order_no: header.data.ecommerce_order_no,
-        ecommerce_buyer_name: header.data.ecommerce_buyer_name,
-        tracking_no: header.data.tracking_no,
-        one_time_address: header.data.one_time_address,
-        attachment_url: mockupUrl.trim() || null,
-        ...(docType === "ABB" || docType === "CS_TAX"
-          ? {
-              payment_channel: paymentChannel,
-              bank_account_id:
-                selectedBankAccount(bankAccounts, paymentChannel, bankAccountId)?.id ??
-                null,
-              receiving_bank_label: (() => {
-                const account = selectedBankAccount(
-                  bankAccounts,
-                  paymentChannel,
-                  bankAccountId,
-                );
-                return account
-                  ? bankAccountDisplay(account)
-                  : paymentChannelLabel(paymentChannel);
-              })(),
-              original_receipt_url: slipUrl.trim() || null,
-            }
-          : {}),
-        items: lineItems.map((row, index) => ({
-          description: row.description,
-          qty: row.qty,
-          uom_used: row.uom_used,
-          unit_price: row.unit_price,
-          unit_cost_price: row.cost_price,
-          discount_text: row.discount_text,
-          discount_amount: row.discount_amount,
-          line_total: row.line_total,
-          sort_order: index,
-          ...salesBundleDraftFields(row),
-        })),
-      });
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    const attempt = submitAttemptRef.current + 1;
+    submitAttemptRef.current = attempt;
 
-      if (result.error || !result.data) {
-        toast.error(result.error ?? "สร้างเอกสารไม่สำเร็จ");
-        return;
-      }
+    try {
+      let documentId = pendingDraftIdRef.current;
+      let draftNo = pendingDraftNoRef.current;
 
-      const draftNo = result.data.document_no;
-      const documentId = result.data.document_id;
-      if (issueNow) {
-        const issued = await issueDocument(documentId);
-        if (issued.error || !issued.data) {
-          toast.error(
-            issued.error ??
-              "บันทึกร่างแล้ว แต่ออกเลขบิลไม่สำเร็จ — เปิดร่างเพื่อออกเอกสารต่อ",
-          );
-          window.location.assign(`/sales/${encodeURIComponent(draftNo)}`);
+      if (!documentId) {
+        const draftPromise = createDraftDocument({
+          doc_type: docType,
+          contact_id: hideContactPicker ? null : contactId,
+          contact_person_id: hideContactPicker ? null : contactPersonId || null,
+          doc_date: docDate,
+          handwritten_doc_ref: handwrittenDocRef.trim() || null,
+          notes: notes.trim() || null,
+          discount_text: discountText.trim() || null,
+          vat_type: vatType,
+          vat_rate: DEFAULT_VAT_RATE,
+          total_amount: billSummary.total_amount,
+          discount_amount: billSummary.discount_amount,
+          net_before_vat: billSummary.net_before_vat,
+          vat_amount: billSummary.vat_amount,
+          grand_total: billSummary.grand_total,
+          shipping_fee: Number(shippingFee) || 0,
+          shipping_method: shippingMethod || null,
+          sales_channel: header.data.sales_channel,
+          ecommerce_order_no: header.data.ecommerce_order_no,
+          ecommerce_buyer_name: header.data.ecommerce_buyer_name,
+          tracking_no: header.data.tracking_no,
+          one_time_address: header.data.one_time_address,
+          attachment_url: mockupUrl.trim() || null,
+          ...(docType === "ABB" || docType === "CS_TAX"
+            ? {
+                payment_channel: paymentChannel,
+                bank_account_id:
+                  selectedBankAccount(bankAccounts, paymentChannel, bankAccountId)?.id ??
+                  null,
+                receiving_bank_label: (() => {
+                  const account = selectedBankAccount(
+                    bankAccounts,
+                    paymentChannel,
+                    bankAccountId,
+                  );
+                  return account
+                    ? bankAccountDisplay(account)
+                    : paymentChannelLabel(paymentChannel);
+                })(),
+                original_receipt_url: slipUrl.trim() || null,
+              }
+            : {}),
+          items: lineItems.map((row, index) => ({
+            description: row.description,
+            qty: row.qty,
+            uom_used: row.uom_used,
+            unit_price: row.unit_price,
+            unit_cost_price: row.cost_price,
+            discount_text: row.discount_text,
+            discount_amount: row.discount_amount,
+            line_total: row.line_total,
+            sort_order: index,
+            ...salesBundleDraftFields(row),
+          })),
+        });
+        void draftPromise.then((result) => {
+          if (submitAttemptRef.current !== attempt) return;
+          if (!result.data?.document_id) return;
+          rememberDraft(result.data.document_id, result.data.document_no);
+        });
+        const result = await withTimeout(draftPromise, SUBMIT_TIMEOUT_MS);
+        if (result.error || !result.data) {
+          toast.error(result.error ?? "สร้างเอกสารไม่สำเร็จ");
           return;
         }
-        toast.success(
-          issued.data.successMessage ??
-            `ออกบิล ${issued.data.document_no} แล้ว`,
-        );
-        window.location.assign(
-          `/sales/${encodeURIComponent(issued.data.document_no)}`,
-        );
+        documentId = result.data.document_id;
+        draftNo = result.data.document_no;
+        rememberDraft(documentId, draftNo);
+      }
+
+      if (!issueNow) {
+        clearAutosave();
+        toast.success(`สร้างเอกสาร ${draftNo ?? ""} สำเร็จ`);
+        if (draftNo) {
+          window.location.assign(`/sales/${encodeURIComponent(draftNo)}`);
+        }
         return;
       }
 
-      toast.success(`สร้างเอกสาร ${draftNo} สำเร็จ`);
-      window.location.assign(`/sales/${encodeURIComponent(draftNo)}`);
-    });
+      const issued = await withTimeout(issueDocument(documentId), SUBMIT_TIMEOUT_MS);
+      if (issued.error || !issued.data) {
+        const message =
+          issued.error ??
+          "บันทึกร่างแล้ว แต่ออกเลขบิลไม่สำเร็จ — กดปุ่มอีกครั้งเพื่อออกเลขจากร่างเดิม";
+        if (/ไม่ใช่สถานะ DRAFT/.test(message)) {
+          pendingDraftIdRef.current = null;
+          pendingDraftNoRef.current = null;
+        }
+        toast.error(message);
+        return;
+      }
+
+      clearAutosave();
+      toast.success(
+        issued.data.successMessage ?? `ออกบิล ${issued.data.document_no} แล้ว`,
+      );
+      window.location.assign(
+        `/sales/${encodeURIComponent(issued.data.document_no)}`,
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "บันทึกบิลไม่สำเร็จ");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   const linesSubtotal = billSummary.total_amount;
   const saveDisabled =
-    isPending || lineItems.length === 0 || (contactRequired && !contactId);
+    formLocked || lineItems.length === 0 || (contactRequired && !contactId);
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 sm:p-6">
@@ -817,13 +1149,13 @@ export default function SalesCreateWorkspace({
         <div className="flex h-10 items-center gap-2">
           <HandwrittenBillDropzone
             variant="bar"
-            disabled={isPending}
+            disabled={formLocked}
             onScanned={applyHandwrittenScan}
             onRequestExpand={() => setOcrOpen((open) => !open)}
           />
           <button
             type="button"
-            disabled={isPending}
+            disabled={formLocked}
             onClick={() => setEcommerceOpen(true)}
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm font-semibold text-violet-900 hover:bg-violet-100 disabled:opacity-60"
           >
@@ -839,15 +1171,29 @@ export default function SalesCreateWorkspace({
       </div>
 
       {ocrOpen ? (
-        <HandwrittenBillDropzone disabled={isPending} onScanned={applyHandwrittenScan} />
+        <HandwrittenBillDropzone disabled={formLocked} onScanned={applyHandwrittenScan} />
       ) : null}
 
       <EcommerceOrderImporter
         open={ecommerceOpen}
         onOpenChange={setEcommerceOpen}
-        disabled={isPending}
+        disabled={formLocked}
         onFillForm={applyEcommerceOrder}
       />
+
+      {restoredNotice ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <span>🔄 กู้คืนข้อมูลบิลที่คุณคีย์ค้างไว้เรียบร้อยแล้ว</span>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-8 border-blue-200 bg-white text-blue-900 hover:bg-blue-100"
+            onClick={resetForm}
+          >
+            🗑️ ล้างฟอร์มเริ่มใหม่
+          </Button>
+        </div>
+      ) : null}
 
       {customersError && (
         <p
@@ -930,7 +1276,7 @@ export default function SalesCreateWorkspace({
                 name="doc_type"
                 value={docType}
                 onChange={(event) => handleDocTypeChange(event.target.value)}
-                disabled={isPending}
+                disabled={formLocked}
                 className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none ring-offset-white focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {SALES_TRADING_DOC_TYPE_OPTIONS.map((option) => (
@@ -948,7 +1294,7 @@ export default function SalesCreateWorkspace({
                 clearLastSavedArtifact();
                 setSalesChannelFields(next);
               }}
-              disabled={isPending}
+              disabled={formLocked}
               docType={docType}
               contactName={selectedCustomerName}
             />
@@ -959,7 +1305,7 @@ export default function SalesCreateWorkspace({
                 id="doc-date"
                 type="date"
                 value={docDate}
-                disabled={isPending}
+                disabled={formLocked}
                 onChange={(event) => {
                   clearLastSavedArtifact();
                   setDocDate(event.target.value);
@@ -975,7 +1321,7 @@ export default function SalesCreateWorkspace({
               <Input
                 id="handwritten-doc-ref"
                 value={handwrittenDocRef}
-                disabled={isPending}
+                disabled={formLocked}
                 placeholder="เช่น เล่มที่ 21 เลขที่ 5"
                 onChange={(event) => {
                   clearLastSavedArtifact();
@@ -1010,7 +1356,7 @@ export default function SalesCreateWorkspace({
                     options={customerOptions}
                     value={contactId}
                     onChange={handleCustomerChange}
-                    disabled={isPending || customerOptions.length === 0}
+                    disabled={formLocked || customerOptions.length === 0}
                     onNicknameChange={(id, nickname) => {
                       setCustomerOptions((current) =>
                         current.map((row) =>
@@ -1022,7 +1368,7 @@ export default function SalesCreateWorkspace({
                 </div>
                 <QuickEditContactButton
                   contactId={contactId}
-                  disabled={isPending}
+                  disabled={formLocked}
                   onSaved={handleContactMasterSaved}
                 />
               </div>
@@ -1034,7 +1380,7 @@ export default function SalesCreateWorkspace({
                 options={contactPersons}
                 value={contactPersonId}
                 onChange={handleContactPersonChange}
-                disabled={isPending || !contactId}
+                disabled={formLocked || !contactId}
                 isLoading={isPersonsLoading}
                 placeholder={
                   !contactId
@@ -1058,7 +1404,7 @@ export default function SalesCreateWorkspace({
               <Input
                 id="sales-notes"
                 value={notes}
-                disabled={isPending}
+                disabled={formLocked}
                 placeholder="เช่น งานสกรีนเสื้อโปโล / PO-2569-010"
                 onChange={(event) => {
                   clearLastSavedArtifact();
@@ -1075,7 +1421,7 @@ export default function SalesCreateWorkspace({
                 clearLastSavedArtifact();
                 setSalesChannelFields(next);
               }}
-              disabled={isPending}
+              disabled={formLocked}
               docType={docType}
               contactName={selectedCustomerName}
               platformClassName="sm:col-span-4"
@@ -1089,7 +1435,7 @@ export default function SalesCreateWorkspace({
       {needsProductionMockup ? (
         <SalesMockupCard
           url={mockupUrl}
-          disabled={isPending}
+          disabled={formLocked}
           onChange={(nextUrl) => {
             clearLastSavedArtifact();
             setMockupUrl(nextUrl);
@@ -1107,7 +1453,7 @@ export default function SalesCreateWorkspace({
         </CardHeader>
         <CardContent>
           <ModelMatrixPicker
-            disabled={isPending}
+            disabled={formLocked}
             onAddBundleLines={handleAddBundleLines}
             onAddToBill={handleAddToBill}
           />
@@ -1131,7 +1477,7 @@ export default function SalesCreateWorkspace({
           <Button
             type="button"
             variant="outline"
-            disabled={isPending}
+            disabled={formLocked}
             onClick={addServiceLine}
             className="h-9 shrink-0"
           >
@@ -1189,7 +1535,7 @@ export default function SalesCreateWorkspace({
                         ) : (
                           <Input
                             value={row.description}
-                            disabled={isPending}
+                            disabled={formLocked}
                             placeholder="รายละเอียดบริการ"
                             onChange={(event) =>
                               updateLineText(row.key, "description", event.target.value)
@@ -1205,7 +1551,7 @@ export default function SalesCreateWorkspace({
                         ) : null}
                         {row.is_service_item ? (
                           <ServiceLineShortcuts
-                            disabled={isPending}
+                            disabled={formLocked}
                             includedActive={
                               row.unit_price === 0 && row.discount_text.trim() !== "100%"
                             }
@@ -1224,7 +1570,7 @@ export default function SalesCreateWorkspace({
                             min="0"
                             step="1"
                             value={row.qty}
-                            disabled={isPending}
+                            disabled={formLocked}
                             onChange={(event) =>
                               updateLineQty(row.key, event.target.value)
                             }
@@ -1239,7 +1585,7 @@ export default function SalesCreateWorkspace({
                         ) : (
                           <Input
                             value={row.uom_used}
-                            disabled={isPending}
+                            disabled={formLocked}
                             onChange={(event) =>
                               updateLineText(row.key, "uom_used", event.target.value)
                             }
@@ -1254,7 +1600,7 @@ export default function SalesCreateWorkspace({
                           min="0"
                           step="0.01"
                           value={row.unit_price}
-                          disabled={isPending}
+                          disabled={formLocked}
                           onChange={(event) =>
                             updateLineUnitPrice(row.key, event.target.value)
                           }
@@ -1281,7 +1627,7 @@ export default function SalesCreateWorkspace({
                           variant="ghost"
                           size="icon"
                           aria-label={`ลบ ${row.sku}`}
-                          disabled={isPending}
+                          disabled={formLocked}
                           onClick={() => removeLine(row.key)}
                           className="size-8 text-slate-400 hover:text-red-600"
                         >
@@ -1312,7 +1658,7 @@ export default function SalesCreateWorkspace({
                 <select
                   id="vat-type"
                   value={vatType}
-                  disabled={isPending}
+                  disabled={formLocked}
                   onChange={(event) => {
                     clearLastSavedArtifact();
                     setVatType(event.target.value as VatCalculationType);
@@ -1334,7 +1680,7 @@ export default function SalesCreateWorkspace({
                 <Input
                   id="bill-discount"
                   value={discountText}
-                  disabled={isPending}
+                  disabled={formLocked}
                   placeholder="ว่าง = ไม่มีส่วนลด"
                   onChange={(event) => {
                     clearLastSavedArtifact();
@@ -1349,7 +1695,7 @@ export default function SalesCreateWorkspace({
               <SalesShippingFields
                 fee={shippingFee}
                 method={shippingMethod}
-                disabled={isPending}
+                disabled={formLocked}
                 onFeeChange={(value) => {
                   clearLastSavedArtifact();
                   setShippingFee(value);
@@ -1429,7 +1775,7 @@ export default function SalesCreateWorkspace({
                     accounts={bankAccounts}
                     referenceNo={handwrittenDocRef}
                     slipUrl={slipUrl}
-                    disabled={isPending}
+                    disabled={formLocked}
                     onChannelChange={(next, accountId) => {
                       setPaymentChannel(next);
                       setBankAccountId(accountId);
@@ -1447,7 +1793,7 @@ export default function SalesCreateWorkspace({
                   className="h-10 w-auto gap-2 bg-blue-800 px-5 text-white hover:bg-blue-900"
                   onClick={() => handleCreateDraft(true)}
                 >
-                  {isPending
+                  {formLocked
                     ? "กำลังบันทึก..."
                     : "✅ บันทึกและออกบิลขายทันที"}
                 </Button>
@@ -1459,7 +1805,7 @@ export default function SalesCreateWorkspace({
                   onClick={() => handleCreateDraft(false)}
                 >
                   <FilePlus2 className="size-4" />
-                  {isPending ? "กำลังบันทึก..." : "บันทึกร่าง"}
+                  {formLocked ? "กำลังบันทึก..." : "บันทึกร่าง"}
                 </Button>
               </div>
             </div>

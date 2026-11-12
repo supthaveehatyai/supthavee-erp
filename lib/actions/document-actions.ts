@@ -1111,20 +1111,18 @@ export async function createDraftDocument(
     }
 
     const documentId = document.id as string;
-    const shippingError = await persistSalesShipping(supabase, documentId, shipping);
-    if (shippingError) {
-      await supabase.from("documents").delete().eq("id", documentId);
-      return { data: null, error: shippingError };
-    }
-    const savedDocNo = (document.doc_no as string) || documentNo;
-    const headerSyncError = await syncHandwrittenRefToDocHeader(supabase, {
-      documentId,
-      docNo: savedDocNo,
-      referenceNo: normalizeHandwrittenDocRef(payload.handwritten_doc_ref),
-    });
-    if (headerSyncError) {
-      await supabase.from("documents").delete().eq("id", documentId);
-      return { data: null, error: headerSyncError };
+    // reference_no ถูกซิงก์เข้า doc_headers โดย trigger แล้ว
+    // อัปเดตค่าขนส่งเฉพาะเมื่อมีค่าจริง เพื่อไม่ยิง UPDATE เปล่าหลัง INSERT
+    if (
+      shipping.shipping_fee !== 0 ||
+      shipping.shipping_tracking_no ||
+      shipping.shipping_method
+    ) {
+      const shippingError = await persistSalesShipping(supabase, documentId, shipping);
+      if (shippingError) {
+        await supabase.from("documents").delete().eq("id", documentId);
+        return { data: null, error: shippingError };
+      }
     }
 
     if (lineRows.length > 0) {
@@ -3683,7 +3681,11 @@ export async function issueDocument(
 
     revalidateApprovalCenterIfPending(pendingApproval);
     revalidateStockSurfaces();
-    if (STOCK_SYNC_DOC_TYPES.has(docType)) {
+    if (
+      STOCK_SYNC_DOC_TYPES.has(docType) &&
+      ledgerCount === 0 &&
+      stockOutLines.length > 0
+    ) {
       const syncError = await syncDocumentStockLedger(supabase, id);
       if (syncError) return { data: null, error: syncError };
     }
@@ -4162,6 +4164,8 @@ export async function getSalesDocuments(
         query = query.or(
           "status.eq.VOID,status.eq.CANCELLED,payment_status.eq.VOID",
         );
+      } else if (paymentStatus === "DRAFT") {
+        query = query.eq("status", "DRAFT");
       }
 
       if (search) {
@@ -4206,10 +4210,16 @@ export async function getSalesDocuments(
       .in("doc_type", docTypes)
       .in("payment_status", ["UNPAID", "PARTIAL", "Pending"])
       .not("status", "in", "(VOID,CANCELLED)");
+    const draftQuery = supabase
+      .from("documents")
+      .select("id", { count: "exact", head: true })
+      .in("doc_type", docTypes)
+      .eq("status", "DRAFT");
 
-    const [firstPage, unpaidResult] = await Promise.all([
+    const [firstPage, unpaidResult, draftResult] = await Promise.all([
       loadRows(true),
       unpaidQuery,
+      draftQuery,
     ]);
     let loaded = firstPage;
     if (loaded.error && /handwritten_doc_ref/i.test(loaded.error.message)) {
@@ -4217,6 +4227,7 @@ export async function getSalesDocuments(
     }
 
     const unpaidCount = unpaidResult.count ?? 0;
+    const draftCount = draftResult.count ?? 0;
     const { data, error, count } = loaded;
 
     if (error) {
@@ -4225,6 +4236,7 @@ export async function getSalesDocuments(
         error: error.message,
         totalCount: 0,
         unpaidCount,
+        draftCount,
         page,
         pageSize,
       };
@@ -4288,6 +4300,7 @@ export async function getSalesDocuments(
       error: null,
       totalCount: count ?? rows.length,
       unpaidCount,
+      draftCount,
       page,
       pageSize,
     };
