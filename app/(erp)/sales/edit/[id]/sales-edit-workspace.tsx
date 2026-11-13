@@ -806,7 +806,7 @@ export default function SalesEditWorkspace({
             docType={initialDocument.doc_type}
             contactName={selectedCustomerName}
           />
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="doc-date">วันที่เอกสาร (doc_date)</Label>
             <Input
               id="doc-date"
@@ -816,6 +816,13 @@ export default function SalesEditWorkspace({
               onChange={(event) => setDocDate(event.target.value)}
               className="h-10"
             />
+            {initialDocument.ref_document_id ? (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-800">
+                ⚠️ เอกสารต่อยอดจาก{" "}
+                {initialDocument.parent_doc_no?.trim() || "เอกสารต้นทาง"} —
+                กรุณาตรวจสอบให้ &quot;วันที่เอกสาร&quot; ตรงกับวันที่รับเงินตามสลิปหรือวันส่งมอบสินค้าจริงก่อนกดออกบิล
+              </p>
+            ) : null}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="handwritten-doc-ref">

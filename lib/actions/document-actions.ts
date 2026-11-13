@@ -4704,9 +4704,76 @@ async function copySalesSettlementFields(
   return "คัดลอกข้อมูลชำระเงินและใบหัก ณ ที่จ่ายไม่สำเร็จ";
 }
 
+function normalizeConversionDate(value: unknown): string | null {
+  const text = String(value ?? "").trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+}
+
+function laterConversionDate(left: string, right: string | null): string {
+  if (!right) return left;
+  return right > left ? right : left;
+}
+
+/**
+ * วันที่เอกสารต่อยอดต้องไม่เก่ากว่าบิลประเภทเดียวกันที่ออกเลขแล้ว
+ * RPC `get_recommended_conversion_date` เป็นตัวหลัก ถ้าเรียกไม่ได้ให้ใช้
+ * max(วันต้นทาง, วันของบิล ISSUED ใบล่าสุดในประเภทปลายทาง)
+ */
+async function recommendConversionDate(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  sourceId: string,
+  sourceDocDate: string,
+  targetDocType: ConvertTargetDocType,
+): Promise<string> {
+  const sourceDate =
+    normalizeConversionDate(sourceDocDate) ??
+    new Date().toISOString().slice(0, 10);
+
+  const rpcClient = supabase as unknown as {
+    rpc: (
+      fn: "get_recommended_conversion_date",
+      args: { p_source_doc_id: string; p_target_doc_type: string },
+    ) => Promise<{ data: unknown; error: { message: string } | null }>;
+  };
+  const rpc = await rpcClient.rpc("get_recommended_conversion_date", {
+    p_source_doc_id: sourceId,
+    p_target_doc_type: targetDocType,
+  });
+  if (!rpc.error) {
+    const raw = Array.isArray(rpc.data) ? rpc.data[0] : rpc.data;
+    const fromRpc =
+      typeof raw === "string" || typeof raw === "number"
+        ? normalizeConversionDate(raw)
+        : raw && typeof raw === "object"
+          ? normalizeConversionDate(
+              (raw as Record<string, unknown>).get_recommended_conversion_date ??
+                (raw as Record<string, unknown>).doc_date ??
+                (raw as Record<string, unknown>).recommended_date,
+            )
+          : null;
+    if (fromRpc) return fromRpc;
+  }
+
+  const { data: latest } = await supabase
+    .from("documents")
+    .select("doc_date")
+    .eq("doc_type", targetDocType)
+    .eq("status", "ISSUED")
+    .order("doc_date", { ascending: false })
+    .order("doc_no", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return laterConversionDate(
+    sourceDate,
+    normalizeConversionDate(latest?.doc_date),
+  );
+}
+
 export async function convertDocument(
   sourceDocId: string,
   targetDocType: ConvertTargetDocType,
+  targetDocDate?: string | null,
 ): Promise<ConvertDocumentResult> {
   try {
     const id = sourceDocId?.trim() ?? "";
@@ -4860,10 +4927,15 @@ export async function convertDocument(
       };
     }
 
-    const sourceDocDate = String(source.doc_date ?? "").slice(0, 10);
-    const docDate = /^\d{4}-\d{2}-\d{2}$/.test(sourceDocDate)
-      ? sourceDocDate
-      : new Date().toISOString().slice(0, 10);
+    const explicitDocDate = normalizeConversionDate(targetDocDate);
+    const docDate = explicitDocDate
+      ? explicitDocDate
+      : await recommendConversionDate(
+          supabase,
+          id,
+          String(source.doc_date ?? ""),
+          targetDocType,
+        );
     // Late Numbering — converted target stays DRAFT with temporary doc_no.
     const newDocNo = generateDraftDocumentNo();
     const draftStatus: DocumentStatus = "DRAFT";
