@@ -4697,8 +4697,15 @@ async function copySalesSettlementFields(
     payment_channel: row.payment_channel ?? null,
     bank_account_id: row.bank_account_id ?? null,
     receiving_bank_label: row.receiving_bank_label ?? null,
-    reference_no: row.reference_no ?? null,
-    handwritten_doc_ref: row.handwritten_doc_ref ?? null,
+    // เลขสลิปโอน (reference_no) กับเลขบิลมือ (handwritten_doc_ref) เป็นคนละคอลัมน์ — ห้ามเอา reference_no ไปทับเลขบิลมือ
+    reference_no:
+      row.reference_no == null || String(row.reference_no).trim() === ""
+        ? null
+        : String(row.reference_no),
+    handwritten_doc_ref:
+      row.handwritten_doc_ref == null || String(row.handwritten_doc_ref).trim() === ""
+        ? null
+        : String(row.handwritten_doc_ref),
     original_receipt_url: row.original_receipt_url ?? null,
     wht_rate: Number(row.wht_rate ?? 0),
     wht_amount: whtAmount,

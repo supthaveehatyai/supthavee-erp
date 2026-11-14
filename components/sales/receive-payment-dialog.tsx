@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Loader2, Wallet } from "lucide-react";
 import { toast } from "sonner";
@@ -24,14 +25,6 @@ import {
 } from "@/lib/finance/payment-channel";
 import { formatBuddhistSlash } from "@/lib/utils/deposit-note";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -70,6 +63,8 @@ export function ReceivePaymentDialog({
   docType = "",
   docDate = "",
   lastPaymentDate = null,
+  vatAmount = 0,
+  roundingDifference = 0,
 }: {
   documentId: string;
   docNo: string;
@@ -85,6 +80,8 @@ export function ReceivePaymentDialog({
   docType?: string;
   docDate?: string;
   lastPaymentDate?: string | null;
+  vatAmount?: number;
+  roundingDifference?: number;
 }) {
   const router = useRouter();
   const sourceDocDate = isoDate(docDate);
@@ -147,7 +144,7 @@ export function ReceivePaymentDialog({
   });
   const suggestedWht = salesWhtAmount(whtBase, Number(whtRate));
   const wht = roundMoney(whtText.trim() === "" ? 0 : Number(whtText));
-  const cash = roundMoney(Math.max(0, settle - (Number.isFinite(wht) ? wht : 0)));
+  const roundingDiff = roundMoney(roundingDifference);
 
   async function readSlip(file: File | null) {
     if (!file || file.size <= 0) {
@@ -235,6 +232,20 @@ export function ReceivePaymentDialog({
     }
   }
 
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !isPending) setOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, isPending]);
+
   function handleSubmit() {
     if (!(settle > 0)) {
       toast.error("กรุณาระบุยอดที่รับชำระ");
@@ -316,15 +327,35 @@ export function ReceivePaymentDialog({
         <Wallet className="size-4" />
         💵 รับชำระเงิน / ตัดยอดบิลนี้
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>รับชำระเงิน {docNo}</DialogTitle>
-            <DialogDescription>
-              ตัดยอดบนเอกสารขายทันที และปรับสถานะเป็น PAID หรือ PARTIAL
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 text-sm">
+      {open
+        ? createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-3 sm:p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isPending) setOpen(false);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="receive-payment-title"
+            className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="flex shrink-0 items-center justify-between border-b bg-white px-5 py-3.5">
+              <h2 id="receive-payment-title" className="text-base font-semibold text-slate-900">
+                รับชำระเงิน {docNo}
+              </h2>
+              <button
+                type="button"
+                aria-label="ปิด"
+                disabled={isPending}
+                onClick={() => setOpen(false)}
+                className="grid size-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 space-y-3.5 overflow-y-auto px-5 py-4 text-sm">
             <div className="space-y-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
               <p>ยอดสุทธิ {formatMoney(grandTotal)} ฿</p>
               <p>หักเงินมัดจำ / ชำระแล้ว {formatMoney(depositDeducted + paidAmount)} ฿</p>
@@ -332,33 +363,35 @@ export function ReceivePaymentDialog({
                 ยอดคงเหลือที่ต้องชำระ {formatMoney(amountDue)} ฿
               </p>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="receipt-date">วันที่รับเงิน</Label>
-              <Input
-                id="receipt-date"
-                type="date"
-                value={paymentDate}
-                onChange={(event) => setPaymentDate(event.target.value)}
-              />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="receipt-date">วันที่รับเงิน</Label>
+                <Input
+                  id="receipt-date"
+                  type="date"
+                  value={paymentDate}
+                  onChange={(event) => setPaymentDate(event.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="receipt-amount">ยอดที่ตัดบิลนี้ (บาท)</Label>
+                <Input
+                  id="receipt-amount"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(event) => applySettleAmount(event.target.value)}
+                />
+                <p className="text-xs text-slate-500">
+                  ยอดคงเหลือที่ต้องชำระสุทธิ {formatMoney(expectedNetPayable)} ฿
+                </p>
+              </div>
               {paymentMonthDiffers ? (
-                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-800">
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-800 sm:col-span-2">
                   ⚠️ วันที่รับเงินอยู่ในเดือนที่ต่างจากใบสั่งขายต้นทาง ({sourceDocDate}) — เอกสารภาษีที่ออกตามวันที่นี้จะรันเลขในหมวดเดือนของวันที่รับเงิน
                 </p>
               ) : null}
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="receipt-amount">ยอดที่ตัดบิลนี้</Label>
-              <Input
-                id="receipt-amount"
-                inputMode="decimal"
-                value={amount}
-                onChange={(event) => applySettleAmount(event.target.value)}
-              />
-              <p className="text-xs text-slate-500">
-                ยอดคงเหลือที่ต้องชำระสุทธิ {formatMoney(expectedNetPayable)} ฿
-              </p>
               {showSettlementModes ? (
-                <div className="space-y-2">
+                <div className="space-y-2 sm:col-span-2">
                   <button
                     type="button"
                     onClick={() => setRoundingMode("close")}
@@ -388,34 +421,39 @@ export function ReceivePaymentDialog({
                 </div>
               ) : null}
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="receipt-wht">หัก ณ ที่จ่าย</Label>
-              <select
-                id="receipt-wht"
-                value={whtRate}
-                onChange={(event) => applyWhtRate(event.target.value)}
-                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
-              >
-                {SALES_WHT_RATE_OPTIONS.map((rate) => (
-                  <option key={rate} value={String(rate)}>
-                    {rate === 0 ? "ไม่หัก ณ ที่จ่าย" : `หัก ณ ที่จ่าย ${rate}%`}
-                  </option>
-                ))}
-              </select>
-              <Label htmlFor="receipt-wht-amount">ยอดภาษีหัก ณ ที่จ่าย (บาท)</Label>
-              <Input
-                id="receipt-wht-amount"
-                inputMode="decimal"
-                value={whtText}
-                onChange={(event) => {
-                  setWhtEdited(true);
-                  setWhtText(event.target.value);
-                }}
-              />
-              <p className="text-xs text-slate-600">
-                ฐานก่อน VAT {formatMoney(whtBase)} ฿ · หัก ณ ที่จ่าย ({whtRate}%) ={" "}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="receipt-wht">หัก ณ ที่จ่าย</Label>
+                <select
+                  id="receipt-wht"
+                  value={whtRate}
+                  onChange={(event) => applyWhtRate(event.target.value)}
+                  className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
+                >
+                  {SALES_WHT_RATE_OPTIONS.map((rate) => (
+                    <option key={rate} value={String(rate)}>
+                      {rate === 0 ? "ไม่หัก ณ ที่จ่าย" : `หัก ณ ที่จ่าย ${rate}%`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="receipt-wht-amount">ยอดภาษีหัก ณ ที่จ่าย (บาท)</Label>
+                <Input
+                  id="receipt-wht-amount"
+                  inputMode="decimal"
+                  value={whtText}
+                  onChange={(event) => {
+                    setWhtEdited(true);
+                    setWhtText(event.target.value);
+                  }}
+                />
+              </div>
+              <p className="text-xs text-slate-600 sm:col-span-2">
+                ฐานก่อน VAT {formatMoney(netBeforeVat)} ฿ · VAT {formatMoney(vatAmount)} ฿
+                {roundingDiff !== 0 ? ` · ปัดเศษ ${roundingDiff.toFixed(2)} ฿` : ""} · หัก ณ ที่จ่าย ={" "}
                 {formatMoney(Number.isFinite(wht) ? wht : suggestedWht)} ฿ · ยอดโอนเข้าบัญชีจริง ={" "}
-                {formatMoney(cash)} ฿
+                {formatMoney(settle)} ฿
               </p>
             </div>
             <PaymentChannelPicker
@@ -506,20 +544,31 @@ export function ReceivePaymentDialog({
                 <span>ออกใบเสร็จรับเงิน (REC) อัตโนมัติทันทีหลังบันทึกการรับชำระเงิน</span>
               </label>
             ) : null}
+            </div>
+            <div className="flex shrink-0 items-center justify-end gap-2 border-t bg-slate-50 px-5 py-3">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isPending}
+                onClick={() => setOpen(false)}
+              >
+                ยกเลิก
+              </Button>
+              <Button
+                type="button"
+                disabled={isPending || isReadingSlip || isUploadingWht}
+                className="bg-emerald-600 hover:bg-emerald-700"
+                onClick={handleSubmit}
+              >
+                {isPending ? <Loader2 className="size-4 animate-spin" /> : null}
+                ยืนยันรับชำระ
+              </Button>
+            </div>
           </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              disabled={isPending || isReadingSlip || isUploadingWht}
-              className="bg-emerald-600 hover:bg-emerald-700"
-              onClick={handleSubmit}
-            >
-              {isPending ? <Loader2 className="size-4 animate-spin" /> : null}
-              ยืนยันรับชำระ
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </div>,
+        document.body,
+      )
+        : null}
     </>
   );
 }

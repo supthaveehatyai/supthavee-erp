@@ -279,7 +279,7 @@ export function SalesHeaderEditDialog({
       {open
         ? createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 overflow-y-auto"
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-3 sm:p-4"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget && !pending) setOpen(false);
           }}
@@ -288,34 +288,23 @@ export function SalesHeaderEditDialog({
             role="dialog"
             aria-modal="true"
             aria-labelledby="issued-header-title"
-            className="w-full max-w-xl max-h-[88vh] flex flex-col rounded-2xl bg-white shadow-2xl overflow-hidden"
+            className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
           >
-            <div className="shrink-0 border-b border-slate-200 px-6 py-3.5 flex items-center justify-between bg-white">
+            <div className="flex shrink-0 items-center justify-between border-b bg-white px-5 py-3.5">
               <h2 id="issued-header-title" className="text-base font-semibold text-slate-900">
                 แก้ไขหัวบิลที่ออกแล้ว
               </h2>
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  className="h-8 bg-blue-800 px-2.5 text-xs text-white hover:bg-blue-900"
-                  disabled={pending}
-                  onClick={onSave}
-                >
-                  {pending ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                  บันทึกหัวบิล
-                </Button>
-                <button
-                  type="button"
-                  aria-label="ปิด"
-                  disabled={pending}
-                  onClick={() => setOpen(false)}
-                  className="grid size-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50"
-                >
-                  ✕
-                </button>
-              </div>
+              <button
+                type="button"
+                aria-label="ปิด"
+                disabled={pending}
+                onClick={() => setOpen(false)}
+                className="grid size-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+              >
+                ✕
+              </button>
             </div>
-            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-3.5">
+            <div className="min-h-0 flex-1 space-y-3.5 overflow-y-auto px-5 py-4">
             <div className="space-y-1.5">
               <Label htmlFor="issued-doc-date">วันที่เอกสาร</Label>
               <Input
@@ -439,7 +428,7 @@ export function SalesHeaderEditDialog({
               />
             </div>
             </div>
-            <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-6 py-3.5 flex items-center justify-end gap-2.5">
+            <div className="flex shrink-0 items-center justify-end gap-2 border-t bg-slate-50 px-5 py-3">
               <Button type="button" variant="outline" disabled={pending} onClick={() => setOpen(false)}>
                 ยกเลิก
               </Button>

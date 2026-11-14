@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { HandCoins, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -18,14 +19,6 @@ import {
 } from "@/lib/finance/payment-channel";
 import { formatBuddhistSlash } from "@/lib/utils/deposit-note";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -164,6 +157,20 @@ export function ReceiveDepositDialog({
     }
   }
 
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !isPending) setOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, isPending]);
+
   function handleSubmit() {
     const raw = Number(amount);
     if (!Number.isFinite(raw) || raw <= 0) {
@@ -216,17 +223,38 @@ export function ReceiveDepositDialog({
         <HandCoins className="size-4" />
         💰 รับเงินมัดจำ (ออกใบกำกับภาษีมัดจำ)
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>รับเงินมัดจำจาก {docNo}</DialogTitle>
-            <DialogDescription>
-              ลูกค้า {customerName} · ออกใบเสร็จรับเงิน/ใบกำกับภาษีมัดจำ (DEP_IN)
-              และผูกกับบิลนี้ทันที
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
+      {open
+        ? createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-3 sm:p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isPending) setOpen(false);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="receive-deposit-title"
+            className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="flex shrink-0 items-center justify-between border-b bg-white px-5 py-3.5">
+              <h2 id="receive-deposit-title" className="text-base font-semibold text-slate-900">
+                รับเงินมัดจำจาก {docNo}
+              </h2>
+              <button
+                type="button"
+                aria-label="ปิด"
+                disabled={isPending}
+                onClick={() => setOpen(false)}
+                className="grid size-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 space-y-3.5 overflow-y-auto px-5 py-4 text-sm">
+            <p className="text-xs text-slate-500">
+              ลูกค้า {customerName} · ออกใบเสร็จรับเงิน/ใบกำกับภาษีมัดจำ (DEP_IN) และผูกกับบิลนี้ทันที
+            </p>
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
               ยอดเอกสาร {formatMoney(orderTotal)} ฿
             </div>
@@ -249,29 +277,31 @@ export function ReceiveDepositDialog({
                 50% ปัดขึ้นก้อนกลม ({formatMoney(roundUpChunk(half))} ฿)
               </Button>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="deposit-date">วันที่รับเงินมัดจำ</Label>
-              <Input
-                id="deposit-date"
-                type="date"
-                value={documentDate}
-                onChange={(event) => setDocumentDate(event.target.value)}
-              />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="deposit-date">วันที่รับเงินมัดจำ</Label>
+                <Input
+                  id="deposit-date"
+                  type="date"
+                  value={documentDate}
+                  onChange={(event) => setDocumentDate(event.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="deposit-amount">ยอดมัดจำก้อนกลม (บาท)</Label>
+                <Input
+                  id="deposit-amount"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(event) => setAmount(event.target.value)}
+                  placeholder="0.00"
+                />
+              </div>
               {paymentMonthDiffers ? (
-                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-800">
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-800 sm:col-span-2">
                   ⚠️ วันที่รับเงินอยู่ในเดือนที่ต่างจากใบสั่งขายต้นทาง ({sourceDocDate}) — เอกสารภาษีที่ออกตามวันที่นี้จะรันเลขในหมวดเดือนของวันที่รับเงิน
                 </p>
               ) : null}
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="deposit-amount">ยอดมัดจำก้อนกลม</Label>
-              <Input
-                id="deposit-amount"
-                inputMode="decimal"
-                value={amount}
-                onChange={(event) => setAmount(event.target.value)}
-                placeholder="0.00"
-              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="deposit-vat">ประเภท VAT</Label>
@@ -343,21 +373,31 @@ export function ReceiveDepositDialog({
                 <p className="text-xs text-slate-500">{slipFile.name}</p>
               ) : null}
             </div>
+            </div>
+            <div className="flex shrink-0 items-center justify-end gap-2 border-t bg-slate-50 px-5 py-3">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isPending}
+                onClick={() => setOpen(false)}
+              >
+                ยกเลิก
+              </Button>
+              <Button
+                type="button"
+                disabled={isPending || isReadingSlip}
+                onClick={handleSubmit}
+                className="bg-amber-600 hover:bg-amber-700"
+              >
+                {isPending ? <Loader2 className="size-4 animate-spin" /> : null}
+                ยืนยันออกใบมัดจำ
+              </Button>
+            </div>
           </div>
-
-          <DialogFooter>
-            <Button
-              type="button"
-              disabled={isPending || isReadingSlip}
-              onClick={handleSubmit}
-              className="bg-amber-600 hover:bg-amber-700"
-            >
-              {isPending ? <Loader2 className="size-4 animate-spin" /> : null}
-              ยืนยันออกใบมัดจำ
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </div>,
+        document.body,
+      )
+        : null}
     </>
   );
 }

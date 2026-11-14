@@ -670,6 +670,8 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               paidAmount={Number(doc.paid_amount ?? 0)}
               amountDue={amountDue}
               netBeforeVat={netBeforeVat}
+              vatAmount={vatAmount}
+              roundingDifference={Number(doc.rounding_difference ?? 0)}
               depositNetDeducted={Number(doc.deposit_net_deducted ?? 0)}
               vatRate={vatRate}
               shippingFee={Number(doc.shipping_fee ?? 0)}
@@ -1232,18 +1234,34 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                   ) : null}
                 </>
               )}
-              {Number(doc.rounding_difference ?? 0) !== 0 ? (
-                <>
-                  <SummaryRow
-                    label="ปัดเศษ / ส่วนลดรับชำระ (บันทึกค่าใช้จ่ายอัตโนมัติ)"
-                    value={`${Number(doc.rounding_difference ?? 0).toFixed(2)} ฿`}
-                  />
-                  <SummaryRow
-                    label="ยอดรับโอนจริงตามสลิป"
-                    value={`${Number(doc.net_received_amount ?? 0).toFixed(2)} ฿`}
-                  />
-                </>
-              ) : null}
+                {Number(doc.rounding_difference ?? 0) !== 0 ? (
+                  <>
+                    <SummaryRow
+                      label="ปัดเศษ / ส่วนลดรับชำระ (บันทึกค่าใช้จ่ายอัตโนมัติ)"
+                      value={`${Number(doc.rounding_difference ?? 0).toLocaleString("th-TH", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })} ฿`}
+                    />
+                    <SummaryRow
+                      label="ยอดรับโอนจริงตามสลิป"
+                      value={`${Math.max(
+                        0,
+                        Number(
+                          (
+                            Number(doc.grand_total ?? 0) -
+                            (doc.doc_type === "SO" ? Number(doc.deposit_deducted ?? 0) : 0) -
+                            Number(doc.wht_amount ?? 0) +
+                            Number(doc.rounding_difference ?? 0)
+                          ).toFixed(2),
+                        ),
+                      ).toLocaleString("th-TH", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })} ฿`}
+                    />
+                  </>
+                ) : null}
               {depositSlips.map((slip) => (
                 <AttachmentSheetViewer
                   key={slip.id}
