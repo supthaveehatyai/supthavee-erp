@@ -55,6 +55,15 @@ function roundUpChunk(value: number): number {
   return Math.abs(down - value) < 0.001 ? value : down + step;
 }
 
+function monthKey(value: string): string {
+  return value.trim().slice(0, 7);
+}
+
+function isoDate(value: string | null | undefined): string {
+  const text = String(value ?? "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
+}
+
 export function ReceiveDepositDialog({
   documentId,
   docNo,
@@ -63,6 +72,8 @@ export function ReceiveDepositDialog({
   orderTotal,
   salesChannel,
   bankAccounts = [],
+  docDate = "",
+  lastPaymentDate = null,
 }: {
   documentId: string;
   docNo: string;
@@ -71,14 +82,22 @@ export function ReceiveDepositDialog({
   orderTotal: number;
   salesChannel?: string | null;
   bankAccounts?: ActiveBankAccount[];
+  docDate?: string;
+  lastPaymentDate?: string | null;
 }) {
   const router = useRouter();
+  const sourceDocDate = isoDate(docDate);
+  const defaultPaymentDate = isoDate(lastPaymentDate) || sourceDocDate;
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [vatType, setVatType] = useState<VatCalculationType>("INCLUSIVE");
-  const [documentDate, setDocumentDate] = useState(() =>
-    new Date().toISOString().slice(0, 10),
+  const [documentDate, setDocumentDate] = useState(
+    () => defaultPaymentDate || new Date().toISOString().slice(0, 10),
   );
+  const paymentMonthDiffers =
+    Boolean(sourceDocDate) &&
+    Boolean(documentDate) &&
+    monthKey(documentDate) !== monthKey(sourceDocDate);
   const [paymentChannel, setPaymentChannel] = useState<PaymentChannel>("COMPANY_BANK");
   const [bankAccountId, setBankAccountId] = useState<string | null>(() =>
     initialBankAccountId(bankAccounts, "COMPANY_BANK"),
@@ -238,6 +257,11 @@ export function ReceiveDepositDialog({
                 value={documentDate}
                 onChange={(event) => setDocumentDate(event.target.value)}
               />
+              {paymentMonthDiffers ? (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-800">
+                  ⚠️ วันที่รับเงินอยู่ในเดือนที่ต่างจากใบสั่งขายต้นทาง ({sourceDocDate}) — เอกสารภาษีที่ออกตามวันที่นี้จะรันเลขในหมวดเดือนของวันที่รับเงิน
+                </p>
+              ) : null}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="deposit-amount">ยอดมัดจำก้อนกลม</Label>

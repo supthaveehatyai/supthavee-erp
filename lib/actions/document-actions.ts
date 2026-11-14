@@ -2248,6 +2248,8 @@ export async function getDocumentByNo(
         wht_rate,
         wht_amount,
         net_received_amount,
+        rounding_difference,
+        last_payment_date,
         wht_status,
         payment_status,
         payment_channel,
@@ -2350,7 +2352,9 @@ export async function getDocumentByNo(
         .replace(/\s*bundle_kit_id,\s*/g, "\n          ")
         .replace(/\s*parent_item_id,\s*/g, "\n          ")
         .replace(/\s*is_bundle_header,\s*/g, "\n          ")
-        .replace(/\s*is_bundle_component,\s*/g, "\n          ");
+        .replace(/\s*is_bundle_component,\s*/g, "\n          ")
+        .replace(/\s*rounding_difference,\s*/g, "\n        ")
+        .replace(/\s*last_payment_date,\s*/g, "\n        ");
       const retry = await supabase
         .from("documents")
         .select(legacySelect)
@@ -2386,7 +2390,9 @@ export async function getDocumentByNo(
         .replace(/\s*bundle_kit_id,\s*/g, "\n          ")
         .replace(/\s*parent_item_id,\s*/g, "\n          ")
         .replace(/\s*is_bundle_header,\s*/g, "\n          ")
-        .replace(/\s*is_bundle_component,\s*/g, "\n          ");
+        .replace(/\s*is_bundle_component,\s*/g, "\n          ")
+        .replace(/\s*rounding_difference,\s*/g, "\n        ")
+        .replace(/\s*last_payment_date,\s*/g, "\n        ");
         const retry = await supabase
           .from("documents")
           .select(legacySelect)
@@ -2689,6 +2695,15 @@ export async function getDocumentByNo(
       net_received_amount: Number(
         (data as { net_received_amount?: number | string | null }).net_received_amount ?? 0,
       ),
+      rounding_difference: Number(
+        (data as { rounding_difference?: number | string | null }).rounding_difference ?? 0,
+      ),
+      last_payment_date: (() => {
+        const raw = String(
+          (data as { last_payment_date?: string | null }).last_payment_date ?? "",
+        ).slice(0, 10);
+        return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+      })(),
       wht_status: ((): DocumentDetail["wht_status"] => {
         const raw = String(
           (data as { wht_status?: string | null }).wht_status ?? "",
@@ -4002,6 +4017,7 @@ export async function updateSalesDocumentDirect(input: {
   shipping_fee?: number | null;
   shipping_method?: string | null;
   shipping_tracking_no?: string | null;
+  rounding_difference?: number | null;
 }) {
   try {
     const owner = await requireSessionUserId();
@@ -4057,6 +4073,10 @@ export async function updateSalesDocumentDirect(input: {
       p_shipping_method: shipping.shipping_method,
       p_shipping_vat_mode: shipping.shipping_vat_mode,
       p_shipping_tracking_no: shipping.shipping_tracking_no,
+      p_rounding_difference:
+        input.rounding_difference == null
+          ? null
+          : Math.round(Number(input.rounding_difference) * 100) / 100,
     });
     if (saved.error) return { data: null, error: saved.error.message };
 
@@ -4666,7 +4686,7 @@ async function copySalesSettlementFields(
   const loaded = await reader
     .from("documents")
     .select(
-      "payment_channel, bank_account_id, receiving_bank_label, reference_no, handwritten_doc_ref, original_receipt_url, wht_rate, wht_amount, net_received_amount, wht_attachment_url, wht_status",
+      "payment_channel, bank_account_id, receiving_bank_label, reference_no, handwritten_doc_ref, original_receipt_url, wht_rate, wht_amount, net_received_amount, rounding_difference, wht_attachment_url, wht_status",
     )
     .eq("id", sourceId)
     .maybeSingle();
@@ -4683,6 +4703,7 @@ async function copySalesSettlementFields(
     wht_rate: Number(row.wht_rate ?? 0),
     wht_amount: whtAmount,
     net_received_amount: Number(row.net_received_amount ?? 0),
+    rounding_difference: Number(row.rounding_difference ?? 0),
     wht_attachment_url: row.wht_attachment_url ?? null,
     wht_status:
       row.wht_status ?? (whtAmount > 0 ? "PENDING_CERT" : "NONE"),
@@ -4709,20 +4730,15 @@ function normalizeConversionDate(value: unknown): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
 }
 
-function laterConversionDate(left: string, right: string | null): string {
-  if (!right) return left;
-  return right > left ? right : left;
-}
-
 /**
- * วันที่เอกสารต่อยอดต้องไม่เก่ากว่าบิลประเภทเดียวกันที่ออกเลขแล้ว
- * RPC `get_recommended_conversion_date` เป็นตัวหลัก ถ้าเรียกไม่ได้ให้ใช้
- * max(วันต้นทาง, วันของบิล ISSUED ใบล่าสุดในประเภทปลายทาง)
+ * วันที่เอกสารต่อยอดอยู่ใหงวดเดือนเดียวกับเอกสารต้นทาง
+ * RPC คืน last_payment_date ของ SO หรือวันที่ใน YYMM เดียวกันเท่านั้น
  */
 async function recommendConversionDate(
   supabase: ReturnType<typeof createSupabaseServerClient>,
   sourceId: string,
   sourceDocDate: string,
+  lastPaymentDate: string | null,
   targetDocType: ConvertTargetDocType,
 ): Promise<string> {
   const sourceDate =
@@ -4751,23 +4767,12 @@ async function recommendConversionDate(
                 (raw as Record<string, unknown>).recommended_date,
             )
           : null;
-    if (fromRpc) return fromRpc;
+    if (fromRpc && fromRpc.slice(0, 7) === sourceDate.slice(0, 7)) return fromRpc;
   }
 
-  const { data: latest } = await supabase
-    .from("documents")
-    .select("doc_date")
-    .eq("doc_type", targetDocType)
-    .eq("status", "ISSUED")
-    .order("doc_date", { ascending: false })
-    .order("doc_no", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  return laterConversionDate(
-    sourceDate,
-    normalizeConversionDate(latest?.doc_date),
-  );
+  const paidOn = normalizeConversionDate(lastPaymentDate);
+  if (paidOn && paidOn.slice(0, 7) === sourceDate.slice(0, 7)) return paidOn;
+  return sourceDate;
 }
 
 export async function convertDocument(
@@ -4823,7 +4828,9 @@ export async function convertDocument(
     const { data: source, error: sourceError } = await loadCopySourceDocument(
       supabase,
       id,
-      sourceSelect,
+      sourceSelect.includes("last_payment_date")
+        ? sourceSelect
+        : sourceSelect.replace("doc_date,", "doc_date,\n        last_payment_date,"),
     );
 
     if (sourceError) {
@@ -4832,6 +4839,9 @@ export async function convertDocument(
     if (!source) {
       return { data: null, error: "ไม่พบเอกสารต้นทาง" };
     }
+    const sourceLastPaymentDate = normalizeConversionDate(
+      (source as { last_payment_date?: string | null }).last_payment_date,
+    );
 
     // ── Validate source doc_type + target combination ──
     const srcType = String(source.doc_type ?? "");
@@ -4934,6 +4944,7 @@ export async function convertDocument(
           supabase,
           id,
           String(source.doc_date ?? ""),
+          sourceLastPaymentDate,
           targetDocType,
         );
     // Late Numbering — converted target stays DRAFT with temporary doc_no.

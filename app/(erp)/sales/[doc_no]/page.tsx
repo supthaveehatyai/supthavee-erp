@@ -657,6 +657,8 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               orderTotal={Number(doc.grand_total ?? 0)}
               salesChannel={doc.sales_channel}
               bankAccounts={bankAccounts.data}
+              docDate={String(doc.doc_date ?? "").slice(0, 10)}
+              lastPaymentDate={doc.last_payment_date ?? null}
             />
           ) : null}
           {canReceivePayment ? (
@@ -673,6 +675,8 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               shippingFee={Number(doc.shipping_fee ?? 0)}
               bankAccounts={bankAccounts.data}
               docType={doc.doc_type}
+              docDate={String(doc.doc_date ?? "").slice(0, 10)}
+              lastPaymentDate={doc.last_payment_date ?? null}
             />
           ) : null}
           {canIssueOfficialReceipt ? (
@@ -703,6 +707,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               shippingTrackingNo={doc.shipping_tracking_no ?? ""}
               depositDeducted={Number(doc.deposit_deducted ?? 0)}
               vatType={doc.vat_type}
+              roundingDifference={Number(doc.rounding_difference ?? 0)}
               pricesIncludeVat={
                 salesVatType !== "EXCLUSIVE" ||
                 Math.abs(
@@ -1227,6 +1232,18 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                   ) : null}
                 </>
               )}
+              {Number(doc.rounding_difference ?? 0) !== 0 ? (
+                <>
+                  <SummaryRow
+                    label="ปัดเศษ / ส่วนลดรับชำระ (บันทึกค่าใช้จ่ายอัตโนมัติ)"
+                    value={`${Number(doc.rounding_difference ?? 0).toFixed(2)} ฿`}
+                  />
+                  <SummaryRow
+                    label="ยอดรับโอนจริงตามสลิป"
+                    value={`${Number(doc.net_received_amount ?? 0).toFixed(2)} ฿`}
+                  />
+                </>
+              ) : null}
               {depositSlips.map((slip) => (
                 <AttachmentSheetViewer
                   key={slip.id}

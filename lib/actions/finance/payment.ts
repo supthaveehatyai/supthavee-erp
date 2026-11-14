@@ -1149,7 +1149,7 @@ export async function receiveSalesDocumentPayment(
     const { data: document, error: documentError } = await supabase
       .from("documents")
       .select(
-        "id, doc_no, doc_type, status, is_voided, grand_total, net_before_vat, deposit_deducted, deposit_net_deducted, vat_rate, paid_amount, wht_rate, wht_amount, net_received_amount, wht_attachment_url, wht_status, reference_no, original_receipt_url",
+        "id, doc_no, doc_type, status, doc_date, is_voided, grand_total, net_before_vat, deposit_deducted, deposit_net_deducted, vat_rate, paid_amount, wht_rate, wht_amount, net_received_amount, wht_attachment_url, wht_status, reference_no, original_receipt_url",
       )
       .eq("id", documentId)
       .maybeSingle();
@@ -1170,74 +1170,28 @@ export async function receiveSalesDocumentPayment(
       return { success: false, error: "รับชำระได้เมื่อเอกสารออกเลขแล้ว" };
     }
 
-    const grand = toMoney(document.grand_total);
-    const deposit = toMoney(document.deposit_deducted);
-    const paid = toMoney(document.paid_amount);
     const docType = String(document.doc_type ?? "");
-    const depositAlreadyOnGrand = docType === "TAX_INV" || docType === "INV_DO";
-    const outstanding = resolveRemainingAmount(
-      grand,
-      depositAlreadyOnGrand ? 0 : deposit,
-      paid,
-    );
-    if (outstanding <= MONEY_EPS) {
-      return { success: false, error: "บิลนี้ไม่มียอดค้างชำระ" };
+    const settle = roundMoney(Number(formData.get("amount") ?? 0));
+    if (!(settle > 0)) {
+      return { success: false, error: "ยอดเงินที่รับชำระต้องมากกว่า 0 บาท" };
     }
-
-    const requested = roundMoney(Number(formData.get("amount") ?? outstanding));
-    const settle = requested > 0 ? requested : outstanding;
-    if (settle > outstanding + MONEY_EPS) {
-      return {
-        success: false,
-        error: `ยอดรับชำระเกินยอดคงเหลือ (${outstanding.toFixed(2)})`,
-      };
-    }
-
-    const docRow = document as typeof document & {
-      net_before_vat?: number | string | null;
-      deposit_net_deducted?: number | string | null;
-      vat_rate?: number | string | null;
-      net_received_amount?: number | string | null;
-      wht_attachment_url?: string | null;
-    };
-    const whtBase = salesWhtBase({
-      payAmount: settle,
-      remainingGrand: outstanding,
-      grandTotal: grand,
-      netBeforeVat: toMoney(docRow.net_before_vat),
-      depositNetDeducted: depositAlreadyOnGrand
-        ? 0
-        : toMoney(docRow.deposit_net_deducted),
-      depositDeducted: depositAlreadyOnGrand ? 0 : deposit,
-      paidAmount: paid,
-      vatRate: docRow.vat_rate == null ? 7 : Number(docRow.vat_rate),
-    });
     const submittedWht = formData.get("wht_amount");
     const parsedWht =
       submittedWht == null || String(submittedWht).trim() === ""
-        ? null
+        ? 0
         : roundMoney(Number(submittedWht));
     const wht =
-      parsedWht != null && Number.isFinite(parsedWht) && parsedWht >= 0
+      Number.isFinite(parsedWht) && parsedWht >= 0
         ? parsedWht
-        : salesWhtAmount(whtBase, whtRate);
+        : salesWhtAmount(settle, whtRate);
     if (wht - settle > MONEY_EPS) {
       return { success: false, error: "ยอดหัก ณ ที่จ่ายเกินยอดที่ตัดบิล" };
     }
-    const cashReceived = roundMoney(Math.max(0, settle - wht));
-    const nextWht = roundMoney(toMoney(document.wht_amount) + wht);
-    const nextNetReceived = roundMoney(toMoney(docRow.net_received_amount) + cashReceived);
-    const nextWhtUrl = whtAttachmentUrl ?? docRow.wht_attachment_url ?? null;
-    const nextWhtStatus =
-      nextWht <= MONEY_EPS ? "NONE" : nextWhtUrl ? "RECEIVED" : "PENDING_CERT";
-    const nextPaid = roundMoney(paid + settle);
-    const covered = depositAlreadyOnGrand
-      ? nextPaid
-      : roundMoney(nextPaid + deposit);
-    const paymentStatus = covered + MONEY_EPS >= grand ? "PAID" : "PARTIAL";
     const paymentDate = /^\d{4}-\d{2}-\d{2}$/.test(paymentDateRaw)
       ? paymentDateRaw
-      : todayIsoDate();
+      : String(document.doc_date ?? "").slice(0, 10) || todayIsoDate();
+    const closeWithRounding =
+      String(formData.get("close_with_rounding") ?? "1") !== "0";
 
     let slipUrl: string | null = null;
     if (slipFile instanceof File && slipFile.size > 0) {
@@ -1253,36 +1207,44 @@ export async function receiveSalesDocumentPayment(
       bankAccountId: String(formData.get("bank_account_id") ?? ""),
       receivingBankLabel: String(formData.get("receiving_bank_label") ?? ""),
     });
-    const updateErrorMessage = await updateSalesReceipt(supabase, documentId, {
-      paid_amount: nextPaid,
-      payment_status: paymentStatus,
-      wht_rate: whtRate > 0 ? whtRate : Number(document.wht_rate ?? 0),
-      wht_amount: nextWht,
-      net_received_amount: nextNetReceived,
-      wht_attachment_url: nextWhtUrl,
-      wht_status: nextWhtStatus,
-      reference_no: document.reference_no?.trim()
-        ? document.reference_no
-        : referenceNo,
-      original_receipt_url: document.original_receipt_url ?? slipUrl,
-      payment_channel: receiptChannel.payment_channel,
-      bank_account_id: receiptChannel.bank_account_id,
-      receiving_bank_label: receiptChannel.receiving_bank_label,
-      is_swept_to_company: receiptChannel.is_swept_to_company,
-      swept_to_company_at: receiptChannel.swept_to_company_at,
-      updated_at: new Date().toISOString(),
+    const bankAccountId = receiptChannel.bank_account_id?.trim() || null;
+    const rpcClient = supabase as unknown as {
+      rpc: (
+        fn: "settle_sales_document_payment",
+        args: Record<string, unknown>,
+      ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    };
+    const settled = await rpcClient.rpc("settle_sales_document_payment", {
+      p_document_id: documentId,
+      p_received_amount: settle,
+      p_close_with_rounding: closeWithRounding,
+      p_wht_rate: whtRate,
+      p_wht_amount: wht,
+      p_payment_channel: receiptChannel.payment_channel,
+      p_bank_account_id: bankAccountId,
+      p_receiving_bank_label: receiptChannel.receiving_bank_label,
+      p_reference_no: referenceNo,
+      p_slip_url: slipUrl,
+      p_payment_date: paymentDate,
     });
-    const updateError = updateErrorMessage ? { message: updateErrorMessage } : null;
-
-    if (updateError) {
+    if (settled.error) {
       await removeUploadedSlip(supabase, slipStoragePath);
-      return { success: false, error: updateError.message };
+      return { success: false, error: settled.error.message };
     }
+    const settledRow = (
+      Array.isArray(settled.data) ? settled.data[0] : settled.data
+    ) as Record<string, unknown> | null;
+    const paymentStatus = String(settledRow?.payment_status ?? "");
+    const depositDocNo = String(settledRow?.deposit_doc_no ?? "").trim() || null;
 
     revalidatePath("/finance/payments");
+    revalidatePath("/finance/deposits");
     revalidatePath("/sales");
     if (document.doc_no) {
       revalidatePath(`/sales/${encodeURIComponent(document.doc_no)}`);
+    }
+    if (depositDocNo) {
+      revalidatePath(`/sales/${encodeURIComponent(depositDocNo)}`);
     }
 
     const wantReceipt = String(formData.get("issue_receipt") ?? "") === "1";
@@ -1306,6 +1268,8 @@ export async function receiveSalesDocumentPayment(
       error: null,
       receipt_doc_no: issuedReceiptNo,
       receipt_error: receiptError,
+      deposit_doc_no: depositDocNo,
+      payment_status: paymentStatus || null,
     };
   } catch (error) {
     await removeUploadedSlip(supabase, slipStoragePath);

@@ -73,4 +73,6 @@ export type ProcessPaymentKnockoffResult = {
   error: string | null;
   receipt_doc_no?: string | null;
   receipt_error?: string | null;
+  deposit_doc_no?: string | null;
+  payment_status?: string | null;
 };

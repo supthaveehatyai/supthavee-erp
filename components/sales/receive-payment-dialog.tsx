@@ -46,6 +46,15 @@ function roundMoney(value: number): number {
   return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
 }
 
+function monthKey(value: string): string {
+  return value.trim().slice(0, 7);
+}
+
+function isoDate(value: string | null | undefined): string {
+  const text = String(value ?? "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
+}
+
 export function ReceivePaymentDialog({
   documentId,
   docNo,
@@ -59,6 +68,8 @@ export function ReceivePaymentDialog({
   shippingFee = 0,
   bankAccounts = [],
   docType = "",
+  docDate = "",
+  lastPaymentDate = null,
 }: {
   documentId: string;
   docNo: string;
@@ -72,11 +83,18 @@ export function ReceivePaymentDialog({
   shippingFee?: number;
   bankAccounts?: ActiveBankAccount[];
   docType?: string;
+  docDate?: string;
+  lastPaymentDate?: string | null;
 }) {
   const router = useRouter();
+  const sourceDocDate = isoDate(docDate);
+  const defaultPaymentDate = isoDate(lastPaymentDate) || sourceDocDate;
   const [open, setOpen] = useState(false);
-  const [paymentDate, setPaymentDate] = useState(() =>
-    new Date().toISOString().slice(0, 10),
+  const [paymentDate, setPaymentDate] = useState(
+    () => defaultPaymentDate || new Date().toISOString().slice(0, 10),
+  );
+  const [roundingMode, setRoundingMode] = useState<"auto" | "close" | "partial">(
+    "auto",
   );
   const [amount, setAmount] = useState(amountDue.toFixed(2));
   const [paymentChannel, setPaymentChannel] = useState<PaymentChannel>("COMPANY_BANK");
@@ -97,6 +115,25 @@ export function ReceivePaymentDialog({
   const [issueReceipt, setIssueReceipt] = useState(docType === "TAX_INV");
 
   const settle = roundMoney(Number(amount));
+  const whtPreview = roundMoney(whtText.trim() === "" ? 0 : Number(whtText));
+  const expectedNetPayable = roundMoney(
+    Math.max(
+      0,
+      grandTotal - (docType === "SO" ? depositDeducted : 0) - (Number.isFinite(whtPreview) ? whtPreview : 0),
+    ),
+  );
+  const diff = roundMoney(settle - expectedNetPayable);
+  const showSettlementModes = Math.abs(diff) >= 0.005;
+  const closeWithRounding =
+    roundingMode === "partial"
+      ? false
+      : roundingMode === "close"
+        ? true
+        : Math.abs(diff) <= 500;
+  const paymentMonthDiffers =
+    Boolean(sourceDocDate) &&
+    Boolean(paymentDate) &&
+    monthKey(paymentDate) !== monthKey(sourceDocDate);
   const whtBase = salesWhtBase({
     payAmount: settle,
     remainingGrand: amountDue,
@@ -158,6 +195,7 @@ export function ReceivePaymentDialog({
   }
 
   function applySettleAmount(nextAmount: string) {
+    setRoundingMode("auto");
     setAmount(nextAmount);
     if (whtEdited) return;
     const nextSettle = roundMoney(Number(nextAmount));
@@ -214,6 +252,7 @@ export function ReceivePaymentDialog({
     formData.set("document_id", documentId);
     formData.set("payment_date", paymentDate);
     formData.set("amount", settle.toFixed(2));
+    formData.set("close_with_rounding", closeWithRounding ? "1" : "0");
     formData.set("wht_rate", whtRate);
     formData.set("wht_amount", wht.toFixed(2));
     formData.set("wht_attachment_url", whtUrl);
@@ -237,13 +276,17 @@ export function ReceivePaymentDialog({
       if (result.receipt_error) {
         toast.error(result.receipt_error);
       }
+      const depositNo = result.deposit_doc_no?.trim() || "";
+      if (depositNo) {
+        toast.success(`ออกใบรับเงินมัดจำ ${depositNo} ตามวันที่รับเงินแล้ว`);
+      }
       const receiptNo = result.receipt_doc_no?.trim() || "";
       if (receiptNo) {
         toast.success(`บันทึกการรับชำระและออกใบเสร็จ ${receiptNo} แล้ว`);
         window.location.assign(`/sales/${encodeURIComponent(receiptNo)}`);
         return;
       }
-      toast.success(`บันทึกการรับชำระ ${docNo} แล้ว`);
+      if (!depositNo) toast.success(`บันทึกการรับชำระ ${docNo} แล้ว`);
       setOpen(false);
       router.refresh();
     });
@@ -255,7 +298,18 @@ export function ReceivePaymentDialog({
         type="button"
         className="h-10 gap-2 bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
         onClick={() => {
-          setAmount(amountDue.toFixed(2));
+          const openingWht = roundMoney(whtText.trim() === "" ? 0 : Number(whtText));
+          const openingExpected = roundMoney(
+            Math.max(
+              0,
+              grandTotal -
+                (docType === "SO" ? depositDeducted : 0) -
+                (Number.isFinite(openingWht) ? openingWht : 0),
+            ),
+          );
+          setAmount((openingExpected > 0 ? openingExpected : amountDue).toFixed(2));
+          setPaymentDate(defaultPaymentDate || paymentDate);
+          setRoundingMode("auto");
           setOpen(true);
         }}
       >
@@ -286,6 +340,11 @@ export function ReceivePaymentDialog({
                 value={paymentDate}
                 onChange={(event) => setPaymentDate(event.target.value)}
               />
+              {paymentMonthDiffers ? (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-800">
+                  ⚠️ วันที่รับเงินอยู่ในเดือนที่ต่างจากใบสั่งขายต้นทาง ({sourceDocDate}) — เอกสารภาษีที่ออกตามวันที่นี้จะรันเลขในหมวดเดือนของวันที่รับเงิน
+                </p>
+              ) : null}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="receipt-amount">ยอดที่ตัดบิลนี้</Label>
@@ -295,6 +354,39 @@ export function ReceivePaymentDialog({
                 value={amount}
                 onChange={(event) => applySettleAmount(event.target.value)}
               />
+              <p className="text-xs text-slate-500">
+                ยอดคงเหลือที่ต้องชำระสุทธิ {formatMoney(expectedNetPayable)} ฿
+              </p>
+              {showSettlementModes ? (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setRoundingMode("close")}
+                    className={
+                      closeWithRounding
+                        ? "w-full rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-left text-xs leading-snug text-emerald-900"
+                        : "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs leading-snug text-slate-700"
+                    }
+                  >
+                    ✅ ปิดยอดบิลเป็นชำระครบ (PAID) และบันทึกผลต่าง {diff.toFixed(2)} ฿ เป็นค่าใช้จ่ายปัดเศษ / ส่วนลดรับชำระ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRoundingMode("partial")}
+                    className={
+                      !closeWithRounding
+                        ? "w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-left text-xs leading-snug text-amber-900"
+                        : "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs leading-snug text-slate-700"
+                    }
+                  >
+                    {docType === "SO"
+                      ? `🧾 รับชำระบางส่วน (${settle.toFixed(2)} ฿) — ระบบจะออก "ใบรับเงินมัดจำ/ใบกำกับภาษี (DIN)" ยอด ${settle.toFixed(2)} ฿ ให้อัตโนมัติตามวันที่รับเงิน และคงเหลือค้างชำระ ${(expectedNetPayable - settle).toFixed(2)} ฿`
+                      : docType === "TAX_INV" || docType === "INV_DO"
+                        ? `⏳ รับชำระหนี้บางส่วน (PARTIAL) — คงเหลือค้างชำระ ${(expectedNetPayable - settle).toFixed(2)} ฿`
+                        : `⏳ รับชำระบางส่วน — คงเหลือค้างชำระ ${(expectedNetPayable - settle).toFixed(2)} ฿`}
+                  </button>
+                </div>
+              ) : null}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="receipt-wht">หัก ณ ที่จ่าย</Label>

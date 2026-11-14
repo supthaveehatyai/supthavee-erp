@@ -63,6 +63,7 @@ export function SalesHeaderEditDialog({
   depositDeducted = 0,
   vatType = "INCLUSIVE",
   pricesIncludeVat = false,
+  roundingDifference = 0,
 }: {
   documentId: string;
   docNo: string;
@@ -85,6 +86,7 @@ export function SalesHeaderEditDialog({
   vatType?: string | null;
   /** ราคารายการรวม VAT แล้ว — ใบกำกับเต็มรูปแค่แยกฐานภาษี ไม่บวก 7% ซ้ำ */
   pricesIncludeVat?: boolean;
+  roundingDifference?: number;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -116,6 +118,9 @@ export function SalesHeaderEditDialog({
   );
   const [receiptUrl, setReceiptUrl] = useState(slipUrl);
   const [discountText, setDiscountText] = useState(() => discountAmount.toFixed(2));
+  const [roundingText, setRoundingText] = useState(() =>
+    roundMoney(roundingDifference).toFixed(2),
+  );
   const [shippingText, setShippingText] = useState(() => roundMoney(shippingFee).toFixed(2));
   const [carrier, setCarrier] = useState(shippingMethod);
   const goods = roundMoney(goodsTotal);
@@ -162,6 +167,7 @@ export function SalesHeaderEditDialog({
     setSlipNo(referenceNo);
     setRemark(notes);
     setDiscountText(roundMoney(discountAmount).toFixed(2));
+    setRoundingText(roundMoney(roundingDifference).toFixed(2));
     setShippingText(roundMoney(shippingFee).toFixed(2));
     setCarrier(shippingMethod);
     setChannel(nextChannel);
@@ -204,6 +210,11 @@ export function SalesHeaderEditDialog({
       toast.error("ค่าขนส่งต้องเป็นตัวเลขไม่ติดลบ");
       return;
     }
+    const parsedRounding = roundingText.trim() === "" ? 0 : Number(roundingText);
+    if (!Number.isFinite(parsedRounding)) {
+      toast.error("ปัดเศษ / ส่วนลดรับชำระต้องเป็นตัวเลข");
+      return;
+    }
     if (!discountReady || discountValue - goods > 0.005) {
       toast.error(
         discountValue - goods > 0.005
@@ -234,6 +245,7 @@ export function SalesHeaderEditDialog({
         shipping_fee: shippingValue,
         shipping_method: carrier || null,
         shipping_tracking_no: shippingTrackingNo.trim() || null,
+        rounding_difference: roundMoney(parsedRounding),
       });
       if (result.error || !result.data) {
         toast.error(result.error ?? "แก้ไขหัวบิลไม่สำเร็จ");
@@ -353,6 +365,20 @@ export function SalesHeaderEditDialog({
               />
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="issued-rounding-difference">
+                  ปัดเศษ / ส่วนลดรับชำระ (บาท)
+                </Label>
+                <Input
+                  id="issued-rounding-difference"
+                  type="number"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={roundingText}
+                  disabled={pending}
+                  onChange={(event) => setRoundingText(event.target.value)}
+                />
+              </div>
               <div className="space-y-1.5">
                 <Label htmlFor="issued-discount-amount">ส่วนลดท้ายบิล (บาท)</Label>
                 <Input

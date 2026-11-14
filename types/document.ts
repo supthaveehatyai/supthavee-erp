@@ -489,6 +489,10 @@ export type DocumentDetail = {
   wht_amount: number;
   /** Cash/transfer actually received after WHT (`documents.net_received_amount`). */
   net_received_amount: number;
+  /** ส่วนต่างปิดยอดเมื่อรับเงินไม่ตรงยอดบิล (`documents.rounding_difference`). */
+  rounding_difference?: number;
+  /** วันที่รับเงินล่าสุดของเอกสารนี้ ใช้กันเลขที่เอกสารหลุดข้ามเดือน */
+  last_payment_date?: string | null;
   /** `documents.wht_status` */
   wht_status: "NONE" | "PENDING_CERT" | "RECEIVED";
   payment_status: string;
