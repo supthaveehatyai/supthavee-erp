@@ -96,7 +96,7 @@ export function PaymentReceiptRegister() {
     setExporting(true);
     try {
       const params = new URLSearchParams({
-        direction,
+        direction: "ALL",
         from: fromDate,
         to: toDate,
       });

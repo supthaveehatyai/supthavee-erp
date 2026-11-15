@@ -4,7 +4,8 @@
  */
 
 import ExcelJS from "exceljs";
-import type { VatLedgerReport } from "@/types/tax-ledger";
+import { OUTPUT_TAX_EXCEL_SHEETS } from "@/lib/tax/output-tax-series";
+import type { VatLedgerLine, VatLedgerReport } from "@/types/tax-ledger";
 
 const HEADER_FILL: ExcelJS.FillPattern = {
   type: "pattern",
@@ -38,14 +39,27 @@ function applyHeaderCell(
   cell.alignment = { vertical: "middle", horizontal: "left" };
 }
 
-export async function buildVatLedgerWorkbook(
-  report: VatLedgerReport,
-): Promise<ExcelJS.Buffer> {
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = "Supthavee ERP";
-  workbook.created = new Date();
+function roundMoney(value: number): number {
+  return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+}
 
-  const sheet = workbook.addWorksheet(report.title, {
+function writeVatLedgerSheet(
+  workbook: ExcelJS.Workbook,
+  sheetName: string,
+  report: VatLedgerReport,
+  rows: VatLedgerLine[],
+  sheetTitle: string,
+) {
+  const totals = rows.reduce(
+    (acc, row) => ({
+      goods_amount: roundMoney(acc.goods_amount + row.goods_amount),
+      vat_amount: roundMoney(acc.vat_amount + row.vat_amount),
+      grand_total: roundMoney(acc.grand_total + row.grand_total),
+    }),
+    { goods_amount: 0, vat_amount: 0, grand_total: 0 },
+  );
+
+  const sheet = workbook.addWorksheet(sheetName, {
     views: [{ state: "frozen", ySplit: HEADER_ROW }],
     pageSetup: {
       paperSize: 9,
@@ -87,7 +101,7 @@ export async function buildVatLedgerWorkbook(
   applyHeaderCell(sheet.getCell("A1"), `${report.company.company_name}${taxIdSuffix}`, {
     size: 16,
   });
-  applyHeaderCell(sheet.getCell("A2"), report.title, { size: 14 });
+  applyHeaderCell(sheet.getCell("A2"), sheetTitle, { size: 14 });
   applyHeaderCell(
     sheet.getCell("A3"),
     `ประจำเดือน ${report.periodLabel}`,
@@ -127,9 +141,9 @@ export async function buildVatLedgerWorkbook(
   });
 
   const dataStartRow = HEADER_ROW + 1;
-  report.rows.forEach((line, index) => {
+  rows.forEach((line, index) => {
     const excelRow = sheet.getRow(dataStartRow + index);
-    excelRow.getCell("seq").value = line.seq;
+    excelRow.getCell("seq").value = index + 1;
     excelRow.getCell("invoice_date").value = line.invoice_date;
     excelRow.getCell("invoice_no").value = line.invoice_no;
     excelRow.getCell("party_name").value = line.party_name;
@@ -154,11 +168,11 @@ export async function buildVatLedgerWorkbook(
     }
   });
 
-  const totalRow = sheet.getRow(dataStartRow + report.rows.length);
+  const totalRow = sheet.getRow(dataStartRow + rows.length);
   totalRow.getCell("party_name").value = "รวมทั้งสิ้น";
-  totalRow.getCell("goods_amount").value = report.totals.goods_amount;
-  totalRow.getCell("vat_amount").value = report.totals.vat_amount;
-  totalRow.getCell("grand_total").value = report.totals.grand_total;
+  totalRow.getCell("goods_amount").value = totals.goods_amount;
+  totalRow.getCell("vat_amount").value = totals.vat_amount;
+  totalRow.getCell("grand_total").value = totals.grand_total;
   totalRow.font = { name: "Calibri", bold: true };
   for (let col = 1; col <= 10; col += 1) {
     totalRow.getCell(col).fill = TOTAL_FILL;
@@ -171,6 +185,32 @@ export async function buildVatLedgerWorkbook(
   totalRow.getCell("goods_amount").alignment = { horizontal: "right" };
   totalRow.getCell("vat_amount").alignment = { horizontal: "right" };
   totalRow.getCell("grand_total").alignment = { horizontal: "right" };
+}
+
+export async function buildVatLedgerWorkbook(
+  report: VatLedgerReport,
+): Promise<ExcelJS.Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Supthavee ERP";
+  workbook.created = new Date();
+
+  if (report.reportType === "OUTPUT_TAX") {
+    for (const sheet of OUTPUT_TAX_EXCEL_SHEETS) {
+      const rows =
+        sheet.key === "ALL"
+          ? report.rows
+          : report.rows.filter((row) => row.output_group === sheet.key);
+      writeVatLedgerSheet(
+        workbook,
+        sheet.name,
+        report,
+        rows,
+        `${report.title} · ${sheet.name}`,
+      );
+    }
+  } else {
+    writeVatLedgerSheet(workbook, report.title, report, report.rows, report.title);
+  }
 
   return workbook.xlsx.writeBuffer();
 }

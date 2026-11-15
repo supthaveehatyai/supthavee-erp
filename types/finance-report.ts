@@ -26,6 +26,7 @@ export type ReportCenterPreviewRow = {
   status: string;
   status_label: string;
   is_void: boolean;
+  output_group?: "ABB" | "CS" | "INV" | "DIN" | "SP" | "LZ";
 };
 
 export type ReportCenterPreview = {

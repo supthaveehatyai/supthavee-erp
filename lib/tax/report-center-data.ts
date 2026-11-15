@@ -9,6 +9,7 @@ import {
   type FinanceReportType,
 } from "@/lib/constants/document";
 import { loadDocumentRegisterReport } from "@/lib/tax/document-register-data";
+import { parseOutputTaxSubFilter } from "@/lib/tax/output-tax-series";
 import { loadVatLedgerReport } from "@/lib/tax/vat-ledger-data";
 import type { ReportCenterPreview } from "@/types/finance-report";
 import type { VatLedgerReport } from "@/types/tax-ledger";
@@ -32,6 +33,7 @@ function mapVatLedgerToPreview(report: VatLedgerReport): ReportCenterPreview {
       status: row.status,
       status_label: getDocumentStatusLabel(row.status),
       is_void: row.is_void,
+      output_group: row.output_group,
     })),
     totals: {
       net_before_vat: report.totals.goods_amount,
@@ -41,10 +43,31 @@ function mapVatLedgerToPreview(report: VatLedgerReport): ReportCenterPreview {
   };
 }
 
+function applyOutputSubFilter(
+  preview: ReportCenterPreview,
+  outputSubFilter: string | null | undefined,
+): ReportCenterPreview {
+  const filter = parseOutputTaxSubFilter(outputSubFilter);
+  if (preview.reportType !== "OUTPUT_TAX" || filter === "ALL") return preview;
+  const rows = preview.rows
+    .filter((row) => row.output_group === filter)
+    .map((row, index) => ({ ...row, seq: index + 1 }));
+  const totals = rows.reduce(
+    (acc, row) => ({
+      net_before_vat: acc.net_before_vat + row.net_before_vat,
+      vat_amount: acc.vat_amount + row.vat_amount,
+      grand_total: acc.grand_total + row.grand_total,
+    }),
+    { net_before_vat: 0, vat_amount: 0, grand_total: 0 },
+  );
+  return { ...preview, rows, totals };
+}
+
 export async function loadReportCenterPreview(input: {
   year: number;
   month: number;
   reportType: FinanceReportType;
+  outputSubFilter?: string | null;
 }): Promise<ReportCenterPreview> {
   if (isVatLedgerReportType(input.reportType)) {
     const report = await loadVatLedgerReport({
@@ -52,7 +75,10 @@ export async function loadReportCenterPreview(input: {
       month: input.month,
       reportType: input.reportType,
     });
-    return mapVatLedgerToPreview(report);
+    return applyOutputSubFilter(
+      mapVatLedgerToPreview(report),
+      input.outputSubFilter,
+    );
   }
 
   if (isDocumentRegisterReportType(input.reportType)) {

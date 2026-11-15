@@ -13,6 +13,9 @@ export type VatLedgerCompanyHeader = {
   branch_name: string;
 };
 
+/** หมวดย่อยภาษีขาย — ใช้กรองพรีวิวและแยกชีต Excel */
+export type OutputTaxSeries = "ABB" | "CS" | "INV" | "DIN" | "SP" | "LZ";
+
 export type VatLedgerLine = {
   seq: number;
   invoice_date: string;
@@ -26,6 +29,8 @@ export type VatLedgerLine = {
   status: string;
   remark: string;
   is_void: boolean;
+  /** มีค่าเฉพาะรายงานภาษีขาย */
+  output_group?: OutputTaxSeries;
 };
 
 export type VatLedgerReport = {

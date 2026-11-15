@@ -25,6 +25,7 @@ import {
   type FinanceReportType,
 } from "@/lib/constants/document";
 import { loadReportCenterPreview } from "@/lib/tax/report-center-data";
+import { parseOutputTaxSubFilter } from "@/lib/tax/output-tax-series";
 import { parseVatLedgerPeriod } from "@/lib/tax/vat-ledger-data";
 import { formatThaiCurrency } from "@/lib/utils/currency";
 import type { ReportCenterPreview } from "@/types/finance-report";
@@ -48,6 +49,7 @@ type PageProps = {
     month?: string;
     year?: string;
     reportType?: string;
+    sub?: string;
   }>;
 };
 
@@ -85,6 +87,7 @@ async function queryReportPreview(input: {
   year: number;
   month: number;
   reportType: FinanceReportType;
+  outputSubFilter: string;
 }): Promise<{ data: ReportCenterPreview | null; error: string | null }> {
   try {
     const data = await loadReportCenterPreview(input);
@@ -126,6 +129,7 @@ export default async function TaxReportsPage({ searchParams }: PageProps) {
   const reportType = isFinanceReportType(reportTypeRaw)
     ? reportTypeRaw
     : DEFAULT_REPORT_TYPE;
+  const outputSubFilter = parseOutputTaxSubFilter(params.sub);
 
   const invalidReportType =
     hasRequested && !isFinanceReportType(reportTypeRaw);
@@ -137,7 +141,12 @@ export default async function TaxReportsPage({ searchParams }: PageProps) {
   let loadError: string | null = null;
 
   if (hasRequested && !invalidReportType && !invalidPeriod) {
-    const result = await queryReportPreview({ year, month, reportType });
+    const result = await queryReportPreview({
+      year,
+      month,
+      reportType,
+      outputSubFilter,
+    });
     preview = result.data;
     loadError = result.error;
   } else if (invalidReportType) {
@@ -186,6 +195,8 @@ export default async function TaxReportsPage({ searchParams }: PageProps) {
             reportType={reportType}
             yearOptions={buildYearOptions(fallbackYear)}
             exportHref={exportHref}
+            outputSubFilter={outputSubFilter}
+            showBatchPdf={hasRequested && reportType === "OUTPUT_TAX"}
           />
         </CardContent>
       </Card>
@@ -198,7 +209,11 @@ export default async function TaxReportsPage({ searchParams }: PageProps) {
             </CardTitle>
             <CardDescription>
               {preview
-                ? `ประจำเดือน ${preview.periodLabel} · ${preview.rows.length} รายการ`
+                ? `ประจำเดือน ${preview.periodLabel} · ${preview.rows.length} รายการ${
+                    reportType === "OUTPUT_TAX" && outputSubFilter !== "ALL"
+                      ? ` · หมวด ${outputSubFilter}`
+                      : ""
+                  }`
                 : "ผลการค้นหาตามเงื่อนไขที่เลือก"}
             </CardDescription>
           </CardHeader>

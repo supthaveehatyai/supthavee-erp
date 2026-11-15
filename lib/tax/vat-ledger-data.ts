@@ -11,6 +11,7 @@ import {
   OUTPUT_TAX_STATUSES,
   type VatLedgerReportType,
 } from "@/lib/constants/document";
+import { classifyOutputTaxSeries } from "@/lib/tax/output-tax-series";
 import { formatThaiDate } from "@/lib/utils/date-formatter";
 import type {
   VatLedgerCompanyHeader,
@@ -138,7 +139,7 @@ async function loadDocuments(input: {
   const { start, end } = vatLedgerDateRange(input.year, input.month);
   const docTypes =
     input.reportType === "OUTPUT_TAX"
-      ? [...OUTPUT_TAX_DOC_TYPES]
+      ? [...OUTPUT_TAX_DOC_TYPES, "DEP_IN"]
       : [...INPUT_TAX_DOC_TYPES];
   const statuses =
     input.reportType === "OUTPUT_TAX"
@@ -307,6 +308,10 @@ function mapDocumentRow(
     status: trimText(row.status).toUpperCase(),
     remark: isVoid ? "ยกเลิก" : "",
     is_void: isVoid,
+    output_group:
+      reportType === "OUTPUT_TAX"
+        ? classifyOutputTaxSeries(String(row.doc_type ?? ""), invoiceNo)
+        : undefined,
   };
 }
 

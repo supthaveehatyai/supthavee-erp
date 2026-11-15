@@ -160,7 +160,7 @@ export async function buildPaymentRegisterWorkbook(
     "สรุปรับเงินลูกค้า (AR)",
     "สรุปรับเงินลูกค้า (AR)",
     `บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด · ${periodLabel}`,
-    "เลขที่ใบเสร็จรับเงิน (REC)",
+    "เลขที่เอกสารรับเงิน",
     ar,
   );
   const summary = workbook.addWorksheet("สรุปแยกตามบัญชีธนาคาร");

@@ -336,6 +336,122 @@ async function loadRegisterFallback(
   return rows;
 }
 
+type ArInboundRow = {
+  document_id?: string | null;
+  payment_date?: string | null;
+  paid_at?: string | null;
+  doc_no?: string | null;
+  doc_type?: string | null;
+  customer_name?: string | null;
+  tax_id?: string | null;
+  payment_channel?: string | null;
+  bank_account_id?: string | null;
+  receiving_bank_label?: string | null;
+  bank_name?: string | null;
+  account_no?: string | null;
+  reference_no?: string | null;
+  handwritten_doc_ref?: string | null;
+  parent_doc_no?: string | null;
+  gross_amount?: number | string | null;
+  wht_amount?: number | string | null;
+  platform_fee_amount?: number | string | null;
+  net_received_amount?: number | string | null;
+  slip_url?: string | null;
+  notes?: string | null;
+};
+
+function isMissingArInboundRpc(message: string): boolean {
+  return /get_ar_inbound_payment_register|PGRST202|schema cache|does not exist|could not find the function/i.test(
+    message,
+  );
+}
+
+function mapArInboundRows(
+  data: unknown,
+  input: PaymentRegisterQuery,
+): PaymentRegisterEntry[] {
+  const list = Array.isArray(data) ? (data as ArInboundRow[]) : [];
+  const rows: PaymentRegisterEntry[] = [];
+  for (const row of list) {
+    const channel = String(row.payment_channel ?? "").trim().toUpperCase();
+    const bankId = row.bank_account_id ? String(row.bank_account_id) : null;
+    const isCash = channel === "CASH" || !bankId;
+    if (input.channelId === "CASH" && !isCash) continue;
+    if (input.channelId && input.channelId !== "CASH" && bankId !== input.channelId) {
+      continue;
+    }
+    const bankName = String(row.bank_name ?? "").trim();
+    const accountNo = String(row.account_no ?? "").trim();
+    const channelLabel = isCash
+      ? "เงินสด (Cash)"
+      : bankName && accountNo
+        ? `${bankName} • ${accountNo}`
+        : String(row.receiving_bank_label ?? "").trim() || "ไม่ระบุช่องทาง";
+    const gross = money(row.gross_amount);
+    const wht = money(row.wht_amount);
+    const net = money(row.net_received_amount);
+    const received = net > 0 ? net : gross;
+    const fee = money(row.platform_fee_amount);
+    const docNo = String(row.doc_no ?? "").trim() || "—";
+    const parentNo = String(row.parent_doc_no ?? "").trim();
+    const referenceNo = String(row.reference_no ?? "").trim() || null;
+    const handwritten = String(row.handwritten_doc_ref ?? "").trim() || null;
+    const lines = [
+      {
+        invoiceDocNo: parentNo || docNo,
+        referenceNo,
+        billingNoteNo: handwritten,
+        billAmount: gross || received,
+        whtAmount: wht,
+        netAmount: received,
+      },
+    ];
+    const noteParts = [String(row.notes ?? "").trim(), fee > 0 ? `ค่าธรรมเนียมแพลตฟอร์ม ${fee.toFixed(2)}` : ""]
+      .filter(Boolean);
+    const paidAt = String(row.paid_at ?? "").trim()
+      || (row.payment_date ? `${String(row.payment_date).slice(0, 10)}T00:00:00+07:00` : "");
+    rows.push({
+      id: `${String(row.document_id ?? docNo)}:${String(row.payment_date ?? paidAt)}`,
+      voucherDocId: String(row.document_id ?? ""),
+      direction: "AR",
+      paidAt,
+      docNo,
+      contactName: String(row.customer_name ?? "").trim() || "ไม่ระบุชื่อ",
+      taxId: String(row.tax_id ?? "").trim() || null,
+      channelLabel,
+      accountNo: isCash ? null : accountNo || null,
+      referenceNo,
+      slipUrl: String(row.slip_url ?? "").trim() || null,
+      notes: noteParts.join(" · ") || null,
+      amount: received,
+      lines,
+      billLabel: billLabel(lines),
+    });
+  }
+  return rows;
+}
+
+async function loadArInboundEntries(
+  supabase: Admin,
+  input: PaymentRegisterQuery,
+): Promise<PaymentRegisterEntry[] | null> {
+  const rpc = supabase as unknown as {
+    rpc: (
+      fn: string,
+      args: { p_start_date: string; p_end_date: string },
+    ) => Promise<{ data: unknown; error: { message: string } | null }>;
+  };
+  const { data, error } = await rpc.rpc("get_ar_inbound_payment_register", {
+    p_start_date: input.fromDate,
+    p_end_date: input.toDate,
+  });
+  if (error) {
+    if (isMissingArInboundRpc(error.message)) return null;
+    throw new Error(error.message);
+  }
+  return mapArInboundRows(data, input);
+}
+
 function mapRpcRows(data: unknown): PaymentRegisterEntry[] | null {
   const list = Array.isArray(data) ? data : null;
   if (!list) return null;
@@ -402,6 +518,15 @@ export async function queryPaymentReceiptRegister(
     rows = await loadRegisterFallback(supabase, input);
   } else {
     return { rows: [], banks, channels: [], error: error.message };
+  }
+  if (input.direction !== "AP") {
+    const inbound = await loadArInboundEntries(supabase, input);
+    if (inbound) {
+      const kept = input.direction === "AR" ? [] : rows.filter((row) => row.direction !== "AR");
+      rows = [...kept, ...inbound].sort(
+        (a, b) => a.paidAt.localeCompare(b.paidAt) || a.docNo.localeCompare(b.docNo, "th"),
+      );
+    }
   }
   return { rows, banks, channels: summarize(rows), error: null };
 }
