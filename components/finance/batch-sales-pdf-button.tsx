@@ -32,6 +32,7 @@ export function BatchSalesPdfButton({
         setError("ไม่พบเอกสารขายในช่วงเดือนและหมวดที่เลือก");
         return;
       }
+      const logoUrl = result.logoUrl;
       const frame = document.createElement("iframe");
       frame.setAttribute("title", "Batch PDF");
       frame.style.position = "fixed";
@@ -49,13 +50,16 @@ export function BatchSalesPdfButton({
         return;
       }
       doc.open();
-      doc.write(buildBatchSalesPrintHtml(result.documents));
+      doc.write(buildBatchSalesPrintHtml(result.documents, logoUrl));
       doc.close();
+      const fontsReady = doc.fonts?.ready ?? Promise.resolve();
       window.setTimeout(() => {
-        view.focus();
-        view.print();
-        window.setTimeout(() => frame.remove(), 1000);
-      }, 300);
+        void fontsReady.finally(() => {
+          view.focus();
+          view.print();
+          window.setTimeout(() => frame.remove(), 1000);
+        });
+      }, 400);
     } catch (err) {
       setError(err instanceof Error ? err.message : "สร้างไฟล์ PDF ไม่สำเร็จ");
     } finally {

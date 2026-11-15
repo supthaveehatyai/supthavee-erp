@@ -28,6 +28,7 @@ import { loadReportCenterPreview } from "@/lib/tax/report-center-data";
 import { parseOutputTaxSubFilter } from "@/lib/tax/output-tax-series";
 import { parseVatLedgerPeriod } from "@/lib/tax/vat-ledger-data";
 import { formatThaiCurrency } from "@/lib/utils/currency";
+import { formatShortDateTh } from "@/lib/utils/date-formatter";
 import type { ReportCenterPreview } from "@/types/finance-report";
 import { ReportCenterForm } from "./tax-reports-panel";
 import { PaymentReceiptRegister } from "@/components/finance/payment-receipt-register";
@@ -58,6 +59,13 @@ const DEFAULT_REPORT_TYPE: FinanceReportType = "OUTPUT_TAX";
 function buildYearOptions(anchorYear: number): number[] {
   const span = 5;
   return Array.from({ length: span * 2 + 1 }, (_, i) => anchorYear - span + i);
+}
+
+/** วันที่บนตารางพรีวิว: DD/MM/YY เช่น 01/10/2569 → 01/10/69 */
+function formatReportTableDate(value: string): string {
+  const buddhist = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim());
+  if (buddhist) return `${buddhist[1]}/${buddhist[2]}/${buddhist[3].slice(-2)}`;
+  return formatShortDateTh(value);
 }
 
 function reportTypeLabel(reportType: FinanceReportType): string {
@@ -227,6 +235,7 @@ export default async function TaxReportsPage({ searchParams }: PageProps) {
                 ไม่พบข้อมูลในช่วงเวลาที่เลือก
               </p>
             ) : preview ? (
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -249,9 +258,20 @@ export default async function TaxReportsPage({ searchParams }: PageProps) {
                       <TableCell className="tabular-nums text-slate-500">
                         {row.seq}
                       </TableCell>
-                      <TableCell>{row.doc_date}</TableCell>
-                      <TableCell className="font-medium">{row.doc_no}</TableCell>
-                      <TableCell>{row.party_name}</TableCell>
+                      <TableCell className="whitespace-nowrap text-slate-600">
+                        {formatReportTableDate(row.doc_date)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap font-mono font-semibold text-slate-900">
+                        {row.doc_no}
+                      </TableCell>
+                      <TableCell>
+                        <div
+                          className="max-w-[200px] truncate sm:max-w-[260px] lg:max-w-[320px]"
+                          title={row.party_name}
+                        >
+                          {row.party_name}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {formatThaiCurrency(row.net_before_vat)}
                       </TableCell>
@@ -261,7 +281,7 @@ export default async function TaxReportsPage({ searchParams }: PageProps) {
                       <TableCell className="text-right tabular-nums">
                         {formatThaiCurrency(row.grand_total)}
                       </TableCell>
-                      <TableCell>{row.status_label}</TableCell>
+                      <TableCell className="whitespace-nowrap">{row.status_label}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -283,6 +303,7 @@ export default async function TaxReportsPage({ searchParams }: PageProps) {
                   </TableRow>
                 </TableFooter>
               </Table>
+              </div>
             ) : null}
           </CardContent>
         </Card>

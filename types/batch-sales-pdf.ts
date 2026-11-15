@@ -10,6 +10,7 @@ export type BatchSalesPdfItem = {
   uom_used: string;
   unit_price: number;
   line_total: number;
+  is_service_item: boolean;
 };
 
 export type BatchSalesPdfDocument = {
@@ -24,6 +25,9 @@ export type BatchSalesPdfDocument = {
   customer_tax_id: string;
   customer_branch: string;
   customer_address: string;
+  discount_amount: number;
+  deposit_deducted: number;
+  shipping_fee: number;
   net_before_vat: number;
   vat_amount: number;
   grand_total: number;

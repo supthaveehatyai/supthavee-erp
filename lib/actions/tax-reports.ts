@@ -15,14 +15,14 @@ function parseItems(value: unknown): BatchSalesPdfItem[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => {
     const row = item as Record<string, unknown>;
-    const qty = num(row.qty);
     return {
       id: String(row.id ?? ""),
       description: String(row.description ?? "").trim() || "สินค้า",
-      qty: qty > 0 ? qty : 1,
+      qty: num(row.qty),
       uom_used: String(row.uom_used ?? "").trim() || "ตัว",
       unit_price: num(row.unit_price),
       line_total: num(row.line_total),
+      is_service_item: row.is_service_item === true,
     };
   });
 }
@@ -51,6 +51,9 @@ function parseDocuments(data: unknown): BatchSalesPdfDocument[] {
       customer_tax_id: String(row.customer_tax_id ?? "").trim(),
       customer_branch: String(row.customer_branch ?? "").trim(),
       customer_address: String(row.customer_address ?? "").trim(),
+      discount_amount: num(row.discount_amount),
+      deposit_deducted: num(row.deposit_deducted),
+      shipping_fee: num(row.shipping_fee),
       net_before_vat: num(row.net_before_vat),
       vat_amount: num(row.vat_amount),
       grand_total: num(row.grand_total),
@@ -74,7 +77,7 @@ export async function getBatchSalesDocumentsForPdf(
   month: number,
   subFilter: string,
 ): Promise<
-  | { ok: true; documents: BatchSalesPdfDocument[] }
+  | { ok: true; documents: BatchSalesPdfDocument[]; logoUrl: string }
   | { ok: false; error: string }
 > {
   const access = await assertReportCenter();
@@ -104,5 +107,13 @@ export async function getBatchSalesDocumentsForPdf(
     p_sub_filter: filter,
   });
   if (error) return { ok: false, error: error.message };
-  return { ok: true, documents: parseDocuments(data) };
+  const settings = await supabase
+    .from("system_settings")
+    .select("logo_url")
+    .eq("id", 1)
+    .maybeSingle();
+  const logoUrl = String(settings.data?.logo_url ?? "")
+    .trim()
+    .split("?")[0];
+  return { ok: true, documents: parseDocuments(data), logoUrl };
 }
