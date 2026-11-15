@@ -701,56 +701,47 @@ function normalizeHandwrittenDocRef(value: unknown): string | null {
   return trimmed ? trimmed.slice(0, 120) : null;
 }
 
-function isMissingDocHeaderReferenceColumn(error: {
-  message?: string;
-  code?: string;
-} | null): boolean {
-  if (!error) return false;
-  const message = error.message ?? "";
-  return (
-    error.code === "42703" ||
-    error.code === "PGRST204" ||
-    (/reference_no/i.test(message) &&
-      /schema cache|does not exist|could not find/i.test(message))
-  );
+async function persistSalesReferenceNo(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  documentId: string,
+  value: unknown,
+): Promise<string | null> {
+  const referenceNo = typeof value === "string" ? value.trim() || null : null;
+  let patch: Record<string, unknown> = { reference_no: referenceNo };
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const { error } = await supabase
+      .from("documents")
+      .update(patch as never)
+      .eq("id", documentId);
+    if (!error) return null;
+    const missing = /Could not find the '([^']+)' column/i.exec(error.message)?.[1];
+    if (missing && missing in patch) return null;
+    if (/does not exist|schema cache/i.test(error.message)) return null;
+    return error.message;
+  }
+  return "บันทึกเลขที่อ้างอิงสลิปไม่สำเร็จ";
 }
 
-/**
- * `handwritten_doc_ref` is stored as `reference_no` on both ledgers.
- * `documents` is written by the caller. This copies the same value onto
- * the mirrored `doc_headers` row (match id, then doc_no).
- */
-async function syncHandwrittenRefToDocHeader(
+async function persistHandwrittenDocRef(
   supabase: ReturnType<typeof createSupabaseServerClient>,
-  input: { documentId: string; docNo: string; referenceNo: string | null },
+  documentId: string,
+  value: unknown,
 ): Promise<string | null> {
-  const patch = { reference_no: input.referenceNo };
-  const byId = await supabase
-    .from("doc_headers")
-    .update(patch)
-    .eq("id", input.documentId)
-    .select("id");
-
-  if (byId.error) {
-    if (isMissingDocHeaderReferenceColumn(byId.error)) return null;
-    return byId.error.message;
+  let patch: Record<string, unknown> = {
+    handwritten_doc_ref: normalizeHandwrittenDocRef(value),
+  };
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const { error } = await supabase
+      .from("documents")
+      .update(patch as never)
+      .eq("id", documentId);
+    if (!error) return null;
+    const missing = /Could not find the '([^']+)' column/i.exec(error.message)?.[1];
+    if (missing && missing in patch) return null;
+    if (/does not exist|schema cache/i.test(error.message)) return null;
+    return error.message;
   }
-  if ((byId.data ?? []).length > 0) return null;
-
-  const docNo = input.docNo.trim();
-  if (!docNo) return null;
-
-  const byNo = await supabase
-    .from("doc_headers")
-    .update(patch)
-    .eq("doc_no", docNo)
-    .select("id");
-
-  if (byNo.error) {
-    if (isMissingDocHeaderReferenceColumn(byNo.error)) return null;
-    return byNo.error.message;
-  }
-  return null;
+  return "บันทึกอ้างอิงบิลมือไม่สำเร็จ";
 }
 
 function normalizeAttachmentUrl(value: unknown): string | null {
@@ -1121,7 +1112,6 @@ export async function createDraftDocument(
           typeof payload.notes === "string"
             ? payload.notes.trim() || null
             : null,
-        reference_no: normalizeHandwrittenDocRef(payload.handwritten_doc_ref),
         attachment_url: attachmentUrl,
         attached_file_url: attachmentUrl,
         ...receiptFields,
@@ -1139,7 +1129,28 @@ export async function createDraftDocument(
     }
 
     const documentId = document.id as string;
-    // reference_no ถูกซิงก์เข้า doc_headers โดย trigger แล้ว
+    if (payload.handwritten_doc_ref !== undefined) {
+      const handwrittenError = await persistHandwrittenDocRef(
+        supabase,
+        documentId,
+        payload.handwritten_doc_ref,
+      );
+      if (handwrittenError) {
+        await supabase.from("documents").delete().eq("id", documentId);
+        return { data: null, error: handwrittenError };
+      }
+    }
+    if (payload.reference_no !== undefined) {
+      const referenceError = await persistSalesReferenceNo(
+        supabase,
+        documentId,
+        payload.reference_no,
+      );
+      if (referenceError) {
+        await supabase.from("documents").delete().eq("id", documentId);
+        return { data: null, error: referenceError };
+      }
+    }
     // อัปเดตค่าขนส่งเฉพาะเมื่อมีค่าจริง เพื่อไม่ยิง UPDATE เปล่าหลัง INSERT
     if (
       shipping.shipping_fee !== 0 ||
@@ -2301,6 +2312,7 @@ export async function getDocumentByNo(
         swept_batch_ref,
         notes,
         reference_no,
+        handwritten_doc_ref,
         remark,
         void_reason,
         attachment_url,
@@ -2397,7 +2409,8 @@ export async function getDocumentByNo(
         .replace(/\s*rounding_difference,\s*/g, "\n        ")
         .replace(/\s*last_payment_date,\s*/g, "\n        ")
         .replace(/\s*platform_fee_amount,\s*/g, "\n        ")
-        .replace(/\s*is_voided,\s*/g, "\n        ");
+        .replace(/\s*is_voided,\s*/g, "\n        ")
+        .replace(/\s*handwritten_doc_ref,\s*/g, "\n        ");
       const retry = await supabase
         .from("documents")
         .select(legacySelect)
@@ -2437,7 +2450,8 @@ export async function getDocumentByNo(
         .replace(/\s*rounding_difference,\s*/g, "\n        ")
         .replace(/\s*last_payment_date,\s*/g, "\n        ")
         .replace(/\s*platform_fee_amount,\s*/g, "\n        ")
-        .replace(/\s*is_voided,\s*/g, "\n        ");
+        .replace(/\s*is_voided,\s*/g, "\n        ")
+        .replace(/\s*handwritten_doc_ref,\s*/g, "\n        ");
         const retry = await supabase
           .from("documents")
           .select(legacySelect)
@@ -2622,11 +2636,11 @@ export async function getDocumentByNo(
 
     const notes = (data.notes as string | null) ?? null;
     const visibleNotes = splitBillNotes(notes).notes;
-    const vendorRefMatch = visibleNotes.match(/อ้างอิงบิลซัพพลายเออร์:\s*(.+)$/m);
-    const columnReference = String(
-      (data as { reference_no?: string | null }).reference_no ?? "",
-    ).trim();
-    const referenceNo = columnReference || vendorRefMatch?.[1]?.trim() || null;
+    const referenceRaw = (data as { reference_no?: string | null }).reference_no;
+    const referenceNo =
+      referenceRaw == null || String(referenceRaw).trim() === ""
+        ? null
+        : String(referenceRaw).trim();
     const taxQuery = supabase.from("documents") as unknown as {
       select: (columns: string) => {
         eq: (column: string, value: string) => {
@@ -2657,17 +2671,27 @@ export async function getDocumentByNo(
     );
     const shipping =
       (await loadSalesShipping(supabase, documentId)) ?? normalizeSalesShipping({});
-    const handwrittenLookup = await supabase
-      .from("documents")
-      .select("handwritten_doc_ref")
-      .eq("id", documentId)
-      .maybeSingle();
-    const handwrittenDocRef = handwrittenLookup.error
-      ? null
-      : String(
-          (handwrittenLookup.data as { handwritten_doc_ref?: string | null } | null)
-            ?.handwritten_doc_ref ?? "",
-        ).trim() || null;
+    const handwrittenRow = data as { handwritten_doc_ref?: string | null };
+    let handwrittenDocRef: string | null =
+      handwrittenRow.handwritten_doc_ref == null ||
+      String(handwrittenRow.handwritten_doc_ref).trim() === ""
+        ? null
+        : String(handwrittenRow.handwritten_doc_ref).trim();
+    if (!("handwritten_doc_ref" in handwrittenRow)) {
+      const handwrittenLookup = await supabase
+        .from("documents")
+        .select("handwritten_doc_ref")
+        .eq("id", documentId)
+        .maybeSingle();
+      const lookedUp = (
+        handwrittenLookup.data as { handwritten_doc_ref?: string | null } | null
+      )?.handwritten_doc_ref;
+      handwrittenDocRef = handwrittenLookup.error
+        ? null
+        : lookedUp == null || String(lookedUp).trim() === ""
+          ? null
+          : String(lookedUp).trim();
+    }
     const parentId = String(data.ref_document_id ?? "").trim();
     let parentDocNo: string | null = null;
     let parentDocDate: string | null = null;
@@ -2952,9 +2976,6 @@ export async function updateDraftDocument(
         : new Date().toISOString().slice(0, 10);
     const notes =
       typeof payload?.notes === "string" ? payload.notes.trim() || null : null;
-    const handwrittenDocRef = normalizeHandwrittenDocRef(
-      payload?.handwritten_doc_ref,
-    );
 
     if (!documentId) {
       return { data: null, error: "ไม่พบรหัสเอกสาร" };
@@ -3032,7 +3053,6 @@ export async function updateDraftDocument(
           contact_id: contactId,
           contact_person_id: contactPersonId,
           notes,
-          reference_no: handwrittenDocRef,
           doc_date: docDate,
           sales_channel: salesChannel,
           ecommerce_order_no: header.data.ecommerce_order_no,
@@ -3065,14 +3085,21 @@ export async function updateDraftDocument(
         );
         if (feeError) return { data: null, error: feeError };
       }
-
-      const headerSyncError = await syncHandwrittenRefToDocHeader(supabase, {
-        documentId,
-        docNo: String(existing.doc_no ?? ""),
-        referenceNo: handwrittenDocRef,
-      });
-      if (headerSyncError) {
-        return { data: null, error: headerSyncError };
+      if (payload.handwritten_doc_ref !== undefined) {
+        const handwrittenError = await persistHandwrittenDocRef(
+          supabase,
+          documentId,
+          payload.handwritten_doc_ref,
+        );
+        if (handwrittenError) return { data: null, error: handwrittenError };
+      }
+      if (payload.reference_no !== undefined) {
+        const referenceError = await persistSalesReferenceNo(
+          supabase,
+          documentId,
+          payload.reference_no,
+        );
+        if (referenceError) return { data: null, error: referenceError };
       }
 
       revalidatePath("/sales");
@@ -3163,7 +3190,6 @@ export async function updateDraftDocument(
         vat_amount: summary.vat_amount,
         discount_text: discountText,
         notes,
-        reference_no: handwrittenDocRef,
         sales_channel: salesChannel,
         ecommerce_order_no: header.data.ecommerce_order_no,
         ecommerce_buyer_name: header.data.ecommerce_buyer_name,
@@ -3197,14 +3223,21 @@ export async function updateDraftDocument(
       );
       if (feeError) return { data: null, error: feeError };
     }
-
-    const headerSyncError = await syncHandwrittenRefToDocHeader(supabase, {
-      documentId,
-      docNo: String(existing.doc_no ?? ""),
-      referenceNo: handwrittenDocRef,
-    });
-    if (headerSyncError) {
-      return { data: null, error: headerSyncError };
+    if (payload.handwritten_doc_ref !== undefined) {
+      const handwrittenError = await persistHandwrittenDocRef(
+        supabase,
+        documentId,
+        payload.handwritten_doc_ref,
+      );
+      if (handwrittenError) return { data: null, error: handwrittenError };
+    }
+    if (payload.reference_no !== undefined) {
+      const referenceError = await persistSalesReferenceNo(
+        supabase,
+        documentId,
+        payload.reference_no,
+      );
+      if (referenceError) return { data: null, error: referenceError };
     }
 
     const { error: deleteItemsError } = await supabase
@@ -3293,28 +3326,27 @@ function isMissingAbbNumberRpc(error: {
   );
 }
 
+const PLATFORM_ABB_DOC_NO = /^(SP|LZ)\d{4}-\d{4,}$/;
+
 function nextPlatformAbbNo(
   series: "SP" | "LZ",
   docDate: string,
   existing: string[],
 ): string {
-  const month = docDate.slice(5, 7);
-  const prefix = `${series}${month}/`;
+  const yymm = `${docDate.slice(2, 4)}${docDate.slice(5, 7)}`;
+  const prefix = `${series}${yymm}-`;
   let maxSeq = 0;
-  const pattern = new RegExp(`^${prefix}(\\d+)$`);
   for (const docNo of existing) {
-    const match = pattern.exec(docNo);
-    if (!match) continue;
-    const seq = Number(match[1]);
+    if (!PLATFORM_ABB_DOC_NO.test(docNo) || !docNo.startsWith(prefix)) continue;
+    const seq = Number(docNo.slice(prefix.length));
     if (Number.isFinite(seq) && seq > maxSeq) maxSeq = seq;
   }
-  return `${prefix}${String(maxSeq + 1).padStart(2, "0")}`;
+  return `${prefix}${String(maxSeq + 1).padStart(4, "0")}`;
 }
 
 /**
  * Reserve the official ABB number on the DRAFT row before
- * `issue_document_transaction`, so SP/LZ slash series is not rewritten
- * as PREFIX-YYMM-XXXX.
+ * `issue_document_transaction`. Shopee/Lazada use SP2610-0001 / LZ2610-0001.
  *
  * Prefers `public.generate_abb_channel_doc_no` when installed on Cloud.
  * Falls back to a unique-constraint retry when that RPC is not deployed yet.
@@ -3380,11 +3412,11 @@ async function assignAbbChannelDocNo(
     let nextDocNo = "";
     if (channel === "SHOPEE" || channel === "LAZADA") {
       const series = channel === "SHOPEE" ? "SP" : "LZ";
-      const month = input.docDate.slice(5, 7);
+      const yymm = `${input.docDate.slice(2, 4)}${input.docDate.slice(5, 7)}`;
       const { data: rows, error: listError } = await supabase
         .from("documents")
         .select("doc_no")
-        .like("doc_no", `${series}${month}/%`)
+        .like("doc_no", `${series}${yymm}-%`)
         .limit(1000);
       if (listError) return { docNo: null, error: listError.message };
       nextDocNo = nextPlatformAbbNo(
@@ -4074,6 +4106,7 @@ export async function updateSalesDocumentDirect(input: {
   doc_date: string;
   notes: string | null;
   reference_no?: string | null;
+  handwritten_doc_ref?: string | null;
   payment_channel?: string | null;
   receiving_bank_label?: string | null;
   bank_account_id?: string | null;
@@ -4106,6 +4139,7 @@ export async function updateSalesDocumentDirect(input: {
     const supabase = createSupabaseServerClient();
     const notes = input.notes?.trim() ?? "";
     const referenceNo = input.reference_no?.trim() ?? "";
+    const handwrittenDocRef = normalizeHandwrittenDocRef(input.handwritten_doc_ref);
     const paymentChannel = input.payment_channel?.trim() || null;
     const cashReceipt = paymentChannel === "CASH";
     const rpcClient = supabase as unknown as {
@@ -4127,6 +4161,7 @@ export async function updateSalesDocumentDirect(input: {
       p_notes: notes,
       p_remark: notes,
       p_reference_no: referenceNo || null,
+      p_handwritten_doc_ref: handwrittenDocRef,
       p_payment_channel: paymentChannel,
       p_receiving_bank_label: cashReceipt
         ? CASH_RECEIPT_LABEL
@@ -4379,12 +4414,14 @@ export async function getSalesDocuments(
         ) || null,
         payment_status: String(row.payment_status ?? "UNPAID"),
         is_billed: billedDocNos.has(docNo),
-        reference_no: String(
-          (row as { reference_no?: string | null }).reference_no ?? "",
-        ).trim() || null,
-        handwritten_doc_ref: String(
-          (row as { handwritten_doc_ref?: string | null }).handwritten_doc_ref ?? "",
-        ).trim() || null,
+        reference_no:
+          row.reference_no == null || String(row.reference_no).trim() === ""
+            ? null
+            : String(row.reference_no),
+        handwritten_doc_ref:
+          row.handwritten_doc_ref == null || String(row.handwritten_doc_ref).trim() === ""
+            ? null
+            : String(row.handwritten_doc_ref),
       };
     });
 

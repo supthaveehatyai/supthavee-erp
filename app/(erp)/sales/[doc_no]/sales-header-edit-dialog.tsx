@@ -48,6 +48,7 @@ export function SalesHeaderEditDialog({
   docDate,
   notes,
   referenceNo,
+  handwrittenDocRef = "",
   paymentChannel,
   receivingBankLabel,
   storedBankAccountId,
@@ -70,6 +71,7 @@ export function SalesHeaderEditDialog({
   docDate: string;
   notes: string;
   referenceNo: string;
+  handwrittenDocRef?: string;
   paymentChannel?: string | null;
   receivingBankLabel?: string | null;
   storedBankAccountId?: string | null;
@@ -93,6 +95,7 @@ export function SalesHeaderEditDialog({
   const [pending, startTransition] = useTransition();
   const [date, setDate] = useState(docDate.slice(0, 10));
   const [slipNo, setSlipNo] = useState(referenceNo);
+  const [handwrittenNo, setHandwrittenNo] = useState(handwrittenDocRef);
   const [remark, setRemark] = useState(notes);
   const cashReceipt = docType === "ABB" || docType === "CS_TAX";
   const initialChannel: PaymentChannel = initialCashReceiptChannel({
@@ -165,6 +168,7 @@ export function SalesHeaderEditDialog({
     });
     setDate(docDate.slice(0, 10));
     setSlipNo(referenceNo);
+    setHandwrittenNo(handwrittenDocRef);
     setRemark(notes);
     setDiscountText(roundMoney(discountAmount).toFixed(2));
     setRoundingText(roundMoney(roundingDifference).toFixed(2));
@@ -233,6 +237,7 @@ export function SalesHeaderEditDialog({
         doc_date: date,
         notes: remark.trim() || null,
         reference_no: slipNo.trim() || null,
+        handwritten_doc_ref: handwrittenNo.trim() || null,
         payment_channel: cashReceipt ? "CASH" : channel,
         bank_account_id: cashReceipt ? null : (account?.id ?? null),
         receiving_bank_label: cashReceipt
@@ -320,15 +325,29 @@ export function SalesHeaderEditDialog({
                 </p>
               ) : null}
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="issued-reference-no">เลขที่อ้างอิง / เลขสลิป</Label>
-              <Input
-                id="issued-reference-no"
-                value={slipNo}
-                disabled={pending}
-                onChange={(event) => setSlipNo(event.target.value)}
-                placeholder="เลขสลิปโอนเงิน / เลขที่บิลอ้างอิง"
-              />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="issued-handwritten-ref">
+                  อ้างอิงบิลมือ (เช่น เล่มที่ 21 เลขที่ 22)
+                </Label>
+                <Input
+                  id="issued-handwritten-ref"
+                  value={handwrittenNo}
+                  disabled={pending}
+                  onChange={(event) => setHandwrittenNo(event.target.value)}
+                  placeholder="เล่มที่ 21 เลขที่ 22"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="issued-reference-no">เลขที่อ้างอิง / เลขสลิปโอนเงิน</Label>
+                <Input
+                  id="issued-reference-no"
+                  value={slipNo}
+                  disabled={pending}
+                  onChange={(event) => setSlipNo(event.target.value)}
+                  placeholder="เลขสลิปโอนเงิน"
+                />
+              </div>
             </div>
             {cashReceipt ? (
               <CashReceiptPaymentBox

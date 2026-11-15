@@ -634,6 +634,11 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                   📒 อ้างอิงบิลมือ: {doc.handwritten_doc_ref.trim()}
                 </Badge>
               ) : null}
+              {doc.reference_no?.trim() ? (
+                <Badge className="border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-100">
+                  🧾 สลิป: {doc.reference_no.trim()}
+                </Badge>
+              ) : null}
               {doc.parent_doc_no?.trim() ? (
                 <Link
                   href={`/sales/${encodeURIComponent(doc.parent_doc_no.trim())}`}
@@ -713,6 +718,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                   : (doc.notes ?? "")
               }
               referenceNo={doc.reference_no ?? ""}
+              handwrittenDocRef={doc.handwritten_doc_ref ?? ""}
               paymentChannel={doc.payment_channel}
               receivingBankLabel={doc.receiving_bank_label}
               storedBankAccountId={doc.bank_account_id}

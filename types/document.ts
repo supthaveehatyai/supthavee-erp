@@ -142,8 +142,10 @@ export type CreateDraftDocumentInput = {
   doc_date?: string | null;
   /** Job name / customer PO / remark — maps to `documents.notes`. */
   notes?: string | null;
-  /** อ้างอิงบิลเขียนมือ เช่น "เล่มที่ 21 เลขที่ 5" — maps to `documents.reference_no`. */
+  /** อ้างอิงบิลเขียนมือ เช่น "เล่มที่ 21 เลขที่ 5" — `documents.handwritten_doc_ref` */
   handwritten_doc_ref?: string | null;
+  /** เลขที่อ้างอิงสลิปโอนเงิน — `documents.reference_no` */
+  reference_no?: string | null;
   items?: CreateDraftDocumentItemInput[];
   /** Bill discount text e.g. "10%" or "500". */
   discount_text?: string | null;
@@ -197,8 +199,10 @@ export type UpdateDraftDocumentInput = {
   vat_rate?: number;
   /** Remark / หมายเหตุ — maps to `documents.notes`. */
   notes?: string | null;
-  /** อ้างอิงบิลเขียนมือ — maps to `documents.reference_no`. */
+  /** อ้างอิงบิลเขียนมือ — `documents.handwritten_doc_ref` */
   handwritten_doc_ref?: string | null;
+  /** เลขที่อ้างอิงสลิปโอนเงิน — `documents.reference_no` */
+  reference_no?: string | null;
   total_amount?: number;
   discount_amount?: number;
   net_before_vat?: number;

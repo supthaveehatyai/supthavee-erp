@@ -412,7 +412,12 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
                         <div>{doc.doc_no}</div>
                         {doc.handwritten_doc_ref ? (
                           <div className="mt-0.5 font-sans text-[10px] font-medium text-amber-800">
-                            📒 {doc.handwritten_doc_ref}
+                            📒 บิลมือ: {doc.handwritten_doc_ref}
+                          </div>
+                        ) : null}
+                        {doc.reference_no ? (
+                          <div className="mt-0.5 font-sans text-[10px] font-medium text-slate-500">
+                            🧾 สลิป: {doc.reference_no}
                           </div>
                         ) : null}
                       </TableCell>

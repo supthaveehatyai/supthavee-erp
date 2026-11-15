@@ -179,8 +179,8 @@ export default function EcommerceOrderImporter({
               className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
             >
               <option value="">ให้ระบบเดาจากไฟล์</option>
-              <option value="SHOPEE">Shopee (SPMM/XX)</option>
-              <option value="LAZADA">Lazada (LZMM/XX)</option>
+              <option value="SHOPEE">Shopee (SP2610-0001)</option>
+              <option value="LAZADA">Lazada (LZ2610-0001)</option>
             </select>
           </label>
 
@@ -285,7 +285,7 @@ export default function EcommerceOrderImporter({
           </Button>
           <Button disabled={busy || selectedOrders.length === 0} onClick={() => void issueSelected()}>
             {isIssuing ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-            สร้างและออกบิล ABB อัตโนมัติ (รันเลข SPMM/XX หรือ LZMM/XX)
+            สร้างและออกบิล ABB อัตโนมัติ (รันเลข SP2610-0001 หรือ LZ2610-0001)
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -247,6 +247,9 @@ export default function SalesEditWorkspace({
       "",
   );
   const [handwrittenDocRef, setHandwrittenDocRef] = useState(
+    initialDocument.handwritten_doc_ref ?? "",
+  );
+  const [slipReferenceNo, setSlipReferenceNo] = useState(
     initialDocument.reference_no ?? "",
   );
   const [docDate, setDocDate] = useState(
@@ -607,6 +610,7 @@ export default function SalesEditWorkspace({
         contact_person_id: hideContactPicker ? null : contactPersonId || null,
         doc_date: docDate,
         handwritten_doc_ref: handwrittenDocRef.trim() || null,
+        reference_no: slipReferenceNo.trim() || null,
         discount_text: discountText.trim() || null,
         vat_type: vatType,
         vat_rate: DEFAULT_VAT_RATE,
@@ -1245,14 +1249,14 @@ export default function SalesEditWorkspace({
                   channel={paymentChannel}
                   bankAccountId={bankAccountId}
                   accounts={bankAccounts}
-                  referenceNo={handwrittenDocRef}
+                  referenceNo={slipReferenceNo}
                   slipUrl={slipUrl}
                   disabled={isPending}
                   onChannelChange={(next, accountId) => {
                     setPaymentChannel(next);
                     setBankAccountId(accountId);
                   }}
-                  onReferenceChange={setHandwrittenDocRef}
+                  onReferenceChange={setSlipReferenceNo}
                   onSlipUrlChange={setSlipUrl}
                 />
               ) : null}

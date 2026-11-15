@@ -399,6 +399,7 @@ export default function SalesCreateWorkspace({
     () => new Date().toISOString().slice(0, 10),
   );
   const [handwrittenDocRef, setHandwrittenDocRef] = useState("");
+  const [slipReferenceNo, setSlipReferenceNo] = useState("");
   const [notes, setNotes] = useState("");
   const [mockupUrl, setMockupUrl] = useState("");
   const [ecommerceOpen, setEcommerceOpen] = useState(openEcommerceImport);
@@ -504,6 +505,7 @@ export default function SalesCreateWorkspace({
     setSalesChannelFields(INITIAL_SALES_CHANNEL_FIELDS);
     setDocDate(new Date().toISOString().slice(0, 10));
     setHandwrittenDocRef("");
+    setSlipReferenceNo("");
     setNotes("");
     const channel = initialCashReceiptChannel({
       docType: startingDocType,
@@ -765,6 +767,7 @@ export default function SalesCreateWorkspace({
     setSalesChannelFields(INITIAL_SALES_CHANNEL_FIELDS);
     setDocDate(new Date().toISOString().slice(0, 10));
     setHandwrittenDocRef("");
+    setSlipReferenceNo("");
     setNotes("");
   }
 
@@ -979,6 +982,7 @@ export default function SalesCreateWorkspace({
     setDocType("ABB");
     setDocDate(sanitizeOcrDocumentDate(order.doc_date));
     setHandwrittenDocRef("");
+    setSlipReferenceNo("");
     setNotes("");
     setVatType("INCLUSIVE");
     setContactId("");
@@ -1055,6 +1059,7 @@ export default function SalesCreateWorkspace({
           contact_person_id: hideContactPicker ? null : contactPersonId || null,
           doc_date: docDate,
           handwritten_doc_ref: handwrittenDocRef.trim() || null,
+          reference_no: slipReferenceNo.trim() || null,
           notes: notes.trim() || null,
           discount_text: discountText.trim() || null,
           vat_type: vatType,
@@ -1831,14 +1836,14 @@ export default function SalesCreateWorkspace({
                     channel={paymentChannel}
                     bankAccountId={bankAccountId}
                     accounts={bankAccounts}
-                    referenceNo={handwrittenDocRef}
+                    referenceNo={slipReferenceNo}
                     slipUrl={slipUrl}
                     disabled={formLocked}
                     onChannelChange={(next, accountId) => {
                       setPaymentChannel(next);
                       setBankAccountId(accountId);
                     }}
-                    onReferenceChange={setHandwrittenDocRef}
+                    onReferenceChange={setSlipReferenceNo}
                     onSlipUrlChange={setSlipUrl}
                   />
                 </div>
