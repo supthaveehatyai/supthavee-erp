@@ -1,8 +1,13 @@
 import { Download, Eye } from "lucide-react";
-import { BatchSalesPdfButton } from "@/components/finance/batch-sales-pdf-button";
+import {
+  BatchPdfPrintButton,
+  BatchPrintTrigger,
+} from "@/components/finance/batch-pdf-print-button";
+import PrintDocumentTemplate from "@/components/sales/print-document-template";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { getBatchDocumentsForPrint } from "@/lib/actions/document-actions";
 import {
   FINANCE_REPORT_TYPE_OPTIONS,
   type FinanceReportType,
@@ -11,6 +16,7 @@ import {
   OUTPUT_TAX_SUB_FILTERS,
   type OutputTaxSubFilter,
 } from "@/lib/tax/output-tax-series";
+import type { DocumentDetail } from "@/types/document";
 
 const THAI_MONTHS = [
   { value: 1, label: "มกราคม" },
@@ -35,6 +41,8 @@ export type ReportCenterFormProps = {
   exportHref: string | null;
   outputSubFilter: OutputTaxSubFilter;
   showBatchPdf: boolean;
+  printBatch: boolean;
+  batchTick: string;
 };
 
 function outputFilterHref(
@@ -51,7 +59,7 @@ function outputFilterHref(
   return `/finance/tax-reports?${params.toString()}`;
 }
 
-export function ReportCenterForm({
+export async function ReportCenterForm({
   year,
   month,
   reportType,
@@ -59,8 +67,28 @@ export function ReportCenterForm({
   exportHref,
   outputSubFilter,
   showBatchPdf,
+  printBatch,
+  batchTick,
 }: ReportCenterFormProps) {
+  let batchDocs: DocumentDetail[] = [];
+  let batchError: string | null = null;
+  if (printBatch) {
+    const res = await getBatchDocumentsForPrint({
+      year,
+      month,
+      subFilter: outputSubFilter,
+    });
+    if (res.error) batchError = res.error;
+    else if (res.data.length === 0) {
+      batchError = "ไม่พบเอกสารขายในช่วงเดือนและหมวดที่เลือก";
+    } else {
+      batchDocs = res.data;
+    }
+  }
+
   return (
+    <>
+    <div className="print:hidden">
     <form
       method="GET"
       action="/finance/tax-reports"
@@ -153,14 +181,32 @@ export function ReportCenterForm({
             Export to Excel
           </a>
         ) : null}
-        {showBatchPdf ? (
-          <BatchSalesPdfButton
-            year={year}
-            month={month}
-            subFilter={outputSubFilter}
-          />
-        ) : null}
+        {showBatchPdf ? <BatchPdfPrintButton /> : null}
       </div>
+      {batchError ? <p className="text-sm text-red-600">{batchError}</p> : null}
     </form>
+    </div>
+    {batchDocs.length > 0 ? (
+      <div id="batch-print-root" className="hidden print:block print:w-full">
+        {batchDocs.map((doc, idx) => (
+          <div
+            key={doc.id}
+            className={idx < batchDocs.length - 1 ? "print:break-after-page" : undefined}
+            style={{
+              pageBreakAfter: idx < batchDocs.length - 1 ? "always" : "auto",
+              breakAfter: idx < batchDocs.length - 1 ? "page" : "auto",
+            }}
+          >
+            <PrintDocumentTemplate
+              className="mt-0 print:mt-0"
+              document={doc}
+              followDocumentDefaults
+            />
+          </div>
+        ))}
+      </div>
+    ) : null}
+    <BatchPrintTrigger active={batchDocs.length > 0} tick={batchTick} />
+    </>
   );
 }

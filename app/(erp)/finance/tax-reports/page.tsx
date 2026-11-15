@@ -38,6 +38,7 @@ import {
 } from "@/components/shared/page-mode-tabs";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export const metadata: Metadata = {
   title: "ศูนย์รายงาน | Report Center",
@@ -51,6 +52,8 @@ type PageProps = {
     year?: string;
     reportType?: string;
     sub?: string;
+    batchPrint?: string;
+    batchTick?: string;
   }>;
 };
 
@@ -169,34 +172,39 @@ export default async function TaxReportsPage({ searchParams }: PageProps) {
     ? buildExportHref(year, month, reportType)
     : null;
 
+  const printBatch =
+    hasRequested && reportType === "OUTPUT_TAX" && params.batchPrint === "1";
+
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
-      <PageModeTabs
-        tabs={REPORT_TABS}
-        activeKey="tax"
-        ariaLabel="ศูนย์รายงานและภาษี"
-      />
-      <div>
-        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-900">
-          <FileSpreadsheet className="size-7 text-blue-600" />
-          ศูนย์รายงาน (Report Center)
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          พรีวิวข้อมูลก่อนดาวน์โหลด Excel — ภาษีขาย (TAX_INV / CS_TAX / ABB),
-          ภาษีซื้อ (AP_TAX), ทะเบียนใบส่งของ (INV_DO), ค่าใช้จ่าย (expenses)
-          และใบสำคัญจ่าย (PAY)
-        </p>
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 print:max-w-none print:gap-0 print:p-0">
+      <div className="print:hidden">
+        <PageModeTabs
+          tabs={REPORT_TABS}
+          activeKey="tax"
+          ariaLabel="ศูนย์รายงานและภาษี"
+        />
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-900">
+            <FileSpreadsheet className="size-7 text-blue-600" />
+            ศูนย์รายงาน (Report Center)
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            พรีวิวข้อมูลก่อนดาวน์โหลด Excel — ภาษีขาย (TAX_INV / CS_TAX / ABB),
+            ภาษีซื้อ (AP_TAX), ทะเบียนใบส่งของ (INV_DO), ค่าใช้จ่าย (expenses)
+            และใบสำคัญจ่าย (PAY)
+          </p>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
+      <Card className="print:border-0 print:bg-transparent print:p-0 print:shadow-none">
+        <CardHeader className="print:hidden">
           <CardTitle className="text-base">เลือกเงื่อนไขรายงาน</CardTitle>
           <CardDescription>
             กด &quot;ดูรายงาน&quot; เพื่อโหลดตารางพรีวิวตามงวดบัญชี —
             ปุ่ม Export จะแสดงเมื่อมีข้อมูลในตารางเท่านั้น
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="print:p-0">
           <ReportCenterForm
             year={year}
             month={month}
@@ -205,11 +213,14 @@ export default async function TaxReportsPage({ searchParams }: PageProps) {
             exportHref={exportHref}
             outputSubFilter={outputSubFilter}
             showBatchPdf={hasRequested && reportType === "OUTPUT_TAX"}
+            printBatch={printBatch}
+            batchTick={params.batchTick ?? ""}
           />
         </CardContent>
       </Card>
 
       {hasRequested ? (
+        <div className="print:hidden">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">
@@ -307,8 +318,11 @@ export default async function TaxReportsPage({ searchParams }: PageProps) {
             ) : null}
           </CardContent>
         </Card>
+        </div>
       ) : null}
-      <PaymentReceiptRegister />
+      <div className="print:hidden">
+        <PaymentReceiptRegister />
+      </div>
     </div>
   );
 }

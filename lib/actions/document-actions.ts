@@ -35,7 +35,8 @@ import { revalidatePath } from "next/cache";
 import { logAuditTrail } from "@/lib/supabase/auditService";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { getSystemSettings } from "@/lib/actions/settings";
-import { requireSessionUserId } from "@/lib/auth/current-user";
+import { getCurrentAuthUser, requireSessionUserId } from "@/lib/auth/current-user";
+import { canAccessReportCenter } from "@/lib/auth/module-access";
 import { paymentChannelFields } from "@/lib/actions/finance/receipt-sweep-actions";
 import {
   CASH_RECEIPT_LABEL,
@@ -6577,4 +6578,86 @@ export async function uploadDocumentImage(
       err instanceof Error ? err.message : "อัปโหลดภาพเอกสารไม่สำเร็จ";
     return { data: null, error: message };
   }
+}
+
+function batchMonthBounds(year: number, month: number): { startDate: string; endDate: string } | null {
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) return null;
+  if (!Number.isInteger(month) || month < 1 || month > 12) return null;
+  const mm = String(month).padStart(2, "0");
+  const lastDay = new Date(year, month, 0).getDate();
+  return {
+    startDate: `${year}-${mm}-01`,
+    endDate: `${year}-${mm}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
+
+export async function getBatchDocumentsForPrint(input: {
+  year: number;
+  month: number;
+  subFilter?: string;
+}): Promise<{ data: DocumentDetail[]; error: string | null }> {
+  const actor = await getCurrentAuthUser();
+  if (!actor) return { data: [], error: "กรุณาเข้าสู่ระบบก่อนพิมพ์เอกสาร" };
+  if (!canAccessReportCenter(actor.accessibleModules, actor.roleCode)) {
+    return { data: [], error: "ไม่มีสิทธิ์ใช้งานศูนย์รายงาน" };
+  }
+
+  const bounds = batchMonthBounds(input.year, input.month);
+  if (!bounds) return { data: [], error: "เดือนหรือปีไม่ถูกต้อง" };
+  const filter = (input.subFilter ?? "ALL").trim().toUpperCase();
+  const supabase = createSupabaseServerClient();
+  const pageSize = 1000;
+  const docNos: string[] = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase
+      .from("documents")
+      .select("doc_no, doc_type, doc_date")
+      .gte("doc_date", bounds.startDate)
+      .lte("doc_date", bounds.endDate)
+      .not("doc_no", "like", "DRAFT-%")
+      .order("doc_date", { ascending: true })
+      .order("doc_no", { ascending: true });
+
+    if (filter === "ABB") {
+      query = query.eq("doc_type", "ABB").like("doc_no", "ABB-%");
+    } else if (filter === "SP") {
+      query = query.like("doc_no", "SP%");
+    } else if (filter === "LZ") {
+      query = query.like("doc_no", "LZ%");
+    } else if (filter === "CS") {
+      query = query.eq("doc_type", "CS_TAX");
+    } else if (filter === "INV") {
+      query = query.eq("doc_type", "TAX_INV");
+    } else if (filter === "DIN") {
+      query = query.eq("doc_type", "DEP_IN");
+    } else {
+      query = query.in("doc_type", ["ABB", "CS_TAX", "TAX_INV", "DEP_IN"]);
+    }
+
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) return { data: [], error: error.message };
+    const page = data ?? [];
+    for (const row of page) {
+      const docNo = String(row.doc_no ?? "").trim();
+      if (docNo && !docNo.startsWith("DRAFT-")) docNos.push(docNo);
+    }
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  const details: DocumentDetail[] = [];
+  for (let index = 0; index < docNos.length; index += 25) {
+    const chunk = docNos.slice(index, index + 25);
+    const loaded = await Promise.all(chunk.map((docNo) => getDocumentByNo(docNo)));
+    for (const result of loaded) {
+      if (result.error || !result.data) {
+        return { data: [], error: result.error ?? "โหลดเอกสารสำหรับพิมพ์ไม่สำเร็จ" };
+      }
+      details.push(result.data);
+    }
+  }
+
+  return { data: details, error: null };
 }
