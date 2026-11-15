@@ -433,6 +433,7 @@ export type DocumentDetail = {
   doc_no: string;
   doc_type: DocumentType;
   status: DocumentStatus;
+  is_voided?: boolean | null;
   doc_date: string;
   due_date: string | null;
   contact_id: string;
@@ -603,6 +604,7 @@ export type SalesDocumentListItem = {
   payment_status: string;
   /** True when this doc_no is already on a billing note. */
   is_billed: boolean;
+  is_voided?: boolean | null;
   reference_no: string | null;
   handwritten_doc_ref: string | null;
 };

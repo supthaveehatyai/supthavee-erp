@@ -92,6 +92,7 @@ import {
 import HandwrittenBillDropzone from "@/components/sales/handwritten-bill-dropzone";
 import EcommerceOrderImporter from "@/components/sales/ecommerce-order-importer";
 import type { EcommerceOrderDraft, HandwrittenBillScan, ScannedSalesLine } from "@/types/sales-ocr";
+import { sanitizeOcrDocumentDate } from "@/lib/sales/sales-ocr-parse";
 
 const INITIAL_DOC_TYPE: SalesTradingDocType = DEFAULT_SALES_CREATE_DOC_TYPE;
 const DEFAULT_VAT_RATE = 7;
@@ -962,7 +963,7 @@ export default function SalesCreateWorkspace({
   function applyHandwrittenScan(scan: HandwrittenBillScan) {
     clearLastSavedArtifact();
     setDocType("INV_DO");
-    if (scan.doc_date) setDocDate(scan.doc_date);
+    if (scan.doc_date) setDocDate(sanitizeOcrDocumentDate(scan.doc_date));
     setHandwrittenDocRef(scan.handwritten_doc_ref ?? "");
     setNotes(scan.notes ?? "");
     setVatType(scan.vat_type);
@@ -976,7 +977,7 @@ export default function SalesCreateWorkspace({
   function applyEcommerceOrder(order: EcommerceOrderDraft) {
     clearLastSavedArtifact();
     setDocType("ABB");
-    setDocDate(order.doc_date);
+    setDocDate(sanitizeOcrDocumentDate(order.doc_date));
     setHandwrittenDocRef("");
     setNotes("");
     setVatType("INCLUSIVE");
@@ -1345,6 +1346,11 @@ export default function SalesCreateWorkspace({
                 }}
                 className="h-10"
               />
+              {/^\d{4}/.test(docDate) && docDate.slice(0, 4) !== "2026" ? (
+                <p className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold leading-snug text-red-700">
+                  {`⚠️ คำเตือน: วันที่เอกสารที่คุณเลือกอยู่ในปี พ.ศ. ${Number(docDate.slice(0, 4)) + 543} (ไม่ใช่ปี 2569) กรุณาตรวจสอบวันที่ก่อนกดบันทึก!`}
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-1.5">
@@ -1834,7 +1840,6 @@ export default function SalesCreateWorkspace({
                     }}
                     onReferenceChange={setHandwrittenDocRef}
                     onSlipUrlChange={setSlipUrl}
-                    onSlipDate={setDocDate}
                   />
                 </div>
               ) : null}

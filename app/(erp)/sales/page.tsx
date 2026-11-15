@@ -393,7 +393,10 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
                   </TableRow>
                 ) : (
                   documents.map((doc) => {
-                    const voided = doc.status === "VOID";
+                    const voided =
+                      doc.status === "VOID" ||
+                      doc.status === "CANCELLED" ||
+                      doc.is_voided === true;
                     return (
                     <TableRow
                       key={doc.id}
@@ -440,8 +443,16 @@ export default async function SalesDocumentsPage({ searchParams }: PageProps) {
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          {statusBadge(doc.status)}
-                          {paymentBadge(doc.payment_status, doc.is_billed)}
+                          {voided ? (
+                            <Badge className="border-red-200 bg-red-50 text-red-700 hover:bg-red-50">
+                              VOID (ยกเลิก)
+                            </Badge>
+                          ) : (
+                            <>
+                              {statusBadge(doc.status)}
+                              {paymentBadge(doc.payment_status, doc.is_billed)}
+                            </>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right">

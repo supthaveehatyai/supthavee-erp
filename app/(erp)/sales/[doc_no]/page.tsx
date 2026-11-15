@@ -212,6 +212,13 @@ function statusBadge(status: DocumentStatus) {
       </Badge>
     );
   }
+  if (status === "VOID" || status === "CANCELLED") {
+    return (
+      <Badge className="border-red-200 bg-red-50 text-red-700 hover:bg-red-50">
+        VOID (ยกเลิก)
+      </Badge>
+    );
+  }
   return (
     <Badge variant="slate" className="font-semibold">
       {status}
@@ -590,8 +597,19 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               <h1 className="font-mono text-xl font-bold tracking-tight text-slate-900">
                 {doc.doc_no}
               </h1>
-              {statusBadge(doc.status)}
-              {doc.doc_type === "SO" &&
+              {doc.status === "VOID" ||
+              doc.status === "CANCELLED" ||
+              doc.is_voided === true ? (
+                <Badge className="border-red-200 bg-red-50 text-red-700 hover:bg-red-50">
+                  VOID (ยกเลิก)
+                </Badge>
+              ) : (
+                statusBadge(doc.status)
+              )}
+              {doc.status !== "VOID" &&
+              doc.status !== "CANCELLED" &&
+              doc.is_voided !== true &&
+              doc.doc_type === "SO" &&
               amountDue > 0.01 &&
               (doc.payment_status === "PARTIAL" ||
                 Number(doc.deposit_deducted ?? 0) > 0) ? (

@@ -2260,6 +2260,7 @@ export async function getDocumentByNo(
         doc_no,
         doc_type,
         status,
+        is_voided,
         doc_date,
         due_date,
         contact_id,
@@ -2395,7 +2396,8 @@ export async function getDocumentByNo(
         .replace(/\s*is_bundle_component,\s*/g, "\n          ")
         .replace(/\s*rounding_difference,\s*/g, "\n        ")
         .replace(/\s*last_payment_date,\s*/g, "\n        ")
-        .replace(/\s*platform_fee_amount,\s*/g, "\n        ");
+        .replace(/\s*platform_fee_amount,\s*/g, "\n        ")
+        .replace(/\s*is_voided,\s*/g, "\n        ");
       const retry = await supabase
         .from("documents")
         .select(legacySelect)
@@ -2434,7 +2436,8 @@ export async function getDocumentByNo(
         .replace(/\s*is_bundle_component,\s*/g, "\n          ")
         .replace(/\s*rounding_difference,\s*/g, "\n        ")
         .replace(/\s*last_payment_date,\s*/g, "\n        ")
-        .replace(/\s*platform_fee_amount,\s*/g, "\n        ");
+        .replace(/\s*platform_fee_amount,\s*/g, "\n        ")
+        .replace(/\s*is_voided,\s*/g, "\n        ");
         const retry = await supabase
           .from("documents")
           .select(legacySelect)
@@ -2685,6 +2688,7 @@ export async function getDocumentByNo(
       doc_no: data.doc_no as string,
       doc_type: data.doc_type as DocumentType,
       status: data.status as DocumentStatus,
+      is_voided: (data as { is_voided?: boolean | null }).is_voided === true,
       doc_date: String(data.doc_date),
       due_date: data.due_date ? String(data.due_date) : null,
       contact_id: data.contact_id as string,
@@ -4216,6 +4220,7 @@ export async function getSalesDocuments(
         doc_no,
         doc_type,
         status,
+        is_voided,
         doc_date,
         created_at,
         grand_total,
@@ -4247,6 +4252,11 @@ export async function getSalesDocuments(
         );
       } else if (paymentStatus === "DRAFT") {
         query = query.eq("status", "DRAFT");
+      }
+      if (paymentStatus !== "VOID") {
+        query = query.or(
+          "doc_no.not.like.DRAFT-%,status.not.in.(VOID,CANCELLED)",
+        );
       }
 
       if (search) {
@@ -4328,6 +4338,7 @@ export async function getSalesDocuments(
       doc_no: string;
       doc_type: string;
       status: string;
+      is_voided?: boolean | null;
       doc_date: string;
       created_at: string;
       grand_total: number | null;
@@ -4357,6 +4368,7 @@ export async function getSalesDocuments(
         doc_no: docNo,
         doc_type: row.doc_type as DocumentType,
         status: row.status as DocumentStatus,
+        is_voided: row.is_voided === true,
         doc_date: row.doc_date as string,
         created_at: row.created_at as string,
         grand_total: Number(row.grand_total ?? 0),

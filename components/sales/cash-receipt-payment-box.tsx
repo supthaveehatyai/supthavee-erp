@@ -61,8 +61,8 @@ export function CashReceiptPaymentBox({
         toast.message("แนบสลิปแล้ว — อ่านวันที่หรือเลขอ้างอิงจากสลิปไม่สำเร็จ");
         return;
       }
-      if (parsed.data.doc_date) {
-        onSlipDate?.(parsed.data.doc_date);
+      if (parsed.data.doc_date && onSlipDate) {
+        onSlipDate(parsed.data.doc_date);
         toast.success(
           `ดึงวันที่โอนจากสลิป: ${formatBuddhistSlash(parsed.data.doc_date)} อัตโนมัติ`,
         );

@@ -847,6 +847,11 @@ export default function SalesEditWorkspace({
               onChange={(event) => setDocDate(event.target.value)}
               className="h-10"
             />
+            {/^\d{4}/.test(docDate) && docDate.slice(0, 4) !== "2026" ? (
+              <p className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold leading-snug text-red-700">
+                {`⚠️ คำเตือน: วันที่เอกสารที่คุณเลือกอยู่ในปี พ.ศ. ${Number(docDate.slice(0, 4)) + 543} (ไม่ใช่ปี 2569) กรุณาตรวจสอบวันที่ก่อนกดบันทึก!`}
+              </p>
+            ) : null}
             {initialDocument.ref_document_id ? (
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-800">
                 ⚠️ เอกสารต่อยอดจาก{" "}
@@ -1249,7 +1254,6 @@ export default function SalesEditWorkspace({
                   }}
                   onReferenceChange={setHandwrittenDocRef}
                   onSlipUrlChange={setSlipUrl}
-                  onSlipDate={setDocDate}
                 />
               ) : null}
               {billSummary.deposit_deducted > 0 ? (

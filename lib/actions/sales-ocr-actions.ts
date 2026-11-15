@@ -30,6 +30,7 @@ import {
   isServiceSalesLabel,
   lineAmounts,
   normalizeIsoDate,
+  sanitizeOcrDocumentDate,
   normalizeSalesLabel,
   normalizeVatType,
   parseJsonObject,
@@ -429,7 +430,9 @@ export async function scanHandwrittenSalesBill(
     const matchedCustomer = customer && customer !== "ambiguous" ? customer : null;
 
     const scan: HandwrittenBillScan = {
-      doc_date: normalizeIsoDate(String(root.doc_date ?? "")),
+      doc_date: sanitizeOcrDocumentDate(
+        normalizeIsoDate(String(root.doc_date ?? "")) ?? "",
+      ) || null,
       handwritten_doc_ref: String(root.handwritten_doc_ref ?? "").trim() || null,
       customer_keyword: keyword || null,
       contact_id: matchedCustomer?.id ?? null,
@@ -500,7 +503,9 @@ async function ordersFromImage(
       ecommerce_order_no: orderNo,
       ecommerce_buyer_name: String(order.buyer_name ?? "").trim() || null,
       tracking_no: String(order.tracking_no ?? "").trim() || null,
-      doc_date: normalizeIsoDate(String(order.doc_date ?? "")),
+      doc_date: sanitizeOcrDocumentDate(
+        normalizeIsoDate(String(order.doc_date ?? "")) ?? "",
+      ) || null,
       items,
     });
   }

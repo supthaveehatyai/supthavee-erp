@@ -17,6 +17,22 @@ export function isServiceSalesLabel(value: string): boolean {
   return SERVICE_ITEM_PATTERN.test(value);
 }
 
+/**
+ * ซ่อมปีที่ OCR อ่านเพี้ยนจากแสงสะท้อน: พ.ศ. 2569 ถูกอ่านเป็น 2565–2568
+ * จึงกลายเป็น ค.ศ. 2022–2025 คงเดือนและวันเดิม แล้วปรับปีเป็น 2026
+ */
+export function sanitizeOcrDocumentDate(rawIsoDate: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(rawIsoDate.trim());
+  if (!match) return rawIsoDate.trim();
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const nextYear = year >= 2022 && year <= 2025 ? 2026 : year;
+  const lastDay = new Date(Date.UTC(nextYear, month, 0)).getUTCDate();
+  const safeDay = Math.min(Math.max(day, 1), lastDay || day);
+  return `${String(nextYear).padStart(4, "0")}-${match[2]}-${String(safeDay).padStart(2, "0")}`;
+}
+
 export function normalizeIsoDate(value: string): string | null {
   const raw = value.trim();
   if (!raw) return null;
