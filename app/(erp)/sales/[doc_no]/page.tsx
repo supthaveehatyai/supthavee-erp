@@ -1215,6 +1215,24 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
                       />
                     )}
                   </div>
+                  {Number(doc.platform_fee_amount ?? 0) > 0 ? (
+                    <>
+                      <SummaryRow
+                        label="หักค่าธรรมเนียมแพลตฟอร์ม"
+                        value={`−${formatMoney(Number(doc.platform_fee_amount ?? 0))} ฿`}
+                        negative
+                      />
+                      <SummaryRow
+                        label="เงินเข้ากระเป๋าสุทธิ"
+                        value={`${formatMoney(
+                          Math.max(
+                            0,
+                            grandTotal - Number(doc.platform_fee_amount ?? 0),
+                          ),
+                        )} ฿`}
+                      />
+                    </>
+                  ) : null}
                   {doc.status !== "VOID" ? (
                     <SalesWhtCertificatePanel
                       documentId={doc.id}

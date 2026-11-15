@@ -173,6 +173,8 @@ export type CreateDraftDocumentInput = {
   shipping_method?: string | null;
   shipping_vat_mode?: string | null;
   shipping_tracking_no?: string | null;
+  /** ค่าธรรมเนียม Shopee/Lazada หักจากยอดใบกำกับ — ไม่เข้าฐาน VAT */
+  platform_fee_amount?: number;
 };
 
 export type CreateDraftDocumentResult = {
@@ -220,6 +222,8 @@ export type UpdateDraftDocumentInput = {
   shipping_method?: string | null;
   shipping_vat_mode?: string | null;
   shipping_tracking_no?: string | null;
+  /** ค่าธรรมเนียม Shopee/Lazada หักจากยอดใบกำกับ — ไม่เข้าฐาน VAT */
+  platform_fee_amount?: number;
 };
 
 export type UpdateDraftDocumentResult = {
@@ -476,6 +480,8 @@ export type DocumentDetail = {
   dest_freight_cost?: number | null;
   /** ค่าขนส่งฝากส่งของบิลขาย — ไม่เข้าฐาน VAT */
   shipping_fee?: number | null;
+  /** ค่าธรรมเนียมแพลตฟอร์มที่หักก่อนเงินเข้ากระเป๋า (`documents.platform_fee_amount`) */
+  platform_fee_amount?: number;
   shipping_method?: string | null;
   shipping_vat_mode?: string | null;
   shipping_tracking_no?: string | null;

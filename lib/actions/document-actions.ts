@@ -952,6 +952,34 @@ async function persistSalesShipping(
   return "บันทึกค่าขนส่งไม่สำเร็จ";
 }
 
+function normalizePlatformFeeAmount(value: unknown): number {
+  const amount = Number(value ?? 0);
+  if (!Number.isFinite(amount) || amount < 0) return 0;
+  return Math.round(amount * 100) / 100;
+}
+
+async function persistPlatformFeeAmount(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  documentId: string,
+  value: unknown,
+): Promise<string | null> {
+  let patch: Record<string, unknown> = {
+    platform_fee_amount: normalizePlatformFeeAmount(value),
+  };
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const { error } = await supabase
+      .from("documents")
+      .update(patch as never)
+      .eq("id", documentId);
+    if (!error) return null;
+    const missing = /Could not find the '([^']+)' column/i.exec(error.message)?.[1];
+    if (missing && missing in patch) return null;
+    if (/does not exist|schema cache/i.test(error.message)) return null;
+    return error.message;
+  }
+  return "บันทึกค่าธรรมเนียมแพลตฟอร์มไม่สำเร็จ";
+}
+
 export async function createDraftDocument(
   payload: CreateDraftDocumentInput,
 ): Promise<CreateDraftDocumentResult> {
@@ -1122,6 +1150,17 @@ export async function createDraftDocument(
       if (shippingError) {
         await supabase.from("documents").delete().eq("id", documentId);
         return { data: null, error: shippingError };
+      }
+    }
+    if (payload.platform_fee_amount !== undefined) {
+      const feeError = await persistPlatformFeeAmount(
+        supabase,
+        documentId,
+        payload.platform_fee_amount,
+      );
+      if (feeError) {
+        await supabase.from("documents").delete().eq("id", documentId);
+        return { data: null, error: feeError };
       }
     }
 
@@ -2242,6 +2281,7 @@ export async function getDocumentByNo(
         total_amount,
         net_before_vat,
         vat_amount,
+        platform_fee_amount,
         freight_cost,
         freight_tax_mode,
         dest_freight_cost,
@@ -2354,7 +2394,8 @@ export async function getDocumentByNo(
         .replace(/\s*is_bundle_header,\s*/g, "\n          ")
         .replace(/\s*is_bundle_component,\s*/g, "\n          ")
         .replace(/\s*rounding_difference,\s*/g, "\n        ")
-        .replace(/\s*last_payment_date,\s*/g, "\n        ");
+        .replace(/\s*last_payment_date,\s*/g, "\n        ")
+        .replace(/\s*platform_fee_amount,\s*/g, "\n        ");
       const retry = await supabase
         .from("documents")
         .select(legacySelect)
@@ -2392,7 +2433,8 @@ export async function getDocumentByNo(
         .replace(/\s*is_bundle_header,\s*/g, "\n          ")
         .replace(/\s*is_bundle_component,\s*/g, "\n          ")
         .replace(/\s*rounding_difference,\s*/g, "\n        ")
-        .replace(/\s*last_payment_date,\s*/g, "\n        ");
+        .replace(/\s*last_payment_date,\s*/g, "\n        ")
+        .replace(/\s*platform_fee_amount,\s*/g, "\n        ");
         const retry = await supabase
           .from("documents")
           .select(legacySelect)
@@ -2678,6 +2720,9 @@ export async function getDocumentByNo(
       dest_freight_cost:
         data.dest_freight_cost == null ? null : Number(data.dest_freight_cost),
       shipping_fee: shipping.shipping_fee,
+      platform_fee_amount: normalizePlatformFeeAmount(
+        (data as { platform_fee_amount?: number | string | null }).platform_fee_amount,
+      ),
       shipping_method: shipping.shipping_method,
       shipping_vat_mode: shipping.shipping_vat_mode,
       shipping_tracking_no: shipping.shipping_tracking_no,
@@ -3008,6 +3053,14 @@ export async function updateDraftDocument(
           error: headerError.message ?? "อัปเดตข้อมูลลูกค้าไม่สำเร็จ",
         };
       }
+      if (payload.platform_fee_amount !== undefined) {
+        const feeError = await persistPlatformFeeAmount(
+          supabase,
+          documentId,
+          payload.platform_fee_amount,
+        );
+        if (feeError) return { data: null, error: feeError };
+      }
 
       const headerSyncError = await syncHandwrittenRefToDocHeader(supabase, {
         documentId,
@@ -3132,6 +3185,14 @@ export async function updateDraftDocument(
     }
     const shippingError = await persistSalesShipping(supabase, documentId, shipping);
     if (shippingError) return { data: null, error: shippingError };
+    if (payload.platform_fee_amount !== undefined) {
+      const feeError = await persistPlatformFeeAmount(
+        supabase,
+        documentId,
+        payload.platform_fee_amount,
+      );
+      if (feeError) return { data: null, error: feeError };
+    }
 
     const headerSyncError = await syncHandwrittenRefToDocHeader(supabase, {
       documentId,

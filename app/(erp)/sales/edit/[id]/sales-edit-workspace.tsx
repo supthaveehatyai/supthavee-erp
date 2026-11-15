@@ -36,10 +36,12 @@ import { CashReceiptPaymentBox } from "@/components/sales/cash-receipt-payment-b
 import { GoodsQtyBadge } from "@/components/sales/goods-qty-badge";
 import {
   bankAccountDisplay,
+  findPlatformWalletAccount,
   initialBankAccountId,
   initialCashReceiptChannel,
   paymentChannelLabel,
-  selectedBankAccount,
+  receiptAccountForSalesDraft,
+  storeCompanyBankAccountId,
   type ActiveBankAccount,
   type PaymentChannel,
 } from "@/lib/finance/payment-channel";
@@ -276,6 +278,9 @@ export default function SalesEditWorkspace({
       initialDocument.receiving_bank_label,
     ),
   );
+  const [platformFee, setPlatformFee] = useState(() =>
+    Number(initialDocument.platform_fee_amount ?? 0).toFixed(2),
+  );
   const [slipUrl, setSlipUrl] = useState(initialDocument.original_receipt_url ?? "");
   const [shippingFee, setShippingFee] = useState(
     Number(initialDocument.shipping_fee ?? 0).toFixed(2),
@@ -290,6 +295,24 @@ export default function SalesEditWorkspace({
     docType: initialDocument.doc_type,
     notes: initialDocument.notes,
   });
+  function applySalesChannel(next: SalesChannelFieldsValue) {
+    const previous = salesChannelFields.sales_channel;
+    setSalesChannelFields(next);
+    if (next.sales_channel === previous) return;
+    if (next.sales_channel === "SHOPEE" || next.sales_channel === "LAZADA") {
+      const wallet = findPlatformWalletAccount(bankAccounts, next.sales_channel);
+      setPaymentChannel("OTHER_BANK");
+      setBankAccountId(
+        wallet?.id ?? initialBankAccountId(bankAccounts, "OTHER_BANK"),
+      );
+      return;
+    }
+    if (next.sales_channel === "STORE") {
+      setPaymentChannel("COMPANY_BANK");
+      setBankAccountId(storeCompanyBankAccountId(bankAccounts));
+    }
+  }
+
   const hideContactPicker = shouldHideSalesContactPicker({
     docType: initialDocument.doc_type,
     salesChannel: salesChannelFields.sales_channel,
@@ -596,6 +619,11 @@ export default function SalesEditWorkspace({
         shipping_fee: Number(shippingFee) || 0,
         shipping_method: shippingMethod || null,
         shipping_tracking_no: initialDocument.shipping_tracking_no ?? null,
+        platform_fee_amount:
+          header.data.sales_channel === "SHOPEE" ||
+          header.data.sales_channel === "LAZADA"
+            ? Number(Math.max(0, Number(platformFee) || 0).toFixed(2))
+            : 0,
         sales_channel: header.data.sales_channel,
         ecommerce_order_no: header.data.ecommerce_order_no,
         ecommerce_buyer_name: header.data.ecommerce_buyer_name,
@@ -606,10 +634,13 @@ export default function SalesEditWorkspace({
           ? {
               payment_channel: paymentChannel,
               bank_account_id:
-                selectedBankAccount(bankAccounts, paymentChannel, bankAccountId)?.id ??
-                null,
+                receiptAccountForSalesDraft(
+                  bankAccounts,
+                  paymentChannel,
+                  bankAccountId,
+                )?.id ?? null,
               receiving_bank_label: (() => {
-                const account = selectedBankAccount(
+                const account = receiptAccountForSalesDraft(
                   bankAccounts,
                   paymentChannel,
                   bankAccountId,
@@ -801,7 +832,7 @@ export default function SalesEditWorkspace({
           <SalesChannelFields
             section="channel"
             value={salesChannelFields}
-            onChange={setSalesChannelFields}
+            onChange={applySalesChannel}
             disabled={isPending}
             docType={initialDocument.doc_type}
             contactName={selectedCustomerName}
@@ -910,7 +941,7 @@ export default function SalesEditWorkspace({
           <SalesChannelFields
             section="details"
             value={salesChannelFields}
-            onChange={setSalesChannelFields}
+            onChange={applySalesChannel}
             disabled={isPending}
             docType={initialDocument.doc_type}
             contactName={selectedCustomerName}
@@ -1184,6 +1215,25 @@ export default function SalesEditWorkspace({
                 />
               </div>
               <GoodsQtyBadge rows={lineItems} />
+              {salesChannelFields.sales_channel === "SHOPEE" ||
+              salesChannelFields.sales_channel === "LAZADA" ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="platform-fee">
+                    ค่าธรรมเนียม Shopee/Lazada หัก ณ ที่จ่าย (บาท)
+                  </Label>
+                  <Input
+                    id="platform-fee"
+                    inputMode="decimal"
+                    value={platformFee}
+                    disabled={isPending || isReplacement}
+                    onChange={(event) => setPlatformFee(event.target.value)}
+                    className="h-10"
+                  />
+                  <p className="text-xs leading-snug text-slate-600">
+                    {`ยอดใบกำกับภาษี (ABB): ${billSummary.grand_total.toFixed(2)} ฿ − ค่าธรรมเนียมแพลตฟอร์ม: ${Math.max(0, Number(platformFee) || 0).toFixed(2)} ฿ = เงินเข้ากระเป๋าสุทธิ: ${Math.max(0, billSummary.grand_total - Math.max(0, Number(platformFee) || 0)).toFixed(2)} ฿`}
+                  </p>
+                </div>
+              ) : null}
               {initialDocument.doc_type === "ABB" ||
               initialDocument.doc_type === "CS_TAX" ? (
                 <CashReceiptPaymentBox

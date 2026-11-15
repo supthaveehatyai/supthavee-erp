@@ -79,11 +79,13 @@ import { CashReceiptPaymentBox } from "@/components/sales/cash-receipt-payment-b
 import { GoodsQtyBadge } from "@/components/sales/goods-qty-badge";
 import {
   bankAccountDisplay,
+  findPlatformWalletAccount,
   initialBankAccountId,
   initialCashReceiptChannel,
   isPaymentChannel,
   paymentChannelLabel,
-  selectedBankAccount,
+  receiptAccountForSalesDraft,
+  storeCompanyBankAccountId,
   type ActiveBankAccount,
   type PaymentChannel,
 } from "@/lib/finance/payment-channel";
@@ -110,6 +112,7 @@ type SalesCreateAutosave = {
   shippingMethod: string;
   paymentChannel: PaymentChannel;
   bankAccountId: string | null;
+  platformFee?: string;
   items: SalesLineItem[];
   pendingDraftId?: string | null;
   pendingDraftNo?: string | null;
@@ -218,6 +221,7 @@ function parseSalesCreateAutosave(raw: string): SalesCreateAutosave | null {
       shippingMethod: String(parsed.shippingMethod ?? ""),
       paymentChannel,
       bankAccountId: parsed.bankAccountId ? String(parsed.bankAccountId) : null,
+      platformFee: String(parsed.platformFee ?? "0"),
       items,
       pendingDraftId: parsed.pendingDraftId ? String(parsed.pendingDraftId) : null,
       pendingDraftNo: parsed.pendingDraftNo ? String(parsed.pendingDraftNo) : null,
@@ -414,6 +418,7 @@ export default function SalesCreateWorkspace({
       }),
     ),
   );
+  const [platformFee, setPlatformFee] = useState("0");
   const [slipUrl, setSlipUrl] = useState("");
   const [shippingFee, setShippingFee] = useState("0");
   const [shippingMethod, setShippingMethod] = useState("");
@@ -444,6 +449,7 @@ export default function SalesCreateWorkspace({
       shippingMethod,
       paymentChannel,
       bankAccountId,
+      platformFee,
       items: lineItems,
       pendingDraftId: pendingDraftIdRef.current,
       pendingDraftNo: pendingDraftNoRef.current,
@@ -504,6 +510,7 @@ export default function SalesCreateWorkspace({
     });
     setPaymentChannel(channel);
     setBankAccountId(initialBankAccountId(bankAccounts, channel));
+    setPlatformFee("0");
     setShippingFee("0");
     setShippingMethod("");
   }
@@ -538,6 +545,7 @@ export default function SalesCreateWorkspace({
         setShippingMethod(saved.shippingMethod);
         setPaymentChannel(saved.paymentChannel);
         setBankAccountId(saved.bankAccountId);
+        setPlatformFee(saved.platformFee ?? "0");
         setLineItems(saved.items);
         pendingDraftIdRef.current = saved.pendingDraftId ?? null;
         pendingDraftNoRef.current = saved.pendingDraftNo ?? null;
@@ -599,8 +607,28 @@ export default function SalesCreateWorkspace({
     shippingMethod,
     paymentChannel,
     bankAccountId,
+    platformFee,
     lineItems,
   ]);
+
+  function applySalesChannel(next: SalesChannelFieldsValue) {
+    const previous = salesChannelFields.sales_channel;
+    clearLastSavedArtifact();
+    setSalesChannelFields(next);
+    if (next.sales_channel === previous) return;
+    if (next.sales_channel === "SHOPEE" || next.sales_channel === "LAZADA") {
+      const wallet = findPlatformWalletAccount(bankAccounts, next.sales_channel);
+      setPaymentChannel("OTHER_BANK");
+      setBankAccountId(
+        wallet?.id ?? initialBankAccountId(bankAccounts, "OTHER_BANK"),
+      );
+      return;
+    }
+    if (next.sales_channel === "STORE") {
+      setPaymentChannel("COMPANY_BANK");
+      setBankAccountId(storeCompanyBankAccountId(bankAccounts));
+    }
+  }
 
   const hideContactPicker = shouldHideSalesContactPicker({
     docType,
@@ -1037,6 +1065,11 @@ export default function SalesCreateWorkspace({
           grand_total: billSummary.grand_total,
           shipping_fee: Number(shippingFee) || 0,
           shipping_method: shippingMethod || null,
+          platform_fee_amount:
+            header.data.sales_channel === "SHOPEE" ||
+            header.data.sales_channel === "LAZADA"
+              ? Number(Math.max(0, Number(platformFee) || 0).toFixed(2))
+              : 0,
           sales_channel: header.data.sales_channel,
           ecommerce_order_no: header.data.ecommerce_order_no,
           ecommerce_buyer_name: header.data.ecommerce_buyer_name,
@@ -1047,10 +1080,13 @@ export default function SalesCreateWorkspace({
             ? {
                 payment_channel: paymentChannel,
                 bank_account_id:
-                  selectedBankAccount(bankAccounts, paymentChannel, bankAccountId)?.id ??
-                  null,
+                  receiptAccountForSalesDraft(
+                    bankAccounts,
+                    paymentChannel,
+                    bankAccountId,
+                  )?.id ?? null,
                 receiving_bank_label: (() => {
-                  const account = selectedBankAccount(
+                  const account = receiptAccountForSalesDraft(
                     bankAccounts,
                     paymentChannel,
                     bankAccountId,
@@ -1290,10 +1326,7 @@ export default function SalesCreateWorkspace({
             <SalesChannelFields
               section="channel"
               value={salesChannelFields}
-              onChange={(next) => {
-                clearLastSavedArtifact();
-                setSalesChannelFields(next);
-              }}
+              onChange={applySalesChannel}
               disabled={formLocked}
               docType={docType}
               contactName={selectedCustomerName}
@@ -1417,10 +1450,7 @@ export default function SalesCreateWorkspace({
             <SalesChannelFields
               section="details"
               value={salesChannelFields}
-              onChange={(next) => {
-                clearLastSavedArtifact();
-                setSalesChannelFields(next);
-              }}
+              onChange={applySalesChannel}
               disabled={formLocked}
               docType={docType}
               contactName={selectedCustomerName}
@@ -1767,6 +1797,28 @@ export default function SalesCreateWorkspace({
                 </div>
               </dl>
               <GoodsQtyBadge rows={lineItems} className="mt-3" />
+              {salesChannelFields.sales_channel === "SHOPEE" ||
+              salesChannelFields.sales_channel === "LAZADA" ? (
+                <div className="mt-4 space-y-1.5">
+                  <Label htmlFor="platform-fee">
+                    ค่าธรรมเนียม Shopee/Lazada หัก ณ ที่จ่าย (บาท)
+                  </Label>
+                  <Input
+                    id="platform-fee"
+                    inputMode="decimal"
+                    value={platformFee}
+                    disabled={formLocked}
+                    onChange={(event) => {
+                      clearLastSavedArtifact();
+                      setPlatformFee(event.target.value);
+                    }}
+                    className="h-10"
+                  />
+                  <p className="text-xs leading-snug text-slate-600">
+                    {`ยอดใบกำกับภาษี (ABB): ${billSummary.grand_total.toFixed(2)} ฿ − ค่าธรรมเนียมแพลตฟอร์ม: ${Math.max(0, Number(platformFee) || 0).toFixed(2)} ฿ = เงินเข้ากระเป๋าสุทธิ: ${Math.max(0, billSummary.grand_total - Math.max(0, Number(platformFee) || 0)).toFixed(2)} ฿`}
+                  </p>
+                </div>
+              ) : null}
               {docType === "ABB" || docType === "CS_TAX" ? (
                 <div className="mt-4">
                   <CashReceiptPaymentBox

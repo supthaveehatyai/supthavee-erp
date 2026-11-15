@@ -238,6 +238,51 @@ export function initialBankAccountId(
   return matched?.id ?? pool[0]?.id ?? null;
 }
 
+/** บัญชีพักแพลตฟอร์ม เช่น SHOPEE-WALLET / LAZADA-WALLET */
+export function findPlatformWalletAccount(
+  accounts: ActiveBankAccount[],
+  keyword: "SHOPEE" | "LAZADA",
+): ActiveBankAccount | null {
+  const needle = keyword.toUpperCase();
+  return (
+    accounts.find((account) => {
+      const bankName = account.bank_name.toUpperCase();
+      const accountNo = account.account_no.toUpperCase();
+      return bankName.includes(needle) || accountNo.includes(needle);
+    }) ?? null
+  );
+}
+
+/** บัญชีบริษัทเริ่มต้นของหน้าร้าน — กรุงไทย 9020746510 */
+export function storeCompanyBankAccountId(
+  accounts: ActiveBankAccount[],
+): string | null {
+  const ktb = accounts.find((account) =>
+    account.account_no.replace(/\D/g, "").includes("9020746510"),
+  );
+  return ktb?.id ?? initialBankAccountId(accounts, "COMPANY_BANK");
+}
+
+/**
+ * บัญชีที่บันทึกลงบิลขาย
+ * บัญชีพัก Shopee/Lazada ใช้ id ที่เลือกไว้ตรงๆ
+ * ช่องทางหน้าร้านและ B2B ยังผ่านตัวเลือกตามช่องทางรับเงินเดิม
+ */
+export function receiptAccountForSalesDraft(
+  accounts: ActiveBankAccount[],
+  channel: PaymentChannel,
+  bankAccountId?: string | null,
+): ActiveBankAccount | null {
+  const direct = accounts.find((account) => account.id === bankAccountId) ?? null;
+  if (
+    direct &&
+    /SHOPEE|LAZADA/i.test(`${direct.bank_name} ${direct.account_no}`)
+  ) {
+    return direct;
+  }
+  return selectedBankAccount(accounts, channel, bankAccountId);
+}
+
 export function matchBankAccountBySlip(
   accounts: ActiveBankAccount[],
   payeeAccount: string | null | undefined,
