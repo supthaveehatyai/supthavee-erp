@@ -27,7 +27,10 @@ const HEADINGS: Record<string, { title: string; subtitle: string }> = {
     title: "บิลเงินสด / ใบกำกับภาษีอย่างย่อ",
     subtitle: "(ABBREVIATED TAX INVOICE)",
   },
-  DEP_IN: { title: "ใบมัดจำรับ", subtitle: "(CUSTOMER DEPOSIT)" },
+  DEP_IN: {
+    title: "ใบมัดจำรับ / ใบกำกับภาษี",
+    subtitle: "(DEPOSIT RECEIPT / TAX INVOICE)",
+  },
   BN: { title: "ใบวางบิล", subtitle: "(BILLING NOTE)" },
   BR: { title: "ใบรับวางบิล", subtitle: "(BILL RECEIPT)" },
   REC: { title: "ใบเสร็จรับเงิน", subtitle: "(OFFICIAL RECEIPT)" },

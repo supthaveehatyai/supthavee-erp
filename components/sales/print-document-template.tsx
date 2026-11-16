@@ -13,7 +13,6 @@ import {
 } from "@/components/sales/sales-print-controls";
 import type { DocumentDetail } from "@/types/document";
 import type { PrintPaperSize, PrintVatType } from "@/types/print-document";
-import { receiptMethodText } from "@/lib/finance/payment-channel";
 import { stripDepositNoteMetadata } from "@/lib/utils/deposit-note";
 import { salesShippingMethodLabel } from "@/lib/utils/sales-shipping";
 import { salesPayableTotals } from "@/lib/utils/document-summary";
@@ -33,6 +32,30 @@ function roundMoney(value: number): number {
 }
 
 const CONVERSION_NOTE = /^แปลงจาก\s+[A-Z0-9\-]+$/;
+const SALES_ORDER_REF = /\bSO-\d{4}-\d+\b/i;
+
+function depositSalesOrderRef(doc: DocumentDetail): string {
+  const parent = doc.parent_doc_no?.trim() ?? "";
+  if (/^SO-/i.test(parent)) return parent.toUpperCase();
+  const text = `${stripDepositNoteMetadata(doc.notes)} ${stripDepositNoteMetadata(doc.remark)}`;
+  const match = text.match(SALES_ORDER_REF);
+  return match ? match[0].toUpperCase() : "";
+}
+
+function depositExtraNote(doc: DocumentDetail, salesOrderRef: string): string {
+  const text = stripDepositNoteMetadata(doc.notes) || stripDepositNoteMetadata(doc.remark);
+  if (!text) return "";
+  const cleaned = text
+    .replace(/รับเงินมัดจำลูกค้า/gi, "")
+    .replace(/เงินมัดจำรับล่วงหน้า/gi, "")
+    .replace(/อ้างอิงใบสั่งขาย/gi, "")
+    .replace(/อ้างอิง/gi, "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(salesOrderRef ? new RegExp(salesOrderRef, "ig") : /$^/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned;
+}
 
 function customerFacingPrintNotes(value: string | null | undefined): string {
   return (value ?? "")
@@ -72,7 +95,11 @@ export default async function PrintDocumentTemplate({
   paperSize,
   followDocumentDefaults = false,
 }: PrintDocumentTemplateProps) {
-  const isDepositDoc = doc.doc_type === "DEP_IN" || doc.doc_type === "DEP_OUT";
+  const isDepositReceipt =
+    doc.doc_type === "DEP_IN" || doc.doc_no.trim().toUpperCase().startsWith("DIN-");
+  const isDepositDoc = isDepositReceipt || doc.doc_type === "DEP_OUT";
+  const depositOrderRef = isDepositReceipt ? depositSalesOrderRef(doc) : "";
+  const depositNote = isDepositReceipt ? depositExtraNote(doc, depositOrderRef) : "";
   const freightCost = roundMoney(Math.max(0, Number(doc.freight_cost ?? 0)));
   const subtotal = Number(doc.total_amount ?? doc.sub_total ?? 0);
   const discountAmount = Number(doc.discount_amount ?? 0);
@@ -130,7 +157,7 @@ export default async function PrintDocumentTemplate({
   const heading = documentPrintHeading(doc.doc_type);
 
   const resolvedPaperSize =
-    doc.doc_type === "ABB"
+    doc.doc_type === "ABB" || isDepositReceipt
       ? "A5-Portrait"
       : (paperSize ?? (await getDocumentPrintPaperSize(doc.doc_type)));
   const salesTaxPaper = salesPaper && !isDepositDoc;
@@ -181,15 +208,19 @@ export default async function PrintDocumentTemplate({
 
   return (
     <PrintLayout
-      title={heading.title}
-      titleSubtitle={heading.subtitle}
-      headerVariant={salesTaxPaper ? "sales-tax" : "goods-receipt"}
+      title={isDepositReceipt ? "ใบมัดจำรับ / ใบกำกับภาษี" : heading.title}
+      titleSubtitle={
+        isDepositReceipt ? "(DEPOSIT RECEIPT / TAX INVOICE)" : heading.subtitle
+      }
+      headerVariant={salesTaxPaper || isDepositReceipt ? "sales-tax" : "goods-receipt"}
       documentNo={doc.doc_no}
       date={doc.doc_date}
-      dueDate={salesTaxPaper ? null : doc.due_date}
-      status={salesTaxPaper ? null : doc.status}
-      docType={salesTaxPaper ? null : doc.doc_type}
-      referenceNo={salesTaxPaper ? null : printReferenceNo}
+      dueDate={salesTaxPaper || isDepositReceipt ? null : doc.due_date}
+      status={salesTaxPaper || isDepositReceipt ? null : doc.status}
+      docType={salesTaxPaper || isDepositReceipt ? null : doc.doc_type}
+      referenceNo={salesTaxPaper || isDepositReceipt ? null : printReferenceNo}
+      documentNoCaption={isDepositReceipt ? "เลขที่เอกสาร :" : undefined}
+      depositOrderRef={isDepositReceipt ? depositOrderRef : undefined}
       partyLabel={partyLabel}
       customerData={printCustomer}
       contactPersonName={doc.contact_person?.name}
@@ -205,6 +236,53 @@ export default async function PrintDocumentTemplate({
       className={cn("mt-2 print:mt-0", className)}
       watermark={doc.status === "VOID" ? "VOID / ยกเลิกแล้ว" : null}
       bottom={
+        isDepositReceipt ? (
+          <div className="mt-auto flex items-end justify-between gap-6 border-t border-slate-200 pt-3">
+            <div className="flex flex-col justify-between">
+              <div>
+                <p className="text-[12.5px] font-bold">📦 รวมรายการ: 1 งวด (1 รายการ)</p>
+                <p className="mt-2 text-[13px] font-bold">
+                  ({numberToThaiBaht(roundMoney(grandTotal))})
+                </p>
+              </div>
+              <div className="mt-6 w-52 pt-2 text-center">
+                <div className="h-6 border-b border-slate-400" />
+                <p className="mt-1 text-xs font-medium text-slate-700">
+                  (ผู้รับเงิน / ผู้มีอำนาจลงนาม)
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  วันที่ ........../........../..........
+                </p>
+              </div>
+            </div>
+            <div className="w-[305px] shrink-0 rounded-lg border border-slate-200 p-3 text-[12.5px]">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="whitespace-nowrap">รวมเป็นเงิน</span>
+                <span className="whitespace-nowrap text-right tabular-nums">
+                  {formatMoney(roundMoney(grandTotal))}
+                </span>
+              </div>
+              <div className="mt-1 flex items-baseline justify-between gap-3">
+                <span className="whitespace-nowrap">มูลค่าสินค้า/บริการ (ก่อน VAT)</span>
+                <span className="whitespace-nowrap text-right tabular-nums">
+                  {formatMoney(storedNet)}
+                </span>
+              </div>
+              <div className="mt-1 flex items-baseline justify-between gap-3">
+                <span className="whitespace-nowrap">ภาษีมูลค่าเพิ่ม 7%</span>
+                <span className="whitespace-nowrap text-right tabular-nums">
+                  {formatMoney(storedVat)}
+                </span>
+              </div>
+              <div className="mt-1.5 flex items-baseline justify-between gap-3 border-t border-slate-300 pt-1.5 font-bold">
+                <span className="whitespace-nowrap">ยอดสุทธิ (Grand Total)</span>
+                <span className="whitespace-nowrap text-right tabular-nums">
+                  {formatMoney(roundMoney(grandTotal))}
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : (
         <div
           className={
             salesTaxPaper
@@ -287,18 +365,54 @@ export default async function PrintDocumentTemplate({
           }
         />
           </div>
-          {salesTaxPaper ? null : (
+          {salesTaxPaper || isDepositReceipt ? null : (
             <SalesPrintStandardFooter
               docNo={doc.doc_no}
               docType={doc.doc_type}
-              receivedLabel={isDepositDoc ? "ผู้รับ/จ่ายเงิน" : "ผู้รับของ"}
+              receivedLabel={doc.doc_type === "DEP_OUT" ? "ผู้รับ/จ่ายเงิน" : "ผู้รับของ"}
             />
           )}
         </div>
+        )
       }
     >
       <section className={compact ? "mt-2" : "mt-1"}>
-        {isDepositDoc ? (
+        {isDepositReceipt ? (
+          <table className="w-full border-collapse text-left text-[10.5px]">
+            <thead>
+              <tr className="border-b border-slate-300">
+                <th className="w-9 py-1.5 pr-2 font-semibold">#</th>
+                <th className="py-1.5 pr-2 font-semibold">รายละเอียด</th>
+                <th className="w-16 py-1.5 text-right font-semibold">จำนวน</th>
+                <th className="w-16 py-1.5 text-center font-semibold">หน่วย</th>
+                <th className="w-24 py-1.5 text-right font-semibold">ราคา/หน่วย</th>
+                <th className="w-24 py-1.5 text-right font-semibold">รวม</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-b border-slate-100 align-top">
+                <td className="py-1.5 pr-2 tabular-nums">1</td>
+                <td className="py-1.5 pr-2">
+                  เงินมัดจำรับล่วงหน้า
+                  {depositOrderRef ? ` (อ้างอิงใบสั่งขาย ${depositOrderRef})` : ""}
+                  {depositNote ? (
+                    <span className="mt-0.5 block text-[10px] text-neutral-600">
+                      {depositNote}
+                    </span>
+                  ) : null}
+                </td>
+                <td className="py-1.5 text-right tabular-nums">1</td>
+                <td className="py-1.5 text-center">งวด</td>
+                <td className="py-1.5 text-right tabular-nums">
+                  {formatMoney(roundMoney(grandTotal))}
+                </td>
+                <td className="py-1.5 text-right font-semibold tabular-nums">
+                  {formatMoney(roundMoney(grandTotal))}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        ) : isDepositDoc ? (
           <table className="w-full border-collapse text-left text-xs">
             <thead>
               <tr className="border-b border-neutral-400">
@@ -342,22 +456,6 @@ export default async function PrintDocumentTemplate({
         )}
       </section>
 
-      {doc.doc_type === "DEP_IN" ? (
-        <section className="mt-3 space-y-1 text-xs text-neutral-800">
-          <p>
-            ชำระโดย (Payment Method):{" "}
-            {receiptMethodText({
-              payment_channel: doc.payment_channel,
-              receiving_bank_label: doc.receiving_bank_label,
-              is_swept_to_company: doc.is_swept_to_company,
-            }) || "—"}
-          </p>
-          <p className="break-all">
-            เลขอ้างอิงสลิป: {doc.reference_no?.trim() || "—"}
-          </p>
-        </section>
-      ) : null}
-
       {doc.doc_type === "CN" && doc.status !== "VOID" && doc.remark?.trim() ? (
         <section className="mt-3 rounded-md border border-neutral-300 bg-neutral-50 px-3 py-2">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
@@ -370,6 +468,7 @@ export default async function PrintDocumentTemplate({
       ) : null}
 
       {!salesTaxPaper &&
+      !isDepositReceipt &&
       (doc.doc_type === "DEP_IN"
         ? stripDepositNoteMetadata(doc.notes) ||
           stripDepositNoteMetadata(doc.remark)
@@ -387,7 +486,7 @@ export default async function PrintDocumentTemplate({
         </section>
       ) : null}
 
-      {!salesTaxPaper && doc.contact_person?.name ? (
+      {!salesTaxPaper && !isDepositReceipt && doc.contact_person?.name ? (
         <p className="mt-2 text-[10px] text-neutral-500">
           ผู้ติดต่อ: {doc.contact_person.name}
         </p>

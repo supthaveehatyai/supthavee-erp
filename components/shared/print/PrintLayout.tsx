@@ -65,6 +65,8 @@ export async function PrintLayout({
   contactPersonName,
   customerCompact = false,
   officialReference,
+  documentNoCaption,
+  depositOrderRef,
   showSignatureFooter = true,
   stackContent = false,
   watermark,
@@ -121,6 +123,8 @@ export async function PrintLayout({
           contactPersonName={contactPersonName}
           customerCompact={customerCompact}
           officialReference={officialReference}
+          documentNoCaption={documentNoCaption}
+          depositOrderRef={depositOrderRef}
         />
 
         <section

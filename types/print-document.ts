@@ -54,6 +54,13 @@ export type DocumentPrintHeaderProps = {
   customerCompact?: boolean;
   /** บรรทัดอ้างอิงใต้เลขที่เอกสาร เช่น ใบกำกับภาษีต้นทางของ REC */
   officialReference?: string | null;
+  /** คำนำหน้าเลขที่เอกสาร ค่าเริ่มต้นคือ `เลขที่เอกสาร:` */
+  documentNoCaption?: string | null;
+  /**
+   * แถบลูกค้าใบมัดจำรับ — ส่งสตริงว่างได้เมื่อไม่มีใบสั่งขายอ้างอิง
+   * ไม่ส่งค่านี้จะใช้แถบลูกค้าของ ABB / ใบกำกับตามเดิม
+   */
+  depositOrderRef?: string | null;
 };
 
 export type DocumentPrintFooterProps = {
@@ -160,6 +167,8 @@ export type PrintLayoutProps = {
   contactPersonName?: string | null;
   customerCompact?: boolean;
   officialReference?: string | null;
+  documentNoCaption?: string | null;
+  depositOrderRef?: string | null;
   /** ซ่อนแถวเซ็นชื่อท้ายกระดาษ เมื่อลายเซ็นถูกวางคู่กับกล่องยอดเงินแล้ว */
   showSignatureFooter?: boolean;
   /** ไม่ดันส่วนท้ายไปก้นกระดาษ เพื่อไม่ให้เกิดช่องว่างกลางหน้า */

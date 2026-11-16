@@ -79,6 +79,8 @@ export async function DocumentPrintHeader({
   contactPersonName,
   customerCompact = false,
   officialReference,
+  documentNoCaption,
+  depositOrderRef,
 }: DocumentPrintHeaderProps) {
   const settingsResult = await getSystemSettings();
   const company = settingsResult.success ? settingsResult.data : null;
@@ -167,7 +169,7 @@ export async function DocumentPrintHeader({
               </p>
             ) : null}
             <p className="mt-1 font-mono text-[11px] font-bold text-neutral-950">
-              เลขที่เอกสาร: {documentNo}
+              {documentNoCaption?.trim() || "เลขที่เอกสาร:"} {documentNo}
             </p>
             <p className="text-[10.5px] text-neutral-800">
               วันที่: {formatDisplayDate(date)}
@@ -179,20 +181,50 @@ export async function DocumentPrintHeader({
             ) : null}
           </div>
         </div>
-        <div className="my-1.5 border-y border-slate-200 px-2.5 py-1.5 text-[10.5px] leading-snug text-neutral-800">
-          <p>
-            <span className="font-semibold">ลูกค้า:</span> {customerName}
-            {contactName ? ` · ผู้ติดต่อ: ${contactName}` : ""}
-          </p>
-          {customerAddress ? <p>{customerAddress}</p> : null}
-          {!customerCompact && (customerTaxId || customerPhone) ? (
-            <p className="text-neutral-700">
-              {customerTaxId ? `เลขประจำตัวผู้เสียภาษี: ${customerTaxId}` : ""}
-              {customerTaxId && customerPhone ? " · " : ""}
-              {customerPhone ? `โทร: ${customerPhone}` : ""}
+        {depositOrderRef != null ? (
+          <div className="my-1.5 border-y border-slate-200 bg-slate-50 px-3 py-2 text-[10.5px] leading-snug text-neutral-800">
+            <div className="flex items-baseline justify-between gap-2">
+              <p>
+                <span className="font-semibold">ลูกค้า:</span> {customerName}
+                {customerTaxId ? ` · เลขประจำตัวผู้เสียภาษี: ${customerTaxId}` : ""}
+                {customerData?.branch_code?.trim() &&
+                customerData.branch_code.trim() !== "00000" &&
+                customerData.branch_code.trim() !== "0"
+                  ? ` · สาขา ${[customerData.branch_code.trim(), customerData.branch_name?.trim()]
+                      .filter(Boolean)
+                      .join(" ")}`
+                  : ""}
+              </p>
+              {depositOrderRef.trim() ? (
+                <p className="shrink-0 whitespace-nowrap">
+                  อ้างอิงใบสั่งขาย: {depositOrderRef.trim()}
+                </p>
+              ) : null}
+            </div>
+            {customerAddress || customerPhone ? (
+              <p className="whitespace-nowrap">
+                {[customerAddress, customerPhone ? `โทร: ${customerPhone}` : ""]
+                  .filter(Boolean)
+                  .join(" ")}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <div className="my-1.5 border-y border-slate-200 px-2.5 py-1.5 text-[10.5px] leading-snug text-neutral-800">
+            <p>
+              <span className="font-semibold">ลูกค้า:</span> {customerName}
+              {contactName ? ` · ผู้ติดต่อ: ${contactName}` : ""}
             </p>
-          ) : null}
-        </div>
+            {customerAddress ? <p>{customerAddress}</p> : null}
+            {!customerCompact && (customerTaxId || customerPhone) ? (
+              <p className="text-neutral-700">
+                {customerTaxId ? `เลขประจำตัวผู้เสียภาษี: ${customerTaxId}` : ""}
+                {customerTaxId && customerPhone ? " · " : ""}
+                {customerPhone ? `โทร: ${customerPhone}` : ""}
+              </p>
+            ) : null}
+          </div>
+        )}
       </header>
     );
   }
