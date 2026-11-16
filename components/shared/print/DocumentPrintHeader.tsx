@@ -121,20 +121,11 @@ export async function DocumentPrintHeader({
   });
 
   if (headerVariant === "sales-tax") {
-    const companyTitle = branchName
-      ? `${companyName} (${branchName})`
-      : companyName;
-    const companyTaxPhone = [
-      companyTaxId ? `เลขประจำตัวผู้เสียภาษี: ${companyTaxId}` : "",
-      companyPhone ? `โทร: ${companyPhone}` : "",
-    ]
-      .filter(Boolean)
-      .join(" · ");
     const contactName = contactPersonName?.trim() || "";
     return (
       <header className="text-neutral-900">
         <div className="flex w-full flex-row flex-nowrap items-start justify-between gap-2">
-          <div className="flex w-[62%] min-w-0 items-start gap-1.5">
+          <div className="flex items-start gap-1.5">
             <div
               className={
                 customerCompact
@@ -153,13 +144,22 @@ export async function DocumentPrintHeader({
                 <span className="text-[10px] font-black tracking-tight text-neutral-800">ST</span>
               )}
             </div>
-            <div className="min-w-0 flex-1 text-[10px] leading-tight text-neutral-800">
-              <p className="font-bold text-neutral-950">{companyTitle}</p>
-              {companyAddress ? <p className="text-neutral-700">{companyAddress}</p> : null}
-              {companyTaxPhone ? <p className="text-neutral-700">{companyTaxPhone}</p> : null}
+            <div className="text-[9.5px] leading-tight text-neutral-800">
+              <p className="whitespace-nowrap font-bold text-neutral-950">
+                บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด (สำนักงานใหญ่)
+              </p>
+              <p className="whitespace-nowrap text-neutral-700">
+                234-235 ถนนเพชรเกษม ตำบลหาดใหญ่ อำเภอหาดใหญ่
+              </p>
+              <p className="whitespace-nowrap text-neutral-700">
+                จังหวัดสงขลา 90110 โทร: 0864808693
+              </p>
+              <p className="whitespace-nowrap text-neutral-700">
+                เลขประจำตัวผู้เสียภาษี: 0-9055-64000-52-0
+              </p>
             </div>
           </div>
-          <div className="w-[38%] shrink-0 text-right leading-tight">
+          <div className="shrink-0 text-right leading-tight">
             <p className="text-[12px] font-bold text-neutral-950">{title}</p>
             {titleSubtitle?.trim() ? (
               <p className="text-[8px] font-semibold tracking-tight text-slate-600">

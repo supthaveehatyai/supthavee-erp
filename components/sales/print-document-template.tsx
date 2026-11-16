@@ -225,7 +225,7 @@ export default async function PrintDocumentTemplate({
               <SalesPrintSignaturePair docNo={doc.doc_no} docType={doc.doc_type} />
             </div>
           ) : null}
-          <div className={salesTaxPaper ? "col-span-5" : undefined}>
+          <div className={salesTaxPaper ? "col-span-5 flex shrink-0 justify-end" : undefined}>
         <DocumentPrintSummary
           subtotal={isDepositDoc ? grandTotal : subtotal}
           freightCost={isDepositDoc ? 0 : freightCost}
@@ -257,7 +257,11 @@ export default async function PrintDocumentTemplate({
           shippingFee={isDepositDoc ? 0 : Number(doc.shipping_fee ?? 0)}
           shippingMethodLabel={salesShippingMethodLabel(doc.shipping_method)}
           hideBahtText={salesTaxPaper}
-          className={salesTaxPaper ? "ml-0 w-full max-w-none text-[10.5px]" : undefined}
+          className={
+            salesTaxPaper
+              ? "ml-0 w-[305px] shrink-0 text-[10.5px] sm:w-[315px]"
+              : undefined
+          }
           collectionGrandLabel={
             doc.doc_type === "CS_TAX" ||
             doc.doc_type === "ABB" ||

@@ -24,6 +24,12 @@ const VOID_FONT: Partial<ExcelJS.Font> = {
 const MONEY_FORMAT = "#,##0.00";
 const HEADER_ROW = 4;
 
+function compactRegisterDate(value: string): string {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim());
+  if (!match) return value;
+  return `${match[1]}/${match[2]}/${match[3].slice(-2)}`;
+}
+
 function applyHeaderCell(
   cell: ExcelJS.Cell,
   value: string,
@@ -63,7 +69,8 @@ export async function buildDocumentRegisterWorkbook(
     views: [{ state: "frozen", ySplit: HEADER_ROW }],
     pageSetup: {
       paperSize: 9,
-      orientation: "landscape",
+      orientation: "portrait",
+      printTitlesRow: "1:4",
       fitToPage: true,
       fitToWidth: 1,
       fitToHeight: 0,
@@ -79,14 +86,14 @@ export async function buildDocumentRegisterWorkbook(
   });
 
   sheet.columns = [
-    { key: "seq", width: 8 },
-    { key: "doc_date", width: 16 },
-    { key: "doc_no", width: 22 },
-    { key: "party_name", width: 36 },
-    { key: "net_before_vat", width: 16 },
-    { key: "vat_amount", width: 14 },
-    { key: "grand_total", width: 16 },
-    { key: "status", width: 14 },
+    { key: "seq", width: 5 },
+    { key: "doc_date", width: 10 },
+    { key: "doc_no", width: 16 },
+    { key: "party_name", width: 20 },
+    { key: "net_before_vat", width: 12 },
+    { key: "vat_amount", width: 10 },
+    { key: "grand_total", width: 12 },
+    { key: "status", width: 10 },
   ];
 
   sheet.mergeCells("A1:H1");
@@ -138,7 +145,7 @@ export async function buildDocumentRegisterWorkbook(
   report.rows.forEach((line, index) => {
     const excelRow = sheet.getRow(dataStartRow + index);
     excelRow.getCell("seq").value = line.seq;
-    excelRow.getCell("doc_date").value = line.doc_date;
+    excelRow.getCell("doc_date").value = compactRegisterDate(line.doc_date);
     excelRow.getCell("doc_no").value = line.doc_no;
     excelRow.getCell("party_name").value = line.party_name;
     excelRow.getCell("net_before_vat").value = line.net_before_vat;
@@ -151,6 +158,11 @@ export async function buildDocumentRegisterWorkbook(
     excelRow.getCell("grand_total").numFmt = MONEY_FORMAT;
     excelRow.getCell("seq").alignment = { horizontal: "center" };
     excelRow.getCell("doc_date").alignment = { horizontal: "center" };
+    excelRow.getCell("party_name").alignment = {
+      vertical: "middle",
+      horizontal: "left",
+      wrapText: true,
+    };
     excelRow.getCell("net_before_vat").alignment = { horizontal: "right" };
     excelRow.getCell("vat_amount").alignment = { horizontal: "right" };
     excelRow.getCell("grand_total").alignment = { horizontal: "right" };

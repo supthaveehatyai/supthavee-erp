@@ -94,7 +94,7 @@ function SummaryRow({
     >
       <span
         className={cn(
-          "text-neutral-600",
+          "whitespace-nowrap text-neutral-600",
           emphasize && "font-bold text-neutral-950",
         )}
       >
@@ -102,7 +102,7 @@ function SummaryRow({
       </span>
       <span
         className={cn(
-          "tabular-nums text-neutral-900",
+          "whitespace-nowrap text-right tabular-nums text-neutral-900",
           emphasize && "font-bold text-neutral-950",
         )}
       >
@@ -210,7 +210,7 @@ export function DocumentPrintSummary({
   return (
     <div
       className={cn(
-        "ml-auto flex w-full max-w-xs flex-col gap-2 text-xs",
+        "ml-auto flex w-[305px] shrink-0 flex-col gap-2 text-xs sm:w-[315px]",
         className,
       )}
     >
@@ -229,11 +229,11 @@ export function DocumentPrintSummary({
             ) : null}
             {salesCollection.deposit > 0 ? (
               <SummaryRow
-                label={`หักเงินมัดจำรับล่วงหน้า${
+                label={
                   salesCollection.depositDocNo
-                    ? ` (${salesCollection.depositDocNo})`
-                    : ""
-                }`}
+                    ? `หักเงินมัดจำ (${salesCollection.depositDocNo})`
+                    : "หักเงินมัดจำ"
+                }
                 value={`−${formatMoney(salesCollection.deposit)}`}
               />
             ) : null}
@@ -241,7 +241,7 @@ export function DocumentPrintSummary({
               label={
                 collectionNetLabel?.trim() ||
                 (salesCollection.deposit > 0
-                  ? "มูลค่าสินค้า/บริการหลังหักมัดจำ (ก่อน VAT)"
+                  ? "มูลค่าหลังหักมัดจำ (ก่อน VAT)"
                   : "มูลค่าสินค้า/บริการ (ก่อน VAT)")
               }
               value={formatMoney(salesCollection.netBeforeVat)}
@@ -289,7 +289,11 @@ export function DocumentPrintSummary({
           <>
             <SummaryRow label="รวมมูลค่าสินค้า" value={formatMoney(safeSubtotal)} />
             <SummaryRow
-              label={`หักเงินมัดจำ ตามใบกำกับภาษีมัดจำ ${depositDeduction?.reference?.trim() || ""}`.trim()}
+              label={
+                depositDeduction?.reference?.trim()
+                  ? `หักเงินมัดจำ (${depositDeduction.reference.trim()})`
+                  : "หักเงินมัดจำ"
+              }
               value={`−${formatMoney(depositGross)}`}
             />
             <SummaryRow
@@ -301,7 +305,7 @@ export function DocumentPrintSummary({
               value={formatMoney(Number(depositDeduction?.vat ?? 0))}
             />
             <SummaryRow
-              label="มูลค่าสินค้าหลังหักเงินมัดจำ"
+              label="มูลค่าหลังหักมัดจำ (ก่อน VAT)"
               value={formatMoney(settledNet)}
             />
             <SummaryRow label={vatLabel} value={formatMoney(vatAmount)} />
