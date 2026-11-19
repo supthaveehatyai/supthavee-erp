@@ -146,8 +146,8 @@ export async function getPendingAP(): Promise<KpiMoneyResult> {
 
     const { data, error } = await supabaseAdmin
       .from("documents")
-      .select("id, grand_total, paid_amount, status, payment_status")
-      .in("doc_type", [...AP_PAYABLE_DOC_TYPES])
+      .select("id, doc_type, grand_total, paid_amount, status, payment_status")
+      .in("doc_type", [...AP_PAYABLE_DOC_TYPES] as never)
       .or(OUTSTANDING_STATUS_OR)
       .not("status", "in", '("DRAFT","VOID","CANCELLED")')
       .not("is_voided", "eq", true);
@@ -158,7 +158,13 @@ export async function getPendingAP(): Promise<KpiMoneyResult> {
     }
 
     return {
-      amount: sumOutstandingCoalescePaid((data ?? []) as OutstandingDocRow[]),
+      amount: sumOutstandingCoalescePaid(
+        ((data ?? []) as (OutstandingDocRow & { doc_type?: string | null })[]).map((row) =>
+          row.doc_type === "AP_CN"
+            ? { ...row, grand_total: -Math.abs(Number(row.grand_total ?? 0)) }
+            : row,
+        ),
+      ),
       error: null,
     };
   } catch (err) {

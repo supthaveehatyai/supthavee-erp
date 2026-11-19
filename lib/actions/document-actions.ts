@@ -4117,6 +4117,7 @@ export async function updateSalesDocumentDirect(input: {
   shipping_method?: string | null;
   shipping_tracking_no?: string | null;
   rounding_difference?: number | null;
+  vat_type?: string | null;
 }) {
   try {
     const owner = await requireSessionUserId();
@@ -4136,6 +4137,9 @@ export async function updateSalesDocumentDirect(input: {
     if (shipping.shipping_fee < 0) {
       return { data: null, error: "ค่าขนส่งต้องเป็นตัวเลขไม่ติดลบ" };
     }
+    const vatType = isVatCalculationType(String(input.vat_type ?? ""))
+      ? input.vat_type
+      : null;
 
     const supabase = createSupabaseServerClient();
     const notes = input.notes?.trim() ?? "";
@@ -4178,6 +4182,7 @@ export async function updateSalesDocumentDirect(input: {
         input.rounding_difference == null
           ? null
           : Math.round(Number(input.rounding_difference) * 100) / 100,
+      p_vat_type: vatType,
     });
     if (saved.error) return { data: null, error: saved.error.message };
 
@@ -4897,6 +4902,7 @@ export async function convertDocument(
   sourceDocId: string,
   targetDocType: ConvertTargetDocType,
   targetDocDate?: string | null,
+  vatType?: string | null,
 ): Promise<ConvertDocumentResult> {
   try {
     const id = sourceDocId?.trim() ?? "";
@@ -5083,6 +5089,81 @@ export async function convertDocument(
       return { data: null, error: owner.error };
     }
 
+    const requestedVatType = isVatCalculationType(String(vatType ?? ""))
+      ? (vatType as VatCalculationType)
+      : null;
+    const picksInvoiceVat =
+      srcType === "SO" &&
+      (targetDocType === "CS_TAX" ||
+        targetDocType === "TAX_INV" ||
+        targetDocType === "INV_DO") &&
+      (requestedVatType === "INCLUSIVE" || requestedVatType === "EXCLUSIVE");
+    if (
+      picksInvoiceVat &&
+      requestedVatType &&
+      String(source.vat_type ?? "") !== requestedVatType
+    ) {
+      const shippingNow =
+        (await loadSalesShipping(supabase, source.id)) ?? normalizeSalesShipping({});
+      const headerReader = supabase as unknown as {
+        from: (table: string) => {
+          select: (columns: string) => {
+            eq: (column: string, value: string) => {
+              maybeSingle: () => Promise<{
+                data: {
+                  doc_date?: string | null;
+                  notes?: string | null;
+                  reference_no?: string | null;
+                  handwritten_doc_ref?: string | null;
+                  payment_channel?: string | null;
+                  receiving_bank_label?: string | null;
+                  bank_account_id?: string | null;
+                  original_receipt_url?: string | null;
+                  discount_amount?: number | null;
+                  rounding_difference?: number | null;
+                } | null;
+                error: { message: string } | null;
+              }>;
+            };
+          };
+        };
+      };
+      const headerLoad = await headerReader
+        .from("documents")
+        .select(
+          "doc_date, notes, reference_no, handwritten_doc_ref, payment_channel, receiving_bank_label, bank_account_id, original_receipt_url, discount_amount, rounding_difference",
+        )
+        .eq("id", source.id)
+        .maybeSingle();
+      if (headerLoad.error || !headerLoad.data) {
+        return {
+          data: null,
+          error: headerLoad.error?.message ?? "อ่านหัวบิลต้นทางก่อนเปลี่ยนประเภทภาษีไม่สำเร็จ",
+        };
+      }
+      const header = headerLoad.data;
+      const synced = await updateSalesDocumentDirect({
+        document_id: source.id,
+        doc_date: String(header.doc_date ?? source.doc_date ?? "").slice(0, 10),
+        notes: typeof header.notes === "string" ? header.notes : null,
+        reference_no: header.reference_no ?? null,
+        handwritten_doc_ref: header.handwritten_doc_ref ?? null,
+        payment_channel: header.payment_channel ?? null,
+        receiving_bank_label: header.receiving_bank_label ?? null,
+        bank_account_id: header.bank_account_id ?? null,
+        slip_url: header.original_receipt_url ?? null,
+        discount_amount: Number(header.discount_amount ?? source.discount_amount ?? 0),
+        shipping_fee: shippingNow.shipping_fee,
+        shipping_method: shippingNow.shipping_method,
+        shipping_tracking_no: shippingNow.shipping_tracking_no,
+        rounding_difference:
+          header.rounding_difference == null ? null : Number(header.rounding_difference),
+        vat_type: requestedVatType,
+      });
+      if (synced.error) return { data: null, error: synced.error };
+      source.vat_type = requestedVatType;
+    }
+
     const settlesDeposit =
       (srcType === "SO" &&
         (targetDocType === "INV_DO" ||
@@ -5091,8 +5172,9 @@ export async function convertDocument(
           targetDocType === "CS_TAX")) ||
       (srcType === "INV_DO" &&
         (targetDocType === "TAX_INV" || targetDocType === "CS_TAX"));
-    const targetVatType: VatCalculationType =
-      targetDocType === "TAX_INV" || targetDocType === "CS_TAX"
+    const targetVatType: VatCalculationType = picksInvoiceVat && requestedVatType
+      ? requestedVatType
+      : targetDocType === "TAX_INV" || targetDocType === "CS_TAX"
         ? "EXCLUSIVE"
         : targetDocType === "ABB" || targetDocType === "INV_DO"
           ? "INCLUSIVE"
@@ -5141,16 +5223,19 @@ export async function convertDocument(
       ? (source.vat_type as VatCalculationType)
       : "INCLUSIVE";
     const payableVatType: VatCalculationType =
-      targetDocType === "TAX_INV" || targetDocType === "CS_TAX"
-        ? sourceVatType === "EXCLUSIVE"
-          ? "EXCLUSIVE"
-          : "INCLUSIVE"
-        : targetVatType;
+      picksInvoiceVat && requestedVatType
+        ? requestedVatType
+        : targetDocType === "TAX_INV" || targetDocType === "CS_TAX"
+          ? sourceVatType === "EXCLUSIVE"
+            ? "EXCLUSIVE"
+            : "INCLUSIVE"
+          : targetVatType;
     const payable = settlesDeposit
       ? salesPayableTotals({
           goodsSubtotal,
           discountAmount: Number(source.discount_amount ?? 0),
           depositDeducted: appliedDeposit.deposit_deducted,
+          depositNetDeducted: appliedDeposit.deposit_net_deducted,
           vatType: payableVatType,
           vatRate: Number.isFinite(vatRate) ? vatRate : 7,
           shippingFee: sourceShipping.shipping_fee,

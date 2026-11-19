@@ -111,7 +111,8 @@ export default async function PrintDocumentTemplate({
   const depositDocs = doc.linked_deposits ?? [];
   const showDepositOnPaper =
     depositGross > 0 &&
-    (doc.doc_type === "ABB" ||
+    (doc.doc_type === "SO" ||
+      doc.doc_type === "ABB" ||
       doc.doc_type === "TAX_INV" ||
       doc.doc_type === "CS_TAX" ||
       doc.doc_type === "INV_DO");
@@ -129,6 +130,7 @@ export default async function PrintDocumentTemplate({
         goodsSubtotal: Number(doc.sub_total ?? subtotal),
         discountAmount,
         depositDeducted: depositGross,
+        depositNetDeducted: Number(doc.deposit_net_deducted ?? 0),
         vatType,
         vatRate,
         shippingFee: Number(doc.shipping_fee ?? 0),
@@ -351,7 +353,13 @@ export default async function PrintDocumentTemplate({
           salesCollection={
             salesPayable
               ? {
-                  goods: salesPayable.goods_subtotal,
+                  goods:
+                    vatType === "EXCLUSIVE" && salesPayable.deposit_deducted > 0
+                      ? roundMoney(
+                          (salesPayable.goods_subtotal - salesPayable.discount_amount) *
+                            (1 + vatRate / 100),
+                        )
+                      : salesPayable.goods_subtotal,
                   discount: salesPayable.discount_amount,
                   deposit: salesPayable.deposit_deducted,
                   depositDocNo: depositDocs.map((row) => row.doc_no).filter(Boolean).join(", "),

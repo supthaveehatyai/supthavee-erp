@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { ChevronDown, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { convertDocument } from "@/lib/actions/document-actions";
+import { isVatCalculationType, type VatCalculationType } from "@/lib/utils/document-summary";
 import type { ConvertTargetDocType } from "@/types/document";
 import type { DocumentType } from "@/types/document";
 import { Button } from "@/components/ui/button";
@@ -27,7 +28,17 @@ export type ConvertDocumentDropdownProps = {
   sourceDocId: string;
   sourceDocNo: string;
   sourceDocType: DocumentType;
+  sourceVatType?: string | null;
 };
+
+const INVOICE_VAT_OPTIONS: { value: "INCLUSIVE" | "EXCLUSIVE"; label: string }[] = [
+  { value: "INCLUSIVE", label: "รวม VAT 7% (Inclusive)" },
+  { value: "EXCLUSIVE", label: "แยก VAT 7% (Exclusive / VAT นอก)" },
+];
+
+function invoiceTarget(type: ConvertTargetDocType): boolean {
+  return type === "CS_TAX" || type === "TAX_INV" || type === "INV_DO";
+}
 
 type Option = { type: ConvertTargetDocType; label: string };
 
@@ -62,13 +73,20 @@ export default function ConvertDocumentDropdown({
   sourceDocId,
   sourceDocNo,
   sourceDocType,
+  sourceVatType,
 }: ConvertDocumentDropdownProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [convertDate, setConvertDate] = useState(todayBangkokIso);
+  const initialVat: "INCLUSIVE" | "EXCLUSIVE" =
+    isVatCalculationType(String(sourceVatType ?? "")) && sourceVatType === "EXCLUSIVE"
+      ? "EXCLUSIVE"
+      : "INCLUSIVE";
+  const [invoiceVatType, setInvoiceVatType] = useState<"INCLUSIVE" | "EXCLUSIVE">(initialVat);
   const [isPending, startTransition] = useTransition();
   const options = getOptions(sourceDocType);
   const asksForIssueDate = sourceDocType === "SO";
+  const asksForInvoiceVat = sourceDocType === "SO";
 
   if (options.length === 0) return null;
 
@@ -77,12 +95,15 @@ export default function ConvertDocumentDropdown({
       asksForIssueDate && /^\d{4}-\d{2}-\d{2}$/.test(convertDate)
         ? convertDate
         : null;
+    const selectedVat: VatCalculationType | null =
+      asksForInvoiceVat && invoiceTarget(targetDocType) ? invoiceVatType : null;
     setOpen(false);
     startTransition(async () => {
       const result = await convertDocument(
         sourceDocId,
         targetDocType,
         selectedConvertDate,
+        selectedVat,
       );
       if (result.error || !result.data) {
         toast.error(result.error ?? "แปลงเอกสารไม่สำเร็จ");
@@ -118,6 +139,31 @@ export default function ConvertDocumentDropdown({
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className={asksForIssueDate ? "w-80 p-2" : "w-64 p-1"}>
+        {asksForInvoiceVat ? (
+          <div className="space-y-1.5 px-2 pb-2">
+            <Label className="text-xs text-slate-600">ประเภทภาษีของใบกำกับภาษี</Label>
+            <div className="grid grid-cols-1 gap-1">
+              {INVOICE_VAT_OPTIONS.map((option) => {
+                const active = invoiceVatType === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    disabled={isPending}
+                    onClick={() => setInvoiceVatType(option.value)}
+                    className={
+                      active
+                        ? "rounded-lg border border-blue-700 bg-blue-800 px-2.5 py-1.5 text-left text-xs font-semibold text-white"
+                        : "rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    }
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
         {asksForIssueDate ? (
           <div className="space-y-1.5 px-2 pb-2">
             <Label htmlFor="convert-doc-date" className="text-xs text-slate-600">

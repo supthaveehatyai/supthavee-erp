@@ -31,7 +31,9 @@ function mapVatLedgerToPreview(report: VatLedgerReport): ReportCenterPreview {
       vat_amount: row.vat_amount,
       grand_total: row.grand_total,
       status: row.status,
-      status_label: getDocumentStatusLabel(row.status),
+      status_label: row.remark
+        ? `${getDocumentStatusLabel(row.status)} · ${row.remark}`
+        : getDocumentStatusLabel(row.status),
       is_void: row.is_void,
       output_group: row.output_group,
     })),

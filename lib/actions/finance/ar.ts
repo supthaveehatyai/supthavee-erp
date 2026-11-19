@@ -90,8 +90,10 @@ function groupByContact(
 
     const debtAmount = resolveDocumentDebtAmount(raw);
     const paidAmount = toMoney(raw.paid_amount);
-    const remaining = debtAmount - paidAmount;
-    if (remaining <= 0) continue;
+    const purchaseCredit = String(raw.doc_type ?? "") === "AP_CN";
+    const signedDebt = purchaseCredit ? -Math.abs(debtAmount) : debtAmount;
+    const remaining = purchaseCredit ? signedDebt : debtAmount - paidAmount;
+    if (purchaseCredit ? Math.abs(remaining) <= 0 : remaining <= 0) continue;
 
     const doc: ArDocument = {
       id: raw.id,
@@ -99,7 +101,7 @@ function groupByContact(
       doc_date: raw.doc_date ? String(raw.doc_date) : "",
       due_date: raw.due_date ? String(raw.due_date) : null,
       doc_type: String(raw.doc_type ?? ""),
-      grand_total: debtAmount,
+      grand_total: signedDebt,
       paid_amount: paidAmount,
       remaining_balance: remaining,
       payment_status: String(raw.payment_status ?? "UNPAID"),
@@ -112,7 +114,7 @@ function groupByContact(
         contact_id: contactId,
         contact_name: contactName,
         total_invoices: 1,
-        total_debt: debtAmount,
+        total_debt: signedDebt,
         total_paid: paidAmount,
         remaining_balance: remaining,
         documents: [doc],
@@ -121,7 +123,7 @@ function groupByContact(
     }
 
     existing.total_invoices += 1;
-    existing.total_debt += debtAmount;
+    existing.total_debt += signedDebt;
     existing.total_paid += paidAmount;
     existing.remaining_balance += remaining;
     existing.documents.push(doc);

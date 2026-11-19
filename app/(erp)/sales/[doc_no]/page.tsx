@@ -393,6 +393,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
         goodsSubtotal: Number(doc.sub_total ?? doc.total_amount ?? 0),
         discountAmount: Number(doc.discount_amount ?? 0),
         depositDeducted: storedDeposit,
+        depositNetDeducted: Number(doc.deposit_net_deducted ?? 0),
         vatType: salesVatType,
         vatRate: Number(doc.vat_rate ?? doc.tax_rate ?? 7),
         shippingFee: Number(doc.shipping_fee ?? 0),
@@ -732,7 +733,14 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               shippingMethod={doc.shipping_method ?? ""}
               shippingTrackingNo={doc.shipping_tracking_no ?? ""}
               depositDeducted={Number(doc.deposit_deducted ?? 0)}
+              depositNetDeducted={Number(doc.deposit_net_deducted ?? 0)}
               vatType={doc.vat_type}
+              allowVatTypeChange={
+                doc.doc_type === "SO" ||
+                !activeChildren.some(
+                  (child) => child.doc_type === "CS_TAX" || child.doc_type === "TAX_INV",
+                )
+              }
               roundingDifference={Number(doc.rounding_difference ?? 0)}
               pricesIncludeVat={
                 salesVatType !== "EXCLUSIVE" ||
@@ -775,6 +783,7 @@ export default async function SalesDocumentDetailPage({ params }: PageProps) {
               sourceDocId={doc.id}
               sourceDocNo={doc.doc_no}
               sourceDocType={doc.doc_type}
+              sourceVatType={doc.vat_type}
             />
           )}
           {canUpgradeAbb ? <UpgradeAbbTaxButton documentId={doc.id} /> : null}

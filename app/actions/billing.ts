@@ -44,7 +44,7 @@ import type {
 } from "@/types/billing";
 
 const AR_INVOICE_TYPES = ["INV_DO", "TAX_INV"] as const;
-const AP_INVOICE_TYPES = ["AP_INV", "AP_TAX"] as const;
+const AP_INVOICE_TYPES = ["AP_INV", "AP_TAX", "AP_CN"] as const;
 /** document_status ENUM — billable invoices must be ISSUED only. */
 const BILLABLE_DOC_STATUS = "ISSUED" as const;
 const ACTIVE_BN_PAYMENT_STATUSES = [
@@ -54,6 +54,11 @@ const ACTIVE_BN_PAYMENT_STATUSES = [
   "PARTIAL",
 ] as const;
 const MONEY_EPS = 0.02;
+
+function signedOutstanding(docType: string, grand: number, paid: number): number {
+  const open = roundMoney(Math.max(0, Math.abs(grand) - Math.abs(paid)));
+  return docType === "AP_CN" ? roundMoney(-open) : roundMoney(grand - paid);
+}
 
 type DocHeaderRow = {
   id: string;
@@ -1167,8 +1172,8 @@ export async function getUnbilledInvoices(
 
       const grandTotal = roundMoney(toMoney(row.grand_total));
       const paidAmount = roundMoney(toMoney(row.paid_amount));
-      const outstanding = roundMoney(grandTotal - paidAmount);
-      if (outstanding <= MONEY_EPS) continue;
+      const outstanding = signedOutstanding(docType, grandTotal, paidAmount);
+      if (Math.abs(outstanding) <= MONEY_EPS) continue;
 
       unbilled.push({
         id: resolvedId,
@@ -1263,10 +1268,12 @@ export async function getOutstandingContactsSummary(
       if (!docNo) continue;
       if (billed.docNos.has(docNo) || billed.ids.has(raw.id)) continue;
 
-      const outstanding = roundMoney(
-        toMoney(raw.grand_total) - toMoney(raw.paid_amount),
+      const outstanding = signedOutstanding(
+        String(raw.doc_type ?? ""),
+        toMoney(raw.grand_total),
+        toMoney(raw.paid_amount),
       );
-      if (outstanding <= MONEY_EPS) continue;
+      if (Math.abs(outstanding) <= MONEY_EPS) continue;
 
       const contact = unwrapContact(raw.contacts);
       const contactId = raw.contact_id?.trim() || contact?.id || "";
@@ -1533,8 +1540,12 @@ export async function createBillingNote(
       const grand = roundMoney(
         grandByDocNo.get(inv.doc_no) ?? toMoney(inv.grand_total),
       );
-      const outstanding = roundMoney(grand - (paidByDocNo.get(inv.doc_no) ?? 0));
-      if (outstanding <= MONEY_EPS) {
+      const outstanding = signedOutstanding(
+        inv.doc_type,
+        grand,
+        paidByDocNo.get(inv.doc_no) ?? 0,
+      );
+      if (Math.abs(outstanding) <= MONEY_EPS) {
         return {
           success: false,
           error: `บิล ${inv.doc_no} ไม่มียอดค้างชำระแล้ว`,
@@ -1909,8 +1920,12 @@ export async function getInvoicesByBillingNote(
         toMoney(ledger.grand_total ?? header.header_grand),
       );
       const paidAmount = roundMoney(toMoney(ledger.paid_amount));
-      const outstanding = roundMoney(grandTotal - paidAmount);
-      if (outstanding <= MONEY_EPS) continue;
+      const outstanding = signedOutstanding(
+        String(ledger.doc_type ?? header.doc_type),
+        grandTotal,
+        paidAmount,
+      );
+      if (Math.abs(outstanding) <= MONEY_EPS) continue;
 
       data.push({
         id: ledger.id,
@@ -2004,8 +2019,12 @@ async function queryUnbilledApByPeriod(
     if (row.is_voided === true) return false;
     const docNo = row.doc_no?.trim() || "";
     if (!docNo || billed.docNos.has(docNo) || billed.ids.has(row.id)) return false;
-    const outstanding = roundMoney(toMoney(row.grand_total) - toMoney(row.paid_amount));
-    return outstanding > MONEY_EPS;
+    const outstanding = signedOutstanding(
+      String(row.doc_type ?? ""),
+      toMoney(row.grand_total),
+      toMoney(row.paid_amount),
+    );
+    return Math.abs(outstanding) > MONEY_EPS;
   });
 
   const contactIds = Array.from(
@@ -2072,7 +2091,7 @@ async function queryUnbilledApByPeriod(
       due_date: resolveDueDate(docDate, row.due_date, creditDays) || null,
       reference_no: row.reference_no?.trim() || null,
       tax_invoice_no: taxInvoiceNoById.get(row.id) ?? null,
-      outstanding_amount: roundMoney(toMoney(row.grand_total) - toMoney(row.paid_amount)),
+      outstanding_amount: signedOutstanding(docType, toMoney(row.grand_total), toMoney(row.paid_amount)),
       accounting_tax_tier: accountingTierById.get(row.id) ?? null,
     };
     const existing = grouped.get(contactId);
@@ -2502,10 +2521,12 @@ async function rewriteBillingNoteItems(
       .select("paid_amount, grand_total")
       .eq("doc_no", docNo)
       .maybeSingle();
-    const outstanding = roundMoney(
-      toMoney(ledger?.grand_total ?? grand) - toMoney(ledger?.paid_amount),
+    const outstanding = signedOutstanding(
+      docType,
+      toMoney(ledger?.grand_total ?? grand),
+      toMoney(ledger?.paid_amount),
     );
-    if (outstanding <= MONEY_EPS) return { total: null, error: `บิล ${docNo} ไม่มียอดค้างชำระแล้ว` };
+    if (Math.abs(outstanding) <= MONEY_EPS) return { total: null, error: `บิล ${docNo} ไม่มียอดค้างชำระแล้ว` };
     additions.push({ invoice_id: invoiceId || id, billed_amount: outstanding });
   }
 

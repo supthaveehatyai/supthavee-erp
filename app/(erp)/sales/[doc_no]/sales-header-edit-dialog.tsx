@@ -25,7 +25,14 @@ import { SalesShippingFields } from "@/components/sales/sales-shipping-fields";
 import {
   isVatCalculationType,
   salesPayableTotals,
+  type VatCalculationType,
 } from "@/lib/utils/document-summary";
+
+const VAT_TYPE_OPTIONS: { value: VatCalculationType; label: string }[] = [
+  { value: "INCLUSIVE", label: "รวม VAT 7% (Inclusive)" },
+  { value: "EXCLUSIVE", label: "แยก VAT 7% (Exclusive / VAT นอก)" },
+  { value: "NONE", label: "ไม่คิด VAT (Non-VAT)" },
+];
 
 function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
@@ -62,9 +69,11 @@ export function SalesHeaderEditDialog({
   shippingMethod = "",
   shippingTrackingNo = "",
   depositDeducted = 0,
+  depositNetDeducted = 0,
   vatType = "INCLUSIVE",
   pricesIncludeVat = false,
   roundingDifference = 0,
+  allowVatTypeChange = false,
 }: {
   documentId: string;
   docNo: string;
@@ -85,10 +94,13 @@ export function SalesHeaderEditDialog({
   shippingMethod?: string;
   shippingTrackingNo?: string;
   depositDeducted?: number;
+  depositNetDeducted?: number;
   vatType?: string | null;
   /** ราคารายการรวม VAT แล้ว — ใบกำกับเต็มรูปแค่แยกฐานภาษี ไม่บวก 7% ซ้ำ */
   pricesIncludeVat?: boolean;
   roundingDifference?: number;
+  /** SO หรือเอกสารขายที่ยังไม่มีใบกำกับภาษีลูก */
+  allowVatTypeChange?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -133,15 +145,21 @@ export function SalesHeaderEditDialog({
   const parsedShipping = shippingText.trim() === "" ? 0 : Number(shippingText);
   const shippingValue = roundMoney(parsedShipping);
   const shippingReady = Number.isFinite(parsedShipping) && parsedShipping >= 0;
-  const storedVatMode = isVatCalculationType(String(vatType ?? ""))
-    ? String(vatType)
+  const storedVatMode: VatCalculationType = isVatCalculationType(String(vatType ?? ""))
+    ? (String(vatType) as VatCalculationType)
     : "INCLUSIVE";
-  const vatMode = pricesIncludeVat ? "INCLUSIVE" : storedVatMode;
+  const [selectedVatType, setSelectedVatType] = useState<VatCalculationType>(storedVatMode);
+  const vatMode: VatCalculationType = allowVatTypeChange
+    ? selectedVatType
+    : pricesIncludeVat
+      ? "INCLUSIVE"
+      : storedVatMode;
   const preview = salesPayableTotals({
     goodsSubtotal: goods,
     discountAmount: discountReady ? discountValue : 0,
     depositDeducted,
-    vatType: vatMode as "INCLUSIVE" | "EXCLUSIVE" | "NONE",
+    depositNetDeducted,
+    vatType: vatMode,
     shippingFee: shippingReady ? shippingValue : 0,
   });
 
@@ -191,6 +209,7 @@ export function SalesHeaderEditDialog({
         : receivingBankLabel?.trim() || paymentChannelLabel(nextChannel),
     );
     setReceiptUrl(slipUrl);
+    setSelectedVatType(storedVatMode);
     setOpen(true);
   }
 
@@ -251,6 +270,7 @@ export function SalesHeaderEditDialog({
         shipping_method: carrier || null,
         shipping_tracking_no: shippingTrackingNo.trim() || null,
         rounding_difference: roundMoney(parsedRounding),
+        vat_type: selectedVatType,
       });
       if (result.error || !result.data) {
         toast.error(result.error ?? "แก้ไขหัวบิลไม่สำเร็จ");
@@ -372,6 +392,31 @@ export function SalesHeaderEditDialog({
                 onChange={applyChannel}
               />
             )}
+            {allowVatTypeChange ? (
+              <div className="space-y-1.5">
+                <Label>ประเภทภาษีมูลค่าเพิ่ม (VAT Type)</Label>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {VAT_TYPE_OPTIONS.map((option) => {
+                    const active = selectedVatType === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        disabled={pending}
+                        onClick={() => setSelectedVatType(option.value)}
+                        className={
+                          active
+                            ? "rounded-lg border border-blue-700 bg-blue-800 px-3 py-2 text-left text-sm font-semibold text-white"
+                            : "rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                        }
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="issued-rounding-difference">
@@ -412,15 +457,25 @@ export function SalesHeaderEditDialog({
               />
             </div>
             <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              {vatMode === "EXCLUSIVE" && preview.deposit_deducted > 0
+                ? `ยอดรวมทั้งบิล ${money(
+                    roundMoney((goods - preview.discount_amount) * 1.07),
+                  )} ฿ · `
+                : ""}
               ค่าสินค้า {money(goods)} ฿
               {preview.discount_amount > 0
                 ? ` - ส่วนลด ${money(preview.discount_amount)} ฿`
                 : ""}
-              {" "}- หักมัดจำ {money(preview.deposit_deducted)} ฿
-              {vatMode === "EXCLUSIVE"
-                ? ` + ภาษีมูลค่าเพิ่ม ${money(preview.vat_amount)} ฿`
+              {preview.deposit_deducted > 0
+                ? ` - หักมัดจำ ${money(preview.deposit_deducted)} ฿`
                 : ""}
-              {" "}+ ค่าขนส่ง {money(preview.shipping_fee)} ฿ ={" "}
+              {vatMode !== "NONE"
+                ? ` · ฐานก่อน VAT ${money(preview.net_before_vat)} ฿ + ภาษีมูลค่าเพิ่ม ${money(preview.vat_amount)} ฿`
+                : ""}
+              {preview.shipping_fee > 0
+                ? ` + ค่าขนส่ง ${money(preview.shipping_fee)} ฿`
+                : ""}
+              {" = "}
               <span className="font-semibold text-slate-900">
                 ยอดเรียกเก็บสุทธิ {money(preview.grand_total)} ฿
               </span>

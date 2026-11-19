@@ -232,6 +232,7 @@ export async function getVendors(): Promise<ApVendorOption[]> {
       .select(
         `
         contact_id,
+        doc_type,
         doc_date,
         due_date,
         grand_total,
@@ -263,8 +264,11 @@ export async function getVendors(): Promise<ApVendorOption[]> {
       if (!vendorId) continue;
 
       const grand = toMoney(raw.grand_total ?? raw.total_amount);
-      const remaining = roundMoney(grand - toMoney(raw.paid_amount));
-      if (remaining <= 0) continue;
+      const purchaseCredit = String(raw.doc_type ?? "") === "AP_CN";
+      const remaining = purchaseCredit
+        ? roundMoney(-(Math.abs(grand) - Math.abs(toMoney(raw.paid_amount))))
+        : roundMoney(grand - toMoney(raw.paid_amount));
+      if (Math.abs(remaining) <= 0) continue;
 
       const docDate = raw.doc_date ? String(raw.doc_date) : "";
       const due = resolveDueDate(docDate, raw.due_date, contact?.credit_days);
@@ -302,7 +306,7 @@ export async function getVendors(): Promise<ApVendorOption[]> {
         overdue_amount: row.overdue_amount,
         oldest_invoice_date: row.oldest_invoice_date,
       }))
-      .filter((row) => row.outstanding_total > 0)
+      .filter((row) => Math.abs(row.outstanding_total) > 0.02)
       .sort((a, b) => b.outstanding_total - a.outstanding_total);
   } catch (err) {
     console.error("Error fetching AP outstanding summary:", err);
@@ -359,23 +363,24 @@ export async function getOutstandingAP(
     const rows = (data ?? []) as ApDocRow[];
     const invoices = rows
       .map((doc) => {
-        const grandTotal = roundMoney(
-          toMoney(doc.grand_total ?? doc.total_amount),
-        );
+        const face = roundMoney(Math.abs(toMoney(doc.grand_total ?? doc.total_amount)));
         const paidAmount = roundMoney(toMoney(doc.paid_amount));
         const allocationSources = mapAllocationSources(doc.allocations);
         const allocatedAmount = resolveAllocatedAmount(
           sumAllocationSources(allocationSources),
           paidAmount,
         );
-        const remaining = roundMoney(grandTotal - allocatedAmount);
+        const purchaseCredit = String(doc.doc_type ?? "") === "AP_CN";
+        const remaining = purchaseCredit
+          ? roundMoney(-(face - allocatedAmount))
+          : roundMoney(face - allocatedAmount);
         return {
           id: doc.id,
           contact_id: doc.contact_id?.trim() || trimmed,
           document_no: doc.doc_no?.trim() || "ไม่ระบุ",
           reference_no: extractVendorReference(doc.notes),
           document_date: doc.doc_date ? String(doc.doc_date) : "",
-          grand_total: grandTotal,
+          grand_total: purchaseCredit ? roundMoney(-face) : face,
           paid_amount: paidAmount,
           allocated_amount: allocatedAmount,
           allocation_sources: allocationSources,
@@ -384,7 +389,7 @@ export async function getOutstandingAP(
           doc_type: doc.doc_type ?? "",
         } satisfies OutstandingApInvoice;
       })
-      .filter((inv) => inv.remaining_balance > 0);
+      .filter((inv) => Math.abs(inv.remaining_balance) > 0.02);
 
     const availableDeposits = await getAvailableDepositsForContact(
       trimmed,
@@ -543,9 +548,16 @@ export async function submitAPPayment(
     const activeAllocations = allocations.filter(
       (row) => row.allocated_amount > 0,
     );
-    const totalInvoicePaid = roundMoney(
+    const creditAllocations = allocations.filter(
+      (row) => row.allocated_amount < -MONEY_EPS,
+    );
+    const creditTotal = roundMoney(
+      creditAllocations.reduce((sum, row) => sum + Math.abs(row.allocated_amount), 0),
+    );
+    const invoiceFace = roundMoney(
       activeAllocations.reduce((sum, row) => sum + row.allocated_amount, 0),
     );
+    const totalInvoicePaid = roundMoney(Math.max(0, invoiceFace - creditTotal));
     const depositTotal = roundMoney(
       depositAllocations.reduce((sum, row) => sum + row.allocated_amount, 0),
     );
@@ -555,16 +567,22 @@ export async function submitAPPayment(
     if (!vendorId) {
       return { success: false, error: "ไม่พบรหัสผู้จำหน่าย" };
     }
-    if (activeAllocations.length === 0 || totalInvoicePaid <= 0) {
+    if (activeAllocations.length === 0 || invoiceFace <= 0) {
       return {
         success: false,
         error: "ห้ามบันทึก — ผลรวมยอดตัดหนี้ (Allocations) ต้องมากกว่า 0",
       };
     }
+    if (creditTotal > invoiceFace + MONEY_EPS) {
+      return {
+        success: false,
+        error: `ยอดใบลดหนี้ (${creditTotal.toFixed(2)}) เกินยอดบิลที่ตัด (${invoiceFace.toFixed(2)})`,
+      };
+    }
     if (depositTotal > totalInvoicePaid + MONEY_EPS) {
       return {
         success: false,
-        error: `ยอดมัดจำที่ใช้ (${depositTotal.toFixed(2)}) เกินยอดตัดหนี้ (${totalInvoicePaid.toFixed(2)})`,
+        error: `ยอดมัดจำที่ใช้ (${depositTotal.toFixed(2)}) เกินยอดตัดหนี้หลังหักใบลดหนี้ (${totalInvoicePaid.toFixed(2)})`,
       };
     }
     if (!bankAccountRaw) {
@@ -593,7 +611,10 @@ export async function submitAPPayment(
       }
     }
 
-    const invoiceIds = activeAllocations.map((row) => row.invoice_id);
+    const invoiceIds = [
+      ...activeAllocations.map((row) => row.invoice_id),
+      ...creditAllocations.map((row) => row.invoice_id),
+    ];
     const { data: invoices, error: invoicesError } = await supabaseAdmin
       .from("documents")
       .select(
@@ -654,6 +675,31 @@ export async function submitAPPayment(
         return {
           success: false,
           error: `ยอดตัดหนี้เกินยอดค้างของบิล (เหลือ ${remaining.toFixed(2)})`,
+        };
+      }
+    }
+
+    for (const alloc of creditAllocations) {
+      const invoice = invoiceMap.get(alloc.invoice_id);
+      if (!invoice) {
+        return { success: false, error: `ไม่พบใบลดหนี้ซื้อ ${alloc.invoice_id}` };
+      }
+      if (invoice.contact_id !== vendorId) {
+        return { success: false, error: "พบใบลดหนี้ที่ไม่ใช่ของผู้จำหน่ายรายนี้" };
+      }
+      if (String(invoice.doc_type ?? "") !== "AP_CN") {
+        return { success: false, error: "ยอดติดลบใช้ได้เฉพาะใบลดหนี้ซื้อ (AP_CN)" };
+      }
+      if (invoice.is_voided === true || (invoice.status !== "ISSUED" && invoice.status !== "COMPLETED")) {
+        return { success: false, error: "ใบลดหนี้ซื้อที่เลือกใช้หักกลบไม่ได้" };
+      }
+      const open = roundMoney(
+        Math.abs(toMoney(invoice.grand_total ?? invoice.total_amount)) - toMoney(invoice.paid_amount),
+      );
+      if (Math.abs(alloc.allocated_amount) > open + MONEY_EPS) {
+        return {
+          success: false,
+          error: `ยอดหักใบลดหนี้เกินยอดคงเหลือ (เหลือ ${open.toFixed(2)})`,
         };
       }
     }
@@ -873,6 +919,14 @@ export async function submitAPPayment(
         adjustment_amount: 0,
         adjustment_reason: null as string | null,
       })),
+      ...creditAllocations.map((row) => ({
+        receipt_doc_id: payDocId,
+        invoice_doc_id: row.invoice_id,
+        allocated_amount: roundMoney(Math.abs(row.allocated_amount)),
+        wht_amount: 0,
+        adjustment_amount: 0,
+        adjustment_reason: "AP_CN",
+      })),
       ...depositAllocations.map((row) => ({
         receipt_doc_id: payDocId,
         invoice_doc_id: row.deposit_id,
@@ -906,7 +960,10 @@ export async function submitAPPayment(
     }
 
     const billingNoteId = String(formData.get("billing_note_id") ?? "").trim();
-    const touchedInvoiceIds = activeAllocations.map((row) => row.invoice_id);
+    const touchedInvoiceIds = [
+      ...activeAllocations.map((row) => row.invoice_id),
+      ...creditAllocations.map((row) => row.invoice_id),
+    ];
     const settleRpc = supabaseAdmin as unknown as {
       rpc: (
         fn: "settle_ap_invoices_bulk_fast",
@@ -927,6 +984,26 @@ export async function submitAPPayment(
       })),
     });
     if (bulkErr) throw new Error(bulkErr.message ?? "ตัดชำระบิลต้นทางไม่สำเร็จ");
+
+    for (const alloc of creditAllocations) {
+      const invoice = invoiceMap.get(alloc.invoice_id);
+      const face = roundMoney(Math.abs(toMoney(invoice?.grand_total ?? invoice?.total_amount)));
+      const { error: creditError } = await supabaseAdmin
+        .from("documents")
+        .update({
+          paid_amount: face,
+          payment_status: "PAID",
+          updated_at: nowIso,
+        })
+        .eq("id", alloc.invoice_id);
+      if (creditError) {
+        return {
+          success: false,
+          error: `บันทึก PAY ${payDocNo} แล้ว แต่ปิดสิทธิ์ใบลดหนี้ไม่สำเร็จ: ${creditError.message}`,
+          payment_doc_no: payDocNo,
+        };
+      }
+    }
 
     if (touchedInvoiceIds.length > 0 || billingNoteId) {
       const bnSync = await syncBillingNotesAfterInvoicePayment(

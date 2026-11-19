@@ -124,6 +124,7 @@ function formatDocLabel(documentNo: string, referenceNo: string | null): string 
 function docTypeBadgeLabel(docType: string): string {
   if (docType === "TB") return "TB · สรุปวางบิลช่าง";
   if (docType === "AP_TAX") return "AP_TAX";
+  if (docType === "AP_CN") return "AP_CN · ใบลดหนี้";
   if (docType === "AP_INV") return "AP_INV";
   return docType || "—";
 }
@@ -253,7 +254,7 @@ export function APPaymentClient({
       const next: Record<string, string> = {};
       if (fillAmounts) {
         for (const row of mapped) {
-          if (row.remaining_balance > 0) {
+          if (Math.abs(row.remaining_balance) > 0.02) {
             next[row.id] = String(roundMoney(row.remaining_balance));
           }
         }
@@ -275,7 +276,7 @@ export function APPaymentClient({
       invoices.reduce((sum, inv) => {
         const raw = paymentAmounts[inv.id] ?? "";
         const amount = Number(raw);
-        if (!Number.isFinite(amount) || amount <= 0) return sum;
+        if (!Number.isFinite(amount) || Math.abs(amount) <= 0.0001) return sum;
         return sum + amount;
       }, 0),
     );
@@ -384,7 +385,7 @@ export function APPaymentClient({
     return roundMoney(
       invoices.reduce((sum, inv) => {
         const n = Number(amounts[inv.id] || 0);
-        return Number.isFinite(n) && n > 0 ? sum + n : sum;
+        return Number.isFinite(n) && Math.abs(n) > 0.0001 ? sum + n : sum;
       }, 0),
     );
   }
@@ -433,7 +434,7 @@ export function APPaymentClient({
     () =>
       invoices.filter((inv) => {
         const amount = Number(paymentAmounts[inv.id] || 0);
-        return Number.isFinite(amount) && amount > 0;
+        return Number.isFinite(amount) && Math.abs(amount) > 0.02;
       }).length,
     [invoices, paymentAmounts],
   );
@@ -886,12 +887,15 @@ export function APPaymentClient({
                       {invoices.map((inv) => {
                         const paymentRaw = paymentAmounts[inv.id] ?? "";
                         const paymentNum = Number(paymentRaw);
+                        const isCredit = inv.doc_type === "AP_CN" || inv.remaining_balance < 0;
                         const isChecked =
-                          Number.isFinite(paymentNum) && paymentNum > 0;
+                          Number.isFinite(paymentNum) && Math.abs(paymentNum) > 0.02;
                         const debtCap = inv.remaining_balance;
                         const overLimit =
                           Number.isFinite(paymentNum) &&
-                          paymentNum > debtCap + 0.02;
+                          (isCredit
+                            ? paymentNum < debtCap - 0.02 || paymentNum > 0.02
+                            : paymentNum > debtCap + 0.02);
                         const docHref = documentHistoryHref(inv.document_no);
 
                         return (
@@ -954,8 +958,8 @@ export function APPaymentClient({
                                 type="number"
                                 inputMode="decimal"
                                 step="0.01"
-                                min="0"
-                                max={debtCap}
+                                min={isCredit ? debtCap : 0}
+                                max={isCredit ? 0 : debtCap}
                                 placeholder="0.00"
                                 value={paymentRaw}
                                 onChange={(e) =>

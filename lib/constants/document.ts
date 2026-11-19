@@ -22,6 +22,7 @@ export const DOCUMENT_TYPES = [
   "AP_TAX",
   "AP_INV",
   "AP_CASH",
+  "AP_CN",
   "DEP_OUT",
   "PAY",
   "AP_REFUND",
@@ -261,6 +262,7 @@ export const DOCUMENT_TYPE_PREFIX = {
   AP_TAX: "APT",
   AP_INV: "API",
   AP_CASH: "APC",
+  AP_CN: "PCN",
   DEP_OUT: "DOUT",
   PAY: "PAY",
   AP_REFUND: "PRF",
@@ -329,6 +331,7 @@ export const PURCHASE_DOC_TYPES = [
   "AP_TAX",
   "AP_INV",
   "AP_CASH",
+  "AP_CN",
   "DEP_OUT",
   "PAY",
   "AP_REFUND",
@@ -362,6 +365,7 @@ export function isRefundDocType(docType: string): boolean {
 const DOCUMENT_TYPE_TH_LABELS: Record<string, string> = {
   AR_REFUND: "ใบสำคัญจ่ายเงินคืน (Refund Payment)",
   AP_REFUND: "ใบสำคัญรับเงินคืน (Refund Receipt)",
+  AP_CN: "ใบลดหนี้ซื้อ / ใบกำกับภาษี",
   AR_WRITEOFF: "ใบสำคัญปรับปรุงบัญชี - รับรู้รายได้ (Write-off Income)",
   AP_WRITEOFF: "ใบสำคัญปรับปรุงบัญชี - ตัดเป็นค่าใช้จ่าย (Write-off Expense)",
   REFUND: "ใบสำคัญคืนเงิน (Refund)",
@@ -481,7 +485,7 @@ export const OUTPUT_TAX_STATUSES = [
  * Phase 19 — ภาษีซื้อ (ภ.พ.30 Input Tax)
  * ใบกำกับภาษีซื้อจากซัพพลายเออร์
  */
-export const INPUT_TAX_DOC_TYPES = ["AP_TAX"] as const;
+export const INPUT_TAX_DOC_TYPES = ["AP_TAX", "AP_CN"] as const;
 
 export const INPUT_TAX_STATUSES = ["ISSUED", "PAID"] as const;
 
@@ -630,7 +634,7 @@ export const CREDIT_NOTE_SOURCE_STATUSES = [
  * AP_TAX / AP_INV = บิลตั้งหนี้ซัพพลายเออร์ · TB = สรุปวางบิลช่าง (Technician Bill).
  * BR อยู่ที่ `doc_headers` (ใบรับวางบิล) ไม่ใช่เอกสารตั้งหนี้ใน `documents`.
  */
-export const AP_PAYABLE_DOC_TYPES = ["AP_TAX", "AP_INV", "TB"] as const;
+export const AP_PAYABLE_DOC_TYPES = ["AP_TAX", "AP_INV", "AP_CN", "TB"] as const;
 
 /**
  * บิลซื้อที่อนุญาตให้ตัดหนี้สูญ / ตัดเศษบัญชี (AP Write-off)

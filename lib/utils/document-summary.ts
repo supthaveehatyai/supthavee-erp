@@ -117,7 +117,10 @@ export type SalesPayableTotals = {
 export function salesPayableTotals(input: {
   goodsSubtotal: number;
   discountAmount?: number | null;
+  /** ยอดมัดจำที่ลูกค้าโอนมาแล้ว รวม VAT */
   depositDeducted?: number | null;
+  /** ฐานมัดจำก่อน VAT ถ้ามีในเอกสาร ไม่ส่งจะถอดจากยอดรวมด้วยอัตรา VAT */
+  depositNetDeducted?: number | null;
   vatType: VatCalculationType;
   vatRate?: number | null;
   shippingFee?: number | null;
@@ -133,8 +136,18 @@ export function salesPayableTotals(input: {
   const shipping = round2(Number.isFinite(shippingRaw) ? Math.max(0, shippingRaw) : 0);
   const rateRaw = Number(input.vatRate ?? 7);
   const vatRate = Number.isFinite(rateRaw) && rateRaw >= 0 ? rateRaw : 7;
-  const goodsAfter = round2(Math.max(0, goods - discount - deposit));
+  const goodsAfterDiscount = round2(Math.max(0, goods - discount));
+  const goodsAfter = round2(Math.max(0, goodsAfterDiscount - deposit));
   const vatType = isVatCalculationType(input.vatType) ? input.vatType : "EXCLUSIVE";
+  const depositNetRaw = Number(input.depositNetDeducted ?? 0);
+  const depositNet =
+    deposit <= 0
+      ? 0
+      : depositNetRaw > 0
+        ? round2(depositNetRaw)
+        : vatRate > 0
+          ? round2(deposit / (1 + vatRate / 100))
+          : deposit;
 
   if (vatType === "NONE" || vatRate === 0) {
     return {
@@ -150,16 +163,18 @@ export function salesPayableTotals(input: {
   }
 
   if (vatType === "EXCLUSIVE") {
-    const vat = round2(goodsAfter * (vatRate / 100));
+    const remainingBase = round2(Math.max(0, goodsAfterDiscount - depositNet));
+    const vat = round2(remainingBase * (vatRate / 100));
+    const remainingGross = round2(remainingBase + vat);
     return {
       goods_subtotal: goods,
       discount_amount: discount,
       deposit_deducted: deposit,
-      goods_after_deposit: goodsAfter,
-      net_before_vat: goodsAfter,
+      goods_after_deposit: deposit > 0 ? remainingGross : goodsAfterDiscount,
+      net_before_vat: remainingBase,
       vat_amount: vat,
       shipping_fee: shipping,
-      grand_total: round2(goodsAfter + vat + shipping),
+      grand_total: round2(remainingBase + vat + shipping),
     };
   }
 

@@ -395,6 +395,14 @@ export default async function PurchaseDocumentDetailPage({
           {isPaymentDoc || isDepositDoc || isSettlementDoc ? (
             <PrintDocumentButton className="h-10 gap-2" />
           ) : null}
+          {doc.doc_type === "AP_TAX" && doc.status !== "VOID" ? (
+            <Link
+              href={`/purchases/credit-note?vendor=${encodeURIComponent(doc.contact_id)}&ref=${encodeURIComponent(doc.id)}`}
+              className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 text-sm font-semibold text-rose-800"
+            >
+              ออกใบลดหนี้ส่งคืนผู้ขาย
+            </Link>
+          ) : null}
           {isGoodsReceipt && doc.status !== "VOID" ? (
             <PurchaseTaxInvoiceControls
               documentId={doc.id}

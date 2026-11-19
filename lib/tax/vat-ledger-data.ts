@@ -44,6 +44,8 @@ type DocumentTaxRow = {
   tax_invoice_date?: string | null;
   tax_reported_base?: number | null;
   tax_reported_vat?: number | null;
+  vat_reporting_date?: string | null;
+  vendor_ref_invoice_no?: string | null;
   contacts: ContactJoin | ContactJoin[] | null;
 };
 
@@ -140,7 +142,7 @@ async function loadDocuments(input: {
   const docTypes =
     input.reportType === "OUTPUT_TAX"
       ? [...OUTPUT_TAX_DOC_TYPES, "DEP_IN"]
-      : [...INPUT_TAX_DOC_TYPES];
+      : INPUT_TAX_DOC_TYPES.filter((docType) => docType !== "AP_CN");
   const statuses =
     input.reportType === "OUTPUT_TAX"
       ? [...OUTPUT_TAX_STATUSES]
@@ -252,6 +254,48 @@ async function loadDocuments(input: {
     from += pageSize;
   }
 
+  if (input.reportType === "INPUT_TAX") {
+    const creditFrom = 0;
+    const creditQuery = documents
+      .select(
+        `
+        id,
+        doc_no,
+        reference_no,
+        doc_type,
+        doc_date,
+        status,
+        net_before_vat,
+        vat_amount,
+        tax_amount,
+        grand_total,
+        sub_total,
+        total_amount,
+        vendor_ref_invoice_no,
+        vat_reporting_date,
+        contacts:contact_id (
+          company_name,
+          tax_id,
+          branch_code
+        )
+      `,
+      )
+      .in("doc_type", ["AP_CN"])
+      .in("status", statuses)
+      .or(
+        `and(vat_reporting_date.gte.${start},vat_reporting_date.lte.${end}),and(vat_reporting_date.is.null,doc_date.gte.${start},doc_date.lte.${end})`,
+      )
+      .order("doc_date", { ascending: true })
+      .order("doc_no", { ascending: true })
+      .range(creditFrom, creditFrom + pageSize - 1);
+    const credit = await creditQuery;
+    if (!credit.error) {
+      rows.push(...((credit.data ?? []) as DocumentTaxRow[]));
+    } else if (!/vat_reporting_date|vendor_ref_invoice_no|42703/i.test(credit.error.message)) {
+      throw new Error(credit.error.message);
+    }
+  }
+
   return rows;
 }
 
@@ -269,9 +313,12 @@ function mapDocumentRow(
       : trimText(contact?.company_name, "—");
 
   const inputTax = reportType === "INPUT_TAX";
+  const purchaseCredit = inputTax && String(row.doc_type ?? "") === "AP_CN";
   const goodsAmount = isVoid
     ? 0
-    : inputTax
+    : purchaseCredit
+      ? roundMoney(-Math.abs(Number(row.net_before_vat ?? row.sub_total ?? 0)))
+      : inputTax
       ? roundMoney(
           row.tax_reported_base != null
             ? Number(row.tax_reported_base)
@@ -280,20 +327,36 @@ function mapDocumentRow(
       : resolveGoodsAmount(row);
   const vatAmount = isVoid
     ? 0
-    : inputTax
+    : purchaseCredit
+      ? roundMoney(-Math.abs(Number(row.vat_amount ?? row.tax_amount ?? 0)))
+      : inputTax
       ? roundMoney(
           row.tax_reported_vat != null ? Number(row.tax_reported_vat) : Number(row.vat_amount ?? 0),
         )
       : resolveVatAmount(row);
   const grandTotal = isVoid
     ? 0
-    : inputTax
+    : purchaseCredit
+      ? roundMoney(-Math.abs(Number(row.grand_total ?? 0)))
+      : inputTax
       ? roundMoney(goodsAmount + vatAmount)
       : roundMoney(Number(row.grand_total ?? 0));
-  const invoiceDate = inputTax ? row.tax_invoice_date || row.doc_date : row.doc_date;
-  const invoiceNo = inputTax
-    ? trimText(row.tax_invoice_no) || trimText(row.reference_no) || trimText(row.doc_no)
-    : trimText(row.doc_no);
+  const invoiceDate = purchaseCredit
+    ? row.doc_date
+    : inputTax
+      ? row.tax_invoice_date || row.doc_date
+      : row.doc_date;
+  const invoiceNo = purchaseCredit
+    ? trimText(row.reference_no) || trimText(row.doc_no)
+    : inputTax
+      ? trimText(row.tax_invoice_no) || trimText(row.reference_no) || trimText(row.doc_no)
+      : trimText(row.doc_no);
+  const vendorRef = trimText(row.vendor_ref_invoice_no);
+  const remark = isVoid
+    ? "ยกเลิก"
+    : purchaseCredit
+      ? `ใบลดหนี้ซื้อ${vendorRef ? ` (อ้างอิง ${vendorRef})` : ""}`
+      : "";
 
   return {
     seq: index + 1,
@@ -306,7 +369,7 @@ function mapDocumentRow(
     vat_amount: vatAmount,
     grand_total: grandTotal,
     status: trimText(row.status).toUpperCase(),
-    remark: isVoid ? "ยกเลิก" : "",
+    remark,
     is_void: isVoid,
     output_group:
       reportType === "OUTPUT_TAX"
