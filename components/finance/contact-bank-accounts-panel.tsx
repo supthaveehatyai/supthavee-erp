@@ -33,6 +33,7 @@ type ContactBankAccountsPanelProps = {
   contactName: string;
   layout: "profile" | "billing" | "payment";
   preferredCategory?: "CORPORATE_TAX" | "PERSONAL_NON_TAX" | null;
+  readOnly?: boolean;
 };
 
 type FormState = {
@@ -89,6 +90,7 @@ export function ContactBankAccountsPanel({
   contactName,
   layout,
   preferredCategory = null,
+  readOnly = false,
 }: ContactBankAccountsPanelProps) {
   const [accounts, setAccounts] = useState<ContactBankAccount[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,33 +101,48 @@ export function ContactBankAccountsPanel({
 
   async function reload() {
     setLoading(true);
-    const result = await getContactBankAccountsAction(contactId);
-    setLoading(false);
-    if (result.error) {
-      setError(result.error);
-      setAccounts([]);
-      return;
-    }
-    setError("");
-    setAccounts(result.data);
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    void getContactBankAccountsAction(contactId).then((result) => {
-      if (cancelled) return;
-      setLoading(false);
+    try {
+      const result = await getContactBankAccountsAction(contactId);
       if (result.error) {
         setError(result.error);
         setAccounts([]);
         return;
       }
       setError("");
-      setAccounts(result.data);
-    });
+      setAccounts(result.data ?? []);
+    } catch (err) {
+      setAccounts([]);
+      setError(err instanceof Error ? err.message : "โหลดบัญชีรับเงินไม่สำเร็จ");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+    void (async () => {
+      try {
+        const result = await getContactBankAccountsAction(contactId);
+        if (!active) return;
+        if (result.error) {
+          setError(result.error);
+          setAccounts([]);
+          return;
+        }
+        setError("");
+        setAccounts(result.data ?? []);
+      } catch (err) {
+        if (!active) return;
+        setAccounts([]);
+        setError(err instanceof Error ? err.message : "โหลดบัญชีรับเงินไม่สำเร็จ");
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
     return () => {
-      cancelled = true;
+      active = false;
     };
   }, [contactId]);
 
@@ -338,9 +355,11 @@ export function ContactBankAccountsPanel({
           <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
           {suggestion ? <p className="mt-1 text-xs font-medium text-emerald-800">{suggestion}</p> : null}
         </div>
-        <Button type="button" size="sm" variant="outline" onClick={openCreate}>
-          {layout === "profile" ? "+ เพิ่มบัญชีธนาคาร" : "+ เพิ่ม / แก้ไขบัญชีคู่ค้า"}
-        </Button>
+        {readOnly ? null : (
+          <Button type="button" size="sm" variant="outline" onClick={openCreate}>
+            {layout === "profile" ? "+ เพิ่มบัญชีธนาคาร" : "+ เพิ่ม / แก้ไขบัญชีคู่ค้า"}
+          </Button>
+        )}
       </div>
 
       {loading ? (
@@ -429,33 +448,37 @@ export function ContactBankAccountsPanel({
                   >
                     คัดลอกข้อมูลบัญชีทั้งหมด
                   </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-7 px-2 text-xs"
-                    onClick={() => openEdit(account)}
-                  >
-                    ✏️ แก้ไข / เปลี่ยนบัญชี
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-7 px-2 text-xs"
-                    onClick={() => void toggleAccount(account)}
-                  >
-                    {account.is_active ? "พักใช้งาน" : "เปิดใช้งาน"}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-7 px-2 text-xs text-red-700"
-                    onClick={() => void removeAccount(account)}
-                  >
-                    ลบ
-                  </Button>
+                  {readOnly ? null : (
+                    <>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => openEdit(account)}
+                      >
+                        ✏️ แก้ไข / เปลี่ยนบัญชี
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => void toggleAccount(account)}
+                      >
+                        {account.is_active ? "พักใช้งาน" : "เปิดใช้งาน"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-xs text-red-700"
+                        onClick={() => void removeAccount(account)}
+                      >
+                        ลบ
+                      </Button>
+                    </>
+                  )}
                 </div>
               </article>
             );

@@ -119,6 +119,8 @@ export default function ManageContactDialog({
         credit_days: null,
         ocr_pattern_config: {},
         is_active: true,
+        succeeded_by_contact_id: null,
+        successor_note: null,
       },
     ),
   );
@@ -383,6 +385,11 @@ export default function ManageContactDialog({
               <span className="font-medium text-slate-700">
                 {contact?.company_name ?? "—"}
               </span>
+              {contact?.successor_note ? (
+                <span className="mt-2 flex w-fit max-w-full rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-800 ring-1 ring-sky-100">
+                  🔄 {contact.successor_note}
+                </span>
+              ) : null}
             </DialogDescription>
           </DialogHeader>
 

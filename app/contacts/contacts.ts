@@ -109,6 +109,8 @@ export type Contact = {
   credit_days: number | null;
   ocr_pattern_config: OcrPatternConfig;
   is_active: boolean;
+  succeeded_by_contact_id: string | null;
+  successor_note: string | null;
 };
 
 export type ContactPersonInput = {
@@ -168,6 +170,8 @@ export const contactSelect = [
   "credit_days",
   "ocr_pattern_config",
   "is_active",
+  "succeeded_by_contact_id",
+  "successor_note",
 ].join(", ");
 
 export function parseOcrPatternConfigJson(
@@ -244,5 +248,12 @@ export function normalizeContactRow(row: unknown): Contact {
         ? (config as OcrPatternConfig)
         : {},
     is_active: raw.is_active !== false,
+    succeeded_by_contact_id: raw.succeeded_by_contact_id
+      ? String(raw.succeeded_by_contact_id)
+      : null,
+    successor_note:
+      raw.successor_note == null || String(raw.successor_note).trim() === ""
+        ? null
+        : String(raw.successor_note).trim(),
   };
 }

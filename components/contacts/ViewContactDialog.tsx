@@ -138,6 +138,11 @@ export default function ViewContactDialog({
               <h3 className="mt-2 text-lg font-bold text-slate-900">
                 {displayValue(contact.company_name)}
               </h3>
+              {contact.successor_note ? (
+                <span className="mt-2 inline-flex max-w-full rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-800 ring-1 ring-sky-100">
+                  🔄 {contact.successor_note}
+                </span>
+              ) : null}
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <DetailField
                   label="เลขประจำตัวผู้เสียภาษี"
@@ -178,6 +183,7 @@ export default function ViewContactDialog({
               contactId={contact.id}
               contactName={contact.company_name}
               layout="profile"
+              readOnly
             />
 
             <VendorTaxTierCard contactId={contact.id} />

@@ -42,27 +42,34 @@ function mapRow(row: Record<string, unknown>): ContactBankAccount {
 export async function getContactBankAccountsAction(
   contactId: string,
 ): Promise<{ data: ContactBankAccount[]; error: string | null }> {
-  const owner = await requireSessionUserId();
-  if (!owner.ok) return { data: [], error: owner.error };
-  const id = contactId.trim();
-  if (!id) return { data: [], error: "ไม่พบรหัสคู่ค้า" };
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return { data: [], error: owner.error };
+    const id = contactId.trim();
+    if (!id) return { data: [], error: "ไม่พบรหัสคู่ค้า" };
 
-  const supabase = createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("contact_bank_accounts")
-    .select(
-      "id, contact_id, account_category, bank_code, bank_name, account_no, account_name, branch_name, qr_image_url, notes, is_default, is_active, created_at",
-    )
-    .eq("contact_id", id)
-    .order("is_active", { ascending: false })
-    .order("is_default", { ascending: false })
-    .order("created_at", { ascending: true });
+    const supabase = createSupabaseServerClient();
+    const { data, error } = await supabase
+      .from("contact_bank_accounts")
+      .select(
+        "id, contact_id, account_category, bank_code, bank_name, account_no, account_name, branch_name, qr_image_url, notes, is_default, is_active, created_at",
+      )
+      .eq("contact_id", id);
 
-  if (error) return { data: [], error: error.message };
-  return {
-    data: (data ?? []).map((row) => mapRow(row as Record<string, unknown>)),
-    error: null,
-  };
+    if (error) return { data: [], error: error.message };
+    const rows = (data ?? []).map((row) => mapRow(row as Record<string, unknown>));
+    rows.sort((left, right) => {
+      const active = Number(right.is_active) - Number(left.is_active);
+      if (active !== 0) return active;
+      const preferred = Number(right.is_default) - Number(left.is_default);
+      if (preferred !== 0) return preferred;
+      return left.created_at.localeCompare(right.created_at);
+    });
+    return { data: rows, error: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "โหลดบัญชีรับเงินไม่สำเร็จ";
+    return { data: [], error: message };
+  }
 }
 
 export async function upsertContactBankAccountAction(

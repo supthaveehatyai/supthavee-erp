@@ -970,6 +970,11 @@ export default function ContactsClient({
                       <p className="text-sm font-semibold text-slate-800">
                         {contact.company_name}
                       </p>
+                      {contact.successor_note ? (
+                        <span className="mt-1 inline-flex max-w-full rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-800 ring-1 ring-sky-100">
+                          🔄 {contact.successor_note}
+                        </span>
+                      ) : null}
                       <p className="mt-0.5 text-[11px] text-slate-400">
                         {contact.branch_code || "สำนักงานใหญ่"}
                       </p>
