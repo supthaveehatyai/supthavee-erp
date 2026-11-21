@@ -6,12 +6,19 @@
 export type ProfitMonthKpi = {
   /** YYYY-MM */
   profitMonth: string;
+  /** รายได้สุทธิก่อน VAT จาก RPC เดียวกับ Executive Dashboard */
   revenue: number;
-  /** ต้นทุนเสื้อเปล่า — Σ (unit_cost_price × qty) */
+  platformFees: number;
+  /** ต้นทุนเสื้อสำเร็จรูปซื้อมาขายไป ก่อน VAT */
+  garmentCogs: number;
   productCogs: number;
-  /** ค่าแรงงานบริการ — Σ document_items.wage_cost */
+  /** วัตถุดิบผลิตเอง BOM และเบิกหน้างาน */
+  bomMaterialCogs: number;
+  /** วัสดุสิ้นเปลืองโรงงานสุทธิหลังหัก AP_CN */
+  consumablesCogs: number;
+  /** ค่าแรงงานบริการ สกรีน / ปัก / บล็อก */
+  serviceLaborCost: number;
   wageCogs: number;
-  /** productCogs + wageCogs */
   cogs: number;
   grossProfit: number;
   opex: number;

@@ -1,20 +1,13 @@
 import type { Metadata } from "next";
 import { LayoutDashboard } from "lucide-react";
-import {
-  getPendingAP,
-  getPendingAR,
-  getTrueNetProfit,
-  getYTDExpenses,
-  getYTDSales,
-} from "@/app/actions/dashboard";
+import { getErpFinancialKpis } from "@/app/actions/dashboard";
 import { getSalesByChannel } from "@/lib/actions/dashboard-actions";
 import { ManualBackupButton } from "@/components/dashboard/manual-backup-button";
 import { getRecentAuditLogs } from "@/lib/actions/audit-actions";
 import type { GetRecentAuditLogsResult } from "@/types/audit";
 import type {
+  ErpFinancialKpis,
   GetSalesByChannelResult,
-  KpiMoneyResult,
-  ProfitabilityKpiResult,
 } from "@/types/dashboard";
 import { ExecutiveDashboard } from "./executive-dashboard";
 
@@ -28,59 +21,43 @@ type DisplayKpi = {
   amount: number;
   formatted: string;
   error: string | null;
+  detail?: string | null;
 };
 
 function formatThaiBaht(value: number): string {
-  return new Intl.NumberFormat("th-TH", {
-    style: "currency",
-    currency: "THB",
-  }).format(Number.isFinite(value) ? value : 0);
+  const amount = Number.isFinite(value) ? value : 0;
+  const formatted = new Intl.NumberFormat("th-TH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+  return `฿${formatted}`;
 }
 
-function unwrapProfit(
-  settled: PromiseSettledResult<ProfitabilityKpiResult>,
-  fallbackError: string,
-): ProfitabilityKpiResult {
-  if (settled.status === "fulfilled") {
-    return settled.value;
-  }
-
+function unwrapFinancial(
+  settled: PromiseSettledResult<ErpFinancialKpis>,
+): ErpFinancialKpis {
+  if (settled.status === "fulfilled") return settled.value;
   const reason = settled.reason;
   const message =
     reason instanceof Error
       ? reason.message
       : typeof reason === "string"
         ? reason
-        : fallbackError;
-
+        : "โหลดตัวชี้วัดการเงินไม่สำเร็จ";
   return {
-    totalExpenses: 0,
-    productCogs: 0,
-    wageCogs: 0,
-    totalCogs: 0,
-    grossProfit: 0,
-    netProfit: 0,
+    grossSalesIncVat: 0,
+    netRevenueExVat: 0,
+    platformFees: 0,
+    garmentCogsExVat: 0,
+    serviceLaborCost: 0,
+    bomMaterialCogs: 0,
+    directConsumablesCogs: 0,
+    opexExpenses: 0,
+    trueNetProfit: 0,
+    pendingAr: 0,
+    pendingAp: 0,
     error: message,
   };
-}
-
-function unwrapKpi(
-  settled: PromiseSettledResult<KpiMoneyResult>,
-  fallbackError: string,
-): KpiMoneyResult {
-  if (settled.status === "fulfilled") {
-    return settled.value;
-  }
-
-  const reason = settled.reason;
-  const message =
-    reason instanceof Error
-      ? reason.message
-      : typeof reason === "string"
-        ? reason
-        : fallbackError;
-
-  return { amount: 0, error: message };
 }
 
 function unwrapAudit(
@@ -132,68 +109,41 @@ function currentYearBounds(): { from: string; to: string } {
  * - success (incl. zero): Thai Baht string
  * - failure: em dash + error message for the UI banner
  */
-function toDisplayKpi(result: KpiMoneyResult): DisplayKpi {
-  if (result.error) {
-    return {
-      amount: 0,
-      formatted: "—",
-      error: result.error,
-    };
-  }
-
-  const amount = Number.isFinite(result.amount) ? result.amount : 0;
-
+function toDisplayKpi(
+  amount: number,
+  error: string | null,
+  detail?: string | null,
+): DisplayKpi {
+  if (error) return { amount: 0, formatted: "—", error, detail: null };
   return {
-    amount,
+    amount: Number.isFinite(amount) ? amount : 0,
     formatted: formatThaiBaht(amount),
     error: null,
+    detail: detail ?? null,
   };
 }
 
 export default async function ExecutiveDashboardPage() {
   const { from, to } = currentYearBounds();
   // allSettled — no unhandled rejections even if a Server Action throws
-  const [
-    ytdSettled,
-    arSettled,
-    apSettled,
-    opexSettled,
-    profitSettled,
-    auditSettled,
-    channelSettled,
-  ] = await Promise.allSettled([
-    getYTDSales(),
-    getPendingAR(),
-    getPendingAP(),
-    getYTDExpenses(),
-    getTrueNetProfit(),
+  const [financialSettled, auditSettled, channelSettled] = await Promise.allSettled([
+    getErpFinancialKpis(from, to),
     getRecentAuditLogs(),
     getSalesByChannel(from, to),
   ]);
 
+  const financial = unwrapFinancial(financialSettled);
   const ytdSales = toDisplayKpi(
-    unwrapKpi(ytdSettled, "Failed to load YTD sales"),
+    financial.grossSalesIncVat,
+    financial.error,
+    financial.error ? null : `Net Revenue (ก่อน VAT) ${formatThaiBaht(financial.netRevenueExVat)}`,
   );
-  const pendingAr = toDisplayKpi(
-    unwrapKpi(arSettled, "Failed to load pending AR"),
-  );
-  const pendingAp = toDisplayKpi(
-    unwrapKpi(apSettled, "Failed to load pending AP"),
-  );
-  const totalExpenses = toDisplayKpi(
-    unwrapKpi(opexSettled, "Failed to load YTD expenses"),
-  );
+  const pendingAr = toDisplayKpi(financial.pendingAr, financial.error);
+  const pendingAp = toDisplayKpi(financial.pendingAp, financial.error);
+  const totalExpenses = toDisplayKpi(financial.opexExpenses, financial.error);
   const auditResult = unwrapAudit(auditSettled);
   const channelResult = unwrapSalesByChannel(channelSettled);
-  const profit = unwrapProfit(profitSettled, "Failed to calculate true net profit");
-
-  const netProfit: DisplayKpi = profit.error
-    ? { amount: 0, formatted: "—", error: profit.error }
-    : {
-        amount: profit.netProfit,
-        formatted: formatThaiBaht(profit.netProfit),
-        error: null,
-      };
+  const netProfit = toDisplayKpi(financial.trueNetProfit, financial.error);
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -204,7 +154,7 @@ export default async function ExecutiveDashboardPage() {
             Executive Dashboard
           </h1>
           <p className="text-slate-500">
-            ภาพรวมธุรกิจ · True Net Profit = รายได้ − ต้นทุนเสื้อ − ค่าแรง − OPEX
+            ภาพรวมธุรกิจ · True Net Profit = Net Revenue - ต้นทุนเสื้อ/วัตถุดิบผลิต - ค่าแรงบริการ - OPEX
           </p>
         </div>
         <ManualBackupButton />

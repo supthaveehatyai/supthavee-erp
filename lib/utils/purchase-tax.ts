@@ -136,6 +136,52 @@ export function resolveReceiptVatTotals(input: {
   return { preVatAmount: net, vatAmount: 0, grandTotal: net, vatRate: 0 };
 }
 
+function roundInvoiceMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * คืนราคาหน้าบิลรวม VAT จากต้นทุนที่ถอด VAT แล้ว
+ * เช่น 44.86 → 48.00 และ 56.07 → 60.00
+ * เลือกยอดจำนวนเต็มบาทก่อน เมื่อมีมากกว่าหนึ่งราคาที่ถอดกลับมาได้เท่าเดิม
+ */
+export function recoverIncVatUnitPrice(exVatCost: number): number {
+  const ex = roundInvoiceMoney(exVatCost);
+  if (!(ex > 0)) return 0;
+  const target = ex * 1.07;
+  const center = Math.round(target * 100);
+  const candidates: number[] = [];
+  for (let satang = center - 8; satang <= center + 8; satang += 1) {
+    if (satang <= 0) continue;
+    const candidate = satang / 100;
+    if (roundInvoiceMoney(candidate / 1.07) === ex) candidates.push(candidate);
+  }
+  if (candidates.length === 0) return roundInvoiceMoney(target);
+  const wholeBaht = candidates.filter((price) => Math.round(price * 100) % 100 === 0);
+  const pool = wholeBaht.length > 0 ? wholeBaht : candidates;
+  return pool.reduce((best, price) => {
+    const bestGap = Math.abs(best - target);
+    const gap = Math.abs(price - target);
+    if (gap < bestGap - 1e-9) return price;
+    if (Math.abs(gap - bestGap) <= 1e-9 && price > best) return price;
+    return best;
+  });
+}
+
+/** ราคาหน้าบิลรวม VAT: ใช้ความจำล่าสุดเมื่อโหมดเป็น INC_VAT มิฉะนั้นคืนจากต้นทุนก่อน VAT */
+export function resolveBaseIncVatPrice(input: {
+  netCostExVat: number;
+  lastInvoiceUnitPrice?: number | null;
+  lastInvoiceVatMode?: string | null;
+}): number {
+  const remembered = Number(input.lastInvoiceUnitPrice);
+  const mode = String(input.lastInvoiceVatMode ?? "").trim().toUpperCase();
+  if (mode === "INC_VAT" && Number.isFinite(remembered) && remembered > 0) {
+    return roundInvoiceMoney(remembered);
+  }
+  return recoverIncVatUnitPrice(input.netCostExVat);
+}
+
 /** Line amount that may enter stock cost. EXCLUSIVE keeps the ex-VAT total. */
 export function exVatGoodsAmount(
   lineTotal: number,

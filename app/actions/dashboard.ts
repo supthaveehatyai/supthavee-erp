@@ -10,6 +10,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { AP_PAYABLE_DOC_TYPES } from "@/lib/constants/document";
 import type { Database } from "@/src/types/supabase";
 import type {
+  ErpFinancialKpis,
   KpiMoneyResult,
   ProfitabilityKpiResult,
 } from "@/types/dashboard";
@@ -73,6 +74,71 @@ function toMoney(value: number | string | null | undefined): number {
 
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function emptyFinancialKpis(error: string | null): ErpFinancialKpis {
+  return {
+    grossSalesIncVat: 0,
+    netRevenueExVat: 0,
+    platformFees: 0,
+    garmentCogsExVat: 0,
+    serviceLaborCost: 0,
+    bomMaterialCogs: 0,
+    directConsumablesCogs: 0,
+    opexExpenses: 0,
+    trueNetProfit: 0,
+    pendingAr: 0,
+    pendingAp: 0,
+    error,
+  };
+}
+
+function readFinancialKpis(data: unknown): ErpFinancialKpis {
+  const row = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+  const num = (key: string) => {
+    const amount = Number(row[key] ?? 0);
+    return Number.isFinite(amount) ? roundMoney(amount) : 0;
+  };
+  return {
+    grossSalesIncVat: num("gross_sales_inc_vat"),
+    netRevenueExVat: num("net_revenue_ex_vat"),
+    platformFees: num("platform_fees"),
+    garmentCogsExVat: num("garment_cogs_ex_vat"),
+    serviceLaborCost: num("service_labor_cost"),
+    bomMaterialCogs: num("bom_material_cogs"),
+    directConsumablesCogs: num("direct_consumables_cogs"),
+    opexExpenses: num("opex_expenses"),
+    trueNetProfit: num("true_net_profit"),
+    pendingAr: num("pending_ar"),
+    pendingAp: num("pending_ap"),
+    error: null,
+  };
+}
+
+/**
+ * Single source of truth สำหรับยอดขาย ลูกหนี้ เจ้าหนี้ และกำไรสุทธิ
+ * true_net_profit รวมค่าแรงบริการอยู่แล้ว ห้ามบวก wage ซ้ำ
+ */
+export async function getErpFinancialKpis(
+  startDate: string,
+  endDate: string,
+): Promise<ErpFinancialKpis> {
+  try {
+    const supabaseAdmin = createSupabaseAdminClient() as unknown as SupabaseClient;
+    const { data, error } = await supabaseAdmin.rpc("get_erp_financial_kpis_and_profit", {
+      p_start_date: startDate,
+      p_end_date: endDate,
+    });
+    if (error) {
+      console.error("[getErpFinancialKpis]", error.message);
+      return emptyFinancialKpis(error.message);
+    }
+    return readFinancialKpis(data);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "โหลดตัวชี้วัดการเงินไม่สำเร็จ";
+    console.error("[getErpFinancialKpis]", message);
+    return emptyFinancialKpis(message);
+  }
 }
 
 function currentYearBounds(): { from: string; to: string; year: number } {

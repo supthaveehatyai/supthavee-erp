@@ -259,8 +259,13 @@ export type SalesProductSearchItem = {
   sku: string;
   /** Selling unit price — mapped from `products.retail_price`. */
   unit_price: number;
-  /** Cost Snapshot source — `products.cost_price`. */
+  /** Cost Snapshot source — `products.cost_price` (ต้นทุนก่อน VAT / TAS 2). */
   cost_price: number;
+  /** ต้นทุนสุทธิก่อน VAT ที่ใช้คำนวณสต็อก ไม่ใช่ราคาหน้าบิล */
+  base_net_cost_ex_vat?: number;
+  /** ราคาซื้อต่อหน่วยตามหน้าบิลเมื่อโหมดรวม VAT */
+  base_inc_vat_price?: number;
+  last_invoice_vat_mode?: string | null;
   display_name: string;
   model_name: string | null;
   color_name: string | null;

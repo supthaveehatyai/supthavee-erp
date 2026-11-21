@@ -9,6 +9,22 @@ export type KpiMoneyResult = {
   error: string | null;
 };
 
+/** ผลจาก RPC get_erp_financial_kpis_and_profit — แหล่งเดียวของแดชบอร์ดและวิเคราะห์กำไร */
+export type ErpFinancialKpis = {
+  grossSalesIncVat: number;
+  netRevenueExVat: number;
+  platformFees: number;
+  garmentCogsExVat: number;
+  serviceLaborCost: number;
+  bomMaterialCogs: number;
+  directConsumablesCogs: number;
+  opexExpenses: number;
+  trueNetProfit: number;
+  pendingAr: number;
+  pendingAp: number;
+  error: string | null;
+};
+
 /** True Net Profit KPI — Net Revenue − (product COGS + wage_cost) − OPEX. */
 export type ProfitabilityKpiResult = {
   /** Σ expenses.net_payable · ISSUED · YTD (จาก vw_monthly_profit_summary) */

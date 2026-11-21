@@ -65,6 +65,7 @@ import { upsertMaterialVendorMappingAction } from "@/lib/actions/materials";
 import type { MaterialRecord } from "@/types/material";
 import { MaterialPicker } from "@/components/procurement/material-picker";
 import { purchasePriceVarianceLabel } from "@/lib/materials/price-variance";
+import { billUnitPriceForVatMode } from "@/lib/products/invoice-price";
 import { saveDocumentProcurementBills } from "@/lib/actions/procurement-bills";
 import { uploadProcurementBills } from "@/lib/procurement/upload-bill-files";
 import { normalizeOcrSkuText } from "@/lib/utils/ocr-sku";
@@ -974,7 +975,29 @@ export default function GoodsReceiptUI({
         similarityScore: 1,
       };
     });
-    setRows(nextRows);
+    const catalog = products.find((item) => item.id === productId);
+    const seededRows = nextRows.map((item) => {
+      if (item.lineKey !== row.lineKey || !catalog) return item;
+      const net = Number(catalog.base_net_cost_ex_vat) || 0;
+      const inc = Number(catalog.base_inc_vat_price) || net;
+      const shouldSeed = !item.priceTouched && Number(item.unit_price) === 0 && (net > 0 || inc > 0);
+      return {
+        ...item,
+        baseNetCostExVat: net,
+        baseIncVatPrice: inc,
+        unit_price: shouldSeed
+          ? roundTo4Decimals(billUnitPriceForVatMode(aiVatType, net, inc))
+          : item.unit_price,
+      };
+    });
+    const priceChanged = seededRows.some(
+      (item, index) => item.unit_price !== nextRows[index]?.unit_price,
+    );
+    setRows(
+      priceChanged
+        ? applyApportionedTotals(seededRows, billDiscountText, calcMode, pennyDelta)
+        : seededRows,
+    );
     setDraftProductByLineKey((current) => {
       const next = { ...current };
       delete next[row.lineKey];
@@ -1039,7 +1062,7 @@ export default function GoodsReceiptUI({
     if (raw.trim() === "") return;
     const unitPrice = Number(raw);
     if (!Number.isFinite(unitPrice) || unitPrice < 0) return;
-    patchReviewLine(lineKey, { unit_price: roundTo4Decimals(unitPrice) });
+    patchReviewLine(lineKey, { unit_price: roundTo4Decimals(unitPrice), priceTouched: true });
   }
 
   function duplicateReviewRow(row: ReceiptLineRow) {
@@ -1478,11 +1501,29 @@ export default function GoodsReceiptUI({
   }
 
   function handleTaxModeChange(mode: PurchaseTaxMode) {
-    setAiVatType(purchaseTaxModeToVatType(mode));
+    const nextVat = purchaseTaxModeToVatType(mode);
+    setAiVatType(nextVat);
     setTaxModeSource("manual");
     setVatAmountTouched(false);
     setGrandTouched(false);
     setVatTotalsManual(false);
+    setRows((current) =>
+      applyApportionedTotals(
+        current.map((row) => {
+          if (row.priceTouched || row.baseNetCostExVat == null) return row;
+          const net = Number(row.baseNetCostExVat) || 0;
+          const inc = Number(row.baseIncVatPrice) > 0 ? Number(row.baseIncVatPrice) : net;
+          return {
+            ...row,
+            unit_price: roundTo4Decimals(billUnitPriceForVatMode(nextVat, net, inc)),
+            totalAmountManual: false,
+          };
+        }),
+        billDiscountText,
+        calcMode,
+        pennyDelta,
+      ),
+    );
   }
 
   function handleVatAmountChange(raw: string) {

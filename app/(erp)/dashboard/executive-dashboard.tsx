@@ -35,6 +35,7 @@ export type DisplayKpi = {
   /** Pre-formatted Thai Baht from the Server Component */
   formatted: string;
   error: string | null;
+  detail?: string | null;
 };
 
 export type ExecutiveKpis = {
@@ -57,6 +58,7 @@ type KpiCard = {
   key: string;
   label: string;
   value: string;
+  detail?: string | null;
   hint: string;
   icon: ReactNode;
   accent: string;
@@ -77,9 +79,10 @@ function buildKpiCards(kpis: ExecutiveKpis): KpiCard[] {
       key: "sales-ytd",
       label: "Total Sales (YTD)",
       value: kpis.ytdSales.formatted,
+      detail: kpis.ytdSales.detail,
       hint: kpis.ytdSales.error
         ? "โหลดยอดขายไม่สำเร็จ"
-        : "Σ grand_total · INV_DO / TAX_INV / ABB · ปีปัจจุบัน (ไม่รวม DRAFT/VOID)",
+        : "INV_DO / TAX_INV / CS_TAX / ABB · มัดจำที่ตัดรับรู้แล้ว · หัก CN",
       icon: <CircleDollarSign className="h-5 w-5" />,
       accent: "bg-blue-50 text-blue-700 border-blue-100",
       error: kpis.ytdSales.error,
@@ -90,7 +93,7 @@ function buildKpiCards(kpis: ExecutiveKpis): KpiCard[] {
       value: kpis.pendingAr.formatted,
       hint: kpis.pendingAr.error
         ? "โหลดลูกหนี้ไม่สำเร็จ"
-        : "Σ (grand_total − paid) · INV_DO / TAX_INV · ISSUED / PARTIAL",
+        : "ลูกหนี้คงค้างสุทธิ · INV_DO / TAX_INV - CN",
       icon: <HandCoins className="h-5 w-5" />,
       accent: "bg-emerald-50 text-emerald-700 border-emerald-100",
       error: kpis.pendingAr.error,
@@ -101,7 +104,7 @@ function buildKpiCards(kpis: ExecutiveKpis): KpiCard[] {
       value: kpis.pendingAp.formatted,
       hint: kpis.pendingAp.error
         ? "โหลดเจ้าหนี้ไม่สำเร็จ"
-        : "Σ (grand_total − paid) · AP_INV / AP_TAX / TB · ISSUED / PARTIAL",
+        : "เจ้าหนี้คงค้างสุทธิ · AP_INV / AP_TAX / TB - AP_CN",
       icon: <Landmark className="h-5 w-5" />,
       accent: "bg-amber-50 text-amber-800 border-amber-100",
       error: kpis.pendingAp.error,
@@ -126,7 +129,7 @@ function buildKpiCards(kpis: ExecutiveKpis): KpiCard[] {
       value: kpis.netProfit.formatted,
       hint: kpis.netProfit.error
         ? "คำนวณกำไรสุทธิไม่สำเร็จ"
-        : "True Net Profit = Net Revenue − ต้นทุนเสื้อเปล่า − ค่าแรงงานบริการ − OPEX",
+        : "True Net Profit = Net Revenue - ต้นทุนเสื้อ/วัตถุดิบผลิต - ค่าแรงบริการ - OPEX",
       icon: <TrendingUp className="h-5 w-5" />,
       accent: "bg-slate-50 text-slate-700 border-slate-200",
       valueClassName: netProfitValueClass(
@@ -186,6 +189,9 @@ function BusinessOverviewTab({
                   >
                     {kpi.value}
                   </CardTitle>
+                  {kpi.detail ? (
+                    <p className="mt-1 text-xs font-medium text-slate-600">{kpi.detail}</p>
+                  ) : null}
                 </div>
                 <div className="shrink-0 rounded-xl bg-white/70 p-2.5 shadow-sm">
                   {kpi.icon}

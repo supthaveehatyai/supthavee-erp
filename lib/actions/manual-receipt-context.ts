@@ -15,6 +15,7 @@ import {
 import type { VatCalculationType } from "@/lib/utils/document-summary";
 import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import { createClient as createSupabaseAdmin } from "@/lib/supabase/server-admin";
+import { attachProductInvoicePrices } from "@/lib/products/invoice-price";
 import type { SalesProductSearchItem } from "@/types/document";
 import type {
   GetManualReceiptVendorContextResult,
@@ -406,6 +407,7 @@ export async function getManualReceiptVendorContext(
     if (productResult.error) return { data: null, error: productResult.error };
 
     const products = productResult.products;
+    await attachProductInvoicePrices(supabase, products);
     const taxVotes = productResult.taxVotes;
 
     const tierQuery = await (supabase as unknown as {
@@ -511,11 +513,15 @@ export async function getSmartSkuPickerAllProducts(): Promise<GetSmartSkuPickerC
       products.push(toReceiptProduct(product, model, "", null, null));
     }
     await enrichColorNames(supabase, products);
+    await attachProductInvoicePrices(supabase, products);
     const catalog: SalesProductSearchItem[] = products.map((product) => ({
       id: product.id,
       sku: product.sku,
       unit_price: product.unit_price,
       cost_price: product.cost_price,
+      base_net_cost_ex_vat: product.base_net_cost_ex_vat,
+      base_inc_vat_price: product.base_inc_vat_price,
+      last_invoice_vat_mode: product.last_invoice_vat_mode,
       display_name: product.display_name,
       model_name: product.model_name,
       color_name: product.color_name,

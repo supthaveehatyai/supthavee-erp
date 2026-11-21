@@ -14,6 +14,7 @@ import {
   updateProductModelSchema,
   zodFirstError,
 } from "@/app/products/zod-schemas";
+import { recoverIncVatUnitPrice } from "@/lib/utils/purchase-tax";
 import type { GetProductModelPreviewResult } from "@/types/product-preview";
 import type {
   ExistingProductModel,
@@ -27,6 +28,19 @@ import type {
   UpdateProductModelSizePrice,
   UploadProductModelImageResult,
 } from "@/types/product-matrix";
+
+function invoiceMemoryForCost(costPrice: number, taxType: TaxType) {
+  if (taxType === "INC_VAT") {
+    return {
+      last_invoice_unit_price: recoverIncVatUnitPrice(costPrice),
+      last_invoice_vat_mode: "INC_VAT",
+    };
+  }
+  return {
+    last_invoice_unit_price: costPrice,
+    last_invoice_vat_mode: taxType === "EXC_VAT" ? "EXC_VAT" : "NONE",
+  };
+}
 
 function normalizeTaxType(value: string): TaxType {
   const raw = value.toUpperCase();
@@ -568,6 +582,7 @@ export async function generateSkusFromModel(
     tax_type: normalizeTaxType(row.taxType),
     base_uom: baseUomLabel,
     cost_price: row.costPrice,
+    ...invoiceMemoryForCost(row.costPrice, normalizeTaxType(row.taxType)),
     retail_price: row.retailPrice,
     wholesale_price: row.wholesalePrice,
     is_active: true,
@@ -1085,6 +1100,7 @@ export async function updateProductModel(
           ...(matched
             ? {
                 cost_price: matched.costPrice,
+                ...invoiceMemoryForCost(matched.costPrice, taxType),
                 retail_price: matched.retailPrice,
                 wholesale_price: matched.wholesalePrice,
               }

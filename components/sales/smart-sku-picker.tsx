@@ -356,7 +356,9 @@ const SmartSkuPicker = forwardRef<SmartSkuPickerHandle, SmartSkuPickerProps>(
                           {product.display_name}
                         </p>
                         <p className="mt-0.5 text-[11px] font-medium text-emerald-700">
-                          LPP {formatMoney(product.cost_price)} ฿
+                          ตามบิล{" "}
+                          {formatMoney(product.base_inc_vat_price ?? product.cost_price)} ฿ · ทุนก่อน VAT{" "}
+                          {formatMoney(product.base_net_cost_ex_vat ?? product.cost_price)} ฿
                           {product.base_uom ? ` · ${product.base_uom}` : ""}
                         </p>
                       </div>
@@ -409,8 +411,16 @@ const SmartSkuPicker = forwardRef<SmartSkuPickerHandle, SmartSkuPickerProps>(
                           {product.display_name}
                         </p>
                         <p className="mt-0.5 text-[11px] text-slate-500">
-                          ราคา {formatMoney(product.unit_price)} ฿ · ต้นทุน{" "}
-                          {formatMoney(product.cost_price)} ฿
+                          {mode === "purchases" ? (
+                            <>
+                              ตามบิล {formatMoney(product.base_inc_vat_price ?? product.cost_price)} ฿ · ทุนก่อน VAT{" "}
+                              {formatMoney(product.base_net_cost_ex_vat ?? product.cost_price)} ฿
+                            </>
+                          ) : (
+                            <>
+                              ราคา {formatMoney(product.unit_price)} ฿ · ต้นทุน {formatMoney(product.cost_price)} ฿
+                            </>
+                          )}
                           {product.base_uom ? ` · ${product.base_uom}` : ""}
                         </p>
                       </div>

@@ -39,10 +39,11 @@ const THAI_MONTH_LABELS: Record<number, string> = {
 };
 
 function formatThaiBaht(value: number): string {
-  return new Intl.NumberFormat("th-TH", {
-    style: "currency",
-    currency: "THB",
-  }).format(Number.isFinite(value) ? value : 0);
+  const amount = Number.isFinite(value) ? value : 0;
+  return `฿${new Intl.NumberFormat("th-TH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount)}`;
 }
 
 function parseMonthParam(raw?: string): string {
@@ -81,8 +82,7 @@ export default async function ProfitAnalysisPage({ searchParams }: PageProps) {
             วิเคราะห์กำไร (Profit Analysis)
           </h1>
           <p className="text-slate-500">
-            KPI รายเดือน + กำไรแยกตามบิลขาย · Actual Cost = เสื้อเปล่า + ค่าแรง
-            งานบริการ
+            True Net Profit = Net Revenue - ต้นทุนเสื้อ/วัตถุดิบผลิต - ค่าแรงบริการ - OPEX
           </p>
         </div>
 

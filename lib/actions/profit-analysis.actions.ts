@@ -6,6 +6,7 @@
  * Types live in `@/types/profit-analysis` (never export types from this file).
  */
 
+import { getErpFinancialKpis } from "@/app/actions/dashboard";
 import { createClient } from "@/lib/supabase/server-admin";
 import type {
   ProfitAnalysisDashboardResult,
@@ -37,6 +38,17 @@ function normalizeProfitMonth(rawMonth?: string | null): string {
   return trimmed;
 }
 
+function monthInclusiveBounds(month: string): { start: string; end: string } {
+  const [yearStr, monthStr] = month.split("-");
+  const year = Number(yearStr);
+  const monthIndex = Number(monthStr);
+  const lastDay = new Date(year, monthIndex, 0).getDate();
+  return {
+    start: `${month}-01`,
+    end: `${month}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
+
 function monthDateBounds(month: string): { from: string; toExclusive: string } {
   const [yearStr, monthStr] = month.split("-");
   const year = Number(yearStr);
@@ -51,7 +63,12 @@ function emptyKpi(month: string): ProfitMonthKpi {
   return {
     profitMonth: month,
     revenue: 0,
+    platformFees: 0,
+    garmentCogs: 0,
     productCogs: 0,
+    bomMaterialCogs: 0,
+    consumablesCogs: 0,
+    serviceLaborCost: 0,
     wageCogs: 0,
     cogs: 0,
     grossProfit: 0,
@@ -68,35 +85,32 @@ export async function getMonthlyProfitKpi(
 ): Promise<{ data: ProfitMonthKpi; error: string | null }> {
   try {
     const profitMonth = normalizeProfitMonth(month);
-    const supabaseAdmin = createClient();
-
-    const { data, error } = await supabaseAdmin
-      .from("vw_monthly_profit_summary")
-      .select(
-        "profit_month, revenue, product_cogs, wage_cogs, cogs, gross_profit, opex, net_profit",
-      )
-      .eq("profit_month", profitMonth)
-      .maybeSingle();
-
-    if (error) {
-      console.error("[getMonthlyProfitKpi]", error.message);
-      return { data: emptyKpi(profitMonth), error: error.message };
+    const { start, end } = monthInclusiveBounds(profitMonth);
+    const kpis = await getErpFinancialKpis(start, end);
+    if (kpis.error) {
+      return { data: emptyKpi(profitMonth), error: kpis.error };
     }
-
-    if (!data) {
-      return { data: emptyKpi(profitMonth), error: null };
-    }
-
+    const directCogs = roundMoney(
+      kpis.garmentCogsExVat +
+        kpis.bomMaterialCogs +
+        kpis.directConsumablesCogs +
+        kpis.serviceLaborCost,
+    );
     return {
       data: {
         profitMonth,
-        revenue: roundMoney(toMoney(data.revenue)),
-        productCogs: roundMoney(toMoney(data.product_cogs)),
-        wageCogs: roundMoney(toMoney(data.wage_cogs)),
-        cogs: roundMoney(toMoney(data.cogs)),
-        grossProfit: roundMoney(toMoney(data.gross_profit)),
-        opex: roundMoney(toMoney(data.opex)),
-        netProfit: roundMoney(toMoney(data.net_profit)),
+        revenue: kpis.netRevenueExVat,
+        platformFees: kpis.platformFees,
+        garmentCogs: kpis.garmentCogsExVat,
+        productCogs: kpis.garmentCogsExVat,
+        bomMaterialCogs: kpis.bomMaterialCogs,
+        consumablesCogs: kpis.directConsumablesCogs,
+        serviceLaborCost: kpis.serviceLaborCost,
+        wageCogs: kpis.serviceLaborCost,
+        cogs: directCogs,
+        grossProfit: roundMoney(kpis.netRevenueExVat - directCogs),
+        opex: kpis.opexExpenses,
+        netProfit: kpis.trueNetProfit,
       },
       error: null,
     };

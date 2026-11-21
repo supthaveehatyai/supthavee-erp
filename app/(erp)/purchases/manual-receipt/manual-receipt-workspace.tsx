@@ -100,6 +100,8 @@ import { InventoryLandedCostCard } from "@/components/procurement/inventory-land
 import { MaterialPicker } from "@/components/procurement/material-picker";
 import { PurchaseUomCell } from "@/components/procurement/PurchaseUomCell";
 import { purchasePriceVarianceLabel } from "@/lib/materials/price-variance";
+import { billUnitPriceForVatMode } from "@/lib/products/invoice-price";
+import { recoverIncVatUnitPrice } from "@/lib/utils/purchase-tax";
 import { buildReceiptQtySummary } from "@/lib/utils/receipt-qty-groups";
 import {
   defaultPurchaseUom,
@@ -118,6 +120,12 @@ export type ManualReceiptLine = {
   name: string;
   qty: number;
   unit_cost: number;
+  /** ต้นทุนก่อน VAT จาก products.cost_price — ไม่ใช่ราคาหน้าบิล */
+  baseNetCostExVat?: number | null;
+  /** ราคาซื้อต่อหน่วยตามบิลเมื่อรวม VAT */
+  baseIncVatPrice?: number | null;
+  /** true เมื่อผู้ใช้แก้ราคาในแถวนี้เอง */
+  priceTouched?: boolean;
   purchaseUomCode: string;
   conversionFactor: number;
   isFoc: boolean;
@@ -173,6 +181,35 @@ function formatMoney(value: number): string {
 
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function catalogBillPrices(product: {
+  cost_price?: number | null;
+  base_net_cost_ex_vat?: number | null;
+  base_inc_vat_price?: number | null;
+}) {
+  const net = Number(product.base_net_cost_ex_vat ?? product.cost_price) || 0;
+  const inc =
+    Number(product.base_inc_vat_price) > 0
+      ? Number(product.base_inc_vat_price)
+      : recoverIncVatUnitPrice(net);
+  return { net, inc };
+}
+
+function repriceUntouchedLine(
+  line: ManualReceiptLine,
+  vatType: VatCalculationType,
+): ManualReceiptLine {
+  if (line.priceTouched || line.materialId || line.baseNetCostExVat == null) return line;
+  const net = Number(line.baseNetCostExVat) || 0;
+  const inc =
+    Number(line.baseIncVatPrice) > 0
+      ? Number(line.baseIncVatPrice)
+      : recoverIncVatUnitPrice(net);
+  return {
+    ...line,
+    unit_cost: roundMoney(billUnitPriceForVatMode(vatType, net, inc)),
+  };
 }
 
 export default function ManualReceiptWorkspace({
@@ -527,7 +564,15 @@ export default function ManualReceiptWorkspace({
           sku: product.sku,
           name: product.display_name,
           qty: 1,
-          unit_cost: roundMoney(Number(product.cost_price) || 0),
+          ...(() => {
+            const prices = catalogBillPrices(product);
+            return {
+              unit_cost: roundMoney(billUnitPriceForVatMode(vatType, prices.net, prices.inc)),
+              baseNetCostExVat: prices.net,
+              baseIncVatPrice: prices.inc,
+              priceTouched: false,
+            };
+          })(),
           purchaseUomCode: purchaseUom.uomCode,
           conversionFactor: purchaseUom.conversionFactor,
           isFoc: false,
@@ -588,7 +633,15 @@ export default function ManualReceiptWorkspace({
     >,
   ) {
     setLines((current) =>
-      current.map((row) => (row.key === key ? { ...row, ...patch } : row)),
+      current.map((row) =>
+        row.key === key
+          ? {
+              ...row,
+              ...patch,
+              priceTouched: patch.unit_cost != null ? true : row.priceTouched,
+            }
+          : row,
+      ),
     );
   }
 
@@ -741,6 +794,10 @@ export default function ManualReceiptWorkspace({
     if (vendorTierLocked && docType !== "AP_INV") setDocType("AP_INV");
     if ((vendorTierLocked || docType === "AP_INV") && vatType !== "NONE") setVatType("NONE");
   }, [vendorTierLocked, docType, vatType]);
+
+  useEffect(() => {
+    setLines((current) => current.map((line) => repriceUntouchedLine(line, vatType)));
+  }, [vatType]);
 
   useEffect(() => {
     if (vendorTierLocked || docType === "AP_INV" || taxModeLocked) return;
@@ -1103,7 +1160,7 @@ export default function ManualReceiptWorkspace({
                   หน่วยรับเข้า
                 </TableHead>
                 <TableHead className="h-auto w-[11%] px-2 py-2.5 text-right normal-case tracking-normal">
-                  ต้นทุน/หน่วย
+                  ราคาซื้อ/หน่วย (ตามบิล)
                 </TableHead>
                 <TableHead className="h-auto w-[5%] px-2 py-2.5 text-center normal-case tracking-normal">
                   ของแถม

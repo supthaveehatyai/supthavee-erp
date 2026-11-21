@@ -34,6 +34,8 @@ import {
 } from "@/lib/ai/ocr-quota";
 import { runGoodsReceiptOcr } from "@/lib/ai/goods-receipt-ocr";
 import { rememberVendorTaxInvoiceStatus } from "@/lib/actions/vendor-tax-invoice";
+import { stampProductInvoicePrices } from "@/lib/products/invoice-price";
+import { resolveBaseIncVatPrice } from "@/lib/utils/purchase-tax";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   DOCUMENT_TYPE_PREFIX,
@@ -313,6 +315,10 @@ export type ReceiptProductSummary = {
   tax_type: string | null;
   base_uom?: string | null;
   is_raw_material?: boolean | null;
+  /** ต้นทุนก่อน VAT — ห้ามใช้เป็นราคาช่องกรอกเมื่อบิลเป็น INC_VAT */
+  base_net_cost_ex_vat?: number;
+  /** ราคาซื้อต่อหน่วยตามหน้าบิล */
+  base_inc_vat_price?: number;
 };
 
 export type ReceiptMatchStatus = "matched" | "unmatched";
@@ -324,6 +330,11 @@ export type ReceiptLineRow = {
   raw_description: string | null;
   qty: number;
   unit_price: number;
+  /** ต้นทุนก่อน VAT ของ SKU ที่จับคู่ — ใช้สลับราคาตามบิลเมื่อยังไม่แก้ด้วยมือ */
+  baseNetCostExVat?: number | null;
+  baseIncVatPrice?: number | null;
+  /** ราคาจากกระดาษหรือที่ผู้ใช้แก้เอง ไม่ถูกสลับเมื่อเปลี่ยนโหมด VAT */
+  priceTouched?: boolean;
   discount_text: string;
   status: ReceiptMatchStatus;
   mappingId: string | null;
@@ -823,6 +834,7 @@ export async function matchReceiptItemsToProducts(
         raw_description: item.raw_description ?? null,
         qty,
         unit_price: Number(item.unit_price) || 0,
+        priceTouched: true,
         discount_text: item.discount_text ?? "",
         status: match ? "matched" : "unmatched",
         mappingId: match?.candidate.id ?? null,
@@ -1059,6 +1071,9 @@ export async function getInternalProductsForMatching(): Promise<GetInternalProdu
       size: string | null;
       tax_type: string | null;
       base_uom: string | null;
+      cost_price: number | null;
+      last_invoice_unit_price: number | null;
+      last_invoice_vat_mode: string | null;
       product_models:
         | { is_raw_material?: boolean | null; is_service?: boolean | null; tax_type?: string | null }
         | { is_raw_material?: boolean | null; is_service?: boolean | null; tax_type?: string | null }[]
@@ -1075,6 +1090,9 @@ export async function getInternalProductsForMatching(): Promise<GetInternalProdu
         size,
         tax_type,
         base_uom,
+        cost_price,
+        last_invoice_unit_price,
+        last_invoice_vat_mode,
         product_models!inner (
           is_raw_material,
           is_service,
@@ -1106,6 +1124,12 @@ export async function getInternalProductsForMatching(): Promise<GetInternalProdu
         tax_type: resolveProductTaxCode(row.tax_type, modelJoin?.tax_type),
         base_uom: row.base_uom ? String(row.base_uom) : null,
         is_raw_material: modelJoin?.is_raw_material === true,
+        base_net_cost_ex_vat: Number(row.cost_price) || 0,
+        base_inc_vat_price: resolveBaseIncVatPrice({
+          netCostExVat: Number(row.cost_price) || 0,
+          lastInvoiceUnitPrice: row.last_invoice_unit_price,
+          lastInvoiceVatMode: row.last_invoice_vat_mode,
+        }),
       } satisfies ReceiptProductSummary;
     });
 
@@ -2430,6 +2454,17 @@ export async function saveGoodsReceiptToLedger(
       }
     }
 
+    await stampProductInvoicePrices(supabaseAdmin, {
+      vatType: resolvedVatType,
+      documentId: headerId,
+      lines: productLines.map((line, index) => ({
+        productId: line.row.matchedProduct!.id,
+        invoiceUnitPrice: line.unitPrice,
+        exVatUnitCost: line.unitCostPrice,
+        sortOrder: index + 1,
+      })),
+    });
+
     const taxStatusWarning = await stampReceiptTaxInvoiceStatus(
       supabaseAdmin,
       headerId,
@@ -3240,6 +3275,17 @@ export async function saveManualGoodsReceipt(
           "บันทึกรับสินค้าแบบ Manual ไม่สำเร็จ",
       };
     }
+
+    await stampProductInvoicePrices(supabaseAdmin, {
+      vatType: resolvedVatType,
+      documentId: parsed.documentId,
+      lines: productReceiptLines.map((line) => ({
+        productId: line.product_id,
+        invoiceUnitPrice: line.unit_price,
+        exVatUnitCost: line.unit_cost,
+        sortOrder: line.sort_order,
+      })),
+    });
 
     if (materialReceiptLines.length > 0) {
       const materialError = await postMaterialPurchaseLines({

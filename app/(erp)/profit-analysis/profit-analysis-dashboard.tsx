@@ -88,7 +88,7 @@ function buildKpiCards(
       key: "revenue",
       label: "Revenue",
       value: formatted.revenue,
-      hint: "รายได้สุทธิ (Net Revenue) · ถอด VAT แล้ว",
+      hint: "รายได้สุทธิก่อน VAT · รวมมัดจำที่รับรู้ · หัก CN และค่าธรรมเนียมแพลตฟอร์ม",
       icon: <CircleDollarSign className="h-5 w-5" />,
       accent: "bg-blue-50 text-blue-700 border-blue-100",
     },
@@ -96,7 +96,7 @@ function buildKpiCards(
       key: "cogs",
       label: "Actual COGS",
       value: formatted.cogs,
-      hint: `เสื้อเปล่า ${formatThaiBaht(kpi.productCogs)} + ค่าแรง ${formatThaiBaht(kpi.wageCogs)}`,
+      hint: `เสื้อ ${formatThaiBaht(kpi.garmentCogs)} · วัตถุดิบ ${formatThaiBaht(kpi.bomMaterialCogs)} · สิ้นเปลือง ${formatThaiBaht(kpi.consumablesCogs)} · ค่าแรง ${formatThaiBaht(kpi.serviceLaborCost)}`,
       icon: <Package className="h-5 w-5" />,
       accent: "bg-amber-50 text-amber-800 border-amber-100",
     },
@@ -122,7 +122,7 @@ function buildKpiCards(
       key: "net",
       label: "Net Profit",
       value: formatted.netProfit,
-      hint: "กำไรสุทธิ = Gross Profit − OPEX",
+      hint: "True Net Profit = Net Revenue - ต้นทุนเสื้อ/วัตถุดิบผลิต - ค่าแรงบริการ - OPEX",
       icon: <TrendingDown className="h-5 w-5" />,
       accent: "bg-slate-50 text-slate-700 border-slate-200",
       valueClassName: moneyToneClass(kpi.netProfit),
@@ -138,8 +138,66 @@ export function ProfitAnalysisDashboard({
 }: ProfitAnalysisDashboardProps) {
   const cards = buildKpiCards(kpi, formatted);
 
+  const statement: Array<{ label: string; amount: number; emphasize?: boolean }> = [
+    {
+      label: "รายได้จากการขายสุทธิก่อน VAT (รวมรับรู้เงินมัดจำ หักใบลดหนี้ CN และค่าธรรมเนียมแพลตฟอร์ม)",
+      amount: kpi.revenue,
+    },
+    {
+      label: "หัก ต้นทุนเสื้อสำเร็จรูปซื้อมาขายไป (TAS 2 ก่อน VAT)",
+      amount: kpi.garmentCogs,
+    },
+    {
+      label: "หัก ต้นทุนวัตถุดิบการผลิต (ตัดตามสูตร BOM & เบิกหน้างาน)",
+      amount: kpi.bomMaterialCogs,
+    },
+    {
+      label: "หัก ต้นทุนวัสดุสิ้นเปลืองโรงงาน (สียางสกรีน / เคมีบล็อก / วัสดุไม่ผูก SKU สุทธิหลังหัก AP_CN)",
+      amount: kpi.consumablesCogs,
+    },
+    {
+      label: "หัก ต้นทุนค่าแรงงานบริการ (สกรีน / ปัก / บล็อก)",
+      amount: kpi.serviceLaborCost,
+    },
+    {
+      label: "หัก ค่าใช้จ่ายดำเนินงาน (OPEX)",
+      amount: kpi.opex,
+    },
+    {
+      label: "กำไรสุทธิที่แท้จริง (True Net Profit)",
+      amount: kpi.netProfit,
+      emphasize: true,
+    },
+  ];
+
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">สมการเดียวกับ Executive Dashboard</CardTitle>
+          <CardDescription>
+            ช่วง {monthLabel} · ตัวเลขจาก get_erp_financial_kpis_and_profit ชุดเดียวกับการ์ดกำไรสุทธิ
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {statement.map((line) => (
+            <div
+              key={line.label}
+              className={cn(
+                "flex items-start justify-between gap-4 rounded-lg px-3 py-2",
+                line.emphasize ? "bg-slate-900 text-white" : "bg-slate-50",
+              )}
+            >
+              <p className={cn("text-sm", line.emphasize ? "font-semibold" : "text-slate-700")}>
+                {line.label}
+              </p>
+              <p className={cn("shrink-0 text-sm font-semibold tabular-nums", line.emphasize ? moneyToneClass(line.amount) : "text-slate-900", line.emphasize && line.amount > 0 && "text-emerald-300", line.emphasize && line.amount < 0 && "text-red-300")}>
+                {formatThaiBaht(line.amount)}
+              </p>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
         {cards.map((card) => (
           <Card key={card.key} className={`border ${card.accent}`}>
@@ -273,8 +331,9 @@ export function ProfitAnalysisDashboard({
 }
 
 function formatThaiBaht(value: number): string {
-  return new Intl.NumberFormat("th-TH", {
-    style: "currency",
-    currency: "THB",
-  }).format(Number.isFinite(value) ? value : 0);
+  const amount = Number.isFinite(value) ? value : 0;
+  return `฿${new Intl.NumberFormat("th-TH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount)}`;
 }
