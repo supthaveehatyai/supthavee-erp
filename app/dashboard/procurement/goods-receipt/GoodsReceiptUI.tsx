@@ -61,7 +61,8 @@ import {
   type ReceiptProductSummary,
 } from "@/lib/actions/receipt";
 import { loadVendorUsesTemporaryBill } from "@/lib/actions/vendor-tax-invoice";
-import { confirmMaterialVendorMappingAction } from "@/lib/actions/materials";
+import { upsertMaterialVendorMappingAction } from "@/lib/actions/materials";
+import type { MaterialRecord } from "@/types/material";
 import { MaterialPicker } from "@/components/procurement/material-picker";
 import { purchasePriceVarianceLabel } from "@/lib/materials/price-variance";
 import { saveDocumentProcurementBills } from "@/lib/actions/procurement-bills";
@@ -411,7 +412,7 @@ export default function GoodsReceiptUI({
   const [editingRawKey, setEditingRawKey] = useState<string | null>(null);
   const [rawDraft, setRawDraft] = useState("");
   const [rematchingKey, setRematchingKey] = useState<string | null>(null);
-  const [overrideLineKey, setOverrideLineKey] = useState<string | null>(null);
+  const [editingLineIndex, setEditingLineIndex] = useState<number | null>(null);
   const [confirmingLineKey, setConfirmingLineKey] = useState<string | null>(
     null,
   );
@@ -652,6 +653,7 @@ export default function GoodsReceiptUI({
       setVatAmountTouched(false);
       setGrandTouched(false);
       setRows(reviewRows);
+      setEditingLineIndex(null);
       if ((parsed.freightCost ?? 0) > 0) {
         setFreightCostInput((current) => {
           const next = roundMoney2(
@@ -830,17 +832,85 @@ export default function GoodsReceiptUI({
     toast.message("ยังไม่พบคู่ที่ตรงกัน — ข้อความที่แก้แล้วพร้อมให้กด Confirm");
   }
 
-  function beginSkuOverride(row: ReceiptLineRow) {
-    setOverrideLineKey(row.lineKey);
-    setDraftProductByLineKey((current) => ({
-      ...current,
-      [row.lineKey]: row.matchedProduct?.id ?? "",
-    }));
+  function toggleLineRematch(index: number) {
+    const row = rows[index];
+    if (row) {
+      setDraftProductByLineKey((current) => ({
+        ...current,
+        [row.lineKey]: row.matchedProduct?.id ?? current[row.lineKey] ?? "",
+      }));
+    }
+    setEditingLineIndex((current) => (current === index ? null : index));
   }
 
-  function cancelSkuOverride(lineKey: string) {
-    setOverrideLineKey((current) => (current === lineKey ? null : current));
-    handleClearDraft(lineKey);
+  function clearLineMatch(index: number) {
+    setRows((current) =>
+      current.map((row, rowIndex) =>
+        rowIndex === index
+          ? {
+              ...row,
+              status: "unmatched",
+              mappingId: null,
+              matchedProduct: null,
+              matchedMaterial: null,
+              matchTier: null,
+              similarityScore: null,
+            }
+          : row,
+      ),
+    );
+    setEditingLineIndex(null);
+  }
+
+  function applyMaterialSelection(index: number, material: MaterialRecord) {
+    const source = rows[index];
+    if (!source) return;
+    const keepPrice = Number(source.unit_price) !== 0;
+    const nextPrice = keepPrice ? source.unit_price : material.referencePurchasePrice;
+    setRows((current) => {
+      const next = current.map((row, rowIndex) => {
+        if (rowIndex !== index) return row;
+        return {
+          ...row,
+          status: "matched" as const,
+          mappingId: null,
+          matchedProduct: null,
+          matchedMaterial: {
+            id: material.id,
+            materialCode: material.materialCode,
+            materialName: material.materialName,
+            purchaseUom: material.purchaseUom,
+            usageUom: material.usageUom,
+            uomConversionFactor: material.uomConversionFactor,
+            referencePurchasePrice: material.referencePurchasePrice,
+          },
+          matchTier: "EXACT" as const,
+          purchaseUomCode: material.purchaseUom || row.purchaseUomCode,
+          conversionFactor:
+            material.uomConversionFactor > 0 ? material.uomConversionFactor : 1,
+          unit_price: nextPrice,
+          qty: row.qty,
+          totalAmountManual: keepPrice ? row.totalAmountManual : false,
+        };
+      });
+      return keepPrice
+        ? next
+        : applyApportionedTotals(next, billDiscountText, calcMode, pennyDelta);
+    });
+    setEditingLineIndex(null);
+    void upsertMaterialVendorMappingAction({
+      contactId: vendorId || null,
+      rawVendorCode: source.raw_vendor_sku || "",
+      rawVendorDesc: source.raw_description || "",
+      materialId: material.id,
+      lastUnitPrice: Number(nextPrice) || material.referencePurchasePrice,
+    }).then((result) => {
+      if (!result.success) {
+        toast.error(result.error ?? "บันทึกความจำรหัสผู้ขายไม่สำเร็จ");
+        return;
+      }
+      toast.success(`จับคู่ ${material.materialCode} ${material.materialName} แล้ว`);
+    });
   }
 
   /** "Confirm Mapping" — saves the latest trimmed `raw_vendor_sku`, then refreshes the row. */
@@ -899,6 +969,7 @@ export default function GoodsReceiptUI({
         status: "matched" as const,
         mappingId: result.mappingId,
         matchedProduct: result.product,
+        matchedMaterial: sameConfirmedLine ? null : item.matchedMaterial,
         matchTier: "EXACT" as const,
         similarityScore: 1,
       };
@@ -910,7 +981,7 @@ export default function GoodsReceiptUI({
       for (const lineKey of siblingKeys) delete next[lineKey];
       return next;
     });
-    setOverrideLineKey((current) => (current === row.lineKey ? null : current));
+    setEditingLineIndex(null);
     if (editingRawKey === row.lineKey) setEditingRawKey(null);
     toast.success(
       siblingKeys.size > 0
@@ -1015,7 +1086,7 @@ export default function GoodsReceiptUI({
       ),
     );
     if (editingRawKey === lineKey) setEditingRawKey(null);
-    if (overrideLineKey === lineKey) setOverrideLineKey(null);
+    setEditingLineIndex(null);
     setDraftProductByLineKey((current) => {
       const next = { ...current };
       delete next[lineKey];
@@ -1900,7 +1971,6 @@ export default function GoodsReceiptUI({
                   {rows.map((row, index) => {
                     const isMatched = row.status === "matched";
                     const isFuzzy = isMatched && row.matchTier === "FUZZY";
-                    const isOverriding = overrideLineKey === row.lineKey;
                     const isEditingRaw = editingRawKey === row.lineKey;
                     const isBusy =
                       confirmingLineKey === row.lineKey || rematchingKey === row.lineKey;
@@ -1922,8 +1992,10 @@ export default function GoodsReceiptUI({
                     const uom = purchaseUoms.find(
                       (item) => item.uom_code === (row.purchaseUomCode || "PCS"),
                     );
-                    const showSkuPicker =
-                      !row.matchedMaterial && (!isMatched || !row.matchedProduct || isOverriding);
+                    const isEditingMatch = editingLineIndex === index;
+                    const hasMatch = Boolean(row.matchedMaterial || row.matchedProduct);
+                    const showInitialPicker = !hasMatch && !isEditingMatch;
+                    const showRematchBox = isEditingMatch;
                     const materialVariance = row.matchedMaterial
                       ? purchasePriceVarianceLabel(
                           row.matchedMaterial.referencePurchasePrice,
@@ -1936,7 +2008,7 @@ export default function GoodsReceiptUI({
                         key={row.lineKey}
                         className={cn(
                           "border-b transition-colors",
-                          showSkuPicker
+                          showInitialPicker || showRematchBox
                             ? "border-b-amber-200 border-l-4 border-l-amber-500 bg-amber-50/80"
                             : index % 2 === 0
                               ? "border-slate-200/80 bg-white hover:bg-blue-50/40"
@@ -1950,7 +2022,67 @@ export default function GoodsReceiptUI({
                         </TableCell>
 
                         <TableCell className="min-w-0 px-1.5 py-2 text-left">
-                          {showSkuPicker ? (
+                          {showRematchBox ? (
+                            <div className="space-y-2 rounded-xl border border-amber-200 bg-white p-2">
+                              <div className="flex justify-end">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 px-2 text-[11px]"
+                                  disabled={isBusy}
+                                  onClick={() => toggleLineRematch(index)}
+                                >
+                                  ✖ ยกเลิกเปลี่ยน
+                                </Button>
+                              </div>
+                              <MaterialPicker
+                                disabled={isBusy}
+                                title="🧵 เปลี่ยนเป็นวัตถุดิบ / วัสดุสิ้นเปลือง (mst_materials)"
+                                highlightMaterialId={row.matchedMaterial?.id ?? null}
+                                onSelect={(material) => applyMaterialSelection(index, material)}
+                              />
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-slate-800">
+                                  👕 เปลี่ยนเป็นสินค้าสำเร็จรูป (ค้นหา SKU ภายใน)
+                                </p>
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                  <div className="min-w-0 flex-1">
+                                    <InternalProductCombobox
+                                      products={getAvailableProductsForRow(row)}
+                                      value={draftProductId}
+                                      disabled={isBusy}
+                                      onChange={(productId) =>
+                                        handleDraftProductChange(row.lineKey, productId)
+                                      }
+                                      onCreateFullMatrix={() => handleOpenFullMatrixModal(row)}
+                                      onQuickCreate={() => handleOpenQuickCreate(row)}
+                                      placeholder="ค้นหา SKU ภายใน..."
+                                    />
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    className="h-8 shrink-0 bg-emerald-600 px-2 hover:bg-emerald-700"
+                                    disabled={!draftProductId || isBusy || !vendorId}
+                                    onClick={() => void handleConfirmMapping(row)}
+                                  >
+                                    {isBusy ? "..." : "Confirm"}
+                                  </Button>
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-6 px-2 text-[11px] text-red-700"
+                                disabled={isBusy}
+                                onClick={() => clearLineMatch(index)}
+                              >
+                                ล้างการจับคู่ (กลับเป็น UNMATCHED)
+                              </Button>
+                            </div>
+                          ) : showInitialPicker ? (
                             <div className="space-y-1.5">
                               <div className="flex min-w-0 items-center gap-1.5">
                                 <div className="min-w-0 flex-1">
@@ -1989,71 +2121,20 @@ export default function GoodsReceiptUI({
                                 >
                                   {isBusy ? "..." : "Confirm"}
                                 </Button>
-                                {isOverriding ? (
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 shrink-0 px-2"
-                                    disabled={isBusy}
-                                    onClick={() => cancelSkuOverride(row.lineKey)}
-                                  >
-                                    ยกเลิก
-                                  </Button>
-                                ) : null}
                               </div>
-                              {isOverriding ? null : (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-6 px-2 text-[11px]"
-                                  disabled={isBusy}
-                                  onClick={() => moveUnmatchedRowToOriginFreight(row)}
-                                >
-                                  ย้ายไปค่าส่งต้นทาง
-                                </Button>
-                              )}
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-6 px-2 text-[11px]"
+                                disabled={isBusy}
+                                onClick={() => moveUnmatchedRowToOriginFreight(row)}
+                              >
+                                ย้ายไปค่าส่งต้นทาง
+                              </Button>
                               <MaterialPicker
-                                disabled={isBusy || !vendorId}
-                                onSelect={(material) => {
-                                  void (async () => {
-                                    const typedSku = (
-                                      editingRawKey === row.lineKey ? rawDraft : row.raw_vendor_sku
-                                    ).trim();
-                                    const saved = await confirmMaterialVendorMappingAction({
-                                      contactId: vendorId,
-                                      rawVendorCode: typedSku || row.raw_vendor_sku,
-                                      rawVendorDesc: row.raw_description,
-                                      materialId: material.id,
-                                      lastUnitPrice: row.unit_price,
-                                    });
-                                    if (!saved.success || !saved.material) {
-                                      toast.error(saved.error ?? "จับคู่วัตถุดิบไม่สำเร็จ");
-                                      return;
-                                    }
-                                    const matched = saved.material;
-                                    setRows((current) =>
-                                      current.map((item) =>
-                                        item.lineKey === row.lineKey
-                                          ? {
-                                              ...item,
-                                              status: "matched",
-                                              mappingId: null,
-                                              matchedProduct: null,
-                                              matchedMaterial: matched,
-                                              matchTier: "EXACT",
-                                              purchaseUomCode: matched.purchaseUom,
-                                              conversionFactor: matched.uomConversionFactor,
-                                            }
-                                          : item,
-                                      ),
-                                    );
-                                    toast.success(
-                                      `จับคู่วัตถุดิบ ${matched.materialCode} แล้ว และจำรหัสผู้ขายไว้`,
-                                    );
-                                  })();
-                                }}
+                                disabled={isBusy}
+                                onSelect={(material) => applyMaterialSelection(index, material)}
                               />
                             </div>
                           ) : (
@@ -2103,10 +2184,10 @@ export default function GoodsReceiptUI({
                                 size="sm"
                                 className="h-6 shrink-0 px-2 text-[11px]"
                                 disabled={isBusy}
-                                onClick={() => beginSkuOverride(row)}
+                                onClick={() => toggleLineRematch(index)}
                               >
                                 <RefreshCw className="size-3" aria-hidden />
-                                เปลี่ยน
+                                🔄 เปลี่ยน
                               </Button>
                             </div>
                           )}

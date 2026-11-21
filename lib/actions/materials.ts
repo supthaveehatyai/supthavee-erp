@@ -262,6 +262,31 @@ export async function findMaterialMatchesForVendorCodes(
   return { matches, error: null };
 }
 
+export async function upsertMaterialVendorMappingAction(input: {
+  contactId?: string | null;
+  rawVendorCode?: string | null;
+  rawVendorDesc?: string | null;
+  materialId: string;
+  lastUnitPrice?: number | null;
+}): Promise<{ success: boolean; error: string | null }> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) return { success: false, error: owner.error };
+  const materialId = input.materialId.trim();
+  if (!materialId) return { success: false, error: "ไม่พบวัตถุดิบที่ต้องการจับคู่" };
+  const supabase = createSupabaseServerClient();
+  const { error } = await supabase.rpc("upsert_material_vendor_mapping", {
+    p_contact_id: input.contactId?.trim() || null,
+    p_raw_vendor_code: input.rawVendorCode?.trim() || "",
+    p_raw_vendor_desc: input.rawVendorDesc?.trim() || "",
+    p_material_id: materialId,
+    p_last_unit_price:
+      input.lastUnitPrice == null ? 0 : money(input.lastUnitPrice),
+  });
+  if (error) return { success: false, error: error.message };
+  revalidateMaterialSurfaces();
+  return { success: true, error: null };
+}
+
 export async function confirmMaterialVendorMappingAction(input: {
   contactId: string;
   rawVendorCode: string;

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { listMaterialCatalogAction, saveMaterialAction } from "@/lib/actions/materials";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import {
   MATERIAL_STOCK_MODES,
   MATERIAL_STOCK_MODE_LABELS,
@@ -12,17 +13,23 @@ import {
   type MaterialRecord,
   type MaterialStockMode,
 } from "@/types/material";
+import { cn } from "@/lib/utils";
 
 export function MaterialPicker({
   disabled = false,
   onSelect,
+  title = "🧵 เลือกจากทะเบียนวัตถุดิบ / วัสดุสิ้นเปลือง",
+  highlightMaterialId = null,
 }: {
   disabled?: boolean;
   onSelect: (material: MaterialRecord) => void;
+  title?: string;
+  highlightMaterialId?: string | null;
 }) {
   const [materials, setMaterials] = useState<MaterialRecord[]>([]);
   const [categories, setCategories] = useState<MaterialCategory[]>([]);
   const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
   const [openQuick, setOpenQuick] = useState(false);
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState("");
@@ -52,11 +59,25 @@ export function MaterialPicker({
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return materials;
-    return materials.filter((row) =>
-      `${row.materialCode} ${row.materialName} ${row.categoryName}`.toLowerCase().includes(needle),
-    );
-  }, [materials, query]);
+    const matched = needle
+      ? materials.filter((row) =>
+          `${row.materialCode} ${row.materialName} ${row.categoryName} ${row.purchaseUom}`
+            .toLowerCase()
+            .includes(needle),
+        )
+      : materials;
+    return [...matched].sort((left, right) => {
+      if (left.id === highlightMaterialId) return -1;
+      if (right.id === highlightMaterialId) return 1;
+      return left.materialCode.localeCompare(right.materialCode, "th");
+    });
+  }, [highlightMaterialId, materials, query]);
+
+  function choose(material: MaterialRecord) {
+    setQuery("");
+    setOpen(false);
+    onSelect(material);
+  }
 
   async function quickAdd() {
     setBusy(true);
@@ -81,7 +102,7 @@ export function MaterialPicker({
     toast.success("เพิ่มวัตถุดิบรายการใหม่แล้ว");
     setOpenQuick(false);
     await load();
-    onSelect({
+    choose({
       id: result.id,
       materialCode: code.trim().toUpperCase(),
       materialName: name.trim(),
@@ -104,33 +125,67 @@ export function MaterialPicker({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-sm font-semibold text-slate-800">🧵 เลือกจากทะเบียนวัตถุดิบ / วัสดุสิ้นเปลือง</p>
+        <p className="text-sm font-semibold text-slate-800">{title}</p>
         <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => setOpenQuick(true)}>
           + เพิ่มวัตถุดิบรายการใหม่ด่วน
         </Button>
       </div>
-      <Input
-        value={query}
-        disabled={disabled}
-        placeholder="ค้นรหัสหรือชื่อวัตถุดิบ"
-        onChange={(event) => setQuery(event.target.value)}
-      />
-      <select
-        disabled={disabled}
-        className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm"
-        value=""
-        onChange={(event) => {
-          const material = materials.find((row) => row.id === event.target.value);
-          if (material) onSelect(material);
-        }}
-      >
-        <option value="">เลือกวัตถุดิบเพื่อลงรายการรับเข้า</option>
-        {visible.map((row) => (
-          <option key={row.id} value={row.id}>
-            {row.materialCode} · {row.materialName} · {row.purchaseUom} · อ้างอิง {row.referencePurchasePrice.toLocaleString("th-TH")}
-          </option>
-        ))}
-      </select>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverAnchor asChild>
+          <Input
+            value={query}
+            disabled={disabled}
+            placeholder="พิมพ์รหัสหรือชื่อวัตถุดิบ เช่น น้ำเงิน หรือ MAT-INK-003"
+            onFocus={() => setOpen(true)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setOpen(true);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setOpen(false);
+            }}
+          />
+        </PopoverAnchor>
+        <PopoverContent
+          align="start"
+          sideOffset={4}
+          className="max-h-72 overflow-auto p-1"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
+          {visible.length === 0 ? (
+            <p className="px-3 py-4 text-center text-xs text-slate-500">ไม่พบวัตถุดิบที่ตรงกับคำค้น</p>
+          ) : (
+            visible.slice(0, 40).map((row) => {
+              const current = row.id === highlightMaterialId;
+              return (
+                <button
+                  key={row.id}
+                  type="button"
+                  className={cn(
+                    "flex w-full items-start justify-between gap-3 rounded-lg px-2 py-2 text-left text-xs hover:bg-slate-50",
+                    current && "bg-teal-50 ring-1 ring-teal-300",
+                  )}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => choose(row)}
+                >
+                  <span>
+                    <span className="font-mono font-semibold text-slate-800">{row.materialCode}</span>
+                    <span className="mt-0.5 block text-slate-700">{row.materialName}</span>
+                  </span>
+                  <span className="shrink-0 text-right text-slate-500">
+                    {current ? <span className="mb-0.5 block font-semibold text-teal-700">ปัจจุบัน</span> : null}
+                    <span className="block">{row.purchaseUom}</span>
+                    <span className="block">
+                      อ้างอิง {row.referencePurchasePrice.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </PopoverContent>
+      </Popover>
       {openQuick ? (
         <div className="grid gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 sm:grid-cols-2">
           <Input placeholder="รหัสวัสดุ" value={code} onChange={(event) => setCode(event.target.value)} />
