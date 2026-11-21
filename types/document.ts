@@ -650,6 +650,8 @@ export type PurchaseDocumentListItem = {
   doc_date: string;
   created_at: string;
   grand_total: number;
+  net_before_vat?: number | null;
+  vat_amount?: number | null;
   contact_id: string;
   vendor_name: string | null;
   bill_attachment_urls?: string[];

@@ -6,6 +6,7 @@ import {
   type GoodsReceiptDocType,
 } from "@/lib/constants/document";
 import { normalizeFreightTaxMode, isFreightTaxMode } from "@/lib/utils/dual-freight";
+import { purchaseTierForVendor } from "@/lib/utils/tax-invoice-status";
 import {
   normalizePurchaseTaxMode,
   purchaseTaxModeToVatType,
@@ -407,6 +408,26 @@ export async function getManualReceiptVendorContext(
     const products = productResult.products;
     const taxVotes = productResult.taxVotes;
 
+    const tierQuery = await (supabase as unknown as {
+      from: (table: "contacts") => {
+        select: (columns: "vendor_tax_tier") => {
+          eq: (column: "id", value: string) => {
+            maybeSingle: () => Promise<{
+              data: { vendor_tax_tier?: string | null } | null;
+              error: { message?: string } | null;
+            }>;
+          };
+        };
+      };
+    })
+      .from("contacts")
+      .select("vendor_tax_tier")
+      .eq("id", id)
+      .maybeSingle();
+    const vendorTaxTier = tierQuery.error
+      ? ""
+      : String((tierQuery.data as { vendor_tax_tier?: string | null } | null)?.vendor_tax_tier ?? "");
+    const tierLock = purchaseTierForVendor(vendorTaxTier);
     const historyType = String(historyResult.data?.doc_type ?? "");
     const historyVat = normalizePurchaseTaxMode(String(historyResult.data?.vat_type ?? ""));
     const productMode = majorityTax(taxVotes);
@@ -424,12 +445,16 @@ export async function getManualReceiptVendorContext(
 
     return {
       data: {
-        docType: isDocType(historyType) ? historyType : null,
-        vatType,
+        docType: tierLock ? "AP_INV" : isDocType(historyType) ? historyType : null,
+        vatType: tierLock ? "NONE" : vatType,
         freightTaxMode: isFreightTaxMode(String(freightRaw ?? ""))
           ? normalizeFreightTaxMode(freightRaw)
           : null,
-        source,
+        source: tierLock
+          ? tierLock.accountingTaxTier === "RECEIPT_1_2"
+            ? "ผู้จำหน่ายกลุ่ม 1.2 ใบรับเงิน — บันทึก AP_INV ไม่มี VAT"
+            : "ผู้จำหน่ายกลุ่ม 1.3 บิลภายใน — บันทึก AP_INV ไม่มี VAT"
+          : source,
         products,
       },
       error: null,

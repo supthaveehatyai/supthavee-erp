@@ -71,6 +71,7 @@ import {
   normalizeFreightTaxMode,
   type FreightTaxMode,
 } from "@/lib/utils/dual-freight";
+import { purchaseTierForVendor } from "@/lib/utils/tax-invoice-status";
 import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import {
   matchVendorSkuWithConfidence,
@@ -191,6 +192,37 @@ function createSupabaseAdminClient(): SupabaseClient {
       detectSessionInUrl: false,
     },
   });
+}
+
+async function readVendorPurchaseTier(
+  supabaseAdmin: SupabaseClient,
+  vendorId: string,
+): Promise<ReturnType<typeof purchaseTierForVendor>> {
+  const id = vendorId.trim();
+  if (!id) return null;
+  const { data, error } = await supabaseAdmin
+    .from("contacts")
+    .select("vendor_tax_tier")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) return null;
+  const tier = String((data as { vendor_tax_tier?: string | null } | null)?.vendor_tax_tier ?? "");
+  return purchaseTierForVendor(tier);
+}
+
+async function stampVendorPurchaseTier(
+  supabaseAdmin: SupabaseClient,
+  documentId: string,
+  accountingTaxTier: "RECEIPT_1_2" | "INTERNAL_1_3" | null,
+): Promise<void> {
+  if (!documentId || !accountingTaxTier) return;
+  const { error } = await supabaseAdmin
+    .from("documents")
+    .update({ accounting_tax_tier: accountingTaxTier } as never)
+    .eq("id", documentId);
+  if (error && !/accounting_tax_tier|42703|schema cache/i.test(error.message)) {
+    console.error("stampVendorPurchaseTier:", error.message);
+  }
 }
 
 function isMissingMappingColumn(
@@ -1683,13 +1715,13 @@ export async function saveGoodsReceiptToLedger(
     return { docHeaderId: null, docNo: null, error: "ไม่มีรายการให้บันทึกรับสินค้า" };
   }
 
-  const resolvedDocType: GoodsReceiptDocType = isGoodsReceiptDocType(docType)
+  let resolvedDocType: GoodsReceiptDocType = isGoodsReceiptDocType(docType)
     ? docType
     : "AP_TAX";
-  const resolvedVatType: VatCalculationType = isVatCalculationType(vatType)
+  let resolvedVatType: VatCalculationType = isVatCalculationType(vatType)
     ? vatType
     : "NONE";
-  const vatRate = resolvedVatType === "NONE" ? 0 : 7;
+  let vatRate = resolvedVatType === "NONE" ? 0 : 7;
 
   const badRow = rows.find(
     (row) => row.status !== "matched" || !row.mappingId || !row.matchedProduct,
@@ -1731,6 +1763,15 @@ export async function saveGoodsReceiptToLedger(
       };
     }
     const vendorId = [...vendorIds][0];
+    const vendorTier = await readVendorPurchaseTier(supabaseAdmin, vendorId);
+    if (vendorTier) {
+      resolvedDocType = vendorTier.docType;
+      resolvedVatType = vendorTier.vatType;
+      vatRate = 0;
+    } else if (resolvedDocType === "AP_INV") {
+      resolvedVatType = "NONE";
+      vatRate = 0;
+    }
 
     const qtyByLineKey = new Map(
       rows.map((row) => [row.lineKey, toNumeric14_4(row.qty)]),
@@ -1892,9 +1933,12 @@ export async function saveGoodsReceiptToLedger(
         ? roundMoney(Number(ledgerOverrides.grandTotal))
         : null;
 
-    const netBeforeVat = overrideNet ?? roundMoney(vatSummary.preVatAmount);
-    const vatAmountPersisted = overrideVat ?? roundMoney(vatSummary.vatAmount);
-    const grandTotal = overrideGrand ?? roundMoney(vatSummary.grandTotal);
+    const netBeforeVat =
+      resolvedDocType === "AP_INV" ? roundMoney(vatSummary.preVatAmount) : (overrideNet ?? roundMoney(vatSummary.preVatAmount));
+    const vatAmountPersisted =
+      resolvedDocType === "AP_INV" ? 0 : (overrideVat ?? roundMoney(vatSummary.vatAmount));
+    const grandTotal =
+      resolvedDocType === "AP_INV" ? roundMoney(vatSummary.grandTotal) : (overrideGrand ?? roundMoney(vatSummary.grandTotal));
     const totalAmountHeader =
       resolvedVatType === "INCLUSIVE"
         ? grandTotal
@@ -2161,6 +2205,7 @@ export async function saveGoodsReceiptToLedger(
 
     const headerId = String(createdDoc.id ?? "").trim();
     const persistedDocNo = String(createdDoc.doc_no ?? "").trim();
+    if (headerId) await stampVendorPurchaseTier(supabaseAdmin, headerId, vendorTier?.accountingTaxTier ?? null);
     if (!headerId || !persistedDocNo) {
       if (headerId) await rollbackOcrGoodsReceipt(supabaseAdmin, headerId);
       return {
@@ -2478,16 +2523,23 @@ export async function saveManualGoodsReceipt(
       ? input.docDate.trim()
       : new Date().toISOString().slice(0, 10);
 
-    const resolvedDocType: GoodsReceiptDocType = isGoodsReceiptDocType(
+    const vendorTier = await readVendorPurchaseTier(supabaseAdmin, vendorId);
+    let resolvedDocType: GoodsReceiptDocType = isGoodsReceiptDocType(
       String(input?.docType ?? "AP_TAX"),
     )
       ? (input.docType as GoodsReceiptDocType)
       : "AP_TAX";
-    const resolvedVatType: VatCalculationType = isVatCalculationType(
+    let resolvedVatType: VatCalculationType = isVatCalculationType(
       String(input?.vatType ?? "NONE"),
     )
       ? (input.vatType as VatCalculationType)
       : "NONE";
+    if (vendorTier) {
+      resolvedDocType = vendorTier.docType;
+      resolvedVatType = vendorTier.vatType;
+    } else if (resolvedDocType === "AP_INV") {
+      resolvedVatType = "NONE";
+    }
     const requestedStatus = String(input?.status ?? "").trim().toUpperCase();
     const payloadStatus: "DRAFT" | "ISSUED" | "PAID" =
       requestedStatus === "DRAFT" ||
@@ -2981,6 +3033,13 @@ export async function saveManualGoodsReceipt(
     );
 
     const parsed = parseManualGoodsReceiptRpc(rpcData);
+    if (parsed.documentId) {
+      await stampVendorPurchaseTier(
+        supabaseAdmin,
+        parsed.documentId,
+        vendorTier?.accountingTaxTier ?? null,
+      );
+    }
     if (rpcError || !parsed.success || !parsed.documentId || !parsed.docNo) {
       return {
         data: null,

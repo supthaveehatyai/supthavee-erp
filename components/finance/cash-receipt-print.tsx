@@ -42,7 +42,7 @@ export function CashReceiptPrintSet({
   return (
     <div className="cash-pack-print bg-white text-black">
       <section className="cash-cover">
-        <h2 className="text-center text-lg font-bold">รายงานบิลซื้อ (แบบไม่มี VAT) / ใบรับเงิน CA</h2>
+        <h2 className="text-center text-lg font-bold">ทะเบียนใบสำคัญรับเงิน / ใบรับเงินแนบบัตรประชาชน (RCV)</h2>
         <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
           <p>ชื่อผู้ประกอบการ {CASH_RECEIPT_COMPANY}</p>
           <p>เลขประจำตัวผู้เสียภาษีอากร {CASH_RECEIPT_TAX_ID}</p>
@@ -98,7 +98,7 @@ export function CashReceiptPrintSet({
 
       {bills.map((bill) => (
         <section key={`${bill.id}-receipt`} className="cash-receipt-sheet mt-8">
-          <h2 className="text-center text-2xl font-bold">ใบรับเงิน</h2>
+          <h2 className="text-center text-2xl font-bold">ใบสำคัญรับเงิน / ใบรับเงิน</h2>
           <div className="mt-4 grid grid-cols-2 gap-x-6 text-sm leading-7">
             <p>ผู้รับเงิน: {bill.vendorName}</p>
             <p>เลขที่: {bill.cashReceiptNo ?? "—"}</p>

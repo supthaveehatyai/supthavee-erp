@@ -18,7 +18,7 @@ export async function buildCashReceiptWorkbook(
   sellerMode: "name" | "cash",
 ): Promise<ExcelJS.Buffer> {
   const workbook = new ExcelJS.Workbook();
-  const cover = workbook.addWorksheet("รายงานสรุปใบรับเงิน_CA");
+  const cover = workbook.addWorksheet("ทะเบียนใบสำคัญรับเงิน_RCV");
   cover.addRow([
     "ลำดับที่",
     "วัน/เดือน/ปี",

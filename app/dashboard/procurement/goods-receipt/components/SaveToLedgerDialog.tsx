@@ -201,10 +201,18 @@ export default function SaveToLedgerDialog({
     };
   }, [open, vendorId]);
 
+  const vendorTierLocked =
+    vendorTaxTier === "INDIVIDUAL_ID_1_2" || vendorTaxTier === "INTERNAL_NO_ID_1_3";
   const nonVatPurchase = isNonVatPurchaseContext({
     docType,
     vendorTaxTier,
   });
+
+  useEffect(() => {
+    if (!open) return;
+    if (vendorTierLocked && docType !== "AP_INV") setDocType("AP_INV");
+    if ((vendorTierLocked || docType === "AP_INV") && vatType !== "NONE") setVatType("NONE");
+  }, [open, vendorTierLocked, docType, vatType]);
 
   useEffect(() => {
     if (!open) return;
@@ -245,8 +253,8 @@ export default function SaveToLedgerDialog({
       docNumber: docNumber.trim(),
       docDate: docDate.trim(),
       billDiscountText: billDiscountText.trim(),
-      docType,
-      vatType,
+      docType: vendorTierLocked ? "AP_INV" : docType,
+      vatType: vendorTierLocked || docType === "AP_INV" ? "NONE" : vatType,
       taxInvoiceStatus: nonVatPurchase ? "TAX_READY" : taxInvoiceStatus,
     });
   }
@@ -312,7 +320,7 @@ export default function SaveToLedgerDialog({
               id="save-ledger-doc-type"
               value={docType}
               onChange={(e) => setDocType(e.target.value as GoodsReceiptDocType)}
-              disabled={isSaving}
+              disabled={isSaving || vendorTierLocked}
               className={selectClassName}
             >
               {DOC_TYPE_OPTIONS.map((option) => (
@@ -328,7 +336,7 @@ export default function SaveToLedgerDialog({
               id="save-ledger-vat-type"
               value={vatType}
               onChange={(e) => setVatType(e.target.value as VatCalculationType)}
-              disabled={isSaving}
+              disabled={isSaving || vendorTierLocked || docType === "AP_INV"}
               className={selectClassName}
             >
               {VAT_OPTIONS.map((option) => (

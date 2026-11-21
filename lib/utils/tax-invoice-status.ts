@@ -59,6 +59,21 @@ export function isNonVatPurchaseContext(input: {
   return tier === "INDIVIDUAL_ID_1_2" || tier === "INTERNAL_NO_ID_1_3";
 }
 
+export function purchaseTierForVendor(vendorTaxTier: string | null | undefined): {
+  docType: "AP_INV";
+  vatType: "NONE";
+  accountingTaxTier: "RECEIPT_1_2" | "INTERNAL_1_3";
+} | null {
+  const tier = String(vendorTaxTier ?? "").trim();
+  if (tier === "INDIVIDUAL_ID_1_2") {
+    return { docType: "AP_INV", vatType: "NONE", accountingTaxTier: "RECEIPT_1_2" };
+  }
+  if (tier === "INTERNAL_NO_ID_1_3") {
+    return { docType: "AP_INV", vatType: "NONE", accountingTaxTier: "INTERNAL_1_3" };
+  }
+  return null;
+}
+
 export function roundTaxMoney(value: number): number {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return 0;

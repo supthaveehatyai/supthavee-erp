@@ -4492,6 +4492,8 @@ export async function getPurchaseDocuments(
         doc_date,
         created_at,
         grand_total,
+        net_before_vat,
+        vat_amount,
         contact_id,
         ${includeTier ? "accounting_tax_tier," : ""}
         ${includeTax ? "tax_invoice_status, tax_invoice_no," : ""}
@@ -4548,6 +4550,8 @@ export async function getPurchaseDocuments(
       doc_date: string;
       created_at: string;
       grand_total: number | null;
+      net_before_vat?: number | null;
+      vat_amount?: number | null;
       contact_id: string;
       tax_invoice_status?: string | null;
       tax_invoice_no?: string | null;
@@ -4588,6 +4592,8 @@ export async function getPurchaseDocuments(
         doc_date: row.doc_date as string,
         created_at: row.created_at as string,
         grand_total: Number(row.grand_total ?? 0),
+        net_before_vat: row.net_before_vat == null ? null : Number(row.net_before_vat),
+        vat_amount: row.vat_amount == null ? null : Number(row.vat_amount),
         contact_id: row.contact_id as string,
         vendor_name:
           (contact as { company_name?: string | null } | null)?.company_name ??

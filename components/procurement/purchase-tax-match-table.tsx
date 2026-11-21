@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { RotateCcw } from "lucide-react";
@@ -170,6 +170,7 @@ export function PurchaseTaxMatchTable({
   error: string | null;
 }) {
   const router = useRouter();
+  const [rows, setRows] = useState(documents);
   const [isPending, startTransition] = useTransition();
   const [isReverting, startRevert] = useTransition();
   const [filter, setFilter] = useState<"all" | "pending">("all");
@@ -183,14 +184,18 @@ export function PurchaseTaxMatchTable({
   const [adjustAp, setAdjustAp] = useState(false);
   const [file, setFile] = useState<File | null>(null);
 
+  useEffect(() => {
+    setRows(documents);
+  }, [documents]);
+
   const visible = useMemo(
     () =>
       filter === "pending"
-        ? documents.filter((doc) => doc.tax_invoice_status === "PENDING_TAX_INVOICE")
-        : documents,
-    [documents, filter],
+        ? rows.filter((doc) => doc.tax_invoice_status === "PENDING_TAX_INVOICE")
+        : rows,
+    [rows, filter],
   );
-  const selected = documents.filter((doc) => selectedIds.includes(doc.id));
+  const selected = rows.filter((doc) => selectedIds.includes(doc.id));
   const selectedVendorId = selected[0]?.contact_id ?? null;
   const deliveryTotal = roundTaxMoney(
     selected.reduce((sum, doc) => sum + Number(doc.grand_total || 0), 0),
@@ -204,7 +209,7 @@ export function PurchaseTaxMatchTable({
     if (doc.tax_invoice_status !== "PENDING_TAX_INVOICE") return;
     setSelectedIds((current) => {
       if (current.includes(doc.id)) return current.filter((id) => id !== doc.id);
-      const first = documents.find((item) => item.id === current[0]);
+      const first = rows.find((item) => item.id === current[0]);
       if (first && first.contact_id !== doc.contact_id) {
         toast.error("เลือกได้เฉพาะใบส่งของผู้จำหน่ายรายเดียวกัน");
         return current;
@@ -214,8 +219,8 @@ export function PurchaseTaxMatchTable({
   }
 
   function openMatch(ids: string[]) {
-    const rows = documents.filter((doc) => ids.includes(doc.id));
-    const sum = roundTaxMoney(rows.reduce((total, doc) => total + Number(doc.grand_total || 0), 0));
+    const picked = rows.filter((doc) => ids.includes(doc.id));
+    const sum = roundTaxMoney(picked.reduce((total, doc) => total + Number(doc.grand_total || 0), 0));
     const base = roundTaxMoney(sum / 1.07);
     setSelectedIds(ids);
     setTaxNo("");
@@ -399,7 +404,26 @@ export function PurchaseTaxMatchTable({
                       ) : null}
                     </div>
                     {(doc.doc_type === "AP_TAX" || doc.doc_type === "AP_INV" || doc.doc_type === "AP_CASH") ? (
-                      <PurchaseTaxTierSwitch documentId={doc.id} current={doc.accounting_tax_tier} />
+                      <PurchaseTaxTierSwitch
+                        documentId={doc.id}
+                        current={doc.accounting_tax_tier}
+                        onUpdated={(next) => {
+                          setRows((current) =>
+                            current.map((row) =>
+                              row.id === doc.id
+                                ? {
+                                    ...row,
+                                    accounting_tax_tier: next.tier,
+                                    grand_total: next.grandTotal ?? row.grand_total,
+                                    net_before_vat: next.netBeforeVat ?? row.net_before_vat,
+                                    vat_amount: next.vatAmount ?? row.vat_amount,
+                                  }
+                                : row,
+                            ),
+                          );
+                          router.refresh();
+                        }}
+                      />
                     ) : null}
                     <TaxInvoiceBadge doc={doc} onRevert={setRevertDoc} />
                   </TableCell>

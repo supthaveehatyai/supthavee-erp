@@ -694,12 +694,20 @@ export default function ManualReceiptWorkspace({
     setMixedTaxConfirmed(false);
   }, [conflictKey]);
 
+  const vendorTierLocked =
+    vendorTaxTier === "INDIVIDUAL_ID_1_2" || vendorTaxTier === "INTERNAL_NO_ID_1_3";
+
   useEffect(() => {
-    if (taxModeLocked) return;
+    if (vendorTierLocked && docType !== "AP_INV") setDocType("AP_INV");
+    if ((vendorTierLocked || docType === "AP_INV") && vatType !== "NONE") setVatType("NONE");
+  }, [vendorTierLocked, docType, vatType]);
+
+  useEffect(() => {
+    if (vendorTierLocked || docType === "AP_INV" || taxModeLocked) return;
     if (!taxConsensus.hasUnanimousConsensus || !taxConsensus.consensusTaxType) return;
     const nextVat = purchaseTaxModeToVatType(taxConsensus.consensusTaxType);
     if (nextVat !== vatType) setVatType(nextVat);
-  }, [taxConsensus, taxModeLocked, vatType]);
+  }, [taxConsensus, taxModeLocked, vatType, vendorTierLocked, docType]);
 
   function handleCalcModeChange(mode: VendorCalcMode) {
     setCalcMode(mode);
@@ -909,7 +917,7 @@ export default function ManualReceiptWorkspace({
                 id="manual-receipt-doc-type"
                 value={docType}
                 onChange={(e) => setDocType(e.target.value as GoodsReceiptDocType)}
-                disabled={isPending}
+                disabled={isPending || vendorTierLocked}
                 className={selectClassName}
               >
                 {DOC_TYPE_OPTIONS.map((option) => (
@@ -1278,7 +1286,7 @@ export default function ManualReceiptWorkspace({
                   setTaxModeLocked(true);
                   setVatType(purchaseTaxModeToVatType(event.target.value as PurchaseTaxMode));
                 }}
-                disabled={isPending}
+                disabled={isPending || vendorTierLocked || docType === "AP_INV"}
                 className={cn(selectClassName, "mt-1")}
               >
                 <option value="EXC_VAT">EXC_VAT — ภาษีนอก (+7% เพิ่มจากยอดบิล)</option>

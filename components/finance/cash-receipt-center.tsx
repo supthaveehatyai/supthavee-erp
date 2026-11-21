@@ -13,6 +13,12 @@ import { Label } from "@/components/ui/label";
 import { monthBounds, thaiMonthLabel, todayBillingIso } from "@/lib/utils/billing-period";
 import type { CashReceiptBill } from "@/types/cash-receipt";
 
+function receiptVoucherPrefix(isoDate: string): string {
+  const match = /^(\d{4})-(\d{2})/.exec(isoDate);
+  if (!match) return "RCV";
+  return `RCV-${match[1].slice(-2)}${match[2]}`;
+}
+
 function recentMonths(count: number): string[] {
   const current = todayBillingIso().slice(0, 7);
   const [yearText, monthText] = current.split("-");
@@ -36,7 +42,7 @@ export function CashReceiptCenter() {
   const [fromDate, setFromDate] = useState(initial?.from ?? todayBillingIso());
   const [toDate, setToDate] = useState(initial?.to ?? todayBillingIso());
   const [periodKey, setPeriodKey] = useState(todayBillingIso().slice(0, 7));
-  const [prefix, setPrefix] = useState("CA01");
+  const [prefix, setPrefix] = useState(() => receiptVoucherPrefix(initial?.from ?? todayBillingIso()));
   const [sellerMode, setSellerMode] = useState<"name" | "cash">("name");
   const [bills, setBills] = useState<CashReceiptBill[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -110,7 +116,7 @@ export function CashReceiptCenter() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">ชุดใบรับเงิน (กลุ่ม 1.2)</h1>
           <p className="text-sm text-slate-500">
-            บิลซื้อไม่มี VAT ที่แนบบัตรประชาชน — รันเลข CA พิมพ์ชุดส่งสำนักงานบัญชี และส่งออก Excel/CSV
+            บิลซื้อไม่มี VAT ที่แนบบัตรประชาชน — รันเลข RCV-YYMM-XXXX พิมพ์ชุดส่งสำนักงานบัญชี และส่งออก Excel/CSV
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -125,6 +131,7 @@ export function CashReceiptCenter() {
                   setPeriodKey(key);
                   setFromDate(bounds.from);
                   setToDate(bounds.to);
+                  setPrefix(receiptVoucherPrefix(bounds.from));
                 }}
                 className={`rounded-full border px-3 py-1 text-xs font-semibold ${
                   periodKey === key ? "border-blue-700 bg-blue-700 text-white" : "border-slate-200 bg-white"
@@ -138,7 +145,7 @@ export function CashReceiptCenter() {
         <div className="grid gap-3 md:grid-cols-4">
           <div className="space-y-1">
             <Label htmlFor="ca-from">ตั้งแต่วันที่</Label>
-            <Input id="ca-from" type="date" value={fromDate} onChange={(event) => { setPeriodKey("custom"); setFromDate(event.target.value); }} />
+            <Input id="ca-from" type="date" value={fromDate} onChange={(event) => { setPeriodKey("custom"); setFromDate(event.target.value); setPrefix(receiptVoucherPrefix(event.target.value)); }} />
           </div>
           <div className="space-y-1">
             <Label htmlFor="ca-to">ถึงวันที่</Label>
@@ -162,7 +169,7 @@ export function CashReceiptCenter() {
         </div>
         <div className="grid gap-2 lg:grid-cols-4">
           <Button type="button" disabled={busy != null} onClick={() => void generate()}>
-            {busy === "generate" ? "กำลังสร้างเลข..." : "⚡ 1. สร้างเลขที่ใบรับเงินอัตโนมัติ (CA01/0001...)"}
+            {busy === "generate" ? "กำลังสร้างเลข..." : `✨ 1. สร้างเลขที่ใบรับเงินอัตโนมัติ (${prefix}-0001...)`}
           </Button>
           <Button
             type="button"

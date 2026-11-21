@@ -40,9 +40,16 @@ export function AccountingTaxTierBadge({ tier }: { tier?: string | null }) {
 export function PurchaseTaxTierSwitch({
   documentId,
   current,
+  onUpdated,
 }: {
   documentId: string;
   current?: string | null;
+  onUpdated?: (next: {
+    tier: AccountingTaxTier;
+    grandTotal: number | null;
+    netBeforeVat: number | null;
+    vatAmount: number | null;
+  }) => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -61,6 +68,12 @@ export function PurchaseTaxTierSwitch({
         return;
       }
       setTier(target);
+      onUpdated?.({
+        tier: target,
+        grandTotal: result.grandTotal,
+        netBeforeVat: result.netBeforeVat,
+        vatAmount: result.vatAmount,
+      });
       toast.success(
         result.grandTotal == null
           ? "สลับประเภทบิลแล้ว"

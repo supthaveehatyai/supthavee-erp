@@ -60,6 +60,7 @@ import {
   type ReceiptLineRow,
   type ReceiptProductSummary,
 } from "@/lib/actions/receipt";
+import { loadVendorUsesTemporaryBill } from "@/lib/actions/vendor-tax-invoice";
 import { saveDocumentProcurementBills } from "@/lib/actions/procurement-bills";
 import { uploadProcurementBills } from "@/lib/procurement/upload-bill-files";
 import { normalizeOcrSkuText } from "@/lib/utils/ocr-sku";
@@ -363,6 +364,7 @@ export default function GoodsReceiptUI({
   const [aiDocType, setAiDocType] = useState<GoodsReceiptDocType>("AP_TAX");
   /** AI-classified VAT type — seeds Save to Ledger (human or product master can override). */
   const [aiVatType, setAiVatType] = useState<VatCalculationType>("NONE");
+  const [vendorTaxTier, setVendorTaxTier] = useState<string | null>(null);
   const [taxModeSource, setTaxModeSource] = useState<TaxModeSource>("ai");
   const [mixedTaxConfirmed, setMixedTaxConfirmed] = useState(false);
   /** User typed VAT Amount — keep that figure instead of the automatic 7%. */
@@ -461,6 +463,7 @@ export default function GoodsReceiptUI({
 
   function handleVendorChange(nextId: string) {
     setVendorId(nextId);
+    setVendorTaxTier(null);
     setCalcMode("LINE_2DEC");
     setPennyDelta(0);
     setRoundingGap(0);
@@ -468,6 +471,17 @@ export default function GoodsReceiptUI({
     setRows([]);
     setDraftProductByLineKey({});
     if (!nextId) return;
+    void loadVendorUsesTemporaryBill(nextId).then((result) => {
+      setVendorTaxTier(result.vendorTaxTier);
+      if (
+        result.vendorTaxTier === "INDIVIDUAL_ID_1_2" ||
+        result.vendorTaxTier === "INTERNAL_NO_ID_1_3"
+      ) {
+        setAiDocType("AP_INV");
+        setAiVatType("NONE");
+        setTaxModeSource("manual");
+      }
+    });
     void loadVendorRoundingCalcMode(nextId).then((result) => {
       if (!result.error) setCalcMode(result.mode);
     });
@@ -1442,7 +1456,19 @@ export default function GoodsReceiptUI({
     setMixedTaxConfirmed(false);
   }, [conflictKey]);
 
+  const vendorTierLocked =
+    vendorTaxTier === "INDIVIDUAL_ID_1_2" || vendorTaxTier === "INTERNAL_NO_ID_1_3";
+
   useEffect(() => {
+    if (vendorTierLocked && aiDocType !== "AP_INV") setAiDocType("AP_INV");
+    if ((vendorTierLocked || aiDocType === "AP_INV") && aiVatType !== "NONE") {
+      setAiVatType("NONE");
+      setTaxModeSource("manual");
+    }
+  }, [vendorTierLocked, aiDocType, aiVatType]);
+
+  useEffect(() => {
+    if (vendorTierLocked || aiDocType === "AP_INV") return;
     if (taxModeSource === "manual" || taxModeSource === "vat-input") return;
     if (!taxConsensus.hasUnanimousConsensus || !taxConsensus.consensusTaxType) return;
     const nextVat = purchaseTaxModeToVatType(taxConsensus.consensusTaxType);
@@ -1455,7 +1481,7 @@ export default function GoodsReceiptUI({
     setVatAmountTouched(false);
     setGrandTouched(false);
     setVatTotalsManual(false);
-  }, [aiVatType, taxConsensus, taxModeSource]);
+  }, [aiVatType, taxConsensus, taxModeSource, vendorTierLocked, aiDocType]);
 
   const canSaveToLedger =
     rows.length > 0 &&
@@ -1499,11 +1525,13 @@ export default function GoodsReceiptUI({
           0,
         ),
       );
+      const saveDocType = vendorTierLocked ? "AP_INV" : payload.docType;
+      const saveVatType = saveDocType === "AP_INV" ? "NONE" : payload.vatType;
       const saveVat = computeVendorPayable({
         goodsNet: saveGoodsNet,
         originFreight: freightCostNormalized,
         freightTaxMode,
-        vatType: payload.vatType,
+        vatType: saveVatType,
         manualVatAmount:
           vatAmountTouched && payload.vatType === "EXCLUSIVE"
             ? roundMoney2(Math.max(0, parseMoneyInput(vatAmountInput)))
@@ -1517,8 +1545,8 @@ export default function GoodsReceiptUI({
         payload.docNumber,
         payload.docDate,
         payload.billDiscountText || null,
-        payload.docType,
-        payload.vatType,
+        saveDocType,
+        saveVatType,
         null,
         {
           netBeforeVat: saveVat.preVatAmount,
@@ -2273,6 +2301,7 @@ export default function GoodsReceiptUI({
                   }
                   className="mt-1 h-9 w-full text-sm"
                   aria-label="โหมดภาษี"
+                  disabled={vendorTierLocked || aiDocType === "AP_INV"}
                 >
                   <option value="EXC_VAT">EXC_VAT — ภาษีนอก (+7% เพิ่มจากยอดบิล)</option>
                   <option value="INC_VAT">INC_VAT — ราคารวมภาษี (ถอด VAT 7% ในตัว)</option>

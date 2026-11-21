@@ -38,9 +38,15 @@ export async function generateTier12CashReceiptNumbersAction(payload: {
 }): Promise<{ success: boolean; error: string | null; generatedCount: number }> {
   const owner = await requireSessionUserId();
   if (!owner.ok) return { success: false, error: owner.error, generatedCount: 0 };
-  const prefix = payload.prefix.trim().toUpperCase() || "CA01";
-  if (!/^[A-Z0-9]{2,10}$/.test(prefix)) {
-    return { success: false, error: "รหัสนำหน้าใช้ได้เฉพาะ A-Z และตัวเลข ไม่เกิน 10 ตัว", generatedCount: 0 };
+  const fromMatch = /^(\d{4})-(\d{2})/.exec(payload.fromDate);
+  const defaultPrefix = fromMatch ? `RCV-${fromMatch[1].slice(-2)}${fromMatch[2]}` : "RCV";
+  const prefix = payload.prefix.trim().toUpperCase() || defaultPrefix;
+  if (!/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(prefix) || prefix.length < 2 || prefix.length > 16) {
+    return {
+      success: false,
+      error: "รหัสนำหน้าใช้รูปแบบ RCV-YYMM เช่น RCV-2610",
+      generatedCount: 0,
+    };
   }
   const supabase = createSupabaseServerClient();
   const { data, error } = await supabase.rpc("generate_tier_1_2_cash_receipt_numbers", {
@@ -61,26 +67,56 @@ export async function generateTier12CashReceiptNumbersAction(payload: {
 export async function convertPurchaseBillTaxModeAction(
   documentId: string,
   targetTier: "CORP_VAT" | "RECEIPT_1_2" | "INTERNAL_1_3",
-): Promise<{ success: boolean; error: string | null; grandTotal: number | null }> {
+): Promise<{
+  success: boolean;
+  error: string | null;
+  grandTotal: number | null;
+  netBeforeVat: number | null;
+  vatAmount: number | null;
+}> {
   const owner = await requireSessionUserId();
-  if (!owner.ok) return { success: false, error: owner.error, grandTotal: null };
+  if (!owner.ok) {
+    return { success: false, error: owner.error, grandTotal: null, netBeforeVat: null, vatAmount: null };
+  }
   const id = documentId.trim();
-  if (!id) return { success: false, error: "ไม่พบเอกสาร", grandTotal: null };
+  if (!id) {
+    return { success: false, error: "ไม่พบเอกสาร", grandTotal: null, netBeforeVat: null, vatAmount: null };
+  }
   if (!isAccountingTaxTier(targetTier)) {
-    return { success: false, error: "ประเภทบิลไม่ถูกต้อง", grandTotal: null };
+    return { success: false, error: "ประเภทบิลไม่ถูกต้อง", grandTotal: null, netBeforeVat: null, vatAmount: null };
   }
   const supabase = createSupabaseServerClient();
   const { data, error } = await supabase.rpc("convert_purchase_bill_tax_mode", {
     p_document_id: id,
     p_target_tier: targetTier,
   });
-  if (error) return { success: false, error: error.message, grandTotal: null };
+  if (error) {
+    return { success: false, error: error.message, grandTotal: null, netBeforeVat: null, vatAmount: null };
+  }
   const body = data as { new_grand_total?: number } | null;
+  const fresh = await supabase
+    .from("documents")
+    .select("grand_total, net_before_vat, vat_amount")
+    .eq("id", id)
+    .maybeSingle();
+  const row = fresh.data as {
+    grand_total?: number | null;
+    net_before_vat?: number | null;
+    vat_amount?: number | null;
+  } | null;
+  const grandTotal =
+    row?.grand_total == null
+      ? body?.new_grand_total == null
+        ? null
+        : Number(body.new_grand_total)
+      : Number(row.grand_total);
   revalidateTaxSurfaces();
   return {
     success: true,
     error: null,
-    grandTotal: body?.new_grand_total == null ? null : Number(body.new_grand_total),
+    grandTotal,
+    netBeforeVat: row?.net_before_vat == null ? grandTotal : Number(row.net_before_vat),
+    vatAmount: row?.vat_amount == null ? 0 : Number(row.vat_amount),
   };
 }
 
