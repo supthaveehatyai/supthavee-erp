@@ -40,6 +40,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { normalizeContactTaxId } from "@/lib/contacts/tax-id";
 import { cn } from "@/lib/utils";
 
 type ContactFormState = {
@@ -69,7 +70,7 @@ function toContactForm(contact: Contact): ContactFormState {
   const roles = normalizeContactRoles(contact.contact_roles);
   return {
     companyName: contact.company_name ?? "",
-    taxId: contact.tax_id ?? "",
+    taxId: normalizeContactTaxId(contact.tax_id ?? "").value,
     branchCode: contact.branch_code ?? "สำนักงานใหญ่",
     phone: contact.phone ?? "",
     address: contact.address ?? "",
@@ -128,6 +129,7 @@ export default function ManageContactDialog({
   const [persons, setPersons] = useState<ContactPersonRow[]>([]);
   const [personsError, setPersonsError] = useState("");
   const [formError, setFormError] = useState("");
+  const [taxIdWarning, setTaxIdWarning] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -135,6 +137,7 @@ export default function ManageContactDialog({
     if (!open || !contact) return;
     setTab("details");
     setContactForm(toContactForm(contact));
+    setTaxIdWarning(normalizeContactTaxId(contact.tax_id ?? "").warning);
     setPersonForm(emptyPersonForm());
     setFormError("");
     setPersonsError("");
@@ -485,12 +488,23 @@ export default function ManageContactDialog({
                     inputMode="numeric"
                     maxLength={20}
                     value={contactForm.taxId}
-                    onChange={(event) =>
-                      updateContactField("taxId", event.target.value)
-                    }
+                    onChange={(event) => {
+                      const next = normalizeContactTaxId(event.target.value);
+                      updateContactField("taxId", next.value);
+                      setTaxIdWarning(next.warning);
+                    }}
                     disabled={isSaving}
                     placeholder="เลขประจำตัว 13 หลัก"
                   />
+                  {taxIdWarning ? (
+                    <p
+                      className={`text-xs font-medium ${
+                        taxIdWarning.includes("เกิน") ? "text-red-700" : "text-orange-700"
+                      }`}
+                    >
+                      {taxIdWarning}
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="space-y-1.5">

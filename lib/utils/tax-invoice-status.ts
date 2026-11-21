@@ -50,6 +50,15 @@ export function suggestReceiptTaxInvoiceStatus(input: {
   return "TAX_READY";
 }
 
+export function isNonVatPurchaseContext(input: {
+  docType?: string | null;
+  vendorTaxTier?: string | null;
+}): boolean {
+  if (String(input.docType ?? "") === "AP_INV") return true;
+  const tier = String(input.vendorTaxTier ?? "").trim();
+  return tier === "INDIVIDUAL_ID_1_2" || tier === "INTERNAL_NO_ID_1_3";
+}
+
 export function roundTaxMoney(value: number): number {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return 0;

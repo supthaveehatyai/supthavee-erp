@@ -23,6 +23,7 @@ import { uploadProcurementBills } from "@/lib/procurement/upload-bill-files";
 import { BillAttachmentPicker } from "@/components/procurement/bill-attachment-picker";
 import { TaxInvoiceStatusPicker } from "@/components/procurement/tax-invoice-status-picker";
 import {
+  isNonVatPurchaseContext,
   suggestReceiptTaxInvoiceStatus,
   type ReceiptTaxInvoiceChoice,
 } from "@/lib/utils/tax-invoice-status";
@@ -213,6 +214,7 @@ export default function ManualReceiptWorkspace({
   const [taxStatusLocked, setTaxStatusLocked] = useState(false);
   const [vendorUsesTemporaryBill, setVendorUsesTemporaryBill] = useState(false);
   const [vendorDefaultTaxStatus, setVendorDefaultTaxStatus] = useState<string | null>(null);
+  const [vendorTaxTier, setVendorTaxTier] = useState<string | null>(null);
   const [vatType, setVatType] = useState<VatCalculationType>(
     cloneDraft?.vatType ?? "NONE",
   );
@@ -456,10 +458,12 @@ export default function ManualReceiptWorkspace({
     setTaxStatusLocked(false);
     setVendorUsesTemporaryBill(false);
     setVendorDefaultTaxStatus(null);
+    setVendorTaxTier(null);
     if (nextId) {
       void loadVendorUsesTemporaryBill(nextId).then((result) => {
         setVendorUsesTemporaryBill(result.usesTemporaryBill);
         setVendorDefaultTaxStatus(result.defaultTaxInvoiceStatus);
+        setVendorTaxTier(result.vendorTaxTier);
       });
     }
     if (!nextId) return;
@@ -632,7 +636,7 @@ export default function ManualReceiptWorkspace({
         carrierId: carrierId || null,
         carrierTrackingNo: carrierTrackingNo || null,
         status: "ISSUED",
-        taxInvoiceStatus,
+        taxInvoiceStatus: nonVatPurchase ? "TAX_READY" : taxInvoiceStatus,
         lines: lines.map((line, index) => ({
           product_id: line.product_id,
           qty: line.qty,
@@ -755,7 +759,16 @@ export default function ManualReceiptWorkspace({
     };
   }, [vendorId, documentRef, docDate]);
 
+  const nonVatPurchase = isNonVatPurchaseContext({
+    docType,
+    vendorTaxTier,
+  });
+
   useEffect(() => {
+    if (nonVatPurchase) {
+      setTaxInvoiceStatus("TAX_READY");
+      return;
+    }
     if (taxStatusLocked) return;
     setTaxInvoiceStatus(
       suggestReceiptTaxInvoiceStatus({
@@ -766,6 +779,7 @@ export default function ManualReceiptWorkspace({
       }),
     );
   }, [
+    nonVatPurchase,
     documentRef,
     selectedVendor?.company_name,
     vendorUsesTemporaryBill,
@@ -906,14 +920,20 @@ export default function ManualReceiptWorkspace({
               </select>
             </div>
             <div className="sm:col-span-2">
-              <TaxInvoiceStatusPicker
-                value={taxInvoiceStatus}
-                disabled={isPending}
-                onChange={(next) => {
-                  setTaxStatusLocked(true);
-                  setTaxInvoiceStatus(next);
-                }}
-              />
+              {nonVatPurchase ? (
+                <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
+                  ✅ เอกสาร Non-VAT (ตั้งหนี้และรับเข้าคลังตาม TAS 2 ทันที ไม่ต้องรอใบกำกับภาษีซื้อ)
+                </p>
+              ) : (
+                <TaxInvoiceStatusPicker
+                  value={taxInvoiceStatus}
+                  disabled={isPending}
+                  onChange={(next) => {
+                    setTaxStatusLocked(true);
+                    setTaxInvoiceStatus(next);
+                  }}
+                />
+              )}
             </div>
           </CardContent>
         </Card>

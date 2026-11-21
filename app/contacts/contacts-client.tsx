@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import VendorForm, { validateVendorOcrConfig } from "@/app/contacts/VendorForm";
+import { normalizeContactTaxId } from "@/lib/contacts/tax-id";
 import {
   CONTACT_ROLE_OPTIONS,
   contactHasRole,
@@ -382,6 +383,7 @@ export default function ContactsClient({
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [taxIdWarning, setTaxIdWarning] = useState<string | null>(null);
   const [form, setForm] = useState<ContactForm>(createEmptyForm);
   const [newVendorTier, setNewVendorTier] = useState<VendorTaxTier>("CORP_VAT");
   const [newIdCard, setNewIdCard] = useState<File | null>(null);
@@ -520,6 +522,7 @@ export default function ContactsClient({
   function openDialog() {
     setForm(createEmptyForm());
     setFormError("");
+    setTaxIdWarning(null);
     setIsDialogOpen(true);
   }
 
@@ -767,6 +770,7 @@ export default function ContactsClient({
       setContacts((current) => [result.data!, ...current]);
       setIsDialogOpen(false);
       setForm(createEmptyForm());
+      setTaxIdWarning(null);
       setNewVendorTier("CORP_VAT");
       setNewIdCard(null);
     } catch (error) {
@@ -1302,12 +1306,23 @@ export default function ContactsClient({
                         inputMode="numeric"
                         maxLength={20}
                         value={form.taxId}
-                        onChange={(event) =>
-                          updateForm("taxId", event.target.value)
-                        }
+                        onChange={(event) => {
+                          const next = normalizeContactTaxId(event.target.value);
+                          updateForm("taxId", next.value);
+                          setTaxIdWarning(next.warning);
+                        }}
                         placeholder="เลขประจำตัว 13 หลัก"
                         className={fieldClass}
                       />
+                      {taxIdWarning ? (
+                        <span
+                          className={`mt-1 block text-xs font-medium ${
+                            taxIdWarning.includes("เกิน") ? "text-red-700" : "text-orange-700"
+                          }`}
+                        >
+                          {taxIdWarning}
+                        </span>
+                      ) : null}
                     </label>
                     {(form.contactRoles.includes("Vendor") || form.contactRoles.includes("Technician")) ? (
                       <div className="space-y-2 sm:col-span-2">

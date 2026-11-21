@@ -21,6 +21,7 @@ export type CashReceiptBill = {
   discountAmount: number;
   goodsBase: number;
   vatPortion: number;
+  settlementMode: "โอน" | "สด";
   lines: CashReceiptLine[];
 };
 

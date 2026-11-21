@@ -25,24 +25,23 @@ export async function buildCashReceiptWorkbook(
     "เลขที่",
     "ชื่อผู้ขาย/รายการ",
     "เลขประจำตัวผู้เสียภาษีอากร",
-    "สถานประกอบการ",
+    "สถานประกอบการ (โอน/สด)",
     "รวมเงิน",
     "มูลค่าสินค้าหรือบริการ",
     "ภาษี",
   ]);
   styleHeader(cover.getRow(1));
   bills.forEach((bill, index) => {
-    const rowNumber = index + 2;
     cover.addRow([
       index + 1,
       bill.docDate,
       bill.cashReceiptNo ?? "",
       sellerMode === "cash" ? "ขายสด/ซื้อสด" : bill.vendorName,
       bill.vendorTaxId ?? "",
-      "สด",
+      bill.settlementMode,
       bill.grandTotal,
-      { formula: `ROUND(G${rowNumber}*100/107,2)` },
-      { formula: `G${rowNumber}-H${rowNumber}` },
+      bill.grandTotal,
+      0,
     ]);
   });
   const totalRow = bills.length + 2;

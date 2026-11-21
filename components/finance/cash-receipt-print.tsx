@@ -78,7 +78,7 @@ export function CashReceiptPrintSet({
                   {sellerMode === "cash" ? "ขายสด/ซื้อสด" : bill.vendorName}
                 </td>
                 <td className="border border-black px-1 py-1 text-center">{bill.vendorTaxId ?? ""}</td>
-                <td className="border border-black px-1 py-1 text-center">สด</td>
+                <td className="border border-black px-1 py-1 text-center">{bill.settlementMode}</td>
                 <td className="border border-black px-1 py-1 text-right">{money(bill.grandTotal)}</td>
                 <td className="border border-black px-1 py-1 text-right">{money(bill.goodsBase)}</td>
                 <td className="border border-black px-1 py-1 text-right">{money(bill.vatPortion)}</td>
@@ -105,6 +105,7 @@ export function CashReceiptPrintSet({
             <p>ที่อยู่: {bill.vendorAddress ?? "—"}</p>
             <p>วันที่: {thaiFullDate(bill.docDate)}</p>
             <p className="col-span-2">เลขที่ประจำตัวผู้เสียภาษี {bill.vendorTaxId ?? "—"}</p>
+            <p className="col-span-2">สถานประกอบการ (โอน/สด): {bill.settlementMode}</p>
           </div>
           <table className="mt-4 w-full border-collapse text-sm">
             <thead>

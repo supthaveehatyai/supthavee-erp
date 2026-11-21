@@ -32,20 +32,21 @@ function isMissingTaxInvoiceStore(error: { code?: string; message?: string } | n
 export async function loadVendorUsesTemporaryBill(vendorId: string): Promise<{
   usesTemporaryBill: boolean;
   defaultTaxInvoiceStatus: "TAX_READY" | "PENDING_TAX_INVOICE" | null;
+  vendorTaxTier: string | null;
   error: string | null;
 }> {
   const owner = await requireSessionUserId();
   if (!owner.ok) {
-    return { usesTemporaryBill: false, defaultTaxInvoiceStatus: null, error: owner.error };
+    return { usesTemporaryBill: false, defaultTaxInvoiceStatus: null, vendorTaxTier: null, error: owner.error };
   }
   const id = vendorId.trim();
-  if (!id) return { usesTemporaryBill: false, defaultTaxInvoiceStatus: null, error: null };
+  if (!id) return { usesTemporaryBill: false, defaultTaxInvoiceStatus: null, vendorTaxTier: null, error: null };
 
   try {
     const supabase = createSupabaseAdmin();
     const { data, error } = await supabase
       .from("contacts")
-      .select("company_name, pending_tax_invoice_default, default_tax_invoice_status")
+      .select("company_name, pending_tax_invoice_default, default_tax_invoice_status, vendor_tax_tier")
       .eq("id", id)
       .maybeSingle();
     if (error && /default_tax_invoice_status|42703|schema cache/i.test(error.message)) {
@@ -60,11 +61,12 @@ export async function loadVendorUsesTemporaryBill(vendorId: string): Promise<{
         return {
           usesTemporaryBill: status === "PENDING_TAX_INVOICE",
           defaultTaxInvoiceStatus: status,
+          vendorTaxTier: null,
           error: null,
         };
       }
       if (legacy.error) {
-        return { usesTemporaryBill: false, defaultTaxInvoiceStatus: null, error: legacy.error.message };
+        return { usesTemporaryBill: false, defaultTaxInvoiceStatus: null, vendorTaxTier: null, error: legacy.error.message };
       }
       const status = rememberedTaxStatus(
         legacy.data?.company_name,
@@ -75,6 +77,7 @@ export async function loadVendorUsesTemporaryBill(vendorId: string): Promise<{
       return {
         usesTemporaryBill: status === "PENDING_TAX_INVOICE",
         defaultTaxInvoiceStatus: status,
+        vendorTaxTier: null,
         error: null,
       };
     }
@@ -85,29 +88,33 @@ export async function loadVendorUsesTemporaryBill(vendorId: string): Promise<{
         return {
           usesTemporaryBill: status === "PENDING_TAX_INVOICE",
           defaultTaxInvoiceStatus: status,
+          vendorTaxTier: null,
           error: null,
         };
       }
-      return { usesTemporaryBill: false, defaultTaxInvoiceStatus: null, error: error.message };
+      return { usesTemporaryBill: false, defaultTaxInvoiceStatus: null, vendorTaxTier: null, error: error.message };
     }
     const row = data as {
       company_name?: string | null;
       pending_tax_invoice_default?: boolean | null;
       default_tax_invoice_status?: string | null;
+      vendor_tax_tier?: string | null;
     } | null;
     const status = rememberedTaxStatus(
       row?.company_name,
       row?.default_tax_invoice_status,
       row?.pending_tax_invoice_default,
     );
+    const vendorTaxTier = String(row?.vendor_tax_tier ?? "").trim() || null;
     return {
       usesTemporaryBill: status === "PENDING_TAX_INVOICE",
       defaultTaxInvoiceStatus: status,
+      vendorTaxTier,
       error: null,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "โหลดรูปแบบบิลผู้จำหน่ายไม่สำเร็จ";
-    return { usesTemporaryBill: false, defaultTaxInvoiceStatus: null, error: message };
+    return { usesTemporaryBill: false, defaultTaxInvoiceStatus: null, vendorTaxTier: null, error: message };
   }
 }
 

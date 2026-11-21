@@ -17,6 +17,7 @@ import type { GoodsReceiptDocType } from "@/lib/constants/document";
 import { VAT_OPTIONS } from "@/lib/constants/accounting";
 import type { VatCalculationType } from "@/lib/utils/document-summary";
 import {
+  isNonVatPurchaseContext,
   suggestReceiptTaxInvoiceStatus,
   type ReceiptTaxInvoiceChoice,
 } from "@/lib/utils/tax-invoice-status";
@@ -113,6 +114,7 @@ export default function SaveToLedgerDialog({
   const [taxStatusLocked, setTaxStatusLocked] = useState(false);
   const [loadedTemporaryBill, setLoadedTemporaryBill] = useState(vendorUsesTemporaryBill);
   const [loadedDefaultStatus, setLoadedDefaultStatus] = useState<string | null>(null);
+  const [vendorTaxTier, setVendorTaxTier] = useState<string | null>(null);
   const temporaryBillVendor = vendorUsesTemporaryBill || loadedTemporaryBill;
 
   const [duplicateCheck, setDuplicateCheck] = useState<{
@@ -137,6 +139,7 @@ export default function SaveToLedgerDialog({
       );
       setVatType(initialVatType);
       setTaxStatusLocked(false);
+      setVendorTaxTier(null);
       setTaxInvoiceStatus(
         suggestReceiptTaxInvoiceStatus({
           referenceNo: initialDocNumber,
@@ -191,14 +194,25 @@ export default function SaveToLedgerDialog({
       if (cancelled) return;
       setLoadedTemporaryBill(result.usesTemporaryBill);
       setLoadedDefaultStatus(result.defaultTaxInvoiceStatus);
+      setVendorTaxTier(result.vendorTaxTier);
     });
     return () => {
       cancelled = true;
     };
   }, [open, vendorId]);
 
+  const nonVatPurchase = isNonVatPurchaseContext({
+    docType,
+    vendorTaxTier,
+  });
+
   useEffect(() => {
-    if (!open || taxStatusLocked) return;
+    if (!open) return;
+    if (nonVatPurchase) {
+      setTaxInvoiceStatus("TAX_READY");
+      return;
+    }
+    if (taxStatusLocked) return;
     setTaxInvoiceStatus(
       suggestReceiptTaxInvoiceStatus({
         referenceNo: docNumber,
@@ -207,7 +221,15 @@ export default function SaveToLedgerDialog({
         defaultTaxInvoiceStatus: loadedDefaultStatus,
       }),
     );
-  }, [open, docNumber, vendorName, temporaryBillVendor, loadedDefaultStatus, taxStatusLocked]);
+  }, [
+    open,
+    nonVatPurchase,
+    docNumber,
+    vendorName,
+    temporaryBillVendor,
+    loadedDefaultStatus,
+    taxStatusLocked,
+  ]);
 
   const isDuplicate = duplicateCheck.isDuplicate;
   const canConfirm =
@@ -225,7 +247,7 @@ export default function SaveToLedgerDialog({
       billDiscountText: billDiscountText.trim(),
       docType,
       vatType,
-      taxInvoiceStatus,
+      taxInvoiceStatus: nonVatPurchase ? "TAX_READY" : taxInvoiceStatus,
     });
   }
 
@@ -267,14 +289,20 @@ export default function SaveToLedgerDialog({
         </div>
 
         <div className="mt-3">
-          <TaxInvoiceStatusPicker
-            value={taxInvoiceStatus}
-            disabled={isSaving}
-            onChange={(next) => {
-              setTaxStatusLocked(true);
-              setTaxInvoiceStatus(next);
-            }}
-          />
+          {nonVatPurchase ? (
+            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
+              ✅ เอกสาร Non-VAT (ตั้งหนี้และรับเข้าคลังตาม TAS 2 ทันที ไม่ต้องรอใบกำกับภาษีซื้อ)
+            </p>
+          ) : (
+            <TaxInvoiceStatusPicker
+              value={taxInvoiceStatus}
+              disabled={isSaving}
+              onChange={(next) => {
+                setTaxStatusLocked(true);
+                setTaxInvoiceStatus(next);
+              }}
+            />
+          )}
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-3">

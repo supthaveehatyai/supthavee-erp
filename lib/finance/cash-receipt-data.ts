@@ -5,9 +5,7 @@ const PURCHASE_TYPES = ["AP_INV", "AP_TAX"] as const;
 
 export function splitCashReceiptBase(grandTotal: number): { goodsBase: number; vatPortion: number } {
   const grand = Math.round((grandTotal + Number.EPSILON) * 100) / 100;
-  const goodsBase = Math.round(((grand * 100) / 107) * 100) / 100;
-  const vatPortion = Math.round((grand - goodsBase) * 100) / 100;
-  return { goodsBase, vatPortion };
+  return { goodsBase: grand, vatPortion: 0 };
 }
 
 export function isVendorTaxTier(value: string): value is "CORP_VAT" | "INDIVIDUAL_ID_1_2" | "INTERNAL_NO_ID_1_3" {
@@ -53,6 +51,28 @@ function money(value: number | string | null | undefined): number {
 function contactOf(row: LedgerRow) {
   const contact = Array.isArray(row.contacts) ? row.contacts[0] : row.contacts;
   return contact ?? null;
+}
+
+async function loadSettlementModes(
+  supabase: SupabaseClient,
+  documentIds: string[],
+): Promise<Map<string, "โอน" | "สด">> {
+  const modes = new Map<string, "โอน" | "สด">();
+  const ids = Array.from(new Set(documentIds.filter(Boolean)));
+  if (ids.length === 0) return modes;
+  const { data, error } = await supabase.rpc("get_ap_doc_settlement_modes", {
+    p_document_ids: ids,
+  });
+  if (error || data == null) return modes;
+  const rows = Array.isArray(data) ? data : [];
+  for (const row of rows) {
+    const record = row as { document_id?: string; id?: string; settlement_mode?: string };
+    const id = String(record.document_id ?? record.id ?? "").trim();
+    const mode = String(record.settlement_mode ?? "").trim();
+    if (!id) continue;
+    modes.set(id, mode === "โอน" ? "โอน" : "สด");
+  }
+  return modes;
 }
 
 function qualifies(row: LedgerRow): boolean {
@@ -120,6 +140,7 @@ export async function loadCashReceiptPack(
 
   const rows = ((data ?? []) as unknown as LedgerRow[]).filter(qualifies);
   const ids = rows.map((row) => row.id);
+  const settlementModes = await loadSettlementModes(supabase, ids);
   const linesByDoc = new Map<string, CashReceiptLine[]>();
   for (let index = 0; index < ids.length; index += 200) {
     const chunk = ids.slice(index, index + 200);
@@ -160,6 +181,7 @@ export async function loadCashReceiptPack(
       discountAmount: money(row.discount_amount),
       goodsBase: split.goodsBase,
       vatPortion: split.vatPortion,
+      settlementMode: settlementModes.get(row.id) ?? "สด",
       lines:
         lines.length > 0
           ? lines
