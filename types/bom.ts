@@ -61,3 +61,34 @@ export type RawMaterialModelOption = {
 export type SearchRawMaterialModelsResult =
   | { success: true; data: RawMaterialModelOption[] }
   | { success: false; error: string; data: RawMaterialModelOption[] };
+
+/** วัตถุดิบจาก mst_materials สำหรับสูตร product_model_bom_materials */
+export type BomMaterialOption = {
+  id: string;
+  materialCode: string;
+  materialName: string;
+  usageUom: string;
+  stockControlMode: string;
+  movingAvgUsageCost: number;
+};
+
+export type ModelMaterialBomLine = {
+  materialId: string;
+  materialCode: string;
+  materialName: string;
+  usageUom: string;
+  stockControlMode: string;
+  usageQtyPerUnit: number;
+  wastePct: number;
+  movingAvgUsageCost: number;
+};
+
+export type SaveModelMaterialBomLine = {
+  materialId: string;
+  usageQtyPerUnit: number;
+  wastePct: number;
+};
+
+export type BomPanelHandle = {
+  save: () => Promise<{ success: boolean; error: string | null }>;
+};

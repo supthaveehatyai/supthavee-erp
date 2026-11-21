@@ -2194,6 +2194,7 @@ type NestedProduct = {
 type NestedItemRow = {
   id: string;
   product_id: string | null;
+  item_nature?: string | null;
   description: string | null;
   qty: number | string | null;
   uom_used: string | null;
@@ -2345,6 +2346,7 @@ export async function getDocumentByNo(
         document_items!document_items_document_id_fkey (
           id,
           product_id,
+          item_nature,
           description,
           qty,
           uom_used,
@@ -2399,6 +2401,7 @@ export async function getDocumentByNo(
         error.code === "42703")
     ) {
       const legacySelect = selectSql
+        .replace(/\s*item_nature,\s*/g, "\n          ")
         .replace(/\s*mockup_image_url,\s*/g, "\n          ")
         .replace(/\s*production_status,\s*/g, "\n          ")
         .replace(/\s*is_sent_to_production,\s*/g, "\n          ")
@@ -2618,9 +2621,12 @@ export async function getDocumentByNo(
           model_short_name: model?.short_name?.trim() || null,
           category_name:
             unwrapJoin(model?.mst_categories)?.category_name?.trim() || null,
-          is_service_item: isBundleHeader
+          item_nature: String(row.item_nature ?? "").trim() || null,
+          is_service_item: String(row.item_nature ?? "") === "RAW_MATERIAL"
             ? false
-            : row.is_service_item === true || !row.product_id || isService,
+            : isBundleHeader
+              ? false
+              : row.is_service_item === true || !row.product_id || isService,
           mockup_image_url: row.mockup_image_url?.trim() || null,
           production_status: productionStatus,
           is_sent_to_production: isSentToProduction,

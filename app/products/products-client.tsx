@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -35,6 +36,7 @@ import ModelLoadCombobox from "./model-load-combobox";
 import { ProductMatrixManufacturedToggle, ProductMatrixRawMaterialToggle, ProductMatrixServiceToggle, ProductMatrixVendorField } from "./ProductMatrixForm";
 import { ProductModelImageUpload } from "@/components/products/ProductModelImageUpload";
 import { BOMSetupPanel } from "@/components/products/BOMSetupPanel";
+import type { BomPanelHandle } from "@/types/bom";
 import {
   Tabs,
   TabsContent,
@@ -1083,6 +1085,7 @@ export default function ProductsClient() {
   const [editTarget, setEditTarget] = useState<ProductGroup | null>(null);
   const [editForm, setEditForm] = useState<BatchEditForm | null>(null);
   const [batchEditTab, setBatchEditTab] = useState<"general" | "bom">("general");
+  const bomPanelRef = useRef<BomPanelHandle>(null);
   const [editError, setEditError] = useState("");
   const [isEditSaving, setIsEditSaving] = useState(false);
   const [isEditConfirmOpen, setIsEditConfirmOpen] = useState(false);
@@ -2920,6 +2923,16 @@ export default function ProductsClient() {
       return;
     }
 
+    if (!editForm.isService && !editForm.isRawMaterial && bomPanelRef.current) {
+      const bomSaved = await bomPanelRef.current.save();
+      if (!bomSaved.success) {
+        setEditError(bomSaved.error ?? "บันทึกสูตรวัตถุดิบไม่สำเร็จ");
+        setIsEditSaving(false);
+        setIsEditConfirmOpen(false);
+        return;
+      }
+    }
+
     toast.success(
       `บันทึกการแก้ไขทั้งรุ่นแล้ว (${result.updatedSkuCount ?? 0} SKU)`,
     );
@@ -2988,6 +3001,12 @@ export default function ProductsClient() {
             >
               📦 จัดการชุดเซ็ตจับคู่ (Bundle Kits)
             </button>
+            <Link
+              href="/products/materials"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-4 text-sm font-semibold text-teal-900 transition hover:bg-teal-100"
+            >
+              🧵 วัตถุดิบ & วัสดุสิ้นเปลือง (Materials)
+            </Link>
             <button
               type="button"
               onClick={() => void openDialog(vendorIdFromQuery)}
@@ -5288,9 +5307,9 @@ export default function ProductsClient() {
                 </TabsContent>
 
                 {showBomTab ? (
-                  <TabsContent value="bom" className="mt-0">
-                    <BOMSetupPanel modelId={editModelId} />
-                  </TabsContent>
+                  <div className={batchEditTab === "bom" ? "mt-0" : "hidden"}>
+                    <BOMSetupPanel ref={bomPanelRef} modelId={editModelId} />
+                  </div>
                 ) : null}
               </Tabs>
             </div>

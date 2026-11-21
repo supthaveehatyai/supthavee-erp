@@ -13,9 +13,12 @@ import { createClient } from "@/lib/supabase/server-admin";
 import type {
   AddBOMItemPayload,
   BOMItemRow,
+  BomMaterialOption,
   GetBOMByModelIdResult,
+  ModelMaterialBomLine,
   MutateBOMItemResult,
   RawMaterialModelOption,
+  SaveModelMaterialBomLine,
   SearchRawMaterialModelsResult,
 } from "@/types/bom";
 
@@ -609,6 +612,268 @@ export async function removeBOMItem(bomId: string): Promise<MutateBOMItemResult>
       success: false,
       error:
         err instanceof Error ? err.message : "ลบรายการสูตรการผลิตไม่สำเร็จ",
+    };
+  }
+}
+
+const BOM_PICKER_MODES = ["BOM_BACKFLUSH", "SHOP_FLOOR_ISSUE"] as const;
+
+function sanitizeMaterialKeyword(keyword: string): string {
+  return keyword.trim().replace(/[%_,.()]/g, " ").replace(/\s+/g, " ").slice(0, 60);
+}
+
+function toBomNumber(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export async function searchBomMaterials(
+  keyword: string,
+): Promise<
+  | { success: true; data: BomMaterialOption[] }
+  | { success: false; error: string; data: BomMaterialOption[] }
+> {
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { success: false, error: owner.error, data: [] };
+    }
+
+    const supabaseAdmin = getSupabaseAdmin();
+    let query = supabaseAdmin
+      .from("mst_materials")
+      .select(
+        "id, material_code, material_name, usage_uom, stock_control_mode, moving_avg_usage_cost",
+      )
+      .eq("is_active", true)
+      .in("stock_control_mode", [...BOM_PICKER_MODES])
+      .order("material_code", { ascending: true })
+      .limit(40);
+
+    const safe = sanitizeMaterialKeyword(keyword);
+    if (safe) {
+      query = query.or(
+        `material_code.ilike.%${safe}%,material_name.ilike.%${safe}%`,
+      );
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      return {
+        success: false,
+        error: error.message ?? "ค้นหาวัตถุดิบไม่สำเร็จ",
+        data: [],
+      };
+    }
+
+    const options: BomMaterialOption[] = (data ?? []).map((row) => ({
+      id: String(row.id),
+      materialCode: String(row.material_code ?? "").trim(),
+      materialName: String(row.material_name ?? "").trim(),
+      usageUom: String(row.usage_uom ?? "").trim(),
+      stockControlMode: String(row.stock_control_mode ?? "").trim(),
+      movingAvgUsageCost: toBomNumber(row.moving_avg_usage_cost),
+    }));
+
+    return { success: true, data: options };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "ค้นหาวัตถุดิบไม่สำเร็จ",
+      data: [],
+    };
+  }
+}
+
+export async function getModelMaterialBom(
+  finishedModelId: string,
+): Promise<
+  | { success: true; data: ModelMaterialBomLine[] }
+  | { success: false; error: string; data: ModelMaterialBomLine[] }
+> {
+  try {
+    const id = finishedModelId?.trim() ?? "";
+    if (!id) {
+      return { success: false, error: "ไม่พบรหัสรุ่นสินค้า", data: [] };
+    }
+
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { success: false, error: owner.error, data: [] };
+    }
+
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: rows, error } = await supabaseAdmin
+      .from("product_model_bom_materials")
+      .select(
+        "material_id, usage_qty_per_unit, waste_pct, sort_order",
+      )
+      .eq("finished_model_id", id)
+      .order("sort_order", { ascending: true });
+
+    if (error) {
+      return {
+        success: false,
+        error: error.message ?? "ดึงสูตรวัตถุดิบไม่สำเร็จ",
+        data: [],
+      };
+    }
+
+    const materialIds = [
+      ...new Set(
+        (rows ?? [])
+          .map((row) => String(row.material_id ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
+    const materialById = new Map<
+      string,
+      {
+        materialCode: string;
+        materialName: string;
+        usageUom: string;
+        stockControlMode: string;
+        movingAvgUsageCost: number;
+      }
+    >();
+
+    if (materialIds.length > 0) {
+      const { data: materials, error: materialError } = await supabaseAdmin
+        .from("mst_materials")
+        .select(
+          "id, material_code, material_name, usage_uom, stock_control_mode, moving_avg_usage_cost",
+        )
+        .in("id", materialIds);
+
+      if (materialError) {
+        return {
+          success: false,
+          error: materialError.message ?? "ดึงข้อมูลวัตถุดิบไม่สำเร็จ",
+          data: [],
+        };
+      }
+
+      for (const material of materials ?? []) {
+        materialById.set(String(material.id), {
+          materialCode: String(material.material_code ?? "").trim(),
+          materialName: String(material.material_name ?? "").trim(),
+          usageUom: String(material.usage_uom ?? "").trim(),
+          stockControlMode: String(material.stock_control_mode ?? "").trim(),
+          movingAvgUsageCost: toBomNumber(material.moving_avg_usage_cost),
+        });
+      }
+    }
+
+    const data: ModelMaterialBomLine[] = (rows ?? []).map((row) => {
+      const materialId = String(row.material_id);
+      const material = materialById.get(materialId);
+      return {
+        materialId,
+        materialCode: material?.materialCode || "—",
+        materialName: material?.materialName || "วัตถุดิบ",
+        usageUom: material?.usageUom || "",
+        stockControlMode: material?.stockControlMode || "",
+        usageQtyPerUnit: toBomNumber(row.usage_qty_per_unit),
+        wastePct: toBomNumber(row.waste_pct),
+        movingAvgUsageCost: material?.movingAvgUsageCost ?? 0,
+      };
+    });
+
+    return { success: true, data };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "ดึงสูตรวัตถุดิบไม่สำเร็จ",
+      data: [],
+    };
+  }
+}
+
+export async function saveModelMaterialBom(
+  finishedModelId: string,
+  lines: SaveModelMaterialBomLine[],
+): Promise<{ success: boolean; error: string | null }> {
+  try {
+    const id = finishedModelId?.trim() ?? "";
+    if (!id) {
+      return { success: false, error: "ไม่พบรหัสรุ่นสินค้า" };
+    }
+
+    const owner = await requireSessionUserId();
+    if (!owner.ok) {
+      return { success: false, error: owner.error };
+    }
+
+    const prepared: Array<{
+      finished_model_id: string;
+      material_id: string;
+      usage_qty_per_unit: number;
+      waste_pct: number;
+      sort_order: number;
+    }> = [];
+    const seen = new Set<string>();
+
+    for (const line of lines) {
+      const materialId = line.materialId?.trim() ?? "";
+      const qty = Number(line.usageQtyPerUnit);
+      const waste = Number(line.wastePct);
+      if (!materialId) {
+        return { success: false, error: "มีรายการที่ยังไม่ได้เลือกวัตถุดิบ" };
+      }
+      if (seen.has(materialId)) {
+        return { success: false, error: "มีวัตถุดิบซ้ำในสูตรเดียวกัน" };
+      }
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return {
+          success: false,
+          error: "ปริมาณที่ใช้ต่อ 1 ตัว ต้องมากกว่า 0",
+        };
+      }
+      if (!Number.isFinite(waste) || waste < 0 || waste > 100) {
+        return { success: false, error: "เผื่อเสีย % ต้องอยู่ระหว่าง 0 ถึง 100" };
+      }
+      seen.add(materialId);
+      prepared.push({
+        finished_model_id: id,
+        material_id: materialId,
+        usage_qty_per_unit: Math.round(qty * 10000) / 10000,
+        waste_pct: Math.round(waste * 100) / 100,
+        sort_order: prepared.length + 1,
+      });
+    }
+
+    const supabaseAdmin = getSupabaseAdmin();
+    const { error: deleteError } = await supabaseAdmin
+      .from("product_model_bom_materials")
+      .delete()
+      .eq("finished_model_id", id);
+
+    if (deleteError) {
+      return {
+        success: false,
+        error: deleteError.message ?? "บันทึกสูตรวัตถุดิบไม่สำเร็จ",
+      };
+    }
+
+    if (prepared.length > 0) {
+      const { error: insertError } = await supabaseAdmin
+        .from("product_model_bom_materials")
+        .insert(prepared);
+
+      if (insertError) {
+        return {
+          success: false,
+          error: insertError.message ?? "บันทึกสูตรวัตถุดิบไม่สำเร็จ",
+        };
+      }
+    }
+
+    revalidatePath(PRODUCTS_PATH);
+    return { success: true, error: null };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "บันทึกสูตรวัตถุดิบไม่สำเร็จ",
     };
   }
 }

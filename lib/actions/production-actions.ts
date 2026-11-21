@@ -482,6 +482,99 @@ export async function getProductionJobs(): Promise<GetProductionJobsResult> {
   }
 }
 
+function bangkokDateStamp(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+/**
+ * ตัดวัตถุดิบตามสูตร product_model_bom_materials เมื่อปิดงานผลิต
+ * RPC กันการตัดซ้ำด้วย already_deducted
+ */
+export async function backflushBomForCompletedJob(
+  jobId: string,
+): Promise<{ success: boolean; error: string | null }> {
+  const id = jobId?.trim() ?? "";
+  if (!id) {
+    return { success: false, error: "ไม่พบรหัสงาน (jobId)" };
+  }
+
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data: job, error: jobError } = await supabaseAdmin
+    .from("production_jobs")
+    .select(
+      "id, job_no, finished_model_id, target_quantity, ref_document_id, ref_document_item_id",
+    )
+    .eq("id", id)
+    .maybeSingle();
+
+  if (jobError) {
+    return {
+      success: false,
+      error: jobError.message ?? "ตรวจสอบใบสั่งผลิตก่อนตัดวัตถุดิบไม่สำเร็จ",
+    };
+  }
+  if (!job) {
+    return { success: false, error: "ไม่พบใบสั่งผลิตในระบบ" };
+  }
+
+  const modelId = String(job.finished_model_id ?? "").trim();
+  const producedQty = Number(job.target_quantity);
+  if (!modelId || !Number.isFinite(producedQty) || producedQty <= 0) {
+    return { success: true, error: null };
+  }
+
+  const { data: model, error: modelError } = await supabaseAdmin
+    .from("product_models")
+    .select("is_manufactured")
+    .eq("id", modelId)
+    .maybeSingle();
+
+  if (modelError) {
+    return {
+      success: false,
+      error: modelError.message ?? "ตรวจสอบรุ่นสินค้าผลิตเองไม่สำเร็จ",
+    };
+  }
+  if (!model?.is_manufactured) {
+    return { success: true, error: null };
+  }
+
+  const refKey =
+    String(job.job_no ?? "").trim() ||
+    String(job.ref_document_item_id ?? "").trim() ||
+    id;
+  const documentId = String(job.ref_document_id ?? "").trim() || null;
+
+  const { data, error } = await supabaseAdmin.rpc(
+    "backflush_bom_for_production",
+    {
+      p_production_ref_key: refKey,
+      p_finished_model_id: modelId,
+      p_produced_qty: producedQty,
+      p_document_id: documentId,
+      p_tx_date: bangkokDateStamp(),
+    },
+  );
+
+  if (error) {
+    return {
+      success: false,
+      error: error.message ?? "ตัดวัตถุดิบตามสูตรการผลิตไม่สำเร็จ",
+    };
+  }
+
+  const payload = data as { already_deducted?: boolean } | null;
+  if (payload?.already_deducted) {
+    return { success: true, error: null };
+  }
+  return { success: true, error: null };
+}
+
 /**
  * อัปเดตสถานะใบสั่งผลิต
  * status ใน DB เป็น VARCHAR — validate ด้วย TS union เท่านั้น
@@ -568,6 +661,12 @@ export async function updateJobStatus(
       if (!materialResult.success) {
         await revertJobStatus();
         throw new Error(materialResult.error);
+      }
+
+      const bomBackflush = await backflushBomForCompletedJob(id);
+      if (!bomBackflush.success) {
+        await revertJobStatus();
+        throw new Error(bomBackflush.error ?? "ตัดวัตถุดิบตามสูตรการผลิตไม่สำเร็จ");
       }
 
       // SAP Backflush / Auto-Confirmation — Job COMPLETED → ยืนยัน Routing ที่ค้าง

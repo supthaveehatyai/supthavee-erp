@@ -61,6 +61,9 @@ import {
   type ReceiptProductSummary,
 } from "@/lib/actions/receipt";
 import { loadVendorUsesTemporaryBill } from "@/lib/actions/vendor-tax-invoice";
+import { confirmMaterialVendorMappingAction } from "@/lib/actions/materials";
+import { MaterialPicker } from "@/components/procurement/material-picker";
+import { purchasePriceVarianceLabel } from "@/lib/materials/price-variance";
 import { saveDocumentProcurementBills } from "@/lib/actions/procurement-bills";
 import { uploadProcurementBills } from "@/lib/procurement/upload-bill-files";
 import { normalizeOcrSkuText } from "@/lib/utils/ocr-sku";
@@ -1563,6 +1566,7 @@ export default function GoodsReceiptUI({
         },
         null,
         payload.taxInvoiceStatus,
+        vendorId,
       );
       if (!result.docHeaderId || !result.docNo) {
         toast.error(result.error ?? "บันทึกรับสินค้าเข้าคลังไม่สำเร็จ");
@@ -1918,7 +1922,14 @@ export default function GoodsReceiptUI({
                     const uom = purchaseUoms.find(
                       (item) => item.uom_code === (row.purchaseUomCode || "PCS"),
                     );
-                    const showSkuPicker = !isMatched || !row.matchedProduct || isOverriding;
+                    const showSkuPicker =
+                      !row.matchedMaterial && (!isMatched || !row.matchedProduct || isOverriding);
+                    const materialVariance = row.matchedMaterial
+                      ? purchasePriceVarianceLabel(
+                          row.matchedMaterial.referencePurchasePrice,
+                          row.unit_price,
+                        )
+                      : null;
 
                     return (
                       <TableRow
@@ -2003,6 +2014,47 @@ export default function GoodsReceiptUI({
                                   ย้ายไปค่าส่งต้นทาง
                                 </Button>
                               )}
+                              <MaterialPicker
+                                disabled={isBusy || !vendorId}
+                                onSelect={(material) => {
+                                  void (async () => {
+                                    const typedSku = (
+                                      editingRawKey === row.lineKey ? rawDraft : row.raw_vendor_sku
+                                    ).trim();
+                                    const saved = await confirmMaterialVendorMappingAction({
+                                      contactId: vendorId,
+                                      rawVendorCode: typedSku || row.raw_vendor_sku,
+                                      rawVendorDesc: row.raw_description,
+                                      materialId: material.id,
+                                      lastUnitPrice: row.unit_price,
+                                    });
+                                    if (!saved.success || !saved.material) {
+                                      toast.error(saved.error ?? "จับคู่วัตถุดิบไม่สำเร็จ");
+                                      return;
+                                    }
+                                    const matched = saved.material;
+                                    setRows((current) =>
+                                      current.map((item) =>
+                                        item.lineKey === row.lineKey
+                                          ? {
+                                              ...item,
+                                              status: "matched",
+                                              mappingId: null,
+                                              matchedProduct: null,
+                                              matchedMaterial: matched,
+                                              matchTier: "EXACT",
+                                              purchaseUomCode: matched.purchaseUom,
+                                              conversionFactor: matched.uomConversionFactor,
+                                            }
+                                          : item,
+                                      ),
+                                    );
+                                    toast.success(
+                                      `จับคู่วัตถุดิบ ${matched.materialCode} แล้ว และจำรหัสผู้ขายไว้`,
+                                    );
+                                  })();
+                                }}
+                              />
                             </div>
                           ) : (
                             <div className="flex items-start gap-1.5">
@@ -2014,10 +2066,20 @@ export default function GoodsReceiptUI({
                                 aria-hidden
                               />
                               <p className="min-w-0 flex-1 whitespace-normal break-words text-sm font-semibold leading-snug text-slate-900">
-                                {row.matchedProduct?.name}
+                                {row.matchedMaterial?.materialName ?? row.matchedProduct?.name}
                                 <span className="ml-1.5 inline-block rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-normal text-slate-600">
-                                  {row.matchedProduct?.sku}
+                                  {row.matchedMaterial?.materialCode ?? row.matchedProduct?.sku}
                                 </span>
+                                {row.matchedMaterial ? (
+                                  <span className="ml-1.5 inline-block rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-800">
+                                    MATCHED (วัตถุดิบ)
+                                  </span>
+                                ) : null}
+                                {materialVariance ? (
+                                  <span className="ml-1.5 inline-block rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-semibold text-orange-800">
+                                    {materialVariance}
+                                  </span>
+                                ) : null}
                                 {row.matchedProduct?.tax_type ? (
                                   <span
                                     className={cn(

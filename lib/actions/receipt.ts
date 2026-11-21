@@ -72,6 +72,7 @@ import {
   type FreightTaxMode,
 } from "@/lib/utils/dual-freight";
 import { purchaseTierForVendor } from "@/lib/utils/tax-invoice-status";
+import { findMaterialMatchesForVendorCodes, postMaterialPurchaseLines } from "@/lib/actions/materials";
 import { fetchAllPages } from "@/lib/supabase/fetch-all-pages";
 import {
   matchVendorSkuWithConfidence,
@@ -327,6 +328,15 @@ export type ReceiptLineRow = {
   status: ReceiptMatchStatus;
   mappingId: string | null;
   matchedProduct: ReceiptProductSummary | null;
+  matchedMaterial?: {
+    id: string;
+    materialCode: string;
+    materialName: string;
+    purchaseUom: string;
+    usageUom: string;
+    uomConversionFactor: number;
+    referencePurchasePrice: number;
+  } | null;
   /** EXACT / NORMALIZED stay green. FUZZY asks the user to check color and size. */
   matchTier?: OcrLineMatchTier | null;
   similarityScore?: number | null;
@@ -826,8 +836,33 @@ export async function matchReceiptItemsToProducts(
         conversionFactor,
         totalAmountManual: false,
         isFoc: false,
+        matchedMaterial: null,
       };
     });
+
+    const unmatchedCodes = rows
+      .filter((row) => row.status !== "matched")
+      .map((row) => row.raw_vendor_sku);
+    const materialLookup = await findMaterialMatchesForVendorCodes(
+      trimmedVendorId,
+      unmatchedCodes,
+    );
+    if (!materialLookup.error) {
+      for (const row of rows) {
+        if (row.status === "matched") continue;
+        const material =
+          materialLookup.matches[row.raw_vendor_sku.trim()] ??
+          materialLookup.matches[row.raw_vendor_sku.trim().toUpperCase()];
+        if (!material) continue;
+        row.status = "matched";
+        row.mappingId = null;
+        row.matchedProduct = null;
+        row.matchedMaterial = material;
+        row.matchTier = "EXACT";
+        row.purchaseUomCode = material.purchaseUom || row.purchaseUomCode;
+        row.conversionFactor = material.uomConversionFactor || row.conversionFactor;
+      }
+    }
 
     return { data: rows, error: null };
   } catch (err) {
@@ -1710,6 +1745,7 @@ export async function saveGoodsReceiptToLedger(
   } | null,
   billAttachments?: ProcurementBillSet | null,
   taxInvoiceStatus?: string | null,
+  vendorIdHint?: string | null,
 ): Promise<SaveGoodsReceiptToLedgerResult> {
   if (!Array.isArray(rows) || rows.length === 0) {
     return { docHeaderId: null, docNo: null, error: "ไม่มีรายการให้บันทึกรับสินค้า" };
@@ -1723,9 +1759,11 @@ export async function saveGoodsReceiptToLedger(
     : "NONE";
   let vatRate = resolvedVatType === "NONE" ? 0 : 7;
 
-  const badRow = rows.find(
-    (row) => row.status !== "matched" || !row.mappingId || !row.matchedProduct,
-  );
+  const badRow = rows.find((row) => {
+    if (row.status !== "matched") return true;
+    if (row.matchedMaterial?.id) return false;
+    return !row.mappingId || !row.matchedProduct;
+  });
   if (badRow) {
     return {
       docHeaderId: null,
@@ -1738,31 +1776,39 @@ export async function saveGoodsReceiptToLedger(
     const supabaseAdmin = createSupabaseAdminClient();
 
     // Resolve the vendor from each row's mapping — must all agree (one doc = one vendor).
-    const mappingIds = [...new Set(rows.map((row) => row.mappingId as string))];
-    const { data: mappings, error: mappingError } = await supabaseAdmin
-      .from("vendor_product_mapping")
-      .select("id, vendor_id")
-      .in("id", mappingIds);
+    const mappingIds = [
+      ...new Set(rows.map((row) => row.mappingId).filter((id): id is string => Boolean(id))),
+    ];
+    let vendorId = vendorIdHint?.trim() ?? "";
+    if (mappingIds.length > 0) {
+      const { data: mappings, error: mappingError } = await supabaseAdmin
+        .from("vendor_product_mapping")
+        .select("id, vendor_id")
+        .in("id", mappingIds);
 
-    if (mappingError || !mappings || mappings.length === 0) {
-      return {
-        docHeaderId: null,
-        docNo: null,
-        error: mappingError?.message ?? "ไม่พบข้อมูล mapping สำหรับรายการที่จับคู่ไว้",
-      };
-    }
+      if (mappingError || !mappings || mappings.length === 0) {
+        return {
+          docHeaderId: null,
+          docNo: null,
+          error: mappingError?.message ?? "ไม่พบข้อมูล mapping สำหรับรายการที่จับคู่ไว้",
+        };
+      }
 
-    const vendorIds = new Set(
-      (mappings as { id: string; vendor_id: string }[]).map((m) => m.vendor_id),
-    );
-    if (vendorIds.size > 1) {
-      return {
-        docHeaderId: null,
-        docNo: null,
-        error: "รายการในตารางมาจากผู้จำหน่ายมากกว่า 1 เจ้า — บันทึกเป็นเอกสารเดียวไม่ได้",
-      };
+      const vendorIds = new Set(
+        (mappings as { id: string; vendor_id: string }[]).map((m) => m.vendor_id),
+      );
+      if (vendorIds.size > 1) {
+        return {
+          docHeaderId: null,
+          docNo: null,
+          error: "รายการในตารางมาจากผู้จำหน่ายมากกว่า 1 เจ้า — บันทึกเป็นเอกสารเดียวไม่ได้",
+        };
+      }
+      vendorId = [...vendorIds][0] ?? "";
     }
-    const vendorId = [...vendorIds][0];
+    if (!vendorId) {
+      return { docHeaderId: null, docNo: null, error: "กรุณาเลือกผู้จำหน่ายก่อนบันทึกรับสินค้า" };
+    }
     const vendorTier = await readVendorPurchaseTier(supabaseAdmin, vendorId);
     if (vendorTier) {
       resolvedDocType = vendorTier.docType;
@@ -1984,16 +2030,26 @@ export async function saveGoodsReceiptToLedger(
     const issuedStatus = resolveIssuedDocumentStatus(resolvedDocType);
     const vendorInvoiceNote = `อ้างอิงบิลซัพพลายเออร์: ${docNo}`;
     const resolvedAttachmentUrl = attachmentUrl?.trim() || null;
+    const productLines = lines.filter(
+      (line) => line.row.matchedProduct?.id && !line.row.matchedMaterial?.id,
+    );
+    const materialLines = lines.filter((line) => Boolean(line.row.matchedMaterial?.id));
     const ledgerProductIds = [
-      ...new Set(lines.map((line) => line.row.matchedProduct!.id)),
+      ...new Set(productLines.map((line) => line.row.matchedProduct!.id)),
     ];
-    const { factors: uomFactorByProductId, error: uomFactorError } =
-      await loadUomConversionFactorByProductId(supabaseAdmin, ledgerProductIds);
-    if (uomFactorError) {
-      return { docHeaderId: null, docNo: null, error: uomFactorError };
+    let uomFactorByProductId = new Map<string, number>();
+    if (ledgerProductIds.length > 0) {
+      const loadedFactors = await loadUomConversionFactorByProductId(
+        supabaseAdmin,
+        ledgerProductIds,
+      );
+      if (loadedFactors.error) {
+        return { docHeaderId: null, docNo: null, error: loadedFactors.error };
+      }
+      uomFactorByProductId = loadedFactors.factors;
     }
 
-    const ledgerLines = lines.map((line) => {
+    const ledgerLines = productLines.map((line) => {
       const proratedFreight = proratedFreightByLineKey.get(line.row.lineKey) ?? 0;
       const landedUnitCost =
         landedUnitCostByLineKey.get(line.row.lineKey) ?? 0;
@@ -2013,7 +2069,7 @@ export async function saveGoodsReceiptToLedger(
       };
     });
 
-    const maTargets = lines.filter(
+    const maTargets = productLines.filter(
       (line) => !line.row.isFoc && line.row.matchedProduct?.id,
     );
     const maProductIds =
@@ -2121,12 +2177,13 @@ export async function saveGoodsReceiptToLedger(
     const paymentStatusSafe = paymentStatus || "UNPAID";
     const statusSafe = issuedStatus || "ISSUED";
     const destFreightPaidStatus = destFreightAmount > 0 ? "UNPAID" : "NONE";
-    const detailRows = lines.map((line, index) => {
+    const detailRows = productLines.map((line, index) => {
       const unitCostWithFreight =
         landedUnitCostByLineKey.get(line.row.lineKey) ?? line.unitCostPrice;
       const description = (
         line.row.raw_description ??
-        line.row.matchedProduct!.name ??
+        line.row.matchedProduct?.name ??
+        line.row.matchedMaterial?.materialName ??
         ""
       ).slice(0, 255);
       return {
@@ -2246,7 +2303,8 @@ export async function saveGoodsReceiptToLedger(
       };
     }
 
-    const { error: legacyDetailError } = await supabaseAdmin.from("doc_details").insert(
+    const { error: legacyDetailError } = detailRows.length
+      ? await supabaseAdmin.from("doc_details").insert(
       detailRows.map((line) => ({
         doc_header_id: headerId,
         product_id: line.product_id,
@@ -2259,7 +2317,8 @@ export async function saveGoodsReceiptToLedger(
         discount_amount: line.discount_amount,
         line_total: line.line_total,
       })),
-    );
+    )
+      : { error: null };
     if (legacyDetailError) {
       await rollbackOcrGoodsReceipt(supabaseAdmin, headerId);
       return {
@@ -2269,7 +2328,8 @@ export async function saveGoodsReceiptToLedger(
       };
     }
 
-    const { error: itemError } = await supabaseAdmin.from("document_items").insert(
+    const { error: itemError } = detailRows.length
+      ? await supabaseAdmin.from("document_items").insert(
       detailRows.map((line) => ({
         document_id: headerId,
         product_id: line.product_id,
@@ -2284,7 +2344,8 @@ export async function saveGoodsReceiptToLedger(
         prorated_freight: line.prorated_freight,
         sort_order: line.sort_order,
       })),
-    );
+    )
+      : { error: null };
     if (itemError) {
       await rollbackOcrGoodsReceipt(supabaseAdmin, headerId);
       return {
@@ -2292,6 +2353,29 @@ export async function saveGoodsReceiptToLedger(
         docNo: null,
         error: itemError.message ?? "บันทึกรายการ (document_items) ไม่สำเร็จ",
       };
+    }
+
+    if (materialLines.length > 0) {
+      const materialPost = await postMaterialPurchaseLines({
+        documentId: headerId,
+        docDate,
+        lines: materialLines.map((line, index) => ({
+          materialId: line.row.matchedMaterial!.id,
+          description:
+            line.row.matchedMaterial?.materialName ||
+            line.row.raw_description ||
+            line.row.raw_vendor_sku,
+          qty: line.qty,
+          unitPrice: line.unitPrice,
+          lineTotal: line.lineTotal,
+          purchaseUom: line.row.matchedMaterial?.purchaseUom || line.row.purchaseUomCode,
+          sortOrder: detailRows.length + index + 1,
+        })),
+      });
+      if (materialPost.error) {
+        await rollbackOcrGoodsReceipt(supabaseAdmin, headerId);
+        return { docHeaderId: null, docNo: null, error: materialPost.error };
+      }
     }
 
     const ledgerPayload = ledgerLines
@@ -2389,6 +2473,7 @@ export async function saveGoodsReceiptToLedger(
 
 export type ManualGoodsReceiptLineInput = {
   product_id: string;
+  material_id?: string | null;
   qty: number;
   /**
    * Gross unit price/cost as entered by staff (before VAT strip / bill discount).
@@ -2618,10 +2703,16 @@ export async function saveManualGoodsReceipt(
       return { data: null, error: "ไม่พบผู้จำหน่าย หรือถูกปิดใช้งาน" };
     }
 
-    const productIds = [
-      ...new Set(lines.map((line) => line.product_id.trim()).filter(Boolean)),
-    ];
-    const { data: products, error: productsError } = await supabaseAdmin
+    const materialInputs = lines.filter(
+      (line) => Boolean(line.material_id?.trim()) && !line.product_id?.trim(),
+    );
+    const productInputs = lines.filter((line) => Boolean(line.product_id?.trim()));
+    const productIds = [...new Set(productInputs.map((line) => line.product_id.trim()))];
+    if (productIds.length === 0 && materialInputs.length === 0) {
+      return { data: null, error: "กรุณาเพิ่มสินค้าหรือวัตถุดิบอย่างน้อย 1 รายการ" };
+    }
+    const { data: products, error: productsError } = productIds.length
+      ? await supabaseAdmin
       .from("products")
       .select(
         `
@@ -2635,7 +2726,8 @@ export async function saveManualGoodsReceipt(
         )
       `,
       )
-      .in("id", productIds);
+      .in("id", productIds)
+      : { data: [], error: null };
 
     if (productsError) {
       return { data: null, error: productsError.message };
@@ -2666,7 +2758,7 @@ export async function saveManualGoodsReceipt(
       }
     }
 
-    const preparedLines = lines.map((line, index) => {
+    const preparedLines = productInputs.map((line, index) => {
       const productId = line.product_id.trim();
       const product = productById.get(productId)!;
       const modelJoin = Array.isArray(product.product_models)
@@ -2697,8 +2789,30 @@ export async function saveManualGoodsReceipt(
             : index + 1;
         })(),
         is_service: modelJoin?.is_service === true,
+        material_id: null as string | null,
       };
-    });
+    }).concat(
+      materialInputs.map((line, index) => {
+        const qty = toNumeric14_4(line.qty);
+        const isFoc = line.isFoc === true;
+        return {
+          lineKey: `mat-${index}-${line.material_id}`,
+          isFoc,
+          product_id: "",
+          material_id: line.material_id?.trim() || null,
+          description: (line.description?.trim() || line.sku?.trim() || "วัตถุดิบ").slice(0, 255),
+          sku: line.sku?.trim() || "",
+          qty,
+          uom_used: resolvePurchaseUomCode(line.purchaseUomCode),
+          conversionFactor: resolveConversionFactor(line.conversionFactor ?? 1),
+          unitPrice: isFoc ? 0 : Number(line.unit_cost) || 0,
+          sort_order: Number.isInteger(Number(line.sort_order)) && Number(line.sort_order) > 0
+            ? Number(line.sort_order)
+            : productInputs.length + index + 1,
+          is_service: false,
+        };
+      }),
+    );
 
     const apportionmentItems: ApportionmentItem[] = preparedLines.map((line) => ({
       id: line.lineKey,
@@ -2733,6 +2847,7 @@ export async function saveManualGoodsReceipt(
       return {
         lineKey: line.lineKey,
         product_id: line.product_id,
+        material_id: line.material_id,
         description: line.description,
         sku: line.sku,
         qty: line.qty,
@@ -2871,7 +2986,7 @@ export async function saveManualGoodsReceipt(
     const notes = `รับสินค้าแบบ Manual · อ้างอิงบิลซัพพลายเออร์: ${documentRef}`;
     const paymentStatus = resolveInitialPaymentStatus(resolvedDocType);
     const stockLines = postLedger
-      ? receiptLines.filter((line) => !line.is_service)
+      ? receiptLines.filter((line) => !line.is_service && Boolean(line.product_id))
       : [];
 
     let ledgerLines: Array<{
@@ -2973,6 +3088,82 @@ export async function saveManualGoodsReceipt(
       );
     }
 
+    const materialReceiptLines = receiptLines.filter(
+      (line) => Boolean(line.material_id) && !line.product_id,
+    );
+    const productReceiptLines = receiptLines.filter((line) => Boolean(line.product_id));
+    if (productReceiptLines.length === 0) {
+      const { data: generatedNo, error: numberError } = await supabaseAdmin.rpc(
+        "generate_document_no",
+        { p_doc_type: runningPrefix, p_doc_date: docDate },
+      );
+      const officialDocNo = typeof generatedNo === "string" ? generatedNo.trim() : "";
+      if (numberError || !officialDocNo) {
+        return { data: null, error: numberError?.message ?? "สร้างเลขที่เอกสารรับวัตถุดิบไม่สำเร็จ" };
+      }
+      const { data: createdDoc, error: docError } = await supabaseAdmin
+        .from("documents")
+        .insert({
+          doc_no: officialDocNo,
+          doc_type: resolvedDocType,
+          status: payloadStatus,
+          doc_date: docDate,
+          contact_id: vendorId,
+          sub_total: subTotal,
+          discount_amount: discountAmount,
+          tax_rate: vatSummary.vatRate,
+          tax_amount: vatSummary.vatAmount,
+          grand_total: grandTotal,
+          vat_type: resolvedVatType,
+          vat_rate: vatSummary.vatRate,
+          vat_amount: vatSummary.vatAmount,
+          net_before_vat: vatSummary.preVatAmount,
+          total_amount: resolvedVatType === "INCLUSIVE" ? grandTotal : vatSummary.preVatAmount,
+          payment_status: paymentStatus,
+          paid_amount: paymentStatus === "PAID" ? grandTotal : 0,
+          notes,
+          reference_no: documentRef,
+          created_by: owner.userId,
+        })
+        .select("id, doc_no")
+        .single();
+      if (docError || !createdDoc) {
+        return { data: null, error: docError?.message ?? "สร้างเอกสารรับวัตถุดิบไม่สำเร็จ" };
+      }
+      const materialError = await postMaterialPurchaseLines({
+        documentId: String(createdDoc.id),
+        docDate,
+        lines: materialReceiptLines.map((line) => ({
+          materialId: String(line.material_id),
+          description: line.description,
+          qty: line.qty,
+          unitPrice: line.unit_price,
+          lineTotal: line.line_total,
+          purchaseUom: line.uom_used,
+          sortOrder: line.sort_order,
+        })),
+      });
+      if (materialError.error) {
+        await supabaseAdmin.from("documents").delete().eq("id", createdDoc.id);
+        return { data: null, error: materialError.error };
+      }
+      await stampVendorPurchaseTier(
+        supabaseAdmin,
+        String(createdDoc.id),
+        vendorTier?.accountingTaxTier ?? null,
+      );
+      revalidatePath("/purchases");
+      revalidatePath(`/purchases/${encodeURIComponent(String(createdDoc.doc_no))}`);
+      return {
+        data: {
+          document_id: String(createdDoc.id),
+          doc_no: String(createdDoc.doc_no),
+          ledger_count: 0,
+        },
+        error: null,
+      };
+    }
+
     const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc(
       "save_manual_goods_receipt_transaction",
       {
@@ -3014,7 +3205,7 @@ export async function saveManualGoodsReceipt(
           reference_no: documentRef,
           created_by: owner.userId,
         },
-        p_items: receiptLines.map((line) => ({
+        p_items: receiptLines.filter((line) => Boolean(line.product_id)).map((line) => ({
           product_id: line.product_id,
           description: line.description,
           qty: toNumeric14_4(line.qty),
@@ -3048,6 +3239,32 @@ export async function saveManualGoodsReceipt(
           parsed.error ??
           "บันทึกรับสินค้าแบบ Manual ไม่สำเร็จ",
       };
+    }
+
+    if (materialReceiptLines.length > 0) {
+      const materialError = await postMaterialPurchaseLines({
+        documentId: parsed.documentId,
+        docDate,
+        lines: materialReceiptLines.map((line) => ({
+          materialId: String(line.material_id),
+          description: line.description,
+          qty: line.qty,
+          unitPrice: line.unit_price,
+          lineTotal: line.line_total,
+          purchaseUom: line.uom_used,
+          sortOrder: line.sort_order,
+        })),
+      });
+      if (materialError.error) {
+        return {
+          data: {
+            document_id: parsed.documentId,
+            doc_no: parsed.docNo,
+            ledger_count: parsed.ledgerCount,
+          },
+          error: `เอกสารถูกบันทึกแล้ว แต่รับวัตถุดิบเข้าคลังไม่สำเร็จ: ${materialError.error}`,
+        };
+      }
     }
 
     const { error: referenceError } = await supabaseAdmin

@@ -97,7 +97,9 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { InventoryLandedCostCard } from "@/components/procurement/inventory-landed-cost-card";
+import { MaterialPicker } from "@/components/procurement/material-picker";
 import { PurchaseUomCell } from "@/components/procurement/PurchaseUomCell";
+import { purchasePriceVarianceLabel } from "@/lib/materials/price-variance";
 import { buildReceiptQtySummary } from "@/lib/utils/receipt-qty-groups";
 import {
   defaultPurchaseUom,
@@ -110,6 +112,8 @@ import {
 export type ManualReceiptLine = {
   key: string;
   product_id: string;
+  materialId?: string | null;
+  referencePurchasePrice?: number | null;
   sku: string;
   name: string;
   qty: number;
@@ -539,6 +543,41 @@ export default function ManualReceiptWorkspace({
     toast.success(`เพิ่ม ${product.sku} ลงรายการแล้ว`);
   }
 
+  function handleSelectMaterial(material: {
+    id: string;
+    materialCode: string;
+    materialName: string;
+    purchaseUom: string;
+    uomConversionFactor: number;
+    referencePurchasePrice: number;
+    usageUom: string;
+  }) {
+    const nextKey = `mat-${material.id}-${Date.now()}`;
+    setLines((current) => [
+      ...current,
+      {
+        key: nextKey,
+        product_id: "",
+        materialId: material.id,
+        referencePurchasePrice: material.referencePurchasePrice,
+        sku: material.materialCode,
+        name: material.materialName,
+        qty: 1,
+        unit_cost: roundMoney(material.referencePurchasePrice),
+        purchaseUomCode: material.purchaseUom,
+        conversionFactor: material.uomConversionFactor > 0 ? material.uomConversionFactor : 1,
+        isFoc: false,
+        vendorSku: "",
+        taxType: "NON_VAT",
+        baseUom: material.usageUom,
+        sizeLabel: null,
+        isRawMaterial: true,
+      },
+    ]);
+    setFocusLineKey(nextKey);
+    toast.success(`เพิ่มวัตถุดิบ ${material.materialCode} ลงรายการแล้ว`);
+  }
+
   function updateLine(
     key: string,
     patch: Partial<
@@ -639,6 +678,7 @@ export default function ManualReceiptWorkspace({
         taxInvoiceStatus: nonVatPurchase ? "TAX_READY" : taxInvoiceStatus,
         lines: lines.map((line, index) => ({
           product_id: line.product_id,
+          material_id: line.materialId ?? null,
           qty: line.qty,
           unit_cost: line.unit_cost,
           description: line.name,
@@ -1006,6 +1046,9 @@ export default function ManualReceiptWorkspace({
             placeholder="ค้นหา SKU หรือชื่อสินค้าเพื่อรับเข้าคลัง..."
             onSelectProduct={handleSelectProduct}
           />
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <MaterialPicker disabled={isPending} onSelect={handleSelectMaterial} />
+          </div>
         </CardContent>
       </Card>
 
@@ -1134,6 +1177,22 @@ export default function ManualReceiptWorkspace({
                             {line.vendorSku}
                           </p>
                         ) : null}
+                        {line.materialId ? (
+                          <p className="mt-1 text-[11px] font-semibold text-teal-800">MATCHED (วัตถุดิบ)</p>
+                        ) : null}
+                        {line.materialId && !line.isFoc
+                          ? (() => {
+                              const label = purchasePriceVarianceLabel(
+                                Number(line.referencePurchasePrice) || 0,
+                                line.unit_cost,
+                              );
+                              return label ? (
+                                <p className="mt-1 inline-flex rounded bg-orange-50 px-1.5 py-0.5 text-[11px] font-semibold text-orange-800 ring-1 ring-orange-200">
+                                  {label}
+                                </p>
+                              ) : null;
+                            })()
+                          : null}
                       </TableCell>
                       <TableCell className="px-2 py-2.5 text-right">
                         <Input

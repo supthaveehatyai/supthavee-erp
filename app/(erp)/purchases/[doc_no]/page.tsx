@@ -791,6 +791,11 @@ export default async function PurchaseDocumentDetailPage({
                               item.description,
                               item.product_name,
                             )}
+                            {item.item_nature === "RAW_MATERIAL" ? (
+                              <span className="ml-2 rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-800">
+                                วัตถุดิบ
+                              </span>
+                            ) : null}
                           </div>
                           {item.sku ? (
                             <div className="font-mono text-xs text-slate-400">

@@ -368,6 +368,7 @@ export type DocumentDetailContactPerson = {
 export type DocumentDetailItem = {
   id: string;
   product_id: string | null;
+  item_nature?: string | null;
   description: string | null;
   qty: number;
   uom_used: string | null;

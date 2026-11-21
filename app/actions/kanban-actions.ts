@@ -7,6 +7,7 @@
 
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { backflushBomForCompletedJob } from "@/lib/actions/production-actions";
 import { createClient } from "@/lib/supabase/server-admin";
 import {
   KANBAN_STATUSES,
@@ -738,6 +739,23 @@ export async function updateJobStatus(
       console.info(
         `[updateJobStatus] backflush confirmed ${flushed?.length ?? 0} routing operation(s) for job ${id}`,
       );
+
+      const bomBackflush = await backflushBomForCompletedJob(id);
+      if (!bomBackflush.success) {
+        await supabase
+          .from("production_jobs")
+          .update({
+            status: current.status,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", id);
+        return {
+          success: false,
+          error:
+            bomBackflush.error ??
+            "อัปเดตสถานะ Job สำเร็จ แต่ตัดวัตถุดิบตามสูตรไม่สำเร็จ",
+        };
+      }
     }
 
     revalidatePath("/production/kanban");
