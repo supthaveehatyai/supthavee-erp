@@ -8,6 +8,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ImageIcon, Loader2, Package } from "lucide-react";
+import { PosterColorwayCropperDialog } from "@/components/products/PosterColorwayCropperDialog";
 import { getProductModelPreview } from "@/app/products/actions/product-matrix";
 import type { ProductModelPreview } from "@/types/product-preview";
 import { Button } from "@/components/ui/button";
@@ -62,12 +63,14 @@ export function ProductModelPreviewSheet() {
 
   const [preview, setPreview] = useState<ProductModelPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cropperOpen, setCropperOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     if (!modelId) {
       setPreview(null);
       setError(null);
+      setCropperOpen(false);
       return;
     }
 
@@ -176,6 +179,14 @@ export function ProductModelPreviewSheet() {
                   )}
                 </div>
 
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setCropperOpen(true)}
+                >
+                  ✂️ ตัดรูปแยกสี
+                </Button>
+
                 <dl className="rounded-xl border border-slate-200 bg-white px-4">
                   <DetailRow
                     label="รหัสรุ่น"
@@ -214,6 +225,15 @@ export function ProductModelPreviewSheet() {
           </div>
         </div>
       </SheetContent>
+      {preview ? (
+        <PosterColorwayCropperDialog
+          open={cropperOpen}
+          onOpenChange={setCropperOpen}
+          modelId={preview.id}
+          modelCode={preview.model_code}
+          modelName={preview.name}
+        />
+      ) : null}
     </Sheet>
   );
 }

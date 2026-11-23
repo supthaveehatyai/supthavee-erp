@@ -53,6 +53,11 @@ const navigationGroups: NavigationGroup[] = [
       {
         label: "เอกสารขาย",
         href: "/sales",
+        excludePaths: ["/sales/catalog"],
+      },
+      {
+        label: "แคตตาล็อกรูป & สต็อก",
+        href: "/sales/catalog",
       },
       {
         label: "เอกสารซื้อ",
