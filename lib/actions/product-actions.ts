@@ -213,7 +213,27 @@ export async function getProductsForCatalog() {
     if (page.error) {
       return { data: [], error: page.error.message };
     }
-    return { data: page.data, error: null as string | null };
+    const rows = page.data ?? [];
+    const invoiceById = new Map<string, number>();
+    const loose = supabaseAdmin as unknown as SupabaseClient;
+    const ids = rows.map((row) => row.id);
+    for (let index = 0; index < ids.length; index += 400) {
+      const chunk = ids.slice(index, index + 400);
+      const { data } = await loose
+        .from("products")
+        .select("id, last_invoice_unit_price")
+        .in("id", chunk);
+      for (const item of data ?? []) {
+        invoiceById.set(String(item.id), Number(item.last_invoice_unit_price) || 0);
+      }
+    }
+    return {
+      data: rows.map((row) => ({
+        ...row,
+        last_invoice_unit_price: invoiceById.get(row.id) ?? null,
+      })),
+      error: null as string | null,
+    };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "โหลดรายการสินค้าไม่สำเร็จ";

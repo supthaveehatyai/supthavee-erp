@@ -521,6 +521,7 @@ export async function getSmartSkuPickerAllProducts(): Promise<GetSmartSkuPickerC
       cost_price: product.cost_price,
       base_net_cost_ex_vat: product.base_net_cost_ex_vat,
       base_inc_vat_price: product.base_inc_vat_price,
+      last_invoice_unit_price: product.last_invoice_unit_price,
       last_invoice_vat_mode: product.last_invoice_vat_mode,
       display_name: product.display_name,
       model_name: product.model_name,

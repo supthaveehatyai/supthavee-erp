@@ -124,9 +124,9 @@ export function MaterialPicker({
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-semibold text-slate-800">{title}</p>
-        <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => setOpenQuick(true)}>
+        <Button type="button" variant="outline" size="sm" className="h-8 shrink-0" disabled={disabled} onClick={() => setOpenQuick(true)}>
           + เพิ่มวัตถุดิบรายการใหม่ด่วน
         </Button>
       </div>
@@ -135,6 +135,7 @@ export function MaterialPicker({
           <Input
             value={query}
             disabled={disabled}
+            className="h-10 w-full"
             placeholder="พิมพ์รหัสหรือชื่อวัตถุดิบ เช่น น้ำเงิน หรือ MAT-INK-003"
             onFocus={() => setOpen(true)}
             onChange={(event) => {
@@ -149,7 +150,7 @@ export function MaterialPicker({
         <PopoverContent
           align="start"
           sideOffset={4}
-          className="max-h-72 overflow-auto p-1"
+          className="max-h-[380px] w-[var(--radix-popover-trigger-width)] overflow-auto p-1"
           onOpenAutoFocus={(event) => event.preventDefault()}
           onCloseAutoFocus={(event) => event.preventDefault()}
         >

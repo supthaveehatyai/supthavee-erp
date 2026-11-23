@@ -4,8 +4,10 @@ import { resolveBaseIncVatPrice } from "@/lib/utils/purchase-tax";
 export type InvoicePricedProduct = {
   id: string;
   cost_price: number;
+  tax_type?: string | null;
   base_net_cost_ex_vat?: number;
   base_inc_vat_price?: number;
+  last_invoice_unit_price?: number | null;
   last_invoice_vat_mode?: string | null;
 };
 
@@ -51,12 +53,14 @@ export async function attachProductInvoicePrices(
     const net = Number(product.cost_price) || 0;
     const remembered = memory.get(product.id);
     product.base_net_cost_ex_vat = net;
+    product.last_invoice_unit_price = remembered?.price ?? null;
+    product.last_invoice_vat_mode = remembered?.mode ?? null;
     product.base_inc_vat_price = resolveBaseIncVatPrice({
       netCostExVat: net,
       lastInvoiceUnitPrice: remembered?.price,
       lastInvoiceVatMode: remembered?.mode,
+      productTaxMode: product.tax_type,
     });
-    product.last_invoice_vat_mode = remembered?.mode ?? null;
   }
 }
 

@@ -168,15 +168,19 @@ export function recoverIncVatUnitPrice(exVatCost: number): number {
   });
 }
 
-/** ราคาหน้าบิลรวม VAT: ใช้ความจำล่าสุดเมื่อโหมดเป็น INC_VAT มิฉะนั้นคืนจากต้นทุนก่อน VAT */
+/** ราคาหน้าบิลรวม VAT: ถ้าเป็น INC_VAT ใช้ last_invoice_unit_price ตรง ๆ ห้ามคูณ 1.07 ซ้ำ */
 export function resolveBaseIncVatPrice(input: {
   netCostExVat: number;
   lastInvoiceUnitPrice?: number | null;
   lastInvoiceVatMode?: string | null;
+  productTaxMode?: string | null;
 }): number {
   const remembered = Number(input.lastInvoiceUnitPrice);
-  const mode = String(input.lastInvoiceVatMode ?? "").trim().toUpperCase();
-  if (mode === "INC_VAT" && Number.isFinite(remembered) && remembered > 0) {
+  const mode = String(input.productTaxMode || input.lastInvoiceVatMode || "")
+    .trim()
+    .toUpperCase();
+  const inclusive = mode === "INC_VAT" || mode === "INCLUSIVE";
+  if (inclusive && Number.isFinite(remembered) && remembered > 0) {
     return roundInvoiceMoney(remembered);
   }
   return recoverIncVatUnitPrice(input.netCostExVat);

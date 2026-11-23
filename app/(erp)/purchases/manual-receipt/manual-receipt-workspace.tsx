@@ -1095,16 +1095,24 @@ export default function ManualReceiptWorkspace({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <SmartSkuPicker
-            ref={skuPickerRef}
-            mode="purchases"
-            disabled={isPending}
-            vendorCatalog={vendorProducts}
-            placeholder="ค้นหา SKU หรือชื่อสินค้าเพื่อรับเข้าคลัง..."
-            onSelectProduct={handleSelectProduct}
-          />
-          <div className="mt-4 border-t border-slate-100 pt-4">
-            <MaterialPicker disabled={isPending} onSelect={handleSelectMaterial} />
+          <div className="grid grid-cols-1 items-end gap-4 lg:grid-cols-2">
+            <div className="min-w-0">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-slate-800">👕 ค้นหาสินค้าสำเร็จรูป (SKU)</p>
+                <span className="text-[11px] font-medium text-slate-400">Alt+A</span>
+              </div>
+              <SmartSkuPicker
+                ref={skuPickerRef}
+                mode="purchases"
+                disabled={isPending}
+                vendorCatalog={vendorProducts}
+                placeholder="ค้นหา SKU หรือชื่อสินค้าเพื่อรับเข้าคลัง..."
+                onSelectProduct={handleSelectProduct}
+              />
+            </div>
+            <div className="min-w-0">
+              <MaterialPicker disabled={isPending} onSelect={handleSelectMaterial} />
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -1136,42 +1144,42 @@ export default function ManualReceiptWorkspace({
           >
             <colgroup>
               <col className="w-[4%]" />
-              <col className="w-[40%]" />
+              <col className="w-[34%]" />
               <col className="w-[10%]" />
-              <col className="w-[11%]" />
-              <col className="w-[11%]" />
-              <col className="w-[5%]" />
-              <col className="w-[8%]" />
+              <col className="w-[12%]" />
+              <col className="w-[13%]" />
+              <col className="w-[6%]" />
+              <col className="w-[10%]" />
               <col className="w-[8%]" />
               <col className="w-[3%]" />
             </colgroup>
             <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-xs [&_th]:sticky [&_th]:top-0 [&_th]:z-20 [&_th]:bg-slate-50">
               <TableRow>
-                <TableHead className="h-auto w-[4%] px-2 py-2.5 text-center normal-case tracking-normal">
+                <TableHead className="h-auto px-2 py-2 text-center normal-case tracking-normal">
                   #
                 </TableHead>
-                <TableHead className="h-auto w-[40%] px-2 py-2.5 text-left normal-case tracking-normal">
+                <TableHead className="h-auto px-2 py-2 text-left normal-case tracking-normal">
                   รายการสินค้า (ชื่อสินค้า / รหัส SKU)
                 </TableHead>
-                <TableHead className="h-auto w-[10%] px-2 py-2.5 text-right normal-case tracking-normal">
+                <TableHead className="h-auto px-2 py-2 text-right normal-case tracking-normal">
                   จำนวน
                 </TableHead>
-                <TableHead className="h-auto w-[11%] px-2 py-2.5 text-center normal-case tracking-normal">
+                <TableHead className="h-auto px-2 py-2 text-center normal-case tracking-normal">
                   หน่วยรับเข้า
                 </TableHead>
-                <TableHead className="h-auto w-[11%] px-2 py-2.5 text-right normal-case tracking-normal">
+                <TableHead className="h-auto px-2 py-2 text-right normal-case tracking-normal">
                   ราคาซื้อ/หน่วย (ตามบิล)
                 </TableHead>
-                <TableHead className="h-auto w-[5%] px-2 py-2.5 text-center normal-case tracking-normal">
+                <TableHead className="h-auto px-2 py-2 text-center normal-case tracking-normal">
                   ของแถม
                 </TableHead>
-                <TableHead className="h-auto w-[8%] px-2 py-2.5 text-right normal-case tracking-normal">
+                <TableHead className="h-auto px-2 py-2 text-right normal-case tracking-normal">
                   NET UNIT COST
                 </TableHead>
-                <TableHead className="h-auto w-[8%] px-2 py-2.5 text-right normal-case tracking-normal">
+                <TableHead className="h-auto px-2 py-2 text-right normal-case tracking-normal">
                   TOTAL AMOUNT
                 </TableHead>
-                <TableHead className="h-auto w-[3%] px-2 py-2.5 text-center normal-case tracking-normal">
+                <TableHead className="h-auto px-1 py-2 text-center normal-case tracking-normal">
                   ลบ
                 </TableHead>
               </TableRow>
@@ -1179,7 +1187,7 @@ export default function ManualReceiptWorkspace({
             <TableBody>
               {lines.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="h-24 px-2 py-2.5 text-center text-slate-500">
+                  <TableCell colSpan={9} className="h-24 px-2 py-2 text-center text-slate-500">
                     ยังไม่มีรายการ — ใช้ช่องค้นหาด้านบนเพื่อเพิ่มสินค้า
                   </TableCell>
                 </TableRow>
@@ -1205,21 +1213,27 @@ export default function ManualReceiptWorkspace({
                       key={line.key}
                       ref={line.key === focusLineKey ? lastRowRef : undefined}
                     >
-                      <TableCell className="px-2 py-2.5 text-center">
+                      <TableCell className="px-2 py-2 text-center">
                         <span className="inline-flex rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
                           {index + 1}
                         </span>
                       </TableCell>
-                      <TableCell className="min-w-0 px-2 py-2.5 text-left">
-                        <p className="whitespace-normal break-words text-sm font-semibold leading-snug text-slate-900">
+                      <TableCell className="min-w-0 px-2 py-2 text-left">
+                        <p className="truncate font-medium leading-snug text-slate-900">
                           {line.name}
-                          <span className="ml-1.5 inline-block rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-normal text-slate-600">
+                        </p>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                          <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-700">
                             {line.sku}
                           </span>
-                          {normalizePurchaseTaxMode(line.taxType) ? (
+                          {line.materialId ? (
+                            <span className="rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-800">
+                              วัตถุดิบ
+                            </span>
+                          ) : normalizePurchaseTaxMode(line.taxType) ? (
                             <span
                               className={cn(
-                                "ml-1.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold",
+                                "rounded px-1.5 py-0.5 text-[10px] font-semibold",
                                 minorityModes.has(normalizePurchaseTaxMode(line.taxType)!)
                                   ? "animate-pulse bg-red-100 text-red-800 ring-2 ring-red-500"
                                   : "bg-violet-100 text-violet-700",
@@ -1228,15 +1242,11 @@ export default function ManualReceiptWorkspace({
                               {normalizePurchaseTaxMode(line.taxType)}
                             </span>
                           ) : null}
-                        </p>
-                        {line.vendorSku ? (
-                          <p className="mt-0.5 whitespace-normal break-words text-xs text-slate-500">
-                            {line.vendorSku}
-                          </p>
-                        ) : null}
-                        {line.materialId ? (
-                          <p className="mt-1 text-[11px] font-semibold text-teal-800">MATCHED (วัตถุดิบ)</p>
-                        ) : null}
+                          {line.vendorSku.trim() &&
+                          line.vendorSku.trim().toUpperCase() !== line.sku.trim().toUpperCase() ? (
+                            <span className="text-[11px] text-slate-500">รหัสผู้ขาย: {line.vendorSku}</span>
+                          ) : null}
+                        </div>
                         {line.materialId && !line.isFoc
                           ? (() => {
                               const label = purchasePriceVarianceLabel(
@@ -1251,7 +1261,7 @@ export default function ManualReceiptWorkspace({
                             })()
                           : null}
                       </TableCell>
-                      <TableCell className="px-2 py-2.5 text-right">
+                      <TableCell className="px-2 py-2 text-right">
                         <Input
                           ref={line.key === focusLineKey ? qtyInputRef : undefined}
                           type="number"
@@ -1267,7 +1277,7 @@ export default function ManualReceiptWorkspace({
                           }
                         />
                       </TableCell>
-                      <TableCell className="min-w-0 px-2 py-2.5 text-center">
+                      <TableCell className="min-w-0 px-2 py-2 text-center">
                         <PurchaseUomCell
                           compact
                           catalog={purchaseUoms}
@@ -1289,7 +1299,7 @@ export default function ManualReceiptWorkspace({
                           }
                         />
                       </TableCell>
-                      <TableCell className="px-2 py-2.5 text-right">
+                      <TableCell className="px-2 py-2 text-right">
                         <Input
                           type="number"
                           min={0}
@@ -1306,7 +1316,7 @@ export default function ManualReceiptWorkspace({
                           }}
                         />
                       </TableCell>
-                      <TableCell className="px-2 py-2.5 text-center">
+                      <TableCell className="px-2 py-2 text-center">
                         <input
                           type="checkbox"
                           checked={line.isFoc}
@@ -1319,7 +1329,7 @@ export default function ManualReceiptWorkspace({
                         />
                       </TableCell>
                       <TableCell
-                        className="px-2 py-2.5 text-right text-sm font-semibold tabular-nums text-emerald-600"
+                        className="px-2 py-2 text-right text-sm font-semibold tabular-nums text-emerald-600"
                         title={
                           vatType === "INCLUSIVE"
                             ? "ทุนสุทธิต่อหน่วยฐานหลังถอด VAT 7% ตาม TAS 2"
@@ -1328,10 +1338,10 @@ export default function ManualReceiptWorkspace({
                       >
                         {formatMoney(line.isFoc ? 0 : baseUnitCost)}
                       </TableCell>
-                      <TableCell className="px-2 py-2.5 text-right text-sm font-bold tabular-nums text-slate-900">
+                      <TableCell className="px-2 py-2 text-right text-sm font-bold tabular-nums text-slate-900">
                         {formatMoney(line.isFoc ? 0 : Number(invoice?.finalLineTotal ?? 0))}
                       </TableCell>
-                      <TableCell className="px-2 py-2.5 text-center">
+                      <TableCell className="px-2 py-2 text-center">
                         <Button
                           type="button"
                           variant="ghost"

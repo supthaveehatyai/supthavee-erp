@@ -114,6 +114,7 @@ type Product = {
   tax_type: TaxType;
   base_uom: string;
   cost_price: number;
+  last_invoice_unit_price?: number | null;
   retail_price: number;
   wholesale_price: number;
   is_active: boolean;
@@ -2614,8 +2615,13 @@ export default function ProductsClient() {
     for (const product of group.products) {
       const sizeLabel = product.size?.trim();
       if (!sizeLabel || prices[sizeLabel]) continue;
+      const billPrice = Number(product.last_invoice_unit_price);
+      const cost =
+        product.tax_type === "INC_VAT" && billPrice > 0
+          ? billPrice
+          : Number(product.cost_price);
       prices[sizeLabel] = {
-        cost: priceToInput(Number(product.cost_price)),
+        cost: priceToInput(cost),
         retail: priceToInput(Number(product.retail_price)),
         wholesale: priceToInput(Number(product.wholesale_price)),
       };
@@ -4389,7 +4395,9 @@ export default function ProductsClient() {
                               ค่าส่วนลด
                             </th>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
-                              ราคาต้นทุน
+                              {form.taxType === "INC_VAT"
+                                ? "ราคาทุนซื้อตามบิล (รวม VAT 7%)"
+                                : "ราคาต้นทุน"}
                             </th>
                           </tr>
                         </thead>
@@ -5183,7 +5191,9 @@ export default function ProductsClient() {
                             ไซส์
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
-                            ราคาต้นทุน
+                            {editForm.taxType === "INC_VAT"
+                              ? "ราคาทุนซื้อตามบิล (รวม VAT 7%)"
+                              : "ราคาต้นทุน"}
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
                             ราคาขายปลีก

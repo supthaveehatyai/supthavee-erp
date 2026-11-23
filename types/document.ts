@@ -265,6 +265,8 @@ export type SalesProductSearchItem = {
   base_net_cost_ex_vat?: number;
   /** ราคาซื้อต่อหน่วยตามหน้าบิลเมื่อโหมดรวม VAT */
   base_inc_vat_price?: number;
+  /** products.last_invoice_unit_price — ราคาตามบิลที่จำไว้ ห้ามคูณ 1.07 ซ้ำ */
+  last_invoice_unit_price?: number | null;
   last_invoice_vat_mode?: string | null;
   display_name: string;
   model_name: string | null;

@@ -14,7 +14,6 @@ import {
   updateProductModelSchema,
   zodFirstError,
 } from "@/app/products/zod-schemas";
-import { recoverIncVatUnitPrice } from "@/lib/utils/purchase-tax";
 import type { GetProductModelPreviewResult } from "@/types/product-preview";
 import type {
   ExistingProductModel,
@@ -29,16 +28,26 @@ import type {
   UploadProductModelImageResult,
 } from "@/types/product-matrix";
 
-function invoiceMemoryForCost(costPrice: number, taxType: TaxType) {
+function roundBill(value: number): number {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+/** ช่องกรอกของ INC_VAT คือราคาตามบิลรวม VAT — ถอด 7% ครั้งเดียวลง cost_price */
+function persistEnteredCost(enteredBillPrice: number, taxType: TaxType) {
+  const entered = roundBill(enteredBillPrice);
   if (taxType === "INC_VAT") {
     return {
-      last_invoice_unit_price: recoverIncVatUnitPrice(costPrice),
+      cost_price: Math.round((entered / 1.07) * 100) / 100,
+      last_invoice_unit_price: entered,
       last_invoice_vat_mode: "INC_VAT",
+      is_inc_vat_cost_normalized: true,
     };
   }
   return {
-    last_invoice_unit_price: costPrice,
+    cost_price: entered,
+    last_invoice_unit_price: entered,
     last_invoice_vat_mode: taxType === "EXC_VAT" ? "EXC_VAT" : "NONE",
+    is_inc_vat_cost_normalized: false,
   };
 }
 
@@ -581,8 +590,7 @@ export async function generateSkusFromModel(
     gender: row.gender,
     tax_type: normalizeTaxType(row.taxType),
     base_uom: baseUomLabel,
-    cost_price: row.costPrice,
-    ...invoiceMemoryForCost(row.costPrice, normalizeTaxType(row.taxType)),
+    ...persistEnteredCost(row.costPrice, normalizeTaxType(row.taxType)),
     retail_price: row.retailPrice,
     wholesale_price: row.wholesalePrice,
     is_active: true,
@@ -1099,8 +1107,7 @@ export async function updateProductModel(
           tax_type: taxType,
           ...(matched
             ? {
-                cost_price: matched.costPrice,
-                ...invoiceMemoryForCost(matched.costPrice, taxType),
+                ...persistEnteredCost(matched.costPrice, taxType),
                 retail_price: matched.retailPrice,
                 wholesale_price: matched.wholesalePrice,
               }

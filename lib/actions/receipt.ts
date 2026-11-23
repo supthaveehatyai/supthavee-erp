@@ -1129,6 +1129,7 @@ export async function getInternalProductsForMatching(): Promise<GetInternalProdu
           netCostExVat: Number(row.cost_price) || 0,
           lastInvoiceUnitPrice: row.last_invoice_unit_price,
           lastInvoiceVatMode: row.last_invoice_vat_mode,
+          productTaxMode: resolveProductTaxCode(row.tax_type, modelJoin?.tax_type),
         }),
       } satisfies ReceiptProductSummary;
     });

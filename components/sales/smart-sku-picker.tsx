@@ -23,6 +23,7 @@ import { getSmartSkuPickerAllProducts } from "@/lib/actions/manual-receipt-conte
 import type { SalesProductSearchItem } from "@/types/document";
 import type { VendorMappedReceiptProduct } from "@/types/manual-receipt";
 import { matchesSmartSkuSearch } from "@/lib/utils/smart-sku-search";
+import { normalizePurchaseTaxMode } from "@/lib/utils/purchase-tax";
 import { cn } from "@/lib/utils";
 import { LineItemProductThumb } from "@/components/sales/LineItemProductThumb";
 import { Badge } from "@/components/ui/badge";
@@ -66,6 +67,56 @@ function formatMoney(value: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+function money2(value: number): string {
+  return (Number.isFinite(value) ? value : 0).toFixed(2);
+}
+
+function PurchaseSkuOption({
+  product,
+}: {
+  product: SalesProductSearchItem & { vendor_sku?: string | null };
+}) {
+  const sku = product.sku.trim();
+  const vendorSku = (product.vendor_sku ?? "").trim();
+  const hasDistinctVendorSku = Boolean(
+    vendorSku && vendorSku.toUpperCase() !== sku.toUpperCase(),
+  );
+  const tax = normalizePurchaseTaxMode(product.tax_type);
+  const net = Number(product.base_net_cost_ex_vat ?? product.cost_price) || 0;
+  const remembered = Number(product.last_invoice_unit_price);
+  const inclusive =
+    tax === "INC_VAT" && Number.isFinite(remembered) && remembered > 0
+      ? remembered
+      : Number(product.base_inc_vat_price) > 0
+        ? Number(product.base_inc_vat_price)
+        : net;
+  const uom = product.base_uom?.trim() || "หน่วย";
+  const priceLine =
+    tax === "INC_VAT"
+      ? `ตามบิล ${money2(inclusive)} ฿ (รวม VAT) · ทุนก่อน VAT ${money2(net)} ฿ · ${uom}`
+      : tax === "EXC_VAT"
+        ? `ตามบิล ${money2(net)} ฿ (ก่อน VAT) · รวม VAT ${money2(inclusive)} ฿ · ${uom}`
+        : `ตามบิล ${money2(net)} ฿ (Non-VAT) · ${uom}`;
+
+  return (
+    <div className="min-w-0 flex-1">
+      <p className="flex min-w-0 items-center gap-1.5">
+        <span className="truncate font-mono text-xs font-semibold text-slate-900">{sku}</span>
+        {tax ? (
+          <Badge variant="slate" className="shrink-0 px-1.5 py-0 text-[9px]">
+            {tax === "NON_VAT" ? "NONE" : tax}
+          </Badge>
+        ) : null}
+        {hasDistinctVendorSku ? (
+          <span className="truncate text-[11px] font-normal text-slate-500">· ผู้ขาย: {vendorSku}</span>
+        ) : null}
+      </p>
+      <p className="truncate text-sm leading-snug text-slate-700">{product.display_name}</p>
+      <p className="mt-0.5 truncate text-[11px] text-emerald-700">{priceLine}</p>
+    </div>
+  );
 }
 
 function toSmartSkuSearchItem(
@@ -257,7 +308,10 @@ const SmartSkuPicker = forwardRef<SmartSkuPickerHandle, SmartSkuPickerProps>(
             aria-expanded={open}
             aria-controls={listboxId}
             disabled={disabled}
-            className="h-11 w-full justify-between font-normal"
+            className={cn(
+              "w-full justify-between font-normal",
+              mode === "purchases" ? "h-10" : "h-11",
+            )}
           >
             <span className="flex min-w-0 items-center gap-2 text-slate-400">
               <PackageSearch className="size-4 shrink-0 text-blue-600" />
@@ -273,7 +327,7 @@ const SmartSkuPicker = forwardRef<SmartSkuPickerHandle, SmartSkuPickerProps>(
         <PopoverContent
           align="start"
           sideOffset={6}
-          className="z-[9999] w-[var(--radix-popover-trigger-width)] p-0 sm:w-[28rem]"
+          className="z-[9999] w-[var(--radix-popover-trigger-width)] min-w-[340px] p-0"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             inputRef.current?.focus();
@@ -287,7 +341,7 @@ const SmartSkuPicker = forwardRef<SmartSkuPickerHandle, SmartSkuPickerProps>(
               onValueChange={setQuery}
               disabled={disabled}
             />
-            <CommandList>
+            <CommandList className="max-h-[380px]">
               {visibleError ? (
                 <div className="px-3 py-4 text-center text-xs text-red-600">
                   {visibleError}
@@ -343,25 +397,7 @@ const SmartSkuPicker = forwardRef<SmartSkuPickerHandle, SmartSkuPickerProps>(
                       className="cursor-pointer items-center gap-2 py-2"
                     >
                       <LineItemProductThumb imageUrl={product.image_url} alt={product.sku} />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-mono text-xs font-semibold text-slate-900">
-                          {product.vendor_sku || product.sku}
-                          {product.vendor_sku ? (
-                            <span className="ml-1.5 font-sans font-normal text-slate-400">
-                              {product.sku}
-                            </span>
-                          ) : null}
-                        </p>
-                        <p className="whitespace-normal break-words text-sm leading-snug text-slate-700">
-                          {product.display_name}
-                        </p>
-                        <p className="mt-0.5 text-[11px] font-medium text-emerald-700">
-                          ตามบิล{" "}
-                          {formatMoney(product.base_inc_vat_price ?? product.cost_price)} ฿ · ทุนก่อน VAT{" "}
-                          {formatMoney(product.base_net_cost_ex_vat ?? product.cost_price)} ฿
-                          {product.base_uom ? ` · ${product.base_uom}` : ""}
-                        </p>
-                      </div>
+                      <PurchaseSkuOption product={product} />
                     </CommandItem>
                   ))}
                 </CommandGroup>
@@ -387,10 +423,13 @@ const SmartSkuPicker = forwardRef<SmartSkuPickerHandle, SmartSkuPickerProps>(
                         imageUrl={product.image_url}
                         alt={product.sku}
                       />
+                      {mode === "purchases" ? (
+                        <PurchaseSkuOption product={product} />
+                      ) : (
                       <div className="min-w-0 flex-1">
                         <p className="flex min-w-0 items-center gap-1.5 truncate font-mono text-xs font-semibold text-slate-900">
                           <span className="truncate">{product.sku}</span>
-                          {mode === "sales" && product.is_service ? (
+                          {product.is_service ? (
                             <Badge
                               variant="amber"
                               className="shrink-0 px-1.5 py-0 text-[9px] uppercase tracking-wide"
@@ -398,32 +437,16 @@ const SmartSkuPicker = forwardRef<SmartSkuPickerHandle, SmartSkuPickerProps>(
                               Service
                             </Badge>
                           ) : null}
-                          {mode === "purchases" && product.is_raw_material ? (
-                            <Badge
-                              variant="slate"
-                              className="shrink-0 px-1.5 py-0 text-[9px] uppercase tracking-wide"
-                            >
-                              Raw
-                            </Badge>
-                          ) : null}
                         </p>
                         <p className="whitespace-normal break-words text-sm leading-snug text-slate-700">
                           {product.display_name}
                         </p>
                         <p className="mt-0.5 text-[11px] text-slate-500">
-                          {mode === "purchases" ? (
-                            <>
-                              ตามบิล {formatMoney(product.base_inc_vat_price ?? product.cost_price)} ฿ · ทุนก่อน VAT{" "}
-                              {formatMoney(product.base_net_cost_ex_vat ?? product.cost_price)} ฿
-                            </>
-                          ) : (
-                            <>
-                              ราคา {formatMoney(product.unit_price)} ฿ · ต้นทุน {formatMoney(product.cost_price)} ฿
-                            </>
-                          )}
+                          ราคา {formatMoney(product.unit_price)} ฿ · ต้นทุน {formatMoney(product.cost_price)} ฿
                           {product.base_uom ? ` · ${product.base_uom}` : ""}
                         </p>
                       </div>
+                      )}
                     </CommandItem>
                   ))}
                 </CommandGroup>
