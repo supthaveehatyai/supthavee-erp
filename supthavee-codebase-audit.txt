@@ -1,0 +1,1144 @@
+====================================================================
+SUPTHAVEE ERP SUPERAPP - CODEBASE ARCHITECTURE AUDIT
+Generated At: 2026-11-23T05:35:27.227Z
+====================================================================
+
+[1] GIT STATUS & RECENT COMMITS (Branch: main)
+420d87c 202611231127 Buy System rev03
+3ee3280 202611212012 Buy System rev02
+2127a32 202611211737 Buy System rev01
+89a9973 202611211708 Sale System rev60
+711a452 202611211531 Sale System rev59
+2a46ebb 202611211348 Sale System rev58
+9c58573 202611200945 Sale System rev57
+3773e30 202611191117 Sale System rev56
+d1310ac 202611161224 Sale System rev55
+8d890fe 202611160959 Sale System rev54
+6064bdb 202611160040 Sale System rev52
+dc387ee 202611160012 Sale System rev51
+
+[2] PACKAGE.JSON (Scripts & Dependencies)
+{
+  "name": "supthavee-erp",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "env:check": "node -e \"const e=process.env.NODE_ENV||'development'; console.log('NODE_ENV='+e); console.log('URL='+(process.env.NEXT_PUBLIC_SUPABASE_URL||'(missing)'));\"",
+    "generate-seed": "node scripts/generate-seed.mjs",
+    "generate-cloud-seed": "node scripts/generate-cloud-seed.mjs",
+    "seed-to-cloud": "node scripts/run-seed-to-cloud.mjs",
+    "seed:uat": "npx tsx scripts/seed-uat-data.ts",
+    "backup:db": "node scripts/backup/backup-db.mjs",
+    "backup:storage": "node scripts/backup/backup-storage.mjs",
+    "backup:all": "node scripts/backup/backup-db.mjs --module=all && node scripts/backup/backup-storage.mjs",
+    "backup:module": "node scripts/backup/backup-db.mjs",
+    "restore:db": "node scripts/backup/restore-db.mjs",
+    "archive:nas": "node scripts/nas-archiver.mjs"
+  },
+  "dependencies": {
+    "@hello-pangea/dnd": "^18.0.1",
+    "@hookform/resolvers": "^5.7.1",
+    "@radix-ui/react-dialog": "^1.1.20",
+    "@radix-ui/react-popover": "^1.1.19",
+    "@supabase/ssr": "^0.12.4",
+    "@supabase/supabase-js": "^2.110.7",
+    "browser-image-compression": "^2.0.2",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "exceljs": "^4.4.0",
+    "lucide-react": "^1.25.0",
+    "next": "16.2.10",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-hook-form": "^7.84.0",
+    "recharts": "^3.10.1",
+    "server-only": "^0.0.1",
+    "sharp": "^0.35.5",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.6.0",
+    "xlsx": "^0.18.5",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1102.0",
+    "@tailwindcss/postcss": "^4",
+    "@types/exceljs": "^0.5.3",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "supabase": "^2.115.0",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
+
+[3] ENVIRONMENT VARIABLE KEYS (Secrets Masked)
+
+[4] PROJECT FILE TREE (707 source files)
+  app/(auth)/login/login-form.tsx
+  app/(auth)/login/page.tsx
+  app/(dashboard)/accounting-periods/accounting-periods-panel.tsx
+  app/(dashboard)/accounting-periods/page.tsx
+  app/(dashboard)/accounting-periods/run-depreciation-button.tsx
+  app/(dashboard)/approvals/approval-center-panel.tsx
+  app/(dashboard)/approvals/document-preview-content.tsx
+  app/(dashboard)/approvals/expense-approval-review-content.tsx
+  app/(dashboard)/approvals/expense-approval-review-sheet.tsx
+  app/(dashboard)/approvals/page.tsx
+  app/(dashboard)/settings/parameters/page.tsx
+  app/(dashboard)/settings/parameters/parameter-approval-table.tsx
+  app/(dashboard)/settings/parameters/parameter-settings-form.tsx
+  app/(dashboard)/settings/parameters/wht-rates-table.tsx
+  app/(erp)/dashboard/executive-dashboard.tsx
+  app/(erp)/dashboard/page.tsx
+  app/(erp)/expenses/actions.ts
+  app/(erp)/expenses/create/expense-category-combobox.tsx
+  app/(erp)/expenses/create/expense-create-workspace.tsx
+  app/(erp)/expenses/create/page.tsx
+  app/(erp)/expenses/page.tsx
+  app/(erp)/expenses/[id]/edit/page.tsx
+  app/(erp)/expenses/[id]/expense-attachment-preview.tsx
+  app/(erp)/expenses/[id]/expense-detail-actions.tsx
+  app/(erp)/expenses/[id]/expense-edit-dialog.tsx
+  app/(erp)/expenses/[id]/expense-receipt-preview.tsx
+  app/(erp)/expenses/[id]/page.tsx
+  app/(erp)/expenses/[id]/pay-installment-dialog.tsx
+  app/(erp)/expenses/[id]/print-wht/auto-print.tsx
+  app/(erp)/expenses/[id]/print-wht/page.tsx
+  app/(erp)/expenses/[id]/print-wht/wht-50tawi-certificate.tsx
+  app/(erp)/finance/ap-ar/ap-ar-dashboard.tsx
+  app/(erp)/finance/ap-ar/page.tsx
+  app/(erp)/finance/ap-payment/components/APPaymentClient.tsx
+  app/(erp)/finance/ap-payment/page.tsx
+  app/(erp)/finance/ap-writeoff/create/page.tsx
+  app/(erp)/finance/ap-writeoff/page.tsx
+  app/(erp)/finance/ar-writeoff/create/page.tsx
+  app/(erp)/finance/ar-writeoff/page.tsx
+  app/(erp)/finance/bank-accounts/create-bank-account-form.tsx
+  app/(erp)/finance/bank-accounts/page.tsx
+  app/(erp)/finance/billing-notes/create/page.tsx
+  app/(erp)/finance/billing-notes/page.tsx
+  app/(erp)/finance/billing-notes/[id]/page.tsx
+  app/(erp)/finance/deposits/create/deposit-create-form.tsx
+  app/(erp)/finance/deposits/create/page.tsx
+  app/(erp)/finance/deposits/page.tsx
+  app/(erp)/finance/payments/components/ARPaymentClient.tsx
+  app/(erp)/finance/payments/page.tsx
+  app/(erp)/finance/refunds/create/page.tsx
+  app/(erp)/finance/refunds/create/refund-create-form.tsx
+  app/(erp)/finance/reports/page.tsx
+  app/(erp)/finance/tax-reports/page.tsx
+  app/(erp)/finance/tax-reports/tax-reports-panel.tsx
+  app/(erp)/fixed-assets/asset-detail-sheet.tsx
+  app/(erp)/fixed-assets/fixed-asset-attachment-uploader.tsx
+  app/(erp)/fixed-assets/fixed-asset-filter.tsx
+  app/(erp)/fixed-assets/fixed-asset-form-sheet.tsx
+  app/(erp)/fixed-assets/fixed-assets-workspace.tsx
+  app/(erp)/fixed-assets/page.tsx
+  app/(erp)/inventory/adjustments/adjustments-workspace.tsx
+  app/(erp)/inventory/adjustments/page.tsx
+  app/(erp)/inventory/ledger/page.tsx
+  app/(erp)/knowledge-base/document-standards/document-paper-size-select.tsx
+  app/(erp)/knowledge-base/document-standards/page.tsx
+  app/(erp)/production/kanban/page.tsx
+  app/(erp)/profit-analysis/loading.tsx
+  app/(erp)/profit-analysis/page.tsx
+  app/(erp)/profit-analysis/profit-analysis-dashboard.tsx
+  app/(erp)/profit-analysis/profit-analysis-month-picker.tsx
+  app/(erp)/purchases/credit-note/page.tsx
+  app/(erp)/purchases/credit-note/purchase-credit-note-form.tsx
+  app/(erp)/purchases/manual-receipt/manual-receipt-preview-dialog.tsx
+  app/(erp)/purchases/manual-receipt/manual-receipt-workspace.tsx
+  app/(erp)/purchases/manual-receipt/page.tsx
+  app/(erp)/purchases/page.tsx
+  app/(erp)/purchases/[doc_no]/page.tsx
+  app/(erp)/purchases/[doc_no]/purchase-document-controls.tsx
+  app/(erp)/purchases/[doc_no]/purchase-tax-invoice-controls.tsx
+  app/(erp)/reports/page.tsx
+  app/(erp)/sales/cn/create/credit-note-create-workspace.tsx
+  app/(erp)/sales/cn/create/page.tsx
+  app/(erp)/sales/create/contact-person-combobox.tsx
+  app/(erp)/sales/create/customer-combobox.tsx
+  app/(erp)/sales/create/page.tsx
+  app/(erp)/sales/create/sales-create-workspace.tsx
+  app/(erp)/sales/edit/[id]/page.tsx
+  app/(erp)/sales/edit/[id]/sales-edit-workspace.tsx
+  app/(erp)/sales/orders/create/page.tsx
+  app/(erp)/sales/orders/create/sales-order-workspace.tsx
+  app/(erp)/sales/orders/edit/[id]/page.tsx
+  app/(erp)/sales/orders/page.tsx
+  app/(erp)/sales/page.tsx
+  app/(erp)/sales/reconcile/page.tsx
+  app/(erp)/sales/[doc_no]/convert-document-dropdown.tsx
+  app/(erp)/sales/[doc_no]/delete-draft-document-button.tsx
+  app/(erp)/sales/[doc_no]/duplicate-document-button.tsx
+  app/(erp)/sales/[doc_no]/issue-credit-note-button.tsx
+  app/(erp)/sales/[doc_no]/issue-document-button.tsx
+  app/(erp)/sales/[doc_no]/issue-sales-receipt-button.tsx
+  app/(erp)/sales/[doc_no]/page.tsx
+  app/(erp)/sales/[doc_no]/print-document-button.tsx
+  app/(erp)/sales/[doc_no]/sales-header-edit-dialog.tsx
+  app/(erp)/sales/[doc_no]/void-document-actions.tsx
+  app/(erp)/sales/[doc_no]/void-sales-document-button.tsx
+  app/(erp)/settings/company/page.tsx
+  app/(erp)/settings/master-data/category-management.tsx
+  app/(erp)/settings/master-data/master-data-hub.tsx
+  app/(erp)/settings/master-data/page.tsx
+  app/(erp)/settings/master-data/sizes/page.tsx
+  app/(erp)/settings/master-data/sizes/sizes-manager.tsx
+  app/(erp)/settings/page.tsx
+  app/(erp)/settings/users/create-user-dialog.tsx
+  app/(erp)/settings/users/page.tsx
+  app/(erp)/settings/users/role-permissions-panel.tsx
+  app/(erp)/settings/users/user-abac-fields.tsx
+  app/(erp)/settings/users/user-profile-form-sheet.tsx
+  app/(erp)/settings/users/user-row-actions.tsx
+  app/(erp)/tax/wht-report/error.tsx
+  app/(erp)/tax/wht-report/page.tsx
+  app/(erp)/tax/wht-report/print-50tawi/page.tsx
+  app/(erp)/tax/wht-report/wht-document-preview-content.tsx
+  app/(erp)/tax/wht-report/wht-document-preview-sheet.tsx
+  app/(erp)/tax/wht-report/wht-document-preview-utils.ts
+  app/(erp)/tax/wht-report/wht-period-picker.tsx
+  app/(erp)/tax/wht-report/wht-report-client.tsx
+  app/(erp)/tax/wht-report/wht-report-dashboard.tsx
+  app/(erp)/tax/wht-report/wht-tb-preview-content.tsx
+  app/actions/accounting-period.ts
+  app/actions/ap-writeoff.ts
+  app/actions/approval.ts
+  app/actions/billing.ts
+  app/actions/contacts.ts
+  app/actions/dashboard.ts
+  app/actions/depreciation.ts
+  app/actions/documents.ts
+  app/actions/expense/ocr-action.ts
+  app/actions/expenses.ts
+  app/actions/finance/ap-actions.ts
+  app/actions/finance/cash-receipts.ts
+  app/actions/finance/contact-bank-accounts.ts
+  app/actions/finance/deposit-actions.ts
+  app/actions/finance/line-oa.ts
+  app/actions/finance/payment-register.ts
+  app/actions/fixed-assets.ts
+  app/actions/inventory-actions.ts
+  app/actions/kanban-actions.ts
+  app/actions/payment-slips.ts
+  app/actions/payments.ts
+  app/actions/refunds.ts
+  app/actions/tax-actions.ts
+  app/actions/technician-billing.ts
+  app/api/backup/export/route.ts
+  app/api/backup/restore/route.ts
+  app/api/expenses/ocr/route.ts
+  app/api/finance/export-cash-receipts/route.ts
+  app/api/finance/export-payment-register/route.ts
+  app/api/finance/export-tax/route.ts
+  app/api/line/slip-image/route.ts
+  app/api/line/webhook/route.ts
+  app/api/tax/export-wht/route.ts
+  app/app-shell.tsx
+  app/contacts/contacts-client.tsx
+  app/contacts/contacts.ts
+  app/contacts/page.tsx
+  app/contacts/VendorForm.tsx
+  app/dashboard/procurement/goods-receipt/components/InvoiceDropzone.tsx
+  app/dashboard/procurement/goods-receipt/components/SaveToLedgerDialog.tsx
+  app/dashboard/procurement/goods-receipt/GoodsReceiptUI.tsx
+  app/dashboard/procurement/goods-receipt/page.tsx
+  app/dashboard/procurement/vendor-mapping/page.tsx
+  app/error.tsx
+  app/favicon.ico
+  app/finance/payroll/actions.ts
+  app/finance/payroll/page.tsx
+  app/finance/payroll/payroll-center.tsx
+  app/forbidden/page.tsx
+  app/globals.css
+  app/layout.tsx
+  app/not-found.tsx
+  app/page.tsx
+  app/procurement/goods-receipt/page.tsx
+  app/procurement/vendor-mapping/page.tsx
+  app/products/actions/product-matrix.ts
+  app/products/brand-combobox.tsx
+  app/products/category-combobox.tsx
+  app/products/materials/materials-workspace.tsx
+  app/products/materials/page.tsx
+  app/products/model-load-combobox.tsx
+  app/products/page.tsx
+  app/products/product-sku.ts
+  app/products/ProductMatrixForm.tsx
+  app/products/products-client.tsx
+  app/products/vendor-combobox.tsx
+  app/products/zod-schemas.ts
+  components/auth/access-context.tsx
+  components/auth/forbidden-screen.tsx
+  components/auth/sign-out-button.tsx
+  components/contacts/contact-modal.tsx
+  components/contacts/ManageContactDialog.tsx
+  components/contacts/QuickEditContactButton.tsx
+  components/contacts/skill-rate-card.tsx
+  components/contacts/vendor-tax-tier-card.tsx
+  components/contacts/ViewContactDialog.tsx
+  components/dashboard/audit-trail-table.tsx
+  components/dashboard/manual-backup-button.tsx
+  components/dashboard/sales-by-channel-chart.tsx
+  components/documents/document-filter.tsx
+  components/expenses/expense-print-button.tsx
+  components/expenses/PrintExpenseTemplate.tsx
+  components/finance/accounting-tax-tier-controls.tsx
+  components/finance/AllocatedAmountCell.tsx
+  components/finance/AllocatedDocumentsTable.tsx
+  components/finance/ap-batch-billing-panel.tsx
+  components/finance/ApWriteoffForm.tsx
+  components/finance/ApWriteoffPreviewContent.tsx
+  components/finance/ApWriteoffQueryFilter.tsx
+  components/finance/ApWriteoffRowActions.tsx
+  components/finance/ArWriteoffForm.tsx
+  components/finance/batch-pdf-print-button.tsx
+  components/finance/billing-note-actions.tsx
+  components/finance/billing-sort-controls.tsx
+  components/finance/BillingNoteDetail.tsx
+  components/finance/BillingNoteList.tsx
+  components/finance/BillingNotePrintTemplate.tsx
+  components/finance/cash-receipt-center.tsx
+  components/finance/cash-receipt-print.tsx
+  components/finance/contact-bank-accounts-panel.tsx
+  components/finance/create-billing-note-screen.tsx
+  components/finance/CreateBillingNoteForm.tsx
+  components/finance/DepositAllocationHistoryTable.tsx
+  components/finance/DepositBalanceActions.tsx
+  components/finance/DocumentPreviewSheet.tsx
+  components/finance/line-payment-slip-dialog.tsx
+  components/finance/OriginalReceiptStatusToggle.tsx
+  components/finance/OutstandingPartyCombobox.tsx
+  components/finance/OutstandingSummaryTable.tsx
+  components/finance/paid-settlement-bar.tsx
+  components/finance/payment-channel-picker.tsx
+  components/finance/payment-receipt-register.tsx
+  components/finance/PaymentKnockoffForm.tsx
+  components/finance/PrintDocumentButton.tsx
+  components/finance/PrintPaymentReceiptTemplate.tsx
+  components/finance/PrintSettlementVoucherTemplate.tsx
+  components/finance/ReferenceDocumentsSection.tsx
+  components/finance/replace-payment-slip-dialog.tsx
+  components/finance/TechnicianBillingPanel.tsx
+  components/finance/unswept-receipts-card.tsx
+  components/inventory/adjustment-detail-sheet.tsx
+  components/inventory/adjustment-form-dialog.tsx
+  components/inventory/adjustment-matrix-picker.tsx
+  components/inventory/ledger-filter.tsx
+  components/inventory/ledger-sheet.tsx
+  components/inventory/stock-card-matrix.tsx
+  components/master/SizeFormDialog.tsx
+  components/procurement/bill-attachment-picker.tsx
+  components/procurement/bill-gallery-dialog.tsx
+  components/procurement/BulkMatrixMappingUI.tsx
+  components/procurement/CarrierFreightSummaryDialog.tsx
+  components/procurement/DualFreightFields.tsx
+  components/procurement/FullMatrixDialog.tsx
+  components/procurement/goods-receipt-print-template.tsx
+  components/procurement/InternalProductCombobox.tsx
+  components/procurement/inventory-landed-cost-card.tsx
+  components/procurement/material-picker.tsx
+  components/procurement/PatternGeneratorModal.tsx
+  components/procurement/purchase-tax-guardrails.tsx
+  components/procurement/purchase-tax-match-table.tsx
+  components/procurement/PurchaseUomCell.tsx
+  components/procurement/QuickCreateDialog.tsx
+  components/procurement/tax-invoice-status-picker.tsx
+  components/procurement/vendor-calc-mode-bar.tsx
+  components/procurement/VendorCombobox.tsx
+  components/production/create-job-modal.tsx
+  components/production/create-mto-job-dialog.tsx
+  components/production/job-detail-sheet.tsx
+  components/production/job-operations-section.tsx
+  components/production/kanban-board.tsx
+  components/production/production-job-detail-sheet.tsx
+  components/production/send-to-production-button.tsx
+  components/products/BOMSetupPanel.tsx
+  components/products/bundle-kits-manager.tsx
+  components/products/ProductModelImageUpload.tsx
+  components/products/ProductModelPreviewSheet.tsx
+  components/sales/bank-reconcile-workspace.tsx
+  components/sales/batch-production-modal.tsx
+  components/sales/bundle-line-details.tsx
+  components/sales/bundle-picker-dialog.tsx
+  components/sales/cash-receipt-payment-box.tsx
+  components/sales/ecommerce-order-importer.tsx
+  components/sales/goods-qty-badge.tsx
+  components/sales/handwritten-bill-dropzone.tsx
+  components/sales/LineItemProductThumb.tsx
+  components/sales/model-matrix-picker.tsx
+  components/sales/print-document-template.tsx
+  components/sales/receive-deposit-dialog.tsx
+  components/sales/receive-payment-dialog.tsx
+  components/sales/sales-channel-fields.tsx
+  components/sales/sales-doc-type-pills.tsx
+  components/sales/sales-document-filter.tsx
+  components/sales/sales-mockup-card.tsx
+  components/sales/sales-print-controls.tsx
+  components/sales/sales-shipping-fields.tsx
+  components/sales/sales-wht-certificate-panel.tsx
+  components/sales/send-bill-to-kanban-button.tsx
+  components/sales/service-line-shortcuts.tsx
+  components/sales/smart-sku-picker.tsx
+  components/sales/so-line-item-production-actions.tsx
+  components/sales/upgrade-abb-tax-button.tsx
+  components/settings/CompanySettingsForm.tsx
+  components/shared/attachment-sheet-viewer.tsx
+  components/shared/document/issue-document-button.tsx
+  components/shared/document/void-document-button.tsx
+  components/shared/document/voided-document-alert.tsx
+  components/shared/page-mode-tabs.tsx
+  components/shared/print/DocumentPrintFooter.tsx
+  components/shared/print/DocumentPrintHeader.tsx
+  components/shared/print/DocumentPrintSummary.tsx
+  components/shared/print/GoodsReceiptSheetHeader.tsx
+  components/shared/print/PrintLayout.tsx
+  components/shared/SmartColorCombobox.tsx
+  components/shared/tiered-storage-image.tsx
+  components/tax/TaxValidationModal.tsx
+  components/tax/wht-50tawi-auto-print.tsx
+  components/tax/wht-50tawi-certificate.tsx
+  components/tax/wht-50tawi-print-layout.tsx
+  components/ui/accordion.tsx
+  components/ui/alert-dialog.tsx
+  components/ui/alert.tsx
+  components/ui/badge.tsx
+  components/ui/button.tsx
+  components/ui/card.tsx
+  components/ui/command.tsx
+  components/ui/dialog.tsx
+  components/ui/dropdown-menu.tsx
+  components/ui/input.tsx
+  components/ui/label.tsx
+  components/ui/popover.tsx
+  components/ui/select.tsx
+  components/ui/sheet.tsx
+  components/ui/switch.tsx
+  components/ui/table.tsx
+  components/ui/tabs.tsx
+  components/ui/textarea.tsx
+  components/ui/tooltip.tsx
+  lib/actions/account-receivables.ts
+  lib/actions/audit-actions.ts
+  lib/actions/auth.actions.ts
+  lib/actions/auth.ts
+  lib/actions/backup-actions.ts
+  lib/actions/bank-accounts.ts
+  lib/actions/bank-reconcile-actions.ts
+  lib/actions/bom-actions.ts
+  lib/actions/carrier-actions.ts
+  lib/actions/contacts.ts
+  lib/actions/credit-note-actions.ts
+  lib/actions/dashboard-actions.ts
+  lib/actions/document-actions.ts
+  lib/actions/document-preview.ts
+  lib/actions/finance/allocations.ts
+  lib/actions/finance/ar.ts
+  lib/actions/finance/attachments.ts
+  lib/actions/finance/available-deposits.ts
+  lib/actions/finance/billing-note-status.ts
+  lib/actions/finance/create-ap-writeoff.ts
+  lib/actions/finance/create-writeoff.ts
+  lib/actions/finance/expense-cash-settlement.ts
+  lib/actions/finance/payment.ts
+  lib/actions/finance/receipt-sweep-actions.ts
+  lib/actions/gemini-model-actions.ts
+  lib/actions/inventory-adjustment.ts
+  lib/actions/inventory.ts
+  lib/actions/manual-receipt-context.ts
+  lib/actions/mapping.ts
+  lib/actions/master-data-actions.ts
+  lib/actions/master.ts
+  lib/actions/materials.ts
+  lib/actions/parameter-actions.ts
+  lib/actions/procurement-bills.ts
+  lib/actions/product-actions.ts
+  lib/actions/product.actions.ts
+  lib/actions/product.ts
+  lib/actions/production/batch-send-to-production.ts
+  lib/actions/production/job-operations-actions.ts
+  lib/actions/production/send-to-production-action.ts
+  lib/actions/production-actions.ts
+  lib/actions/profit-analysis.actions.ts
+  lib/actions/purchase-credit-note.ts
+  lib/actions/purchase-document-control.ts
+  lib/actions/receipt.ts
+  lib/actions/role-permissions.ts
+  lib/actions/sales-ocr-actions.ts
+  lib/actions/sales-order-actions.ts
+  lib/actions/sales-receipt-actions.ts
+  lib/actions/settings.ts
+  lib/actions/tax-reports.ts
+  lib/actions/technician-rates.ts
+  lib/actions/uom-actions.ts
+  lib/actions/user.actions.ts
+  lib/actions/vendor-rounding.ts
+  lib/actions/vendor-tax-invoice.ts
+  lib/actions/wht-rate-actions.ts
+  lib/ai/gemini-client.ts
+  lib/ai/goods-receipt-ocr.ts
+  lib/ai/ocr-quota.ts
+  lib/approval/approval-rules.ts
+  lib/approval/revalidate-approval.ts
+  lib/audit/parse-audit-change.ts
+  lib/auth/current-user.ts
+  lib/auth/module-access.ts
+  lib/auth/require-admin.ts
+  lib/backup/backup-file.ts
+  lib/backup/backup-modules.ts
+  lib/backup/manual-backup-auth.ts
+  lib/backup/restore-rows.ts
+  lib/backup/schema-cache.ts
+  lib/constants/accounting.ts
+  lib/constants/document-actions.ts
+  lib/constants/document-print-heading.ts
+  lib/constants/document.ts
+  lib/constants/expense-constants.ts
+  lib/constants/print-paper-size.ts
+  lib/contacts/duplicate-check.ts
+  lib/contacts/tax-id.ts
+  lib/finance/cash-receipt-csv.ts
+  lib/finance/cash-receipt-data.ts
+  lib/finance/cash-receipt-excel.ts
+  lib/finance/invoice-allocation-summary.ts
+  lib/finance/payment-channel.ts
+  lib/finance/payment-register-data.ts
+  lib/finance/payment-register-excel.ts
+  lib/finance/payment-register-label.ts
+  lib/finance/payroll-excel.ts
+  lib/finance/refund-print-vat.ts
+  lib/finance/refund-settlement.ts
+  lib/finance/vendor-banks.ts
+  lib/finance/wht-base.ts
+  lib/inventory/filter-stock-overview.ts
+  lib/inventory/landed-cost.ts
+  lib/inventory/ledger-balances.ts
+  lib/inventory/stock-availability.ts
+  lib/line/line-oa.ts
+  lib/line/line-target.ts
+  lib/line/slip-jpeg.ts
+  lib/master/category-hierarchy.ts
+  lib/master/size-sort.ts
+  lib/materials/price-variance.ts
+  lib/print/company-profile.ts
+  lib/print/taxonomy-storage.ts
+  lib/procurement/bill-notes.ts
+  lib/procurement/compress-bill-image.ts
+  lib/procurement/upload-bill-files.ts
+  lib/products/invoice-price.ts
+  lib/sales/bundle-lines.ts
+  lib/sales/ecommerce-sheet.ts
+  lib/sales/goods-qty-summary.ts
+  lib/sales/ktb-statement-parse.ts
+  lib/sales/print-line-view.ts
+  lib/sales/resolve-one-time-contact.ts
+  lib/sales/sales-ocr-parse.ts
+  lib/sales/service-line-price.ts
+  lib/supabase/auditService.ts
+  lib/supabase/fetch-all-pages.ts
+  lib/supabase/server-admin.ts
+  lib/supabase/ssr-server.ts
+  lib/supabase/update-session.ts
+  lib/supabase-server.ts
+  lib/supabase.ts
+  lib/tax/document-register-data.ts
+  lib/tax/document-register-excel.ts
+  lib/tax/monthly-wht-report-data.ts
+  lib/tax/output-tax-series.ts
+  lib/tax/report-center-data.ts
+  lib/tax/vat-ledger-data.ts
+  lib/tax/vat-ledger-excel.ts
+  lib/tax/wht-50tawi-data.ts
+  lib/tax/wht-50tawi-format.ts
+  lib/tax/wht-export.ts
+  lib/utils/accounting.ts
+  lib/utils/billing-list-sort.ts
+  lib/utils/billing-period.ts
+  lib/utils/cancel-replace-draft.ts
+  lib/utils/credit-note-line.ts
+  lib/utils/currency.ts
+  lib/utils/date-formatter.ts
+  lib/utils/deposit-apply.ts
+  lib/utils/deposit-note.ts
+  lib/utils/document-summary.ts
+  lib/utils/draft-document-no.ts
+  lib/utils/dual-freight.ts
+  lib/utils/expense-capitalize.ts
+  lib/utils/expense-knockoff.ts
+  lib/utils/expense-labels.ts
+  lib/utils/image-compression.ts
+  lib/utils/landed-cost.ts
+  lib/utils/ocr-sku.ts
+  lib/utils/outstanding-summary.ts
+  lib/utils/payment-fifo.ts
+  lib/utils/payment-timestamp.ts
+  lib/utils/pricing.ts
+  lib/utils/purchase-tax.ts
+  lib/utils/purchase-uom.ts
+  lib/utils/purchase-vat-revise.ts
+  lib/utils/rec-payment-summary.ts
+  lib/utils/receipt-qty-groups.ts
+  lib/utils/sales-shipping.ts
+  lib/utils/skuGenerator.ts
+  lib/utils/smart-sku-search.ts
+  lib/utils/storage-tier.ts
+  lib/utils/tax-invoice-status.ts
+  lib/utils/test-accounting.ts
+  lib/utils/thai-baht-text.ts
+  lib/utils/uom-conversion.ts
+  lib/utils/vendor-calc-mode.ts
+  lib/utils/void-remark.ts
+  lib/utils.ts
+  lib/validations/ap-writeoff.ts
+  lib/validations/ar-writeoff.ts
+  lib/validations/contacts.ts
+  lib/validations/credit-note.ts
+  lib/validations/master-category.ts
+  lib/validations/master-size.ts
+  lib/validations/payment-knockoff.ts
+  lib/validations/refund.ts
+  lib/validations/sales-document.ts
+  lib/validations/system-settings.ts
+  types/account-receivable.ts
+  types/accounting-period.ts
+  types/ap-payment.ts
+  types/ap-writeoff.ts
+  types/approval.ts
+  types/ar-writeoff.ts
+  types/audit.ts
+  types/auth.ts
+  types/available-deposit.ts
+  types/bank-account.ts
+  types/bank-reconcile.ts
+  types/batch-sales-pdf.ts
+  types/billing.ts
+  types/bom.ts
+  types/bundle-kit.ts
+  types/carrier.ts
+  types/cash-receipt.ts
+  types/contact-bank-account.ts
+  types/contact.ts
+  types/credit-note.ts
+  types/dashboard.ts
+  types/database.types.ts
+  types/deposit.ts
+  types/depreciation.ts
+  types/document-allocation.ts
+  types/document-preview.ts
+  types/document.ts
+  types/expense.ts
+  types/finance-report.ts
+  types/fixed-asset.ts
+  types/fixed-assets.ts
+  types/gemini-model.ts
+  types/inventory-adjustment.ts
+  types/kanban.ts
+  types/manual-receipt.ts
+  types/master-category.ts
+  types/master-size.ts
+  types/material.ts
+  types/ocr-line-match.ts
+  types/parameter.ts
+  types/payment-register.ts
+  types/payment-transaction-meta.ts
+  types/payment.ts
+  types/payroll.ts
+  types/print-document.ts
+  types/procurement-bills.ts
+  types/product-matrix.ts
+  types/product-preview.ts
+  types/product-sale.ts
+  types/production.ts
+  types/profit-analysis.ts
+  types/purchase-document-control.ts
+  types/rbac.ts
+  types/refund.ts
+  types/sales-ocr.ts
+  types/sales-order.ts
+  types/storage-tier.ts
+  types/supabase.ts
+  types/system-settings.ts
+  types/tax-ledger.ts
+  types/tax-wht-print.ts
+  types/tax.ts
+  types/technician-billing.ts
+  types/technician-rate.ts
+  types/user.ts
+  types/wht-rate.ts
+  utils/supabase/server.ts
+  supabase/.branches/_current_branch
+  supabase/.env.local
+  supabase/.temp/cli-latest
+  supabase/.temp/gotrue-version
+  supabase/.temp/linked-project.json
+  supabase/.temp/pgdelta/catalog-local-migrations-832d81bdc29e745a55191d608039b80d574d7957dd62d7af9d5b856f0d9d538a-1785729843296.json
+  supabase/.temp/pgdelta/catalog-local-migrations-a8de363a5e6e5448659192df41ce470ec5bb9df6767c5d7f7f251873b23348ac-1786339054787.json
+  supabase/.temp/pgdelta/pgdelta-target-ca.crt
+  supabase/.temp/pooler-url
+  supabase/.temp/postgres-version
+  supabase/.temp/project-ref
+  supabase/.temp/rest-version
+  supabase/.temp/start-secrets/supabase_edge_runtime_supthavee-erp/env/docker.env
+  supabase/.temp/storage-migration
+  supabase/.temp/storage-version
+  supabase/config.toml
+  supabase/functions/ocr-expense/config.toml
+  supabase/functions/ocr-expense/deno.json
+  supabase/functions/ocr-expense/index.ts
+  supabase/functions/process-receipt-ocr/config.toml
+  supabase/functions/process-receipt-ocr/deno.json
+  supabase/functions/process-receipt-ocr/index.ts
+  supabase/functions/_shared/gemini-model.ts
+  supabase/migrations/20260720013414_create_procurement_tables.sql
+  supabase/migrations/20260720083500_contacts_contact_persons_vendor_product_mapping.sql
+  supabase/migrations/20260720083600_master_data_public_read_rls.sql
+  supabase/migrations/20260722013000_grant_vendor_product_mapping_privileges.sql
+  supabase/migrations/20260722023000_grant_mapping_table_privileges.sql
+  supabase/migrations/20260722114442_add_indexes_and_grants.sql
+  supabase/migrations/20260726150000_grant_service_role_all_tables.sql
+  supabase/migrations/20260726160000_doc_headers_composite_unique_doc_no.sql
+  supabase/migrations/20260727200000_documents_document_items.sql
+  supabase/migrations/20260727210000_documents_contact_person_id.sql
+  supabase/migrations/20260727220000_generate_document_no_function.sql
+  supabase/migrations/20260727230000_documents_vat_summary.sql
+  supabase/migrations/20260727240000_document_status_completed.sql
+  supabase/migrations/20260727250000_documents_ref_document_id.sql
+  supabase/migrations/20260728100000_documents_attachment_url_storage.sql
+  supabase/migrations/20260728155233_phase5_finance_init.sql
+  supabase/migrations/20260729150000_document_types_sales_purchases_v2.sql
+  supabase/migrations/20260729190000_documents_reference_no.sql
+  supabase/migrations/20260729200000_document_allocations_original_receipt.sql
+  supabase/migrations/20260729210000_documents_reference_attachments.sql
+  supabase/migrations/20260730115538_document_type_refund_writeoff_official.sql
+  supabase/migrations/20260730115809_generate_document_no_refund_writeoff_prefix.sql
+  supabase/migrations/20260730120758_add_refund_writeoff_enums.sql
+  supabase/migrations/20260730125526_add_ar_ap_refund_writeoff_enums.sql
+  supabase/migrations/20260730180000_document_type_refund_writeoff.sql
+  supabase/migrations/20260730210000_billing_note_items.sql
+  supabase/migrations/20260731180000_void_document_with_stock_reversal.sql
+  supabase/migrations/20260731201400_create_audit_logs_table.sql
+  supabase/migrations/20260801073544_create_expense_management_tables.sql
+  supabase/migrations/20260801081210_add_vendor_to_expenses.sql
+  supabase/migrations/20260801133000_create_generate_expense_no_rpc.sql
+  supabase/migrations/20260801234500_generate_expense_no_use_current_date.sql
+  supabase/migrations/20260801240000_expense_documents_storage_bucket.sql
+  supabase/migrations/20260801999999_add_bank_account_to_expenses.sql
+  supabase/migrations/20260802093000_expenses_vendor_doc_no_unique_index.sql
+  supabase/migrations/20260802143000_expenses_withholding_tax_columns.sql
+  supabase/migrations/20260802164028_add_wht_foundation_clean.sql
+  supabase/migrations/20260802184604_add_production_kanban.sql
+  supabase/migrations/20260802185827_add_production_kanban.sql
+  supabase/migrations/20260802223000_expenses_payment_slip_url.sql
+  supabase/migrations/20260803010000_phase7_production_kanban_workflow.sql
+  supabase/migrations/20260803031621_add_rounding_difference_to_documents.sql
+  supabase/migrations/20260803032045_add_system_settings_rounding_gl.sql
+  supabase/migrations/20260803124500_production_job_attachments.sql
+  supabase/migrations/20260803140000_production_job_cancelled_status.sql
+  supabase/migrations/20260803150000_kanban_auto_archive.sql
+  supabase/migrations/20260805032907_phase10_app_roles_user_profiles.sql
+  supabase/migrations/20260805034000_dynamic_rbac_and_settings.sql
+  supabase/migrations/20260805040000_system_settings_singleton.sql
+  supabase/migrations/20260805042000_company_assets_and_branch_name.sql
+  supabase/migrations/20260805043000_product_assets_and_model_image_url.sql
+  supabase/migrations/20260809141609_create_profit_analysis_views.sql
+  supabase/migrations/20260809163000_add_document_print_settings.sql
+  supabase/migrations/20260810003000_add_allow_negative_inventory.sql
+  supabase/migrations/20260811023000_add_user_profiles_pin_code.sql
+  supabase/migrations/20260811110000_add_service_and_technician_fields.sql
+  supabase/migrations/20260813140000_create_technician_rates.sql
+  supabase/migrations/20260816120000_contacts_contact_roles.sql
+  supabase/migrations/20260816140000_align_technician_rates_product_models_fk.sql
+  supabase/migrations/20260817090000_contacts_drop_contact_type.sql
+  supabase/migrations/20260817140000_ensure_technician_rates_product_models_fk.sql
+  supabase/migrations/20260818100000_actual_cost_engine_wage_cogs.sql
+  supabase/migrations/20260818120000_technician_billing_tb.sql
+  supabase/migrations/20260818140000_document_items_technician_wage.sql
+  supabase/migrations/20260819130000_stk_ob_stk_adj_inventory.sql
+  supabase/migrations/20260820052415_period_closing_and_approval.sql
+  supabase/migrations/20260820150000_approval_logs.sql
+  supabase/migrations/20260820170000_align_approval_logs_cloud_schema.sql
+  supabase/migrations/20260821000000_create_fixed_asset_management.sql
+  supabase/migrations/20260821120000_fixed_assets_expense_warranty_attachments.sql
+  supabase/migrations/20260822110000_expense_payout_allocations_and_paid_status.sql
+  supabase/migrations/20260824160000_abac_user_profiles_and_document_ownership.sql
+  supabase/migrations/20260825100000_app_roles_accessible_modules.sql
+  supabase/migrations/20260826100000_tiered_storage_storage_tier.sql
+  supabase/migrations/20260828120000_system_parameters_maker_checker.sql
+  supabase/migrations/20260828130000_seed_nas_backup_wht_params.sql
+  supabase/migrations/20260828140000_mst_wht_rates.sql
+  supabase/migrations/20260830100000_ap_freight_cost_landed_cost.sql
+  supabase/migrations/20260830110000_inventory_ledger_unit_cost.sql
+  supabase/migrations/20260830120000_phase15_mst_uom_category_parent.sql
+  supabase/migrations/20260901100000_product_boms.sql
+  supabase/migrations/20260903110000_product_models_is_manufactured.sql
+  supabase/migrations/20260903140000_production_jobs_mto_kanban.sql
+  supabase/migrations/20261021160000_audit_remediation_master.sql
+  supabase/migrations/20261021170000_issue_document_transaction_rpc.sql
+  supabase/migrations/20261021173000_process_ar_receipt_transaction_rpc.sql
+  supabase/migrations/20261021180000_save_manual_goods_receipt_transaction_rpc.sql
+  supabase/migrations/20261021183000_save_goods_receipt_to_ledger_transaction_rpc.sql
+  supabase/seed.sql
+  supabase/snippets/Untitled query 475.sql
+  supabase/snippets/Untitled query 596.sql
+
+[5] ROUTES, SERVER ACTIONS & SUPABASE RPC CALLS
+- app/(auth)/login/page.tsx
+- app/(dashboard)/accounting-periods/page.tsx
+- app/(dashboard)/approvals/page.tsx
+- app/(dashboard)/settings/parameters/page.tsx
+- app/(erp)/dashboard/page.tsx
+- app/(erp)/expenses/actions.ts [USE SERVER]
+    exported async fns: updateExpenseDirectAction
+- app/(erp)/expenses/create/page.tsx
+- app/(erp)/expenses/page.tsx
+- app/(erp)/expenses/[id]/edit/page.tsx
+    exported async fns: generateMetadata
+- app/(erp)/expenses/[id]/page.tsx
+    exported async fns: generateMetadata
+- app/(erp)/expenses/[id]/print-wht/page.tsx
+    exported async fns: generateMetadata
+- app/(erp)/finance/ap-ar/page.tsx
+- app/(erp)/finance/ap-payment/page.tsx
+- app/(erp)/finance/ap-writeoff/create/page.tsx
+- app/(erp)/finance/ap-writeoff/page.tsx
+- app/(erp)/finance/ar-writeoff/create/page.tsx
+- app/(erp)/finance/ar-writeoff/page.tsx
+- app/(erp)/finance/bank-accounts/page.tsx
+- app/(erp)/finance/billing-notes/create/page.tsx
+- app/(erp)/finance/billing-notes/page.tsx
+- app/(erp)/finance/billing-notes/[id]/page.tsx
+    exported async fns: generateMetadata
+- app/(erp)/finance/deposits/create/page.tsx
+- app/(erp)/finance/deposits/page.tsx
+- app/(erp)/finance/payments/page.tsx
+- app/(erp)/finance/refunds/create/page.tsx
+- app/(erp)/finance/reports/page.tsx
+- app/(erp)/finance/tax-reports/page.tsx
+- app/(erp)/fixed-assets/page.tsx
+- app/(erp)/inventory/adjustments/page.tsx
+- app/(erp)/inventory/ledger/page.tsx
+- app/(erp)/knowledge-base/document-standards/page.tsx
+- app/(erp)/production/kanban/page.tsx
+- app/(erp)/profit-analysis/page.tsx
+- app/(erp)/purchases/credit-note/page.tsx
+- app/(erp)/purchases/manual-receipt/page.tsx
+- app/(erp)/purchases/page.tsx
+- app/(erp)/purchases/[doc_no]/page.tsx
+    exported async fns: generateMetadata
+- app/(erp)/reports/page.tsx
+- app/(erp)/sales/cn/create/page.tsx
+- app/(erp)/sales/create/page.tsx
+- app/(erp)/sales/edit/[id]/page.tsx
+    exported async fns: generateMetadata
+- app/(erp)/sales/orders/create/page.tsx
+- app/(erp)/sales/orders/edit/[id]/page.tsx
+- app/(erp)/sales/orders/page.tsx
+- app/(erp)/sales/page.tsx
+- app/(erp)/sales/reconcile/page.tsx
+- app/(erp)/sales/[doc_no]/page.tsx
+    exported async fns: generateMetadata
+- app/(erp)/settings/company/page.tsx
+- app/(erp)/settings/master-data/page.tsx
+- app/(erp)/settings/master-data/sizes/page.tsx
+- app/(erp)/settings/page.tsx
+- app/(erp)/settings/users/page.tsx
+- app/(erp)/tax/wht-report/page.tsx
+- app/(erp)/tax/wht-report/print-50tawi/page.tsx
+    exported async fns: generateMetadata
+- app/actions/accounting-period.ts [USE SERVER]
+    exported async fns: getAccountingPeriods, togglePeriodStatus, createAccountingPeriod
+- app/actions/ap-writeoff.ts [USE SERVER]
+    exported async fns: getOutstandingAP, createAPWriteOff, listApWriteoffs, getApWriteoffPreview, deleteApWriteoffDraft, voidApWriteoff
+    supabase.rpc(): is_period_closed
+- app/actions/approval.ts [USE SERVER]
+    exported async fns: getPendingApprovals, processApproval
+    supabase.rpc(): generate_expense_no
+- app/actions/billing.ts [USE SERVER]
+    exported async fns: getBillingNotes, getPendingBillReceipts, getBillingNoteSettlements, getBillingNoteById, getUnbilledInvoices, getOutstandingContactsSummary, getUnbilledApVendorQueue, createBillingNote, getOpenBillingNotesForContact, getInvoicesByBillingNote, loadUnbilledApSummaryByPeriod, createBatchBillingNotesAction, getIssuedTechnicianBills, deleteBillingNoteAction, updateBillingNoteAction
+    supabase.rpc(): get_unbilled_ap_vendor_queue, get_unbilled_ap_summary_by_period, delete_billing_note_transaction, update_billing_note_transaction
+- app/actions/contacts.ts [USE SERVER]
+    exported async fns: getServiceModels, getTechnicianRates, upsertTechnicianRate, updateTechnicianRate, deleteTechnicianRate, getContactDetails, updateContact, addContactPerson, listContactPersons
+- app/actions/dashboard.ts [USE SERVER]
+    exported async fns: getErpFinancialKpis, getPendingAR, getPendingAP, getYTDSales, getYTDExpenses, getTrueNetProfit
+    supabase.rpc(): get_erp_financial_kpis_and_profit
+- app/actions/depreciation.ts [USE SERVER]
+    exported async fns: calculateDepreciationAction, getAssetDepreciationLedger
+    supabase.rpc(): calculate_monthly_depreciation
+- app/actions/documents.ts [USE SERVER]
+    exported async fns: deleteDraftDocument
+- app/actions/expense/ocr-action.ts [USE SERVER]
+    exported async fns: processExpenseOCR
+- app/actions/expenses.ts [USE SERVER]
+    exported async fns: getExpenses, getExpenseVendors, getExpenseCategories, getBankAccounts, createExpenseCategory, uploadExpenseReceipt, saveExpenseDirect, updateExpenseDirectAction, createDraftExpense, updateDraftExpense, getExpenseById, sendExpenseForApproval, issueExpense, deleteDraftExpense, voidExpense, payExpenseInstallment
+    supabase.rpc(): save_expense_direct_no_draft, update_expense_direct, generate_expense_no
+- app/actions/finance/ap-actions.ts [USE SERVER]
+    exported async fns: getOutstandingSummary, getVendors, getOutstandingAP, submitAPPayment, uploadReplacementPaymentSlipAction, replacePaymentSlipAction
+    supabase.rpc(): settle_ap_invoices_bulk_fast, replace_payment_slip_transaction
+- app/actions/finance/cash-receipts.ts [USE SERVER]
+    exported async fns: getCashReceiptPackAction, generateTier12CashReceiptNumbersAction, convertPurchaseBillTaxModeAction, setContactVendorTaxTierAction, getContactVendorTaxTierAction, uploadContactIdCardAction
+    supabase.rpc(): generate_tier_1_2_cash_receipt_numbers, convert_purchase_bill_tax_mode
+- app/actions/finance/contact-bank-accounts.ts [USE SERVER]
+    exported async fns: getContactBankAccountsAction, upsertContactBankAccountAction, deleteOrToggleContactBankAccountAction
+    supabase.rpc(): upsert_contact_bank_account
+- app/actions/finance/deposit-actions.ts [USE SERVER]
+    exported async fns: getDepositDocuments, createDepositDocument, manageDepositBalance
+    supabase.rpc(): is_period_closed
+- app/actions/finance/line-oa.ts [USE SERVER]
+    exported async fns: listLineKnownGroupsAction, loadContactLineTargetAction, saveContactLineOaChatUrlAction, sendVendorPaymentSlipLineAction, diagnoseAndSyncLineWebhookAction, registerAndVerifyLineWebhookUrlAction
+    supabase.rpc(): get_line_webhook_status_summary
+- app/actions/finance/payment-register.ts [USE SERVER]
+    exported async fns: getPaymentReceiptRegisterAction
+- app/actions/fixed-assets.ts [USE SERVER]
+    exported async fns: getAssetCategories, getLinkableExpenses, getLinkedExpenseDocumentNo, uploadFixedAssetAttachment, getFixedAssets, createFixedAsset, updateFixedAsset, hasFixedAssetForExpense, getFixedAssetById, disposeFixedAsset
+- app/actions/inventory-actions.ts [USE SERVER]
+- app/actions/kanban-actions.ts [USE SERVER]
+    exported async fns: getProductionJobs, getKanbanBoardData, createProductionJob, updateJobStatus, getJobDetails, cancelProductionJob, lookupTechnicianWageForService, getTechnicianOptions, updateProductionJobAssignment
+- app/actions/refunds.ts [USE SERVER]
+    exported async fns: getAvailableDeposits, getRefundParties, createRefundDocument
+    supabase.rpc(): is_period_closed
+- app/actions/tax-actions.ts [USE SERVER]
+    exported async fns: getMonthlyWHTReport, updateVendorTaxInfo
+- app/actions/technician-billing.ts [USE SERVER]
+    exported async fns: getUnbilledTechnicianJobs, createTechnicianBill
+    supabase.rpc(): generate_document_no
+- app/api/backup/export/route.ts
+    exported async fns: GET
+- app/api/backup/restore/route.ts
+    exported async fns: POST
+- app/api/expenses/ocr/route.ts
+    exported async fns: POST
+- app/api/finance/export-cash-receipts/route.ts
+    exported async fns: GET
+- app/api/finance/export-payment-register/route.ts
+    exported async fns: GET
+- app/api/finance/export-tax/route.ts
+    exported async fns: GET
+- app/api/line/slip-image/route.ts
+    exported async fns: GET
+- app/api/line/webhook/route.ts
+    exported async fns: POST
+- app/api/tax/export-wht/route.ts
+    exported async fns: GET
+- app/contacts/page.tsx
+- app/dashboard/procurement/goods-receipt/page.tsx
+- app/dashboard/procurement/vendor-mapping/page.tsx
+- app/finance/payroll/actions.ts [USE SERVER]
+    exported async fns: getOrCreatePayrollPeriodAction, uploadEmployeeIdCardAction, updateEmployeeIdCardAction, setPayrollSsoRateAction, updatePayrollItemCalculationAction, confirmEmployeeSalaryPaymentAction, confirmSsoRemittancePaymentAction, upsertEmployeeMasterAction, exportPayrollWorkbookAction
+    supabase.rpc(): generate_or_sync_payroll_period, recalculate_payroll_period_totals, update_employee_id_card_attachment, record_sso_remittance_and_expense
+- app/finance/payroll/page.tsx
+- app/forbidden/page.tsx
+- app/layout.tsx
+- app/page.tsx
+- app/procurement/goods-receipt/page.tsx
+- app/procurement/vendor-mapping/page.tsx
+- app/products/actions/product-matrix.ts [USE SERVER]
+    exported async fns: uploadProductModelImage, findProductModelByCode, getProductModelById, listLoadableProductModels, insertDraftProductModel, overwriteDraftProductModel, saveDraftProductModel, generateSkusFromModel, getProductModelPreview, updateProductModel
+- app/products/materials/page.tsx
+- app/products/page.tsx
+- components/tax/wht-50tawi-print-layout.tsx
+- lib/actions/account-receivables.ts [USE SERVER]
+    exported async fns: getAccountReceivables
+- lib/actions/audit-actions.ts [USE SERVER]
+    exported async fns: getRecentAuditLogs
+- lib/actions/auth.actions.ts [USE SERVER]
+    exported async fns: signInWithPin, signOut
+- lib/actions/auth.ts [USE SERVER]
+    exported async fns: getAllRoles
+- lib/actions/backup-actions.ts [USE SERVER]
+    exported async fns: triggerManualBackup
+- lib/actions/bank-accounts.ts [USE SERVER]
+    exported async fns: getBankAccounts, createBankAccount, createBankAccountFormAction, toggleBankAccountStatus, toggleBankAccountStatusFormAction
+- lib/actions/bank-reconcile-actions.ts [USE SERVER]
+    exported async fns: importKtbStatement, listBankStatementLines, suggestBillMatches, searchOpenSalesBills, autoMatchUniqueDeposits, reclassifyDocumentPaymentChannel, unmatchBankStatementLine, unmatchStatementLineAllocation, confirmBankMatch, searchOpenPurchaseBills, confirmWithdrawalRecord
+    supabase.rpc(): get_statement_lines_with_matches, get_reconcile_candidate_documents, reclassify_document_payment_channel, unmatch_statement_line_allocation
+- lib/actions/bom-actions.ts [USE SERVER]
+    exported async fns: searchRawMaterialModels, getBOMByModelId, addBOMItem, removeBOMItem, searchBomMaterials, getModelMaterialBom, saveModelMaterialBom
+- lib/actions/carrier-actions.ts [USE SERVER]
+    exported async fns: getActiveCarriers, createCarrier, listDestFreightSummary, confirmCarrierReceipt
+- lib/actions/contacts.ts [USE SERVER]
+    exported async fns: getContacts, createContact, toggleContactStatus, importContacts
+- lib/actions/credit-note-actions.ts [USE SERVER]
+    exported async fns: getCreditNoteSourceAction, createCreditNoteAction
+    supabase.rpc(): is_period_closed
+- lib/actions/dashboard-actions.ts [USE SERVER]
+    exported async fns: getSalesByChannel
+- lib/actions/document-actions.ts [USE SERVER]
+    exported async fns: generateDocumentNumber, createDraftDocument, createDocument, listActiveBankAccounts, listActiveCustomers, updateCustomerNickname, getContactPersons, searchProductsForSales, searchProductsForPurchases, completeDocument, getDocumentByNo, getDocumentById, updateSalesDocumentMockup, updateDraftDocument, issueDocument, issueCreditNoteAction, updateSalesDocumentDirect, getSalesDocuments, getPurchaseDocuments, convertDocument, upgradeAbbToFullTaxInvoice, voidSalesDocumentAction, voidDocumentAction, voidDocument, cloneDocumentToNewDraft, duplicateDocument, attachSalesDocumentWhtCertificate, uploadDocumentImage, getBatchDocumentsForPrint
+    supabase.rpc(): generate_document_no, issue_document_transaction, generate_abb_channel_doc_no, sync_document_stock_ledger, issue_credit_note_transaction, update_sales_document_direct, get_sales_order_deposit_summary, get_recommended_conversion_date, void_sales_document, void_document_transaction, void_document_with_stock_reversal, attach_sales_document_wht_certificate
+- lib/actions/document-preview.ts [USE SERVER]
+    exported async fns: getDocumentPreview
+- lib/actions/finance/allocations.ts [USE SERVER]
+    exported async fns: getDocumentAllocationsByReceiptId, getDepositAllocationHistory, updateReceiptStatus
+- lib/actions/finance/ar.ts [USE SERVER]
+    exported async fns: getAccountReceivables, getAccountPayables
+- lib/actions/finance/attachments.ts [USE SERVER]
+    exported async fns: uploadDocumentAttachment
+- lib/actions/finance/available-deposits.ts [USE SERVER]
+    exported async fns: getAvailableDepositsForContact
+- lib/actions/finance/create-ap-writeoff.ts [USE SERVER]
+    exported async fns: getApWriteoffVendors, getUnpaidApInvoicesByVendor, createApWriteOff
+- lib/actions/finance/create-writeoff.ts [USE SERVER]
+    exported async fns: createWriteOff
+    supabase.rpc(): is_period_closed
+- lib/actions/finance/payment.ts [USE SERVER]
+    exported async fns: getOutstandingSummary, getDebtorsList, getUnpaidInvoicesByCustomer, processPaymentKnockoff, receiveSalesDocumentPayment
+    supabase.rpc(): process_ar_receipt_transaction, settle_sales_document_payment
+- lib/actions/finance/receipt-sweep-actions.ts [USE SERVER]
+    exported async fns: resolveCompanyBankAccountId, getUnsweptReceipts, markReceiptsSweptToCompany, getAccountantReceiptFiles, paymentChannelFields
+- lib/actions/gemini-model-actions.ts [USE SERVER]
+    exported async fns: listAvailableGeminiModels
+- lib/actions/inventory-adjustment.ts [USE SERVER]
+    exported async fns: getInventoryAdjustments, adjustInventory, getAdjustmentDetail
+- lib/actions/inventory.ts [USE SERVER]
+    exported async fns: searchModelsForStockCard, searchBrandsForStockCard, getInventoryOverview, getInventoryOverviewByBrand, getStockCardByModel, getProductStockCard
+    supabase.rpc(): get_on_hand_qty_by_product_ids
+- lib/actions/manual-receipt-context.ts [USE SERVER]
+    exported async fns: getManualReceiptVendorContext, getSmartSkuPickerAllProducts
+    supabase.rpc(): get_smart_sku_picker_vendor_products
+- lib/actions/mapping.ts [USE SERVER]
+    exported async fns: getActiveVendors, getVendorMappingData, getModelsByVendor, bulkUpsertVendorMapping
+- lib/actions/master-data-actions.ts [USE SERVER]
+    exported async fns: getSizes, createSize, updateSize, toggleSizeStatus, getCategories, createCategory, updateCategory, toggleCategoryStatus
+- lib/actions/master.ts [USE SERVER]
+    exported async fns: getBrands, getCategories, getUoms, getGenders, getVendors, getColors, getSizesByBrand, getGlobalSizes, getSizeSortCatalog, getAllSizesByBrand, createSize, updateSize, createSizesBulk, getVendorMappingsByProductIds, getMasterDataForMatrix, createBrand, createVendor, createColor, createCategory
+- lib/actions/materials.ts [USE SERVER]
+    exported async fns: listMaterialCatalogAction, saveMaterialAction, issueMaterialToShopFloorAction, findMaterialMatchesForVendorCodes, upsertMaterialVendorMappingAction, confirmMaterialVendorMappingAction, postMaterialPurchaseLines
+    supabase.rpc(): upsert_material_vendor_mapping, record_material_purchase_inbound
+- lib/actions/parameter-actions.ts [USE SERVER]
+    exported async fns: getSystemParameter, getSystemParameter, getSystemParameter, getParameterSettingsPageData, requestParameterChange, approveParameterChange, rejectParameterChange
+- lib/actions/procurement-bills.ts [USE SERVER]
+    exported async fns: uploadProcurementBillFile, saveDocumentProcurementBills
+- lib/actions/product-actions.ts [USE SERVER]
+    exported async fns: deleteProductModel, getProductsForCatalog, deactivateProductsByIds, deleteSkusSafelyAction, getProductOnHandQty, listBundleKits, searchBundleKits, getBundleKitById, saveBundleKit
+    supabase.rpc(): delete_skus_safely
+- lib/actions/product.actions.ts [USE SERVER]
+    exported async fns: searchProductModels, getModelMatrixForSale
+- lib/actions/product.ts [USE SERVER]
+    exported async fns: getModelsByVendorForQuickCreate, getSizesByBrand, quickCreateSKU
+- lib/actions/production/batch-send-to-production.ts [USE SERVER]
+    exported async fns: uploadBatchModelMockup, batchSendToProduction
+- lib/actions/production/job-operations-actions.ts [USE SERVER]
+    exported async fns: getJobOperations, upsertJobOperation, deleteJobOperation, getRoutingActivityRates
+- lib/actions/production/send-to-production-action.ts [USE SERVER]
+    exported async fns: sendToProduction, sendDocumentToKanban, uploadDocumentItemMockup
+- lib/actions/production-actions.ts [USE SERVER]
+    exported async fns: getProductionJobs, backflushBomForCompletedJob, updateJobStatus, createProductionJob, createProductionJobFromSO, searchManufacturedModels, getProductionJobDetails, executeMaterialBackflush
+    supabase.rpc(): backflush_bom_for_production
+- lib/actions/profit-analysis.actions.ts [USE SERVER]
+    exported async fns: getMonthlyProfitKpi, getSalesProfitRows, getProfitAnalysisDashboard
+- lib/actions/purchase-credit-note.ts [USE SERVER]
+    exported async fns: searchPurchaseVendors, getPurchaseVendor, listVendorApTaxBills, savePurchaseCreditNote, uploadPurchaseCreditNoteFile
+- lib/actions/purchase-document-control.ts [USE SERVER]
+    exported async fns: revisePurchaseVatMode, voidAndClonePurchaseDocument, requestPurchaseDocumentControl, loadVoidedPurchaseClone
+    supabase.rpc(): admin_revise_purchase_vat_mode
+- lib/actions/receipt.ts [USE SERVER]
+    exported async fns: parseReceiptOcr, getOcrQuotaStatusAction, matchReceiptItemsToProducts, rematchSingleOcrLineAction, getInternalProductsForMatching, createOnTheFlyReceiptMapping, checkDuplicateInvoice, saveGoodsReceiptToLedger, saveManualGoodsReceipt
+    supabase.rpc(): match_vendor_ocr_line_item, upsert_ocr_vendor_mapping, generate_document_no, save_manual_goods_receipt_transaction
+- lib/actions/role-permissions.ts [USE SERVER]
+    exported async fns: getRolePermissions, updateRoleAccessibleModules
+- lib/actions/sales-ocr-actions.ts [USE SERVER]
+    exported async fns: scanHandwrittenSalesBill, previewEcommerceOrders, issueImportedEcommerceOrders, parseTransferSlipOcr
+- lib/actions/sales-order-actions.ts [USE SERVER]
+    exported async fns: saveSalesOrderDraft, uploadSalesOrderMockup, sendSalesOrderToProduction, getSalesOrders
+- lib/actions/sales-receipt-actions.ts [USE SERVER]
+    exported async fns: issueReceiptForTaxInvoice
+    supabase.rpc(): issue_receipt_for_tax_invoice
+- lib/actions/settings.ts [USE SERVER]
+    exported async fns: getDocumentPrintPaperSize, updateSystemSettings, updateDocumentPrintSetting, uploadCompanyLogo
+- lib/actions/tax-reports.ts [USE SERVER]
+    exported async fns: getBatchSalesDocumentsForPdf
+    supabase.rpc(): get_batch_sales_documents_for_pdf
+- lib/actions/technician-rates.ts [USE SERVER]
+    exported async fns: getServiceModels, getTechnicianRates, upsertTechnicianRate, updateTechnicianRate, deleteTechnicianRate
+- lib/actions/uom-actions.ts [USE SERVER]
+    exported async fns: getPurchaseUoms
+- lib/actions/user.actions.ts [USE SERVER]
+    exported async fns: getUsers, getAppRoles, createUserWithPin, deactivateUser, reactivateUser, updateUserProfile, updateUserAbacSettings
+- lib/actions/vendor-rounding.ts [USE SERVER]
+    exported async fns: loadVendorRoundingCalcMode, saveVendorRoundingCalcMode
+    supabase.rpc(): save_vendor_rounding_calc_mode
+- lib/actions/vendor-tax-invoice.ts [USE SERVER]
+    exported async fns: loadVendorUsesTemporaryBill, rememberVendorTaxInvoiceStatus, togglePurchaseTaxInvoiceStatusAction, matchVendorTaxInvoiceAction
+    supabase.rpc(): set_purchase_tax_invoice_status, match_vendor_tax_invoice_transaction
+- lib/actions/wht-rate-actions.ts [USE SERVER]
+    exported async fns: getActiveWhtRates, getAllWhtRates, createWhtRate, setWhtRateActive
+- lib/ai/ocr-quota.ts
+    exported async fns: recordOcrQuota
+    supabase.rpc(): record_and_get_ocr_quota
+- lib/finance/cash-receipt-data.ts
+    exported async fns: loadAccountingTaxTiers, loadCashReceiptPack
+    supabase.rpc(): get_ap_doc_settlement_modes
+- lib/finance/payment-register-data.ts
+    exported async fns: queryPaymentReceiptRegister
+    supabase.rpc(): get_ar_inbound_payment_register, get_accounting_payment_receipt_register
+- lib/inventory/ledger-balances.ts
+    exported async fns: fetchOnHandQtyByProductIds
+    supabase.rpc(): get_on_hand_qty_by_product_ids
+- supabase/functions/process-receipt-ocr/index.ts
+    supabase.rpc(): record_and_get_ocr_quota
+
+[6] UNIQUE SUPABASE RPCs REFERENCED IN CODE (57)
+  - admin_revise_purchase_vat_mode
+  - attach_sales_document_wht_certificate
+  - backflush_bom_for_production
+  - calculate_monthly_depreciation
+  - convert_purchase_bill_tax_mode
+  - delete_billing_note_transaction
+  - delete_skus_safely
+  - generate_abb_channel_doc_no
+  - generate_document_no
+  - generate_expense_no
+  - generate_or_sync_payroll_period
+  - generate_tier_1_2_cash_receipt_numbers
+  - get_accounting_payment_receipt_register
+  - get_ap_doc_settlement_modes
+  - get_ar_inbound_payment_register
+  - get_batch_sales_documents_for_pdf
+  - get_erp_financial_kpis_and_profit
+  - get_line_webhook_status_summary
+  - get_on_hand_qty_by_product_ids
+  - get_recommended_conversion_date
+  - get_reconcile_candidate_documents
+  - get_sales_order_deposit_summary
+  - get_smart_sku_picker_vendor_products
+  - get_statement_lines_with_matches
+  - get_unbilled_ap_summary_by_period
+  - get_unbilled_ap_vendor_queue
+  - is_period_closed
+  - issue_credit_note_transaction
+  - issue_document_transaction
+  - issue_receipt_for_tax_invoice
+  - match_vendor_ocr_line_item
+  - match_vendor_tax_invoice_transaction
+  - process_ar_receipt_transaction
+  - recalculate_payroll_period_totals
+  - reclassify_document_payment_channel
+  - record_and_get_ocr_quota
+  - record_material_purchase_inbound
+  - record_sso_remittance_and_expense
+  - replace_payment_slip_transaction
+  - save_expense_direct_no_draft
+  - save_manual_goods_receipt_transaction
+  - save_vendor_rounding_calc_mode
+  - set_purchase_tax_invoice_status
+  - settle_ap_invoices_bulk_fast
+  - settle_sales_document_payment
+  - sync_document_stock_ledger
+  - unmatch_statement_line_allocation
+  - update_billing_note_transaction
+  - update_employee_id_card_attachment
+  - update_expense_direct
+  - update_sales_document_direct
+  - upsert_contact_bank_account
+  - upsert_material_vendor_mapping
+  - upsert_ocr_vendor_mapping
+  - void_document_transaction
+  - void_document_with_stock_reversal
+  - void_sales_document

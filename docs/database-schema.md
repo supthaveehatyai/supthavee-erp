@@ -1,5 +1,7 @@
 # Supthavee ERP - Database Schema Reference
 
+> แหล่งที่ยืนยันกับ Production ถึง Phase 31.2 คือไฟล์ราก [`database-schema.md`](../database-schema.md) คู่นี้เป็นสำเนาโครงเดิม ห้ามใช้ชื่อตารางจากไฟล์นี้ทับไฟล์ราก
+
 **CRITICAL INSTRUCTION FOR AI:** STRICTLY use the table names listed below. DO NOT invent, assume, or create new tables. If a required table is not on this list, STOP and ask the user for clarification.
 
 *(Note:* `bank_accounts` *is DEPRECATED. ALWAYS use* `mst_bank_accounts` *for bank data).*

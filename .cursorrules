@@ -19,7 +19,7 @@ Supthavee ERP SuperApp - Global Code Rules
 1. Architecture & Data Fetching (STRICT CLOUD & VERCEL)
 - 100% Supabase Cloud & Vercel: ระบบทำงานบน Supabase Cloud และ Vercel เสมอ ห้ามสร้างไฟล์ .sql migration ลงเครื่อง Local โดยไม่จำเป็น ให้เตรียมคำสั่ง SQL สำหรับรันบน Supabase Cloud SQL Editor โดยตรง
 - Zero Client-Side Fetching: ห้ามใช้ `supabase.from()` ใน Client Component สำหรับตารางการเงินและเอกสารสำคัญ ให้ทำผ่าน Server Actions หรือ PostgreSQL RPC Functions พร้อมตรวจสอบ Session (`requireSessionUserId()`) เสมอ
-- PostgREST 1,000-Row Limit Protection: ระบบมีสินค้ามากกว่า 3,811+ SKUs และรายการ Mapping กว่า 3,917+ แถว ห้ามใช้ `.select()` แบบไม่แบ่งหน้ากับตารางขนาดใหญ่ ให้ใช้ `fetchAllPages` หรือเรียก RPC `get_on_hand_qty_by_product_ids` เสมอ
+- PostgREST 1,000-Row Limit Protection: สินค้าสำเร็จรูปและงานบริการมากกว่า 5,923+ SKUs (`products` Schema Dump `est_rows=6042`) และ `vendor_product_mapping` ประมาณ 6,357 แถว วัตถุดิบโรงงานอยู่ที่ `mst_materials` ห้ามใช้ `.select()` แบบไม่แบ่งหน้ากับตารางขนาดใหญ่ ให้ใช้ `fetchAllPages` หรือเรียก RPC `get_on_hand_qty_by_product_ids` เสมอ
 - Type Separation & Strict "use server" Exports: ในไฟล์ที่มี `'use server'` อนุญาตให้ `export async function` เท่านั้น ห้าม `export type`, `interface`, หรือ `export const` (เช่น `maxDuration`) เด็ดขาด เพื่อป้องกัน Vercel/Turbopack Build Error
 
 2. Business & Accounting Logic (GAAP / TFRS / SAP Standard)
@@ -32,5 +32,16 @@ Supthavee ERP SuperApp - Global Code Rules
   - ส่งข้อความแจ้งโอน 4 บรรทัดพร้อมรูปสลิปโอนเงินโดยส่ง Direct Public URL ของ Supabase Storage CDN (`document_attachments`) ให้กับ LINE Messaging API โดยตรง (ห้ามแปลงผ่าน `/api/line/slip-image`) และประทับสถานะ `line_notified_at` อัตโนมัติ
 - Dual-Lens HR, Payroll & SSO Management:
   - แยกพนักงานในระบบบัญชี (`CORPORATE_OFFICIAL` 4 คน หักประกันสังคม 5% เพดาน 15,000 บาท สูงสุด 750 บาท ยกเว้นผู้บริหาร) ออกจากพนักงานจ่ายส่วนตัว (`INTERNAL_PRIVATE` 1 คน ไม่ส่งสำนักงานบัญชี) และซิงก์ใบเสร็จประกันสังคม (`record_sso_remittance_and_expense`) เข้าตาราง `expenses` อัตโนมัติ
-- Unified Sales, E-Commerce (`SP` / `LZ`) & Bank Statement Reconciliation (Phase 24):
+- Unified Sales, E-Commerce (`SP` / `LZ`) & Bank Statement Reconciliation (Phase 24 — Completed):
   - ใช้แบบฟอร์มใบกำกับภาษีอย่างย่อ (`ABB`) ฟอร์มเดียวร่วมกันทุกช่องทาง โดยแยกซีรีส์เลขที่เอกสารตาม `sales_channel` (`ABB-YYMM-XXXX` สำหรับหน้าร้าน, `SPMM/XX` สำหรับ Shopee, `LZMM/XX` สำหรับ Lazada) และรับรู้รายได้เต็มจำนวน (Gross Sales ตาม TFRS 15) คู่กับการตั้งค่าใช้จ่ายค่าธรรมเนียมแพลตฟอร์มแยกต่างหาก
+  - ซิงค์ `documents.handwritten_doc_ref` กับ `documents.reference_no` ค้นหาลูกค้าด้วย `contacts.nickname` และรายการบริการใช้ `document_items.is_service_item`
+  - ค่าขนส่งฝากส่งอยู่ที่ `documents.shipping_fee` ไม่เข้าฐาน VAT ใบ 50 ทวิย้อนหลังใช้ RPC `attach_sales_document_wht_certificate`
+- Bill Price vs TAS 2 Cost (Phase 31.2 — ห้ามปะปน):
+  - `products.last_invoice_unit_price` และ `products.last_invoice_vat_mode` คือราคาตามหน้าบิล (เช่น `43.00 / 48.00 / 53.00`) ใช้ Prefill หน้าคีย์รับสินค้าเท่านั้น เมื่อโหมด `INC_VAT` และค่ามากกว่า 0 ห้ามคูณ `1.07` ซ้ำ ถ้าไม่มีค่าจึงเรียก `recover_inc_vat_unit_price`
+  - `products.cost_price` คือทุนก่อน VAT ตาม TAS 2 (เช่น `40.19 / 44.86 / 49.53`) ใช้ตีมูลค่าสต็อกและกำไรเท่านั้น พร้อมธง `products.is_inc_vat_cost_normalized`
+  - ตอนบันทึกสินค้า `INC_VAT` จากฟอร์ม Product Matrix: ตัวเลขที่กรอกเข้า `last_invoice_unit_price`, ตั้ง `last_invoice_vat_mode = INC_VAT`, `is_inc_vat_cost_normalized = true`, และ `cost_price = round(entered / 1.07, 2)`
+  - `document_items.unit_cost_ex_vat` ถูกเติมโดย Trigger `trg_snapshot_sales_item_tas2_cost` ห้ามใช้ `last_invoice_unit_price` ลง `inventory_ledger` หรือ RPC กำไร
+- Financial KPI Single Source (Phase 31): ตัวเลข Executive Dashboard และรายงานการเงินต้องมาจาก RPC `get_erp_financial_kpis_and_profit(p_start_date, p_end_date)` เท่านั้น รวม `CS_TAX` บวกฐานมัดจำตาม TFRS 15 หัก `CN` และ `AP_CN` หักต้นทุนเสื้อ วัตถุดิบ BOM วัสดุสิ้นเปลือง ค่าแรงบริการ และ OPEX แสดงสกุลเงิน `฿`
+- Factory Materials (Phase 29–30): วัตถุดิบโรงงานอยู่ที่ `mst_materials` ไม่ใช่ SKU เสื้อ โหมด `BOM_BACKFLUSH` | `SHOP_FLOOR_ISSUE` | `DIRECT_CONSUMABLE` รับเข้าผ่าน `record_material_purchase_inbound` ตัดตอนผลิตผ่าน `backflush_bom_for_production` จับคู่ผู้ขายผ่าน `upsert_material_vendor_mapping` บรรทัดเอกสารใช้ `document_items.material_id` และ `skip_stock_ledger = true` ห้ามลง `inventory_ledger`
+- AP Credit Note & Tier 1.2 Receipt (Phase 25–28): ใบลดหนี้ซื้อคือ `AP_CN` เลขใบรับเงินกลุ่ม 1.2 คือ `RCV-YYMM-XXXX` Trigger `trg_enforce_ap_inv_non_vat_on_insert` ล็อก `AP_INV` ให้ `vat_amount = 0` สถานะชำระของบิลซื้ออ่านจาก `get_ap_doc_settlement_modes` คู่ค้ารับช่วงต่อใช้ `contacts.succeeded_by_contact_id` และ `contacts.successor_note`
+- Manual Receipt UI (Phase 31.2): หน้า `/purchases/manual-receipt` วาง Smart SKU Picker กับ Material Combobox แบบ 50:50 และแถวรายการรับเข้าเหลือ 2 บรรทัด แสดงรหัส SKU ครั้งเดียว แสดงรหัสผู้ขายเฉพาะเมื่อไม่ซ้ำกับ SKU

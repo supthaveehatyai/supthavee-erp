@@ -1,132 +1,158 @@
-﻿Supthavee ERP - Database Schema Reference (Cloud Production Verified - Phase 24)
+# Supthavee ERP — Database Schema Reference (Cloud Production Verified - Phase 31.2)
 
+อัปเดตพฤศจิกายน 2026 จาก `Supabase Snippet-SchemaDump.csv` และ `supthavee-codebase-audit.txt` เท่านั้น ห้ามสมมติชื่อตารางหรือคอลัมน์ที่ไม่มีในไฟล์นั้น
 
 
-CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names, column names, views, triggers, and RPC functions listed below. DO NOT invent, assume, or create new tables. (`bank\_accounts` is DEPRECATED — always use `mst\_bank\_accounts`).
 
+CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names, column names, views, triggers, and RPC functions listed below. DO NOT invent, assume, or create new tables. (`bank_accounts` is DEPRECATED — always use `mst_bank_accounts`).
 
 
-1\. Master Data (ตารางข้อมูลหลัก)
 
-\- `mst\_bank\_accounts` (สมุดบัญชีธนาคารบริษัท — PK: `id`, UNIQUE: `account\_no` เช่น `902-0-74651-0`)
+1. Master Data (ตารางข้อมูลหลัก)
 
-\- `mst\_brands` (แบรนด์สินค้า — PK: `id`)
+- `mst_bank_accounts` (สมุดบัญชีธนาคารบริษัท — PK: `id`, UNIQUE: `account_no` เช่น `902-0-74651-0`)
 
-\- `mst\_categories` (หมวดหมู่สินค้า — PK: `id`, Self-FK: `parent\_id`; รหัส Parent = 1 ตัวอักษร, Child = 2 ตัวอักษร)
+- `mst_brands` (แบรนด์สินค้า — PK: `id`)
 
-\- `mst\_colors` (สีมาตรฐาน — PK: `id`, ล็อกรหัสสี 3 ตัวอักษรพิมพ์ใหญ่ เช่น `WHT`, `BLK`, `NVY`)
+- `mst_categories` (หมวดหมู่สินค้า — PK: `id`, Self-FK: `parent_id`; รหัส Parent = 1 ตัวอักษร, Child = 2 ตัวอักษร)
 
-\- `mst\_expense\_categories` (หมวดหมู่ค่าใช้จ่าย — PK: `id`)
+- `mst_colors` (สีมาตรฐาน — PK: `id`, ล็อกรหัสสี 3 ตัวอักษรพิมพ์ใหญ่ เช่น `WHT`, `BLK`, `NVY`)
 
-\- `mst\_asset\_categories` (หมวดหมู่สินทรัพย์ถาวร — PK: `id`, `category\_code`, `useful\_life\_years`, และคอลัมน์ `depreciation\_rate` เป็น `GENERATED ALWAYS` ห้ามส่งค่าตอน Insert/Upsert)
+- `mst_expense_categories` (หมวดหมู่ค่าใช้จ่าย — PK: `id`)
 
-\- `mst\_genders` (เพศ/ทรงเสื้อ — PK: `id`)
+- `mst_asset_categories` (หมวดหมู่สินทรัพย์ถาวร — PK: `id`, `category_code`, `useful_life_years`, และคอลัมน์ `depreciation_rate` เป็น `GENERATED ALWAYS` ห้ามส่งค่าตอน Insert/Upsert)
 
-\- `mst\_sizes` (ไซส์มาตรฐาน Global Size Fixed-2 Characters — PK: `id`, `size\_code`, `sort\_order` Gap of 10, รวมถึงไซส์ `00` สำหรับวัตถุดิบ/งานบริการ)
+- `mst_genders` (เพศ/ทรงเสื้อ — PK: `id`)
 
-\- `mst\_uom` (หน่วยนับสินค้า — PK: `uom\_id`, `uom\_code`, `uom\_name`)
+- `mst_sizes` (ไซส์มาตรฐาน Global Size Fixed-2 Characters — PK: `id`, `size_code`, `sort_order` Gap of 10, รวมถึงไซส์ `00` สำหรับวัตถุดิบ/งานบริการ)
 
-\- `mst\_wht\_rates` (อัตราภาษีหัก ณ ที่จ่ายมาตรฐาน — PK: `id`, 1%, 2%, 3%, 5%)
+- `mst_uom` (หน่วยนับสินค้า — PK: `uom_id`, `uom_code`, `uom_name`)
 
-\- `mst\_carriers` (บริษัทขนส่ง — PK: `carrier\_id`, `carrier\_code`, `carrier\_name`, `contact\_id`, `carrier\_tier` \[`PRIMARY\_MONTHLY` | `OCCASIONAL`])
+- `mst_wht_rates` (อัตราภาษีหัก ณ ที่จ่ายมาตรฐาน — PK: `id`, 1%, 2%, 3%, 5%)
 
-\- `mst\_document\_taxonomy` (มาตรฐานเอกสารและขนาดกระดาษเริ่มต้น — PK: `doc\_code`, `paper\_format` \[`A4\_PORTRAIT` | `A5\_PORTRAIT` | `A5\_LANDSCAPE`])
+- `mst_carriers` (บริษัทขนส่ง — PK: `carrier_id`, `carrier_code`, `carrier_name`, `contact_id`, `carrier_tier` [`PRIMARY_MONTHLY` | `OCCASIONAL`])
 
+- `mst_document_taxonomy` (มาตรฐานเอกสารและขนาดกระดาษเริ่มต้น — PK: `doc_code`, `paper_format` [`A4_PORTRAIT` | `A5_PORTRAIT` | `A5_LANDSCAPE`])
 
 
-2\. Core Entities, LINE OA \& HR/Payroll (องค์กร, ผู้ใช้, พนักงานเงินเดือน)
 
-\- `contacts` (คู่ค้า Multi-Role — PK: `id`, `company\_name`, `nickname` \[ชื่อเล่นลูกค้าหน้าร้าน เช่น พี่ก๊ก, พี่รัตน์], `tax\_id`, `branch\_code`, `address`, `phone`, `contact\_roles` VARCHAR\[], `vendor\_tax\_tier` \[`CORP\_VAT` | `INDIVIDUAL\_ID\_1\_2` | `INTERNAL\_NO\_ID\_1\_3`], `id\_card\_attachment\_url`, `line\_target\_id`, `line\_display\_name`, `line\_notify\_enabled`, `line\_oa\_chat\_url`)
+2. Core Entities, LINE OA & HR/Payroll (องค์กร, ผู้ใช้, พนักงานเงินเดือน)
 
-\- `contact\_bank\_accounts` (บัญชีรับเงิน/โอนเงินของคู่ค้า — PK: `id`, FK: `contact\_id` → `contacts.id`, `account\_category`, `bank\_code`, `bank\_name`, `account\_no`, `account\_name`, `is\_default`)
+- `contacts` (คู่ค้า Multi-Role — PK: `id`, `company_name`, `nickname` [ชื่อเล่นลูกค้าหน้าร้าน เช่น พี่ก๊ก, พี่รัตน์], `tax_id` 13 หลัก, `branch_code`, `address`, `phone`, `contact_roles` VARCHAR[], `vendor_tax_tier` [`CORP_VAT` | `INDIVIDUAL_ID_1_2` | `INTERNAL_NO_ID_1_3`], `id_card_attachment_url`, `line_target_id`, `line_display_name`, `line_notify_enabled`, `line_oa_chat_url`, `succeeded_by_contact_id` UUID FK → `contacts.id` ON DELETE SET NULL, `successor_note` TEXT)
 
-\- `contact\_persons` (ผู้ติดต่อภายใต้คู่ค้า — PK: `id`, FK: `contact\_id`)
+- `contact_bank_accounts` (บัญชีรับเงิน/โอนเงินของคู่ค้า — PK: `id`, FK: `contact_id` → `contacts.id`, `account_category`, `bank_code`, `bank_name`, `account_no`, `account_name`, `is_default`)
 
-\- `mst\_employees` (ทะเบียนพนักงานเงินเดือน — PK: `id`, UNIQUE: `emp\_code` \[`EMP-001`..`EMP-005`], `full\_name`, `nickname`, `citizen\_id`, `address`, `position\_title`, `department\_type` \[`OPEX\_ADMIN\_SALES` | `COGS\_PRODUCTION`], `payroll\_channel` \[`CORPORATE\_OFFICIAL` | `INTERNAL\_PRIVATE`], `base\_salary`, `is\_sso\_enrolled`, `bank\_code`, `bank\_name`, `bank\_account\_no`, `bank\_account\_name`, `id\_card\_attachment\_url`, `bank\_book\_attachment\_url`, `is\_active`)
+- `contact_persons` (ผู้ติดต่อภายใต้คู่ค้า — PK: `id`, FK: `contact_id`)
 
-\- `hr\_payroll\_periods` (งวดเงินเดือนและประกันสังคม — PK: `id`, UNIQUE: `period\_year` + `period\_month`, `period\_label`, `sso\_rate\_pct` \[5.00], `sso\_wage\_ceiling` \[15000.00], `official\_gross\_total`, `official\_net\_total`, `internal\_gross\_total`, `internal\_net\_total`, `sso\_employee\_total`, `sso\_employer\_total`, `sso\_total\_remittance`, `sso\_payment\_status`, `sso\_payment\_date`, `sso\_payment\_slip\_url`, `sso\_receipt\_no`, `sso\_reference\_no`, `sso\_employer\_account\_no` \[`9020012177`], `paid\_sso\_from\_account`, `linked\_sso\_expense\_id` FK → `expenses.id`, `status`)
+- `mst_employees` (ทะเบียนพนักงานเงินเดือน — PK: `id`, UNIQUE: `emp_code` [`EMP-001`..`EMP-005`], `full_name`, `nickname`, `citizen_id`, `address`, `position_title`, `department_type` [`OPEX_ADMIN_SALES` | `COGS_PRODUCTION`], `payroll_channel` [`CORPORATE_OFFICIAL` | `INTERNAL_PRIVATE`], `base_salary`, `is_sso_enrolled`, `bank_code`, `bank_name`, `bank_account_no`, `bank_account_name`, `id_card_attachment_url`, `bank_book_attachment_url`, `is_active`)
 
-\- `hr\_payroll\_items` (รายการคำนวณเงินเดือนรายบุคคล — PK: `id`, UNIQUE: `payroll\_period\_id` + `employee\_id`, `payroll\_channel`, `base\_salary`, `ot\_amount`, `allowance\_amount`, `commission\_amount`, `bonus\_amount`, `gross\_income`, `sso\_employee\_amount`, `sso\_employer\_amount`, `wht\_tax\_amount`, `other\_deduction`, `net\_pay`, `payment\_status`, `payment\_date`, `paid\_from\_account`, `payment\_slip\_url`, `payment\_reference\_no`, `linked\_expense\_id`)
+- `hr_payroll_periods` (งวดเงินเดือนและประกันสังคม — PK: `id`, UNIQUE: `period_year` + `period_month`, `period_label`, `sso_rate_pct` [5.00], `sso_wage_ceiling` [15000.00], `official_gross_total`, `official_net_total`, `internal_gross_total`, `internal_net_total`, `sso_employee_total`, `sso_employer_total`, `sso_total_remittance`, `sso_payment_status`, `sso_payment_date`, `sso_payment_slip_url`, `sso_receipt_no`, `sso_reference_no`, `sso_employer_account_no` [`9020012177`], `paid_sso_from_account`, `linked_sso_expense_id` FK → `expenses.id`, `status`)
 
-\- `line\_known\_groups` (PK: `group\_id`, `group\_name`, `linked\_contact\_id` → `contacts.id`, `last\_reply\_token`, `chat\_room\_url`)
+- `hr_payroll_items` (รายการคำนวณเงินเดือนรายบุคคล — PK: `id`, UNIQUE: `payroll_period_id` + `employee_id`, `payroll_channel`, `base_salary`, `ot_amount`, `allowance_amount`, `commission_amount`, `bonus_amount`, `gross_income`, `sso_employee_amount`, `sso_employer_amount`, `wht_tax_amount`, `other_deduction`, `net_pay`, `payment_status`, `payment_date`, `paid_from_account`, `payment_slip_url`, `payment_reference_no`, `linked_expense_id`)
 
-\- `line\_notification\_logs` (ประวัติการส่งสลิปผ่าน LINE OA — PK: `id`, `document\_id` FK → `documents.id`, `contact\_id` FK → `contacts.id`, `target\_id`, `message\_text`, `slip\_url`, `status`, `error\_message`, `created\_at` TIMESTAMPTZ; มี Trigger `trg\_stamp\_document\_line\_notified` อัปเดต `documents.line\_notified\_at`)
+- `line_known_groups` (PK: `group_id`, `group_name`, `linked_contact_id` → `contacts.id`, `last_reply_token`, `chat_room_url`)
 
-\- `user\_profiles`, `app\_roles`, `system\_settings` (มี `ocr\_primary\_model = 'gemini-3.7-flash'` และ `ocr\_fallback\_models`), `system\_parameters`, `parameter\_change\_requests`
+- `line_notification_logs` (ประวัติการส่งสลิปผ่าน LINE OA — PK: `id`, `document_id` FK → `documents.id`, `contact_id` FK → `contacts.id`, `target_id`, `message_text`, `slip_url`, `status`, `error_message`, `created_at` TIMESTAMPTZ; มี Trigger `trg_stamp_document_line_notified` อัปเดต `documents.line_notified_at`)
 
+- `user_profiles`, `app_roles`, `system_settings` (มี `ocr_primary_model = 'gemini-3.7-flash'` และ `ocr_fallback_models`), `system_parameters`, `parameter_change_requests`
 
 
-3\. Products, Inventory \& Production (สินค้า, คลัง, ผลิต)
 
-\- `product\_models`, `products` (3,811+ SKUs), `vendor\_product\_mapping` (3,917+ แถว), `inventory\_ledger`, `product\_boms`, `production\_jobs` (`finished\_model\_id` nullable, `ref\_document\_id`, `ref\_document\_item\_id` → `document\_items.id` แยกการ์ด Kanban ต่อบรรทัดบริการ, `job\_no`, `status`, `target\_quantity`, `mockup\_image\_url`, `remark`), `production\_job\_items`, `production\_job\_materials`, `production\_job\_operations`, `technician\_rates`
+3. Products, Inventory & Production (สินค้า, คลัง, ผลิต)
 
+- `product_models`, `products` (5,923+ SKUs สำเร็จรูป/งานบริการ; Schema Dump `est_rows=6042`), `vendor_product_mapping` (Schema Dump `est_rows=6357`), `inventory_ledger`, `product_boms`, `production_jobs` (`finished_model_id` nullable, `ref_document_id`, `ref_document_item_id` → `document_items.id` แยกการ์ด Kanban ต่อบรรทัดบริการ, `job_no`, `status`, `target_quantity`, `mockup_image_url`, `remark`), `production_job_items`, `production_job_materials`, `production_job_operations`, `technician_rates`
+- `products` แยกราคาตามบิลออกจากทุน TAS 2: `cost_price` = ทุนก่อน VAT (เช่น `40.19 / 44.86 / 49.53`) ใช้ตีสต็อกและกำไรเท่านั้น; `last_invoice_unit_price` NUMERIC NULL และ `last_invoice_vat_mode` VARCHAR(20) NULL = ราคาตามหน้าบิล (เช่น `43.00 / 48.00 / 53.00`) ใช้ Prefill หน้าคีย์รับสินค้าเท่านั้น; `is_inc_vat_cost_normalized` BOOLEAN NOT NULL DEFAULT false. ห้ามนำ `last_invoice_unit_price` ไปคูณ 1.07 ซ้ำ และห้ามใช้เป็นต้นทุนสต็อกหรือกำไร
 
 
-4\. Documents, Expenses \& Financials (เอกสาร, ค่าใช้จ่าย, การเงิน)
 
-\- `documents` (เอกสารหลักทั้งระบบ 76+ คอลัมน์ — PK: `id`, `doc\_no`, `doc\_type`, `status`, `doc\_date`, `due\_date`, `contact\_id`, `contact\_person\_id`, `ref\_doc\_id`, `ref\_document\_id`, `sub\_total`, `total\_amount`, `discount\_text`, `discount\_amount`, `net\_before\_vat`, `vat\_type` \[ENUM: `vat\_calculation\_type`], `vat\_rate`, `vat\_amount`, `tax\_rate`, `tax\_amount`, `wht\_rate`, `wht\_amount`, `grand\_total`, `deposit\_deducted`, `deposit\_net\_deducted`, `deposit\_vat\_deducted`, `deposit\_doc\_id`, `paid\_amount`, `payment\_status`, `accounting\_tax\_tier` \[`CORP\_VAT` | `RECEIPT\_1\_2` | `INTERNAL\_1\_3`], `cash\_receipt\_no`, `tax\_invoice\_status`, `tax\_invoice\_no`, `tax\_invoice\_date`, `sales\_channel` \[`STORE` | `SHOPEE` | `LAZADA` | `TIKTOK`], `ecommerce\_order\_no`, `ecommerce\_buyer\_name`, `tracking\_no`, `one\_time\_address`, `attachment\_url`, `attached\_file\_url`, `attachment\_urls`, `attachments`, `line\_notified\_at`, `line\_notified\_count`, `reference\_no`, `handwritten\_doc\_ref` [Trigger ซิงค์คู่กับ `reference\_no`], `notes`)
+4. Documents, Expenses & Financials (เอกสาร, ค่าใช้จ่าย, การเงิน)
 
-\- `documents.payment\_channel` (`COMPANY\_BANK` | `CASH` | `OTHER\_BANK`), `bank\_account\_id` → `mst\_bank\_accounts`, `receiving\_bank\_label`, `is\_swept\_to\_company`, `swept\_to\_company\_at`, `swept\_batch\_ref` — แยกช่องทางรับเงินและติดตามยอดเงินสด/บัญชีอื่นที่ยังไม่โอนเข้าบัญชีบริษัท. RPC `get\_unswept\_receipts\_summary()`
+- `documents` (เอกสารหลักทั้งระบบ 76+ คอลัมน์ — PK: `id`, `doc_no`, `doc_type`, `status`, `doc_date`, `due_date`, `contact_id`, `contact_person_id`, `ref_doc_id`, `ref_document_id`, `sub_total`, `total_amount`, `discount_text`, `discount_amount`, `net_before_vat`, `vat_type` [ENUM: `vat_calculation_type`], `vat_rate`, `vat_amount`, `tax_rate`, `tax_amount`, `wht_rate`, `wht_amount`, `grand_total`, `deposit_deducted`, `deposit_net_deducted`, `deposit_vat_deducted`, `deposit_doc_id`, `paid_amount`, `payment_status`, `accounting_tax_tier` [`CORP_VAT` | `RECEIPT_1_2` | `INTERNAL_1_3`], `cash_receipt_no`, `tax_invoice_status`, `tax_invoice_no`, `tax_invoice_date`, `sales_channel` [`STORE` | `SHOPEE` | `LAZADA` | `TIKTOK`], `ecommerce_order_no`, `ecommerce_buyer_name`, `tracking_no`, `one_time_address`, `attachment_url`, `attached_file_url`, `attachment_urls`, `attachments`, `line_notified_at`, `line_notified_count`, `reference_no`, `handwritten_doc_ref` [Trigger ซิงค์คู่กับ `reference_no`], `notes`)
 
-\- `documents` ค่าขนส่งฝากส่งของบิลขาย: `shipping\_fee`, `shipping\_method` [`VAN` | `FLASH` | `KERRY` | `THAILAND\_POST` | `OTHER`], `shipping\_vat\_mode` [`EXEMPT` | `NONE`], `shipping\_tracking\_no`. บวกเข้า `grand\_total` หลัง VAT และไม่เข้า `net\_before\_vat` ตามประมวลรัษฎากร ม.81(1)(ณ). `update\_sales\_document\_direct` รับ `p\_shipping\_fee`, `p\_shipping\_method`, `p\_shipping\_vat\_mode`, `p\_shipping\_tracking\_no`
+- `documents.payment_channel` (`COMPANY_BANK` | `CASH` | `OTHER_BANK`), `bank_account_id` → `mst_bank_accounts`, `receiving_bank_label`, `is_swept_to_company`, `swept_to_company_at`, `swept_batch_ref` — แยกช่องทางรับเงินและติดตามยอดเงินสด/บัญชีอื่นที่ยังไม่โอนเข้าบัญชีบริษัท. RPC `get_unswept_receipts_summary()`
 
-\- `documents` ภาษีหัก ณ ที่จ่าย: `wht\_rate`, `wht\_amount`, `net\_received\_amount`, `wht\_attachment\_url`, `wht\_status` [`NONE` | `PENDING\_CERT` | `RECEIVED`]. ฐานคำนวณคือ `net\_before\_vat - deposit\_net\_deducted` ไม่ใช่ `grand\_total`. RPC `attach\_sales\_document\_wht\_certificate(p\_document\_id, p\_wht\_rate, p\_wht\_amount, p\_wht\_attachment\_url)` ใช้แนบใบ 50 ทวิย้อนหลัง
+- `documents` ค่าขนส่งฝากส่งของบิลขาย: `shipping_fee`, `shipping_method` [`VAN` | `FLASH` | `KERRY` | `THAILAND_POST` | `OTHER`], `shipping_vat_mode` [`EXEMPT` | `NONE`], `shipping_tracking_no`. บวกเข้า `grand_total` หลัง VAT และไม่เข้า `net_before_vat` ตามประมวลรัษฎากร ม.81(1)(ณ). `update_sales_document_direct` รับ `p_shipping_fee`, `p_shipping_method`, `p_shipping_vat_mode`, `p_shipping_tracking_no`
 
-\- `doc\_headers` (ตารางคู่ขนาน — `contact\_id` ปลด `NOT NULL` แล้วเพื่อรองรับบิลขายหน้าร้าน `ABB` และ E-Commerce, `reference\_no` ซิงค์จาก `documents.reference\_no` / `handwritten\_doc\_ref`, `payment\_status`, `paid\_amount`)
+- `documents` ภาษีหัก ณ ที่จ่าย: `wht_rate`, `wht_amount`, `net_received_amount`, `wht_attachment_url`, `wht_status` [`NONE` | `PENDING_CERT` | `RECEIVED`]. ฐานคำนวณคือ `net_before_vat - deposit_net_deducted` ไม่ใช่ `grand_total`. RPC `attach_sales_document_wht_certificate(p_document_id, p_wht_rate, p_wht_amount, p_wht_attachment_url)` ใช้แนบใบ 50 ทวิย้อนหลัง
 
-\- `document\_items` (PK: `id`, `document\_id`, `product\_id` \[Nullable สำหรับรายการบริการ], `is\_service\_item` BOOLEAN, `description`, `qty` NUMERIC(14,4), `uom\_used`, `unit\_price`, `unit\_cost\_price`, `discount\_text`, `discount\_amount`, `line\_total`, `sort\_order`, `technician\_id`, `wage\_cost`, `technician\_bill\_id`, `mockup\_image\_url`, `is\_sent\_to\_production`, `production\_status`)
+- `doc_headers` (ตารางคู่ขนาน — `contact_id` ปลด `NOT NULL` แล้วเพื่อรองรับบิลขายหน้าร้าน `ABB` และ E-Commerce, `reference_no` ซิงค์จาก `documents.reference_no` / `handwritten_doc_ref`, `payment_status`, `paid_amount`)
 
-\- `sales\_item\_mappings` (จำคำบนบิลขาย — `source\_text`, `normalized\_text`, `product\_id` [Nullable], `is\_service\_item` BOOLEAN, `sku`, `description`, `uom\_used`)
+- `document_items` (PK: `id`, `document_id`, `product_id` [Nullable สำหรับรายการบริการหรือวัตถุดิบ], `is_service_item` BOOLEAN, `description`, `qty` NUMERIC(14,4), `uom_used`, `unit_price`, `unit_cost_price`, `unit_cost_ex_vat` NUMERIC NULL [ล็อกทุน TAS 2 ณ วันขาย], `discount_text`, `discount_amount`, `line_total`, `sort_order`, `technician_id`, `wage_cost`, `technician_bill_id`, `mockup_image_url`, `is_sent_to_production`, `production_status`, `material_id` UUID NULL FK → `mst_materials.id` ON DELETE SET NULL, `item_nature` VARCHAR(30) NOT NULL DEFAULT `STOCK_ITEM`, `skip_stock_ledger` BOOLEAN NOT NULL DEFAULT false)
 
-\- `bank\_statement\_imports` (หัวไฟล์ Statement กรุงไทย — `bank\_code` [`KTB`], `account\_no`, `file\_name`, `source\_filename` ส่งคู่กับ `file\_name` ทุกครั้งที่นำเข้า, `source\_kind`, `row\_count`, `created\_by`)
+- `sales_item_mappings` (จำคำบนบิลขาย — `source_text`, `normalized_text`, `product_id` [Nullable], `is_service_item` BOOLEAN, `sku`, `description`, `uom_used`)
 
-\- `bank\_statement\_lines` (รายการเดินบัญชี — FK: `import\_id`, `tx\_date`, `tx\_time`, `tx\_code`, `description`, `payer\_hint`, `withdrawal\_amount`, `deposit\_amount`, `tx\_direction` [`IN` | `OUT`], `expense\_memo`, `balance\_amount`, `row\_hash` TEXT UNIQUE สำหรับ upsert กันไฟล์ซ้อนวัน, `reconcile\_status` [`UNMATCHED` | `PARTIAL` | `MATCHED`], `matched\_amount`)
+- `bank_statement_imports` (หัวไฟล์ Statement กรุงไทย — `bank_code` [`KTB`], `account_no`, `file_name`, `source_filename` ส่งคู่กับ `file_name` ทุกครั้งที่นำเข้า, `source_kind`, `row_count`, `created_by`)
 
-\- `bank\_reconciliation\_allocations` (ชนยอดเงินฝากกับบิลขาย — FK: `statement\_line\_id`, FK: `document\_id`, `allocated\_amount`, `platform\_fee\_diff`, `created\_by`)
+- `bank_statement_lines` (รายการเดินบัญชี — FK: `import_id`, `tx_date`, `tx_time`, `tx_code`, `description`, `payer_hint`, `withdrawal_amount`, `deposit_amount`, `tx_direction` [`IN` | `OUT`], `expense_memo`, `balance_amount`, `row_hash` TEXT UNIQUE สำหรับ upsert กันไฟล์ซ้อนวัน, `reconcile_status` [`UNMATCHED` | `PARTIAL` | `MATCHED`], `matched_amount`)
 
-\- `get\_reconcile\_candidate\_documents()` และ Trigger `trg\_sync\_parent\_child\_document\_settlement` — ยอดตัดได้ของบิลขายคือ `grand\_total - deposit\_deducted - wht\_amount - allocated` โดยไม่หัก `wht\_amount` ซ้ำ และไม่แสดง `SO` ที่ถูกแปลงเป็น `CS\_TAX` / `TAX\_INV` / `INV\_DO` / `ABB` ที่ออกเลขแล้ว
+- `bank_reconciliation_allocations` (ชนยอดเงินฝากกับบิลขาย — FK: `statement_line_id`, FK: `document_id`, `allocated_amount`, `platform_fee_diff`, `created_by`)
 
-\- `get\_statement\_lines\_with\_matches(p\_import\_id uuid DEFAULT NULL)` คืนรายการเดินบัญชีพร้อม `matched\_doc\_nos` และ `matched\_documents` (เลขที่บิล, ลูกค้า, อ้างอิงบิลมือ, เลขสลิป, ยอดเต็ม, มัดจำ, หัก ณ ที่จ่าย, ยอดที่ชน, เลขใบสั่งขายต้นทาง)
+- `get_reconcile_candidate_documents()` และ Trigger `trg_sync_parent_child_document_settlement` — ยอดตัดได้ของบิลขายคือ `grand_total - deposit_deducted - wht_amount - allocated` โดยไม่หัก `wht_amount` ซ้ำ และไม่แสดง `SO` ที่ถูกแปลงเป็น `CS_TAX` / `TAX_INV` / `INV_DO` / `ABB` ที่ออกเลขแล้ว
 
-\- `unmatch\_statement\_line\_allocation(p\_statement\_line\_id uuid, p\_document\_id uuid DEFAULT NULL)` ปลดคู่ชนยอดทั้งบรรทัด หรือเฉพาะบิลที่ระบุ แล้วคืนบิลกลับเข้าลิสต์รอชน
+- `get_statement_lines_with_matches(p_import_id uuid DEFAULT NULL)` คืนรายการเดินบัญชีพร้อม `matched_doc_nos` และ `matched_documents` (เลขที่บิล, ลูกค้า, อ้างอิงบิลมือ, เลขสลิป, ยอดเต็ม, มัดจำ, หัก ณ ที่จ่าย, ยอดที่ชน, เลขใบสั่งขายต้นทาง)
 
-\- `reclassify\_document\_payment\_channel(p\_document\_id, p\_new\_channel, p\_bank\_account\_id)` (ย้ายบิลออกจากหน้าชนยอด KTB ไปช่องทาง `CASH` หรือ `OTHER\_BANK`)
+- `unmatch_statement_line_allocation(p_statement_line_id uuid, p_document_id uuid DEFAULT NULL)` ปลดคู่ชนยอดทั้งบรรทัด หรือเฉพาะบิลที่ระบุ แล้วคืนบิลกลับเข้าลิสต์รอชน
 
-###### \- `expenses` (บิลค่าใช้จ่าย / OPEX — PK: `id`, ซิงก์คอลัมน์เลขเอกสาร `expense\_no` = `doc\_no` = `document\_no`, ซิงก์วันที่ `expense\_date` = `doc\_date`, ซิงก์รายละเอียด `description` = `remark`, ซิงก์หมวดหมู่ `category` = `expense\_category`, `contact\_id` FK → `contacts.id`, `vendor\_name`, `vendor\_tax\_id`, `tax\_invoice\_no`, `reference\_no`, `vehicle\_plate`, `tax\_type` \[`INCLUSIVE` | `EXCLUSIVE` | `NO\_VAT`], `tax\_invoice\_status`, `accounting\_tax\_tier`, `net\_amount`, `sub\_total`, `amount`, `vat\_rate`, `vat\_amount`, `wht\_rate`, `wht\_amount`, `total\_amount`, และ \*\*`grand\_total` เป็น `GENERATED ALWAYS AS (net\_amount + vat\_amount) STORED` ห้ามส่งค่าเข้า Insert/Update เด็ดขาด\*\*, `bank\_account\_id` \[Single FK → `mst\_bank\_accounts.id`], `attachment\_url`, `payment\_slip\_url`, `status`, `payment\_status`)
+- `reclassify_document_payment_channel(p_document_id, p_new_channel, p_bank_account_id)` (ย้ายบิลออกจากหน้าชนยอด KTB ไปช่องทาง `CASH` หรือ `OTHER_BANK`)
 
-###### \- `expense\_items` (รายการย่อยของบิลค่าใช้จ่าย — PK: `id`, FK: `expense\_id` → `expenses.id` ON DELETE CASCADE, `line\_no`, `item\_description`, `quantity`, `unit\_name`, `unit\_price`, `discount\_amount`, `line\_total`)
+- `expenses` (บิลค่าใช้จ่าย / OPEX — PK: `id`, ซิงก์คอลัมน์เลขเอกสาร `expense_no` = `doc_no` = `document_no`, ซิงก์วันที่ `expense_date` = `doc_date`, ซิงก์รายละเอียด `description` = `remark`, ซิงก์หมวดหมู่ `category` = `expense_category`, `contact_id` FK → `contacts.id`, `vendor_name`, `vendor_tax_id`, `tax_invoice_no`, `reference_no`, `vehicle_plate`, `tax_type` [`INCLUSIVE` | `EXCLUSIVE` | `NO_VAT`], `tax_invoice_status`, `accounting_tax_tier`, `net_amount`, `sub_total`, `amount`, `vat_rate`, `vat_amount`, `wht_rate`, `wht_amount`, `total_amount`, และ **`grand_total` เป็น `GENERATED ALWAYS AS (net_amount + vat_amount) STORED` ห้ามส่งค่าเข้า Insert/Update เด็ดขาด**, `bank_account_id` [Single FK → `mst_bank_accounts.id`], `attachment_url`, `payment_slip_url`, `status`, `payment_status`)
 
-###### \- `document\_allocations`, `billing\_note\_items`, `payment\_transactions` (เปิด RLS Policy `FOR ALL TO authenticated` ครบแล้ว), `expense\_installments`, `fixed\_assets`, `asset\_depreciation\_ledger`, `accounting\_periods`, `approval\_logs`, `audit\_logs`
+- `expense_items` (รายการย่อยของบิลค่าใช้จ่าย — PK: `id`, FK: `expense_id` → `expenses.id` ON DELETE CASCADE, `line_no`, `item_description`, `quantity`, `unit_name`, `unit_price`, `discount_amount`, `line_total`)
 
-###### 
+- `document_allocations`, `billing_note_items`, `payment_transactions` (เปิด RLS Policy `FOR ALL TO authenticated` ครบแล้ว), `expense_installments`, `fixed_assets`, `asset_depreciation_ledger`, `accounting_periods`, `approval_logs`, `audit_logs`
 
-###### 5\. Supabase Storage Buckets (Public Read CDN \& Authenticated Write)
 
-###### \- `document\_attachments`, `expense\_documents`, `procurement\_bills`, `product\_assets`, `production\_attachments`, `payment-slips`
 
-###### 
+5. Supabase Storage Buckets (Public Read CDN & Authenticated Write)
 
-###### 6\. Key Database Triggers \& RPC Functions (Phase 22–24)
+- `document_attachments`, `expense_documents`, `procurement_bills`, `product_assets`, `production_attachments`, `payment-slips`
 
-###### \- `public.settle\_ap\_invoices\_bulk\_fast(p\_pay\_doc\_id UUID, p\_billing\_note\_id UUID, p\_allocations JSONB)`
 
-###### \- `public.generate\_or\_sync\_payroll\_period(p\_year INT, p\_month INT, p\_sso\_rate\_pct NUMERIC)`
 
-###### \- `public.recalculate\_payroll\_period\_totals(p\_period\_id UUID)`
+6. Key Database Triggers & RPC Functions (Phase 22–24)
 
-###### \- `public.update\_employee\_id\_card\_attachment(p\_employee\_id UUID, p\_id\_card\_url TEXT, p\_bank\_book\_url TEXT)`
+- `public.settle_ap_invoices_bulk_fast(p_pay_doc_id UUID, p_billing_note_id UUID, p_allocations JSONB)`
 
-###### \- `public.record\_sso\_remittance\_and\_expense(p\_period\_id UUID, p\_payment\_date DATE, p\_receipt\_no VARCHAR, p\_reference\_no VARCHAR, p\_slip\_url TEXT, p\_paid\_from\_account VARCHAR)`
+- `public.generate_or_sync_payroll_period(p_year INT, p_month INT, p_sso_rate_pct NUMERIC)`
 
-###### \- `public.save\_expense\_direct\_no\_draft(...)` \& `public.update\_expense\_direct(...)`
+- `public.recalculate_payroll_period_totals(p_period_id UUID)`
 
-###### \- `public.fn\_sync\_expenses\_standard\_columns()` \& `public.fn\_auto\_fill\_expense\_vendor\_name()`
+- `public.update_employee_id_card_attachment(p_employee_id UUID, p_id_card_url TEXT, p_bank_book_url TEXT)`
 
-###### \- `public.update\_sales\_document\_direct(...)`
+- `public.record_sso_remittance_and_expense(p_period_id UUID, p_payment_date DATE, p_receipt_no VARCHAR, p_reference_no VARCHAR, p_slip_url TEXT, p_paid_from_account VARCHAR)`
 
+- `public.save_expense_direct_no_draft(...)` & `public.update_expense_direct(...)`
 
-###### \- `public.generate\_abb\_channel\_doc\_no(p\_sales\_channel TEXT, p\_doc\_date DATE, p\_document\_id UUID DEFAULT NULL)` — เลข ABB หน้าร้าน `ABB-YYMM-XXXX`, Shopee `SPMM/XX`, Lazada `LZMM/XX` ตามเดือนของ `doc\_date`
+- `public.fn_sync_expenses_standard_columns()` & `public.fn_auto_fill_expense_vendor_name()`
 
-###### \- Index `idx\_documents\_ecom\_order\_lookup` บน `documents` (`sales\_channel`, `ecommerce\_order\_no`)
+- `public.update_sales_document_direct(...)`
 
-###### \- Trigger ซิงค์ `documents.reference\_no` กับ `documents.handwritten\_doc\_ref` และคัดลอก `reference\_no` ไป `doc\_headers`
+
+- `public.generate_abb_channel_doc_no(p_sales_channel TEXT, p_doc_date DATE, p_document_id UUID DEFAULT NULL)` — เลข ABB หน้าร้าน `ABB-YYMM-XXXX`, Shopee `SPMM/XX`, Lazada `LZMM/XX` ตามเดือนของ `doc_date`
+
+- Index `idx_documents_ecom_order_lookup` บน `documents` (`sales_channel`, `ecommerce_order_no`)
+
+- Trigger ซิงค์ `documents.reference_no` กับ `documents.handwritten_doc_ref` และคัดลอก `reference_no` ไป `doc_headers`
+
+7. Factory Materials (Phase 29–30 — ไม่ผูก SKU เสื้อขาย)
+
+- `mst_material_categories` (PK: `code` VARCHAR(40), `name_th`, `name_en`, `default_purchase_uom` DEFAULT `KG`, `default_usage_uom` DEFAULT `KG`, `sort_order`, `is_active`)
+- `mst_materials` (PK: `id` UUID, `material_code` VARCHAR(40) NOT NULL, `material_name`, `spec_description`, `category_code` FK → `mst_material_categories.code`, `stock_control_mode` VARCHAR(30) NOT NULL DEFAULT `BOM_BACKFLUSH` [`BOM_BACKFLUSH` | `SHOP_FLOOR_ISSUE` | `DIRECT_CONSUMABLE`], `purchase_uom`, `usage_uom`, `uom_conversion_factor` NUMERIC DEFAULT 1, `reference_purchase_price`, `last_purchase_price`, `moving_avg_usage_cost`, `current_usage_qty`, `reorder_point_usage_qty`, `default_vendor_id` FK → `contacts.id`, `is_active`; Schema Dump `est_rows=22`)
+- `material_vendor_mappings` (PK: `id`, `contact_id`, `raw_vendor_code`, `raw_vendor_desc`, `material_id` FK → `mst_materials.id` ON DELETE CASCADE, `last_unit_price`, `lookup_key` VARCHAR(200))
+- `product_model_bom_materials` (PK: `id`, `finished_model_id`, `material_id` FK → `mst_materials.id` ON DELETE RESTRICT, `usage_qty_per_unit`, `waste_pct` DEFAULT 0, `notes`, `sort_order`)
+- `material_stock_ledger` (PK: `id`, `material_id` FK → `mst_materials.id` ON DELETE RESTRICT, `tx_type` VARCHAR(30), `tx_date`, `document_id`, `finished_model_id`, `production_ref_key`, `purchase_qty`, `usage_qty_delta`, `unit_usage_cost`, `total_cost`, `notes`, `actor_user_id`)
+- โหมดควบคุม: `BOM_BACKFLUSH` แปลงหน่วยซื้อเป็นหน่วยใช้ผ่าน `record_material_purchase_inbound` และตัดเมื่อผลิตเสร็จผ่าน `backflush_bom_for_production`; `SHOP_FLOOR_ISSUE` เบิกหน้าเครื่อง; `DIRECT_CONSUMABLE` ตัดต้นทุนทันทีเมื่อซื้อ และแจ้งเตือนเมื่อราคาซื้อเกิน `reference_purchase_price`
+- บรรทัดวัตถุดิบบนเอกสารซื้อใช้ `document_items.material_id` โดย `product_id` เป็น NULL, `skip_stock_ledger = true` และไม่ลง `inventory_ledger`
+
+8. Phase 25–31.2 Triggers & RPC (ยืนยันจาก Schema Dump)
+
+- `public.attach_sales_document_wht_certificate(p_document_id uuid, p_wht_rate numeric, p_wht_amount numeric, p_wht_attachment_url text)` RETURNS jsonb
+- `public.get_ap_doc_settlement_modes(p_document_ids uuid[])` RETURNS TABLE(`document_id`, `settlement_mode`, `payment_channel`, `bank_label`) — ค่า `settlement_mode` เป็น `'โอน'` หรือ `'สด'`
+- `public.recover_inc_vat_unit_price(p_ex_vat_cost numeric)` RETURNS numeric IMMUTABLE — ใช้เมื่อไม่มี `last_invoice_unit_price` เท่านั้น ห้ามเรียกกับราคาตามบิลที่บันทึกแล้ว
+- `public.get_erp_financial_kpis_and_profit(p_start_date date, p_end_date date)` RETURNS jsonb SECURITY DEFINER STABLE — แหล่งเดียวของ Executive Dashboard และรายงานการเงิน
+- `public.record_material_purchase_inbound(p_document_id uuid, p_material_id uuid, p_purchase_qty numeric, p_net_line_amount numeric, p_tx_date date, p_notes text)` RETURNS jsonb
+- `public.backflush_bom_for_production(p_production_ref_key text, p_finished_model_id uuid, p_produced_qty numeric, p_document_id uuid, p_tx_date date)` RETURNS jsonb
+- `public.upsert_material_vendor_mapping(p_contact_id uuid, p_raw_vendor_code text, p_raw_vendor_desc text, p_material_id uuid, p_last_unit_price numeric)` RETURNS jsonb
+- Trigger `trg_enforce_ap_inv_non_vat_on_insert` BEFORE INSERT ON `documents` EXECUTE `fn_enforce_ap_inv_non_vat_on_insert` — ล็อก `AP_INV` ให้ `vat_amount = 0` และสถานะภาษี `TAX_READY`
+- Trigger `trg_snapshot_sales_item_tas2_cost` BEFORE INSERT ON `document_items` EXECUTE `fn_snapshot_sales_item_tas2_cost` — บันทึก `unit_cost_ex_vat` จากทุน TAS 2 ณ วันขาย
+- เอกสาร `AP_CN` คือใบลดหนี้ซื้อ หักเจ้าหนี้คงค้างและปรับปรุงภาษีซื้อกับสต็อก เลขใบรับเงินกลุ่ม 1.2 คือ `RCV-YYMM-XXXX` ไม่ใช่ `CA01/XXXX`
