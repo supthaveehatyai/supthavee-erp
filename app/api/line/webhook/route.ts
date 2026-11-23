@@ -11,6 +11,7 @@ import {
 import {
   handleLineCatalogBotEvent,
   parseLineCatalogCommand,
+  type LineBotReplyResult,
 } from "@/lib/line/catalog-sales-bot";
 
 export const dynamic = "force-dynamic";
@@ -29,19 +30,28 @@ type LineWebhookEvent = {
   timestamp?: number;
 };
 
+type QueryError = { error: { message?: string } | null };
+
+type InsertBuilder = Promise<QueryError> & {
+  select: (columns: string) => Promise<{
+    data: { id: string }[] | null;
+    error: { message?: string } | null;
+  }>;
+};
+
+type EqBuilder = Promise<QueryError> & {
+  is: (column: string, value: null) => Promise<QueryError>;
+};
+
 type LineDb = {
   from: (table: string) => {
-    insert: (rows: Record<string, unknown> | Record<string, unknown>[]) => Promise<{
-      error: { message?: string } | null;
-    }>;
+    insert: (rows: Record<string, unknown> | Record<string, unknown>[]) => InsertBuilder;
     upsert: (
       row: Record<string, unknown>,
       options: { onConflict: string },
-    ) => Promise<{ error: { message?: string } | null }>;
+    ) => Promise<QueryError>;
     update: (values: Record<string, unknown>) => {
-      eq: (column: string, value: string) => {
-        is: (column: string, value: null) => Promise<{ error: { message?: string } | null }>;
-      };
+      eq: (column: string, value: string) => EqBuilder;
     };
     select: (columns: string) => {
       eq: (column: string, value: boolean) => {
@@ -84,24 +94,19 @@ export async function POST(request: Request) {
     }
     if (raw) {
       const body = JSON.parse(raw) as { events?: LineWebhookEvent[] };
-      if (Array.isArray(body.events)) await recordLineWebhook(body, body.events);
-      if ((trusted || !secret) && Array.isArray(body.events)) {
+      const events = Array.isArray(body.events) ? body.events : [];
+      const logIds = await recordLineWebhook(body, events);
+      if (trusted || !secret) {
         const token = await loadLineChannelAccessToken();
-        if (token) {
-          for (const event of body.events) {
-            const text = event.message?.text ?? "";
-            if (event.type !== "message" || event.message?.type !== "text") continue;
-            if (!event.replyToken || parseLineCatalogCommand(text) === null) continue;
-            try {
-              await handleLineCatalogBotEvent({
-                replyToken: event.replyToken,
-                text,
-                token,
-              });
-            } catch (error) {
-              console.error("[line-catalog-bot]", error);
-            }
-          }
+        for (let index = 0; index < events.length; index += 1) {
+          const outcome = await replyCatalogIfCommand(events[index], token);
+          const logId = logIds[index];
+          if (logId) await stampBotReply(logId, outcome.status, outcome.error);
+        }
+      } else {
+        for (let index = 0; index < events.length; index += 1) {
+          const logId = logIds[index];
+          if (logId) await stampBotReply(logId, "SKIPPED", "ลายเซ็น webhook ไม่ผ่าน");
         }
       }
     }
@@ -130,9 +135,9 @@ function lineAdmin(): LineDb | null {
 async function recordLineWebhook(
   body: { events?: LineWebhookEvent[] },
   events: LineWebhookEvent[],
-) {
+): Promise<string[]> {
   const supabase = lineAdmin();
-  if (!supabase) return;
+  if (!supabase) return [];
   const receivedAt = new Date().toISOString();
   if (events.length === 0) {
     await supabase.from("line_webhook_events_log").insert({
@@ -145,21 +150,29 @@ async function recordLineWebhook(
       raw_payload: body,
       received_at: receivedAt,
     });
-    return;
+    return [];
   }
 
-  await supabase.from("line_webhook_events_log").insert(
-    events.map((event) => ({
-      event_type: String(event.type ?? "unknown").slice(0, 50),
-      source_type: event.source?.type?.slice(0, 30) ?? null,
-      source_group_id: event.source?.groupId?.slice(0, 100) ?? null,
-      source_user_id: event.source?.userId?.slice(0, 100) ?? null,
-      reply_token: event.replyToken?.slice(0, 200) ?? null,
-      message_text: event.message?.type === "text" ? event.message.text ?? null : null,
-      raw_payload: event,
-      received_at: receivedAt,
-    })),
-  );
+  const inserted = await supabase
+    .from("line_webhook_events_log")
+    .insert(
+      events.map((event) => ({
+        event_type: String(event.type ?? "unknown").slice(0, 50),
+        source_type: event.source?.type?.slice(0, 30) ?? null,
+        source_group_id: event.source?.groupId?.slice(0, 100) ?? null,
+        source_user_id: event.source?.userId?.slice(0, 100) ?? null,
+        reply_token: event.replyToken?.slice(0, 200) ?? null,
+        message_text: event.message?.type === "text" ? event.message.text ?? null : null,
+        raw_payload: event,
+        received_at: receivedAt,
+      })),
+    )
+    .select("id");
+  if (inserted.error) {
+    console.error("[line-webhook] log", inserted.error.message);
+    return [];
+  }
+  const logIds = (inserted.data ?? []).map((row) => row.id).filter(Boolean);
 
   const token = await loadLineChannelAccessToken();
   const now = new Date();
@@ -208,6 +221,50 @@ async function recordLineWebhook(
       }
     }
   }
+  return logIds;
+}
+
+async function replyCatalogIfCommand(
+  event: LineWebhookEvent,
+  token: string | null,
+): Promise<LineBotReplyResult> {
+  const text = event.message?.text ?? "";
+  if (event.type !== "message" || event.message?.type !== "text") {
+    return { status: "SKIPPED", error: null };
+  }
+  if (parseLineCatalogCommand(text) === null) return { status: "SKIPPED", error: null };
+  if (!event.replyToken || !token) {
+    return {
+      status: "FAILED",
+      error: token ? "ไม่มี reply token" : "ไม่พบ LINE Channel Access Token",
+    };
+  }
+  try {
+    return await handleLineCatalogBotEvent({
+      replyToken: event.replyToken,
+      text,
+      token,
+    });
+  } catch (error) {
+    console.error("[line-catalog-bot]", error);
+    return {
+      status: "FAILED",
+      error: error instanceof Error ? error.message : "บอทตอบกลับไม่สำเร็จ",
+    };
+  }
+}
+
+async function stampBotReply(id: string, status: string, error: string | null) {
+  const supabase = lineAdmin();
+  if (!supabase) return;
+  const saved = await supabase
+    .from("line_webhook_events_log")
+    .update({
+      bot_reply_status: status.slice(0, 40),
+      bot_reply_error: error ? error.slice(0, 2000) : null,
+    })
+    .eq("id", id);
+  if (saved.error) console.error("[line-webhook] bot status", saved.error.message);
 }
 
 function compactName(value: string): string {

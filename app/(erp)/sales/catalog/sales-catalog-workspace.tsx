@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Copy, ImageIcon, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 import { PosterColorwayCropperDialog } from "@/components/products/PosterColorwayCropperDialog";
+import { LineSalesBotDialog } from "@/components/sales/line-sales-bot-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -153,11 +154,14 @@ export function SalesCatalogWorkspace({
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold text-slate-900">แคตตาล็อกรูป & สต็อก</h1>
-        <p className="text-sm text-slate-500">
-          ค้นด้วยชื่อทรงและสี เช่น คอกลมสั้น แดง, โปโล กรม หรือรหัสรุ่น HA003S
-        </p>
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-xl font-semibold text-slate-900">แคตตาล็อกรูป & สต็อก</h1>
+          <p className="text-sm text-slate-500">
+            ค้นด้วยชื่อทรงและสี เช่น คอกลมสั้น แดง, โปโล กรม หรือรหัสรุ่น HA003S
+          </p>
+        </div>
+        <LineSalesBotDialog />
       </header>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">

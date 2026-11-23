@@ -3,6 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server-admin";
 import { requireSessionUserId } from "@/lib/auth/current-user";
+import {
+  isVercelDeploymentHashUrl,
+  recommendedProductionWebhookUrl,
+} from "@/lib/line/line-target";
 import type {
   CatalogCategoryOption,
   CatalogFilterMetadata,
@@ -21,6 +25,10 @@ import type {
   ModelVisualSlot,
   SearchColorwayCatalogResult,
 } from "@/types/colorway-catalog";
+import type {
+  LineSalesBotDiagnostics,
+  LineWebhookEventLogRow,
+} from "@/types/line-sales-bot";
 
 const PRODUCT_ASSETS_BUCKET = "product_assets";
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -735,4 +743,81 @@ export async function uploadModelMasterPosterAction(
 ): Promise<ColorwayMutationResult> {
   formData.set("slot", "MAIN");
   return uploadModelVisualSlotAction(formData);
+}
+
+export async function getLineSalesBotDiagnosticsAction(): Promise<LineSalesBotDiagnostics> {
+  const owner = await requireSessionUserId();
+  const recommended = recommendedProductionWebhookUrl();
+  const empty: LineSalesBotDiagnostics = {
+    line_oa_basic_id: null,
+    line_webhook_url: null,
+    line_webhook_last_verified_at: null,
+    recommended_webhook_url: recommended,
+    is_stale_deployment_url: false,
+    events: [],
+    error: null,
+  };
+  if (!owner.ok) return { ...empty, error: owner.error };
+
+  const supabase = createClient() as unknown as {
+    from: (table: string) => {
+      select: (columns: string) => {
+        eq: (
+          column: string,
+          value: number,
+        ) => {
+          maybeSingle: () => Promise<{
+            data: Record<string, unknown> | null;
+            error: { message: string } | null;
+          }>;
+        };
+        order: (
+          column: string,
+          options: { ascending: boolean },
+        ) => {
+          limit: (count: number) => Promise<{
+            data: Record<string, unknown>[] | null;
+            error: { message: string } | null;
+          }>;
+        };
+      };
+    };
+  };
+
+  const [settings, events] = await Promise.all([
+    supabase
+      .from("system_settings")
+      .select("line_oa_basic_id, line_webhook_url, line_webhook_last_verified_at")
+      .eq("id", 1)
+      .maybeSingle(),
+    supabase
+      .from("line_webhook_events_log")
+      .select("id, received_at, source_type, message_text, bot_reply_status, bot_reply_error")
+      .order("received_at", { ascending: false })
+      .limit(8),
+  ]);
+
+  if (settings.error) return { ...empty, error: settings.error.message };
+  if (events.error) return { ...empty, error: events.error.message };
+
+  const row = settings.data;
+  const webhookUrl = textOrNull(row?.line_webhook_url);
+  const mapped: LineWebhookEventLogRow[] = (events.data ?? []).map((item) => ({
+    id: textOrNull(item.id) ?? "",
+    received_at: textOrNull(item.received_at) ?? "",
+    source_type: textOrNull(item.source_type),
+    message_text: textOrNull(item.message_text),
+    bot_reply_status: textOrNull(item.bot_reply_status),
+    bot_reply_error: textOrNull(item.bot_reply_error),
+  }));
+
+  return {
+    line_oa_basic_id: textOrNull(row?.line_oa_basic_id),
+    line_webhook_url: webhookUrl,
+    line_webhook_last_verified_at: textOrNull(row?.line_webhook_last_verified_at),
+    recommended_webhook_url: recommended,
+    is_stale_deployment_url: webhookUrl ? isVercelDeploymentHashUrl(webhookUrl) : false,
+    events: mapped.filter((item) => item.id),
+    error: null,
+  };
 }

@@ -9,6 +9,7 @@ import {
   pushLineMessages,
   replyLineMessages,
 } from "@/lib/line/line-oa";
+import { resolveCanonicalLineWebhookEndpoint } from "@/lib/line/line-target";
 
 type KnownGroup = {
   group_id: string;
@@ -446,11 +447,11 @@ export async function registerAndVerifyLineWebhookUrlAction(webhookUrl: string) 
     };
   }
 
-  const endpoint = publicWebhookUrl(webhookUrl);
+  const endpoint = resolveCanonicalLineWebhookEndpoint(webhookUrl);
   if (!endpoint) {
     return {
       success: false,
-      error: "กดปุ่มนี้จากเว็บที่ Deploy แล้ว (https://.../api/line/webhook) LINE ไม่รับ localhost",
+      error: "ไม่พบโดเมน Production ถาวร — ตั้ง VERCEL_PROJECT_PRODUCTION_URL หรือใส่ HTTPS ที่ไม่ใช่ลิงก์ Vercel แบบ deployment hash",
       statusCode: null,
       active: null,
       endpoint: null,
@@ -519,7 +520,10 @@ export async function registerAndVerifyLineWebhookUrlAction(webhookUrl: string) 
   );
   const active = typeof current.body.active === "boolean" ? current.body.active : null;
   const verified = tested.ok && statusCode === 200;
-  const saved = verified ? await saveLineWebhookRegistration(endpoint, new Date().toISOString()) : false;
+  const saved = await saveLineWebhookRegistration(
+    endpoint,
+    verified ? new Date().toISOString() : null,
+  );
   const connected = verified && active === true;
   const locked = statusCode === 401 || statusCode === 403;
   return {
@@ -611,30 +615,18 @@ function asJsonRecord(value: unknown): Record<string, unknown> | null {
   return null;
 }
 
-function publicWebhookUrl(value: string): string | null {
-  try {
-    const url = new URL(value.trim());
-    if (url.protocol !== "https:") return null;
-    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return null;
-    if (url.pathname !== "/api/line/webhook" || url.search || url.hash) return null;
-    return `${url.origin}/api/line/webhook`;
-  } catch {
-    return null;
-  }
-}
-
-async function saveLineWebhookRegistration(webhookUrl: string, verifiedAt: string): Promise<boolean> {
+async function saveLineWebhookRegistration(webhookUrl: string, verifiedAt: string | null): Promise<boolean> {
   const supabase = createClient() as unknown as {
     from: (table: "system_settings") => {
-      update: (values: { line_webhook_url: string; line_webhook_last_verified_at: string }) => {
+      update: (values: { line_webhook_url: string; line_webhook_last_verified_at?: string }) => {
         eq: (column: string, value: number) => Promise<{ error: { message?: string } | null }>;
       };
     };
   };
-  const saved = await supabase
-    .from("system_settings")
-    .update({ line_webhook_url: webhookUrl, line_webhook_last_verified_at: verifiedAt })
-    .eq("id", 1);
+  const values = verifiedAt
+    ? { line_webhook_url: webhookUrl, line_webhook_last_verified_at: verifiedAt }
+    : { line_webhook_url: webhookUrl };
+  const saved = await supabase.from("system_settings").update(values).eq("id", 1);
   if (saved.error) console.error("[registerLineWebhook]", saved.error.message);
   return !saved.error;
 }

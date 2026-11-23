@@ -75,6 +75,22 @@ export async function compressImage(file: File): Promise<File> {
   return toWebpFile(compressed, file.name);
 }
 
+const CATALOG_CLARITY_OPTIONS: Parameters<typeof imageCompression>[1] = {
+  maxSizeMB: 4,
+  maxWidthOrHeight: 2048,
+  initialQuality: 0.92,
+  useWebWorker: true,
+  fileType: "image/webp",
+};
+
+/** Catalog sheet and size-chart slots: long edge 2048px, WebP quality 0.92. */
+export async function compressCatalogClarityImage(file: File): Promise<File> {
+  if (!file || !(file instanceof File) || file.size <= 0) return file;
+  if (!isCompressibleImage(file)) return file;
+  const compressed = await imageCompression(file, CATALOG_CLARITY_OPTIONS);
+  return toWebpFile(compressed, file.name);
+}
+
 const SLIP_JPEG_OPTIONS: Parameters<typeof imageCompression>[1] = {
   maxSizeMB: 1.2,
   maxWidthOrHeight: 1920,

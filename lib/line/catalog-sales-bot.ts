@@ -2,7 +2,11 @@ import { createClient } from "@/lib/supabase/server-admin";
 import { replyLineMessages } from "@/lib/line/line-oa";
 
 const COMMAND_RE =
-  /^#(รูป|แคตตาล็อก|catalog|พร้อมส่ง|สต็อก|เช็ค|ไซส์|ตารางไซส์|ตารางขนาด|size)(?:\s+(.+))?$/i;
+  /^#(รูป|พร้อมส่ง|สต็อก|แคตตาล็อก|catalog|เช็ค|ไซส์|ตารางไซส์|ตารางขนาด|size)\s*(.*)$/i;
+const FLEX_LABEL_LIMIT = 20;
+const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
+const CATALOG_BUTTON_LABEL = "📋 ใบ Catalog";
+const SIZE_BUTTON_LABEL = "📏 ตารางขนาด";
 
 const USAGE_GUIDE = [
   "#รูป PS031S",
@@ -17,6 +21,11 @@ export type LineCatalogCommand = {
   mode: CatalogCommandMode;
   query: string;
   inStockOnly: boolean;
+};
+
+export type LineBotReplyResult = {
+  status: "REPLIED_OK" | "REPLIED_FALLBACK" | "SKIPPED" | "FAILED";
+  error: string | null;
 };
 
 type BotSize = {
@@ -39,6 +48,7 @@ type BotColorway = {
   total_on_hand_qty: number;
   min_retail_price: number | null;
   max_retail_price: number | null;
+  hex_code: string;
   sizes: BotSize[];
 };
 
@@ -85,6 +95,17 @@ function toNullableNumber(value: unknown): number | null {
 
 function lineText(value: unknown): string {
   return String(value || "-").trim() || "-";
+}
+
+function flexLabel(label: string): string {
+  const text = label.trim();
+  if (!text) return "ดูรายละเอียด";
+  return text.length <= FLEX_LABEL_LIMIT ? text : text.slice(0, FLEX_LABEL_LIMIT);
+}
+
+function safeHex(value: unknown): string {
+  const text = String(value ?? "").trim();
+  return HEX_COLOR.test(text) ? text.toUpperCase() : "#64748B";
 }
 
 function formatBaht(value: number): string {
@@ -174,6 +195,7 @@ function mapColorway(value: unknown): BotColorway | null {
     total_on_hand_qty: total > 0 ? total : 0,
     min_retail_price: toNullableNumber(row.min_retail_price),
     max_retail_price: toNullableNumber(row.max_retail_price),
+    hex_code: safeHex(row.hex_code),
     sizes: readSizes(row.sizes_breakdown),
   };
 }
@@ -288,11 +310,29 @@ function buildBubble(row: BotColorway): LineMessage {
       color: "#0F172A",
     },
     {
-      type: "text",
-      text: lineText(`${row.color_name} (${row.color_code || "-"})`),
-      size: "xs",
-      wrap: true,
-      color: "#334155",
+      type: "box",
+      layout: "horizontal",
+      spacing: "sm",
+      alignItems: "center",
+      contents: [
+        {
+          type: "box",
+          layout: "vertical",
+          width: "14px",
+          height: "14px",
+          backgroundColor: row.hex_code,
+          cornerRadius: "7px",
+          contents: [{ type: "filler" }],
+        },
+        {
+          type: "text",
+          text: lineText(`${row.color_name} (${row.color_code || "-"})`),
+          size: "xs",
+          wrap: true,
+          color: "#334155",
+          flex: 1,
+        },
+      ],
     },
   ];
   if (price) {
@@ -320,7 +360,7 @@ function buildBubble(row: BotColorway): LineMessage {
       height: "sm",
       action: {
         type: "message",
-        label: "📋 ดูใบ Catalog",
+        label: flexLabel(CATALOG_BUTTON_LABEL),
         text: `#แคตตาล็อก ${row.model_code}`.slice(0, 300),
       },
     });
@@ -332,7 +372,7 @@ function buildBubble(row: BotColorway): LineMessage {
       height: "sm",
       action: {
         type: "message",
-        label: "📏 ตารางขนาด",
+        label: flexLabel(SIZE_BUTTON_LABEL),
         text: `#ไซส์ ${row.model_code}`.slice(0, 300),
       },
     });
@@ -370,18 +410,26 @@ function buildBubble(row: BotColorway): LineMessage {
   return bubble;
 }
 
-function flexCarousel(rows: BotColorway[]): LineMessage | null {
-  const bubbles = rows.slice(0, 10).map(buildBubble);
+function flexCarousel(rows: BotColorway[], bubbleLimit: number): LineMessage | null {
+  const cap = bubbleLimit > 1 ? Math.min(12, bubbleLimit) : 1;
+  const bubbles = rows.slice(0, cap).map(buildBubble);
   if (bubbles.length === 0) return null;
   const alt = rows
-    .slice(0, 10)
+    .slice(0, cap)
     .map((row) => `${row.model_code} ${row.color_name}`.trim())
+    .filter(Boolean)
     .join(", ");
   return {
     type: "flex",
     altText: (`แคตตาล็อก ${alt}`.trim() || "แคตตาล็อกสินค้า").slice(0, 380),
     contents: { type: "carousel", contents: bubbles },
   };
+}
+
+function bubbleCapFor(rows: BotColorway[]): number {
+  if (rows.length === 0) return 10;
+  const modelId = rows[0].model_id;
+  return rows.every((row) => row.model_id === modelId) ? 12 : 10;
 }
 
 function imagePair(
@@ -466,79 +514,97 @@ function pickCard(cards: BotModelCard[], query: string): BotModelCard | "many" |
   return "many";
 }
 
+const SKIPPED: LineBotReplyResult = { status: "SKIPPED", error: null };
+
 async function sendMessages(
   token: string,
   replyToken: string,
   messages: LineMessage[],
-) {
+  plainTextSummary?: string,
+): Promise<LineBotReplyResult> {
   const payload = messages.slice(0, 5);
-  if (payload.length === 0) return;
+  if (payload.length === 0) return { status: "FAILED", error: "ไม่มีข้อความให้ส่ง" };
   const result = await replyLineMessages(token, replyToken, payload);
-  if (!result.ok) console.error("[line-catalog-bot]", result.error);
+  if (result.ok) return { status: "REPLIED_OK", error: null };
+
+  const hasFlex = payload.some((message) => message.type === "flex");
+  if (!hasFlex) {
+    console.error("[line-catalog-bot]", result.error);
+    return { status: "FAILED", error: result.error };
+  }
+
+  const validImages = payload.filter(
+    (message) =>
+      message.type === "image" &&
+      typeof message.originalContentUrl === "string" &&
+      message.originalContentUrl.startsWith("https://"),
+  );
+  const summary = lineText(plainTextSummary || "แคตตาล็อกสินค้า").slice(0, 4900);
+  const retry = await replyLineMessages(token, replyToken, [
+    ...validImages.slice(0, 2),
+    { type: "text", text: summary },
+  ]);
+  if (!retry.ok) console.error("[line-catalog-bot] fallback", retry.error);
+  return { status: "REPLIED_FALLBACK", error: result.error };
 }
 
 export async function handleLineCatalogBotEvent(params: {
   replyToken: string;
   text: string;
   token: string;
-}) {
+}): Promise<LineBotReplyResult> {
   const command = parseLineCatalogCommand(params.text);
-  if (!command || !params.replyToken || !params.token) return;
+  if (!command || !params.replyToken || !params.token) return SKIPPED;
   if (command.mode === "guide") {
-    await sendMessages(params.token, params.replyToken, [textMessage(USAGE_GUIDE)]);
-    return;
+    return sendMessages(params.token, params.replyToken, [textMessage(USAGE_GUIDE)], USAGE_GUIDE);
   }
 
   const searched = await searchColorways(command.query, command.inStockOnly);
   if (searched.error) {
-    await sendMessages(params.token, params.replyToken, [
+    return sendMessages(params.token, params.replyToken, [
       textMessage("ระบบค้นหาสินค้าชั่วคราวไม่พร้อม ลองใหม่อีกครั้ง"),
     ]);
-    return;
   }
 
   if (command.mode === "photo" && isSingleModelShowcase(searched.rows, command.query)) {
     const first = searched.rows[0];
     const sheet = sheetUrlOf(first);
     const size = sizeUrlOf(first);
-    const flex = flexCarousel(searched.rows);
+    const flex = flexCarousel(searched.rows, 12);
     const messages = [...imagePair(sheet, size)];
     if (flex) messages.push(flex);
-    if (messages.length === 0) messages.push(textMessage(summarizeRows(searched.rows)));
-    await sendMessages(params.token, params.replyToken, messages);
-    return;
+    const summary = summarizeRows(searched.rows);
+    if (messages.length === 0) messages.push(textMessage(summary));
+    return sendMessages(params.token, params.replyToken, messages, summary);
   }
 
   if (command.mode === "photo" && searched.rows.length > 0) {
-    const flex = flexCarousel(searched.rows);
-    await sendMessages(params.token, params.replyToken, [
-      flex ?? textMessage(summarizeRows(searched.rows)),
-    ]);
-    return;
+    const summary = summarizeRows(searched.rows);
+    const flex = flexCarousel(searched.rows, bubbleCapFor(searched.rows));
+    return sendMessages(
+      params.token,
+      params.replyToken,
+      [flex ?? textMessage(summary)],
+      summary,
+    );
   }
 
   const focused = focusRows(searched.rows, command.query);
   if (focused === "many") {
     const verb = command.mode === "size" ? "#ไซส์" : command.mode === "catalog" ? "#แคตตาล็อก" : "#รูป";
-    await sendMessages(params.token, params.replyToken, [
-      textMessage(
-        `พบหลายรุ่น กรุณาระบุรหัส เช่น ${verb} ${codeList(searched.rows).split(", ")[0] ?? "PS031S"}\n${codeList(searched.rows)}`,
-      ),
-    ]);
-    return;
+    const guide = `พบหลายรุ่น กรุณาระบุรหัส เช่น ${verb} ${codeList(searched.rows).split(", ")[0] ?? "PS031S"}\n${codeList(searched.rows)}`;
+    return sendMessages(params.token, params.replyToken, [textMessage(guide)], guide);
   }
 
   if (Array.isArray(focused) && focused.length > 0) {
-    await replyForKnownRows(params.token, params.replyToken, command.mode, focused);
-    return;
+    return replyForKnownRows(params.token, params.replyToken, command.mode, focused);
   }
 
   const looked = await lookupModels(command.query);
   if (looked.error) {
-    await sendMessages(params.token, params.replyToken, [
+    return sendMessages(params.token, params.replyToken, [
       textMessage("ระบบค้นหาสินค้าชั่วคราวไม่พร้อม ลองใหม่อีกครั้ง"),
     ]);
-    return;
   }
   const card = pickCard(looked.cards, command.query);
   if (card === "many") {
@@ -546,37 +612,34 @@ export async function handleLineCatalogBotEvent(params: {
       .slice(0, 6)
       .map((item) => item.model_code || "-")
       .join(", ");
-    await sendMessages(params.token, params.replyToken, [
-      textMessage(`พบหลายรุ่น กรุณาระบุรหัสรุ่น\n${codes}`),
-    ]);
-    return;
+    const guide = `พบหลายรุ่น กรุณาระบุรหัสรุ่น\n${codes}`;
+    return sendMessages(params.token, params.replyToken, [textMessage(guide)], guide);
   }
   if (!card) {
-    await sendMessages(params.token, params.replyToken, [
-      textMessage(`ไม่พบสินค้าจาก "${command.query}"\nลองรหัสรุ่น เช่น #รูป PS031S`),
-    ]);
-    return;
+    const guide = `ไม่พบสินค้าจาก "${command.query}"\nลองรหัสรุ่น เช่น #รูป PS031S`;
+    return sendMessages(params.token, params.replyToken, [textMessage(guide)], guide);
   }
 
   const sheet = sheetUrlOf(card);
   const size = sizeUrlOf(card);
   if (command.mode === "size") {
     const chart = size ?? toSafeLineHttpsUrl(card.catalog_image_url);
+    const summary = chart ? displayName(card) : summarizeCard(card);
     const messages: LineMessage[] = [];
     if (chart) messages.push(imageMessage(chart));
-    messages.push(textMessage(chart ? displayName(card) : summarizeCard(card)));
-    await sendMessages(params.token, params.replyToken, messages);
-    return;
+    messages.push(textMessage(summary));
+    return sendMessages(params.token, params.replyToken, messages, summary);
   }
   if (command.mode === "catalog") {
+    const summary = sheet ? displayName(card) : summarizeCard(card);
     const messages = imagePair(sheet, size);
-    messages.push(textMessage(sheet ? displayName(card) : summarizeCard(card)));
-    await sendMessages(params.token, params.replyToken, messages);
-    return;
+    messages.push(textMessage(summary));
+    return sendMessages(params.token, params.replyToken, messages, summary);
   }
+  const summary = summarizeCard(card);
   const messages = imagePair(sheet, size);
-  messages.push(textMessage(summarizeCard(card)));
-  await sendMessages(params.token, params.replyToken, messages);
+  messages.push(textMessage(summary));
+  return sendMessages(params.token, params.replyToken, messages, summary);
 }
 
 async function replyForKnownRows(
@@ -584,33 +647,33 @@ async function replyForKnownRows(
   replyToken: string,
   mode: CatalogCommandMode,
   rows: BotColorway[],
-) {
+): Promise<LineBotReplyResult> {
   const first = rows[0];
   const sheet = sheetUrlOf(first);
   const size = sizeUrlOf(first);
+  const summary = summarizeRows(rows);
+  const cap = bubbleCapFor(rows);
   if (mode === "size") {
     const chart = size ?? toSafeLineHttpsUrl(first.catalog_image_url);
     if (chart) {
-      await sendMessages(token, replyToken, [
-        imageMessage(chart),
-        textMessage(summarizeRows(rows)),
-      ]);
-      return;
+      return sendMessages(
+        token,
+        replyToken,
+        [imageMessage(chart), textMessage(summary)],
+        summary,
+      );
     }
-    await sendMessages(token, replyToken, [textMessage(summarizeRows(rows))]);
-    return;
+    return sendMessages(token, replyToken, [textMessage(summary)], summary);
   }
   if (mode === "catalog") {
     if (sheet) {
       const messages = imagePair(sheet, size);
       messages.push(textMessage(displayName(first)));
-      await sendMessages(token, replyToken, messages);
-      return;
+      return sendMessages(token, replyToken, messages, summary);
     }
-    const flex = flexCarousel(rows);
-    await sendMessages(token, replyToken, [flex ?? textMessage(summarizeRows(rows))]);
-    return;
+    const flex = flexCarousel(rows, cap);
+    return sendMessages(token, replyToken, [flex ?? textMessage(summary)], summary);
   }
-  const flex = flexCarousel(rows);
-  await sendMessages(token, replyToken, [flex ?? textMessage(summarizeRows(rows))]);
+  const flex = flexCarousel(rows, cap);
+  return sendMessages(token, replyToken, [flex ?? textMessage(summary)], summary);
 }

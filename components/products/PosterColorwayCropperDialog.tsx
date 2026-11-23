@@ -12,7 +12,7 @@ import {
   uploadColorwayCroppedImageAction,
   uploadModelVisualSlotAction,
 } from "@/lib/actions/colorway-catalog-actions";
-import { compressImage } from "@/lib/utils/image-compression";
+import { compressCatalogClarityImage, compressImage } from "@/lib/utils/image-compression";
 import type {
   ModelColorCropperItem,
   ModelColorCropperState,
@@ -64,6 +64,103 @@ function clampCrop(crop: CropNorm): CropNorm {
     w,
     h,
   };
+}
+
+type CropHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+
+const MIN_FREE = 0.04;
+const SIZE_CHART_FRAME: CropNorm = { x: 0.38, y: 0.72, w: 0.6, h: 0.24 };
+const CATALOG_EXPORT_EDGE = 2048;
+
+const CROP_HANDLES: { id: CropHandle; className: string; cursor: string; wide: boolean }[] = [
+  { id: "nw", className: "left-0 top-0 -translate-x-1/2 -translate-y-1/2", cursor: "cursor-nw-resize", wide: false },
+  { id: "n", className: "left-1/2 top-0 h-2.5 w-7 -translate-x-1/2 -translate-y-1/2", cursor: "cursor-ns-resize", wide: true },
+  { id: "ne", className: "right-0 top-0 translate-x-1/2 -translate-y-1/2", cursor: "cursor-nesw-resize", wide: false },
+  { id: "e", className: "right-0 top-1/2 h-7 w-2.5 translate-x-1/2 -translate-y-1/2", cursor: "cursor-ew-resize", wide: true },
+  { id: "se", className: "bottom-0 right-0 translate-x-1/2 translate-y-1/2", cursor: "cursor-nwse-resize", wide: false },
+  { id: "s", className: "bottom-0 left-1/2 h-2.5 w-7 -translate-x-1/2 translate-y-1/2", cursor: "cursor-ns-resize", wide: true },
+  { id: "sw", className: "bottom-0 left-0 -translate-x-1/2 translate-y-1/2", cursor: "cursor-nesw-resize", wide: false },
+  { id: "w", className: "left-0 top-1/2 h-7 w-2.5 -translate-x-1/2 -translate-y-1/2", cursor: "cursor-ew-resize", wide: true },
+];
+
+function touchesWest(handle: CropHandle): boolean {
+  return handle === "w" || handle === "nw" || handle === "sw";
+}
+function touchesEast(handle: CropHandle): boolean {
+  return handle === "e" || handle === "ne" || handle === "se";
+}
+function touchesNorth(handle: CropHandle): boolean {
+  return handle === "n" || handle === "nw" || handle === "ne";
+}
+function touchesSouth(handle: CropHandle): boolean {
+  return handle === "s" || handle === "sw" || handle === "se";
+}
+
+/** Free mode: each axis clamps on its own, so a box flush with the bottom can still widen to 100%. */
+function resizeFree(origin: CropNorm, dx: number, dy: number, handle: CropHandle): CropNorm {
+  const right = origin.x + origin.w;
+  const bottom = origin.y + origin.h;
+  let x = origin.x;
+  let y = origin.y;
+  let w = origin.w;
+  let h = origin.h;
+
+  if (touchesWest(handle)) {
+    x = clamp01(origin.x + dx, 0, right - MIN_FREE);
+    w = right - x;
+  } else if (touchesEast(handle)) {
+    w = clamp01(origin.w + dx, MIN_FREE, 1 - origin.x);
+  }
+
+  if (touchesNorth(handle)) {
+    y = clamp01(origin.y + dy, 0, bottom - MIN_FREE);
+    h = bottom - y;
+  } else if (touchesSouth(handle)) {
+    h = clamp01(origin.h + dy, MIN_FREE, 1 - origin.y);
+  }
+
+  return { x, y, w, h };
+}
+
+function resizeLocked(
+  origin: CropNorm,
+  dx: number,
+  dy: number,
+  handle: CropHandle,
+  ratio: number,
+  displayRatio: number,
+): CropNorm {
+  const free = resizeFree(origin, dx, dy, handle);
+  const driveVertical = handle === "n" || handle === "s";
+  let w = free.w;
+  let h = free.h;
+  if (driveVertical) w = (h * ratio) / Math.max(displayRatio, 0.01);
+  else h = (w * displayRatio) / ratio;
+  let x = touchesWest(handle) ? origin.x + origin.w - w : origin.x;
+  let y = touchesNorth(handle) ? origin.y + origin.h - h : origin.y;
+  if (x < 0) {
+    w += x;
+    x = 0;
+    h = (w * displayRatio) / ratio;
+    if (touchesNorth(handle)) y = origin.y + origin.h - h;
+  }
+  if (y < 0) {
+    h += y;
+    y = 0;
+    w = (h * ratio) / Math.max(displayRatio, 0.01);
+    if (touchesWest(handle)) x = origin.x + origin.w - w;
+  }
+  if (x + w > 1) {
+    w = 1 - x;
+    h = (w * displayRatio) / ratio;
+    if (touchesNorth(handle)) y = origin.y + origin.h - h;
+  }
+  if (y + h > 1) {
+    h = 1 - Math.max(y, 0);
+    w = (h * ratio) / Math.max(displayRatio, 0.01);
+    if (touchesWest(handle)) x = origin.x + origin.w - w;
+  }
+  return clampCrop({ x, y, w, h });
 }
 
 function defaultCrop(aspect: AspectMode, displayRatio: number): CropNorm {
@@ -167,9 +264,13 @@ export function PosterColorwayCropperDialog({
   const pendingSlotRef = useRef<ModelVisualSlot>("MAIN");
   const cropRef = useRef<CropNorm>({ x: 0.15, y: 0.08, w: 0.7, h: 0.84 });
   const dragRef = useRef<{
-    mode: "move" | "resize";
-    x: number;
-    y: number;
+    mode: "move" | "resize" | "marquee";
+    handle: CropHandle | null;
+    startX: number;
+    startY: number;
+    startNormX: number;
+    startNormY: number;
+    origin: CropNorm;
     width: number;
     height: number;
   } | null>(null);
@@ -305,40 +406,68 @@ export function PosterColorwayCropperDialog({
     if (w > 0 && h > 0) updateCrop(defaultCrop(aspect, w / h));
   }
 
+  function normFromClient(clientX: number, clientY: number): { x: number; y: number } | null {
+    const img = imgRef.current;
+    if (!img) return null;
+    const rect = img.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return {
+      x: clamp01((clientX - rect.left) / rect.width, 0, 1),
+      y: clamp01((clientY - rect.top) / rect.height, 0, 1),
+    };
+  }
+
   useEffect(() => {
     function onMove(event: PointerEvent) {
       const drag = dragRef.current;
       if (!drag) return;
-      const origin = cropRef.current;
-      const dx = (event.clientX - drag.x) / drag.width;
-      const dy = (event.clientY - drag.y) / drag.height;
-      drag.x = event.clientX;
-      drag.y = event.clientY;
-      const displayRatio = drag.width / Math.max(drag.height, 1);
-      let next: CropNorm;
-      if (drag.mode === "move") {
-        next = clampCrop({ ...origin, x: origin.x + dx, y: origin.y + dy });
-      } else if (aspect === "free") {
-        next = clampCrop({ ...origin, w: origin.w + dx, h: origin.h + dy });
-      } else {
-        const ratio = ASPECT_RATIO[aspect];
-        let w = origin.w + dx;
-        let h = (w * displayRatio) / ratio;
-        if (origin.y + h > 1) {
-          h = 1 - origin.y;
-          w = (h * ratio) / displayRatio;
-        }
-        if (origin.x + w > 1) {
-          w = 1 - origin.x;
-          h = (w * displayRatio) / ratio;
-        }
-        next = clampCrop({ x: origin.x, y: origin.y, w, h });
+      if (drag.mode === "marquee") {
+        const point = normFromClient(event.clientX, event.clientY);
+        if (!point) return;
+        const x = Math.min(drag.startNormX, point.x);
+        const y = Math.min(drag.startNormY, point.y);
+        const next = {
+          x,
+          y,
+          w: Math.max(Math.min(Math.abs(point.x - drag.startNormX), 1 - x), 0.01),
+          h: Math.max(Math.min(Math.abs(point.y - drag.startNormY), 1 - y), 0.01),
+        };
+        cropRef.current = next;
+        setCrop(next);
+        return;
       }
+      const dx = (event.clientX - drag.startX) / Math.max(drag.width, 1);
+      const dy = (event.clientY - drag.startY) / Math.max(drag.height, 1);
+      const next =
+        drag.mode === "move"
+          ? clampCrop({ ...drag.origin, x: drag.origin.x + dx, y: drag.origin.y + dy })
+          : drag.handle
+            ? aspect === "free"
+              ? resizeFree(drag.origin, dx, dy, drag.handle)
+              : resizeLocked(
+                  drag.origin,
+                  dx,
+                  dy,
+                  drag.handle,
+                  ASPECT_RATIO[aspect],
+                  drag.width / Math.max(drag.height, 1),
+                )
+            : drag.origin;
       cropRef.current = next;
       setCrop(next);
     }
-    function onUp() {
+    function onUp(event: PointerEvent) {
+      const drag = dragRef.current;
       dragRef.current = null;
+      if (!drag || drag.mode !== "marquee") return;
+      const moved = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4;
+      const current = cropRef.current;
+      if (!moved || (current.w < 0.03 && current.h < 0.03)) {
+        cropRef.current = drag.origin;
+        setCrop(drag.origin);
+        return;
+      }
+      setAspect("free");
     }
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -348,13 +477,39 @@ export function PosterColorwayCropperDialog({
     };
   }, [aspect]);
 
-  function startDrag(event: ReactPointerEvent<HTMLDivElement>, mode: "move" | "resize") {
+  function startDrag(
+    event: ReactPointerEvent<HTMLDivElement>,
+    mode: "move" | "resize",
+    handle: CropHandle | null = null,
+  ) {
     event.preventDefault();
     event.stopPropagation();
     dragRef.current = {
       mode,
-      x: event.clientX,
-      y: event.clientY,
+      handle,
+      startX: event.clientX,
+      startY: event.clientY,
+      startNormX: 0,
+      startNormY: 0,
+      origin: cropRef.current,
+      width: innerWidth,
+      height: innerHeight,
+    };
+  }
+
+  function startMarquee(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    const point = normFromClient(event.clientX, event.clientY);
+    if (!point) return;
+    event.preventDefault();
+    dragRef.current = {
+      mode: "marquee",
+      handle: null,
+      startX: event.clientX,
+      startY: event.clientY,
+      startNormX: point.x,
+      startNormY: point.y,
+      origin: cropRef.current,
       width: innerWidth,
       height: innerHeight,
     };
@@ -441,7 +596,7 @@ export function PosterColorwayCropperDialog({
     await submitColorFile(color, file, { source: "direct_upload" });
   }
 
-  async function renderCropFile(filename: string): Promise<File | null> {
+  async function renderCropFile(filename: string, maxDimension = 0): Promise<File | null> {
     const img = imgRef.current;
     if (!img || natural.w <= 0 || !imageSrc) {
       toast.error("ยังไม่มีรูปบนผืนตัด — เลือกไฟล์จากเครื่อง");
@@ -451,16 +606,22 @@ export function PosterColorwayCropperDialog({
     const sy = Math.round(crop.y * natural.h);
     const sw = Math.max(1, Math.round(crop.w * natural.w));
     const sh = Math.max(1, Math.round(crop.h * natural.h));
+    const edge = Math.max(sw, sh);
+    const scale = maxDimension > 0 && edge > maxDimension ? maxDimension / edge : 1;
+    const dw = Math.max(1, Math.round(sw * scale));
+    const dh = Math.max(1, Math.round(sh * scale));
     const canvas = document.createElement("canvas");
-    canvas.width = sw;
-    canvas.height = sh;
+    canvas.width = dw;
+    canvas.height = dh;
     const ctx = canvas.getContext("2d");
     if (!ctx) {
       toast.error("เบราว์เซอร์นี้ตัดรูปไม่ได้");
       return null;
     }
     try {
-      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
       const blob = await new Promise<Blob | null>((resolve, reject) => {
         try {
           canvas.toBlob((file) => resolve(file), "image/webp", 0.92);
@@ -481,7 +642,10 @@ export function PosterColorwayCropperDialog({
     try {
       let compressed: File;
       try {
-        compressed = await compressImage(file);
+        compressed =
+          slot === "CATALOG" || slot === "SIZE_CHART"
+            ? await compressCatalogClarityImage(file)
+            : await compressImage(file);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "บีบอัดรูปไม่สำเร็จ");
         return;
@@ -511,7 +675,11 @@ export function PosterColorwayCropperDialog({
   }
 
   async function cropSlot(slot: ModelVisualSlot, success: string) {
-    const file = await renderCropFile(slot === "SIZE_CHART" ? "sizechart.webp" : "main.webp");
+    const clarity = slot === "CATALOG" || slot === "SIZE_CHART";
+    const file = await renderCropFile(
+      slot === "SIZE_CHART" ? "sizechart.webp" : slot === "CATALOG" ? "catalog.webp" : "main.webp",
+      clarity ? CATALOG_EXPORT_EDGE : 0,
+    );
     if (!file) return;
     await uploadSlotFile(slot, file, success);
   }
@@ -752,6 +920,18 @@ export function PosterColorwayCropperDialog({
                     {label}
                   </Button>
                 ))}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="rounded-full"
+                  onClick={() => {
+                    setAspect("free");
+                    updateCrop(SIZE_CHART_FRAME);
+                  }}
+                >
+                  📏 กรอบตารางขนาด (Free)
+                </Button>
                 <Button type="button" size="sm" variant="outline" onClick={() => setZoom((z) => Math.min(3, +(z + 0.25).toFixed(2)))}>
                   ขยาย
                 </Button>
@@ -816,7 +996,11 @@ export function PosterColorwayCropperDialog({
                 }}
               >
                 {imageSrc ? (
-                  <div className="relative" style={{ width: innerWidth, height: innerHeight }}>
+                  <div
+                    className="relative"
+                    style={{ width: innerWidth, height: innerHeight }}
+                    onPointerDown={startMarquee}
+                  >
                     {/* eslint-disable-next-line @next/next/no-img-element -- canvas crop needs a live image element */}
                     <img
                       ref={imgRef}
@@ -841,10 +1025,19 @@ export function PosterColorwayCropperDialog({
                       }}
                       onPointerDown={(event) => startDrag(event, "move")}
                     >
-                      <div
-                        className="absolute -bottom-1.5 -right-1.5 size-4 cursor-nwse-resize rounded-sm border border-slate-300 bg-white"
-                        onPointerDown={(event) => startDrag(event, "resize")}
-                      />
+                      {CROP_HANDLES.map((handle) => (
+                        <div
+                          key={handle.id}
+                          aria-label={`ปรับกรอบ ${handle.id}`}
+                          className={cn(
+                            "absolute z-10 border border-slate-400 bg-white shadow-sm",
+                            handle.cursor,
+                            handle.className,
+                            handle.wide ? "" : "size-3.5 rounded-sm",
+                          )}
+                          onPointerDown={(event) => startDrag(event, "resize", handle.id)}
+                        />
+                      ))}
                     </div>
                   </div>
                 ) : (
