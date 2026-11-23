@@ -75,7 +75,7 @@ export async function fetchLineGroupSummary(
 export async function replyLineMessages(
   token: string,
   replyToken: string,
-  messages: Array<Record<string, string>>,
+  messages: Array<Record<string, unknown>>,
 ): Promise<{
   ok: boolean;
   error: string | null;
@@ -92,7 +92,7 @@ export async function replyLineMessages(
 export async function pushLineMessages(
   token: string,
   targetId: string,
-  messages: Array<Record<string, string>>,
+  messages: Array<Record<string, unknown>>,
 ): Promise<{
   ok: boolean;
   error: string | null;

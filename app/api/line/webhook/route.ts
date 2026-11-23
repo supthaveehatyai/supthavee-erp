@@ -8,6 +8,10 @@ import {
   loadLineChannelAccessToken,
   loadLineChannelSecret,
 } from "@/lib/line/line-oa";
+import {
+  handleLineCatalogBotEvent,
+  parseLineCatalogCommand,
+} from "@/lib/line/catalog-sales-bot";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +85,25 @@ export async function POST(request: Request) {
     if (raw) {
       const body = JSON.parse(raw) as { events?: LineWebhookEvent[] };
       if (Array.isArray(body.events)) await recordLineWebhook(body, body.events);
+      if ((trusted || !secret) && Array.isArray(body.events)) {
+        const token = await loadLineChannelAccessToken();
+        if (token) {
+          for (const event of body.events) {
+            const text = event.message?.text ?? "";
+            if (event.type !== "message" || event.message?.type !== "text") continue;
+            if (!event.replyToken || parseLineCatalogCommand(text) === null) continue;
+            try {
+              await handleLineCatalogBotEvent({
+                replyToken: event.replyToken,
+                text,
+                token,
+              });
+            } catch (error) {
+              console.error("[line-catalog-bot]", error);
+            }
+          }
+        }
+      }
     }
   } catch (error) {
     console.error("[line-webhook]", error);

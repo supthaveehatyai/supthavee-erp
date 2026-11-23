@@ -43,9 +43,13 @@ export type ColorwayCatalogItem = {
   color_family: string | null;
   color_family_th: string | null;
   hex_code: string | null;
+  catalog_name: string | null;
   display_image_url: string | null;
   colorway_image_url: string | null;
   model_poster_url: string | null;
+  model_main_image_url: string | null;
+  catalog_image_url: string | null;
+  size_chart_image_url: string | null;
   has_colorway_image: boolean;
   total_on_hand_qty: number;
   in_stock_size_count: number;
@@ -69,12 +73,18 @@ export type ModelColorCropperItem = {
   crop_meta: Record<string, unknown> | null;
 };
 
+export type ModelVisualSlot = "MAIN" | "CATALOG" | "SIZE_CHART";
+
 export type ModelColorCropperModel = {
   model_id: string;
   model_code: string;
   name: string;
   short_name: string | null;
+  catalog_name: string | null;
   poster_image_url: string | null;
+  main_image_url: string | null;
+  catalog_image_url: string | null;
+  size_chart_image_url: string | null;
 };
 
 export type ModelColorCropperState = {
@@ -114,4 +124,12 @@ export type ColorwayMutationResult =
 
 export type ColorwayDeleteResult =
   | { ok: true }
+  | { ok: false; error: string };
+
+export type CatalogMetaResult =
+  | { ok: true; catalogName: string | null }
+  | { ok: false; error: string };
+
+export type ModelSlotResult =
+  | { ok: true; imageUrl: string | null }
   | { ok: false; error: string };

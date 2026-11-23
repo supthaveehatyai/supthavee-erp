@@ -78,7 +78,7 @@ function formatQty(value: number): string {
 function customerText(item: ColorwayCatalogItem): string {
   const ready = item.sizes_breakdown.filter((size) => size.on_hand_qty > 0);
   const lines = [
-    `${item.model_name} (${item.model_code})`,
+    `${item.catalog_name || item.model_name} (${item.model_code})`,
     `สี ${item.color_name}`,
     `ราคาปลีก ${formatPriceSpan(item.min_retail_price, item.max_retail_price)}`,
     ready.length > 0
@@ -100,7 +100,7 @@ export function SalesCatalogWorkspace({
   const [isPending, startTransition] = useTransition();
   const [draftQ, setDraftQ] = useState(filters.q ?? "");
   const [cropTarget, setCropTarget] = useState<CropTarget | null>(null);
-  const [zoomUrl, setZoomUrl] = useState<string | null>(null);
+  const [zoomUrl, setZoomUrl] = useState<{ url: string; title: string } | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
@@ -268,7 +268,7 @@ export function SalesCatalogWorkspace({
                     <button
                       type="button"
                       className="h-full w-full cursor-zoom-in"
-                      onClick={() => setZoomUrl(image)}
+                      onClick={() => setZoomUrl({ url: image, title: `${item.model_name} ${item.color_name}` })}
                       aria-label={`ขยายรูป ${item.model_name} สี ${item.color_name}`}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element -- public catalog image */}
@@ -300,6 +300,9 @@ export function SalesCatalogWorkspace({
                     <h2 className="line-clamp-2 text-sm font-semibold text-slate-900">
                       {item.model_name}
                     </h2>
+                    {item.catalog_name ? (
+                      <p className="mt-0.5 text-xs text-slate-500">{item.catalog_name}</p>
+                    ) : null}
                     <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-slate-600">
                       <span
                         className="size-2.5 rounded-full border border-black/10"
@@ -345,6 +348,33 @@ export function SalesCatalogWorkspace({
                     ))}
                   </div>
                   <div className="mt-auto flex flex-wrap gap-2 pt-1">
+                    {item.catalog_image_url ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setZoomUrl({ url: item.catalog_image_url ?? "", title: "ใบ Catalog" })
+                        }
+                      >
+                        📋 ใบ Catalog
+                      </Button>
+                    ) : null}
+                    {item.size_chart_image_url ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setZoomUrl({
+                            url: item.size_chart_image_url ?? "",
+                            title: "ตารางขนาด",
+                          })
+                        }
+                      >
+                        📏 ตารางขนาด
+                      </Button>
+                    ) : null}
                     <Button
                       type="button"
                       size="sm"
@@ -383,10 +413,10 @@ export function SalesCatalogWorkspace({
 
       <Dialog open={Boolean(zoomUrl)} onOpenChange={(open) => !open && setZoomUrl(null)}>
         <DialogContent className="max-w-[min(90vw,56rem)] border-0 bg-transparent p-0 shadow-none [&>button]:text-white">
-          <DialogTitle className="sr-only">ขยายรูปสินค้า</DialogTitle>
+          <DialogTitle className="sr-only">{zoomUrl?.title || "ขยายรูปสินค้า"}</DialogTitle>
           {zoomUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- lightbox
-            <img src={zoomUrl} alt="" className="max-h-[80vh] w-full object-contain" />
+            <img src={zoomUrl.url} alt={zoomUrl.title} className="max-h-[80vh] w-full object-contain" />
           ) : null}
         </DialogContent>
       </Dialog>

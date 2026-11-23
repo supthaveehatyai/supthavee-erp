@@ -1,0 +1,616 @@
+import { createClient } from "@/lib/supabase/server-admin";
+import { replyLineMessages } from "@/lib/line/line-oa";
+
+const COMMAND_RE =
+  /^#(รูป|แคตตาล็อก|catalog|พร้อมส่ง|สต็อก|เช็ค|ไซส์|ตารางไซส์|ตารางขนาด|size)(?:\s+(.+))?$/i;
+
+const USAGE_GUIDE = [
+  "#รูป PS031S",
+  "#รูป คอกลมสั้น แดง",
+  "#พร้อมส่ง โปโล กรม",
+  "#ไซส์ PS031S",
+].join("\n");
+
+type CatalogCommandMode = "guide" | "size" | "catalog" | "photo";
+
+export type LineCatalogCommand = {
+  mode: CatalogCommandMode;
+  query: string;
+  inStockOnly: boolean;
+};
+
+type BotSize = {
+  size: string;
+  on_hand_qty: number;
+};
+
+type BotColorway = {
+  model_id: string;
+  model_code: string;
+  model_name: string;
+  catalog_name: string | null;
+  color_code: string;
+  color_name: string;
+  display_image_url: string | null;
+  has_colorway_image: boolean;
+  model_main_image_url: string | null;
+  catalog_image_url: string | null;
+  size_chart_image_url: string | null;
+  total_on_hand_qty: number;
+  min_retail_price: number | null;
+  max_retail_price: number | null;
+  sizes: BotSize[];
+};
+
+type BotModelCard = {
+  model_id: string;
+  model_code: string;
+  model_name: string;
+  catalog_name: string | null;
+  model_main_image_url: string | null;
+  catalog_image_url: string | null;
+  size_chart_image_url: string | null;
+};
+
+type LineMessage = Record<string, unknown>;
+
+type LooseRpc = {
+  rpc: (
+    fn: string,
+    args: Record<string, unknown>,
+  ) => Promise<{ data: unknown; error: { message: string } | null }>;
+};
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function textOrNull(value: unknown): string | null {
+  if (value == null) return null;
+  const text = String(value).trim();
+  return text || null;
+}
+
+function toNumber(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function lineText(value: unknown): string {
+  return String(value || "-").trim() || "-";
+}
+
+function formatBaht(value: number): string {
+  const whole = Math.abs(value - Math.round(value)) < 0.001;
+  return new Intl.NumberFormat("th-TH", {
+    minimumFractionDigits: whole ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatQty(value: number): string {
+  if (value <= 0) return "0";
+  if (Math.abs(value - Math.round(value)) < 0.001) return String(Math.round(value));
+  return new Intl.NumberFormat("th-TH", { maximumFractionDigits: 2 }).format(value);
+}
+
+export function toSafeLineHttpsUrl(raw?: string | null): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value.toLowerCase().startsWith("https://")) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return null;
+    if (url.href.length > 2000) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+export function parseLineCatalogCommand(text: string): LineCatalogCommand | null {
+  const match = text.trim().match(COMMAND_RE);
+  if (!match) return null;
+  const verb = match[1].toLowerCase();
+  const query = (match[2] ?? "").trim();
+  if (!query) return { mode: "guide", query: "", inStockOnly: false };
+  if (verb === "ไซส์" || verb === "ตารางไซส์" || verb === "ตารางขนาด" || verb === "size") {
+    return { mode: "size", query, inStockOnly: false };
+  }
+  if (verb === "แคตตาล็อก" || verb === "catalog") {
+    return { mode: "catalog", query, inStockOnly: false };
+  }
+  const inStockOnly = verb === "พร้อมส่ง" || verb === "สต็อก" || verb === "เช็ค";
+  return { mode: "photo", query, inStockOnly };
+}
+
+function readSizes(value: unknown): BotSize[] {
+  let raw = value;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw) as unknown;
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(raw)) return [];
+  const sizes: BotSize[] = [];
+  for (const entry of raw) {
+    const row = asRecord(entry);
+    if (!row) continue;
+    const size = textOrNull(row.size);
+    if (!size) continue;
+    const qty = toNumber(row.on_hand_qty);
+    sizes.push({ size, on_hand_qty: qty > 0 ? qty : 0 });
+  }
+  return sizes;
+}
+
+function mapColorway(value: unknown): BotColorway | null {
+  const row = asRecord(value);
+  if (!row) return null;
+  const modelId = textOrNull(row.model_id);
+  if (!modelId) return null;
+  const total = toNumber(row.total_on_hand_qty);
+  return {
+    model_id: modelId,
+    model_code: textOrNull(row.model_code) ?? "",
+    model_name: textOrNull(row.model_name) ?? "",
+    catalog_name: textOrNull(row.catalog_name),
+    color_code: textOrNull(row.color_code) ?? "",
+    color_name: textOrNull(row.color_name) ?? "",
+    display_image_url: textOrNull(row.display_image_url),
+    has_colorway_image: row.has_colorway_image === true,
+    model_main_image_url:
+      textOrNull(row.model_main_image_url) ?? textOrNull(row.model_poster_url),
+    catalog_image_url: textOrNull(row.catalog_image_url),
+    size_chart_image_url: textOrNull(row.size_chart_image_url),
+    total_on_hand_qty: total > 0 ? total : 0,
+    min_retail_price: toNullableNumber(row.min_retail_price),
+    max_retail_price: toNullableNumber(row.max_retail_price),
+    sizes: readSizes(row.sizes_breakdown),
+  };
+}
+
+function mapModelCard(value: unknown): BotModelCard | null {
+  const row = asRecord(value);
+  if (!row) return null;
+  const modelId = textOrNull(row.model_id);
+  if (!modelId) return null;
+  return {
+    model_id: modelId,
+    model_code: textOrNull(row.model_code) ?? "",
+    model_name: textOrNull(row.model_name) ?? "",
+    catalog_name: textOrNull(row.catalog_name),
+    model_main_image_url: textOrNull(row.model_main_image_url),
+    catalog_image_url: textOrNull(row.catalog_image_url),
+    size_chart_image_url: textOrNull(row.size_chart_image_url),
+  };
+}
+
+function retailLabel(min: number | null, max: number | null): string | null {
+  if (min == null || min <= 0) return null;
+  const high = max ?? min;
+  if (!Number.isFinite(high) || high <= 0) return `฿${formatBaht(min)}`;
+  if (Math.abs(min - high) < 0.005) return `฿${formatBaht(min)}`;
+  return `฿${formatBaht(Math.min(min, high))}–${formatBaht(Math.max(min, high))}`;
+}
+
+function readyLine(row: BotColorway): { text: string; color: string } {
+  const ready = row.sizes.filter((size) => size.on_hand_qty > 0);
+  if (row.total_on_hand_qty > 0 && ready.length > 0) {
+    return {
+      text: `พร้อมส่ง: ${ready
+        .map((size) => `${size.size}(${formatQty(size.on_hand_qty)})`)
+        .join(" ")}`,
+      color: "#059669",
+    };
+  }
+  const labels = row.sizes.map((size) => size.size).filter(Boolean);
+  return {
+    text: labels.length
+      ? `สินค้าสั่งผลิต / เช็คสต็อกหน้าร้าน (${labels.join(" ")})`
+      : "สินค้าสั่งผลิต / เช็คสต็อกหน้าร้าน",
+    color: "#64748B",
+  };
+}
+
+function displayName(row: { catalog_name: string | null; model_name: string }): string {
+  return lineText(row.catalog_name || row.model_name);
+}
+
+function summarizeRows(rows: BotColorway[]): string {
+  const first = rows[0];
+  const price = retailLabel(first.min_retail_price, first.max_retail_price);
+  const sizes = [
+    ...new Set(rows.flatMap((row) => row.sizes.map((size) => size.size)).filter(Boolean)),
+  ];
+  return [
+    `${displayName(first)} (${lineText(first.model_code)})`,
+    price ? `ราคาปลีก ${price}` : "สอบถามราคาได้ที่ร้าน",
+    sizes.length ? `ไซส์: ${sizes.join(" ")}` : "สอบถามไซส์ได้ที่ร้าน",
+  ].join("\n");
+}
+
+function summarizeCard(card: BotModelCard): string {
+  return [
+    `${displayName(card)} (${lineText(card.model_code)})`,
+    "ยังไม่มีตารางขนาดแยกในระบบ",
+    "สอบถามราคาและไซส์พร้อมส่งได้ที่ร้าน",
+  ].join("\n");
+}
+
+function textMessage(text: string): LineMessage {
+  return { type: "text", text: lineText(text).slice(0, 4900) };
+}
+
+function imageMessage(url: string): LineMessage {
+  return { type: "image", originalContentUrl: url, previewImageUrl: url };
+}
+
+function sheetUrlOf(row: {
+  catalog_image_url: string | null;
+  model_main_image_url: string | null;
+}): string | null {
+  return toSafeLineHttpsUrl(row.catalog_image_url) ?? toSafeLineHttpsUrl(row.model_main_image_url);
+}
+
+function sizeUrlOf(row: { size_chart_image_url: string | null }): string | null {
+  return toSafeLineHttpsUrl(row.size_chart_image_url);
+}
+
+function buildBubble(row: BotColorway): LineMessage {
+  const displayUrl = toSafeLineHttpsUrl(row.display_image_url);
+  const title = displayName(row);
+  const price = retailLabel(row.min_retail_price, row.max_retail_price);
+  const ready = readyLine(row);
+  const body: LineMessage[] = [
+    {
+      type: "text",
+      text: lineText(row.model_code),
+      size: "xs",
+      weight: "bold",
+      color: "#1D4ED8",
+    },
+    {
+      type: "text",
+      text: title,
+      wrap: true,
+      maxLines: 2,
+      weight: "bold",
+      size: "sm",
+      color: "#0F172A",
+    },
+    {
+      type: "text",
+      text: lineText(`${row.color_name} (${row.color_code || "-"})`),
+      size: "xs",
+      wrap: true,
+      color: "#334155",
+    },
+  ];
+  if (price) {
+    body.push({
+      type: "text",
+      text: lineText(price),
+      size: "sm",
+      weight: "bold",
+      color: "#0F172A",
+    });
+  }
+  body.push({
+    type: "text",
+    text: lineText(ready.text),
+    wrap: true,
+    size: "xs",
+    color: ready.color,
+  });
+
+  const footer: LineMessage[] = [];
+  if (row.catalog_image_url || row.model_main_image_url) {
+    footer.push({
+      type: "button",
+      style: "link",
+      height: "sm",
+      action: {
+        type: "message",
+        label: "📋 ดูใบ Catalog",
+        text: `#แคตตาล็อก ${row.model_code}`.slice(0, 300),
+      },
+    });
+  }
+  if (row.size_chart_image_url) {
+    footer.push({
+      type: "button",
+      style: "link",
+      height: "sm",
+      action: {
+        type: "message",
+        label: "📏 ตารางขนาด",
+        text: `#ไซส์ ${row.model_code}`.slice(0, 300),
+      },
+    });
+  }
+
+  const bubble: LineMessage = {
+    type: "bubble",
+    size: "kilo",
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      contents: body,
+    },
+  };
+  if (displayUrl) {
+    bubble.hero = {
+      type: "image",
+      url: displayUrl,
+      size: "full",
+      aspectRatio: "3:4",
+      aspectMode: row.has_colorway_image ? "cover" : "fit",
+      backgroundColor: "#FFFFFF",
+      action: { type: "uri", label: "ดูรูปขยาย", uri: displayUrl },
+    };
+  }
+  if (footer.length > 0) {
+    bubble.footer = {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      contents: footer,
+    };
+  }
+  return bubble;
+}
+
+function flexCarousel(rows: BotColorway[]): LineMessage | null {
+  const bubbles = rows.slice(0, 10).map(buildBubble);
+  if (bubbles.length === 0) return null;
+  const alt = rows
+    .slice(0, 10)
+    .map((row) => `${row.model_code} ${row.color_name}`.trim())
+    .join(", ");
+  return {
+    type: "flex",
+    altText: (`แคตตาล็อก ${alt}`.trim() || "แคตตาล็อกสินค้า").slice(0, 380),
+    contents: { type: "carousel", contents: bubbles },
+  };
+}
+
+function imagePair(
+  sheet: string | null,
+  size: string | null,
+): LineMessage[] {
+  const messages: LineMessage[] = [];
+  if (sheet) messages.push(imageMessage(sheet));
+  if (size && size !== sheet) messages.push(imageMessage(size));
+  return messages;
+}
+
+function isSingleModelShowcase(rows: BotColorway[], query: string): boolean {
+  if (rows.length === 0) return false;
+  const modelId = rows[0].model_id;
+  if (!rows.every((row) => row.model_id === modelId)) return false;
+  const oneWord = query.trim().split(/\s+/).length === 1;
+  return rows.length > 1 || oneWord;
+}
+
+function focusRows(rows: BotColorway[], query: string): BotColorway[] | "many" {
+  if (rows.length === 0) return [];
+  const code = query.trim().toLowerCase();
+  const exact = rows.filter((row) => row.model_code.toLowerCase() === code);
+  if (exact.length > 0) return exact;
+  const ids = new Set(rows.map((row) => row.model_id));
+  if (ids.size === 1) return rows;
+  return "many";
+}
+
+function codeList(rows: BotColorway[]): string {
+  const codes: string[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (seen.has(row.model_id)) continue;
+    seen.add(row.model_id);
+    codes.push(row.model_code || "-");
+    if (codes.length >= 6) break;
+  }
+  return codes.join(", ");
+}
+
+async function searchColorways(
+  query: string,
+  inStockOnly: boolean,
+): Promise<{ rows: BotColorway[]; error: string | null }> {
+  const admin = createClient() as unknown as LooseRpc;
+  const { data, error } = await admin.rpc("search_colorway_sales_catalog", {
+    p_search_text: query,
+    p_color_family: null,
+    p_category_id: null,
+    p_in_stock_only: inStockOnly,
+    p_limit: 12,
+  });
+  if (error) return { rows: [], error: error.message };
+  const rows = (Array.isArray(data) ? data : []).flatMap((row) => {
+    const item = mapColorway(row);
+    return item ? [item] : [];
+  });
+  return { rows, error: null };
+}
+
+async function lookupModels(query: string): Promise<{ cards: BotModelCard[]; error: string | null }> {
+  const admin = createClient() as unknown as LooseRpc;
+  const { data, error } = await admin.rpc("lookup_model_catalog_for_bot", {
+    p_query: query,
+  });
+  if (error) return { cards: [], error: error.message };
+  const cards = (Array.isArray(data) ? data : []).flatMap((row) => {
+    const card = mapModelCard(row);
+    return card ? [card] : [];
+  });
+  return { cards, error: null };
+}
+
+function pickCard(cards: BotModelCard[], query: string): BotModelCard | "many" | null {
+  if (cards.length === 0) return null;
+  const code = query.trim().toLowerCase();
+  const exact = cards.find((card) => card.model_code.toLowerCase() === code);
+  if (exact) return exact;
+  if (cards.length === 1) return cards[0];
+  return "many";
+}
+
+async function sendMessages(
+  token: string,
+  replyToken: string,
+  messages: LineMessage[],
+) {
+  const payload = messages.slice(0, 5);
+  if (payload.length === 0) return;
+  const result = await replyLineMessages(token, replyToken, payload);
+  if (!result.ok) console.error("[line-catalog-bot]", result.error);
+}
+
+export async function handleLineCatalogBotEvent(params: {
+  replyToken: string;
+  text: string;
+  token: string;
+}) {
+  const command = parseLineCatalogCommand(params.text);
+  if (!command || !params.replyToken || !params.token) return;
+  if (command.mode === "guide") {
+    await sendMessages(params.token, params.replyToken, [textMessage(USAGE_GUIDE)]);
+    return;
+  }
+
+  const searched = await searchColorways(command.query, command.inStockOnly);
+  if (searched.error) {
+    await sendMessages(params.token, params.replyToken, [
+      textMessage("ระบบค้นหาสินค้าชั่วคราวไม่พร้อม ลองใหม่อีกครั้ง"),
+    ]);
+    return;
+  }
+
+  if (command.mode === "photo" && isSingleModelShowcase(searched.rows, command.query)) {
+    const first = searched.rows[0];
+    const sheet = sheetUrlOf(first);
+    const size = sizeUrlOf(first);
+    const flex = flexCarousel(searched.rows);
+    const messages = [...imagePair(sheet, size)];
+    if (flex) messages.push(flex);
+    if (messages.length === 0) messages.push(textMessage(summarizeRows(searched.rows)));
+    await sendMessages(params.token, params.replyToken, messages);
+    return;
+  }
+
+  if (command.mode === "photo" && searched.rows.length > 0) {
+    const flex = flexCarousel(searched.rows);
+    await sendMessages(params.token, params.replyToken, [
+      flex ?? textMessage(summarizeRows(searched.rows)),
+    ]);
+    return;
+  }
+
+  const focused = focusRows(searched.rows, command.query);
+  if (focused === "many") {
+    const verb = command.mode === "size" ? "#ไซส์" : command.mode === "catalog" ? "#แคตตาล็อก" : "#รูป";
+    await sendMessages(params.token, params.replyToken, [
+      textMessage(
+        `พบหลายรุ่น กรุณาระบุรหัส เช่น ${verb} ${codeList(searched.rows).split(", ")[0] ?? "PS031S"}\n${codeList(searched.rows)}`,
+      ),
+    ]);
+    return;
+  }
+
+  if (Array.isArray(focused) && focused.length > 0) {
+    await replyForKnownRows(params.token, params.replyToken, command.mode, focused);
+    return;
+  }
+
+  const looked = await lookupModels(command.query);
+  if (looked.error) {
+    await sendMessages(params.token, params.replyToken, [
+      textMessage("ระบบค้นหาสินค้าชั่วคราวไม่พร้อม ลองใหม่อีกครั้ง"),
+    ]);
+    return;
+  }
+  const card = pickCard(looked.cards, command.query);
+  if (card === "many") {
+    const codes = looked.cards
+      .slice(0, 6)
+      .map((item) => item.model_code || "-")
+      .join(", ");
+    await sendMessages(params.token, params.replyToken, [
+      textMessage(`พบหลายรุ่น กรุณาระบุรหัสรุ่น\n${codes}`),
+    ]);
+    return;
+  }
+  if (!card) {
+    await sendMessages(params.token, params.replyToken, [
+      textMessage(`ไม่พบสินค้าจาก "${command.query}"\nลองรหัสรุ่น เช่น #รูป PS031S`),
+    ]);
+    return;
+  }
+
+  const sheet = sheetUrlOf(card);
+  const size = sizeUrlOf(card);
+  if (command.mode === "size") {
+    const chart = size ?? toSafeLineHttpsUrl(card.catalog_image_url);
+    const messages: LineMessage[] = [];
+    if (chart) messages.push(imageMessage(chart));
+    messages.push(textMessage(chart ? displayName(card) : summarizeCard(card)));
+    await sendMessages(params.token, params.replyToken, messages);
+    return;
+  }
+  if (command.mode === "catalog") {
+    const messages = imagePair(sheet, size);
+    messages.push(textMessage(sheet ? displayName(card) : summarizeCard(card)));
+    await sendMessages(params.token, params.replyToken, messages);
+    return;
+  }
+  const messages = imagePair(sheet, size);
+  messages.push(textMessage(summarizeCard(card)));
+  await sendMessages(params.token, params.replyToken, messages);
+}
+
+async function replyForKnownRows(
+  token: string,
+  replyToken: string,
+  mode: CatalogCommandMode,
+  rows: BotColorway[],
+) {
+  const first = rows[0];
+  const sheet = sheetUrlOf(first);
+  const size = sizeUrlOf(first);
+  if (mode === "size") {
+    const chart = size ?? toSafeLineHttpsUrl(first.catalog_image_url);
+    if (chart) {
+      await sendMessages(token, replyToken, [
+        imageMessage(chart),
+        textMessage(summarizeRows(rows)),
+      ]);
+      return;
+    }
+    await sendMessages(token, replyToken, [textMessage(summarizeRows(rows))]);
+    return;
+  }
+  if (mode === "catalog") {
+    if (sheet) {
+      const messages = imagePair(sheet, size);
+      messages.push(textMessage(displayName(first)));
+      await sendMessages(token, replyToken, messages);
+      return;
+    }
+    const flex = flexCarousel(rows);
+    await sendMessages(token, replyToken, [flex ?? textMessage(summarizeRows(rows))]);
+    return;
+  }
+  const flex = flexCarousel(rows);
+  await sendMessages(token, replyToken, [flex ?? textMessage(summarizeRows(rows))]);
+}

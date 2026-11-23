@@ -11,11 +11,14 @@ import type {
   ColorwayCatalogQuery,
   ColorwayCropperStateResult,
   ColorwayDeleteResult,
+  CatalogMetaResult,
   ColorwayMutationResult,
   ColorwaySizeBreakdown,
   ModelColorCropperItem,
   ModelColorCropperModel,
   ModelColorCropperState,
+  ModelSlotResult,
+  ModelVisualSlot,
   SearchColorwayCatalogResult,
 } from "@/types/colorway-catalog";
 
@@ -138,9 +141,14 @@ function mapCatalogItem(value: unknown): ColorwayCatalogItem | null {
     color_family: textOrNull(row.color_family),
     color_family_th: textOrNull(row.color_family_th),
     hex_code: textOrNull(row.hex_code),
+    catalog_name: textOrNull(row.catalog_name),
     display_image_url: textOrNull(row.display_image_url),
     colorway_image_url: textOrNull(row.colorway_image_url),
     model_poster_url: textOrNull(row.model_poster_url),
+    model_main_image_url:
+      textOrNull(row.model_main_image_url) ?? textOrNull(row.model_poster_url),
+    catalog_image_url: textOrNull(row.catalog_image_url),
+    size_chart_image_url: textOrNull(row.size_chart_image_url),
     has_colorway_image: row.has_colorway_image === true,
     total_on_hand_qty: toNumber(row.total_on_hand_qty),
     in_stock_size_count: Math.trunc(toNumber(row.in_stock_size_count)),
@@ -177,12 +185,18 @@ function mapCropperState(value: unknown): ModelColorCropperState | null {
   if (!row) return null;
   const modelRow = asRecord(row.model);
   if (!modelRow) return null;
+  const mainImage =
+    textOrNull(modelRow.main_image_url) ?? textOrNull(modelRow.poster_image_url);
   const model: ModelColorCropperModel = {
     model_id: textOrNull(modelRow.model_id) ?? "",
     model_code: textOrNull(modelRow.model_code) ?? "",
     name: textOrNull(modelRow.name) ?? "",
     short_name: textOrNull(modelRow.short_name),
-    poster_image_url: textOrNull(modelRow.poster_image_url),
+    catalog_name: textOrNull(modelRow.catalog_name),
+    poster_image_url: mainImage,
+    main_image_url: mainImage,
+    catalog_image_url: textOrNull(modelRow.catalog_image_url),
+    size_chart_image_url: textOrNull(modelRow.size_chart_image_url),
   };
   const colors = Array.isArray(row.colors)
     ? row.colors.flatMap((entry) => {
@@ -220,6 +234,97 @@ async function removeAssetBestEffort(storagePath: string | null | undefined) {
   } catch {
     // Replacing the catalog row already succeeded. A leftover object is cleaned later.
   }
+}
+
+const VISUAL_SLOT_PREFIX: Record<ModelVisualSlot, string> = {
+  MAIN: "main",
+  CATALOG: "catalog",
+  SIZE_CHART: "sizechart",
+};
+
+type PathProbe = {
+  from: (table: string) => {
+    select: (columns: string) => {
+      eq: (
+        column: string,
+        value: string,
+      ) => {
+        limit: (
+          count: number,
+        ) => Promise<{ data: unknown[] | null; error: { message: string } | null }>;
+      };
+      ilike: (
+        column: string,
+        pattern: string,
+      ) => {
+        limit: (
+          count: number,
+        ) => Promise<{ data: unknown[] | null; error: { message: string } | null }>;
+      };
+    };
+  };
+};
+
+function parseVisualSlot(value: unknown): ModelVisualSlot | null {
+  const slot = String(value ?? "").trim().toUpperCase();
+  if (slot === "MAIN" || slot === "CATALOG" || slot === "SIZE_CHART") return slot;
+  return null;
+}
+
+async function probeHasRows(
+  run: Promise<{ data: unknown[] | null; error: { message: string } | null }>,
+): Promise<boolean> {
+  const { data, error } = await run;
+  if (error) return true;
+  return (data?.length ?? 0) > 0;
+}
+
+async function storagePathStillReferenced(storagePath: string): Promise<boolean> {
+  const path = storagePath.trim().replace(/^\/+/, "");
+  if (!path) return true;
+  const probe = createClient() as unknown as PathProbe;
+  const like = `%/${path}`;
+  const models = () => probe.from("product_models").select("id");
+  const colors = () => probe.from("product_model_color_images").select("id");
+  const checks = await Promise.all([
+    probeHasRows(models().eq("catalog_storage_path", path).limit(1)),
+    probeHasRows(models().eq("size_chart_storage_path", path).limit(1)),
+    probeHasRows(models().ilike("image_url", like).limit(1)),
+    probeHasRows(models().ilike("catalog_image_url", like).limit(1)),
+    probeHasRows(models().ilike("size_chart_image_url", like).limit(1)),
+    probeHasRows(colors().eq("storage_path", path).limit(1)),
+    probeHasRows(colors().ilike("image_url", like).limit(1)),
+  ]);
+  return checks.some(Boolean);
+}
+
+async function removeUnreferencedSlotPath(
+  oldPath: string | null,
+  nextPath: string | null,
+) {
+  const previous = String(oldPath ?? "").trim().replace(/^\/+/, "");
+  const current = String(nextPath ?? "").trim().replace(/^\/+/, "");
+  if (!previous || previous === current || previous.includes("..")) return;
+  if (await storagePathStillReferenced(previous)) return;
+  await removeAssetBestEffort(previous);
+}
+
+async function applyVisualSlot(input: {
+  modelId: string;
+  slot: ModelVisualSlot;
+  imageUrl: string | null;
+  storagePath: string | null;
+}): Promise<{ ok: true; oldPath: string | null } | { ok: false; error: string }> {
+  const { data, error } = await looseAdmin().rpc("set_product_model_visual_slot", {
+    p_model_id: input.modelId,
+    p_slot: input.slot,
+    p_image_url: input.imageUrl,
+    p_storage_path: input.storagePath,
+  });
+  if (error) return { ok: false, error: error.message };
+  const failure = rpcFailure(data);
+  if (failure) return { ok: false, error: failure };
+  return { ok: true, oldPath: textOrNull(asRecord(data)?.old_storage_path) };
 }
 
 function readImageFile(formData: FormData): { file: File } | { error: string } {
@@ -481,16 +586,42 @@ export async function deleteColorwayImageAction(
   }
 }
 
-export async function uploadModelMasterPosterAction(
+export async function updateModelCatalogMetaAction(
+  modelId: string,
+  catalogName: string,
+): Promise<CatalogMetaResult> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) return { ok: false, error: owner.error };
+
+  const id = String(modelId ?? "").trim();
+  if (!UUID_RE.test(id)) return { ok: false, error: "รหัสรุ่นสินค้าไม่ถูกต้อง" };
+
+  try {
+    const { data, error } = await looseAdmin().rpc("update_product_model_catalog_meta", {
+      p_model_id: id,
+      p_catalog_name: String(catalogName ?? ""),
+    });
+    if (error) return { ok: false, error: error.message };
+    const failure = rpcFailure(data);
+    if (failure) return { ok: false, error: failure };
+    revalidateCatalog();
+    return { ok: true, catalogName: textOrNull(asRecord(data)?.catalog_name) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "บันทึกชื่อ Catalog ไม่สำเร็จ";
+    return { ok: false, error: message };
+  }
+}
+
+export async function uploadModelVisualSlotAction(
   formData: FormData,
 ): Promise<ColorwayMutationResult> {
   const owner = await requireSessionUserId();
   if (!owner.ok) return { ok: false, error: owner.error };
 
   const modelId = String(formData.get("modelId") ?? "").trim();
-  if (!UUID_RE.test(modelId)) {
-    return { ok: false, error: "รหัสรุ่นสินค้าไม่ถูกต้อง" };
-  }
+  const slot = parseVisualSlot(formData.get("slot"));
+  if (!UUID_RE.test(modelId)) return { ok: false, error: "รหัสรุ่นสินค้าไม่ถูกต้อง" };
+  if (!slot) return { ok: false, error: "ประเภทช่องรูปไม่ถูกต้อง" };
 
   const image = readImageFile(formData);
   if ("error" in image) return { ok: false, error: image.error };
@@ -498,7 +629,7 @@ export async function uploadModelMasterPosterAction(
   const modelCode = asciiToken(formData.get("modelCode"), "MODEL");
   const mime = (image.file.type || "").toLowerCase();
   const ext = imageExtension(mime);
-  const storagePath = `models/${modelCode}/${crypto.randomUUID()}.${ext}`;
+  const storagePath = `models/${modelCode}/${VISUAL_SLOT_PREFIX[slot]}_${crypto.randomUUID()}.${ext}`;
 
   const supabase = createClient();
   const buffer = Buffer.from(await image.file.arrayBuffer());
@@ -509,7 +640,7 @@ export async function uploadModelMasterPosterAction(
       upsert: false,
     });
   if (uploadError) {
-    return { ok: false, error: uploadError.message || "อัปโหลดโปสเตอร์ไม่สำเร็จ" };
+    return { ok: false, error: uploadError.message || "อัปโหลดรูปไม่สำเร็จ" };
   }
 
   const imageUrl =
@@ -517,18 +648,91 @@ export async function uploadModelMasterPosterAction(
       .publicUrl?.split("?")[0] ?? "";
   if (!imageUrl) {
     await removeAssetBestEffort(storagePath);
-    return { ok: false, error: "อัปโหลดสำเร็จ แต่สร้างลิงก์โปสเตอร์ไม่ได้" };
+    return { ok: false, error: "อัปโหลดสำเร็จ แต่สร้างลิงก์รูปไม่ได้" };
   }
 
-  const { error: updateError } = await supabase
-    .from("product_models")
-    .update({ image_url: imageUrl })
-    .eq("id", modelId);
-  if (updateError) {
+  try {
+    const applied = await applyVisualSlot({
+      modelId,
+      slot,
+      imageUrl,
+      storagePath,
+    });
+    if (!applied.ok) {
+      await removeAssetBestEffort(storagePath);
+      return { ok: false, error: applied.error };
+    }
+    await removeUnreferencedSlotPath(applied.oldPath, storagePath);
+    revalidateCatalog();
+    return { ok: true, imageUrl, storagePath };
+  } catch (err) {
     await removeAssetBestEffort(storagePath);
-    return { ok: false, error: updateError.message };
+    const message = err instanceof Error ? err.message : "บันทึกรูปไม่สำเร็จ";
+    return { ok: false, error: message };
   }
+}
 
-  revalidateCatalog();
-  return { ok: true, imageUrl, storagePath };
+export async function clearModelVisualSlotAction(
+  modelId: string,
+  slot: ModelVisualSlot,
+): Promise<ModelSlotResult> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) return { ok: false, error: owner.error };
+
+  const id = String(modelId ?? "").trim();
+  const parsed = parseVisualSlot(slot);
+  if (!UUID_RE.test(id)) return { ok: false, error: "รหัสรุ่นสินค้าไม่ถูกต้อง" };
+  if (!parsed) return { ok: false, error: "ประเภทช่องรูปไม่ถูกต้อง" };
+
+  try {
+    const applied = await applyVisualSlot({
+      modelId: id,
+      slot: parsed,
+      imageUrl: null,
+      storagePath: null,
+    });
+    if (!applied.ok) return { ok: false, error: applied.error };
+    await removeUnreferencedSlotPath(applied.oldPath, null);
+    revalidateCatalog();
+    return { ok: true, imageUrl: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "ลบรูปไม่สำเร็จ";
+    return { ok: false, error: message };
+  }
+}
+
+export async function copyMainImageToCatalogSlotAction(
+  modelId: string,
+  mainImageUrl: string,
+): Promise<ModelSlotResult> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) return { ok: false, error: owner.error };
+
+  const id = String(modelId ?? "").trim();
+  const imageUrl = String(mainImageUrl ?? "").trim();
+  if (!UUID_RE.test(id)) return { ok: false, error: "รหัสรุ่นสินค้าไม่ถูกต้อง" };
+  if (!imageUrl) return { ok: false, error: "ยังไม่มีรูปหลักของรุ่นให้ดึงมาใช้" };
+
+  try {
+    const applied = await applyVisualSlot({
+      modelId: id,
+      slot: "CATALOG",
+      imageUrl,
+      storagePath: null,
+    });
+    if (!applied.ok) return { ok: false, error: applied.error };
+    await removeUnreferencedSlotPath(applied.oldPath, null);
+    revalidateCatalog();
+    return { ok: true, imageUrl };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "ดึงรูปหลักมาเป็นใบ Catalog ไม่สำเร็จ";
+    return { ok: false, error: message };
+  }
+}
+
+export async function uploadModelMasterPosterAction(
+  formData: FormData,
+): Promise<ColorwayMutationResult> {
+  formData.set("slot", "MAIN");
+  return uploadModelVisualSlotAction(formData);
 }

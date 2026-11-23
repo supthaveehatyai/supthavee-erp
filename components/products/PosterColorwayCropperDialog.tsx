@@ -4,15 +4,19 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { ImagePlus, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  clearModelVisualSlotAction,
+  copyMainImageToCatalogSlotAction,
   deleteColorwayImageAction,
   getModelCropperStateAction,
+  updateModelCatalogMetaAction,
   uploadColorwayCroppedImageAction,
-  uploadModelMasterPosterAction,
+  uploadModelVisualSlotAction,
 } from "@/lib/actions/colorway-catalog-actions";
 import { compressImage } from "@/lib/utils/image-compression";
 import type {
   ModelColorCropperItem,
   ModelColorCropperState,
+  ModelVisualSlot,
 } from "@/types/colorway-catalog";
 import { Button } from "@/components/ui/button";
 import {
@@ -80,6 +84,72 @@ function firstImageFile(list: FileList | null | undefined): File | null {
   return file;
 }
 
+function VisualSlotCard({
+  title,
+  url,
+  busy,
+  uploadLabel,
+  cropLabel,
+  copyLabel,
+  onUpload,
+  onCrop,
+  onCopy,
+  onClear,
+  onUse,
+}: {
+  title: string;
+  url?: string | null;
+  busy: boolean;
+  uploadLabel: string;
+  cropLabel?: string;
+  copyLabel?: string;
+  onUpload: () => void;
+  onCrop?: () => void;
+  onCopy?: () => void;
+  onClear?: () => void;
+  onUse?: () => void;
+}) {
+  const src = (url ?? "").trim();
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-2">
+      <p className="text-xs font-semibold text-slate-700">{title}</p>
+      <button
+        type="button"
+        className="mt-2 flex h-20 w-full items-center justify-center overflow-hidden rounded-lg border border-dashed border-slate-200 bg-slate-50"
+        onClick={src && onUse ? onUse : undefined}
+        disabled={!src || !onUse}
+      >
+        {src ? (
+          // eslint-disable-next-line @next/next/no-img-element -- optional model visual
+          <img src={src} alt="" className="h-full w-full object-contain" />
+        ) : (
+          <span className="text-[11px] text-slate-400">ยังไม่มี (ไม่บังคับ)</span>
+        )}
+      </button>
+      <div className="mt-2 flex flex-wrap gap-1">
+        {onCrop && cropLabel ? (
+          <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={onCrop}>
+            {cropLabel}
+          </Button>
+        ) : null}
+        <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onUpload}>
+          {uploadLabel}
+        </Button>
+        {onCopy && copyLabel ? (
+          <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onCopy}>
+            {copyLabel}
+          </Button>
+        ) : null}
+        {onClear ? (
+          <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onClear}>
+            ลบ
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function PosterColorwayCropperDialog({
   open,
   onOpenChange,
@@ -93,6 +163,8 @@ export function PosterColorwayCropperDialog({
   const localUrlRef = useRef<string | null>(null);
   const posterInputRef = useRef<HTMLInputElement>(null);
   const colorInputRef = useRef<HTMLInputElement>(null);
+  const slotInputRef = useRef<HTMLInputElement>(null);
+  const pendingSlotRef = useRef<ModelVisualSlot>("MAIN");
   const cropRef = useRef<CropNorm>({ x: 0.15, y: 0.08, w: 0.7, h: 0.84 });
   const dragRef = useRef<{
     mode: "move" | "resize";
@@ -117,14 +189,16 @@ export function PosterColorwayCropperDialog({
   const [busy, setBusy] = useState(false);
   const [dragOverPoster, setDragOverPoster] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [catalogName, setCatalogName] = useState("");
+  const [canvasOverride, setCanvasOverride] = useState<string | null>(null);
 
   function updateCrop(next: CropNorm) {
     cropRef.current = next;
     setCrop(next);
   }
 
-  const posterUrl = (state?.model.poster_image_url ?? "").trim();
-  const imageSrc = localPosterUrl || (!cdnFailed ? posterUrl : "");
+  const posterUrl = (state?.model.main_image_url || state?.model.poster_image_url || "").trim();
+  const imageSrc = localPosterUrl || canvasOverride || (!cdnFailed ? posterUrl : "");
   const innerWidth = Math.max(280, frameWidth) * zoom;
   const innerHeight =
     natural.w > 0 ? innerWidth * (natural.h / natural.w) : Math.round(innerWidth * 1.25);
@@ -183,6 +257,8 @@ export function PosterColorwayCropperDialog({
     setSelectedColorId("");
     setCdnFailed(false);
     setConfirmDeleteId(null);
+    setCanvasOverride(null);
+    setCatalogName("");
     void getModelCropperStateAction(modelId).then((result) => {
       if (!active) return;
       setLoading(false);
@@ -191,6 +267,7 @@ export function PosterColorwayCropperDialog({
         return;
       }
       setState(result.state);
+      setCatalogName(result.state.model.catalog_name ?? "");
       const first =
         result.state.colors.find((color) => !color.colorway_image_url) ??
         result.state.colors[0];
@@ -290,6 +367,7 @@ export function PosterColorwayCropperDialog({
       return;
     }
     setState(result.state);
+    setCatalogName(result.state.model.catalog_name ?? "");
     if (!preferColorId) return;
     const colors = result.state.colors;
     const start = Math.max(
@@ -325,7 +403,7 @@ export function PosterColorwayCropperDialog({
       formData.set("colorCode", color.color_code);
       formData.set(
         "sourcePosterUrl",
-        localPosterUrl ? "" : posterUrl,
+        localPosterUrl ? "" : canvasOverride || posterUrl,
       );
       formData.set("cropMeta", JSON.stringify(cropMeta));
       const result = await uploadColorwayCroppedImageAction(formData);
@@ -346,10 +424,28 @@ export function PosterColorwayCropperDialog({
       toast.error("เลือกสีก่อนตัดรูป");
       return;
     }
+    const file = await renderCropFile(`${selected.color_code || "color"}.webp`);
+    if (!file) return;
+    await submitColorFile(selected, file, {
+      x: crop.x,
+      y: crop.y,
+      w: crop.w,
+      h: crop.h,
+      aspect,
+      source: localPosterUrl ? "local_poster" : "cdn_poster",
+    });
+  }
+
+  async function uploadDirect(color: ModelColorCropperItem, file: File) {
+    setSelectedColorId(color.color_id);
+    await submitColorFile(color, file, { source: "direct_upload" });
+  }
+
+  async function renderCropFile(filename: string): Promise<File | null> {
     const img = imgRef.current;
     if (!img || natural.w <= 0 || !imageSrc) {
-      toast.error("ยังไม่มีโปสเตอร์ให้ตัด — เลือกไฟล์จากเครื่อง");
-      return;
+      toast.error("ยังไม่มีรูปบนผืนตัด — เลือกไฟล์จากเครื่อง");
+      return null;
     }
     const sx = Math.round(crop.x * natural.w);
     const sy = Math.round(crop.y * natural.h);
@@ -361,7 +457,7 @@ export function PosterColorwayCropperDialog({
     const ctx = canvas.getContext("2d");
     if (!ctx) {
       toast.error("เบราว์เซอร์นี้ตัดรูปไม่ได้");
-      return;
+      return null;
     }
     try {
       ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
@@ -372,31 +468,15 @@ export function PosterColorwayCropperDialog({
           reject(err);
         }
       });
-      if (!blob) {
-        throw new Error("อ่านพิกเซลจากรูปนี้ไม่ได้");
-      }
-      const file = new File([blob], `${selected.color_code || "color"}.webp`, {
-        type: "image/webp",
-      });
-      await submitColorFile(selected, file, {
-        x: crop.x,
-        y: crop.y,
-        w: crop.w,
-        h: crop.h,
-        aspect,
-        source: localPosterUrl ? "local_poster" : "cdn_poster",
-      });
+      if (!blob) throw new Error("อ่านพิกเซลจากรูปนี้ไม่ได้");
+      return new File([blob], filename, { type: "image/webp" });
     } catch {
-      toast.error("อ่านพิกเซลจากรูป CDN ไม่ได้ — เลือกไฟล์โปสเตอร์จากเครื่องแล้วตัดอีกครั้ง");
+      toast.error("อ่านพิกเซลจากรูป CDN ไม่ได้ — เลือกไฟล์จากเครื่องแล้วตัดอีกครั้ง");
+      return null;
     }
   }
 
-  async function uploadDirect(color: ModelColorCropperItem, file: File) {
-    setSelectedColorId(color.color_id);
-    await submitColorFile(color, file, { source: "direct_upload" });
-  }
-
-  async function saveMasterPoster(file: File) {
+  async function uploadSlotFile(slot: ModelVisualSlot, file: File, success: string) {
     setBusy(true);
     try {
       let compressed: File;
@@ -410,17 +490,107 @@ export function PosterColorwayCropperDialog({
       formData.set("file", compressed);
       formData.set("modelId", state?.model.model_id || modelId);
       formData.set("modelCode", state?.model.model_code || modelCode);
-      const result = await uploadModelMasterPosterAction(formData);
+      formData.set("slot", slot);
+      const result = await uploadModelVisualSlotAction(formData);
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
-      toast.success("บันทึกโปสเตอร์รวมของรุ่นแล้ว");
+      if (slot === "CATALOG") {
+        replaceLocalPoster(null);
+        setCanvasOverride(result.imageUrl);
+        setCdnFailed(false);
+      }
+      if (slot === "MAIN") setCanvasOverride(null);
+      toast.success(success);
       onSaved?.();
       await refreshColors();
     } finally {
       setBusy(false);
     }
+  }
+
+  async function cropSlot(slot: ModelVisualSlot, success: string) {
+    const file = await renderCropFile(slot === "SIZE_CHART" ? "sizechart.webp" : "main.webp");
+    if (!file) return;
+    await uploadSlotFile(slot, file, success);
+  }
+
+  async function saveCatalogName() {
+    setBusy(true);
+    try {
+      const result = await updateModelCatalogMetaAction(
+        state?.model.model_id || modelId,
+        catalogName,
+      );
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setCatalogName(result.catalogName ?? "");
+      toast.success(result.catalogName ? "บันทึกชื่อ Catalog แล้ว" : "ล้างชื่อ Catalog แล้ว");
+      onSaved?.();
+      await refreshColors();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyMainToCatalog() {
+    const main = (state?.model.main_image_url || "").trim();
+    if (!main) {
+      toast.error("ยังไม่มีรูปหลักของรุ่น");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await copyMainImageToCatalogSlotAction(
+        state?.model.model_id || modelId,
+        main,
+      );
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      if (result.imageUrl) {
+        replaceLocalPoster(null);
+        setCanvasOverride(result.imageUrl);
+        setCdnFailed(false);
+      }
+      toast.success("ใช้รูปหลักเป็นใบ Catalog แล้ว");
+      onSaved?.();
+      await refreshColors();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clearSlot(slot: ModelVisualSlot) {
+    setBusy(true);
+    try {
+      const result = await clearModelVisualSlotAction(
+        state?.model.model_id || modelId,
+        slot,
+      );
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      if (slot === "CATALOG") setCanvasOverride(null);
+      toast.success("ลบรูปช่องนี้แล้ว");
+      onSaved?.();
+      await refreshColors();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function useCatalogOnCanvas() {
+    const url = (state?.model.catalog_image_url || "").trim();
+    if (!url) return;
+    replaceLocalPoster(null);
+    setCanvasOverride(url);
+    setCdnFailed(false);
   }
 
   async function removeColorImage(color: ModelColorCropperItem) {
@@ -462,6 +632,106 @@ export function PosterColorwayCropperDialog({
         ) : loadError ? (
           <div className="px-5 py-16 text-center text-sm text-red-600">{loadError}</div>
         ) : (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <details open className="border-b border-slate-100 bg-slate-50 px-4 py-3">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+                ข้อมูล Catalog & รูปส่วนกลางของรุ่น (ไม่บังคับ)
+              </summary>
+              <div className="mt-3 flex flex-col gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    value={catalogName}
+                    onChange={(event) => setCatalogName(event.target.value)}
+                    placeholder="ชื่อ Catalog (ไม่บังคับ)"
+                    aria-label="ชื่อ Catalog"
+                    className="h-9 min-w-[16rem] flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => void saveCatalogName()}
+                  >
+                    บันทึกชื่อ
+                  </Button>
+                </div>
+                <div className="grid gap-2 md:grid-cols-3">
+                  <VisualSlotCard
+                    title="ใบ Catalog รวม"
+                    url={state?.model.catalog_image_url}
+                    busy={busy}
+                    onUse={state?.model.catalog_image_url ? useCatalogOnCanvas : undefined}
+                    onUpload={() => {
+                      pendingSlotRef.current = "CATALOG";
+                      slotInputRef.current?.click();
+                    }}
+                    onCopy={
+                      !state?.model.catalog_image_url && state?.model.main_image_url
+                        ? () => void copyMainToCatalog()
+                        : undefined
+                    }
+                    onClear={
+                      state?.model.catalog_image_url
+                        ? () => void clearSlot("CATALOG")
+                        : undefined
+                    }
+                    uploadLabel="อัปโหลดใบ Catalog"
+                    copyLabel="ดึงจากรูปหลักรุ่น"
+                  />
+                  <VisualSlotCard
+                    title="รูปหลักของรุ่น"
+                    url={state?.model.main_image_url}
+                    busy={busy}
+                    onCrop={() => void cropSlot("MAIN", "บันทึกรูปหลักจากกรอบแล้ว")}
+                    cropLabel="✂️ ตัดจากกรอบเป็นรูปหลัก"
+                    onUpload={() => {
+                      pendingSlotRef.current = "MAIN";
+                      slotInputRef.current?.click();
+                    }}
+                    onClear={
+                      state?.model.main_image_url ? () => void clearSlot("MAIN") : undefined
+                    }
+                    uploadLabel="อัปโหลดไฟล์"
+                  />
+                  <VisualSlotCard
+                    title="ตารางขนาดสินค้า"
+                    url={state?.model.size_chart_image_url}
+                    busy={busy}
+                    onCrop={() => void cropSlot("SIZE_CHART", "บันทึกตารางขนาดจากกรอบแล้ว")}
+                    cropLabel="✂️ ตัดจากกรอบเป็นตารางขนาด"
+                    onUpload={() => {
+                      pendingSlotRef.current = "SIZE_CHART";
+                      slotInputRef.current?.click();
+                    }}
+                    onClear={
+                      state?.model.size_chart_image_url
+                        ? () => void clearSlot("SIZE_CHART")
+                        : undefined
+                    }
+                    uploadLabel="อัปโหลดไฟล์"
+                  />
+                </div>
+              </div>
+              <input
+                ref={slotInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(event) => {
+                  const file = firstImageFile(event.target.files);
+                  event.target.value = "";
+                  if (!file) return;
+                  const slot = pendingSlotRef.current;
+                  const success =
+                    slot === "CATALOG"
+                      ? "อัปโหลดใบ Catalog แล้ว"
+                      : slot === "SIZE_CHART"
+                        ? "อัปโหลดตารางขนาดแล้ว"
+                        : "อัปโหลดรูปหลักแล้ว";
+                  void uploadSlotFile(slot, file, success);
+                }}
+              />
+            </details>
           <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1.25fr)_22rem]">
             <section className="flex min-h-0 flex-col border-b border-slate-100 lg:border-b-0 lg:border-r">
               <div className="flex flex-wrap items-center gap-2 px-4 py-3">
@@ -596,9 +866,9 @@ export function PosterColorwayCropperDialog({
                     type="button"
                     variant="outline"
                     disabled={busy}
-                    onClick={() => void saveMasterPoster(localPosterFile)}
+                    onClick={() => void uploadSlotFile("MAIN", localPosterFile, "บันทึกรูปหลักของรุ่นแล้ว")}
                   >
-                    บันทึกไฟล์นี้เป็นโปสเตอร์รวม
+                    บันทึกไฟล์นี้เป็นรูปหลัก
                   </Button>
                 ) : null}
                 {!posterUrl && !localPosterFile ? (
@@ -748,6 +1018,7 @@ export function PosterColorwayCropperDialog({
                 }}
               />
             </aside>
+          </div>
           </div>
         )}
       </DialogContent>
