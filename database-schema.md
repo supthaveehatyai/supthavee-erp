@@ -1,6 +1,6 @@
-# Supthavee ERP — Database Schema Reference (Cloud Production Verified - Phase 31.2)
+# Supthavee ERP — Database Schema Reference (Cloud Production Verified - Phase 32)
 
-อัปเดตพฤศจิกายน 2026 จาก `Supabase Snippet-SchemaDump.csv` และ `supthavee-codebase-audit.txt` เท่านั้น ห้ามสมมติชื่อตารางหรือคอลัมน์ที่ไม่มีในไฟล์นั้น
+อัปเดตพฤศจิกายน 2026 จาก `Supabase Snippet-SchemaDump.csv` และคอลัมน์/RPC ของ Phase 32 ที่โค้ดแคตตาล็อกกับบอท LINE เรียกใช้จริงบน Cloud
 
 
 
@@ -16,7 +16,7 @@ CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names, column names, views, 
 
 - `mst_categories` (หมวดหมู่สินค้า — PK: `id`, Self-FK: `parent_id`; รหัส Parent = 1 ตัวอักษร, Child = 2 ตัวอักษร)
 
-- `mst_colors` (สีมาตรฐาน — PK: `id`, ล็อกรหัสสี 3 ตัวอักษรพิมพ์ใหญ่ เช่น `WHT`, `BLK`, `NVY`)
+- `mst_colors` (สีมาตรฐาน — PK: `id`, `color_code` VARCHAR(10) ล็อก 3 ตัวอักษรพิมพ์ใหญ่ เช่น `WHT`, `BLK`, `NVY`, `color_name` VARCHAR(50), `is_active` BOOLEAN, `color_family` VARCHAR(30) NOT NULL DEFAULT `OTHER`, `color_family_th` VARCHAR(50) NOT NULL DEFAULT `หลากสี/อื่นๆ`, `hex_code` VARCHAR(7) NULL)
 
 - `mst_expense_categories` (หมวดหมู่ค่าใช้จ่าย — PK: `id`)
 
@@ -50,7 +50,7 @@ CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names, column names, views, 
 
 - `hr_payroll_items` (รายการคำนวณเงินเดือนรายบุคคล — PK: `id`, UNIQUE: `payroll_period_id` + `employee_id`, `payroll_channel`, `base_salary`, `ot_amount`, `allowance_amount`, `commission_amount`, `bonus_amount`, `gross_income`, `sso_employee_amount`, `sso_employer_amount`, `wht_tax_amount`, `other_deduction`, `net_pay`, `payment_status`, `payment_date`, `paid_from_account`, `payment_slip_url`, `payment_reference_no`, `linked_expense_id`)
 
-- `line_known_groups` (PK: `group_id`, `group_name`, `linked_contact_id` → `contacts.id`, `last_reply_token`, `chat_room_url`)
+- `line_known_groups` (PK: `group_id` VARCHAR(100), `group_name` VARCHAR(200), `picture_url`, `last_message_preview`, `last_active_at`, `linked_contact_id` → `contacts.id`, `last_reply_token` VARCHAR(200), `reply_token_expires_at`, `updated_at`, `chat_room_url`)
 
 - `line_notification_logs` (ประวัติการส่งสลิปผ่าน LINE OA — PK: `id`, `document_id` FK → `documents.id`, `contact_id` FK → `contacts.id`, `target_id`, `message_text`, `slip_url`, `status`, `error_message`, `created_at` TIMESTAMPTZ; มี Trigger `trg_stamp_document_line_notified` อัปเดต `documents.line_notified_at`)
 
@@ -60,7 +60,7 @@ CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names, column names, views, 
 
 3. Products, Inventory & Production (สินค้า, คลัง, ผลิต)
 
-- `product_models`, `products` (5,923+ SKUs สำเร็จรูป/งานบริการ; Schema Dump `est_rows=6042`), `vendor_product_mapping` (Schema Dump `est_rows=6357`), `inventory_ledger`, `product_boms`, `production_jobs` (`finished_model_id` nullable, `ref_document_id`, `ref_document_item_id` → `document_items.id` แยกการ์ด Kanban ต่อบรรทัดบริการ, `job_no`, `status`, `target_quantity`, `mockup_image_url`, `remark`), `production_job_items`, `production_job_materials`, `production_job_operations`, `technician_rates`
+- `product_models` (รูปหลัก `image_url`; ช่องแคตตาล็อก Phase 32: `catalog_name` VARCHAR(200), `catalog_image_url`, `catalog_storage_path`, `size_chart_image_url`, `size_chart_storage_path` — รายละเอียดในข้อ 9), `products` (5,923+ SKUs สำเร็จรูป/งานบริการ; Schema Dump `est_rows=6042`), `vendor_product_mapping` (Schema Dump `est_rows=6357`), `inventory_ledger`, `product_boms`, `production_jobs` (`finished_model_id` nullable, `ref_document_id`, `ref_document_item_id` → `document_items.id` แยกการ์ด Kanban ต่อบรรทัดบริการ, `job_no`, `status`, `target_quantity`, `mockup_image_url`, `remark`), `production_job_items`, `production_job_materials`, `production_job_operations`, `technician_rates`
 - `products` แยกราคาตามบิลออกจากทุน TAS 2: `cost_price` = ทุนก่อน VAT (เช่น `40.19 / 44.86 / 49.53`) ใช้ตีสต็อกและกำไรเท่านั้น; `last_invoice_unit_price` NUMERIC NULL และ `last_invoice_vat_mode` VARCHAR(20) NULL = ราคาตามหน้าบิล (เช่น `43.00 / 48.00 / 53.00`) ใช้ Prefill หน้าคีย์รับสินค้าเท่านั้น; `is_inc_vat_cost_normalized` BOOLEAN NOT NULL DEFAULT false. ห้ามนำ `last_invoice_unit_price` ไปคูณ 1.07 ซ้ำ และห้ามใช้เป็นต้นทุนสต็อกหรือกำไร
 
 
@@ -156,3 +156,24 @@ CRITICAL INSTRUCTION FOR AI: STRICTLY use the table names, column names, views, 
 - Trigger `trg_enforce_ap_inv_non_vat_on_insert` BEFORE INSERT ON `documents` EXECUTE `fn_enforce_ap_inv_non_vat_on_insert` — ล็อก `AP_INV` ให้ `vat_amount = 0` และสถานะภาษี `TAX_READY`
 - Trigger `trg_snapshot_sales_item_tas2_cost` BEFORE INSERT ON `document_items` EXECUTE `fn_snapshot_sales_item_tas2_cost` — บันทึก `unit_cost_ex_vat` จากทุน TAS 2 ณ วันขาย
 - เอกสาร `AP_CN` คือใบลดหนี้ซื้อ หักเจ้าหนี้คงค้างและปรับปรุงภาษีซื้อกับสต็อก เลขใบรับเงินกลุ่ม 1.2 คือ `RCV-YYMM-XXXX` ไม่ใช่ `CA01/XXXX`
+
+9. Colorway Visual Catalog & LINE Sales Bot (Phase 32 — จบแล้ว)
+
+ไม่มีไฟล์ SQL migration ในโปรเจกต์สำหรับชุดนี้ ฟังก์ชันอยู่บน Supabase Cloud และถูกเรียกจาก Server Action / webhook เท่านั้น
+
+- `product_model_color_images` (รูปแยกสีของรุ่น — PK: `id` UUID, `model_id` UUID NOT NULL, `color_id` UUID NOT NULL, `color_code` VARCHAR(10) NOT NULL, `image_url` TEXT NOT NULL, `storage_path` TEXT, `source_poster_url` TEXT, `crop_meta` JSONB NOT NULL DEFAULT `{}`, `sort_order` INTEGER NOT NULL DEFAULT 0, `created_by` UUID, `created_at`, `updated_at`)
+- `product_models` ช่องรูปที่ไม่บังคับ: `catalog_name` VARCHAR(200), `catalog_image_url` TEXT, `catalog_storage_path` TEXT, `size_chart_image_url` TEXT, `size_chart_storage_path` TEXT คู่กับรูปหลักเดิม `image_url` ไม่มีคอลัมน์ `main_storage_path`
+- `mst_colors.color_family`, `color_family_th`, `hex_code` ใช้กรองตระกูลสีบน `/sales/catalog` หน้าเว็บอ่าน `mst_categories` (`id`, `category_code`, `category_name`, `is_active`) คู่กับสีที่ `is_active = true`
+- Storage bucket `product_assets` เท่านั้น พาธ ASCII: รูปแยกสี `colorways/{MODEL}/{COLOR}_{uuid}.webp|jpg|png` และช่องรุ่น `models/{MODEL}/main_|catalog_|sizechart_{uuid}.webp|jpg|png` ไฟล์ไม่เกิน 5MB ชนิด jpeg/png/webp ช่อง `CATALOG` กับ `SIZE_CHART` ส่งออก WebP ขอบยาวไม่เกิน 2048px คุณภาพ 0.92 การคัดลอกรูปหลักไปใบ Catalog ส่ง `p_storage_path` เป็น null เพื่อไม่ให้การลบช่อง Catalog ไปลบไฟล์รูปหลัก
+- RPC ที่โค้ดเรียกจริง:
+  - `search_colorway_sales_catalog(p_search_text text, p_color_family text, p_category_id uuid, p_in_stock_only boolean, p_limit integer)` RETURNS TABLE ที่รวม `display_image_url`, `colorway_image_url`, `model_poster_url`, `model_main_image_url`, `catalog_image_url`, `size_chart_image_url`, `has_colorway_image`, `total_on_hand_qty`, `in_stock_size_count`, `min_retail_price`, `max_retail_price`, `min_wholesale_price`, `max_wholesale_price`, `sizes_breakdown` jsonb คีย์ที่แอปอ่านคือ `sku`, `size`, `product_id`, `on_hand_qty`, `retail_price`, `wholesale_price` หน้าเว็บใช้ `p_limit` 240 บอทใช้ `p_limit` 12
+  - `get_model_colorway_cropper_state(p_model_id uuid)` RETURNS jsonb ก้อน `model` (`model_id`, `model_code`, `name`, `short_name`, `catalog_name`, `main_image_url` / `poster_image_url`, `catalog_image_url`, `size_chart_image_url`) และ `colors[]` (`color_id`, `color_code`, `color_name`, `color_family`, `color_family_th`, `hex_code`, `sku_count`, `colorway_image_url`, `storage_path`, `crop_meta`)
+  - `upsert_product_model_color_image(p_model_id uuid, p_color_id uuid, p_image_url text, p_storage_path text, p_source_poster_url text, p_crop_meta jsonb, p_actor_id uuid)` RETURNS jsonb คีย์ที่แอปอ่าน `ok`, `error`, `old_storage_path`
+  - `delete_product_model_color_image(p_model_id uuid, p_color_id uuid)` RETURNS jsonb คีย์ที่แอปอ่าน `ok`, `error`, `deleted_storage_path`
+  - `update_product_model_catalog_meta(p_model_id uuid, p_catalog_name text)` RETURNS jsonb คีย์ที่แอปอ่าน `ok`, `error`, `catalog_name`
+  - `set_product_model_visual_slot(p_model_id uuid, p_slot text, p_image_url text, p_storage_path text)` RETURNS jsonb `p_slot` คือ `MAIN` | `CATALOG` | `SIZE_CHART` คีย์ที่แอปอ่าน `ok`, `error`, `old_storage_path` ช่อง `MAIN` ไม่มี path เก่าให้ลบ
+  - `lookup_model_catalog_for_bot(p_query text)` RETURNS TABLE(`model_id`, `model_code`, `model_name`, `model_short_name`, `catalog_name`, `brand_name`, `category_name`, `model_main_image_url`, `catalog_image_url`, `size_chart_image_url`) ใช้เมื่อค้น SKU ไม่เจอแถว
+- หน้า `/sales/catalog` แสดง `display_image_url` และป้าย `has_colorway_image` (`รูปเฉพาะสี` หรือ `โปสเตอร์รวม`) พนักงานเห็นช่วงราคาปลีกและราคาส่ง บอท LINE ไม่ส่ง `vendor_id`, `cost_price`, `last_invoice_unit_price`, `wholesale_price`
+- `line_webhook_events_log` คอลัมน์ที่ webhook ใช้: `id`, `event_type` VARCHAR(50), `source_type` VARCHAR(30), `source_group_id` VARCHAR(100), `source_user_id` VARCHAR(100), `reply_token` VARCHAR(200), `message_text`, `raw_payload` JSONB, `received_at`, `bot_reply_status` VARCHAR(40), `bot_reply_error` TEXT สถานะที่เขียนจริงคือ `REPLIED_OK`, `REPLIED_FALLBACK`, `SKIPPED`, `FAILED` ข้อความที่ไม่ได้ขึ้นต้นด้วย `#` ได้ `SKIPPED` และไม่มีการ reply
+- `system_settings` ที่บอทขายอ่าน/เขียน: `line_oa_basic_id` (ค่าเริ่มต้น `@hzr1801v`), `line_channel_access_token`, `line_channel_secret`, `line_webhook_url`, `line_webhook_last_verified_at` ลิงก์ที่ลงทะเบียนต้องเป็น `https://<VERCEL_PROJECT_PRODUCTION_URL>/api/line/webhook` ห้ามค้างโฮสต์ Vercel แบบ deployment hash
+- Webhook `POST /api/line/webhook` บันทึกแถว log ก่อน แล้วตอบเฉพาะคำสั่ง `^#(รูป|พร้อมส่ง|สต็อก|แคตตาล็อก|catalog|เช็ค|ไซส์|ตารางไซส์|ตารางขนาด|size)\s*(.*)$` ผ่าน Reply Token จากนั้นอัปเดต `bot_reply_status` กับ `bot_reply_error` ก่อน HTTP 200 แคร์รูเซลรุ่นเดียวไม่เกิน 12 ใบ หลายรุ่นไม่เกิน 10 ใบ

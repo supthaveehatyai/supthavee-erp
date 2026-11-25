@@ -1,6 +1,6 @@
 # System Blueprint: Supthavee ERP SuperApp
 
-Version: 31.2 (พฤศจิกายน 2026 — จบ Phase 31.2: TAS 2 bill price แยกจาก cost_price, KPI RPC, วัตถุดิบโรงงาน)
+Version: 32.0 (พฤศจิกายน 2026 — จบ Phase 32: Colorway Visual Catalog /sales/catalog & LINE Group Sales Bot)
 
 
 
@@ -130,15 +130,11 @@ Module H: TAS 2 Bill Price vs Stock Cost & Financial KPI (Phase 31–31.2 — Co
 - RPC `get_erp_financial_kpis_and_profit(p_start_date, p_end_date)` เป็นแหล่งเดียวของ Executive Dashboard และรายงานการเงิน รวม `CS_TAX` บวกฐานมัดจำตาม TFRS 15 หัก `CN` และ `AP_CN` หักต้นทุนเสื้อ วัตถุดิบ BOM วัสดุสิ้นเปลือง ค่าแรงบริการ และ OPEX แสดงสกุลเงิน `฿`
 - หน้า `/purchases/manual-receipt` เป็นกริด 50:50 ของ Smart SKU Picker กับ Material Combobox และแถวรับเข้าเหลือ 2 บรรทัด
 
-Module I: Next — Colorway Catalog & LINE Group Sales Bot (Phase 32)
+Module I: Colorway Visual Catalog & LINE Group Sales Bot (Phase 32 — Completed)
 
-- รูปแยกตามรุ่นและสี Fallback ไปโปสเตอร์รุ่น และ In-App Catalog Cropper
-- Color Family, กรองสต็อกพร้อมส่ง, ปิดบังซัพพลายเออร์และราคาทุน
-- กลุ่ม LINE ของร้านมี LINE ส่วนตัว 3 คน ดึง OA `@hzr1801v` เข้ากลุ่ม แบ่งงานตามประเภทสินค้า และมีบัญชี 1 คนดูสลิป เพื่อไม่ให้ปุ่ม Unread หายบนแอป LINE OA
-- คำสั่งในกลุ่มเช่น `#รูป คอกลมสั้น แดง` ตอบ Flex Carousel ผ่าน Reply Token คู่กับ Quick Sales Catalog บนเว็บ
-
-Module J: Next — Shop-Floor Requisition to PO (Phase 33)
-
-- ช่างขอซื้อจาก Dropdown `mst_materials` โดยซ่อนราคาทุนตามสิทธิ์
-- ศูนย์อนุมัติออก `PO-YYMM-XXXX` แล้วดึงใบสั่งซื้อมารับเข้าคลังในคลิกเดียว
+- หน้า `/sales/catalog` เมนู «แคตตาล็อกรูป & สต็อก» ค้นรุ่นกับสี กรอง Color Family และหมวดหมู่ และสต็อกพร้อมส่ง
+- In-App Catalog Cropper ตัดรูปแยกสี ใบ Catalog และตารางขนาดจากโปสเตอร์ในเว็บ โหมด Free มีมือจับ 8 จุดและกรอบเริ่ม «📏 กรอบตารางขนาด (Free)» เวลาตัดตารางขนาดให้เผื่อขอบบนและล่างของตารางไว้ในกรอบ เพื่อให้ตัวเลขรอบอกและความยาวไม่ชิดขอบรูปเมื่อซูมใน LINE
+- ถ้าสียังไม่มีรูปแยก ระบบใช้ `display_image_url` ของโปสเตอร์รวมรุ่น และป้ายบนการ์ดเป็น «โปสเตอร์รวม» เมื่อมีรูปสีแล้วป้ายเป็น «รูปเฉพาะสี»
+- B2B Data Masking: ข้อความบอท LINE ไม่แสดง `vendor_id`, `cost_price`, `last_invoice_unit_price` หรือ `wholesale_price` หน้าเว็บพนักงานยังเห็นช่วงราคาปลีกและราคาส่ง
+- บอท LINE OA `@hzr1801v` ตอบเฉพาะข้อความที่ขึ้นต้นด้วย `#` เช่น `#รูป ...`, `#พร้อมส่ง ...`, `#แคตตาล็อก ...`, `#ไซส์ ...` ผ่าน Reply Token ข้อความลูกค้า สลิป และแชทบัญชีที่ไม่มี `#` นำหน้าถูกเพิกเฉย 100% จึงไม่ล้างจุดเขียว Unread บน LINE OA Manager
 

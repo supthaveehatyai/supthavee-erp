@@ -1,6 +1,6 @@
 # สรุปความคืบหน้า Supthavee ERP
 
-อัปเดตถึง Phase 31.2 — พฤศจิกายน 2026
+อัปเดตถึง Phase 32 — พฤศจิกายน 2026
 สถิติภาพรวมปัจจุบัน:
 - โครงสร้างฐานข้อมูล Master Data, เอกสารบัญชี และคลังสินค้า: [✅ ทำงานบน Supabase Cloud & Vercel Production 100%]
 - สินค้าสำเร็จรูปและงานบริการ: 5,923+ SKUs (ตาราง `products` Schema Dump est_rows=6042) ผูกซัพพลายเออร์ `vendor_product_mapping` ประมาณ 6,357 แถว และทะเบียนวัตถุดิบโรงงาน `mst_materials` ประมาณ 22 รายการแยกจาก SKU เสื้อ
@@ -239,3 +239,5 @@
 217. Sales Cost Snapshot Trigger (Phase 31): `document_items.unit_cost_ex_vat` ถูกเติมโดย Trigger `trg_snapshot_sales_item_tas2_cost`
 218. Financial KPI RPC (Phase 31): `get_erp_financial_kpis_and_profit(p_start_date, p_end_date)` เป็นแหล่งเดียวของ Executive Dashboard และรายงานการเงิน รวม `CS_TAX` บวกฐานมัดจำตาม TFRS 15 หัก `CN` และ `AP_CN` หักต้นทุนเสื้อ วัตถุดิบ BOM วัสดุสิ้นเปลือง ค่าแรงบริการ และ OPEX แสดงสกุลเงิน `฿`
 219. Manual Receipt 50/50 Layout (Phase 31.2): หน้า `/purchases/manual-receipt` วาง Smart SKU Picker คู่ Material Combobox แบบ 50:50 และยุบแถวรับเข้าเหลือ 2 บรรทัดโดยไม่พิมพ์รหัส SKU ซ้ำ ฟอร์ม Product Matrix ของสินค้า `INC_VAT` กรอกราคาตามบิลรวม VAT แล้วบันทึกทุนก่อน VAT ด้วยการหาร 1.07 ครั้งเดียว
+220. Colorway Visual Catalog (Phase 32): หน้า `/sales/catalog` ค้นรูปแยกสีตามรุ่น กรอง `mst_colors.color_family` และสต็อกพร้อมส่งผ่าน `search_colorway_sales_catalog` รูปสีอยู่ที่ `product_model_color_images` ในถัง `product_assets` พาธ `colorways/{MODEL}/{COLOR}_{uuid}` ช่องใบ Catalog กับตารางขนาดอยู่ที่ `product_models` ผ่าน `set_product_model_visual_slot` (`MAIN` | `CATALOG` | `SIZE_CHART`) ถ้าสียังไม่มีรูป การ์ดใช้โปสเตอร์รวมของรุ่น เครื่องมือตัดรูปในเว็บมีกรอบ Free สำหรับตารางขนาดโดยเผื่อขอบบน-ล่าง และส่งออก WebP ขอบยาว 2048px คุณภาพ 0.92
+221. LINE Group Sales Bot (Phase 32): OA `@hzr1801v` ที่ `/api/line/webhook` ตอบเฉพาะคำสั่งขึ้นต้น `#` เช่น `#รูป PS031S` ด้วย Reply Token และ Flex ไม่เกิน 12 ใบต่อรุ่น ข้อความกับสลิปที่ไม่มี `#` ได้ `SKIPPED` จึงไม่ล้างจุดเขียว Unread บอทไม่ส่ง `vendor_id`, `cost_price`, `last_invoice_unit_price` หรือ `wholesale_price` สถานะตอบกลับลง `line_webhook_events_log.bot_reply_status` และลิงก์ webhook ถาวรอยู่ที่ `system_settings.line_webhook_url` จากโดเมน Production ของ Vercel

@@ -1,6 +1,6 @@
 # แผนการพัฒนาระบบ Supthavee ERP SuperApp
 
-อัปเดตล่าสุด: Phase 31.2 (พฤศจิกายน 2026) — Cloud Production
+อัปเดตล่าสุด: Phase 32 (พฤศจิกายน 2026) — Cloud Production
 
 
 
@@ -475,17 +475,12 @@
 
 สเกลปัจจุบันจาก Schema Dump: ตาราง `products` ประมาณ 6,042 แถว (ใช้งานจริง 5,923+ SKUs สำเร็จรูปและงานบริการ), `vendor_product_mapping` ประมาณ 6,357 แถว, `mst_materials` ประมาณ 22 รายการ
 
-## [NEXT]
+## [VISUAL CATALOG & LINE OA SALES BOT]
 
-## Phase 32: Colorway Visual Catalog & LINE Group Sales Bot — [📍 ลำดับถัดไป]
+## Phase 32: Colorway Visual Catalog & LINE Group Sales Bot — [✅ เสร็จสมบูรณ์ 100%]
 
-- [ ] เก็บรูปแยกตามรุ่นและสี พร้อม Fallback ไปรูปโปสเตอร์รุ่น และเครื่องมือ In-App Catalog Cropper ตัดรูปจากใบโปสเตอร์รวมบนหน้าเว็บ
-- [ ] ผูกตระกูลสีหลัก (Color Family) กรองสต็อกพร้อมส่ง และปิดบังซัพพลายเออร์กับราคาทุน (B2B Data Masking)
-- [ ] เข้ากับวิธีทำงานจริงของร้าน: กลุ่ม LINE ที่มี LINE ส่วนตัวของร้าน 3 คน ดึง LINE OA `@hzr1801v` เข้ากลุ่ม แบ่งงานตามประเภทสินค้า และมีฝ่ายบัญชี 1 คนดูสลิปโอน เพื่อไม่ให้ปุ่ม Unread หายบนแอป LINE OA
-- [ ] พิมพ์คำสั่งในกลุ่ม เช่น `#รูป คอกลมสั้น แดง` แล้วบอทตอบ Flex Carousel ผ่าน `Reply Token` คู่กับหน้า Quick Sales Catalog บนเว็บ ERP
-
-## Phase 33: Shop-Floor Material Requisition to Purchase Order — [📍 แผนถัดจาก Phase 32]
-
-- [ ] ช่างและฝ่ายผลิตแจ้งขอซื้อจาก Dropdown `mst_materials` โดยซ่อนราคาทุนตามสิทธิ์
-- [ ] ส่งเข้าศูนย์อนุมัติให้ผู้บริหารออกใบสั่งซื้อ `PO-YYMM-XXXX` ถึงซัพพลายเออร์
-- [ ] ดึงใบสั่งซื้อมารับเข้าคลังในคลิกเดียว
+- [✅] หน้า `/sales/catalog` ค้นรูปแยกสีตามรุ่น กรอง Color Family หมวดหมู่ และสต็อกพร้อมส่ง ถ้าสียังไม่ถูกตัดรูป การ์ดใช้โปสเตอร์รวมของรุ่น
+- [✅] In-App Catalog Cropper ตัดรูปแยกสี ใบ Catalog และตารางขนาดในเว็บ โหมด Free ขยายแนวนอนได้แม้กรอบชิดขอบล่าง และกรอบ «📏 กรอบตารางขนาด (Free)» ให้เผื่อขอบบน-ล่างของตารางขนาด ไฟล์ Catalog กับตารางขนาดเป็น WebP ขอบยาว 2048px คุณภาพ 0.92 ในถัง `product_assets`
+- [✅] B2B Data Masking บนบอท LINE: ไม่ส่ง `vendor_id`, `cost_price`, `last_invoice_unit_price` หรือ `wholesale_price` หน้าเว็บพนักงานยังเห็นราคาปลีกและราคาส่ง
+- [✅] บอท OA `@hzr1801v` ตอบเฉพาะคำสั่งที่ขึ้นต้นด้วย `#` เช่น `#รูป PS031S` และ `#รูป คอกลมสั้น แดง` ด้วย Reply Token แคร์รูเซลสูงสุด 12 ใบต่อรุ่น ข้อความและสลิปที่ไม่มี `#` นำหน้าได้สถานะ `SKIPPED` และไม่ล้างจุดเขียว Unread ของฝ่ายบัญชี
+- [✅] Webhook ถาวรชี้ `https://<VERCEL_PROJECT_PRODUCTION_URL>/api/line/webhook` บันทึกใน `system_settings.line_webhook_url` และเขียน `bot_reply_status` / `bot_reply_error` ลง `line_webhook_events_log` ก่อนตอบ HTTP 200
