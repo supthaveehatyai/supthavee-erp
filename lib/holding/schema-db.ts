@@ -39,6 +39,7 @@ export type SchemaAdmin = {
       createSignedUrl: (
         path: string,
         expiresIn: number,
+        options?: { download?: string | boolean },
       ) => Promise<{ data: { signedUrl: string } | null; error: { message?: string } | null }>;
       getPublicUrl: (path: string) => { data: { publicUrl: string } };
     };

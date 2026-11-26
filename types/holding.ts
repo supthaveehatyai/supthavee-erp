@@ -123,44 +123,73 @@ export const WORKSPACE_THEMES: Record<WorkspaceKey, WorkspaceTheme> = {
 export type LegalEntityRow = {
   id: string;
   entity_code: string;
-  legal_name: string;
+  entity_type: string | null;
+  entity_name_th: string;
+  entity_name_en: string | null;
   tax_id: string | null;
-  workspace_key: WorkspaceKey | null;
+  vat_status: string | null;
+  pp30_filing_mode: string | null;
+  vat_effective_date: string | null;
+  registered_capital: number | null;
+  incorporation_date: string | null;
+  head_office_address: string | null;
+  signatory_condition: string | null;
+  governance_notes: string | null;
+  primary_workspace: WorkspaceKey | null;
   is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
 };
 
 export type BusinessUnitRow = {
-  id: string;
-  entity_id: string | null;
-  unit_code: string;
-  unit_name: string;
+  bu_code: string;
   workspace_key: WorkspaceKey;
+  bu_name_th: string;
+  default_legal_entity_id: string | null;
+  vat_treatment: string | null;
+  theme_color_hex: string | null;
   is_active: boolean;
+  sort_order: number;
+  created_at: string;
 };
 
 export type HoldingBankAccountRow = {
   id: string;
-  entity_id: string | null;
+  legal_entity_id: string | null;
+  business_unit_code: string | null;
   workspace_key: WorkspaceKey;
+  branch_code: string | null;
+  bank_code: string | null;
   bank_name: string;
   account_no: string;
   account_name: string;
   branch_name: string | null;
-  promptpay_note: string | null;
-  qr_label: string | null;
   qr_image_url: string | null;
   qr_storage_path: string | null;
+  qr_label: string | null;
   is_qr_customer_visible: boolean;
-  is_active: boolean;
+  promptpay_id: string | null;
+  payment_instruction: string | null;
+  effective_from: string | null;
+  effective_to: string | null;
   is_default_receiving: boolean;
+  is_active: boolean;
   sort_order: number;
+  created_at: string;
+  updated_at: string;
 };
 
 export type HoldingBankQrSettingsInput = {
   id: string;
   qr_label: string | null;
-  promptpay_note: string | null;
+  payment_instruction: string | null;
   is_qr_customer_visible: boolean;
+};
+
+export type SignedDocumentLink = {
+  url: string | null;
+  downloadFileName: string | null;
 };
 
 export type CorporateDocumentRow = {

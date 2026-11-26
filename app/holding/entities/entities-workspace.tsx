@@ -30,9 +30,9 @@ export function EntitiesWorkspace({
       {schemaMessage ? <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{schemaMessage}</div> : null}
       <form action={save} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-4">
         <input name="entity_code" required placeholder="รหัส ASCII เช่น STV" className="h-10 rounded border border-slate-200 px-3 text-sm" />
-        <input name="legal_name" required placeholder="ชื่อนิติบุคคล" className="h-10 rounded border border-slate-200 px-3 text-sm" />
+        <input name="entity_name_th" required placeholder="ชื่อนิติบุคคล" className="h-10 rounded border border-slate-200 px-3 text-sm" />
         <input name="tax_id" placeholder="เลขผู้เสียภาษี" className="h-10 rounded border border-slate-200 px-3 text-sm" />
-        <select name="workspace_key" className="h-10 rounded border border-slate-200 px-3 text-sm">
+        <select name="primary_workspace" className="h-10 rounded border border-slate-200 px-3 text-sm">
           {WORKSPACES.map((key) => <option key={key} value={key}>{WORKSPACE_THEMES[key].label}</option>)}
         </select>
         <Button type="submit" disabled={pending}>เพิ่มนิติบุคคล</Button>
@@ -42,9 +42,9 @@ export function EntitiesWorkspace({
           <form key={entity.id} action={save} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-4">
             <input type="hidden" name="id" value={entity.id} />
             <input name="entity_code" defaultValue={entity.entity_code} className="h-10 rounded border border-slate-200 px-3 text-sm" />
-            <input name="legal_name" defaultValue={entity.legal_name} className="h-10 rounded border border-slate-200 px-3 text-sm" />
+            <input name="entity_name_th" defaultValue={entity.entity_name_th} className="h-10 rounded border border-slate-200 px-3 text-sm" />
             <input name="tax_id" defaultValue={entity.tax_id ?? ""} className="h-10 rounded border border-slate-200 px-3 text-sm" />
-            <select name="workspace_key" defaultValue={entity.workspace_key ?? "holding"} className="h-10 rounded border border-slate-200 px-3 text-sm">
+            <select name="primary_workspace" defaultValue={entity.primary_workspace ?? "holding"} className="h-10 rounded border border-slate-200 px-3 text-sm">
               {WORKSPACES.map((key) => <option key={key} value={key}>{WORKSPACE_THEMES[key].label}</option>)}
             </select>
             <select name="is_active" defaultValue={entity.is_active ? "true" : "false"} className="h-10 rounded border border-slate-200 px-3 text-sm">

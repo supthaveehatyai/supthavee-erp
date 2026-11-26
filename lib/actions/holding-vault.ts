@@ -8,6 +8,7 @@ import {
   type CorporateDocumentListFilter,
   type CorporateDocumentRow,
   type HoldingActionResult,
+  type SignedDocumentLink,
   type VaultDocCategory,
   type WorkspaceKey,
 } from "@/types/holding";
@@ -122,12 +123,12 @@ export async function listCorporateDocumentsAction(
     const entities = await admin
       .schema("holding")
       .from("legal_entities")
-      .select("id, legal_name")
+      .select("id, entity_name_th")
       .limit(100);
     const names = new Map<string, string>();
     if (!entities.error) {
       for (const row of asRows(entities.data)) {
-        names.set(String(row.id), String(row.legal_name ?? ""));
+        names.set(String(row.id), String(row.entity_name_th ?? ""));
       }
     }
     const docs = asRows(listed.data).flatMap((row) => {
@@ -195,31 +196,57 @@ export async function uploadCorporateDocumentAction(
   }
 }
 
+function downloadFileName(title: string, storagePath: string, mimeType: string | null): string {
+  const pathExt = storagePath.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
+  const mimeExt = mimeType === "application/pdf"
+    ? "pdf"
+    : mimeType === "image/webp"
+      ? "webp"
+      : mimeType === "image/png"
+        ? "png"
+        : mimeType === "image/jpeg"
+          ? "jpg"
+          : "";
+  const ext = pathExt === "pdf" || pathExt === "webp" || pathExt === "png" || pathExt === "jpg"
+    ? pathExt
+    : pathExt === "jpeg"
+      ? "jpg"
+      : mimeExt || "pdf";
+  const cleaned = title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "document";
+  const base = cleaned.replace(new RegExp(`\\.${ext}$`, "i"), "");
+  return `${base}.${ext}`;
+}
+
 export async function getCorporateDocumentSignedUrlAction(
   documentId: string,
-): Promise<HoldingActionResult<{ url: string | null }>> {
+  mode: "view" | "download" = "view",
+): Promise<HoldingActionResult<SignedDocumentLink>> {
   try {
     await requireSuperAdmin();
     const admin = schemaAdmin();
     const found = await admin
       .schema("holding")
       .from("corporate_documents")
-      .select("file_storage_path")
+      .select("title, file_storage_path, file_mime_type")
       .eq("id", documentId)
       .maybeSingle();
     if (found.error) {
-      return empty({ url: null }, schemaErrorMessage(found.error, "เปิดเอกสารไม่สำเร็จ"), !isSchemaUnavailable(found.error));
+      return empty({ url: null, downloadFileName: null }, schemaErrorMessage(found.error, "เปิดเอกสารไม่สำเร็จ"), !isSchemaUnavailable(found.error));
     }
-    const storagePath = String((found.data as { file_storage_path?: string } | null)?.file_storage_path ?? "");
-    if (!storagePath) return empty({ url: null }, "ไม่พบไฟล์เอกสาร");
-    const signed = await admin.storage.from("corporate_vault").createSignedUrl(storagePath, 3600);
+    const row = found.data as { title?: string; file_storage_path?: string; file_mime_type?: string | null } | null;
+    const storagePath = String(row?.file_storage_path ?? "");
+    if (!storagePath) return empty({ url: null, downloadFileName: null }, "ไม่พบไฟล์เอกสาร");
+    const fileName = downloadFileName(String(row?.title ?? ""), storagePath, row?.file_mime_type ?? null);
+    const signed = mode === "download"
+      ? await admin.storage.from("corporate_vault").createSignedUrl(storagePath, 3600, { download: fileName })
+      : await admin.storage.from("corporate_vault").createSignedUrl(storagePath, 3600);
     if (signed.error || !signed.data?.signedUrl) {
-      return empty({ url: null }, signed.error?.message ?? "สร้างลิงก์ชั่วคราวไม่สำเร็จ");
+      return empty({ url: null, downloadFileName: null }, signed.error?.message ?? "สร้างลิงก์ชั่วคราวไม่สำเร็จ");
     }
-    return empty({ url: signed.data.signedUrl });
+    return empty({ url: signed.data.signedUrl, downloadFileName: fileName });
   } catch (error) {
     rethrowNavigation(error);
-    return empty({ url: null }, error instanceof Error ? error.message : "เปิดเอกสารไม่สำเร็จ", false);
+    return empty({ url: null, downloadFileName: null }, error instanceof Error ? error.message : "เปิดเอกสารไม่สำเร็จ", false);
   }
 }
 

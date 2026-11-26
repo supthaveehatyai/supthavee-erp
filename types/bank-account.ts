@@ -37,6 +37,16 @@ export function isInternalClearingWallet(parts: Array<string | null | undefined>
   );
 }
 
+export function isPlatformClearingWallet(input: {
+  accountNo?: string | null;
+  bankName?: string | null;
+  accountName?: string | null;
+  qrLabel?: string | null;
+}): boolean {
+  const names = `${input.bankName ?? ""} ${input.accountName ?? ""} ${input.qrLabel ?? ""}`;
+  return /shopee-wallet|lazada-wallet/i.test(names) || /wallet/i.test(input.accountNo ?? "");
+}
+
 export type GetBankAccountsResult = {
   data: BankAccount[];
   error: string | null;

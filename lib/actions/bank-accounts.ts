@@ -320,7 +320,7 @@ export async function updateSupthaveeBankQrSettingsAction(
     .update({
       qr_label: input.qr_label?.trim() || null,
       promptpay_note: input.promptpay_note?.trim() || null,
-      is_qr_customer_visible: input.is_qr_customer_visible === true,
+      is_qr_customer_visible: Boolean(input.is_qr_customer_visible),
     })
     .eq("id", id);
   if (updated.error) {

@@ -69,7 +69,7 @@ export function VaultWorkspace({
   }, [documents, workspace, entityId, category, keyword]);
 
   async function openSigned(documentId: string, mode: "view" | "download" | "copy") {
-    const result = await getCorporateDocumentSignedUrlAction(documentId);
+    const result = await getCorporateDocumentSignedUrlAction(documentId, mode === "download" ? "download" : "view");
     if (!result.data.url) {
       toast.error(result.error ?? "สร้างลิงก์ไม่สำเร็จ");
       return;
@@ -82,10 +82,10 @@ export function VaultWorkspace({
     if (mode === "download") {
       const anchor = document.createElement("a");
       anchor.href = result.data.url;
-      anchor.download = "";
-      anchor.target = "_blank";
-      anchor.rel = "noreferrer";
+      anchor.download = result.data.downloadFileName ?? "";
+      document.body.appendChild(anchor);
       anchor.click();
+      anchor.remove();
       return;
     }
     window.open(result.data.url, "_blank", "noopener,noreferrer");
@@ -130,7 +130,7 @@ export function VaultWorkspace({
         <select name="legal_entity_id" className="h-10 rounded border border-slate-200 px-3 text-sm" defaultValue="">
           <option value="">ไม่ระบุนิติบุคคล</option>
           {entities.map((entity) => (
-            <option key={entity.id} value={entity.id}>{entity.legal_name}</option>
+            <option key={entity.id} value={entity.id}>{entity.entity_name_th}</option>
           ))}
         </select>
         <input name="doc_ref_no" placeholder="เลขที่เอกสาร" className="h-10 rounded border border-slate-200 px-3 text-sm" />
@@ -170,7 +170,7 @@ export function VaultWorkspace({
         </select>
         <select value={entityId} onChange={(event) => setEntityId(event.target.value)} className="h-10 rounded border border-slate-200 px-3 text-sm">
           <option value="all">ทรัพย์ทวี, จัสมิน พลัส, ลิ่มวรวิวัฒน์, บุคคลในครอบครัว</option>
-          {entities.map((entity) => <option key={entity.id} value={entity.id}>{entity.legal_name}</option>)}
+          {entities.map((entity) => <option key={entity.id} value={entity.id}>{entity.entity_name_th}</option>)}
         </select>
         <select value={category} onChange={(event) => setCategory(event.target.value)} className="h-10 rounded border border-slate-200 px-3 text-sm">
           <option value="all">ทุกหมวด</option>
@@ -200,7 +200,15 @@ export function VaultWorkspace({
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" size="sm" onClick={() => void openSigned(doc.id, "view")}>เปิดดู / พิมพ์ทันที</Button>
                   <Button type="button" size="sm" variant="outline" onClick={() => void openSigned(doc.id, "download")}>ดาวน์โหลด</Button>
-                  <Button type="button" size="sm" variant="outline" onClick={() => void openSigned(doc.id, "copy")}>คัดลอกลิงก์ชั่วคราว (1 ชม.)</Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    title="สร้างลิงก์ชั่วคราวสำหรับส่งต่อให้ร้านปริ้นท์ ธนาคาร หรือสำนักงานบัญชีทาง LINE โดยลิงก์จะปิดการเข้าถึงอัตโนมัติใน 1 ชั่วโมงเพื่อความปลอดภัย"
+                    onClick={() => void openSigned(doc.id, "copy")}
+                  >
+                    🔗 คัดลอกลิงก์ส่งพิมพ์/แชร์ LINE (หมดอายุใน 1 ชม.)
+                  </Button>
                 </div>
               </div>
               <form
@@ -222,7 +230,7 @@ export function VaultWorkspace({
                 </select>
                 <select name="legal_entity_id" defaultValue={doc.legal_entity_id ?? ""} className="h-9 rounded border border-slate-200 px-2 text-sm">
                   <option value="">ไม่ระบุนิติบุคคล</option>
-                  {entities.map((entity) => <option key={entity.id} value={entity.id}>{entity.legal_name}</option>)}
+                  {entities.map((entity) => <option key={entity.id} value={entity.id}>{entity.entity_name_th}</option>)}
                 </select>
                 <input name="doc_ref_no" defaultValue={doc.doc_ref_no ?? ""} placeholder="เลขที่เอกสาร" className="h-9 rounded border border-slate-200 px-2 text-sm" />
                 <input name="tags" defaultValue={doc.tags.join(", ")} placeholder="แท็ก" className="h-9 rounded border border-slate-200 px-2 text-sm" />

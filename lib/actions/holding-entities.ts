@@ -15,6 +15,10 @@ import type {
 } from "@/types/holding";
 
 const WORKSPACES = new Set<WorkspaceKey>(["supthavee", "fnb", "agri", "prop", "holding"]);
+const LEGAL_ENTITY_COLUMNS =
+  "id, entity_code, entity_type, entity_name_th, entity_name_en, tax_id, vat_status, pp30_filing_mode, vat_effective_date, registered_capital, incorporation_date, head_office_address, signatory_condition, governance_notes, primary_workspace, is_active, sort_order, created_at, updated_at";
+const HOLDING_BANK_COLUMNS =
+  "id, legal_entity_id, business_unit_code, workspace_key, branch_code, bank_code, bank_name, account_no, account_name, branch_name, qr_image_url, qr_storage_path, qr_label, is_qr_customer_visible, promptpay_id, payment_instruction, effective_from, effective_to, is_default_receiving, is_active, sort_order, created_at, updated_at";
 
 function rethrowNavigation(error: unknown): void {
   const digest = error && typeof error === "object" && "digest" in error
@@ -43,14 +47,27 @@ function asciiToken(value: string, fallback: string): string {
   return cleaned.slice(0, 40) || fallback;
 }
 
+function textOrNull(value: unknown): string | null {
+  if (value == null) return null;
+  const text = String(value).trim();
+  return text || null;
+}
+
+function numberOrNull(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : null;
+}
+
 export async function listLegalEntitiesAction(): Promise<HoldingActionResult<LegalEntityRow[]>> {
   try {
     await requireSuperAdmin();
     const listed = await schemaAdmin()
       .schema("holding")
       .from("legal_entities")
-      .select("id, entity_code, legal_name, tax_id, workspace_key, is_active")
-      .order("legal_name", { ascending: true })
+      .select(LEGAL_ENTITY_COLUMNS)
+      .order("sort_order", { ascending: true })
+      .order("entity_name_th", { ascending: true })
       .limit(100);
     if (listed.error) {
       return empty([], schemaErrorMessage(listed.error, "อ่านทะเบียนนิติบุคคลไม่สำเร็จ"), !isSchemaUnavailable(listed.error));
@@ -58,10 +75,23 @@ export async function listLegalEntitiesAction(): Promise<HoldingActionResult<Leg
     return empty(asRows(listed.data).map((row) => ({
       id: String(row.id),
       entity_code: String(row.entity_code ?? ""),
-      legal_name: String(row.legal_name ?? ""),
-      tax_id: row.tax_id == null ? null : String(row.tax_id),
-      workspace_key: row.workspace_key == null ? null : workspaceOf(row.workspace_key),
+      entity_type: textOrNull(row.entity_type),
+      entity_name_th: String(row.entity_name_th ?? ""),
+      entity_name_en: textOrNull(row.entity_name_en),
+      tax_id: textOrNull(row.tax_id),
+      vat_status: textOrNull(row.vat_status),
+      pp30_filing_mode: textOrNull(row.pp30_filing_mode),
+      vat_effective_date: textOrNull(row.vat_effective_date),
+      registered_capital: numberOrNull(row.registered_capital),
+      incorporation_date: textOrNull(row.incorporation_date),
+      head_office_address: textOrNull(row.head_office_address),
+      signatory_condition: textOrNull(row.signatory_condition),
+      governance_notes: textOrNull(row.governance_notes),
+      primary_workspace: row.primary_workspace == null ? null : workspaceOf(row.primary_workspace),
       is_active: row.is_active !== false,
+      sort_order: Number(row.sort_order ?? 0) || 0,
+      created_at: String(row.created_at ?? ""),
+      updated_at: String(row.updated_at ?? ""),
     })));
   } catch (error) {
     rethrowNavigation(error);
@@ -77,12 +107,13 @@ export async function saveLegalEntityAction(
     const id = String(formData.get("id") ?? "").trim();
     const payload = {
       entity_code: asciiToken(String(formData.get("entity_code") ?? ""), ""),
-      legal_name: String(formData.get("legal_name") ?? "").trim(),
-      tax_id: String(formData.get("tax_id") ?? "").trim() || null,
-      workspace_key: workspaceOf(formData.get("workspace_key")),
+      entity_name_th: String(formData.get("entity_name_th") ?? "").trim(),
+      entity_name_en: textOrNull(formData.get("entity_name_en")),
+      tax_id: textOrNull(formData.get("tax_id")),
+      primary_workspace: workspaceOf(formData.get("primary_workspace")),
       is_active: String(formData.get("is_active") ?? "true") !== "false",
     };
-    if (!payload.entity_code || !payload.legal_name) {
+    if (!payload.entity_code || !payload.entity_name_th) {
       return empty({ ok: false }, "กรุณาระบุรหัส ASCII และชื่อนิติบุคคล");
     }
     const table = schemaAdmin().schema("holding").from("legal_entities");
@@ -108,7 +139,7 @@ export async function listHoldingBankAccountsAction(
     let query = schemaAdmin()
       .schema("holding")
       .from("bank_accounts")
-      .select("id, entity_id, workspace_key, bank_name, account_no, account_name, branch_name, promptpay_note, qr_label, qr_image_url, qr_storage_path, is_qr_customer_visible, is_active, is_default_receiving, sort_order")
+      .select(HOLDING_BANK_COLUMNS)
       .order("sort_order", { ascending: true })
       .limit(200);
     if (workspaceKey && WORKSPACES.has(workspaceKey as WorkspaceKey)) {
@@ -120,20 +151,28 @@ export async function listHoldingBankAccountsAction(
     }
     return empty(asRows(listed.data).map((row) => ({
       id: String(row.id),
-      entity_id: row.entity_id == null ? null : String(row.entity_id),
+      legal_entity_id: textOrNull(row.legal_entity_id),
+      business_unit_code: textOrNull(row.business_unit_code),
       workspace_key: workspaceOf(row.workspace_key),
+      branch_code: textOrNull(row.branch_code),
+      bank_code: textOrNull(row.bank_code),
       bank_name: String(row.bank_name ?? ""),
       account_no: String(row.account_no ?? ""),
       account_name: String(row.account_name ?? ""),
-      branch_name: row.branch_name == null ? null : String(row.branch_name),
-      promptpay_note: row.promptpay_note == null ? null : String(row.promptpay_note),
-      qr_label: row.qr_label == null ? null : String(row.qr_label),
-      qr_image_url: row.qr_image_url == null ? null : String(row.qr_image_url),
-      qr_storage_path: row.qr_storage_path == null ? null : String(row.qr_storage_path),
+      branch_name: textOrNull(row.branch_name),
+      qr_image_url: textOrNull(row.qr_image_url),
+      qr_storage_path: textOrNull(row.qr_storage_path),
+      qr_label: textOrNull(row.qr_label),
       is_qr_customer_visible: row.is_qr_customer_visible === true,
-      is_active: row.is_active !== false,
+      promptpay_id: textOrNull(row.promptpay_id),
+      payment_instruction: textOrNull(row.payment_instruction),
+      effective_from: textOrNull(row.effective_from),
+      effective_to: textOrNull(row.effective_to),
       is_default_receiving: row.is_default_receiving === true,
+      is_active: row.is_active !== false,
       sort_order: Number(row.sort_order ?? 10) || 10,
+      created_at: String(row.created_at ?? ""),
+      updated_at: String(row.updated_at ?? ""),
     })));
   } catch (error) {
     rethrowNavigation(error);
@@ -148,13 +187,17 @@ export async function saveHoldingBankAccountAction(
     await requireSuperAdmin();
     const id = String(formData.get("id") ?? "").trim();
     const payload = {
-      entity_id: String(formData.get("entity_id") ?? "").trim() || null,
+      legal_entity_id: textOrNull(formData.get("legal_entity_id")),
+      business_unit_code: textOrNull(formData.get("business_unit_code")),
       workspace_key: workspaceOf(formData.get("workspace_key")),
+      branch_code: textOrNull(formData.get("branch_code")),
+      bank_code: textOrNull(formData.get("bank_code")),
       bank_name: String(formData.get("bank_name") ?? "").trim(),
       account_no: String(formData.get("account_no") ?? "").trim(),
       account_name: String(formData.get("account_name") ?? "").trim(),
-      branch_name: String(formData.get("branch_name") ?? "").trim() || null,
-      promptpay_note: String(formData.get("promptpay_note") ?? "").trim() || null,
+      branch_name: textOrNull(formData.get("branch_name")),
+      promptpay_id: textOrNull(formData.get("promptpay_id")),
+      payment_instruction: textOrNull(formData.get("payment_instruction")),
       is_active: String(formData.get("is_active") ?? "true") !== "false",
       is_default_receiving: String(formData.get("is_default_receiving") ?? "") === "true",
       sort_order: Number(formData.get("sort_order") ?? 10) || 10,
@@ -183,7 +226,7 @@ export async function uploadHoldingBankQrAction(
     const bankId = String(formData.get("bank_account_id") ?? "").trim();
     const workspace = asciiToken(String(formData.get("workspace_key") ?? "holding"), "holding");
     const qrLabel = String(formData.get("qr_label") ?? "").trim();
-    const note = String(formData.get("promptpay_note") ?? "").trim();
+    const note = String(formData.get("payment_instruction") ?? "").trim();
     const customerVisible = String(formData.get("is_qr_customer_visible") ?? "") === "true";
     const file = formData.get("file");
     if (!bankId) return empty({ url: null }, "ไม่พบรหัสบัญชี");
@@ -205,8 +248,8 @@ export async function uploadHoldingBankQrAction(
         qr_storage_path: path,
         qr_image_url: publicUrl,
         qr_label: qrLabel || null,
-        promptpay_note: note || null,
-        is_qr_customer_visible: customerVisible,
+        payment_instruction: note || null,
+        is_qr_customer_visible: Boolean(customerVisible),
       })
       .eq("id", bankId);
     if (updated.error) {
@@ -232,8 +275,8 @@ export async function updateHoldingBankQrSettingsAction(
       .from("bank_accounts")
       .update({
         qr_label: input.qr_label?.trim() || null,
-        promptpay_note: input.promptpay_note?.trim() || null,
-        is_qr_customer_visible: input.is_qr_customer_visible === true,
+        payment_instruction: input.payment_instruction?.trim() || null,
+        is_qr_customer_visible: Boolean(input.is_qr_customer_visible),
       })
       .eq("id", id);
     if (updated.error) {
@@ -403,7 +446,7 @@ export async function listFnbBranchesAction(): Promise<HoldingActionResult<FnbBr
     const listed = await schemaAdmin()
       .schema("fnb")
       .from("branches")
-      .select("id, branch_code, branch_name, brand_code, brand_name, is_active, countdown_until")
+      .select("*")
       .order("branch_code", { ascending: true })
       .limit(50);
     if (listed.error) {

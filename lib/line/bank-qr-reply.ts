@@ -10,6 +10,7 @@ type BankQrRow = {
   promptpay_note: string | null;
   qr_label: string | null;
   qr_image_url: string | null;
+  account_channel: string | null;
   is_primary_company: boolean;
 };
 
@@ -45,15 +46,19 @@ function mapRows(data: unknown): BankQrRow[] {
     if (row.is_qr_customer_visible === false) return [];
     const accountNo = String(row.account_no ?? "").trim();
     const bankName = String(row.bank_name ?? "").trim();
+    const accountChannel = row.account_channel == null ? null : String(row.account_channel);
     if (!accountNo || !bankName) return [];
+    if (/wallet/i.test(accountNo) || accountChannel === "PLATFORM_WALLET") return [];
+    const note = row.promptpay_note ?? row.payment_instruction;
     return [{
       id: String(row.id ?? ""),
       bank_name: bankName,
       account_name: String(row.account_name ?? "").trim() || "-",
       account_no: accountNo,
-      promptpay_note: row.promptpay_note == null ? null : String(row.promptpay_note).trim() || null,
+      promptpay_note: note == null ? null : String(note).trim() || null,
       qr_label: row.qr_label == null ? null : String(row.qr_label).trim() || null,
       qr_image_url: row.qr_image_url == null ? null : String(row.qr_image_url),
+      account_channel: accountChannel,
       is_primary_company: row.is_primary_company === true || row.is_default_receiving === true,
     }];
   });
@@ -72,23 +77,34 @@ function accountLines(row: BankQrRow): string {
   ].filter(Boolean).join("\n");
 }
 
+function accountDigits(accountNo: string): string {
+  return accountNo.replace(/[\s\-_.]+/g, "");
+}
+
+function officialCompanyAccount(rows: BankQrRow[]): BankQrRow[] {
+  const official = rows.find((row) => accountDigits(row.account_no) === "9020746510");
+  if (official) return [official];
+  const withQr = rows.find((row) => safeHttps(row.qr_image_url));
+  return withQr ? [withQr] : rows.slice(0, 1);
+}
+
 function selectAccounts(rows: BankQrRow[], query: string): { selected: BankQrRow[]; notice: string | null } {
+  const visible = rows.filter((row) => !/wallet/i.test(row.account_no) && row.account_channel !== "PLATFORM_WALLET");
   const trimmed = query.trim();
   const normalized = normalizeQrQuery(trimmed);
-  if (!trimmed) {
-    const primary = rows.filter((row) => row.is_primary_company);
-    return { selected: primary.length > 0 ? [primary[0]] : rows.slice(0, 1), notice: null };
+  if (!trimmed || normalized === "บริษัท") {
+    return { selected: officialCompanyAccount(visible), notice: null };
   }
   if (normalized === "ทั้งหมด" || normalized === "all") {
-    return { selected: rows.slice(0, 4), notice: null };
+    return { selected: visible.slice(0, 4), notice: null };
   }
-  const matched = rows.filter((row) =>
+  const matched = visible.filter((row) =>
     [row.qr_label, row.bank_name, row.account_name, row.account_no].some((part) =>
       normalizeQrQuery(part ?? "").includes(normalized),
     ),
   );
   if (matched.length === 0) {
-    const hints = rows.map((row) => `#qr ${row.qr_label || row.bank_name}`).join(", ");
+    const hints = visible.map((row) => `#qr ${row.qr_label || row.bank_name}`).join(", ");
     return {
       selected: [],
       notice: `ไม่พบบัญชี QR ที่ตรงกับ "${trimmed}"\nคำสั่งที่ใช้ได้: ${hints || "#qr"}`,
@@ -126,7 +142,7 @@ export async function replySupthaveeBankQr(
 ): Promise<BankQrReplyResult> {
   const listed = await schemaAdmin()
     .from("mst_bank_accounts")
-    .select("id, bank_name, account_name, account_no, promptpay_note, qr_label, qr_image_url, is_primary_company, is_qr_customer_visible, sort_order")
+    .select("id, bank_name, account_name, account_no, account_channel, promptpay_note, qr_label, qr_image_url, is_primary_company, is_qr_customer_visible, sort_order")
     .eq("is_active", true)
     .eq("is_qr_customer_visible", true)
     .order("is_primary_company", { ascending: false })
@@ -148,7 +164,7 @@ export async function replyHoldingBankQr(params: {
   const listed = await schemaAdmin()
     .schema("holding")
     .from("bank_accounts")
-    .select("id, bank_name, account_name, account_no, promptpay_note, qr_label, qr_image_url, is_default_receiving, is_qr_customer_visible, sort_order")
+    .select("id, bank_name, account_name, account_no, payment_instruction, qr_label, qr_image_url, is_default_receiving, is_qr_customer_visible, sort_order")
     .eq("is_active", true)
     .eq("is_qr_customer_visible", true)
     .eq("workspace_key", params.workspaceKey)
