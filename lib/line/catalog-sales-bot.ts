@@ -22,9 +22,9 @@ const USAGE_GUIDE = [
   "#เช็ค PS031S",
   "",
   "เลขบัญชีรับโอน:",
-  "#qr",
-  "#เลขบัญชี",
-  "#บัญชี",
+  "#qr หรือ #เลขบัญชี = QR และเลขบัญชีหลักของบริษัท",
+  "#qr กรุงเทพ = เฉพาะบัญชีที่ตั้งชื่อและเปิดอนุญาต",
+  "#qr ทั้งหมด = ทุกบัญชีที่เปิดอนุญาต #qr",
 ].join("\n");
 
 type CatalogCommandMode = "guide" | "size" | "catalog" | "photo" | "bank";
@@ -616,7 +616,7 @@ export async function handleLineCatalogBotEvent(params: {
     return sendMessages(params.token, params.replyToken, [textMessage(USAGE_GUIDE)], USAGE_GUIDE);
   }
   if (command.mode === "bank") {
-    return replySupthaveeBankQr(params.token, params.replyToken);
+    return replySupthaveeBankQr(params.token, params.replyToken, command.query);
   }
 
   const searched = await searchColorways(command.query, command.inStockOnly);

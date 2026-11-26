@@ -142,8 +142,13 @@ export default async function BankAccountsPage() {
                               ) : null}
                               <BankQrUploader
                                 bankAccountId={account.id}
+                                bankName={account.bank_name}
+                                accountName={account.account_name}
+                                accountNo={account.account_no}
                                 qrImageUrl={account.qr_image_url}
+                                qrLabel={account.qr_label}
                                 promptpayNote={account.promptpay_note}
+                                isQrCustomerVisible={account.is_qr_customer_visible === true}
                               />
                             </div>
                           </TableCell>

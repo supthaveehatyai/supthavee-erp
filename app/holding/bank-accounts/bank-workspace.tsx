@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { saveHoldingBankAccountAction, uploadHoldingBankQrAction } from "@/lib/actions/holding-entities";
+import { saveHoldingBankAccountAction, updateHoldingBankQrSettingsAction, uploadHoldingBankQrAction } from "@/lib/actions/holding-entities";
 import { compressImage } from "@/lib/utils/image-compression";
+import { isInternalClearingWallet } from "@/types/bank-account";
 import { WORKSPACE_THEMES, type HoldingBankAccountRow, type LegalEntityRow, type WorkspaceKey } from "@/types/holding";
 import { Button } from "@/components/ui/button";
 
@@ -62,7 +63,8 @@ export function HoldingBankWorkspace({
       </form>
       <div className="space-y-3">
         {accounts.map((account) => (
-          <form key={account.id} action={save} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-3">
+          <div key={account.id} className="space-y-2 rounded-xl border border-slate-200 bg-white p-4">
+          <form action={save} className="grid gap-2 md:grid-cols-3">
             <input type="hidden" name="id" value={account.id} />
             <select name="workspace_key" defaultValue={account.workspace_key} className="h-10 rounded border border-slate-200 px-3 text-sm">
               {WORKSPACES.map((key) => <option key={key} value={key}>{WORKSPACE_THEMES[key].label}</option>)}
@@ -85,47 +87,42 @@ export function HoldingBankWorkspace({
               <input type="checkbox" name="is_default_receiving" value="true" defaultChecked={account.is_default_receiving} />
               บัญชีรับเงินหลัก
             </label>
-            {account.qr_image_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={account.qr_image_url} alt="QR" className="h-24 w-24 rounded border object-contain" />
-            ) : null}
-            <label
-              className="text-xs text-slate-600"
-              onDragOver={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                const file = event.dataTransfer.files?.[0];
-                if (!file) return;
-                void uploadQr(account.id, account.workspace_key, file);
-              }}
-            >
-              วางรูป QR รับเงิน
-              <input
-                type="file"
-                accept="image/*"
-                className="mt-1 block"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void uploadQr(account.id, account.workspace_key, file);
-                }}
-              />
-            </label>
             <Button type="submit" variant="outline" disabled={pending}>บันทึกการแก้ไข</Button>
           </form>
+          <HoldingAccountQr account={account} />
+          </div>
         ))}
       </div>
     </div>
   );
 
-  async function uploadQr(bankAccountId: string, workspaceKey: WorkspaceKey, file: File) {
+}
+
+function HoldingAccountQr({ account }: { account: HoldingBankAccountRow }) {
+  const [label, setLabel] = useState(account.qr_label ?? "");
+  const [note, setNote] = useState(account.promptpay_note ?? "");
+  const [visible, setVisible] = useState(account.is_qr_customer_visible);
+  const [pending, startTransition] = useTransition();
+  const internal = isInternalClearingWallet([account.bank_name, account.account_name, account.account_no, label]);
+
+  useEffect(() => {
+    const block = (event: DragEvent) => event.preventDefault();
+    window.addEventListener("dragover", block);
+    window.addEventListener("drop", block);
+    return () => {
+      window.removeEventListener("dragover", block);
+      window.removeEventListener("drop", block);
+    };
+  }, []);
+
+  async function upload(file: File) {
     const image = await compressImage(file);
     const formData = new FormData();
-    formData.set("bank_account_id", bankAccountId);
-    formData.set("workspace_key", workspaceKey);
+    formData.set("bank_account_id", account.id);
+    formData.set("workspace_key", account.workspace_key);
+    formData.set("qr_label", label);
+    formData.set("promptpay_note", note);
+    formData.set("is_qr_customer_visible", visible ? "true" : "false");
     formData.set("file", image);
     startTransition(async () => {
       const result = await uploadHoldingBankQrAction(formData);
@@ -133,4 +130,68 @@ export function HoldingBankWorkspace({
       else toast.success("อัปโหลด QR แล้ว");
     });
   }
+
+  return (
+    <div className={`grid gap-2 rounded-lg border p-3 md:grid-cols-3 ${internal ? "border-slate-300 bg-slate-50" : "border-slate-200"}`}>
+      <div className="flex flex-wrap items-center gap-2 md:col-span-3">
+        <span className={`rounded px-2 py-0.5 text-[11px] font-semibold ${visible ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}>
+          {visible ? "แสดงใน #qr" : "ซ่อนจาก #qr"}
+        </span>
+        {internal ? <span className="text-[11px] text-slate-500">บัญชีภายใน ค่าเริ่มต้นซ่อนจาก #qr</span> : null}
+        <label className="flex items-center gap-2 text-xs">
+          <input type="checkbox" checked={visible} onChange={(event) => setVisible(event.target.checked)} />
+          อนุญาตส่งในคำสั่ง #qr ลูกค้า
+        </label>
+      </div>
+      {account.qr_image_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={account.qr_image_url} alt="QR" className="h-24 w-24 rounded border object-contain" />
+      ) : null}
+      <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="ชื่อเรียก QR (เช่น บริษัท, กรุงเทพ)" className="h-10 rounded border border-slate-200 px-3 text-sm" />
+      <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="หมายเหตุพร้อมเพย์/การโอน" className="h-10 rounded border border-slate-200 px-3 text-sm" />
+      <Button
+        type="button"
+        variant="outline"
+        disabled={pending}
+        onClick={() => {
+          startTransition(async () => {
+            const result = await updateHoldingBankQrSettingsAction({
+              id: account.id,
+              qr_label: label.trim() || null,
+              promptpay_note: note.trim() || null,
+              is_qr_customer_visible: visible,
+            });
+            if (result.error) toast.error(result.error);
+            else toast.success("บันทึกตั้งค่า QR แล้ว");
+          });
+        }}
+      >
+        บันทึกตั้งค่า QR
+      </Button>
+      <label
+        className="text-xs text-slate-600"
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const file = event.dataTransfer.files?.[0];
+          if (file) void upload(file);
+        }}
+      >
+        วางรูป QR รับเงิน
+        <input
+          type="file"
+          accept="image/*"
+          className="mt-1 block"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void upload(file);
+          }}
+        />
+      </label>
+    </div>
+  );
 }

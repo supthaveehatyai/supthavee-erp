@@ -7,6 +7,7 @@ import type {
   FnbBranchRow,
   HoldingActionResult,
   HoldingBankAccountRow,
+  HoldingBankQrSettingsInput,
   LegalEntityRow,
   LiffRegistrationRow,
   LineChannelRow,
@@ -107,7 +108,7 @@ export async function listHoldingBankAccountsAction(
     let query = schemaAdmin()
       .schema("holding")
       .from("bank_accounts")
-      .select("id, entity_id, workspace_key, bank_name, account_no, account_name, branch_name, promptpay_note, qr_image_url, qr_storage_path, is_active, is_default_receiving, sort_order")
+      .select("id, entity_id, workspace_key, bank_name, account_no, account_name, branch_name, promptpay_note, qr_label, qr_image_url, qr_storage_path, is_qr_customer_visible, is_active, is_default_receiving, sort_order")
       .order("sort_order", { ascending: true })
       .limit(200);
     if (workspaceKey && WORKSPACES.has(workspaceKey as WorkspaceKey)) {
@@ -126,8 +127,10 @@ export async function listHoldingBankAccountsAction(
       account_name: String(row.account_name ?? ""),
       branch_name: row.branch_name == null ? null : String(row.branch_name),
       promptpay_note: row.promptpay_note == null ? null : String(row.promptpay_note),
+      qr_label: row.qr_label == null ? null : String(row.qr_label),
       qr_image_url: row.qr_image_url == null ? null : String(row.qr_image_url),
       qr_storage_path: row.qr_storage_path == null ? null : String(row.qr_storage_path),
+      is_qr_customer_visible: row.is_qr_customer_visible === true,
       is_active: row.is_active !== false,
       is_default_receiving: row.is_default_receiving === true,
       sort_order: Number(row.sort_order ?? 10) || 10,
@@ -179,6 +182,9 @@ export async function uploadHoldingBankQrAction(
     await requireSuperAdmin();
     const bankId = String(formData.get("bank_account_id") ?? "").trim();
     const workspace = asciiToken(String(formData.get("workspace_key") ?? "holding"), "holding");
+    const qrLabel = String(formData.get("qr_label") ?? "").trim();
+    const note = String(formData.get("promptpay_note") ?? "").trim();
+    const customerVisible = String(formData.get("is_qr_customer_visible") ?? "") === "true";
     const file = formData.get("file");
     if (!bankId) return empty({ url: null }, "ไม่พบรหัสบัญชี");
     if (!(file instanceof File) || file.size <= 0 || !file.type.startsWith("image/")) {
@@ -195,7 +201,13 @@ export async function uploadHoldingBankQrAction(
     const updated = await admin
       .schema("holding")
       .from("bank_accounts")
-      .update({ qr_storage_path: path, qr_image_url: publicUrl })
+      .update({
+        qr_storage_path: path,
+        qr_image_url: publicUrl,
+        qr_label: qrLabel || null,
+        promptpay_note: note || null,
+        is_qr_customer_visible: customerVisible,
+      })
       .eq("id", bankId);
     if (updated.error) {
       return empty({ url: null }, schemaErrorMessage(updated.error, "บันทึก QR ไม่สำเร็จ"), !isSchemaUnavailable(updated.error));
@@ -205,6 +217,33 @@ export async function uploadHoldingBankQrAction(
   } catch (error) {
     rethrowNavigation(error);
     return empty({ url: null }, error instanceof Error ? error.message : "อัปโหลด QR ไม่สำเร็จ", false);
+  }
+}
+
+export async function updateHoldingBankQrSettingsAction(
+  input: HoldingBankQrSettingsInput,
+): Promise<HoldingActionResult<{ ok: boolean }>> {
+  try {
+    await requireSuperAdmin();
+    const id = input.id.trim();
+    if (!id) return empty({ ok: false }, "ไม่พบรหัสบัญชี");
+    const updated = await schemaAdmin()
+      .schema("holding")
+      .from("bank_accounts")
+      .update({
+        qr_label: input.qr_label?.trim() || null,
+        promptpay_note: input.promptpay_note?.trim() || null,
+        is_qr_customer_visible: input.is_qr_customer_visible === true,
+      })
+      .eq("id", id);
+    if (updated.error) {
+      return empty({ ok: false }, schemaErrorMessage(updated.error, "บันทึกตั้งค่า QR ไม่สำเร็จ"), !isSchemaUnavailable(updated.error));
+    }
+    revalidatePath("/holding/bank-accounts");
+    return empty({ ok: true });
+  } catch (error) {
+    rethrowNavigation(error);
+    return empty({ ok: false }, error instanceof Error ? error.message : "บันทึกตั้งค่า QR ไม่สำเร็จ", false);
   }
 }
 

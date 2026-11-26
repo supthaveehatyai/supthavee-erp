@@ -6,7 +6,7 @@ import type { WorkspaceKey } from "@/types/holding";
 
 export const dynamic = "force-dynamic";
 
-const BANK_COMMAND = /^#(เลขบัญชี|บัญชี|qr)\b/i;
+const BANK_COMMAND = /^#(เลขบัญชี|บัญชี|qr)\s*(.*)$/i;
 const WORKSPACES = new Set<WorkspaceKey>(["supthavee", "fnb", "agri", "prop", "holding"]);
 
 type ChannelRow = {
@@ -68,13 +68,15 @@ export async function POST(
 
   for (const event of events) {
     const text = String(event.message?.text ?? "").trim();
+    const bankCommand = text.match(BANK_COMMAND);
     let replyStatus = "SKIPPED";
     let replyError: string | null = null;
-    if (event.type === "message" && event.replyToken && row.channel_access_token && BANK_COMMAND.test(text)) {
+    if (event.type === "message" && event.replyToken && row.channel_access_token && bankCommand) {
       const reply = await replyHoldingBankQr({
         token: row.channel_access_token,
         replyToken: event.replyToken,
         workspaceKey: workspace,
+        query: (bankCommand[2] ?? "").trim(),
         bankAccountId: row.default_bank_account_id,
       });
       replyStatus = reply.status;

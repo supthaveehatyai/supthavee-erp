@@ -10,7 +10,8 @@ import {
 } from "@/lib/actions/holding-vault";
 import { compressImage } from "@/lib/utils/image-compression";
 import {
-  VAULT_CATEGORIES,
+  VAULT_DOC_CATEGORIES,
+  VAULT_DOC_CATEGORY_LABEL,
   WORKSPACE_THEMES,
   type CorporateDocumentRow,
   type LegalEntityRow,
@@ -60,8 +61,8 @@ export function VaultWorkspace({
     const needle = keyword.trim().toLowerCase();
     return documents.filter((doc) => {
       if (workspace !== "all" && doc.workspace_key !== workspace) return false;
-      if (entityId !== "all" && doc.entity_id !== entityId) return false;
-      if (category !== "all" && doc.category !== category) return false;
+      if (entityId !== "all" && doc.legal_entity_id !== entityId) return false;
+      if (category !== "all" && doc.doc_category !== category) return false;
       if (!needle) return true;
       return `${doc.title} ${doc.entity_name ?? ""} ${doc.notes ?? ""}`.toLowerCase().includes(needle);
     });
@@ -119,19 +120,21 @@ export function VaultWorkspace({
           });
         }}
       >
-        <input name="title" required placeholder="ชื่อเอกสาร" className="h-10 rounded border border-slate-200 px-3 text-sm" />
-        <select name="category" className="h-10 rounded border border-slate-200 px-3 text-sm" defaultValue={VAULT_CATEGORIES[0]}>
-          {VAULT_CATEGORIES.map((item) => <option key={item}>{item}</option>)}
+        <input name="title" placeholder="ชื่อเอกสาร เว้นว่างเพื่อใช้ชื่อไฟล์" className="h-10 rounded border border-slate-200 px-3 text-sm" />
+        <select name="doc_category" className="h-10 rounded border border-slate-200 px-3 text-sm" defaultValue={VAULT_DOC_CATEGORIES[0]}>
+          {VAULT_DOC_CATEGORIES.map((item) => <option key={item} value={item}>{VAULT_DOC_CATEGORY_LABEL[item]}</option>)}
         </select>
         <select name="workspace_key" className="h-10 rounded border border-slate-200 px-3 text-sm" defaultValue={initialWorkspace || "holding"}>
           {WORKSPACE_OPTIONS.map((key) => <option key={key} value={key}>{WORKSPACE_THEMES[key].label}</option>)}
         </select>
-        <select name="entity_id" className="h-10 rounded border border-slate-200 px-3 text-sm" defaultValue="">
+        <select name="legal_entity_id" className="h-10 rounded border border-slate-200 px-3 text-sm" defaultValue="">
           <option value="">ไม่ระบุนิติบุคคล</option>
           {entities.map((entity) => (
             <option key={entity.id} value={entity.id}>{entity.legal_name}</option>
           ))}
         </select>
+        <input name="doc_ref_no" placeholder="เลขที่เอกสาร" className="h-10 rounded border border-slate-200 px-3 text-sm" />
+        <input name="tags" placeholder="แท็ก คั่นด้วยจุลภาค" className="h-10 rounded border border-slate-200 px-3 text-sm" />
         <input name="entity_code" placeholder="รหัส ASCII เช่น STV" className="h-10 rounded border border-slate-200 px-3 text-sm" />
         <input name="issue_date" type="date" className="h-10 rounded border border-slate-200 px-3 text-sm" />
         <input name="expiry_date" type="date" className="h-10 rounded border border-slate-200 px-3 text-sm" />
@@ -171,7 +174,7 @@ export function VaultWorkspace({
         </select>
         <select value={category} onChange={(event) => setCategory(event.target.value)} className="h-10 rounded border border-slate-200 px-3 text-sm">
           <option value="all">ทุกหมวด</option>
-          {VAULT_CATEGORIES.map((item) => <option key={item}>{item}</option>)}
+          {VAULT_DOC_CATEGORIES.map((item) => <option key={item} value={item}>{VAULT_DOC_CATEGORY_LABEL[item]}</option>)}
         </select>
         <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="ค้นหา" className="h-10 rounded border border-slate-200 px-3 text-sm" />
       </div>
@@ -186,7 +189,7 @@ export function VaultWorkspace({
                 <div>
                   <h2 className="font-semibold text-slate-900">{doc.title}</h2>
                   <p className="text-xs text-slate-500">
-                    {doc.entity_name ?? "ไม่ระบุนิติบุคคล"} · {WORKSPACE_THEMES[doc.workspace_key].label} · {doc.category}
+                    {doc.entity_name ?? "ไม่ระบุนิติบุคคล"} · {WORKSPACE_THEMES[doc.workspace_key].label} · {VAULT_DOC_CATEGORY_LABEL[doc.doc_category]}
                   </p>
                   <p className="text-xs text-slate-500">
                     ออก {doc.issue_date ?? "—"} · หมดอายุ {doc.expiry_date ?? "—"}
@@ -214,9 +217,15 @@ export function VaultWorkspace({
               >
                 <input type="hidden" name="id" value={doc.id} />
                 <input name="title" defaultValue={doc.title} className="h-9 rounded border border-slate-200 px-2 text-sm" />
-                <select name="category" defaultValue={doc.category} className="h-9 rounded border border-slate-200 px-2 text-sm">
-                  {VAULT_CATEGORIES.map((item) => <option key={item}>{item}</option>)}
+                <select name="doc_category" defaultValue={doc.doc_category} className="h-9 rounded border border-slate-200 px-2 text-sm">
+                  {VAULT_DOC_CATEGORIES.map((item) => <option key={item} value={item}>{VAULT_DOC_CATEGORY_LABEL[item]}</option>)}
                 </select>
+                <select name="legal_entity_id" defaultValue={doc.legal_entity_id ?? ""} className="h-9 rounded border border-slate-200 px-2 text-sm">
+                  <option value="">ไม่ระบุนิติบุคคล</option>
+                  {entities.map((entity) => <option key={entity.id} value={entity.id}>{entity.legal_name}</option>)}
+                </select>
+                <input name="doc_ref_no" defaultValue={doc.doc_ref_no ?? ""} placeholder="เลขที่เอกสาร" className="h-9 rounded border border-slate-200 px-2 text-sm" />
+                <input name="tags" defaultValue={doc.tags.join(", ")} placeholder="แท็ก" className="h-9 rounded border border-slate-200 px-2 text-sm" />
                 <select name="workspace_key" defaultValue={doc.workspace_key} className="h-9 rounded border border-slate-200 px-2 text-sm">
                   {WORKSPACE_OPTIONS.map((key) => <option key={key} value={key}>{WORKSPACE_THEMES[key].label}</option>)}
                 </select>

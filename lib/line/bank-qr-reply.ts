@@ -3,11 +3,14 @@ import { isSchemaUnavailable, schemaAdmin } from "@/lib/holding/schema-db";
 import type { WorkspaceKey } from "@/types/holding";
 
 type BankQrRow = {
+  id: string;
   bank_name: string;
   account_name: string;
   account_no: string;
   promptpay_note: string | null;
+  qr_label: string | null;
   qr_image_url: string | null;
+  is_primary_company: boolean;
 };
 
 export type BankQrReplyResult = {
@@ -30,144 +33,137 @@ function safeHttps(raw: string | null): string | null {
   }
 }
 
+function normalizeQrQuery(value: string): string {
+  return value.toLowerCase().replace(/[\s\-_.]+/g, "");
+}
+
 function mapRows(data: unknown): BankQrRow[] {
   if (!Array.isArray(data)) return [];
   return data.flatMap((value) => {
     if (!value || typeof value !== "object") return [];
     const row = value as Record<string, unknown>;
+    if (row.is_qr_customer_visible === false) return [];
     const accountNo = String(row.account_no ?? "").trim();
     const bankName = String(row.bank_name ?? "").trim();
     if (!accountNo || !bankName) return [];
     return [{
+      id: String(row.id ?? ""),
       bank_name: bankName,
       account_name: String(row.account_name ?? "").trim() || "-",
       account_no: accountNo,
       promptpay_note: row.promptpay_note == null ? null : String(row.promptpay_note).trim() || null,
+      qr_label: row.qr_label == null ? null : String(row.qr_label).trim() || null,
       qr_image_url: row.qr_image_url == null ? null : String(row.qr_image_url),
+      is_primary_company: row.is_primary_company === true || row.is_default_receiving === true,
     }];
   });
 }
 
+function bankHeading(name: string): string {
+  return name.startsWith("ธนาคาร") ? name : `ธนาคาร${name}`;
+}
+
 function accountLines(row: BankQrRow): string {
   return [
-    row.bank_name,
+    bankHeading(row.bank_name),
     `ชื่อบัญชี: ${row.account_name}`,
-    `เลขที่: ${row.account_no}`,
-    row.promptpay_note ? `หมายเหตุ: ${row.promptpay_note}` : "",
+    `เลขที่บัญชี: ${row.account_no}`,
+    row.promptpay_note ?? "",
   ].filter(Boolean).join("\n");
 }
 
-function flexMessage(rows: BankQrRow[]): Record<string, unknown> {
-  return {
-    type: "flex",
-    altText: "เลขบัญชีรับโอน",
-    contents: {
-      type: "bubble",
-      body: {
-        type: "box",
-        layout: "vertical",
-        spacing: "md",
-        contents: rows.map((row) => ({
-          type: "box",
-          layout: "vertical",
-          spacing: "xs",
-          contents: [
-            { type: "text", text: row.bank_name, weight: "bold", wrap: true },
-            { type: "text", text: row.account_name, size: "sm", wrap: true },
-            { type: "text", text: row.account_no, size: "sm", wrap: true },
-            ...(row.promptpay_note
-              ? [{ type: "text", text: row.promptpay_note, size: "xs", color: "#64748B", wrap: true }]
-              : []),
-          ],
-        })),
-      },
-    },
-  };
+function selectAccounts(rows: BankQrRow[], query: string): { selected: BankQrRow[]; notice: string | null } {
+  const trimmed = query.trim();
+  const normalized = normalizeQrQuery(trimmed);
+  if (!trimmed) {
+    const primary = rows.filter((row) => row.is_primary_company);
+    return { selected: primary.length > 0 ? [primary[0]] : rows.slice(0, 1), notice: null };
+  }
+  if (normalized === "ทั้งหมด" || normalized === "all") {
+    return { selected: rows.slice(0, 4), notice: null };
+  }
+  const matched = rows.filter((row) =>
+    [row.qr_label, row.bank_name, row.account_name, row.account_no].some((part) =>
+      normalizeQrQuery(part ?? "").includes(normalized),
+    ),
+  );
+  if (matched.length === 0) {
+    const hints = rows.map((row) => `#qr ${row.qr_label || row.bank_name}`).join(", ");
+    return {
+      selected: [],
+      notice: `ไม่พบบัญชี QR ที่ตรงกับ "${trimmed}"\nคำสั่งที่ใช้ได้: ${hints || "#qr"}`,
+    };
+  }
+  return { selected: matched.slice(0, 4), notice: null };
 }
 
-export function buildBankQrMessages(rows: BankQrRow[]): Record<string, unknown>[] {
-  const visible = rows.slice(0, 5);
-  if (visible.length === 0) return [textMessage("ยังไม่มีบัญชีรับโอนที่เปิดใช้งาน")];
-  const images = visible
-    .map((row) => safeHttps(row.qr_image_url))
-    .filter((url): url is string => Boolean(url))
-    .slice(0, 2)
-    .map((url) => ({ type: "image", originalContentUrl: url, previewImageUrl: url }));
-  return [flexMessage(visible), ...images, textMessage(visible.map(accountLines).join("\n\n"))].slice(0, 5);
+function customerMessages(rows: BankQrRow[], query: string): Record<string, unknown>[] {
+  if (rows.length === 0) return [textMessage("ยังไม่มีบัญชี QR ที่เปิดให้ลูกค้าเห็น")];
+  const picked = selectAccounts(rows, query);
+  if (picked.notice) return [textMessage(picked.notice)];
+  if (picked.selected.length === 0) return [textMessage("ยังไม่มีบัญชี QR ที่เปิดให้ลูกค้าเห็น")];
+  const images = picked.selected.flatMap((row) => {
+    const url = safeHttps(row.qr_image_url);
+    return url ? [{ type: "image", originalContentUrl: url, previewImageUrl: url }] : [];
+  });
+  return [...images, textMessage(picked.selected.map(accountLines).join("\n\n"))].slice(0, 5);
 }
 
-async function sendBankReply(
+async function sendOnce(
   token: string,
   replyToken: string,
-  rows: BankQrRow[],
+  messages: Record<string, unknown>[],
 ): Promise<BankQrReplyResult> {
-  const sent = await replyLineMessages(token, replyToken, buildBankQrMessages(rows));
-  if (sent.ok) return { status: "REPLIED_OK", error: null };
-  const summary = rows.length
-    ? rows.slice(0, 5).map(accountLines).join("\n\n")
-    : "ยังไม่มีบัญชีรับโอนที่เปิดใช้งาน";
-  const images = rows
-    .map((row) => safeHttps(row.qr_image_url))
-    .filter((url): url is string => Boolean(url))
-    .slice(0, 2)
-    .map((url) => ({ type: "image", originalContentUrl: url, previewImageUrl: url }));
-  const retry = await replyLineMessages(token, replyToken, [...images, textMessage(summary)].slice(0, 5));
-  if (!retry.ok) return { status: "FAILED", error: sent.error };
-  return { status: "REPLIED_FALLBACK", error: sent.error };
+  const sent = await replyLineMessages(token, replyToken, messages.slice(0, 5));
+  if (!sent.ok) return { status: "FAILED", error: sent.error };
+  return { status: "REPLIED_OK", error: null };
 }
 
 export async function replySupthaveeBankQr(
   token: string,
   replyToken: string,
+  query = "",
 ): Promise<BankQrReplyResult> {
-  const admin = schemaAdmin();
-  const listed = await admin
+  const listed = await schemaAdmin()
     .from("mst_bank_accounts")
-    .select("bank_name, account_name, account_no, promptpay_note, qr_image_url, is_primary_company, sort_order")
+    .select("id, bank_name, account_name, account_no, promptpay_note, qr_label, qr_image_url, is_primary_company, is_qr_customer_visible, sort_order")
     .eq("is_active", true)
+    .eq("is_qr_customer_visible", true)
     .order("is_primary_company", { ascending: false })
     .order("sort_order", { ascending: true })
-    .limit(5);
-  if (listed.error && /promptpay_note|qr_image_url|PGRST204/i.test(listed.error.message ?? "")) {
-    const plain = await admin
-      .from("mst_bank_accounts")
-      .select("bank_name, account_name, account_no, is_primary_company, sort_order")
-      .eq("is_active", true)
-      .order("is_primary_company", { ascending: false })
-      .order("sort_order", { ascending: true })
-      .limit(5);
-    return sendBankReply(token, replyToken, mapRows(plain.data));
+    .limit(50);
+  if (listed.error) {
+    return sendOnce(token, replyToken, [textMessage("ยังตั้งค่าการแสดง QR ให้ลูกค้าไม่พร้อม")]);
   }
-  return sendBankReply(token, replyToken, mapRows(listed.data));
+  return sendOnce(token, replyToken, customerMessages(mapRows(listed.data), query));
 }
 
 export async function replyHoldingBankQr(params: {
   token: string;
   replyToken: string;
   workspaceKey: WorkspaceKey;
+  query?: string;
   bankAccountId?: string | null;
 }): Promise<BankQrReplyResult> {
-  const admin = schemaAdmin();
-  const listed = params.bankAccountId
-    ? await admin
-        .schema("holding")
-        .from("bank_accounts")
-        .select("bank_name, account_name, account_no, promptpay_note, qr_image_url")
-        .eq("id", params.bankAccountId)
-        .eq("is_active", true)
-        .limit(1)
-    : await admin
-        .schema("holding")
-        .from("bank_accounts")
-        .select("bank_name, account_name, account_no, promptpay_note, qr_image_url, is_default_receiving, sort_order")
-        .eq("is_active", true)
-        .eq("workspace_key", params.workspaceKey)
-        .order("is_default_receiving", { ascending: false })
-        .order("sort_order", { ascending: true })
-        .limit(5);
-  if (listed.error && isSchemaUnavailable(listed.error)) {
-    return sendBankReply(params.token, params.replyToken, []);
+  const listed = await schemaAdmin()
+    .schema("holding")
+    .from("bank_accounts")
+    .select("id, bank_name, account_name, account_no, promptpay_note, qr_label, qr_image_url, is_default_receiving, is_qr_customer_visible, sort_order")
+    .eq("is_active", true)
+    .eq("is_qr_customer_visible", true)
+    .eq("workspace_key", params.workspaceKey)
+    .order("is_default_receiving", { ascending: false })
+    .order("sort_order", { ascending: true })
+    .limit(50);
+  if (listed.error) {
+    const message = isSchemaUnavailable(listed.error)
+      ? "ยังตั้งค่าการแสดง QR ให้ลูกค้าไม่พร้อม"
+      : "อ่านสมุดบัญชีไม่สำเร็จ";
+    return sendOnce(params.token, params.replyToken, [textMessage(message)]);
   }
-  if (listed.error) return { status: "FAILED", error: listed.error.message ?? "อ่านสมุดบัญชีไม่สำเร็จ" };
-  return sendBankReply(params.token, params.replyToken, mapRows(listed.data));
+  const rows = mapRows(listed.data).map((row) => ({
+    ...row,
+    is_primary_company: row.is_primary_company || row.id === params.bankAccountId,
+  }));
+  return sendOnce(params.token, params.replyToken, customerMessages(rows, params.query ?? ""));
 }

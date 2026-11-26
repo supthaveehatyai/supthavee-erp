@@ -16,6 +16,7 @@ import { schemaAdmin } from "@/lib/holding/schema-db";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import type {
   BankAccount,
+  BankQrSettingsInput,
   GetBankAccountsResult,
   MutateBankAccountResult,
 } from "@/types/bank-account";
@@ -37,13 +38,13 @@ const EMPTY_LIST: GetBankAccountsResult = { data: [], error: null };
 const BANK_LIST_COLUMNS =
   "id, bank_name, account_no, account_name, branch_name, is_active, created_at, updated_at";
 const BANK_LIST_COLUMNS_WITH_QR =
-  `${BANK_LIST_COLUMNS}, qr_image_url, qr_storage_path, promptpay_note`;
+  `${BANK_LIST_COLUMNS}, qr_image_url, qr_storage_path, qr_label, promptpay_note, is_qr_customer_visible`;
 const QR_COLUMN_MISSING =
-  "ยังไม่มีคอลัมน์ qr_image_url บน mst_bank_accounts — เพิ่มคอลัมน์แบบ NULL ได้บน Cloud ก่อนอัปโหลด QR";
+  "ยังไม่มีคอลัมน์ qr_label หรือ is_qr_customer_visible บน mst_bank_accounts — เพิ่มคอลัมน์บน Cloud ก่อนตั้งค่า QR";
 
 function isMissingQrColumn(error: { message?: string; code?: string } | null): boolean {
   const message = String(error?.message ?? "");
-  return /qr_image_url|qr_storage_path|promptpay_note|PGRST204|schema cache/i.test(message);
+  return /qr_image_url|qr_storage_path|qr_label|promptpay_note|is_qr_customer_visible|PGRST204|schema cache/i.test(message);
 }
 
 function isUniqueViolation(error: {
@@ -80,7 +81,9 @@ function toBankAccountList(data: unknown): BankAccount[] {
       updated_at: String(row.updated_at ?? ""),
       qr_image_url: row.qr_image_url == null ? null : String(row.qr_image_url),
       qr_storage_path: row.qr_storage_path == null ? null : String(row.qr_storage_path),
+      qr_label: row.qr_label == null ? null : String(row.qr_label),
       promptpay_note: row.promptpay_note == null ? null : String(row.promptpay_note),
+      is_qr_customer_visible: row.is_qr_customer_visible === true,
     }))
     .filter((row) => Boolean(row.id));
 }
@@ -268,6 +271,8 @@ export async function uploadSupthaveeBankQrAction(
   if (denied) return denied;
   const bankId = String(formData.get("bank_account_id") ?? "").trim();
   const note = String(formData.get("promptpay_note") ?? "").trim();
+  const qrLabel = String(formData.get("qr_label") ?? "").trim();
+  const customerVisible = String(formData.get("is_qr_customer_visible") ?? "") === "true";
   const file = formData.get("file");
   if (!bankId) return { success: false, error: "ไม่พบรหัสบัญชี" };
   if (!(file instanceof File) || file.size <= 0) {
@@ -290,12 +295,37 @@ export async function uploadSupthaveeBankQrAction(
     .update({
       qr_storage_path: path,
       qr_image_url: publicUrl.publicUrl,
+      qr_label: qrLabel || null,
       promptpay_note: note || null,
+      is_qr_customer_visible: customerVisible,
     })
     .eq("id", bankId);
   if (updated.error) {
     if (isMissingQrColumn(updated.error)) return { success: false, error: QR_COLUMN_MISSING };
     return { success: false, error: updated.error.message ?? "บันทึก QR ไม่สำเร็จ" };
+  }
+  revalidateBankAccountPages();
+  return { success: true, error: null };
+}
+
+export async function updateSupthaveeBankQrSettingsAction(
+  input: BankQrSettingsInput,
+): Promise<MutateBankAccountResult> {
+  const denied = await requireBankAdmin();
+  if (denied) return denied;
+  const id = input.id.trim();
+  if (!id) return { success: false, error: "ไม่พบรหัสบัญชี" };
+  const updated = await schemaAdmin()
+    .from(MST_BANK_ACCOUNTS_TABLE)
+    .update({
+      qr_label: input.qr_label?.trim() || null,
+      promptpay_note: input.promptpay_note?.trim() || null,
+      is_qr_customer_visible: input.is_qr_customer_visible === true,
+    })
+    .eq("id", id);
+  if (updated.error) {
+    if (isMissingQrColumn(updated.error)) return { success: false, error: QR_COLUMN_MISSING };
+    return { success: false, error: updated.error.message ?? "บันทึกตั้งค่า QR ไม่สำเร็จ" };
   }
   revalidateBankAccountPages();
   return { success: true, error: null };
@@ -318,7 +348,7 @@ export async function clearSupthaveeBankQrAction(
   if (storagePath) await admin.storage.from("payment_qr_codes").remove([storagePath]);
   const updated = await admin
     .from(MST_BANK_ACCOUNTS_TABLE)
-    .update({ qr_storage_path: null, qr_image_url: null, promptpay_note: null })
+    .update({ qr_storage_path: null, qr_image_url: null })
     .eq("id", bankId);
   if (updated.error) {
     if (isMissingQrColumn(updated.error)) return { success: false, error: QR_COLUMN_MISSING };

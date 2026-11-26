@@ -9,28 +9,33 @@ export const HOLDING_WORKSPACE_PREFIXES = [
   "/plantation",
 ] as const;
 
-export const VAULT_CATEGORIES = [
-  "หนังสือรับรอง DBD",
-  "ภ.พ.20",
-  "หน้าสมุดบัญชี",
-  "สำเนาบัตรกรรมการ/ทะเบียนบ้าน",
-  "สัญญาเช่า/ใบอนุญาต",
-  "สำเนาโฉนด/ภ.ด.ส.",
-  "ภาษี/งบการเงิน",
-  "อื่นๆ",
+export const VAULT_DOC_CATEGORIES = [
+  "DBD_CERT",
+  "VAT_PP20",
+  "BANK_BOOK",
+  "DIRECTOR_ID",
+  "CONTRACT_LICENSE",
+  "LAND_DEED",
+  "TAX_FINANCE",
+  "OTHER",
 ] as const;
 
-export type VaultCategory = (typeof VAULT_CATEGORIES)[number];
+export type VaultDocCategory = (typeof VAULT_DOC_CATEGORIES)[number];
 
-export const VAULT_CATEGORY_SLUG: Record<VaultCategory, string> = {
-  "หนังสือรับรอง DBD": "dbd",
-  "ภ.พ.20": "pp20",
-  "หน้าสมุดบัญชี": "passbook",
-  "สำเนาบัตรกรรมการ/ทะเบียนบ้าน": "id-house",
-  "สัญญาเช่า/ใบอนุญาต": "lease",
-  "สำเนาโฉนด/ภ.ด.ส.": "title-deed",
-  "ภาษี/งบการเงิน": "tax",
-  "อื่นๆ": "other",
+export const VAULT_DOC_CATEGORY_LABEL: Record<VaultDocCategory, string> = {
+  DBD_CERT: "หนังสือรับรอง DBD",
+  VAT_PP20: "ภ.พ.20",
+  BANK_BOOK: "หน้าสมุดบัญชี",
+  DIRECTOR_ID: "สำเนาบัตรกรรมการ/ทะเบียนบ้าน",
+  CONTRACT_LICENSE: "สัญญาเช่า/ใบอนุญาต",
+  LAND_DEED: "สำเนาโฉนด/ภ.ด.ส.",
+  TAX_FINANCE: "ภาษี/งบการเงิน",
+  OTHER: "อื่นๆ",
+};
+
+export type CorporateDocumentListFilter = {
+  legalEntityId?: string | null;
+  docCategory?: VaultDocCategory | null;
 };
 
 export type WorkspaceTheme = {
@@ -142,27 +147,41 @@ export type HoldingBankAccountRow = {
   account_name: string;
   branch_name: string | null;
   promptpay_note: string | null;
+  qr_label: string | null;
   qr_image_url: string | null;
   qr_storage_path: string | null;
+  is_qr_customer_visible: boolean;
   is_active: boolean;
   is_default_receiving: boolean;
   sort_order: number;
 };
 
+export type HoldingBankQrSettingsInput = {
+  id: string;
+  qr_label: string | null;
+  promptpay_note: string | null;
+  is_qr_customer_visible: boolean;
+};
+
 export type CorporateDocumentRow = {
   id: string;
-  entity_id: string | null;
+  legal_entity_id: string | null;
   entity_name: string | null;
   workspace_key: WorkspaceKey;
-  category: string;
+  doc_category: VaultDocCategory;
   title: string;
-  storage_path: string;
-  mime_type: string | null;
+  doc_ref_no: string | null;
   issue_date: string | null;
   expiry_date: string | null;
+  file_storage_path: string;
+  file_mime_type: string | null;
+  file_size_bytes: number | null;
+  tags: string[];
   notes: string | null;
+  uploaded_by: string | null;
   is_archived: boolean;
   created_at: string;
+  updated_at: string;
 };
 
 export type FnbBranchRow = {
