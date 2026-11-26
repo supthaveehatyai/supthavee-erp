@@ -13,6 +13,7 @@ import { updateSession } from "@/lib/supabase/update-session";
 export async function middleware(request: NextRequest) {
   if (
     request.nextUrl.pathname.startsWith("/api/line") ||
+    request.nextUrl.pathname.startsWith("/api/fnb/server-time") ||
     isPublicLineWebhookPath(request.nextUrl.pathname)
   ) {
     return NextResponse.next();

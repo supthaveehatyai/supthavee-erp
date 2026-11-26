@@ -1,5 +1,6 @@
 import { listFnbBranchesAction } from "@/lib/actions/holding-entities";
 import { getFnbDashboardAction, listPendingShiftApprovalsAction } from "@/lib/actions/fnb-operations";
+import { listEarlyWarningsAction } from "@/lib/actions/fnb-sop";
 import { requireSuperAdmin } from "@/lib/holding/workspace-access";
 import type { FnbBranchRow } from "@/types/holding";
 import { FnbHub } from "@/app/fnb/fnb-hub";
@@ -21,10 +22,11 @@ export default async function FnbPage({
 }) {
   await requireSuperAdmin();
   const params = await searchParams;
-  const [listed, dashboard, approvals] = await Promise.all([
+  const [listed, dashboard, approvals, warnings] = await Promise.all([
     listFnbBranchesAction(),
     getFnbDashboardAction(),
     listPendingShiftApprovalsAction(),
+    listEarlyWarningsAction(),
   ]);
   const branches = listed.data.length > 0 ? listed.data : FALLBACK_BRANCHES;
   return (
@@ -34,6 +36,8 @@ export default async function FnbPage({
       schemaMessage={listed.schemaReady && dashboard.schemaReady ? null : listed.error ?? dashboard.error}
       initialTab={params.tab ?? ""}
       approvals={approvals.data}
+      parAlerts={warnings.data.par}
+      expiryAlerts={warnings.data.expiry}
     />
   );
 }

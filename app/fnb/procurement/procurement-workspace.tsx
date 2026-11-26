@@ -88,7 +88,7 @@ function ScanTab({
       <SaveButton busy={busy} onClick={() => {
         const body = new FormData();
         body.set("receiving_branch_code", branch);
-        body.set("staff_name", "คุณจวง");
+        body.set("actor_source", "desktop");
         body.set("vendor_name", vendor);
         body.set("reveal_cost", "true");
         body.set("lines_json", JSON.stringify(rows.filter((row) => row.item_id).map((row) => ({
@@ -152,12 +152,14 @@ export function ManualReceive({
   items,
   brandLock,
   revealCost,
+  actorSource = "desktop",
   setMessage,
 }: {
   branches: FnbBranchOption[];
   items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom">[];
   brandLock: FnbBrandCode | null;
   revealCost: boolean;
+  actorSource?: "desktop" | "liff";
   setMessage?: (message: string) => void;
 }) {
   const [lines, setLines] = useState([{ item_id: items[0]?.id ?? "", qty: "", uom: items[0]?.default_purchase_uom ?? "" }]);
@@ -168,6 +170,7 @@ export function ManualReceive({
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       form.set("brand_lock", brandLock ?? "");
+      form.set("actor_source", actorSource);
       form.set("reveal_cost", revealCost ? "true" : "false");
       form.set("lines_json", JSON.stringify(lines.map((line) => {
         const item = items.find((row) => row.id === line.item_id);
@@ -184,7 +187,6 @@ export function ManualReceive({
       <h2 className="font-semibold">รับวัตถุดิบเข้าด่วน</h2>
       <div className="grid gap-2 md:grid-cols-2">
         <select className={field} name="receiving_branch_code">{branches.map((branch) => <option key={branch.branch_code} value={branch.branch_code}>{branch.branch_code} {branch.branch_name_th}</option>)}</select>
-        <input className={field} name="staff_name" placeholder="ผู้รับของ" required />
         <input className={field} name="vendor_name" placeholder="ผู้ขาย" />
       </div>
       {lines.map((line, index) => (
@@ -201,7 +203,7 @@ export function ManualReceive({
   );
 }
 
-export function ExpiryPanel({ pending, lots, brandLock }: { pending: FnbUnpackLine[]; lots: FnbExpiryLotRow[]; brandLock: FnbBrandCode | null }) {
+export function ExpiryPanel({ pending, lots, brandLock, actorSource = "desktop" }: { pending: FnbUnpackLine[]; lots: FnbExpiryLotRow[]; brandLock: FnbBrandCode | null; actorSource?: "desktop" | "liff" }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [, start] = useTransition();
@@ -219,10 +221,10 @@ export function ExpiryPanel({ pending, lots, brandLock }: { pending: FnbUnpackLi
             </div>
           );
         })}
-        {line ? <LotSplitter line={line} brandLock={brandLock} busy={busy} onSave={(lotsToSave, staff) => {
+        {line ? <LotSplitter line={line} brandLock={brandLock} busy={busy} onSave={(lotsToSave) => {
           setBusy(true);
           start(async () => {
-            const saved = await saveExpiryLotsAction({ gr_line_id: line.id, staff_name: staff, brand_lock: brandLock, lots: lotsToSave });
+            const saved = await saveExpiryLotsAction({ gr_line_id: line.id, staff_name: "", actor_source: actorSource, brand_lock: brandLock, lots: lotsToSave });
             setBusy(false);
             if (saved.error) toast.error(saved.error);
             else { toast.success("บันทึกล็อตวันหมดอายุแล้ว"); setOpenId(null); }
@@ -262,19 +264,17 @@ function LotSplitter({
   line: FnbUnpackLine;
   brandLock: FnbBrandCode | null;
   busy: boolean;
-  onSave: (lots: { pack_qty: number; mfg_date: string; expiry_date: string; shelf_life_months: number | null }[], staff: string) => void;
+  onSave: (lots: { pack_qty: number; mfg_date: string; expiry_date: string; shelf_life_months: number | null }[]) => void;
 }) {
   const remain = line.received_qty - line.allocated_lot_qty;
   const [rows, setRows] = useState([{ qty: String(remain), mfg: "", expiry: "" }]);
-  const [staff, setStaff] = useState("");
   const months = line.shelf_life_months ?? 12;
   return (
     <form className="space-y-2 rounded-lg border border-red-100 p-3" onSubmit={(event) => {
       event.preventDefault();
-      onSave(rows.map((row) => ({ pack_qty: Number(row.qty) || 0, mfg_date: row.mfg, expiry_date: row.expiry, shelf_life_months: line.shelf_life_months })), staff);
+      onSave(rows.map((row) => ({ pack_qty: Number(row.qty) || 0, mfg_date: row.mfg, expiry_date: row.expiry, shelf_life_months: line.shelf_life_months })));
     }}>
       <p className="text-sm">อายุเก็บรักษาตามมาตรฐาน: {months} เดือน นับจากวันผลิต</p>
-      <input className={field} value={staff} placeholder="ผู้แกะกล่อง" required onChange={(event) => setStaff(event.target.value)} />
       {rows.map((row, index) => (
         <div key={index} className="grid gap-2 md:grid-cols-3">
           <input className={field} type="number" step="0.01" value={row.qty} onChange={(event) => setRows((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, qty: event.target.value } : item))} />

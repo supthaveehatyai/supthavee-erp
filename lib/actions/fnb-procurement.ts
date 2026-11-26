@@ -1,6 +1,7 @@
 "use server";
 
 import { generateWithGeminiFallback, resolveGeminiApiKey } from "@/lib/ai/gemini-client";
+import { resolveFnbActor } from "@/lib/fnb/actor";
 import { parseVendorCatalogSheet } from "@/lib/fnb/excel";
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
@@ -127,6 +128,13 @@ export async function listReceiveItemsAction(brandLock?: FnbBrandCode | null): P
 
 export async function submitBlindGoodsReceiptAction(formData: FormData): Promise<FnbActionResult<{ gr_no: string; line_count: number }>> {
   try {
+    const actor = await resolveFnbActor({
+      actorSource: text(formData.get("actor_source")),
+      brandLock: text(formData.get("brand_lock")),
+      branchCode: text(formData.get("receiving_branch_code")),
+    });
+    if (!actor.ok) return result({ gr_no: "", line_count: 0 }, actor.error);
+    formData.set("staff_name", actor.actor.name);
     const branch = text(formData.get("receiving_branch_code"));
     const brand = text(formData.get("brand_lock"));
     const brandLock = brand === "LUCKY_CUP" || brand === "CHATORN" ? brand : null;
@@ -268,13 +276,17 @@ export async function listExpiryWorkspaceAction(brandLock?: FnbBrandCode | null)
 export async function saveExpiryLotsAction(input: {
   gr_line_id: string;
   staff_name: string;
+  actor_source?: string;
   brand_lock?: FnbBrandCode | null;
+  branch_code?: string | null;
   lots: { pack_qty: number; mfg_date: string; expiry_date: string; shelf_life_months: number | null }[];
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
+    const actor = await resolveFnbActor({ actorSource: input.actor_source ?? "desktop", brandLock: input.brand_lock ?? null, branchCode: input.branch_code ?? null });
+    if (!actor.ok) return result({ ok: false }, actor.error);
     const saved = await callFnbRpc("save_gr_line_expiry_lots", {
       p_gr_line_id: input.gr_line_id,
-      p_staff_name: input.staff_name,
+      p_staff_name: actor.actor.name,
       p_lots: input.lots,
     });
     if (saved.error) return fail({ ok: false }, saved.error, "บันทึกล็อตไม่สำเร็จ");
@@ -426,6 +438,13 @@ export async function confirmHqGoodsReceiptAction(input: {
 
 export async function submitStaffReimbursementAction(formData: FormData): Promise<FnbActionResult<{ reimb_no: string }>> {
   try {
+    const actor = await resolveFnbActor({
+      actorSource: text(formData.get("actor_source")),
+      brandLock: text(formData.get("brand_lock")),
+      branchCode: text(formData.get("branch_code")),
+    });
+    if (!actor.ok) return result({ reimb_no: "" }, actor.error);
+    formData.set("staff_name", actor.actor.name);
     const mode = text(formData.get("reimb_mode"));
     if (mode !== "STAFF_ADVANCE_REIMBURSE" && mode !== "HQ_DIRECT_PAY") return result({ reimb_no: "" }, "เลือกประเภทรายการให้ถูกต้อง");
     const branch = text(formData.get("branch_code"));

@@ -1,5 +1,6 @@
 "use server";
 
+import { resolveFnbActor } from "@/lib/fnb/actor";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
 import { requireSuperAdmin } from "@/lib/holding/workspace-access";
@@ -47,11 +48,15 @@ export async function transferFnbStockAction(input: {
   from_branch_code: string;
   to_branch_code: string;
   staff_name: string;
+  actor_source?: string;
   item_id: string;
   qty_in_count_uom: number;
 }): Promise<FnbActionResult<{ transfer_no: string }>> {
   try {
     await requireSuperAdmin();
+    const actor = await resolveFnbActor({ actorSource: input.actor_source ?? "desktop", brandLock: null, branchCode: input.from_branch_code });
+    if (!actor.ok) return result({ transfer_no: "" }, actor.error);
+    const staffName = actor.actor.name;
     const db = schemaAdmin().schema("fnb");
     const [from, to, item] = await Promise.all([
       db.from("branches").select("legal_entity_id").eq("branch_code", input.from_branch_code).maybeSingle(),
@@ -73,7 +78,7 @@ export async function transferFnbStockAction(input: {
       from_branch_code: input.from_branch_code,
       to_branch_code: input.to_branch_code,
       transfer_date: todayBangkok(),
-      staff_name: input.staff_name,
+      staff_name: staffName,
     });
     if (header.error) return fail({ transfer_no: "" }, header.error, "บันทึกโอนไม่สำเร็จ");
     const line = await db.from("inter_branch_transfer_lines").insert({
@@ -110,10 +115,14 @@ export async function transferFnbStockAction(input: {
 export async function submitBlindCountAction(input: {
   branch_code: string;
   staff_name: string;
+  actor_source?: string;
   lines: { item_id: string; closed_pack_count: number; open_pack_weight_g: number }[];
 }): Promise<FnbActionResult<{ count_no: string; lines: { short_code: string; counted: number; system: number; variance: number; cost: number }[] }>> {
   try {
     await requireSuperAdmin();
+    const actor = await resolveFnbActor({ actorSource: input.actor_source ?? "desktop", brandLock: null, branchCode: input.branch_code });
+    if (!actor.ok) return result({ count_no: "", lines: [] }, actor.error);
+    const staffName = actor.actor.name;
     const db = schemaAdmin().schema("fnb");
     const items = await db.from("items").select("id,short_code,recipe_uom,recipe_per_count_uom,specific_gravity,tare_weight_g,moving_avg_cost_per_recipe_unit").limit(500);
     const ledger = await db.from("stock_ledger").select("item_id,qty_delta").eq("branch_code", input.branch_code).limit(5000);
@@ -130,7 +139,7 @@ export async function submitBlindCountAction(input: {
       count_no: countNo,
       branch_code: input.branch_code,
       count_date: todayBangkok(),
-      staff_name: input.staff_name,
+      staff_name: staffName,
       status: "SUBMITTED",
     });
     if (header.error) return fail({ count_no: "", lines: [] }, header.error, "บันทึกใบนับไม่สำเร็จ");

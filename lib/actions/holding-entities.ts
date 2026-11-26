@@ -362,7 +362,7 @@ export async function listLiffRegistrationsAction(): Promise<HoldingActionResult
     const listed = await schemaAdmin()
       .schema("holding")
       .from("liff_user_registrations")
-      .select("id, line_user_id, display_name, channel_code, approval_status, assigned_workspace, assigned_brand_code, branch_code, created_at")
+      .select("id, line_user_id, display_name, channel_code, approval_status, assigned_workspace, assigned_brand_code, branch_code, staff_nickname, is_active, created_at")
       .order("created_at", { ascending: false })
       .limit(200);
     if (listed.error) {
@@ -377,6 +377,8 @@ export async function listLiffRegistrationsAction(): Promise<HoldingActionResult
       status: String(row.approval_status ?? "PENDING"),
       assigned_brand_code: row.assigned_brand_code == null ? null : String(row.assigned_brand_code),
       branch_code: row.branch_code == null ? null : String(row.branch_code),
+      staff_nickname: row.staff_nickname == null ? null : String(row.staff_nickname),
+      is_active: row.is_active !== false,
       created_at: String(row.created_at ?? ""),
     })));
   } catch (error) {
@@ -395,6 +397,8 @@ export async function approveLiffRegistrationAction(
     if (!id) return empty({ ok: false }, "ไม่พบคำขอ");
     const workspace = String(formData.get("workspace_key") ?? "");
     const brand = String(formData.get("assigned_brand_code") ?? "");
+    const active = String(formData.get("is_active") ?? "true") !== "false";
+    const session = await requireSuperAdmin();
     const updated = await schemaAdmin()
       .schema("holding")
       .from("liff_user_registrations")
@@ -403,6 +407,12 @@ export async function approveLiffRegistrationAction(
         assigned_workspace: ["fnb", "agri", "prop", "holding"].includes(workspace) ? workspace : null,
         assigned_brand_code: brand === "LUCKY_CUP" || brand === "CHATORN" ? brand : null,
         branch_code: String(formData.get("branch_code") ?? "").trim() || null,
+        staff_nickname: String(formData.get("staff_nickname") ?? "").trim() || null,
+        is_active: active,
+        deactivated_at: active ? null : new Date().toISOString(),
+        deactivated_by: active ? null : session.userId,
+        deactivation_reason: active ? null : "ระงับสิทธิ์พนักงานลาออก",
+        updated_at: new Date().toISOString(),
       })
       .eq("id", id);
     if (updated.error) {

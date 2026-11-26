@@ -14,6 +14,7 @@ export function BrandStore({
   pendingLots,
   lots,
   schemaMessage,
+  actorName,
 }: {
   brand: FnbBrandCode;
   title: string;
@@ -23,6 +24,7 @@ export function BrandStore({
   pendingLots: FnbUnpackLine[];
   lots: FnbExpiryLotRow[];
   schemaMessage: string | null;
+  actorName: string;
 }) {
   const [tab, setTab] = useState<"ops" | "receive" | "lots">("ops");
   return (
@@ -34,9 +36,9 @@ export function BrandStore({
         <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "receive" ? "bg-red-700 text-white" : "bg-white ring-1 ring-red-200"}`} onClick={() => setTab("receive")}>รับของเข้า</button>
         <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "lots" ? "bg-red-700 text-white" : "bg-white ring-1 ring-red-200"}`} onClick={() => setTab("lots")}>แกะล็อตหมดอายุ</button>
       </div>
-      {tab === "ops" ? <OperationsWorkspace branches={branches} shelfItems={shelfItems} brandLock={brand} superAdmin={false} /> : null}
-      {tab === "receive" ? <ManualReceive branches={branches} items={items} brandLock={brand} revealCost={false} /> : null}
-      {tab === "lots" ? <ExpiryPanel pending={pendingLots} lots={lots} brandLock={brand} /> : null}
+      {tab === "ops" ? <OperationsWorkspace branches={branches} shelfItems={shelfItems} brandLock={brand} superAdmin={false} actorName={actorName} actorSource="liff" /> : null}
+      {tab === "receive" ? <ManualReceive branches={branches} items={items} brandLock={brand} revealCost={false} actorSource="liff" /> : null}
+      {tab === "lots" ? <ExpiryPanel pending={pendingLots} lots={lots} brandLock={brand} actorSource="liff" /> : null}
     </main>
   );
 }

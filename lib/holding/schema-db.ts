@@ -7,6 +7,8 @@ type QueryError = { code?: string; message?: string } | null;
 
 type FilterBuilder = Promise<{ data: unknown; error: QueryError }> & {
   eq: (column: string, value: string | boolean | number | null) => FilterBuilder;
+  gte: (column: string, value: string | number) => FilterBuilder;
+  lte: (column: string, value: string | number) => FilterBuilder;
   order: (column: string, options?: { ascending?: boolean }) => FilterBuilder;
   limit: (count: number) => FilterBuilder;
   maybeSingle: () => Promise<{ data: unknown; error: QueryError }>;
@@ -18,12 +20,8 @@ export type SchemaTable = {
     data: unknown;
     error: QueryError;
   }>;
-  update: (values: Record<string, unknown>) => {
-    eq: (column: string, value: string | boolean) => Promise<{ error: QueryError }>;
-  };
-  delete: () => {
-    eq: (column: string, value: string) => Promise<{ error: QueryError }>;
-  };
+  update: (values: Record<string, unknown>) => FilterBuilder;
+  delete: () => FilterBuilder;
 };
 
 export type SchemaAdmin = {

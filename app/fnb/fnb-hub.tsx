@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import type { FnbBranchRow } from "@/types/holding";
-import type { FnbBranchKpi, FnbChangeRequestRow } from "@/types/fnb";
+import type { FnbBranchKpi, FnbChangeRequestRow, FnbExpiryAlert, FnbParLevelRow } from "@/types/fnb";
 import { ApprovalQueue } from "@/app/fnb/approval-queue";
 
 const CT_BNP_OPENING = "2026-12-26";
@@ -22,12 +22,16 @@ export function FnbHub({
   schemaMessage,
   initialTab,
   approvals,
+  parAlerts,
+  expiryAlerts,
 }: {
   branches: FnbBranchRow[];
   kpis: FnbBranchKpi[];
   schemaMessage: string | null;
   initialTab: string;
   approvals: FnbChangeRequestRow[];
+  parAlerts: FnbParLevelRow[];
+  expiryAlerts: FnbExpiryAlert[];
 }) {
   const [brand, setBrand] = useState(initialTab === "branches" ? "all" : "all");
   const [branchCode, setBranchCode] = useState("all");
@@ -85,6 +89,18 @@ export function FnbHub({
           ))}
         </select>
       </div>
+      {parAlerts.length > 0 ? (
+        <article className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-900">
+          <h2 className="font-semibold">🚨 วัตถุดิบและของใช้ต่ำกว่าจุดสั่งซื้อ (ต้องสั่งเพิ่มด่วน)</h2>
+          {parAlerts.map((row) => <p key={`${row.branch_code}-${row.item_id}`}>{row.branch_code} · {row.name_th || row.short_code} คงเหลือ {row.last_observed_count_qty ?? 0} จุดต่ำสุด {row.min_par_count_qty}</p>)}
+        </article>
+      ) : null}
+      {expiryAlerts.length > 0 ? (
+        <article className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+          <h2 className="font-semibold">⏰ แจ้งเตือนล็อตวัตถุดิบใกล้หมดอายุ (ล่วงหน้า 14 วัน / 7 วัน / หมดอายุ)</h2>
+          {expiryAlerts.map((row, index) => <p key={`${row.branch_code}-${row.expiry_date}-${index}`}>{row.branch_code} · {row.name_th} หมดอายุ {row.expiry_date} {row.days_left < 0 ? "หมดอายุแล้ว" : row.days_left <= 7 ? `อีก ${row.days_left} วัน` : `อีก ${row.days_left} วัน`}</p>)}
+        </article>
+      ) : null}
       <div className="grid gap-3 md:grid-cols-4">
         <Kpi label="ยอดขายวันนี้" value={baht(totals.todaySales)} />
         <Kpi label="ยอดขายเดือนนี้" value={baht(totals.monthSales)} />

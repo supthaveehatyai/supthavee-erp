@@ -66,6 +66,17 @@ export type FnbBranchOption = {
   vat_branch_code: string;
   branch_status: string;
   target_open_date: string | null;
+  standard_cash_float: number;
+  enable_shift_3: boolean;
+  opening_time: string | null;
+  closing_time: string | null;
+  opening_deadline_time: string | null;
+  shift_1_start: string | null;
+  shift_1_end: string | null;
+  shift_2_start: string | null;
+  shift_2_end: string | null;
+  shift_3_start: string | null;
+  shift_3_end: string | null;
 };
 
 export type FnbBrandCode = "LUCKY_CUP" | "CHATORN";
@@ -331,6 +342,130 @@ export type FnbExcelPriceRow = {
   name_th: string;
   unit_price: number;
   action: "insert" | "update";
+};
+
+export const FNB_LIFF_SUSPENDED_MESSAGE = "บัญชีนี้ถูกระงับสิทธิ์การเข้าใช้งานแล้ว กรุณาติดต่อผู้จัดการ";
+
+export const FNB_SOP_STAGES = ["OPENING", "SHIFT_HANDOVER", "CLOSING"] as const;
+export const FNB_SOP_STAGE_INSTANCES = ["OPENING", "SHIFT_1", "SHIFT_2", "SHIFT_3", "CLOSING"] as const;
+export const FNB_SOP_INPUT_TYPES = ["PHOTO_ONLY", "COFFEE_CALIBRATION", "CASH_FLOAT_CHECK", "PREP_BATCH", "ITEM_PAR_CHECK", "EXPIRY_AUDIT", "NUMBER_METRIC", "PASS_FAIL_PHOTO"] as const;
+export const FNB_SOP_SCHEDULES = ["DAILY", "WEEKLY_DAYS", "MONTHLY_DATES"] as const;
+export const FNB_BRANCH_CODES = ["LC-HDY", "LC-PSU", "CT-KLN", "CT-BNP", "CT-NMM"] as const;
+
+export type FnbSopStage = (typeof FNB_SOP_STAGES)[number];
+export type FnbSopStageInstance = (typeof FNB_SOP_STAGE_INSTANCES)[number];
+export type FnbSopInputType = (typeof FNB_SOP_INPUT_TYPES)[number];
+export type FnbSopSchedule = (typeof FNB_SOP_SCHEDULES)[number];
+
+export type FnbActorSource = "desktop" | "liff";
+
+export type FnbActor = {
+  name: string;
+  lineUserId: string | null;
+  userId: string | null;
+  branchCode: string | null;
+  brandCode: FnbBrandCode | null;
+  source: FnbActorSource;
+};
+
+export type FnbSopTemplate = {
+  id: string;
+  task_code: string;
+  stage_code: FnbSopStage;
+  brand_scope: string;
+  title_th: string;
+  description_instruction: string | null;
+  reference_photo_url: string | null;
+  input_type: FnbSopInputType;
+  linked_item_id: string | null;
+  live_camera_only: boolean;
+  is_mandatory: boolean;
+  schedule_type: FnbSopSchedule;
+  schedule_days: number[];
+  sort_order: number;
+  is_active: boolean;
+  branches: string[];
+};
+
+export type FnbSopSubmission = {
+  id: string;
+  template_id: string;
+  submitted_by_name: string;
+  server_submitted_at: string;
+  status_value: string;
+  numeric_value: number | null;
+  note_text: string | null;
+  photo_urls: string[];
+  manager_review_status: string;
+};
+
+export type FnbSopBoard = {
+  session_status: string;
+  contributors: { staff_name: string; task_count: number }[];
+  mandatory_done: number;
+  mandatory_total: number;
+  tasks: (FnbSopTemplate & { submission: FnbSopSubmission | null })[];
+};
+
+export type FnbParLevelRow = {
+  branch_code: string;
+  item_id: string;
+  short_code: string;
+  name_th: string;
+  min_par_count_qty: number;
+  lead_time_days: number;
+  is_below_par: boolean;
+  last_observed_count_qty: number | null;
+};
+
+export type FnbExpiryAlert = {
+  branch_code: string;
+  name_th: string;
+  expiry_date: string;
+  remaining_pack_qty: number;
+  days_left: number;
+};
+
+export type FnbMenuSalesLine = {
+  line_seq: number;
+  menu_id: string | null;
+  menu_name_th: string;
+  category_name: string | null;
+  cup_size: string | null;
+  qty_sold: number;
+  gross_amount: number;
+};
+
+export type FnbMenuSalesDraft = {
+  summary_only: boolean;
+  slip_printed_at: string | null;
+  reported_total_qty: number;
+  reported_total_amount: number;
+  early_print_note: string | null;
+  lines: FnbMenuSalesLine[];
+};
+
+export type FnbMenuRank = {
+  branch_code: string;
+  menu_name_th: string;
+  cup_size: string | null;
+  category_name: string | null;
+  qty_sold: number;
+  gross_amount: number;
+};
+
+export type FnbPromoHint = {
+  branch_code: string;
+  item_name: string;
+  expiry_date: string;
+  days_left: number;
+  menu_name_th: string;
+};
+
+export type FnbCashFloatContext = {
+  standard_cash_float: number;
+  prev_shift_held_cash: number;
+  closing_time: string | null;
 };
 
 export type FnbPosImportPreview = {

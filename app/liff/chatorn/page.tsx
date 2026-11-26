@@ -1,10 +1,17 @@
 import { listFnbBranchOptionsAction, listFrontBackItemsAction } from "@/lib/actions/fnb-operations";
 import { listExpiryWorkspaceAction, listReceiveItemsAction } from "@/lib/actions/fnb-procurement";
+import { readLiffActor } from "@/lib/fnb/actor";
 import { BrandStore } from "@/app/liff/brand-store";
+import { LiffLogin } from "@/app/liff/liff-login";
+import { FNB_LIFF_SUSPENDED_MESSAGE } from "@/types/fnb";
 
 export const dynamic = "force-dynamic";
 
 export default async function ChatornLiffPage() {
+  const gate = await readLiffActor();
+  if (!gate.actor || gate.actor.brandCode !== "CHATORN") {
+    return <LiffLogin brand="CHATORN" suspended={gate.error === FNB_LIFF_SUSPENDED_MESSAGE} />;
+  }
   const [branches, shelf, items, expiry] = await Promise.all([
     listFnbBranchOptionsAction("CHATORN"),
     listFrontBackItemsAction("CHATORN"),
@@ -21,6 +28,7 @@ export default async function ChatornLiffPage() {
       pendingLots={expiry.data.pending}
       lots={expiry.data.lots}
       schemaMessage={branches.error || shelf.error || items.error || expiry.error}
+      actorName={gate.actor.name}
     />
   );
 }

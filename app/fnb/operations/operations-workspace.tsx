@@ -3,6 +3,11 @@
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { ApprovalQueue } from "@/app/fnb/approval-queue";
+import { CashFloatNote } from "@/components/fnb/cash-float-note";
+import { MenuSalesPanel } from "@/components/fnb/menu-sales-panel";
+import { SopBoard } from "@/components/fnb/sop-board";
+import { SopPhotoBoard } from "@/components/fnb/sop-photo-board";
+import { saveShift3HandoverAction } from "@/lib/actions/fnb-sop";
 import {
   commitPosExcelAction,
   getFnbDayStateAction,
@@ -27,6 +32,7 @@ import {
   type FnbItemRow,
   type FnbPosImportPreview,
   type FnbShiftCard,
+  type FnbSopStageInstance,
   type FnbSubmitResult,
 } from "@/types/fnb";
 
@@ -45,18 +51,22 @@ export function OperationsWorkspace({
   shelfItems,
   brandLock,
   superAdmin,
+  actorName,
+  actorSource,
   initialApprovals = [],
 }: {
   branches: FnbBranchOption[];
   shelfItems: FnbItemRow[];
   brandLock: FnbBrandCode | null;
   superAdmin: boolean;
+  actorName: string;
+  actorSource: "desktop" | "liff";
   initialApprovals?: FnbChangeRequestRow[];
 }) {
-  const [tab, setTab] = useState<"open" | "close" | "waste">("open");
+  const [tab, setTab] = useState<FnbSopStageInstance>("OPENING");
   const [branch, setBranch] = useState(branches[0]?.branch_code ?? "");
   const [workDate, setWorkDate] = useState(today());
-  const [staffName, setStaffName] = useState("");
+  const staffName = actorName;
   const [message, setMessage] = useState("");
   const [day, setDay] = useState<FnbDayState | null>(null);
   const [approvals, setApprovals] = useState(initialApprovals);
@@ -121,18 +131,23 @@ export function OperationsWorkspace({
         <select className={field} value={branch} onChange={(event) => setBranch(event.target.value)}>
           {branches.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code} {item.branch_name_th}</option>)}
         </select>
-        <input className={field} value={staffName} placeholder="ชื่อพนักงาน" onChange={(event) => setStaffName(event.target.value)} />
+        <p className="flex h-10 items-center rounded-md bg-red-50 px-3 text-sm text-red-900">ผู้ปฏิบัติงาน: {staffName || "บัญชีที่ล็อกอิน"}</p>
         <input className={field} type="date" value={workDate} onChange={(event) => setWorkDate(event.target.value)} />
       </div>
       <div className="flex flex-wrap gap-2">
-        <TabButton active={tab === "open"} onClick={() => setTab("open")}>เปิดร้านเช้า</TabButton>
-        <TabButton active={tab === "close"} onClick={() => setTab("close")}>ปิดกะเช้า / ปิดกะบ่าย</TabButton>
-        <TabButton active={tab === "waste"} onClick={() => setTab("waste")}>ปิดร้าน: ของทิ้งและเช็กหน้า-หลัง</TabButton>
+        <TabButton active={tab === "OPENING"} onClick={() => setTab("OPENING")}>1. เปิดร้าน (กะแรก)</TabButton>
+        <TabButton active={tab === "SHIFT_1"} onClick={() => setTab("SHIFT_1")}>2. ส่งเงินกะแรก</TabButton>
+        <TabButton active={tab === "SHIFT_2"} onClick={() => setTab("SHIFT_2")}>3. ส่งเงินกะสอง</TabButton>
+        {selected?.enable_shift_3 ? <TabButton active={tab === "SHIFT_3"} onClick={() => setTab("SHIFT_3")}>4. ส่งเงินกะสาม</TabButton> : null}
+        <TabButton active={tab === "CLOSING"} onClick={() => setTab("CLOSING")}>{`${selected?.enable_shift_3 ? "5" : "4"}. ปิดร้านและยอดขายรายเมนู (${selected?.enable_shift_3 ? "กะสาม" : "กะสอง"})`}</TabButton>
       </div>
-      {tab === "open" ? <MorningPanel brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} day={day} busy={busy === "open"} run={run} /> : null}
-      {tab === "close" ? <ClosePanel brand={brand} brandLock={brandLock} superAdmin={superAdmin} branch={branch} branches={branches} workDate={workDate} staffName={staffName} day={day} busy={busy} run={run} /> : null}
-      {tab === "waste" ? <WastePanel brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} shelfItems={shelfItems} day={day} busy={busy} run={run} /> : null}
-      {brandLock ? <ReimburseBox brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} busy={busy === "reimburse"} run={run} /> : null}
+      {tab === "OPENING" ? <MorningPanel brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} day={day} busy={busy === "open"} run={run} /> : null}
+      {tab === "SHIFT_1" || tab === "SHIFT_2" ? <ClosePanel brand={brand} brandLock={brandLock} superAdmin={superAdmin} branch={branch} branches={branches} workDate={workDate} staffName={staffName} actorSource={actorSource} day={day} busy={busy} run={run} lockShift={tab === "SHIFT_1" ? "MORNING" : "AFTERNOON"} /> : null}
+      {tab === "SHIFT_3" ? <Shift3Panel brandLock={brandLock} branch={branch} workDate={workDate} actorSource={actorSource} busy={busy === "shift3"} run={run} /> : null}
+      {tab === "CLOSING" ? <><WastePanel brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} shelfItems={shelfItems} day={day} busy={busy} run={run} /><MenuSalesPanel branch={branch} workDate={workDate} brand={brand} actorSource={actorSource} /></> : null}
+      <SopBoard branch={branch} workDate={workDate} stage={tab === "SHIFT_3" && !selected?.enable_shift_3 ? "CLOSING" : tab} brandLock={brandLock} actorSource={actorSource} actorName={staffName} superAdmin={superAdmin} />
+      {brandLock ? <ReimburseBox brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} busy={busy === "reimburse"} run={run} /> : null}
+      {superAdmin ? <SopPhotoBoard workDate={workDate} /> : null}
       {superAdmin ? <SettlementPanel shifts={day?.shifts ?? []} busy={busy === "settle"} run={run} /> : null}
     </div>
   );
@@ -143,6 +158,7 @@ function MorningPanel({
   branch,
   workDate,
   staffName,
+  actorSource,
   day,
   busy,
   run,
@@ -151,6 +167,7 @@ function MorningPanel({
   branch: string;
   workDate: string;
   staffName: string;
+  actorSource: "desktop" | "liff";
   day: FnbDayState | null;
   busy: boolean;
   run: (key: string, task: () => Promise<{ error: string | null; data: FnbSubmitResult }>, success: string) => void;
@@ -171,7 +188,7 @@ function MorningPanel({
         <form className="space-y-3" onSubmit={(event) => {
           event.preventDefault();
           const body = new FormData(event.currentTarget);
-          fillCommon(body, { brandLock, branch, workDate, staffName });
+          fillCommon(body, { brandLock, branch, workDate, staffName, actorSource });
           body.set("calibration_shots", String(shots));
           body.set("is_edit", day?.opening ? "true" : "false");
           run("open", () => recordMorningOpeningAction(body), "บันทึกเปิดร้านเรียบร้อยแล้ว");
@@ -202,27 +219,32 @@ function ClosePanel(props: {
   branches: FnbBranchOption[];
   workDate: string;
   staffName: string;
+  actorSource: "desktop" | "liff";
   day: FnbDayState | null;
   busy: string | null;
   run: (key: string, task: () => Promise<{ error: string | null; data: FnbSubmitResult }>, success: string) => void;
+  lockShift?: "MORNING" | "AFTERNOON";
 }) {
   const morning = props.day?.shifts.find((shift) => shift.shift_type === "MORNING") ?? null;
   const afternoon = props.day?.shifts.find((shift) => shift.shift_type === "AFTERNOON") ?? null;
-  const [shiftType, setShiftType] = useState<"MORNING" | "AFTERNOON">("MORNING");
-  const current = shiftType === "MORNING" ? morning : afternoon;
-  const pending = props.day?.pending.find((row) => row.shift_type === shiftType);
+  const [shiftType, setShiftType] = useState<"MORNING" | "AFTERNOON">(props.lockShift ?? "MORNING");
+  const activeShift = props.lockShift ?? shiftType;
+  const current = activeShift === "MORNING" ? morning : afternoon;
+  const pending = props.day?.pending.find((row) => row.shift_type === activeShift);
   return (
     <section className="space-y-3">
       <article className="rounded-xl bg-slate-900 p-4 text-sm text-white">
         <p className="font-semibold">สรุปยอดรวมทั้งวันอัตโนมัติ = กะเช้า + กะบ่าย</p>
         <p className="mt-1">ยอดสุทธิ {money((morning?.net_sales_inc_vat ?? 0) + (afternoon?.net_sales_inc_vat ?? 0))} · เงินสด POS {money((morning?.cash_pos_amount ?? 0) + (afternoon?.cash_pos_amount ?? 0))} · QR {money((morning?.qr_amount ?? 0) + (afternoon?.qr_amount ?? 0))}</p>
       </article>
-      <div className="flex gap-2">
-        <TabButton active={shiftType === "MORNING"} onClick={() => setShiftType("MORNING")}>กะเช้า</TabButton>
-        <TabButton active={shiftType === "AFTERNOON"} onClick={() => setShiftType("AFTERNOON")}>กะบ่าย / ปิดยอดขาย</TabButton>
-      </div>
+      {props.lockShift ? null : (
+        <div className="flex gap-2">
+          <TabButton active={shiftType === "MORNING"} onClick={() => setShiftType("MORNING")}>กะแรก</TabButton>
+          <TabButton active={shiftType === "AFTERNOON"} onClick={() => setShiftType("AFTERNOON")}>กะสอง</TabButton>
+        </div>
+      )}
       {pending ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">รออนุมัติแก้ไขตัวเลขการเงิน ({pending.request_no})</p> : null}
-      <ShiftForm {...props} shiftType={shiftType} current={current} />
+      <ShiftForm {...props} shiftType={activeShift} current={current} />
       {props.brand === "LUCKY_CUP" && props.superAdmin ? <PosExcelBox branches={props.branches.filter((item) => item.brand_code === "LUCKY_CUP")} /> : null}
     </section>
   );
@@ -235,6 +257,7 @@ function ShiftForm({
   branch,
   workDate,
   staffName,
+  actorSource,
   shiftType,
   current,
   busy,
@@ -246,7 +269,9 @@ function ShiftForm({
   branch: string;
   workDate: string;
   staffName: string;
+  actorSource: "desktop" | "liff";
   shiftType: "MORNING" | "AFTERNOON";
+  lockShift?: "MORNING" | "AFTERNOON";
   current: FnbShiftCard | null;
   busy: string | null;
   run: (key: string, task: () => Promise<{ error: string | null; data: FnbSubmitResult }>, success: string) => void;
@@ -281,7 +306,7 @@ function ShiftForm({
             }
           }
           const body = new FormData(event.currentTarget);
-          fillCommon(body, { brandLock, branch, workDate, staffName });
+          fillCommon(body, { brandLock, branch, workDate, staffName, actorSource });
           body.set("shift_type", shiftType);
           body.set("entry_mode", brand === "LUCKY_CUP" ? "POS_SLIP" : mode);
           body.set("cash_counted_amount", String(counted));
@@ -344,6 +369,7 @@ function ShiftForm({
             </div>
             {Math.abs(diff) >= 0.5 ? <label className="mt-2 block text-sm">สาเหตุส่วนต่างเงินสด *<input className={field} name="cash_variance_reason" required minLength={3} /></label> : null}
           </div>
+          <CashFloatNote branch={branch} workDate={workDate} shiftType={shiftType} counted={counted} cashPos={cashPos} />
           <div className="space-y-2 rounded-lg bg-slate-50 p-3">
             <p className="font-medium">วิธีฝากเงินสด</p>
             <label className="flex gap-2 text-sm"><input type="radio" checked={deposit === "BANK_DIRECT"} onChange={() => setDeposit("BANK_DIRECT")} />ฝากธนาคาร / ตู้ CDM (ไม่มีค่าธรรมเนียม 0 บาท)</label>
@@ -361,12 +387,54 @@ function ShiftForm({
   );
 }
 
+function Shift3Panel({
+  brandLock,
+  branch,
+  workDate,
+  actorSource,
+  busy,
+  run,
+}: {
+  brandLock: FnbBrandCode | null;
+  branch: string;
+  workDate: string;
+  actorSource: "desktop" | "liff";
+  busy: boolean;
+  run: (key: string, task: () => Promise<{ error: string | null; data: FnbSubmitResult }>, success: string) => void;
+}) {
+  const [notes, setNotes] = useState<Record<number, number>>({});
+  const [deposit, setDeposit] = useState<"BANK_DIRECT" | "SEVEN_ELEVEN" | "HOLD_NEXT_SHIFT">("HOLD_NEXT_SHIFT");
+  const [cashPos, setCashPos] = useState(0);
+  const counted = FNB_NOTE_VALUES.reduce((sum, face) => sum + face * (notes[face] ?? 0), 0);
+  return (
+    <form className="space-y-3 rounded-xl border bg-white p-4" onSubmit={(event) => {
+      event.preventDefault();
+      const body = new FormData(event.currentTarget);
+      fillCommon(body, { brandLock, branch, workDate, staffName: "", actorSource });
+      body.set("cash_counted_amount", String(counted));
+      body.set("deposit_method", deposit);
+      run("shift3", () => saveShift3HandoverAction(body), "บันทึกส่งเงินกะสามแล้ว");
+    }}>
+      <h2 className="font-semibold">ส่งเงินกะสาม</h2>
+      <p className="text-sm text-slate-500">กะสามบันทึกบนเซสชันหน้าร้าน เพราะสมุดปิดกะรองรับกะแรกและกะสอง</p>
+      <CashFloatNote branch={branch} workDate={workDate} shiftType="SHIFT_3" counted={counted} cashPos={cashPos} />
+      <label className="text-sm">เงินสดตาม POS<input className={field} type="number" step="0.01" onChange={(event) => setCashPos(Number(event.target.value) || 0)} /></label>
+      <div className="grid gap-2 md:grid-cols-3">{FNB_NOTE_VALUES.map((face) => <label key={face} className="text-sm">ธนบัตร {face}<input className={field} type="number" min={0} onChange={(event) => setNotes((current) => ({ ...current, [face]: Number(event.target.value) || 0 }))} /></label>)}</div>
+      <label className="flex gap-2 text-sm"><input type="radio" checked={deposit === "BANK_DIRECT"} onChange={() => setDeposit("BANK_DIRECT")} />ฝากธนาคาร 0฿</label>
+      <label className="flex gap-2 text-sm"><input type="radio" checked={deposit === "SEVEN_ELEVEN"} onChange={() => setDeposit("SEVEN_ELEVEN")} />ฝาก 7-Eleven ค่าธรรมเนียม 15฿ โอนคืนโดยคุณจวง</label>
+      <label className="flex gap-2 text-sm"><input type="radio" checked={deposit === "HOLD_NEXT_SHIFT"} onChange={() => setDeposit("HOLD_NEXT_SHIFT")} />เก็บรอฝากรวมกะถัดไป</label>
+      <SaveButton busy={busy}>บันทึกส่งเงินกะสาม</SaveButton>
+    </form>
+  );
+}
+
 function WastePanel({
   brand,
   brandLock,
   branch,
   workDate,
   staffName,
+  actorSource,
   shelfItems,
   day,
   busy,
@@ -377,6 +445,7 @@ function WastePanel({
   branch: string;
   workDate: string;
   staffName: string;
+  actorSource: "desktop" | "liff";
   shelfItems: FnbItemRow[];
   day: FnbDayState | null;
   busy: string | null;
@@ -400,7 +469,7 @@ function WastePanel({
           <form className="space-y-3" onSubmit={(event) => {
             event.preventDefault();
             const body = new FormData(event.currentTarget);
-            fillCommon(body, { brandLock, branch, workDate, staffName });
+            fillCommon(body, { brandLock, branch, workDate, staffName, actorSource });
             body.set("is_edit", day?.waste ? "true" : "false");
             body.set("waste_entries_json", JSON.stringify(Object.entries(waste).filter(([, qty]) => Number(qty) > 0).map(([code, qty]) => ({ code, qty: Number(qty) }))));
             run("waste", () => recordNightWasteAction(body).then((saved) => {
@@ -440,6 +509,7 @@ function WastePanel({
               branch_code: branch,
               check_date: workDate,
               staff_name: staffName,
+              actor_source: actorSource,
               brand_lock: brandLock,
               is_edit: Boolean(day?.shelf),
               edit_reason: String(form.get("edit_reason") ?? ""),
@@ -544,12 +614,14 @@ function PosExcelBox({ branches }: { branches: FnbBranchOption[] }) {
   }
 }
 
-function ReimburseBox(props: { brand: FnbBrandCode; brandLock: FnbBrandCode | null; branch: string; workDate: string; staffName: string; busy: boolean; run: (key: string, task: () => Promise<{ error: string | null; data: FnbSubmitResult }>, success: string) => void }) {
+function ReimburseBox(props: { brand: FnbBrandCode; brandLock: FnbBrandCode | null; branch: string; workDate: string; staffName: string; actorSource: "desktop" | "liff"; busy: boolean; run: (key: string, task: () => Promise<{ error: string | null; data: FnbSubmitResult }>, success: string) => void }) {
   return (
     <form className="space-y-3 rounded-xl border bg-white p-4" onSubmit={(event) => {
       event.preventDefault();
       const body = new FormData(event.currentTarget);
       body.set("branch_code", props.branch);
+      body.set("brand_lock", props.brandLock ?? "");
+      body.set("actor_source", props.actorSource);
       body.set("staff_name", props.staffName);
       props.run("reimburse", async () => {
         const saved = await submitStaffReimbursementAction(body);
@@ -567,11 +639,12 @@ function ReimburseBox(props: { brand: FnbBrandCode; brandLock: FnbBrandCode | nu
   );
 }
 
-function fillCommon(body: FormData, input: { brandLock: FnbBrandCode | null; branch: string; workDate: string; staffName: string }) {
+function fillCommon(body: FormData, input: { brandLock: FnbBrandCode | null; branch: string; workDate: string; staffName: string; actorSource: "desktop" | "liff" }) {
   body.set("brand_lock", input.brandLock ?? "");
   body.set("branch_code", input.branch);
   body.set("work_date", input.workDate);
   body.set("staff_name", input.staffName);
+  body.set("actor_source", input.actorSource);
 }
 
 function setMessageSafe(value: string) {

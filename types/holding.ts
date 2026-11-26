@@ -243,6 +243,8 @@ export type LiffRegistrationRow = {
   status: string;
   assigned_brand_code: string | null;
   branch_code: string | null;
+  staff_nickname: string | null;
+  is_active: boolean;
   created_at: string;
 };
 

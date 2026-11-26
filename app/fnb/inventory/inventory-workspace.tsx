@@ -48,7 +48,8 @@ export function InventoryWorkspace({
           const saved = await transferFnbStockAction({
             from_branch_code: branch,
             to_branch_code: String(form.get("to_branch_code") ?? ""),
-            staff_name: String(form.get("staff_name") ?? ""),
+            staff_name: "",
+            actor_source: "desktop",
             item_id: String(form.get("item_id") ?? ""),
             qty_in_count_uom: Number(form.get("qty") ?? 0),
           });
@@ -59,7 +60,6 @@ export function InventoryWorkspace({
         <select className={field} name="to_branch_code">{sameEntity.filter((item) => item.branch_code !== branch).map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code}</option>)}</select>
         <select className={field} name="item_id">{rows.map((row) => <option key={row.item_id} value={row.item_id}>{row.short_code}</option>)}</select>
         <input className={field} name="qty" type="number" step="0.01" placeholder="จำนวนหน่วยนับ" />
-        <input className={field} name="staff_name" placeholder="ผู้โอน" required />
         <button className="rounded-md bg-red-700 px-4 py-2 text-sm text-white" disabled={pending}>บันทึกโอน</button>
       </form>
       <form className="space-y-2 rounded-xl border bg-white p-4" onSubmit={(event) => {
@@ -71,14 +71,13 @@ export function InventoryWorkspace({
           open_pack_weight_g: Number(form.get(`open_${row.item_id}`) ?? 0),
         })).filter((line) => line.closed_pack_count || line.open_pack_weight_g);
         start(async () => {
-          const saved = await submitBlindCountAction({ branch_code: branch, staff_name: String(form.get("staff_name") ?? ""), lines });
+          const saved = await submitBlindCountAction({ branch_code: branch, staff_name: "", actor_source: "desktop", lines });
           setMessage(saved.error ?? `นับ ${saved.data.count_no} แล้ว`);
           setReport(saved.data.lines.map((line) => `${line.short_code} นับ ${line.counted.toFixed(2)} ระบบ ${line.system.toFixed(2)} ส่วนต่าง ${line.variance.toFixed(2)} บาท ${line.cost.toFixed(2)}`).join("\n"));
         });
       }}>
         <h2 className="font-semibold">นับสต็อกแบบปิดตา</h2>
-        <p className="text-sm text-slate-500">กรอกจำนวนแพ็กปิดและน้ำหนักแพ็กเปิด ระบบจะเทียบกับยอดในบัญชีหลังกดบันทึก และแปลงน้ำหนักด้วยความถ่วงจำเพาะ</p>
-        <input className={field} name="staff_name" placeholder="ผู้ตรวจนับ" required />
+        <p className="text-sm text-slate-500">กรอกจำนวนแพ็กปิดและน้ำหนักแพ็กเปิด ระบบจะเทียบกับยอดในบัญชีหลังกดบันทึก และใช้ชื่อจากบัญชีที่ล็อกอิน</p>
         {rows.map((row) => (
           <div key={row.item_id} className="grid gap-2 md:grid-cols-3">
             <p className="text-sm">{row.short_code}</p>

@@ -1,6 +1,7 @@
 "use server";
 
 import { generateWithGeminiFallback, resolveGeminiApiKey } from "@/lib/ai/gemini-client";
+import { resolveFnbActor } from "@/lib/fnb/actor";
 import { parseLuckyCupPosWorkbook } from "@/lib/fnb/excel";
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
@@ -81,6 +82,17 @@ export async function listFnbBranchOptionsAction(brandLock?: FnbBrandCode | null
       vat_branch_code: text(row.vat_branch_code),
       branch_status: text(row.branch_status),
       target_open_date: row.target_open_date == null ? null : text(row.target_open_date),
+      standard_cash_float: num(row.standard_cash_float),
+      enable_shift_3: row.enable_shift_3 === true,
+      opening_time: row.opening_time == null ? null : text(row.opening_time),
+      closing_time: row.closing_time == null ? null : text(row.closing_time),
+      opening_deadline_time: row.opening_deadline_time == null ? null : text(row.opening_deadline_time),
+      shift_1_start: row.shift_1_start == null ? null : text(row.shift_1_start),
+      shift_1_end: row.shift_1_end == null ? null : text(row.shift_1_end),
+      shift_2_start: row.shift_2_start == null ? null : text(row.shift_2_start),
+      shift_2_end: row.shift_2_end == null ? null : text(row.shift_2_end),
+      shift_3_start: row.shift_3_start == null ? null : text(row.shift_3_start),
+      shift_3_end: row.shift_3_end == null ? null : text(row.shift_3_end),
     })).filter((branch) => !brandLock || branch.brand_code === brandLock));
   } catch (error) {
     return caught([], error, "อ่านสาขาไม่สำเร็จ");
@@ -129,8 +141,21 @@ export async function getFnbDashboardAction(): Promise<FnbActionResult<FnbBranch
   }
 }
 
+async function stampStaff(formData: FormData): Promise<string | null> {
+  const actor = await resolveFnbActor({
+    actorSource: text(formData.get("actor_source")),
+    brandLock: text(formData.get("brand_lock")),
+    branchCode: text(formData.get("branch_code")),
+  });
+  if (!actor.ok) return actor.error;
+  formData.set("staff_name", actor.actor.name);
+  return null;
+}
+
 export async function recordMorningOpeningAction(formData: FormData): Promise<FnbActionResult<FnbSubmitResult>> {
   try {
+    const deniedActor = await stampStaff(formData);
+    if (deniedActor) return result({ ok: false, mode: null, request_no: null, message: deniedActor }, deniedActor);
     const branch = text(formData.get("branch_code"));
     const denied = await assertBranchBrand(branch, brandLockOf(formData.get("brand_lock")));
     if (denied) return result({ ok: false, mode: null, request_no: null, message: denied }, denied);
@@ -158,6 +183,8 @@ export async function recordMorningOpeningAction(formData: FormData): Promise<Fn
 
 export async function recordShiftClosingAction(formData: FormData): Promise<FnbActionResult<FnbSubmitResult>> {
   try {
+    const deniedActor = await stampStaff(formData);
+    if (deniedActor) return result({ ok: false, mode: null, request_no: null, message: deniedActor }, deniedActor);
     const branch = text(formData.get("branch_code"));
     const denied = await assertBranchBrand(branch, brandLockOf(formData.get("brand_lock")));
     if (denied) return result({ ok: false, mode: null, request_no: null, message: denied }, denied);
@@ -230,6 +257,8 @@ export async function recordShiftClosingAction(formData: FormData): Promise<FnbA
 
 export async function recordNightWasteAction(formData: FormData): Promise<FnbActionResult<FnbSubmitResult & { detail: unknown }>> {
   try {
+    const deniedActor = await stampStaff(formData);
+    if (deniedActor) return result({ ok: false, mode: null, request_no: null, message: deniedActor, detail: null }, deniedActor);
     const branch = text(formData.get("branch_code"));
     const denied = await assertBranchBrand(branch, brandLockOf(formData.get("brand_lock")));
     if (denied) return result({ ok: false, mode: null, request_no: null, message: denied, detail: null }, denied);
@@ -294,12 +323,16 @@ export async function saveShelfChecksAction(input: {
   branch_code: string;
   check_date: string;
   staff_name: string;
+  actor_source?: string;
   brand_lock?: FnbBrandCode | null;
   is_edit?: boolean;
   edit_reason?: string;
   lines: { item_id: string; sold_qty: number; front_qty: number; back_qty: number; expiry_date: string }[];
 }): Promise<FnbActionResult<FnbSubmitResult>> {
   try {
+    const actor = await resolveFnbActor({ actorSource: input.actor_source ?? "desktop", brandLock: input.brand_lock ?? null, branchCode: input.branch_code });
+    if (!actor.ok) return result({ ok: false, mode: null, request_no: null, message: actor.error }, actor.error);
+    const staffName = actor.actor.name;
     const denied = await assertBranchBrand(input.branch_code, input.brand_lock ?? null);
     if (denied) return result({ ok: false, mode: null, request_no: null, message: denied }, denied);
     const db = schemaAdmin().schema("fnb");
@@ -325,7 +358,7 @@ export async function saveShelfChecksAction(input: {
       const payload = {
         branch_code: input.branch_code,
         check_date: input.check_date,
-        staff_name: input.staff_name,
+        staff_name: staffName,
         item_id: line.item_id,
         sold_qty: Number(line.sold_qty) || 0,
         front_qty: Number(line.front_qty) || 0,
@@ -341,7 +374,7 @@ export async function saveShelfChecksAction(input: {
     }
     const header = current?.id
       ? await db.from("daily_shelf_check_submissions").update({
-          staff_name: input.staff_name,
+          staff_name: staffName,
           item_count: saved,
           revision_count: num(current.revision_count) + 1,
           last_edit_reason: text(input.edit_reason),
@@ -350,7 +383,7 @@ export async function saveShelfChecksAction(input: {
       : await db.from("daily_shelf_check_submissions").insert({
           branch_code: input.branch_code,
           check_date: input.check_date,
-          staff_name: input.staff_name,
+          staff_name: staffName,
           item_count: saved,
         });
     if (header.error) return fail({ ok: false, mode: null, request_no: null, message: null }, header.error, "บันทึกเช็กของไม่สำเร็จ");

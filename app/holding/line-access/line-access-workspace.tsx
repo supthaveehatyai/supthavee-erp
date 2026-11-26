@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 import { toast } from "sonner";
 import { approveLiffRegistrationAction, saveLineChannelAction } from "@/lib/actions/holding-entities";
+import { bindLiffSessionAction } from "@/lib/actions/fnb-identity";
 import { WORKSPACE_THEMES, type LiffRegistrationRow, type LineChannelRow, type WorkspaceKey } from "@/types/holding";
 import { Button } from "@/components/ui/button";
 
@@ -73,6 +74,10 @@ export function LineAccessWorkspace({
         })}
       </div>
 
+      <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm">
+        <h2 className="font-semibold">โหมดจำลองทดสอบ LIFF สำหรับผู้บริหาร</h2>
+        <p className="mt-1 text-slate-600">สร้างหรืออนุมัติแถวพนักงานด้วยรหัส LINE ทดสอบ แล้วกดเปิด LIFF ตามแบรนด์ พนักงานจริงยังต้องใช้รหัส LINE ที่อนุมัติและยังไม่ถูกระงับ</p>
+      </section>
       <div className="space-y-3">
         <h2 className="text-lg font-semibold">คำขอ LIFF</h2>
         {registrations.map((row) => (
@@ -107,8 +112,44 @@ export function LineAccessWorkspace({
               <option value="LUCKY_CUP">LUCKY_CUP</option>
               <option value="CHATORN">CHATORN</option>
             </select>
-            <input name="branch_code" defaultValue={row.branch_code ?? ""} placeholder="รหัสสาขา เช่น LC-HDY" className="h-10 rounded border border-slate-200 px-3 text-sm" />
+            <input name="branch_code" defaultValue={row.branch_code ?? ""} placeholder="สาขาประจำ เช่น LC-HDY" className="h-10 rounded border border-slate-200 px-3 text-sm" />
+            <input name="staff_nickname" defaultValue={row.staff_nickname ?? ""} placeholder="ชื่อเล่นพนักงานในร้าน (แสดงบนงานและลายน้ำรูป)" className="h-10 rounded border border-slate-200 px-3 text-sm md:col-span-2" />
+            <input type="hidden" name="is_active" value={row.is_active ? "true" : "false"} />
             <Button type="submit" disabled={pending}>{pending ? "กำลังบันทึก..." : "บันทึกสิทธิ์"}</Button>
+            <Button
+              type="button"
+              disabled={pending}
+              className={row.is_active ? "bg-red-700 text-white" : "bg-emerald-700 text-white"}
+              onClick={() => {
+                const body = new FormData();
+                body.set("id", row.id);
+                body.set("status", row.status === "REVOKED" ? "APPROVED" : row.status);
+                body.set("workspace_key", row.workspace_key ?? "fnb");
+                body.set("assigned_brand_code", row.assigned_brand_code ?? "");
+                body.set("branch_code", row.branch_code ?? "");
+                body.set("staff_nickname", row.staff_nickname ?? "");
+                body.set("is_active", row.is_active ? "false" : "true");
+                startTransition(async () => {
+                  const result = await approveLiffRegistrationAction(body);
+                  if (result.error) toast.error(result.error);
+                  else toast.success(row.is_active ? "ระงับสิทธิ์ทันทีแล้ว" : "เปิดสิทธิ์กลับแล้ว");
+                });
+              }}
+            >
+              {row.is_active ? "🚫 ระงับสิทธิ์พนักงานลาออก (Deactivate ทันที)" : "✅ เปิดสิทธิ์กลับ"}
+            </Button>
+            {row.assigned_brand_code === "LUCKY_CUP" || row.assigned_brand_code === "CHATORN" ? (
+              <Button type="button" variant="outline" disabled={pending} onClick={() => {
+                startTransition(async () => {
+                  const bound = await bindLiffSessionAction(row.line_user_id, row.assigned_brand_code === "CHATORN" ? "CHATORN" : "LUCKY_CUP");
+                  if (!bound.ok) toast.error(bound.error || "เปิดโหมดทดสอบไม่สำเร็จ");
+                  else {
+                    toast.success(`พร้อมทดสอบในชื่อ ${bound.name}`);
+                    window.location.href = row.assigned_brand_code === "CHATORN" ? "/liff/chatorn" : "/liff/luckycup";
+                  }
+                });
+              }}>เปิด LIFF ทดสอบแบรนด์นี้</Button>
+            ) : null}
           </form>
         ))}
       </div>
