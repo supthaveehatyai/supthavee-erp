@@ -447,20 +447,24 @@ export async function listFnbBranchesAction(): Promise<HoldingActionResult<FnbBr
       .schema("fnb")
       .from("branches")
       .select("*")
-      .order("branch_code", { ascending: true })
+      .order("sort_order", { ascending: true })
       .limit(50);
     if (listed.error) {
       return empty([], schemaErrorMessage(listed.error, "อ่านสาขาเครื่องดื่มไม่สำเร็จ"), !isSchemaUnavailable(listed.error));
     }
-    return empty(asRows(listed.data).map((row) => ({
-      id: String(row.id ?? row.branch_code ?? ""),
-      branch_code: String(row.branch_code ?? ""),
-      branch_name: String(row.branch_name ?? ""),
-      brand_code: String(row.brand_code ?? ""),
-      brand_name: row.brand_name == null ? null : String(row.brand_name),
-      is_active: row.is_active !== false,
-      countdown_until: row.countdown_until == null ? null : String(row.countdown_until),
-    })));
+    return empty(asRows(listed.data).map((row) => {
+      const brandCode = String(row.brand_code ?? "");
+      const status = String(row.branch_status ?? "");
+      return {
+        id: String(row.branch_code ?? ""),
+        branch_code: String(row.branch_code ?? ""),
+        branch_name: String(row.branch_name_th ?? ""),
+        brand_code: brandCode,
+        brand_name: brandCode === "LUCKY_CUP" ? "Lucky Cup" : brandCode === "CHATORN" ? "ชาทรตะโหมด" : brandCode,
+        is_active: status !== "INACTIVE",
+        countdown_until: row.target_open_date == null ? null : String(row.target_open_date),
+      };
+    }));
   } catch (error) {
     rethrowNavigation(error);
     return empty([], error instanceof Error ? error.message : "อ่านสาขาเครื่องดื่มไม่สำเร็จ", false);

@@ -1,4 +1,5 @@
 import { listFnbBranchesAction } from "@/lib/actions/holding-entities";
+import { getFnbDashboardAction } from "@/lib/actions/fnb-operations";
 import { requireSuperAdmin } from "@/lib/holding/workspace-access";
 import type { FnbBranchRow } from "@/types/holding";
 import { FnbHub } from "@/app/fnb/fnb-hub";
@@ -6,11 +7,11 @@ import { FnbHub } from "@/app/fnb/fnb-hub";
 export const dynamic = "force-dynamic";
 
 const FALLBACK_BRANCHES: FnbBranchRow[] = [
-  { id: "lc-hy", branch_code: "LC-HY", branch_name: "หาดใหญ่", brand_code: "LUCKY", brand_name: "Lucky Cup", is_active: true, countdown_until: null },
-  { id: "lc-sk", branch_code: "LC-SK", branch_name: "สงขลา", brand_code: "LUCKY", brand_name: "Lucky Cup", is_active: true, countdown_until: null },
-  { id: "ct-tm", branch_code: "CT-TM", branch_name: "ตะโหมด", brand_code: "CHATR", brand_name: "ชาทรตะโหมด", is_active: true, countdown_until: null },
-  { id: "ct-hy", branch_code: "CT-HY", branch_name: "หาดใหญ่", brand_code: "CHATR", brand_name: "ชาทรตะโหมด", is_active: true, countdown_until: null },
-  { id: "ct-bnp", branch_code: "CT-BNP", branch_name: "บางนา", brand_code: "CHATR", brand_name: "ชาทรตะโหมด", is_active: true, countdown_until: "2026-12-26" },
+  { id: "LC-HDY", branch_code: "LC-HDY", branch_name: "Lucky Cup สาขาหาดใหญ่ (เพชรเกษม)", brand_code: "LUCKY_CUP", brand_name: "Lucky Cup", is_active: true, countdown_until: null },
+  { id: "LC-PSU", branch_code: "LC-PSU", branch_name: "Lucky Cup สาขา PSU (ทุ่งรี-ม.อ.)", brand_code: "LUCKY_CUP", brand_name: "Lucky Cup", is_active: true, countdown_until: null },
+  { id: "CT-KLN", branch_code: "CT-KLN", branch_name: "ชาทรตะโหมด สาขาคลองแงะ", brand_code: "CHATORN", brand_name: "ชาทรตะโหมด", is_active: true, countdown_until: null },
+  { id: "CT-BNP", branch_code: "CT-BNP", branch_name: "ชาทรตะโหมด สาขาบ้านพรุ", brand_code: "CHATORN", brand_name: "ชาทรตะโหมด", is_active: true, countdown_until: "2026-12-26" },
+  { id: "CT-NMM", branch_code: "CT-NMM", branch_name: "ชาทรตะโหมด สาขานาหม่อม", brand_code: "CHATORN", brand_name: "ชาทรตะโหมด", is_active: true, countdown_until: null },
 ];
 
 export default async function FnbPage({
@@ -20,12 +21,13 @@ export default async function FnbPage({
 }) {
   await requireSuperAdmin();
   const params = await searchParams;
-  const listed = await listFnbBranchesAction();
+  const [listed, dashboard] = await Promise.all([listFnbBranchesAction(), getFnbDashboardAction()]);
   const branches = listed.data.length > 0 ? listed.data : FALLBACK_BRANCHES;
   return (
     <FnbHub
       branches={branches}
-      schemaMessage={listed.schemaReady ? null : listed.error}
+      kpis={dashboard.data}
+      schemaMessage={listed.schemaReady && dashboard.schemaReady ? null : listed.error ?? dashboard.error}
       initialTab={params.tab ?? ""}
     />
   );

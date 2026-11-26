@@ -21,6 +21,9 @@ export type SchemaTable = {
   update: (values: Record<string, unknown>) => {
     eq: (column: string, value: string | boolean) => Promise<{ error: QueryError }>;
   };
+  delete: () => {
+    eq: (column: string, value: string) => Promise<{ error: QueryError }>;
+  };
 };
 
 export type SchemaAdmin = {

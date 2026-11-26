@@ -7,6 +7,18 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 1_TABLE_COLUMN,accounting_periods,period_month,integer,NO,,ordinal=3
 1_TABLE_COLUMN,accounting_periods,period_year,integer,NO,,ordinal=2
 1_TABLE_COLUMN,accounting_periods,updated_at,timestamp with time zone,NO,now(),ordinal=8
+1_TABLE_COLUMN,agri.plantation_zones,created_at,timestamp with time zone,NO,now(),ordinal=12
+1_TABLE_COLUMN,agri.plantation_zones,default_owner_share_pct,numeric,NO,55.00,ordinal=7
+1_TABLE_COLUMN,agri.plantation_zones,default_product_mode,character varying(20),NO,'FRESH_LATEX'::character varying,ordinal=6
+1_TABLE_COLUMN,agri.plantation_zones,default_tapper_share_pct,numeric,NO,45.00,ordinal=8
+1_TABLE_COLUMN,agri.plantation_zones,estimated_area_rai,numeric,YES,,ordinal=9
+1_TABLE_COLUMN,agri.plantation_zones,is_tapping_active,boolean,NO,true,ordinal=5
+1_TABLE_COLUMN,agri.plantation_zones,manager_name,text,YES,,ordinal=4
+1_TABLE_COLUMN,agri.plantation_zones,notes,text,YES,,ordinal=10
+1_TABLE_COLUMN,agri.plantation_zones,region_code,character varying(20),NO,,ordinal=2
+1_TABLE_COLUMN,agri.plantation_zones,sort_order,integer,NO,10,ordinal=11
+1_TABLE_COLUMN,agri.plantation_zones,zone_code,character varying(40),NO,,ordinal=1
+1_TABLE_COLUMN,agri.plantation_zones,zone_name_th,text,NO,,ordinal=3
 1_TABLE_COLUMN,app_roles,accessible_modules,jsonb,YES,"'{""sales"": false, ""finance"": false, ""settings"": false, ""inventory"": false, ""purchases"": false}'::jsonb",ordinal=5
 1_TABLE_COLUMN,app_roles,created_at,timestamp with time zone,YES,now(),ordinal=4
 1_TABLE_COLUMN,app_roles,description,text,YES,,ordinal=3
@@ -139,7 +151,7 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 1_TABLE_COLUMN,contacts,address,text,YES,,ordinal=7
 1_TABLE_COLUMN,contacts,branch_code,character varying(50),YES,'สำนักงานใหญ่'::character varying,ordinal=6
 1_TABLE_COLUMN,contacts,company_name,character varying(255),NO,,ordinal=4
-1_TABLE_COLUMN,contacts,contact_roles,ARRAY,NO,ARRAY['Customer'::character varying],ordinal=18
+1_TABLE_COLUMN,contacts,contact_roles,_varchar,NO,ARRAY['Customer'::character varying],ordinal=18
 1_TABLE_COLUMN,contacts,created_at,timestamp with time zone,YES,CURRENT_TIMESTAMP,ordinal=13
 1_TABLE_COLUMN,contacts,credit_days,integer,YES,0,ordinal=10
 1_TABLE_COLUMN,contacts,customer_type,character varying(50),YES,'บุคคลธรรมดา'::character varying,ordinal=3
@@ -187,7 +199,7 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 1_TABLE_COLUMN,doc_details,unit_price,numeric,NO,,ordinal=7
 1_TABLE_COLUMN,doc_details,uom_used,character varying(50),YES,,ordinal=6
 1_TABLE_COLUMN,doc_headers,attached_file_url,text,YES,,ordinal=19
-1_TABLE_COLUMN,doc_headers,attachment_urls,ARRAY,YES,'{}'::text[],ordinal=25
+1_TABLE_COLUMN,doc_headers,attachment_urls,_text,YES,'{}'::text[],ordinal=25
 1_TABLE_COLUMN,doc_headers,attachments,jsonb,YES,'[]'::jsonb,ordinal=26
 1_TABLE_COLUMN,doc_headers,contact_id,uuid,YES,,ordinal=7
 1_TABLE_COLUMN,doc_headers,contact_person_id,uuid,YES,,ordinal=8
@@ -267,7 +279,7 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 1_TABLE_COLUMN,documents,approved_by,uuid,YES,,ordinal=42
 1_TABLE_COLUMN,documents,attached_file_url,text,YES,,ordinal=22
 1_TABLE_COLUMN,documents,attachment_url,text,YES,,ordinal=31
-1_TABLE_COLUMN,documents,attachment_urls,ARRAY,YES,'{}'::text[],ordinal=65
+1_TABLE_COLUMN,documents,attachment_urls,_text,YES,'{}'::text[],ordinal=65
 1_TABLE_COLUMN,documents,attachments,jsonb,YES,'[]'::jsonb,ordinal=66
 1_TABLE_COLUMN,documents,bank_account_id,uuid,YES,,ordinal=82
 1_TABLE_COLUMN,documents,billing_note_eligible_amount,numeric,NO,0,ordinal=57
@@ -370,7 +382,7 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 1_TABLE_COLUMN,expense_installments,paid_date,date,YES,,ordinal=9
 1_TABLE_COLUMN,expense_installments,payment_transaction_id,uuid,YES,,ordinal=10
 1_TABLE_COLUMN,expense_installments,principal_amount,numeric,NO,,ordinal=5
-1_TABLE_COLUMN,expense_installments,total_installment,numeric,YES,GENERATED ALWAYS AS (principal_amount + interest_amount),ordinal=7
+1_TABLE_COLUMN,expense_installments,total_installment,numeric,YES,GENERATED ALWAYS AS ((principal_amount + interest_amount)) STORED,ordinal=7
 1_TABLE_COLUMN,expense_installments,updated_at,timestamp with time zone,YES,now(),ordinal=12
 1_TABLE_COLUMN,expense_items,created_at,timestamp with time zone,NO,now(),ordinal=10
 1_TABLE_COLUMN,expense_items,discount_amount,numeric,NO,0.00,ordinal=8
@@ -402,7 +414,7 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 1_TABLE_COLUMN,expenses,expense_category,character varying(150),YES,,ordinal=56
 1_TABLE_COLUMN,expenses,expense_date,date,YES,,ordinal=3
 1_TABLE_COLUMN,expenses,expense_no,character varying(60),YES,,ordinal=48
-1_TABLE_COLUMN,expenses,grand_total,numeric,YES,GENERATED ALWAYS AS (net_amount + vat_amount),ordinal=7
+1_TABLE_COLUMN,expenses,grand_total,numeric,YES,GENERATED ALWAYS AS ((net_amount + vat_amount)) STORED,ordinal=7
 1_TABLE_COLUMN,expenses,id,uuid,NO,gen_random_uuid(),ordinal=1
 1_TABLE_COLUMN,expenses,is_installment,boolean,YES,false,ordinal=28
 1_TABLE_COLUMN,expenses,net_amount,numeric,NO,0,ordinal=5
@@ -444,11 +456,11 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 1_TABLE_COLUMN,fixed_assets,acquisition_date,date,NO,,ordinal=6
 1_TABLE_COLUMN,fixed_assets,asset_code,character varying(50),NO,,ordinal=2
 1_TABLE_COLUMN,fixed_assets,asset_name,character varying(255),NO,,ordinal=3
-1_TABLE_COLUMN,fixed_assets,attachment_urls,ARRAY,YES,'{}'::text[],ordinal=17
+1_TABLE_COLUMN,fixed_assets,attachment_urls,_text,YES,'{}'::text[],ordinal=17
 1_TABLE_COLUMN,fixed_assets,category_id,uuid,YES,,ordinal=4
 1_TABLE_COLUMN,fixed_assets,created_at,timestamp with time zone,YES,now(),ordinal=13
 1_TABLE_COLUMN,fixed_assets,current_accumulated_depreciation,numeric,YES,0,ordinal=18
-1_TABLE_COLUMN,fixed_assets,current_net_book_value,numeric,YES,GENERATED ALWAYS AS (acquisition_cost - current_accumulated_depreciation),ordinal=19
+1_TABLE_COLUMN,fixed_assets,current_net_book_value,numeric,YES,GENERATED ALWAYS AS ((acquisition_cost - current_accumulated_depreciation)) STORED,ordinal=19
 1_TABLE_COLUMN,fixed_assets,expense_id,uuid,YES,,ordinal=15
 1_TABLE_COLUMN,fixed_assets,id,uuid,NO,gen_random_uuid(),ordinal=1
 1_TABLE_COLUMN,fixed_assets,last_depreciation_date,date,YES,,ordinal=20
@@ -459,6 +471,137 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 1_TABLE_COLUMN,fixed_assets,updated_at,timestamp with time zone,YES,now(),ordinal=14
 1_TABLE_COLUMN,fixed_assets,useful_life_months,integer,NO,,ordinal=9
 1_TABLE_COLUMN,fixed_assets,warranty_expiry_date,date,YES,,ordinal=16
+1_TABLE_COLUMN,fnb.branches,address,text,YES,,ordinal=15
+1_TABLE_COLUMN,fnb.branches,branch_code,character varying(30),NO,,ordinal=1
+1_TABLE_COLUMN,fnb.branches,branch_name_th,text,NO,,ordinal=3
+1_TABLE_COLUMN,fnb.branches,branch_status,character varying(20),NO,'ACTIVE'::character varying,ordinal=11
+1_TABLE_COLUMN,fnb.branches,brand_code,character varying(30),NO,,ordinal=2
+1_TABLE_COLUMN,fnb.branches,business_unit_code,character varying(30),NO,,ordinal=5
+1_TABLE_COLUMN,fnb.branches,closing_time,time without time zone,YES,'21:30:00'::time without time zone,ordinal=14
+1_TABLE_COLUMN,fnb.branches,created_at,timestamp with time zone,NO,now(),ordinal=18
+1_TABLE_COLUMN,fnb.branches,default_bank_account_id,uuid,YES,,ordinal=10
+1_TABLE_COLUMN,fnb.branches,legal_entity_id,uuid,NO,,ordinal=4
+1_TABLE_COLUMN,fnb.branches,opening_time,time without time zone,YES,'07:00:00'::time without time zone,ordinal=13
+1_TABLE_COLUMN,fnb.branches,phone,character varying(30),YES,,ordinal=16
+1_TABLE_COLUMN,fnb.branches,pos_shop_id,character varying(50),YES,,ordinal=8
+1_TABLE_COLUMN,fnb.branches,pos_system,character varying(30),NO,'LUCKY_CUP_CN'::character varying,ordinal=7
+1_TABLE_COLUMN,fnb.branches,pos_terminal_id,character varying(50),YES,,ordinal=9
+1_TABLE_COLUMN,fnb.branches,sort_order,integer,NO,10,ordinal=17
+1_TABLE_COLUMN,fnb.branches,target_open_date,date,YES,,ordinal=12
+1_TABLE_COLUMN,fnb.branches,updated_at,timestamp with time zone,NO,now(),ordinal=19
+1_TABLE_COLUMN,fnb.branches,vat_branch_code,character varying(10),NO,'00000'::character varying,ordinal=6
+1_TABLE_COLUMN,holding.bank_accounts,account_name,text,NO,,ordinal=9
+1_TABLE_COLUMN,holding.bank_accounts,account_no,text,NO,,ordinal=8
+1_TABLE_COLUMN,holding.bank_accounts,bank_code,character varying(20),NO,,ordinal=6
+1_TABLE_COLUMN,holding.bank_accounts,bank_name,text,NO,,ordinal=7
+1_TABLE_COLUMN,holding.bank_accounts,branch_code,character varying(30),YES,,ordinal=5
+1_TABLE_COLUMN,holding.bank_accounts,branch_name,text,YES,,ordinal=10
+1_TABLE_COLUMN,holding.bank_accounts,business_unit_code,character varying(30),YES,,ordinal=3
+1_TABLE_COLUMN,holding.bank_accounts,created_at,timestamp with time zone,NO,now(),ordinal=20
+1_TABLE_COLUMN,holding.bank_accounts,effective_from,date,YES,,ordinal=15
+1_TABLE_COLUMN,holding.bank_accounts,effective_to,date,YES,,ordinal=16
+1_TABLE_COLUMN,holding.bank_accounts,id,uuid,NO,gen_random_uuid(),ordinal=1
+1_TABLE_COLUMN,holding.bank_accounts,is_active,boolean,NO,true,ordinal=18
+1_TABLE_COLUMN,holding.bank_accounts,is_default_receiving,boolean,NO,false,ordinal=17
+1_TABLE_COLUMN,holding.bank_accounts,is_qr_customer_visible,boolean,NO,false,ordinal=23
+1_TABLE_COLUMN,holding.bank_accounts,legal_entity_id,uuid,NO,,ordinal=2
+1_TABLE_COLUMN,holding.bank_accounts,payment_instruction,text,YES,,ordinal=14
+1_TABLE_COLUMN,holding.bank_accounts,promptpay_id,character varying(30),YES,,ordinal=13
+1_TABLE_COLUMN,holding.bank_accounts,qr_image_url,text,YES,,ordinal=11
+1_TABLE_COLUMN,holding.bank_accounts,qr_label,character varying(80),YES,,ordinal=22
+1_TABLE_COLUMN,holding.bank_accounts,qr_storage_path,text,YES,,ordinal=12
+1_TABLE_COLUMN,holding.bank_accounts,sort_order,integer,NO,10,ordinal=19
+1_TABLE_COLUMN,holding.bank_accounts,updated_at,timestamp with time zone,NO,now(),ordinal=21
+1_TABLE_COLUMN,holding.bank_accounts,workspace_key,character varying(20),NO,,ordinal=4
+1_TABLE_COLUMN,holding.business_units,bu_code,character varying(30),NO,,ordinal=1
+1_TABLE_COLUMN,holding.business_units,bu_name_th,text,NO,,ordinal=3
+1_TABLE_COLUMN,holding.business_units,created_at,timestamp with time zone,NO,now(),ordinal=9
+1_TABLE_COLUMN,holding.business_units,default_legal_entity_id,uuid,YES,,ordinal=4
+1_TABLE_COLUMN,holding.business_units,is_active,boolean,NO,true,ordinal=7
+1_TABLE_COLUMN,holding.business_units,sort_order,integer,NO,10,ordinal=8
+1_TABLE_COLUMN,holding.business_units,theme_color_hex,character varying(7),NO,,ordinal=6
+1_TABLE_COLUMN,holding.business_units,vat_treatment,character varying(30),NO,,ordinal=5
+1_TABLE_COLUMN,holding.business_units,workspace_key,character varying(20),NO,,ordinal=2
+1_TABLE_COLUMN,holding.corporate_documents,created_at,timestamp with time zone,NO,now(),ordinal=16
+1_TABLE_COLUMN,holding.corporate_documents,doc_category,character varying(40),NO,,ordinal=4
+1_TABLE_COLUMN,holding.corporate_documents,doc_ref_no,character varying(100),YES,,ordinal=6
+1_TABLE_COLUMN,holding.corporate_documents,expiry_date,date,YES,,ordinal=8
+1_TABLE_COLUMN,holding.corporate_documents,file_mime_type,character varying(100),NO,,ordinal=10
+1_TABLE_COLUMN,holding.corporate_documents,file_size_bytes,bigint,YES,,ordinal=11
+1_TABLE_COLUMN,holding.corporate_documents,file_storage_path,text,NO,,ordinal=9
+1_TABLE_COLUMN,holding.corporate_documents,id,uuid,NO,gen_random_uuid(),ordinal=1
+1_TABLE_COLUMN,holding.corporate_documents,is_archived,boolean,NO,false,ordinal=15
+1_TABLE_COLUMN,holding.corporate_documents,issue_date,date,YES,,ordinal=7
+1_TABLE_COLUMN,holding.corporate_documents,legal_entity_id,uuid,YES,,ordinal=2
+1_TABLE_COLUMN,holding.corporate_documents,notes,text,YES,,ordinal=13
+1_TABLE_COLUMN,holding.corporate_documents,tags,_text,NO,'{}'::text[],ordinal=12
+1_TABLE_COLUMN,holding.corporate_documents,title,text,NO,,ordinal=5
+1_TABLE_COLUMN,holding.corporate_documents,updated_at,timestamp with time zone,NO,now(),ordinal=17
+1_TABLE_COLUMN,holding.corporate_documents,uploaded_by,uuid,YES,,ordinal=14
+1_TABLE_COLUMN,holding.corporate_documents,workspace_key,character varying(20),NO,'holding'::character varying,ordinal=3
+1_TABLE_COLUMN,holding.legal_entities,created_at,timestamp with time zone,NO,now(),ordinal=18
+1_TABLE_COLUMN,holding.legal_entities,entity_code,character varying(30),NO,,ordinal=2
+1_TABLE_COLUMN,holding.legal_entities,entity_name_en,text,YES,,ordinal=5
+1_TABLE_COLUMN,holding.legal_entities,entity_name_th,text,NO,,ordinal=4
+1_TABLE_COLUMN,holding.legal_entities,entity_type,character varying(20),NO,,ordinal=3
+1_TABLE_COLUMN,holding.legal_entities,governance_notes,jsonb,NO,'{}'::jsonb,ordinal=14
+1_TABLE_COLUMN,holding.legal_entities,head_office_address,text,YES,,ordinal=12
+1_TABLE_COLUMN,holding.legal_entities,id,uuid,NO,gen_random_uuid(),ordinal=1
+1_TABLE_COLUMN,holding.legal_entities,incorporation_date,date,YES,,ordinal=11
+1_TABLE_COLUMN,holding.legal_entities,is_active,boolean,NO,true,ordinal=16
+1_TABLE_COLUMN,holding.legal_entities,pp30_filing_mode,character varying(30),NO,'NONE'::character varying,ordinal=8
+1_TABLE_COLUMN,holding.legal_entities,primary_workspace,character varying(20),NO,'holding'::character varying,ordinal=15
+1_TABLE_COLUMN,holding.legal_entities,registered_capital,numeric,YES,,ordinal=10
+1_TABLE_COLUMN,holding.legal_entities,signatory_condition,text,YES,,ordinal=13
+1_TABLE_COLUMN,holding.legal_entities,sort_order,integer,NO,10,ordinal=17
+1_TABLE_COLUMN,holding.legal_entities,tax_id,character varying(20),YES,,ordinal=6
+1_TABLE_COLUMN,holding.legal_entities,updated_at,timestamp with time zone,NO,now(),ordinal=19
+1_TABLE_COLUMN,holding.legal_entities,vat_effective_date,date,YES,,ordinal=9
+1_TABLE_COLUMN,holding.legal_entities,vat_status,character varying(20),NO,'NO_VAT'::character varying,ordinal=7
+1_TABLE_COLUMN,holding.liff_user_registrations,approval_status,character varying(20),NO,'PENDING'::character varying,ordinal=7
+1_TABLE_COLUMN,holding.liff_user_registrations,approved_at,timestamp with time zone,YES,,ordinal=14
+1_TABLE_COLUMN,holding.liff_user_registrations,approved_by,uuid,YES,,ordinal=13
+1_TABLE_COLUMN,holding.liff_user_registrations,assigned_role,character varying(40),YES,,ordinal=9
+1_TABLE_COLUMN,holding.liff_user_registrations,assigned_workspace,character varying(20),YES,,ordinal=8
+1_TABLE_COLUMN,holding.liff_user_registrations,branch_code,character varying(30),YES,,ordinal=11
+1_TABLE_COLUMN,holding.liff_user_registrations,channel_code,character varying(40),YES,,ordinal=2
+1_TABLE_COLUMN,holding.liff_user_registrations,created_at,timestamp with time zone,NO,now(),ordinal=15
+1_TABLE_COLUMN,holding.liff_user_registrations,display_name,text,NO,,ordinal=4
+1_TABLE_COLUMN,holding.liff_user_registrations,id,uuid,NO,gen_random_uuid(),ordinal=1
+1_TABLE_COLUMN,holding.liff_user_registrations,legal_entity_id,uuid,YES,,ordinal=10
+1_TABLE_COLUMN,holding.liff_user_registrations,line_user_id,character varying(100),NO,,ordinal=3
+1_TABLE_COLUMN,holding.liff_user_registrations,picture_url,text,YES,,ordinal=5
+1_TABLE_COLUMN,holding.liff_user_registrations,requested_note,text,YES,,ordinal=6
+1_TABLE_COLUMN,holding.liff_user_registrations,updated_at,timestamp with time zone,NO,now(),ordinal=16
+1_TABLE_COLUMN,holding.liff_user_registrations,zone_code,character varying(30),YES,,ordinal=12
+1_TABLE_COLUMN,holding.line_channels,channel_access_token,text,YES,,ordinal=6
+1_TABLE_COLUMN,holding.line_channels,channel_code,character varying(40),NO,,ordinal=1
+1_TABLE_COLUMN,holding.line_channels,channel_name,text,NO,,ordinal=3
+1_TABLE_COLUMN,holding.line_channels,channel_secret,text,YES,,ordinal=5
+1_TABLE_COLUMN,holding.line_channels,created_at,timestamp with time zone,NO,now(),ordinal=10
+1_TABLE_COLUMN,holding.line_channels,is_active,boolean,NO,true,ordinal=9
+1_TABLE_COLUMN,holding.line_channels,liff_id,character varying(100),YES,,ordinal=7
+1_TABLE_COLUMN,holding.line_channels,oa_basic_id,character varying(60),YES,,ordinal=4
+1_TABLE_COLUMN,holding.line_channels,updated_at,timestamp with time zone,NO,now(),ordinal=11
+1_TABLE_COLUMN,holding.line_channels,webhook_last_verified_at,timestamp with time zone,YES,,ordinal=8
+1_TABLE_COLUMN,holding.line_channels,workspace_key,character varying(20),NO,,ordinal=2
+1_TABLE_COLUMN,holding.line_webhook_logs,channel_code,character varying(40),NO,,ordinal=2
+1_TABLE_COLUMN,holding.line_webhook_logs,event_type,character varying(50),YES,,ordinal=3
+1_TABLE_COLUMN,holding.line_webhook_logs,id,uuid,NO,gen_random_uuid(),ordinal=1
+1_TABLE_COLUMN,holding.line_webhook_logs,message_text,text,YES,,ordinal=7
+1_TABLE_COLUMN,holding.line_webhook_logs,raw_payload,jsonb,YES,,ordinal=8
+1_TABLE_COLUMN,holding.line_webhook_logs,received_at,timestamp with time zone,NO,now(),ordinal=11
+1_TABLE_COLUMN,holding.line_webhook_logs,reply_error,text,YES,,ordinal=10
+1_TABLE_COLUMN,holding.line_webhook_logs,reply_status,character varying(40),YES,,ordinal=9
+1_TABLE_COLUMN,holding.line_webhook_logs,source_group_id,character varying(100),YES,,ordinal=5
+1_TABLE_COLUMN,holding.line_webhook_logs,source_type,character varying(30),YES,,ordinal=4
+1_TABLE_COLUMN,holding.line_webhook_logs,source_user_id,character varying(100),YES,,ordinal=6
+1_TABLE_COLUMN,holding.user_workspace_grants,allowed_branch_codes,_text,NO,'{}'::text[],ordinal=4
+1_TABLE_COLUMN,holding.user_workspace_grants,allowed_workspaces,_text,NO,ARRAY['supthavee'::text],ordinal=3
+1_TABLE_COLUMN,holding.user_workspace_grants,is_super_admin,boolean,NO,false,ordinal=2
+1_TABLE_COLUMN,holding.user_workspace_grants,notes,text,YES,,ordinal=5
+1_TABLE_COLUMN,holding.user_workspace_grants,updated_at,timestamp with time zone,NO,now(),ordinal=6
+1_TABLE_COLUMN,holding.user_workspace_grants,user_id,uuid,NO,,ordinal=1
 1_TABLE_COLUMN,hr_payroll_items,allowance_amount,numeric,NO,0.00,ordinal=7
 1_TABLE_COLUMN,hr_payroll_items,base_salary,numeric,NO,0.00,ordinal=5
 1_TABLE_COLUMN,hr_payroll_items,bonus_amount,numeric,NO,0.00,ordinal=9
@@ -577,7 +720,7 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 1_TABLE_COLUMN,mst_asset_categories,category_code,character varying(20),NO,,ordinal=2
 1_TABLE_COLUMN,mst_asset_categories,category_name,character varying(100),NO,,ordinal=3
 1_TABLE_COLUMN,mst_asset_categories,created_at,timestamp with time zone,YES,now(),ordinal=7
-1_TABLE_COLUMN,mst_asset_categories,depreciation_rate,numeric,YES,GENERATED ALWAYS AS (100.0 / (useful_life_years)::numeric),ordinal=5
+1_TABLE_COLUMN,mst_asset_categories,depreciation_rate,numeric,YES,GENERATED ALWAYS AS ((100.0 / (useful_life_years)::numeric)) STORED,ordinal=5
 1_TABLE_COLUMN,mst_asset_categories,id,uuid,NO,gen_random_uuid(),ordinal=1
 1_TABLE_COLUMN,mst_asset_categories,is_active,boolean,YES,true,ordinal=6
 1_TABLE_COLUMN,mst_asset_categories,updated_at,timestamp with time zone,YES,now(),ordinal=8
@@ -591,6 +734,11 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 1_TABLE_COLUMN,mst_bank_accounts,id,uuid,NO,gen_random_uuid(),ordinal=1
 1_TABLE_COLUMN,mst_bank_accounts,is_active,boolean,YES,true,ordinal=6
 1_TABLE_COLUMN,mst_bank_accounts,is_primary_company,boolean,NO,false,ordinal=10
+1_TABLE_COLUMN,mst_bank_accounts,is_qr_customer_visible,boolean,NO,false,ordinal=16
+1_TABLE_COLUMN,mst_bank_accounts,promptpay_note,text,YES,,ordinal=14
+1_TABLE_COLUMN,mst_bank_accounts,qr_image_url,text,YES,,ordinal=12
+1_TABLE_COLUMN,mst_bank_accounts,qr_label,character varying(80),YES,,ordinal=15
+1_TABLE_COLUMN,mst_bank_accounts,qr_storage_path,text,YES,,ordinal=13
 1_TABLE_COLUMN,mst_bank_accounts,sort_order,integer,NO,10,ordinal=11
 1_TABLE_COLUMN,mst_bank_accounts,updated_at,timestamp with time zone,YES,now(),ordinal=8
 1_TABLE_COLUMN,mst_brands,brand_code,character varying(10),NO,,ordinal=2
@@ -889,6 +1037,19 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 1_TABLE_COLUMN,products,sku,character varying(100),NO,,ordinal=3
 1_TABLE_COLUMN,products,tax_type,character varying(20),YES,'INC_VAT'::character varying,ordinal=12
 1_TABLE_COLUMN,products,wholesale_price,numeric,YES,0.00,ordinal=16
+1_TABLE_COLUMN,prop.land_estates,created_at,timestamp with time zone,NO,now(),ordinal=12
+1_TABLE_COLUMN,prop.land_estates,district,character varying(60),YES,,ordinal=7
+1_TABLE_COLUMN,prop.land_estates,estate_code,character varying(40),NO,,ordinal=2
+1_TABLE_COLUMN,prop.land_estates,estate_name_th,text,NO,,ordinal=3
+1_TABLE_COLUMN,prop.land_estates,expense_target_workspace,character varying(20),NO,'prop'::character varying,ordinal=5
+1_TABLE_COLUMN,prop.land_estates,id,uuid,NO,gen_random_uuid(),ordinal=1
+1_TABLE_COLUMN,prop.land_estates,is_active,boolean,NO,true,ordinal=11
+1_TABLE_COLUMN,prop.land_estates,local_tax_authority,text,YES,,ordinal=9
+1_TABLE_COLUMN,prop.land_estates,notes,text,YES,,ordinal=10
+1_TABLE_COLUMN,prop.land_estates,province,character varying(60),YES,,ordinal=6
+1_TABLE_COLUMN,prop.land_estates,subdistrict,character varying(60),YES,,ordinal=8
+1_TABLE_COLUMN,prop.land_estates,updated_at,timestamp with time zone,NO,now(),ordinal=13
+1_TABLE_COLUMN,prop.land_estates,usage_category,character varying(30),NO,,ordinal=4
 1_TABLE_COLUMN,sales_item_mappings,created_at,timestamp with time zone,NO,now(),ordinal=11
 1_TABLE_COLUMN,sales_item_mappings,created_by,uuid,YES,,ordinal=10
 1_TABLE_COLUMN,sales_item_mappings,default_unit_price,numeric,YES,,ordinal=8
@@ -896,7 +1057,7 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 1_TABLE_COLUMN,sales_item_mappings,description,text,YES,,ordinal=16
 1_TABLE_COLUMN,sales_item_mappings,id,uuid,NO,gen_random_uuid(),ordinal=1
 1_TABLE_COLUMN,sales_item_mappings,is_service_item,boolean,NO,false,ordinal=6
-1_TABLE_COLUMN,sales_item_mappings,normalized_key,text,YES,GENERATED ALWAYS AS lower(btrim(raw_item_text)),ordinal=4
+1_TABLE_COLUMN,sales_item_mappings,normalized_key,text,YES,GENERATED ALWAYS AS (lower(btrim(raw_item_text))) STORED,ordinal=4
 1_TABLE_COLUMN,sales_item_mappings,normalized_text,text,YES,,ordinal=14
 1_TABLE_COLUMN,sales_item_mappings,product_id,uuid,YES,,ordinal=5
 1_TABLE_COLUMN,sales_item_mappings,raw_item_text,text,YES,,ordinal=3
@@ -989,33 +1150,33 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 1_TABLE_COLUMN,vendor_product_mapping,vendor_product_name,character varying(255),YES,,ordinal=4
 1_TABLE_COLUMN,vendor_product_mapping,vendor_sku,character varying(100),NO,,ordinal=3
 1_TABLE_COLUMN,vendor_product_mapping,vendor_uom,character varying(50),YES,,ordinal=5
-2_FOREIGN_KEY,accounting_periods,accounting_periods_closed_by_fkey,FOREIGN KEY (closed_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,users,
-2_FOREIGN_KEY,approval_logs,approval_logs_actor_id_fkey,FOREIGN KEY (actor_id) REFERENCES auth.users(id),FK,users,
+2_FOREIGN_KEY,accounting_periods,accounting_periods_closed_by_fkey,FOREIGN KEY (closed_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,auth.users,
+2_FOREIGN_KEY,approval_logs,approval_logs_actor_id_fkey,FOREIGN KEY (actor_id) REFERENCES auth.users(id),FK,auth.users,
 2_FOREIGN_KEY,approval_logs,approval_logs_document_id_fkey,FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,FK,documents,
 2_FOREIGN_KEY,approval_logs,approval_logs_expense_id_fkey,FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE,FK,expenses,
 2_FOREIGN_KEY,asset_depreciation_ledger,asset_depreciation_ledger_asset_id_fkey,FOREIGN KEY (asset_id) REFERENCES fixed_assets(id) ON DELETE CASCADE,FK,fixed_assets,
-2_FOREIGN_KEY,asset_depreciation_ledger,asset_depreciation_ledger_created_by_fkey,FOREIGN KEY (created_by) REFERENCES auth.users(id),FK,users,
+2_FOREIGN_KEY,asset_depreciation_ledger,asset_depreciation_ledger_created_by_fkey,FOREIGN KEY (created_by) REFERENCES auth.users(id),FK,auth.users,
 2_FOREIGN_KEY,asset_depreciation_ledger,asset_depreciation_ledger_period_id_fkey,FOREIGN KEY (period_id) REFERENCES accounting_periods(id),FK,accounting_periods,
-2_FOREIGN_KEY,audit_logs,audit_logs_changed_by_fkey,FOREIGN KEY (changed_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,users,
-2_FOREIGN_KEY,bank_reconciliation_allocations,bank_reconciliation_allocations_created_by_fkey,FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,users,
+2_FOREIGN_KEY,audit_logs,audit_logs_changed_by_fkey,FOREIGN KEY (changed_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,auth.users,
+2_FOREIGN_KEY,bank_reconciliation_allocations,bank_reconciliation_allocations_created_by_fkey,FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,auth.users,
 2_FOREIGN_KEY,bank_reconciliation_allocations,bank_reconciliation_allocations_document_id_fkey,FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE RESTRICT,FK,documents,
 2_FOREIGN_KEY,bank_reconciliation_allocations,bank_reconciliation_allocations_statement_line_id_fkey,FOREIGN KEY (statement_line_id) REFERENCES bank_statement_lines(id) ON DELETE CASCADE,FK,bank_statement_lines,
-2_FOREIGN_KEY,bank_statement_imports,bank_statement_imports_imported_by_fkey,FOREIGN KEY (imported_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,users,
+2_FOREIGN_KEY,bank_statement_imports,bank_statement_imports_imported_by_fkey,FOREIGN KEY (imported_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,auth.users,
 2_FOREIGN_KEY,bank_statement_lines,bank_statement_lines_import_id_fkey,FOREIGN KEY (import_id) REFERENCES bank_statement_imports(id) ON DELETE CASCADE,FK,bank_statement_imports,
 2_FOREIGN_KEY,bank_statement_lines,bank_statement_lines_matched_document_id_fkey,FOREIGN KEY (matched_document_id) REFERENCES documents(id) ON DELETE SET NULL,FK,documents,
-2_FOREIGN_KEY,bank_statement_lines,bank_statement_lines_reconciled_by_fkey,FOREIGN KEY (reconciled_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,users,
+2_FOREIGN_KEY,bank_statement_lines,bank_statement_lines_reconciled_by_fkey,FOREIGN KEY (reconciled_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,auth.users,
 2_FOREIGN_KEY,billing_note_items,billing_note_items_billing_note_id_fkey,FOREIGN KEY (billing_note_id) REFERENCES doc_headers(id) ON DELETE CASCADE,FK,doc_headers,
 2_FOREIGN_KEY,billing_note_items,billing_note_items_invoice_id_fkey,FOREIGN KEY (invoice_id) REFERENCES doc_headers(id) ON DELETE RESTRICT,FK,doc_headers,
 2_FOREIGN_KEY,contact_bank_accounts,contact_bank_accounts_contact_id_fkey,FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE,FK,contacts,
 2_FOREIGN_KEY,contact_persons,contact_persons_contact_id_fkey,FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE,FK,contacts,
 2_FOREIGN_KEY,contacts,contacts_succeeded_by_contact_id_fkey,FOREIGN KEY (succeeded_by_contact_id) REFERENCES contacts(id) ON DELETE SET NULL NOT VALID,FK,contacts,
 2_FOREIGN_KEY,depreciation_ledgers,depreciation_ledgers_asset_id_fkey,FOREIGN KEY (asset_id) REFERENCES fixed_assets(id) ON DELETE CASCADE,FK,fixed_assets,
-2_FOREIGN_KEY,depreciation_ledgers,depreciation_ledgers_created_by_fkey,FOREIGN KEY (created_by) REFERENCES auth.users(id),FK,users,
+2_FOREIGN_KEY,depreciation_ledgers,depreciation_ledgers_created_by_fkey,FOREIGN KEY (created_by) REFERENCES auth.users(id),FK,auth.users,
 2_FOREIGN_KEY,doc_details,doc_details_doc_header_id_fkey,FOREIGN KEY (doc_header_id) REFERENCES doc_headers(id) ON DELETE CASCADE,FK,doc_headers,
 2_FOREIGN_KEY,doc_details,doc_details_product_id_fkey,FOREIGN KEY (product_id) REFERENCES products(id),FK,products,
 2_FOREIGN_KEY,doc_headers,doc_headers_contact_id_fkey,FOREIGN KEY (contact_id) REFERENCES contacts(id),FK,contacts,
 2_FOREIGN_KEY,doc_headers,doc_headers_contact_person_id_fkey,FOREIGN KEY (contact_person_id) REFERENCES contact_persons(id),FK,contact_persons,
-2_FOREIGN_KEY,doc_headers,doc_headers_created_by_fkey,FOREIGN KEY (created_by) REFERENCES auth.users(id),FK,users,
+2_FOREIGN_KEY,doc_headers,doc_headers_created_by_fkey,FOREIGN KEY (created_by) REFERENCES auth.users(id),FK,auth.users,
 2_FOREIGN_KEY,doc_headers,doc_headers_ref_doc_id_fkey,FOREIGN KEY (ref_doc_id) REFERENCES doc_headers(id),FK,doc_headers,
 2_FOREIGN_KEY,document_allocations,document_allocations_invoice_doc_id_fkey,FOREIGN KEY (invoice_doc_id) REFERENCES documents(id) ON DELETE CASCADE,FK,documents,
 2_FOREIGN_KEY,document_allocations,document_allocations_receipt_doc_id_fkey,FOREIGN KEY (receipt_doc_id) REFERENCES documents(id) ON DELETE CASCADE,FK,documents,
@@ -1026,26 +1187,36 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 2_FOREIGN_KEY,document_items,document_items_product_id_fkey,FOREIGN KEY (product_id) REFERENCES products(id),FK,products,
 2_FOREIGN_KEY,document_items,document_items_technician_bill_id_fkey,FOREIGN KEY (technician_bill_id) REFERENCES documents(id) ON DELETE SET NULL,FK,documents,
 2_FOREIGN_KEY,document_items,document_items_technician_id_fkey,FOREIGN KEY (technician_id) REFERENCES contacts(id) ON DELETE SET NULL,FK,contacts,
-2_FOREIGN_KEY,documents,documents_approved_by_fkey,FOREIGN KEY (approved_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,users,
+2_FOREIGN_KEY,documents,documents_approved_by_fkey,FOREIGN KEY (approved_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,auth.users,
 2_FOREIGN_KEY,documents,documents_bank_account_id_fkey,FOREIGN KEY (bank_account_id) REFERENCES mst_bank_accounts(id) ON DELETE SET NULL,FK,mst_bank_accounts,
 2_FOREIGN_KEY,documents,documents_carrier_id_fkey,FOREIGN KEY (carrier_id) REFERENCES mst_carriers(carrier_id) ON DELETE SET NULL,FK,mst_carriers,
 2_FOREIGN_KEY,documents,documents_consolidated_parent_doc_id_fkey,FOREIGN KEY (consolidated_parent_doc_id) REFERENCES documents(id),FK,documents,
 2_FOREIGN_KEY,documents,documents_contact_id_fkey,FOREIGN KEY (contact_id) REFERENCES contacts(id),FK,contacts,
 2_FOREIGN_KEY,documents,documents_contact_person_id_fkey,FOREIGN KEY (contact_person_id) REFERENCES contact_persons(id),FK,contact_persons,
-2_FOREIGN_KEY,documents,documents_created_by_fkey,FOREIGN KEY (created_by) REFERENCES auth.users(id),FK,users,
+2_FOREIGN_KEY,documents,documents_created_by_fkey,FOREIGN KEY (created_by) REFERENCES auth.users(id),FK,auth.users,
 2_FOREIGN_KEY,documents,documents_deposit_doc_id_fkey,FOREIGN KEY (deposit_doc_id) REFERENCES documents(id) ON DELETE SET NULL,FK,documents,
 2_FOREIGN_KEY,documents,documents_ref_doc_id_fkey,FOREIGN KEY (ref_doc_id) REFERENCES documents(id),FK,documents,
 2_FOREIGN_KEY,documents,documents_ref_document_id_fkey,FOREIGN KEY (ref_document_id) REFERENCES documents(id) ON DELETE SET NULL,FK,documents,
 2_FOREIGN_KEY,expense_installments,expense_installments_expense_id_fkey,FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE,FK,expenses,
 2_FOREIGN_KEY,expense_items,expense_items_expense_id_fkey,FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE,FK,expenses,
-2_FOREIGN_KEY,expenses,expenses_approved_by_fkey,FOREIGN KEY (approved_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,users,
+2_FOREIGN_KEY,expenses,expenses_approved_by_fkey,FOREIGN KEY (approved_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,auth.users,
 2_FOREIGN_KEY,expenses,expenses_bank_account_id_fkey,FOREIGN KEY (bank_account_id) REFERENCES mst_bank_accounts(id) ON DELETE SET NULL,FK,mst_bank_accounts,
 2_FOREIGN_KEY,expenses,expenses_category_id_fkey,FOREIGN KEY (category_id) REFERENCES mst_expense_categories(id) ON DELETE RESTRICT,FK,mst_expense_categories,
 2_FOREIGN_KEY,expenses,expenses_contact_id_fkey,FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE SET NULL,FK,contacts,
-2_FOREIGN_KEY,expenses,expenses_recorded_by_fkey,FOREIGN KEY (recorded_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,users,
+2_FOREIGN_KEY,expenses,expenses_recorded_by_fkey,FOREIGN KEY (recorded_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,auth.users,
 2_FOREIGN_KEY,expenses,expenses_vendor_id_fkey,FOREIGN KEY (vendor_id) REFERENCES contacts(id) ON DELETE RESTRICT,FK,contacts,
 2_FOREIGN_KEY,fixed_assets,fixed_assets_category_id_fkey,FOREIGN KEY (category_id) REFERENCES mst_asset_categories(id) ON DELETE RESTRICT,FK,mst_asset_categories,
 2_FOREIGN_KEY,fixed_assets,fixed_assets_expense_id_fkey,FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE SET NULL,FK,expenses,
+2_FOREIGN_KEY,fnb.branches,branches_business_unit_code_fkey,FOREIGN KEY (business_unit_code) REFERENCES holding.business_units(bu_code),FK,holding.business_units,
+2_FOREIGN_KEY,fnb.branches,branches_default_bank_account_id_fkey,FOREIGN KEY (default_bank_account_id) REFERENCES holding.bank_accounts(id) ON DELETE SET NULL,FK,holding.bank_accounts,
+2_FOREIGN_KEY,fnb.branches,branches_legal_entity_id_fkey,FOREIGN KEY (legal_entity_id) REFERENCES holding.legal_entities(id) ON DELETE RESTRICT,FK,holding.legal_entities,
+2_FOREIGN_KEY,holding.bank_accounts,bank_accounts_business_unit_code_fkey,FOREIGN KEY (business_unit_code) REFERENCES holding.business_units(bu_code) ON DELETE SET NULL,FK,holding.business_units,
+2_FOREIGN_KEY,holding.bank_accounts,bank_accounts_legal_entity_id_fkey,FOREIGN KEY (legal_entity_id) REFERENCES holding.legal_entities(id) ON DELETE RESTRICT,FK,holding.legal_entities,
+2_FOREIGN_KEY,holding.business_units,business_units_default_legal_entity_id_fkey,FOREIGN KEY (default_legal_entity_id) REFERENCES holding.legal_entities(id) ON DELETE SET NULL,FK,holding.legal_entities,
+2_FOREIGN_KEY,holding.corporate_documents,corporate_documents_legal_entity_id_fkey,FOREIGN KEY (legal_entity_id) REFERENCES holding.legal_entities(id) ON DELETE RESTRICT,FK,holding.legal_entities,
+2_FOREIGN_KEY,holding.liff_user_registrations,liff_user_registrations_channel_code_fkey,FOREIGN KEY (channel_code) REFERENCES holding.line_channels(channel_code) ON DELETE SET NULL,FK,holding.line_channels,
+2_FOREIGN_KEY,holding.liff_user_registrations,liff_user_registrations_legal_entity_id_fkey,FOREIGN KEY (legal_entity_id) REFERENCES holding.legal_entities(id) ON DELETE SET NULL,FK,holding.legal_entities,
+2_FOREIGN_KEY,holding.user_workspace_grants,user_workspace_grants_user_id_fkey,FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON DELETE CASCADE,FK,user_profiles,
 2_FOREIGN_KEY,hr_payroll_items,hr_payroll_items_employee_id_fkey,FOREIGN KEY (employee_id) REFERENCES mst_employees(id) ON DELETE RESTRICT,FK,mst_employees,
 2_FOREIGN_KEY,hr_payroll_items,hr_payroll_items_linked_expense_id_fkey,FOREIGN KEY (linked_expense_id) REFERENCES expenses(id) ON DELETE SET NULL,FK,expenses,
 2_FOREIGN_KEY,hr_payroll_items,hr_payroll_items_payroll_period_id_fkey,FOREIGN KEY (payroll_period_id) REFERENCES hr_payroll_periods(id) ON DELETE CASCADE,FK,hr_payroll_periods,
@@ -1056,7 +1227,7 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 2_FOREIGN_KEY,line_notification_logs,line_notification_logs_contact_id_fkey,FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE SET NULL,FK,contacts,
 2_FOREIGN_KEY,line_notification_logs,line_notification_logs_document_id_fkey,FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE SET NULL,FK,documents,
 2_FOREIGN_KEY,line_notification_logs,line_notification_logs_payment_transaction_id_fkey,FOREIGN KEY (payment_transaction_id) REFERENCES payment_transactions(id) ON DELETE SET NULL,FK,payment_transactions,
-2_FOREIGN_KEY,material_stock_ledger,material_stock_ledger_actor_user_id_fkey,FOREIGN KEY (actor_user_id) REFERENCES auth.users(id) ON DELETE SET NULL,FK,users,
+2_FOREIGN_KEY,material_stock_ledger,material_stock_ledger_actor_user_id_fkey,FOREIGN KEY (actor_user_id) REFERENCES auth.users(id) ON DELETE SET NULL,FK,auth.users,
 2_FOREIGN_KEY,material_stock_ledger,material_stock_ledger_document_id_fkey,FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE SET NULL,FK,documents,
 2_FOREIGN_KEY,material_stock_ledger,material_stock_ledger_finished_model_id_fkey,FOREIGN KEY (finished_model_id) REFERENCES product_models(id) ON DELETE SET NULL,FK,product_models,
 2_FOREIGN_KEY,material_stock_ledger,material_stock_ledger_material_id_fkey,FOREIGN KEY (material_id) REFERENCES mst_materials(id) ON DELETE RESTRICT,FK,mst_materials,
@@ -1069,9 +1240,9 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 2_FOREIGN_KEY,mst_materials,mst_materials_category_code_fkey,FOREIGN KEY (category_code) REFERENCES mst_material_categories(code) ON DELETE RESTRICT,FK,mst_material_categories,
 2_FOREIGN_KEY,mst_materials,mst_materials_default_vendor_id_fkey,FOREIGN KEY (default_vendor_id) REFERENCES contacts(id) ON DELETE SET NULL,FK,contacts,
 2_FOREIGN_KEY,mst_sizes,mst_sizes_brand_id_fkey,FOREIGN KEY (brand_id) REFERENCES mst_brands(id) ON DELETE CASCADE,FK,mst_brands,
-2_FOREIGN_KEY,parameter_change_requests,parameter_change_requests_approved_by_fkey,FOREIGN KEY (approved_by) REFERENCES auth.users(id),FK,users,
+2_FOREIGN_KEY,parameter_change_requests,parameter_change_requests_approved_by_fkey,FOREIGN KEY (approved_by) REFERENCES auth.users(id),FK,auth.users,
 2_FOREIGN_KEY,parameter_change_requests,parameter_change_requests_param_key_fkey,FOREIGN KEY (param_key) REFERENCES system_parameters(param_key),FK,system_parameters,
-2_FOREIGN_KEY,parameter_change_requests,parameter_change_requests_requested_by_fkey,FOREIGN KEY (requested_by) REFERENCES auth.users(id),FK,users,
+2_FOREIGN_KEY,parameter_change_requests,parameter_change_requests_requested_by_fkey,FOREIGN KEY (requested_by) REFERENCES auth.users(id),FK,auth.users,
 2_FOREIGN_KEY,payment_allocations,payment_allocations_doc_header_id_fkey,FOREIGN KEY (doc_header_id) REFERENCES doc_headers(id) ON DELETE CASCADE,FK,doc_headers,
 2_FOREIGN_KEY,payment_transactions,payment_transactions_bank_account_id_fkey,FOREIGN KEY (bank_account_id) REFERENCES mst_bank_accounts(id),FK,mst_bank_accounts,
 2_FOREIGN_KEY,payment_transactions,payment_transactions_document_id_fkey,FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,FK,documents,
@@ -1082,7 +1253,7 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 2_FOREIGN_KEY,product_model_bom_materials,product_model_bom_materials_finished_model_id_fkey,FOREIGN KEY (finished_model_id) REFERENCES product_models(id) ON DELETE CASCADE,FK,product_models,
 2_FOREIGN_KEY,product_model_bom_materials,product_model_bom_materials_material_id_fkey,FOREIGN KEY (material_id) REFERENCES mst_materials(id) ON DELETE RESTRICT,FK,mst_materials,
 2_FOREIGN_KEY,product_model_color_images,product_model_color_images_color_id_fkey,FOREIGN KEY (color_id) REFERENCES mst_colors(id) ON DELETE RESTRICT,FK,mst_colors,
-2_FOREIGN_KEY,product_model_color_images,product_model_color_images_created_by_fkey,FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,users,
+2_FOREIGN_KEY,product_model_color_images,product_model_color_images_created_by_fkey,FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,auth.users,
 2_FOREIGN_KEY,product_model_color_images,product_model_color_images_model_id_fkey,FOREIGN KEY (model_id) REFERENCES product_models(id) ON DELETE CASCADE,FK,product_models,
 2_FOREIGN_KEY,product_models,product_models_base_uom_id_fkey,FOREIGN KEY (base_uom_id) REFERENCES mst_uom(uom_id) ON DELETE SET NULL,FK,mst_uom,
 2_FOREIGN_KEY,product_models,product_models_brand_id_fkey,FOREIGN KEY (brand_id) REFERENCES mst_brands(id) ON DELETE SET NULL,FK,mst_brands,
@@ -1100,168 +1271,199 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 2_FOREIGN_KEY,production_jobs,production_jobs_finished_model_id_fkey,FOREIGN KEY (finished_model_id) REFERENCES product_models(id),FK,product_models,
 2_FOREIGN_KEY,production_jobs,production_jobs_ref_document_item_id_fkey,FOREIGN KEY (ref_document_item_id) REFERENCES document_items(id) ON DELETE SET NULL,FK,document_items,
 2_FOREIGN_KEY,products,products_model_id_fkey,FOREIGN KEY (model_id) REFERENCES product_models(id) ON DELETE CASCADE,FK,product_models,
-2_FOREIGN_KEY,sales_item_mappings,sales_item_mappings_created_by_fkey,FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,users,
+2_FOREIGN_KEY,sales_item_mappings,sales_item_mappings_created_by_fkey,FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,auth.users,
 2_FOREIGN_KEY,sales_item_mappings,sales_item_mappings_product_id_fkey,FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,FK,products,
 2_FOREIGN_KEY,service_tracking,service_tracking_doc_header_id_fkey,FOREIGN KEY (doc_header_id) REFERENCES doc_headers(id) ON DELETE CASCADE,FK,doc_headers,
-2_FOREIGN_KEY,system_parameters,system_parameters_updated_by_fkey,FOREIGN KEY (updated_by) REFERENCES auth.users(id),FK,users,
-2_FOREIGN_KEY,system_settings,system_settings_updated_by_fkey,FOREIGN KEY (updated_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,users,
+2_FOREIGN_KEY,system_parameters,system_parameters_updated_by_fkey,FOREIGN KEY (updated_by) REFERENCES auth.users(id),FK,auth.users,
+2_FOREIGN_KEY,system_settings,system_settings_updated_by_fkey,FOREIGN KEY (updated_by) REFERENCES auth.users(id) ON DELETE SET NULL,FK,auth.users,
 2_FOREIGN_KEY,technician_rates,technician_rates_service_model_id_fkey,FOREIGN KEY (service_model_id) REFERENCES product_models(id) ON DELETE CASCADE,FK,product_models,
 2_FOREIGN_KEY,technician_rates,technician_rates_technician_id_fkey,FOREIGN KEY (technician_id) REFERENCES contacts(id) ON DELETE CASCADE,FK,contacts,
-2_FOREIGN_KEY,user_profiles,user_profiles_id_fkey,FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE,FK,users,
+2_FOREIGN_KEY,user_profiles,user_profiles_id_fkey,FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE,FK,auth.users,
 2_FOREIGN_KEY,user_profiles,user_profiles_role_code_fkey,FOREIGN KEY (role_code) REFERENCES app_roles(role_code),FK,app_roles,
 2_FOREIGN_KEY,vendor_product_mapping,vendor_product_mapping_internal_product_id_fkey,FOREIGN KEY (internal_product_id) REFERENCES products(id) ON DELETE CASCADE,FK,products,
 2_FOREIGN_KEY,vendor_product_mapping,vendor_product_mapping_vendor_id_fkey,FOREIGN KEY (vendor_id) REFERENCES contacts(id) ON DELETE CASCADE,FK,contacts,
-3_ENUM_TYPE,approval_status,PENDING | APPROVED | REJECTED,ENUM,IMMUTABLE,,values=3
-3_ENUM_TYPE,audit_action_type,INSERT | UPDATE | DELETE,ENUM,IMMUTABLE,,values=3
-3_ENUM_TYPE,document_status,DRAFT | ISSUED | PAID | CANCELLED | VOID | COMPLETED,ENUM,IMMUTABLE,,values=6
-3_ENUM_TYPE,document_type,QT | PO | ABB | DEP | INV_DO | REC | TAX_INV | INT_REC | SO | CS_TAX | DEP_IN | CN | AP_TAX | AP_INV | AP_CASH | DEP_OUT | PAY | REFUND | WRITE_OFF | AR_REFUND | AP_REFUND | AR_WRITEOFF | AP_WRITEOFF | TB | STK_OB | STK_ADJ | BR | BN | AP_CN,ENUM,IMMUTABLE,,values=29
-3_ENUM_TYPE,payment_method_enum,CASH | BANK_TRANSFER | CHEQUE | CREDIT_CARD | OFFSET_DEPOSIT,ENUM,IMMUTABLE,,values=5
-3_ENUM_TYPE,payment_status_enum,UNPAID | PARTIAL | PAID | VOIDED,ENUM,IMMUTABLE,,values=4
-3_ENUM_TYPE,production_job_status,TODO | IN_PROGRESS | QC | READY_TO_SHIP | DELIVERED | CANCELLED,ENUM,IMMUTABLE,,values=6
-3_ENUM_TYPE,production_job_type,SCREEN | EMBROIDERY | SEWING | OTHER,ENUM,IMMUTABLE,,values=4
-3_ENUM_TYPE,storage_tier_type,CLOUD | NAS,ENUM,IMMUTABLE,,values=2
-3_ENUM_TYPE,vat_calculation_type,NONE | INCLUSIVE | EXCLUSIVE,ENUM,IMMUTABLE,,values=3
-4_RPC_FUNCTION,admin_revise_purchase_vat_mode,"p_doc_no text, p_new_vat_mode text, p_reason text",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,attach_sales_document_wht_certificate,"p_document_id uuid, p_wht_rate numeric, p_wht_amount numeric, p_wht_attachment_url text",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,backflush_bom_for_production,"p_production_ref_key text, p_finished_model_id uuid, p_produced_qty numeric, p_document_id uuid, p_tx_date date",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,calculate_monthly_depreciation,"p_period_id uuid, p_user_id uuid",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,check_duplicate_purchase_invoice,"p_vendor_id uuid, p_reference_no text, p_doc_date date, p_exclude_doc_id uuid","TABLE(is_duplicate boolean, existing_doc_id uuid, existing_doc_no character varying, existing_doc_type text, existing_status text)",SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,compute_vendor_mapping_normalized_key,,trigger,SECURITY_INVOKER,VOLATILE,plpgsql
-4_RPC_FUNCTION,convert_purchase_bill_tax_mode,"p_document_id uuid, p_target_tier character varying",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,delete_billing_note_transaction,"p_billing_note_id uuid, p_actor_id uuid",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,delete_product_color_variants,"p_product_id uuid, p_color_id uuid, p_color_name text, p_skus text[]",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,delete_product_model_color_image,"p_model_id uuid, p_color_id uuid",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,delete_skus_safely,p_skus text[],jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,enforce_open_accounting_period,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,enforce_raw_material_size,,trigger,SECURITY_INVOKER,VOLATILE,plpgsql
-4_RPC_FUNCTION,expand_catalog_search_tokens,p_raw_query text,text[],SECURITY_INVOKER,IMMUTABLE,plpgsql
-4_RPC_FUNCTION,extract_color_token,p_text text,text,SECURITY_INVOKER,IMMUTABLE,plpgsql
-4_RPC_FUNCTION,extract_size_token,p_text text,text,SECURITY_INVOKER,IMMUTABLE,plpgsql
-4_RPC_FUNCTION,fn_audit_logs_forbid_mutation,,trigger,SECURITY_INVOKER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_auto_assign_mst_color_family,,trigger,SECURITY_INVOKER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_auto_assign_walkin_contact_for_abb,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_auto_calculate_ap_due_date,,trigger,SECURITY_INVOKER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_auto_fill_expense_vendor_name,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_auto_match_line_group_to_contact,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_auto_settle_and_inherit_satang_rounding,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_auto_sync_billing_note_paid_status,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_auto_sync_purchase_tax_invoice_fields,,trigger,SECURITY_INVOKER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_before_write_inventory_ledger_tx_date,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_classify_bank_account_before_write,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_dedup_before_insert_doc_headers,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_ecommerce_wallet_document_defaults,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_enforce_ap_inv_non_vat_on_insert,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_enforce_void_document_payment_status,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_ensure_bank_statement_import_defaults,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_ensure_carrier_role_on_contact,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_extract_line_target_from_chat_url,,trigger,SECURITY_INVOKER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_is_admin,,boolean,SECURITY_DEFINER,STABLE,sql
-4_RPC_FUNCTION,fn_mirror_documents_to_doc_headers,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_recalc_so_deposit_deducted,p_so_id uuid,void,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_release_vendor_ref_on_document_void,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_snapshot_sales_item_tas2_cost,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_stamp_document_line_notified,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_billing_note_paid_status,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_child_document_sales_channel,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_contact_to_carrier,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_default_contact_bank_account,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_doc_header_br_to_documents,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_document_item_service_flag,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_document_payment_channel_sweep,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_document_wht_fields,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_expenses_bank_account_id,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_expenses_standard_columns,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_handwritten_reference_fields,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_ledger_tx_date_on_document_update,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_model_base_uom_to_products,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_parent_child_document_settlement,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_sales_item_mapping_columns,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_so_on_bank_reconcile_allocation,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_statement_line_direction,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_sync_statement_line_match_status,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_trg_sync_so_deposit_on_dep_in,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,fn_write_row_audit,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,generate_abb_channel_doc_no,"p_sales_channel character varying, p_doc_date date",character varying,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,generate_abb_channel_doc_no,"p_sales_channel text, p_doc_date date",text,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,generate_abb_channel_doc_no,"p_sales_channel text, p_doc_date date, p_document_id uuid",text,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,generate_document_no,"p_doc_type text, p_doc_date date",text,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,generate_expense_no,p_expense_date date,character varying,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,generate_next_expense_no,p_doc_date date,character varying,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,generate_or_sync_payroll_period,"p_year integer, p_month integer, p_sso_rate_pct numeric",uuid,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,generate_tier_1_2_cash_receipt_numbers,"p_start_date date, p_end_date date, p_prefix character varying",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,get_accounting_payment_receipt_register,"p_direction character varying, p_from_date date, p_to_date date, p_bank_account_id uuid, p_payment_method character varying","TABLE(transaction_id uuid, voucher_doc_id uuid, voucher_doc_no character varying, voucher_doc_type text, flow_direction text, payment_datetime timestamp with time zone, payment_date date, payment_time text, contact_id uuid, contact_name character varying, contact_tax_id character varying, payment_method text, payment_channel_label text, bank_account_id uuid, bank_name text, bank_account_no text, bank_account_name text, slip_reference_no text, gross_allocated_amount numeric, wht_deducted_amount numeric, deposit_deducted_amount numeric, net_cash_amount numeric, settled_invoices_summary text, tax_invoices_summary text, billing_note_no text, slip_attachment_url text, notes text)",SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,get_active_bank_accounts,,"TABLE(id uuid, bank_name character varying, account_no character varying, account_name character varying, branch_name character varying, is_company_account boolean, channel_type character varying, display_label text)",SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,get_ap_doc_settlement_modes,p_document_ids uuid[],"TABLE(document_id uuid, settlement_mode text, payment_channel text, bank_label text)",SECURITY_DEFINER,STABLE,plpgsql
-4_RPC_FUNCTION,get_ar_inbound_payment_register,"p_start_date date, p_end_date date","TABLE(document_id uuid, payment_date date, paid_at timestamp with time zone, doc_no text, doc_type text, sales_channel text, customer_name text, tax_id text, payment_channel text, bank_account_id uuid, receiving_bank_label text, bank_name text, account_no text, reference_no text, handwritten_doc_ref text, parent_doc_no text, gross_amount numeric, wht_amount numeric, rounding_difference numeric, platform_fee_amount numeric, net_received_amount numeric, slip_url text, is_swept_to_company boolean, notes text)",SECURITY_DEFINER,STABLE,plpgsql
-4_RPC_FUNCTION,get_ar_outstanding_documents,p_contact_id uuid,"TABLE(document_id uuid, doc_no character varying, doc_type character varying, doc_date date, due_date date, contact_id uuid, customer_name character varying, customer_nickname character varying, grand_total numeric, deposit_deducted numeric, paid_amount numeric, outstanding_amount numeric, payment_status character varying, vat_type character varying, net_before_vat numeric, vat_amount numeric)",SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,get_batch_sales_documents_for_pdf,"p_year integer, p_month integer, p_sub_filter text",jsonb,SECURITY_DEFINER,STABLE,plpgsql
-4_RPC_FUNCTION,get_default_walkin_contact_id,,uuid,SECURITY_DEFINER,STABLE,sql
-4_RPC_FUNCTION,get_erp_financial_kpis_and_profit,"p_start_date date, p_end_date date",jsonb,SECURITY_DEFINER,STABLE,plpgsql
-4_RPC_FUNCTION,get_line_webhook_status_summary,,jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,get_model_colorway_cropper_state,p_model_id uuid,jsonb,SECURITY_DEFINER,STABLE,plpgsql
-4_RPC_FUNCTION,get_official_document_titles,p_doc_type document_type,jsonb,SECURITY_INVOKER,IMMUTABLE,sql
-4_RPC_FUNCTION,get_official_document_titles,p_doc_type text,jsonb,SECURITY_INVOKER,IMMUTABLE,sql
-4_RPC_FUNCTION,get_on_hand_qty_by_product_ids,p_product_ids uuid[],"TABLE(product_id uuid, on_hand_qty numeric, movement_count bigint)",SECURITY_DEFINER,STABLE,sql
-4_RPC_FUNCTION,get_recommended_conversion_date,"p_source_doc_id uuid, p_target_doc_type text",date,SECURITY_DEFINER,STABLE,plpgsql
-4_RPC_FUNCTION,get_reconcile_candidate_documents,,"TABLE(id uuid, doc_no character varying, doc_type character varying, doc_date date, issued_time character varying, contact_id uuid, customer_name character varying, reference_no character varying, has_slip boolean, sales_channel character varying, payment_channel character varying, grand_total numeric, deposit_deducted numeric, wht_amount numeric, allocated_in_reconcile numeric, reconcilable_amount numeric, same_amount_count integer, payment_status character varying)",SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,get_sales_order_deposit_summary,p_so_document_id uuid,"TABLE(deposit_count integer, total_deposit_gross numeric, total_deposit_net numeric, total_deposit_vat numeric, latest_deposit_doc_id uuid, deposit_doc_nos text)",SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,get_smart_sku_picker_vendor_products,p_vendor_id uuid,"TABLE(product_id uuid, model_id uuid, sku character varying, product_name character varying, color character varying, size character varying, base_uom character varying, cost_price numeric, tax_type character varying, vendor_sku character varying, purchase_uom_code character varying, conversion_factor numeric, image_url text, is_mapped boolean, is_raw_material boolean, size_sort_order integer)",SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,get_statement_lines_with_matches,p_import_id uuid,"TABLE(id uuid, import_id uuid, tx_datetime timestamp with time zone, tx_date date, tx_code character varying, description text, deposit_amount numeric, withdrawal_amount numeric, balance_amount numeric, tx_direction character varying, channel character varying, match_status character varying, reconcile_status character varying, status character varying, is_matched boolean, matched_document_id uuid, expense_memo text, allocated_total numeric, allocated_amount numeric, remaining_amount numeric, matched_doc_nos text, matched_documents jsonb)",SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,get_unbilled_ap_summary_by_period,"p_from_date date, p_to_date date, p_contact_id uuid",jsonb,SECURITY_DEFINER,VOLATILE,sql
-4_RPC_FUNCTION,get_unbilled_ap_vendor_queue,,"TABLE(contact_id uuid, company_name character varying, contact_name character varying, unbilled_count bigint, invoice_count bigint, total_unbilled_amount numeric, total_outstanding numeric)",SECURITY_DEFINER,STABLE,sql
-4_RPC_FUNCTION,get_unswept_receipts_summary,,"TABLE(cash_count integer, cash_total numeric, other_bank_count integer, other_bank_total numeric, total_unswept_amount numeric)",SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,get_user_access_scope,,character varying,SECURITY_DEFINER,STABLE,sql
-4_RPC_FUNCTION,get_vendor_receipt_defaults,p_vendor_id uuid,jsonb,SECURITY_DEFINER,STABLE,plpgsql
-4_RPC_FUNCTION,get_vendor_rounding_calc_mode,p_vendor_id uuid,text,SECURITY_DEFINER,STABLE,sql
-4_RPC_FUNCTION,handle_updated_at,,trigger,SECURITY_INVOKER,VOLATILE,plpgsql
-4_RPC_FUNCTION,is_admin,,boolean,SECURITY_DEFINER,STABLE,sql
-4_RPC_FUNCTION,is_period_closed,doc_date date,boolean,SECURITY_DEFINER,STABLE,plpgsql
-4_RPC_FUNCTION,issue_credit_note_transaction,"p_document_id uuid, p_user_id uuid",character varying,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,issue_document_transaction,"p_document_id uuid, p_needs_official_no boolean, p_doc_prefix text, p_issue_date date, p_issued_status text, p_payment_status text, p_paid_amount numeric, p_approval_status text, p_ledger_lines jsonb, p_new_items jsonb, p_sub_total numeric, p_tax_amount numeric, p_grand_total numeric",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,issue_receipt_for_tax_invoice,"p_source_doc_id uuid, p_receipt_date date",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,lookup_model_catalog_for_bot,p_query text,"TABLE(model_id uuid, model_code character varying, model_name character varying, model_short_name character varying, catalog_name character varying, brand_name character varying, category_name character varying, model_main_image_url text, catalog_image_url text, size_chart_image_url text)",SECURITY_DEFINER,STABLE,plpgsql
-4_RPC_FUNCTION,match_vendor_ocr_line_item,"p_vendor_id uuid, p_raw_vendor_sku text","TABLE(mapping_id uuid, internal_product_id uuid, sku character varying, product_name character varying, color character varying, size character varying, default_tax_type character varying, purchase_uom_code character varying, conversion_factor numeric, match_tier text, similarity_score numeric)",SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,match_vendor_tax_invoice_transaction,"p_document_ids uuid[], p_tax_invoice_no character varying, p_tax_invoice_date date, p_actual_tax_base numeric, p_actual_vat_amount numeric, p_tax_invoice_file_url text, p_adjust_ap_to_tax_invoice boolean",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,normalize_ocr_text,p_text text,text,SECURITY_INVOKER,IMMUTABLE,plpgsql
-4_RPC_FUNCTION,process_ar_receipt_transaction,"p_contact_id uuid, p_payment_date date, p_payment_method text, p_bank_account_id uuid, p_net_cash_amount numeric, p_receipt_grand_total numeric, p_header_wht numeric, p_reference_no text, p_slip_url text, p_original_file_name text, p_notes text, p_user_id uuid, p_invoice_allocations jsonb, p_cn_allocations jsonb, p_deposit_allocations jsonb",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,recalculate_payroll_period_totals,p_period_id uuid,void,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,reclassify_document_payment_channel,"p_document_id uuid, p_new_channel text, p_bank_account_id uuid",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,record_and_get_ocr_quota,"p_model_used text, p_is_exhausted boolean",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,record_material_purchase_inbound,"p_document_id uuid, p_material_id uuid, p_purchase_qty numeric, p_net_line_amount numeric, p_tx_date date, p_notes text",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,record_sso_remittance_and_expense,"p_period_id uuid, p_payment_date date, p_receipt_no character varying, p_reference_no character varying, p_slip_url text, p_paid_from_account character varying",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,recover_inc_vat_unit_price,p_ex_vat_cost numeric,numeric,SECURITY_INVOKER,IMMUTABLE,plpgsql
-4_RPC_FUNCTION,replace_payment_slip_transaction,"p_voucher_doc_id uuid, p_new_slip_url text, p_payment_date date, p_reference_no text, p_bank_account_id uuid, p_actor_id uuid",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,resolve_ledger_posting_context,"p_document_id uuid, p_doc_header_id uuid, p_notes text, p_created_at timestamp with time zone","TABLE(resolved_document_id uuid, resolved_tx_date date)",SECURITY_DEFINER,STABLE,plpgsql
-4_RPC_FUNCTION,save_expense_direct_no_draft,"p_expense_date date, p_contact_id uuid, p_vendor_name character varying, p_vendor_tax_id character varying, p_vendor_address text, p_tax_invoice_no character varying, p_reference_no character varying, p_category character varying, p_description text, p_tax_type character varying, p_tax_invoice_status character varying, p_accounting_tax_tier character varying, p_sub_total numeric, p_vat_amount numeric, p_wht_amount numeric, p_total_amount numeric, p_payment_method character varying, p_bank_account_id uuid, p_attachment_url text, p_payment_slip_url text, p_vehicle_plate character varying, p_items jsonb",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,save_goods_receipt_to_ledger_transaction,"p_running_prefix text, p_doc_date date, p_legacy_header jsonb, p_legacy_details jsonb, p_document_header jsonb, p_document_items jsonb, p_ledger_lines jsonb, p_cost_updates jsonb",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,save_manual_goods_receipt_transaction,"p_should_post_ledger boolean, p_running_prefix text, p_draft_doc_no text, p_doc_date date, p_document_ref text, p_header jsonb, p_items jsonb, p_ledger_lines jsonb, p_cost_updates jsonb",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,save_vendor_rounding_calc_mode,"p_vendor_id uuid, p_rounding_calc_mode text",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,search_colorway_sales_catalog,"p_search_text text, p_color_family text, p_category_id uuid, p_in_stock_only boolean, p_limit integer","TABLE(model_id uuid, model_code character varying, model_name character varying, model_short_name character varying, catalog_name character varying, brand_code character varying, brand_name character varying, category_id uuid, category_code character varying, category_name character varying, gender character varying, color_id uuid, color_code character varying, color_name character varying, color_family character varying, color_family_th character varying, hex_code character varying, display_image_url text, colorway_image_url text, model_poster_url text, model_main_image_url text, catalog_image_url text, size_chart_image_url text, has_colorway_image boolean, total_on_hand_qty numeric, in_stock_size_count integer, min_retail_price numeric, max_retail_price numeric, min_wholesale_price numeric, max_wholesale_price numeric, sizes_breakdown jsonb)",SECURITY_DEFINER,STABLE,plpgsql
-4_RPC_FUNCTION,set_product_model_visual_slot,"p_model_id uuid, p_slot text, p_image_url text, p_storage_path text",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,set_purchase_tax_invoice_status,"p_document_id uuid, p_target_status character varying, p_actor_id uuid",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,settle_ap_invoices_bulk_fast,"p_pay_doc_id uuid, p_billing_note_id uuid, p_allocations jsonb",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,settle_sales_document_payment,"p_document_id uuid, p_received_amount numeric, p_close_with_rounding boolean, p_wht_rate numeric, p_wht_amount numeric, p_payment_channel text, p_bank_account_id uuid, p_receiving_bank_label text, p_reference_no text, p_slip_url text, p_payment_date date",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,sync_document_stock_ledger,p_document_id uuid,jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,trg_auto_assign_document_item_sort_order,,trigger,SECURITY_INVOKER,VOLATILE,plpgsql
-4_RPC_FUNCTION,trg_compute_vendor_mapping_normalized_key,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,trg_enforce_mapping_product_tax_type,,trigger,SECURITY_INVOKER,VOLATILE,plpgsql
-4_RPC_FUNCTION,trg_sanitize_document_defaults,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,trg_sync_model_tax_type_to_children,,trigger,SECURITY_INVOKER,VOLATILE,plpgsql
-4_RPC_FUNCTION,unmatch_statement_line_allocation,"p_statement_line_id uuid, p_document_id uuid",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,update_billing_note_transaction,"p_billing_note_id uuid, p_doc_date date, p_due_date date, p_notes text, p_invoice_ids uuid[], p_auto_renumber_if_month_changed boolean, p_actor_id uuid",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,update_employee_id_card_attachment,"p_employee_id uuid, p_id_card_url text, p_bank_book_url text",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,update_expense_direct,"p_expense_id uuid, p_expense_date date, p_contact_id uuid, p_vendor_name character varying, p_vendor_tax_id character varying, p_tax_invoice_no character varying, p_reference_no character varying, p_category character varying, p_description text, p_tax_type character varying, p_tax_invoice_status character varying, p_accounting_tax_tier character varying, p_net_amount numeric, p_vat_amount numeric, p_wht_amount numeric, p_total_amount numeric, p_payment_method character varying, p_bank_account_id uuid, p_attachment_url text, p_payment_slip_url text, p_vehicle_plate character varying",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,update_product_model_catalog_meta,"p_model_id uuid, p_catalog_name text",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,update_sales_document_direct,"p_document_id uuid, p_doc_date date, p_notes text, p_remark text, p_reference_no text, p_payment_channel text, p_receiving_bank_label text, p_bank_account_id uuid, p_slip_url text, p_discount_amount numeric, p_shipping_fee numeric, p_shipping_method text, p_shipping_tracking_no text, p_shipping_vat_mode text, p_rounding_difference numeric, p_handwritten_doc_ref text, p_vat_type text",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,update_updated_at_column,,trigger,SECURITY_INVOKER,VOLATILE,plpgsql
-4_RPC_FUNCTION,upsert_contact_bank_account,"p_contact_id uuid, p_account_id uuid, p_account_category character varying, p_bank_code character varying, p_bank_name character varying, p_account_no character varying, p_account_name character varying, p_branch_name character varying, p_notes text, p_is_default boolean, p_is_active boolean",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,upsert_material_vendor_mapping,"p_contact_id uuid, p_raw_vendor_code text, p_raw_vendor_desc text, p_material_id uuid, p_last_unit_price numeric",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,upsert_ocr_vendor_mapping,"p_vendor_id uuid, p_raw_vendor_sku text, p_internal_product_id uuid, p_purchase_uom_code character varying, p_conversion_factor numeric, p_default_tax_type character varying",uuid,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,upsert_product_model_color_image,"p_model_id uuid, p_color_id uuid, p_image_url text, p_storage_path text, p_source_poster_url text, p_crop_meta jsonb, p_actor_id uuid",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,validate_inventory_ledger_doc_header,,trigger,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,void_document_transaction,"p_document_id uuid, p_user_id uuid, p_void_reason text",void,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,void_document_with_stock_reversal,p_document_id uuid,jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
-4_RPC_FUNCTION,void_sales_document,"p_document_id uuid, p_void_reason text",jsonb,SECURITY_DEFINER,VOLATILE,plpgsql
+3_ENUM_TYPE,approval_status,ENUM_VALUES,PENDING | APPROVED | REJECTED,ENUM,,count=3
+3_ENUM_TYPE,audit_action_type,ENUM_VALUES,INSERT | UPDATE | DELETE,ENUM,,count=3
+3_ENUM_TYPE,document_status,ENUM_VALUES,DRAFT | ISSUED | PAID | CANCELLED | VOID | COMPLETED,ENUM,,count=6
+3_ENUM_TYPE,document_type,ENUM_VALUES,QT | PO | ABB | DEP | INV_DO | REC | TAX_INV | INT_REC | SO | CS_TAX | DEP_IN | CN | AP_TAX | AP_INV | AP_CASH | DEP_OUT | PAY | REFUND | WRITE_OFF | AR_REFUND | AP_REFUND | AR_WRITEOFF | AP_WRITEOFF | TB | STK_OB | STK_ADJ | BR | BN | AP_CN,ENUM,,count=29
+3_ENUM_TYPE,payment_method_enum,ENUM_VALUES,CASH | BANK_TRANSFER | CHEQUE | CREDIT_CARD | OFFSET_DEPOSIT,ENUM,,count=5
+3_ENUM_TYPE,payment_status_enum,ENUM_VALUES,UNPAID | PARTIAL | PAID | VOIDED,ENUM,,count=4
+3_ENUM_TYPE,production_job_status,ENUM_VALUES,TODO | IN_PROGRESS | QC | READY_TO_SHIP | DELIVERED | CANCELLED,ENUM,,count=6
+3_ENUM_TYPE,production_job_type,ENUM_VALUES,SCREEN | EMBROIDERY | SEWING | OTHER,ENUM,,count=4
+3_ENUM_TYPE,storage_tier_type,ENUM_VALUES,CLOUD | NAS,ENUM,,count=2
+3_ENUM_TYPE,vat_calculation_type,ENUM_VALUES,NONE | INCLUSIVE | EXCLUSIVE,ENUM,,count=3
+4_RPC_FUNCTION,admin_revise_purchase_vat_mode,oid_34030,"(p_doc_no text, p_new_vat_mode text, p_reason text) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,attach_sales_document_wht_certificate,oid_35183,"(p_document_id uuid, p_wht_rate numeric, p_wht_amount numeric, p_wht_attachment_url text) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,backflush_bom_for_production,oid_36283,"(p_production_ref_key text, p_finished_model_id uuid, p_produced_qty numeric, p_document_id uuid, p_tx_date date) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,calculate_monthly_depreciation,oid_29054,"(p_period_id uuid, p_user_id uuid) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,check_duplicate_purchase_invoice,oid_34077,"(p_vendor_id uuid, p_reference_no text, p_doc_date date, p_exclude_doc_id uuid) -> TABLE(is_duplicate boolean, existing_doc_id uuid, existing_doc_no character varying, existing_doc_type text, existing_status text)",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,compute_vendor_mapping_normalized_key,oid_34034,() -> trigger,SECURITY_INVOKER,plpgsql,VOLATILE
+4_RPC_FUNCTION,convert_purchase_bill_tax_mode,oid_34469,"(p_document_id uuid, p_target_tier character varying) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,delete_billing_note_transaction,oid_34234,"(p_billing_note_id uuid, p_actor_id uuid) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,delete_product_color_variants,oid_35327,"(p_product_id uuid, p_color_id uuid, p_color_name text, p_skus text[]) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,delete_product_model_color_image,oid_36519,"(p_model_id uuid, p_color_id uuid) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,delete_skus_safely,oid_35324,(p_skus text[]) -> jsonb,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,enforce_open_accounting_period,oid_28828,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,enforce_raw_material_size,oid_29366,() -> trigger,SECURITY_INVOKER,plpgsql,VOLATILE
+4_RPC_FUNCTION,expand_catalog_search_tokens,oid_36513,(p_raw_query text) -> text[],SECURITY_INVOKER,plpgsql,IMMUTABLE
+4_RPC_FUNCTION,extract_color_token,oid_34033,(p_text text) -> text,SECURITY_INVOKER,plpgsql,IMMUTABLE
+4_RPC_FUNCTION,extract_size_token,oid_34006,(p_text text) -> text,SECURITY_INVOKER,plpgsql,IMMUTABLE
+4_RPC_FUNCTION,fn_audit_logs_forbid_mutation,oid_27286,() -> trigger,SECURITY_INVOKER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_auto_assign_mst_color_family,oid_36477,() -> trigger,SECURITY_INVOKER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_auto_assign_walkin_contact_for_abb,oid_35284,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_auto_calculate_ap_due_date,oid_34120,() -> trigger,SECURITY_INVOKER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_auto_fill_expense_vendor_name,oid_34811,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_auto_match_line_group_to_contact,oid_34513,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_auto_settle_and_inherit_satang_rounding,oid_35803,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_auto_sync_billing_note_paid_status,oid_34331,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_auto_sync_purchase_tax_invoice_fields,oid_34115,() -> trigger,SECURITY_INVOKER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_before_write_inventory_ledger_tx_date,oid_35608,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_classify_bank_account_before_write,oid_35398,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_dedup_before_insert_doc_headers,oid_34328,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_ecommerce_wallet_document_defaults,oid_35871,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_enforce_ap_inv_non_vat_on_insert,oid_36148,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_enforce_void_document_payment_status,oid_35888,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_ensure_bank_statement_import_defaults,oid_35135,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_ensure_carrier_role_on_contact,oid_33795,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_extract_line_target_from_chat_url,oid_34291,() -> trigger,SECURITY_INVOKER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_is_admin,oid_27517,() -> boolean,SECURITY_DEFINER,sql,STABLE
+4_RPC_FUNCTION,fn_mirror_documents_to_doc_headers,oid_34259,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_recalc_so_deposit_deducted,oid_35147,(p_so_id uuid) -> void,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_release_vendor_ref_on_document_void,oid_34074,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_snapshot_sales_item_tas2_cost,oid_36302,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_stamp_document_line_notified,oid_34533,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_billing_note_paid_status,oid_34130,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_child_document_sales_channel,oid_35044,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_contact_to_carrier,oid_33777,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_default_contact_bank_account,oid_34440,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_doc_header_br_to_documents,oid_34216,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_document_item_service_flag,oid_34838,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_document_payment_channel_sweep,oid_35056,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_document_wht_fields,oid_35181,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_expenses_bank_account_id,oid_34772,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_expenses_standard_columns,oid_34789,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_handwritten_reference_fields,oid_34842,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_ledger_tx_date_on_document_update,oid_35610,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_model_base_uom_to_products,oid_34167,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_parent_child_document_settlement,oid_35195,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_sales_item_mapping_columns,oid_34885,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_so_on_bank_reconcile_allocation,oid_35197,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_statement_line_direction,oid_35145,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_sync_statement_line_match_status,oid_35208,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_trg_sync_so_deposit_on_dep_in,oid_35148,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,fn_write_row_audit,oid_27289,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,generate_abb_channel_doc_no,oid_34836,"(p_sales_channel character varying, p_doc_date date) -> character varying",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,generate_abb_channel_doc_no,oid_34840,"(p_sales_channel text, p_doc_date date, p_document_id uuid) -> text",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,generate_abb_channel_doc_no,oid_35903,"(p_sales_channel text, p_doc_date date) -> text",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,generate_document_no,oid_27078,"(p_doc_type text, p_doc_date date) -> text",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,generate_expense_no,oid_27346,(p_expense_date date) -> character varying,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,generate_next_expense_no,oid_34791,(p_doc_date date) -> character varying,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,generate_or_sync_payroll_period,oid_34681,"(p_year integer, p_month integer, p_sso_rate_pct numeric) -> uuid",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,generate_tier_1_2_cash_receipt_numbers,oid_34470,"(p_start_date date, p_end_date date, p_prefix character varying) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,get_accounting_payment_receipt_register,oid_34249,"(p_direction character varying, p_from_date date, p_to_date date, p_bank_account_id uuid, p_payment_method character varying) -> TABLE(transaction_id uuid, voucher_doc_id uuid, voucher_doc_no character varying, voucher_doc_type text, flow_direction text, payment_datetime timestamp with time zone, payment_date date, payment_time text, contact_id uuid, contact_name character varying, contact_tax_id character varying, payment_method text, payment_channel_label text, bank_account_id uuid, bank_name text, bank_account_no text, bank_account_name text, slip_reference_no text, gross_allocated_amount numeric, wht_deducted_amount numeric, deposit_deducted_amount numeric, net_cash_amount numeric, settled_invoices_summary text, tax_invoices_summary text, billing_note_no text, slip_attachment_url text, notes text)",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,get_active_bank_accounts,oid_35074,"() -> TABLE(id uuid, bank_name character varying, account_no character varying, account_name character varying, branch_name character varying, is_company_account boolean, channel_type character varying, display_label text)",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,get_ap_doc_settlement_modes,oid_36139,"(p_document_ids uuid[]) -> TABLE(document_id uuid, settlement_mode text, payment_channel text, bank_label text)",SECURITY_DEFINER,plpgsql,STABLE
+4_RPC_FUNCTION,get_ar_inbound_payment_register,oid_35923,"(p_start_date date, p_end_date date) -> TABLE(document_id uuid, payment_date date, paid_at timestamp with time zone, doc_no text, doc_type text, sales_channel text, customer_name text, tax_id text, payment_channel text, bank_account_id uuid, receiving_bank_label text, bank_name text, account_no text, reference_no text, handwritten_doc_ref text, parent_doc_no text, gross_amount numeric, wht_amount numeric, rounding_difference numeric, platform_fee_amount numeric, net_received_amount numeric, slip_url text, is_swept_to_company boolean, notes text)",SECURITY_DEFINER,plpgsql,STABLE
+4_RPC_FUNCTION,get_ar_outstanding_documents,oid_35046,"(p_contact_id uuid) -> TABLE(document_id uuid, doc_no character varying, doc_type character varying, doc_date date, due_date date, contact_id uuid, customer_name character varying, customer_nickname character varying, grand_total numeric, deposit_deducted numeric, paid_amount numeric, outstanding_amount numeric, payment_status character varying, vat_type character varying, net_before_vat numeric, vat_amount numeric)",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,get_batch_sales_documents_for_pdf,oid_35930,"(p_year integer, p_month integer, p_sub_filter text) -> jsonb",SECURITY_DEFINER,plpgsql,STABLE
+4_RPC_FUNCTION,get_default_walkin_contact_id,oid_35283,() -> uuid,SECURITY_DEFINER,sql,STABLE
+4_RPC_FUNCTION,get_erp_financial_kpis_and_profit,oid_36304,"(p_start_date date, p_end_date date) -> jsonb",SECURITY_DEFINER,plpgsql,STABLE
+4_RPC_FUNCTION,get_line_webhook_status_summary,oid_34517,() -> jsonb,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,get_model_colorway_cropper_state,oid_36517,(p_model_id uuid) -> jsonb,SECURITY_DEFINER,plpgsql,STABLE
+4_RPC_FUNCTION,get_official_document_titles,oid_35269,(p_doc_type text) -> jsonb,SECURITY_INVOKER,sql,IMMUTABLE
+4_RPC_FUNCTION,get_official_document_titles,oid_35270,(p_doc_type document_type) -> jsonb,SECURITY_INVOKER,sql,IMMUTABLE
+4_RPC_FUNCTION,get_on_hand_qty_by_product_ids,oid_33820,"(p_product_ids uuid[]) -> TABLE(product_id uuid, on_hand_qty numeric, movement_count bigint)",SECURITY_DEFINER,sql,STABLE
+4_RPC_FUNCTION,get_recommended_conversion_date,oid_35739,"(p_source_doc_id uuid, p_target_doc_type text) -> date",SECURITY_DEFINER,plpgsql,STABLE
+4_RPC_FUNCTION,get_reconcile_candidate_documents,oid_35249,"() -> TABLE(id uuid, doc_no character varying, doc_type character varying, doc_date date, issued_time character varying, contact_id uuid, customer_name character varying, reference_no character varying, has_slip boolean, sales_channel character varying, payment_channel character varying, grand_total numeric, deposit_deducted numeric, wht_amount numeric, allocated_in_reconcile numeric, reconcilable_amount numeric, same_amount_count integer, payment_status character varying)",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,get_sales_order_deposit_summary,oid_35035,"(p_so_document_id uuid) -> TABLE(deposit_count integer, total_deposit_gross numeric, total_deposit_net numeric, total_deposit_vat numeric, latest_deposit_doc_id uuid, deposit_doc_nos text)",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,get_smart_sku_picker_vendor_products,oid_34198,"(p_vendor_id uuid) -> TABLE(product_id uuid, model_id uuid, sku character varying, product_name character varying, color character varying, size character varying, base_uom character varying, cost_price numeric, tax_type character varying, vendor_sku character varying, purchase_uom_code character varying, conversion_factor numeric, image_url text, is_mapped boolean, is_raw_material boolean, size_sort_order integer)",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,get_statement_lines_with_matches,oid_35236,"(p_import_id uuid) -> TABLE(id uuid, import_id uuid, tx_datetime timestamp with time zone, tx_date date, tx_code character varying, description text, deposit_amount numeric, withdrawal_amount numeric, balance_amount numeric, tx_direction character varying, channel character varying, match_status character varying, reconcile_status character varying, status character varying, is_matched boolean, matched_document_id uuid, expense_memo text, allocated_total numeric, allocated_amount numeric, remaining_amount numeric, matched_doc_nos text, matched_documents jsonb)",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,get_unbilled_ap_summary_by_period,oid_34129,"(p_from_date date, p_to_date date, p_contact_id uuid) -> jsonb",SECURITY_DEFINER,sql,VOLATILE
+4_RPC_FUNCTION,get_unbilled_ap_vendor_queue,oid_34230,"() -> TABLE(contact_id uuid, company_name character varying, contact_name character varying, unbilled_count bigint, invoice_count bigint, total_unbilled_amount numeric, total_outstanding numeric)",SECURITY_DEFINER,sql,STABLE
+4_RPC_FUNCTION,get_unswept_receipts_summary,oid_35058,"() -> TABLE(cash_count integer, cash_total numeric, other_bank_count integer, other_bank_total numeric, total_unswept_amount numeric)",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,get_user_access_scope,oid_29126,() -> character varying,SECURITY_DEFINER,sql,STABLE
+4_RPC_FUNCTION,get_vendor_receipt_defaults,oid_33891,(p_vendor_id uuid) -> jsonb,SECURITY_DEFINER,plpgsql,STABLE
+4_RPC_FUNCTION,get_vendor_rounding_calc_mode,oid_34082,(p_vendor_id uuid) -> text,SECURITY_DEFINER,sql,STABLE
+4_RPC_FUNCTION,gin_extract_query_trgm,oid_33973,"(text, internal, smallint, internal, internal, internal, internal) -> internal",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,gin_extract_value_trgm,oid_33972,"(text, internal) -> internal",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,gin_trgm_consistent,oid_33974,"(internal, smallint, text, integer, internal, internal, internal, internal) -> boolean",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,gin_trgm_triconsistent,oid_33986,"(internal, smallint, text, integer, internal, internal, internal) -> ""char""",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,gtrgm_compress,oid_33948,(internal) -> internal,SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,gtrgm_consistent,oid_33946,"(internal, text, smallint, oid, internal) -> boolean",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,gtrgm_decompress,oid_33949,(internal) -> internal,SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,gtrgm_distance,oid_33947,"(internal, text, smallint, oid, internal) -> double precision",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,gtrgm_in,oid_33943,(cstring) -> gtrgm,SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,gtrgm_options,oid_34001,(internal) -> void,SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,gtrgm_out,oid_33944,(gtrgm) -> cstring,SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,gtrgm_penalty,oid_33950,"(internal, internal, internal) -> internal",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,gtrgm_picksplit,oid_33951,"(internal, internal) -> internal",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,gtrgm_same,oid_33953,"(gtrgm, gtrgm, internal) -> internal",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,gtrgm_union,oid_33952,"(internal, internal) -> gtrgm",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,handle_updated_at,oid_27771,() -> trigger,SECURITY_INVOKER,plpgsql,VOLATILE
+4_RPC_FUNCTION,is_admin,oid_33867,() -> boolean,SECURITY_DEFINER,sql,STABLE
+4_RPC_FUNCTION,is_period_closed,oid_28821,(doc_date date) -> boolean,SECURITY_DEFINER,plpgsql,STABLE
+4_RPC_FUNCTION,issue_credit_note_transaction,oid_29673,"(p_document_id uuid, p_user_id uuid) -> character varying",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,issue_document_transaction,oid_33846,"(p_document_id uuid, p_needs_official_no boolean, p_doc_prefix text, p_issue_date date, p_issued_status text, p_payment_status text, p_paid_amount numeric, p_approval_status text, p_ledger_lines jsonb, p_new_items jsonb, p_sub_total numeric, p_tax_amount numeric, p_grand_total numeric) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,issue_receipt_for_tax_invoice,oid_35271,"(p_source_doc_id uuid, p_receipt_date date) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,lookup_model_catalog_for_bot,oid_36544,"(p_query text) -> TABLE(model_id uuid, model_code character varying, model_name character varying, model_short_name character varying, catalog_name character varying, brand_name character varying, category_name character varying, model_main_image_url text, catalog_image_url text, size_chart_image_url text)",SECURITY_DEFINER,plpgsql,STABLE
+4_RPC_FUNCTION,match_vendor_ocr_line_item,oid_34037,"(p_vendor_id uuid, p_raw_vendor_sku text) -> TABLE(mapping_id uuid, internal_product_id uuid, sku character varying, product_name character varying, color character varying, size character varying, default_tax_type character varying, purchase_uom_code character varying, conversion_factor numeric, match_tier text, similarity_score numeric)",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,match_vendor_tax_invoice_transaction,oid_34102,"(p_document_ids uuid[], p_tax_invoice_no character varying, p_tax_invoice_date date, p_actual_tax_base numeric, p_actual_vat_amount numeric, p_tax_invoice_file_url text, p_adjust_ap_to_tax_invoice boolean) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,normalize_ocr_text,oid_34005,(p_text text) -> text,SECURITY_INVOKER,plpgsql,IMMUTABLE
+4_RPC_FUNCTION,process_ar_receipt_transaction,oid_33850,"(p_contact_id uuid, p_payment_date date, p_payment_method text, p_bank_account_id uuid, p_net_cash_amount numeric, p_receipt_grand_total numeric, p_header_wht numeric, p_reference_no text, p_slip_url text, p_original_file_name text, p_notes text, p_user_id uuid, p_invoice_allocations jsonb, p_cn_allocations jsonb, p_deposit_allocations jsonb) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,recalculate_payroll_period_totals,oid_34680,(p_period_id uuid) -> void,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,reclassify_document_payment_channel,oid_35177,"(p_document_id uuid, p_new_channel text, p_bank_account_id uuid) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,record_and_get_ocr_quota,oid_34042,"(p_model_used text, p_is_exhausted boolean) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,record_material_purchase_inbound,oid_36282,"(p_document_id uuid, p_material_id uuid, p_purchase_qty numeric, p_net_line_amount numeric, p_tx_date date, p_notes text) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,record_sso_remittance_and_expense,oid_34710,"(p_period_id uuid, p_payment_date date, p_receipt_no character varying, p_reference_no character varying, p_slip_url text, p_paid_from_account character varying) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,recover_inc_vat_unit_price,oid_36301,(p_ex_vat_cost numeric) -> numeric,SECURITY_INVOKER,plpgsql,IMMUTABLE
+4_RPC_FUNCTION,replace_payment_slip_transaction,oid_34368,"(p_voucher_doc_id uuid, p_new_slip_url text, p_payment_date date, p_reference_no text, p_bank_account_id uuid, p_actor_id uuid) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,resolve_ledger_posting_context,oid_35651,"(p_document_id uuid, p_doc_header_id uuid, p_notes text, p_created_at timestamp with time zone) -> TABLE(resolved_document_id uuid, resolved_tx_date date)",SECURITY_DEFINER,plpgsql,STABLE
+4_RPC_FUNCTION,save_expense_direct_no_draft,oid_34792,"(p_expense_date date, p_contact_id uuid, p_vendor_name character varying, p_vendor_tax_id character varying, p_vendor_address text, p_tax_invoice_no character varying, p_reference_no character varying, p_category character varying, p_description text, p_tax_type character varying, p_tax_invoice_status character varying, p_accounting_tax_tier character varying, p_sub_total numeric, p_vat_amount numeric, p_wht_amount numeric, p_total_amount numeric, p_payment_method character varying, p_bank_account_id uuid, p_attachment_url text, p_payment_slip_url text, p_vehicle_plate character varying, p_items jsonb) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,save_goods_receipt_to_ledger_transaction,oid_33858,"(p_running_prefix text, p_doc_date date, p_legacy_header jsonb, p_legacy_details jsonb, p_document_header jsonb, p_document_items jsonb, p_ledger_lines jsonb, p_cost_updates jsonb) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,save_manual_goods_receipt_transaction,oid_33854,"(p_should_post_ledger boolean, p_running_prefix text, p_draft_doc_no text, p_doc_date date, p_document_ref text, p_header jsonb, p_items jsonb, p_ledger_lines jsonb, p_cost_updates jsonb) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,save_vendor_rounding_calc_mode,oid_34081,"(p_vendor_id uuid, p_rounding_calc_mode text) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,search_colorway_sales_catalog,oid_36539,"(p_search_text text, p_color_family text, p_category_id uuid, p_in_stock_only boolean, p_limit integer) -> TABLE(model_id uuid, model_code character varying, model_name character varying, model_short_name character varying, catalog_name character varying, brand_code character varying, brand_name character varying, category_id uuid, category_code character varying, category_name character varying, gender character varying, color_id uuid, color_code character varying, color_name character varying, color_family character varying, color_family_th character varying, hex_code character varying, display_image_url text, colorway_image_url text, model_poster_url text, model_main_image_url text, catalog_image_url text, size_chart_image_url text, has_colorway_image boolean, total_on_hand_qty numeric, in_stock_size_count integer, min_retail_price numeric, max_retail_price numeric, min_wholesale_price numeric, max_wholesale_price numeric, sizes_breakdown jsonb)",SECURITY_DEFINER,plpgsql,STABLE
+4_RPC_FUNCTION,set_limit,oid_33925,(real) -> real,SECURITY_INVOKER,c,VOLATILE
+4_RPC_FUNCTION,set_product_model_visual_slot,oid_36543,"(p_model_id uuid, p_slot text, p_image_url text, p_storage_path text) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,set_purchase_tax_invoice_status,oid_34202,"(p_document_id uuid, p_target_status character varying, p_actor_id uuid) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,settle_ap_invoices_bulk_fast,oid_34349,"(p_pay_doc_id uuid, p_billing_note_id uuid, p_allocations jsonb) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,settle_sales_document_payment,oid_35805,"(p_document_id uuid, p_received_amount numeric, p_close_with_rounding boolean, p_wht_rate numeric, p_wht_amount numeric, p_payment_channel text, p_bank_account_id uuid, p_receiving_bank_label text, p_reference_no text, p_slip_url text, p_payment_date date) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,show_limit,oid_33926,() -> real,SECURITY_INVOKER,c,STABLE
+4_RPC_FUNCTION,show_trgm,oid_33927,(text) -> text[],SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,similarity,oid_33928,"(text, text) -> real",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,similarity_dist,oid_33936,"(text, text) -> real",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,similarity_op,oid_33929,"(text, text) -> boolean",SECURITY_INVOKER,c,STABLE
+4_RPC_FUNCTION,strict_word_similarity,oid_33989,"(text, text) -> real",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,strict_word_similarity_commutator_op,oid_33991,"(text, text) -> boolean",SECURITY_INVOKER,c,STABLE
+4_RPC_FUNCTION,strict_word_similarity_dist_commutator_op,oid_33995,"(text, text) -> real",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,strict_word_similarity_dist_op,oid_33994,"(text, text) -> real",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,strict_word_similarity_op,oid_33990,"(text, text) -> boolean",SECURITY_INVOKER,c,STABLE
+4_RPC_FUNCTION,sync_document_stock_ledger,oid_35591,(p_document_id uuid) -> jsonb,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,trg_auto_assign_document_item_sort_order,oid_34056,() -> trigger,SECURITY_INVOKER,plpgsql,VOLATILE
+4_RPC_FUNCTION,trg_compute_vendor_mapping_normalized_key,oid_34009,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,trg_enforce_mapping_product_tax_type,oid_34069,() -> trigger,SECURITY_INVOKER,plpgsql,VOLATILE
+4_RPC_FUNCTION,trg_sanitize_document_defaults,oid_33917,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,trg_sync_model_tax_type_to_children,oid_34067,() -> trigger,SECURITY_INVOKER,plpgsql,VOLATILE
+4_RPC_FUNCTION,unmatch_statement_line_allocation,oid_35206,"(p_statement_line_id uuid, p_document_id uuid) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,update_billing_note_transaction,oid_34235,"(p_billing_note_id uuid, p_doc_date date, p_due_date date, p_notes text, p_invoice_ids uuid[], p_auto_renumber_if_month_changed boolean, p_actor_id uuid) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,update_employee_id_card_attachment,oid_34692,"(p_employee_id uuid, p_id_card_url text, p_bank_book_url text) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,update_expense_direct,oid_34803,"(p_expense_id uuid, p_expense_date date, p_contact_id uuid, p_vendor_name character varying, p_vendor_tax_id character varying, p_tax_invoice_no character varying, p_reference_no character varying, p_category character varying, p_description text, p_tax_type character varying, p_tax_invoice_status character varying, p_accounting_tax_tier character varying, p_net_amount numeric, p_vat_amount numeric, p_wht_amount numeric, p_total_amount numeric, p_payment_method character varying, p_bank_account_id uuid, p_attachment_url text, p_payment_slip_url text, p_vehicle_plate character varying) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,update_product_model_catalog_meta,oid_36542,"(p_model_id uuid, p_catalog_name text) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,update_sales_document_direct,oid_36014,"(p_document_id uuid, p_doc_date date, p_notes text, p_remark text, p_reference_no text, p_payment_channel text, p_receiving_bank_label text, p_bank_account_id uuid, p_slip_url text, p_discount_amount numeric, p_shipping_fee numeric, p_shipping_method text, p_shipping_tracking_no text, p_shipping_vat_mode text, p_rounding_difference numeric, p_handwritten_doc_ref text, p_vat_type text) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,update_updated_at_column,oid_27190,() -> trigger,SECURITY_INVOKER,plpgsql,VOLATILE
+4_RPC_FUNCTION,upsert_contact_bank_account,oid_34442,"(p_contact_id uuid, p_account_id uuid, p_account_category character varying, p_bank_code character varying, p_bank_name character varying, p_account_no character varying, p_account_name character varying, p_branch_name character varying, p_notes text, p_is_default boolean, p_is_active boolean) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,upsert_material_vendor_mapping,oid_36297,"(p_contact_id uuid, p_raw_vendor_code text, p_raw_vendor_desc text, p_material_id uuid, p_last_unit_price numeric) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,upsert_ocr_vendor_mapping,oid_34049,"(p_vendor_id uuid, p_raw_vendor_sku text, p_internal_product_id uuid, p_purchase_uom_code character varying, p_conversion_factor numeric, p_default_tax_type character varying) -> uuid",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,upsert_product_model_color_image,oid_36518,"(p_model_id uuid, p_color_id uuid, p_image_url text, p_storage_path text, p_source_poster_url text, p_crop_meta jsonb, p_actor_id uuid) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,validate_inventory_ledger_doc_header,oid_33909,() -> trigger,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,void_document_transaction,oid_29672,"(p_document_id uuid, p_user_id uuid, p_void_reason text) -> void",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,void_document_with_stock_reversal,oid_27259,(p_document_id uuid) -> jsonb,SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,void_sales_document,oid_35594,"(p_document_id uuid, p_void_reason text) -> jsonb",SECURITY_DEFINER,plpgsql,VOLATILE
+4_RPC_FUNCTION,word_similarity,oid_33931,"(text, text) -> real",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,word_similarity_commutator_op,oid_33933,"(text, text) -> boolean",SECURITY_INVOKER,c,STABLE
+4_RPC_FUNCTION,word_similarity_dist_commutator_op,oid_33939,"(text, text) -> real",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,word_similarity_dist_op,oid_33938,"(text, text) -> real",SECURITY_INVOKER,c,IMMUTABLE
+4_RPC_FUNCTION,word_similarity_op,oid_33932,"(text, text) -> boolean",SECURITY_INVOKER,c,STABLE
 5_TRIGGER,accounting_periods,trg_accounting_periods_updated_at,update_updated_at_column,ENABLED,CREATE TRIGGER trg_accounting_periods_updated_at BEFORE UPDATE ON public.accounting_periods FOR EACH ROW EXECUTE FUNCTION update_updated_at_column(),
 5_TRIGGER,audit_logs,trg_audit_logs_no_delete,fn_audit_logs_forbid_mutation,ENABLED,CREATE TRIGGER trg_audit_logs_no_delete BEFORE DELETE ON public.audit_logs FOR EACH ROW EXECUTE FUNCTION fn_audit_logs_forbid_mutation(),
 5_TRIGGER,audit_logs,trg_audit_logs_no_update,fn_audit_logs_forbid_mutation,ENABLED,CREATE TRIGGER trg_audit_logs_no_update BEFORE UPDATE ON public.audit_logs FOR EACH ROW EXECUTE FUNCTION fn_audit_logs_forbid_mutation(),
@@ -1324,75 +1526,95 @@ section,object_name,sub_name,data_type_or_signature,is_nullable_or_mode,default_
 5_TRIGGER,vendor_product_mapping,trg_before_write_vendor_mapping_norm,trg_compute_vendor_mapping_normalized_key,ENABLED,CREATE TRIGGER trg_before_write_vendor_mapping_norm BEFORE INSERT OR UPDATE ON public.vendor_product_mapping FOR EACH ROW EXECUTE FUNCTION trg_compute_vendor_mapping_normalized_key(),
 5_TRIGGER,vendor_product_mapping,trg_compute_vendor_mapping_normalized_key,compute_vendor_mapping_normalized_key,ENABLED,CREATE TRIGGER trg_compute_vendor_mapping_normalized_key BEFORE INSERT OR UPDATE OF vendor_sku ON public.vendor_product_mapping FOR EACH ROW EXECUTE FUNCTION compute_vendor_mapping_normalized_key(),
 5_TRIGGER,vendor_product_mapping,trg_enforce_vpm_tax_type,trg_enforce_mapping_product_tax_type,ENABLED,CREATE TRIGGER trg_enforce_vpm_tax_type BEFORE INSERT OR UPDATE OF internal_product_id ON public.vendor_product_mapping FOR EACH ROW EXECUTE FUNCTION trg_enforce_mapping_product_tax_type(),
-6_TABLE_RLS_AND_VIEW,accounting_periods,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=0,
-6_TABLE_RLS_AND_VIEW,app_roles,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=0,
-6_TABLE_RLS_AND_VIEW,approval_logs,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,asset_depreciation_ledger,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=0,
-6_TABLE_RLS_AND_VIEW,audit_logs,BASE_TABLE,RLS_ENABLED,policies=0,est_rows=812,
-6_TABLE_RLS_AND_VIEW,backup_abb_before_reseq_20261115,BASE_TABLE,RLS_DISABLED,policies=0,est_rows=272,
-6_TABLE_RLS_AND_VIEW,bank_reconciliation_allocations,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=0,
-6_TABLE_RLS_AND_VIEW,bank_statement_imports,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,bank_statement_lines,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=206,
-6_TABLE_RLS_AND_VIEW,billing_note_items,BASE_TABLE,RLS_ENABLED,policies=4,est_rows=94,
-6_TABLE_RLS_AND_VIEW,contact_bank_accounts,BASE_TABLE,RLS_ENABLED,policies=4,est_rows=0,
-6_TABLE_RLS_AND_VIEW,contact_persons,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,contacts,BASE_TABLE,RLS_ENABLED,policies=6,est_rows=415,
-6_TABLE_RLS_AND_VIEW,depreciation_ledgers,BASE_TABLE,RLS_ENABLED,policies=0,est_rows=0,
-6_TABLE_RLS_AND_VIEW,doc_details,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=426,
-6_TABLE_RLS_AND_VIEW,doc_headers,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=596,
-6_TABLE_RLS_AND_VIEW,document_allocations,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=70,
-6_TABLE_RLS_AND_VIEW,document_items,BASE_TABLE,RLS_ENABLED,policies=5,est_rows=2066,
-6_TABLE_RLS_AND_VIEW,documents,BASE_TABLE,RLS_ENABLED,policies=11,est_rows=621,
-6_TABLE_RLS_AND_VIEW,expense_installments,BASE_TABLE,RLS_ENABLED,policies=0,est_rows=0,
-6_TABLE_RLS_AND_VIEW,expense_items,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,expenses,BASE_TABLE,RLS_ENABLED,policies=5,est_rows=13,
-6_TABLE_RLS_AND_VIEW,fixed_assets,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,hr_payroll_items,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,hr_payroll_periods,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=1,
-6_TABLE_RLS_AND_VIEW,inventory_ledger,BASE_TABLE,RLS_ENABLED,policies=8,est_rows=1646,
-6_TABLE_RLS_AND_VIEW,line_known_groups,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=101,
-6_TABLE_RLS_AND_VIEW,line_notification_logs,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=0,
-6_TABLE_RLS_AND_VIEW,line_webhook_events_log,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=4011,
-6_TABLE_RLS_AND_VIEW,material_stock_ledger,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,material_vendor_mappings,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=15,
-6_TABLE_RLS_AND_VIEW,mst_asset_categories,BASE_TABLE,RLS_ENABLED,policies=0,est_rows=0,
-6_TABLE_RLS_AND_VIEW,mst_bank_accounts,BASE_TABLE,RLS_ENABLED,policies=6,est_rows=4,
-6_TABLE_RLS_AND_VIEW,mst_brands,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=54,
-6_TABLE_RLS_AND_VIEW,mst_bundle_kits,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,mst_bundle_slot_models,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,mst_bundle_slots,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,mst_carriers,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=14,
-6_TABLE_RLS_AND_VIEW,mst_categories,BASE_TABLE,RLS_ENABLED,policies=5,est_rows=123,
-6_TABLE_RLS_AND_VIEW,mst_colors,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=77,
-6_TABLE_RLS_AND_VIEW,mst_document_taxonomy,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=13,
-6_TABLE_RLS_AND_VIEW,mst_employees,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=5,
-6_TABLE_RLS_AND_VIEW,mst_expense_categories,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,mst_genders,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,mst_material_categories,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,mst_materials,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=22,
-6_TABLE_RLS_AND_VIEW,mst_sizes,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=73,
-6_TABLE_RLS_AND_VIEW,mst_uom,BASE_TABLE,RLS_ENABLED,policies=4,est_rows=20,
-6_TABLE_RLS_AND_VIEW,mst_wht_rates,BASE_TABLE,RLS_ENABLED,policies=6,est_rows=0,
-6_TABLE_RLS_AND_VIEW,parameter_change_requests,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=2,
-6_TABLE_RLS_AND_VIEW,payment_allocations,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,payment_transactions,BASE_TABLE,RLS_ENABLED,policies=4,est_rows=13,
-6_TABLE_RLS_AND_VIEW,product_boms,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,product_model_bom_materials,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,product_model_color_images,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=381,
-6_TABLE_RLS_AND_VIEW,product_models,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=206,
-6_TABLE_RLS_AND_VIEW,production_job_items,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=0,
-6_TABLE_RLS_AND_VIEW,production_job_materials,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,production_job_operations,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,production_jobs,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=2,
-6_TABLE_RLS_AND_VIEW,products,BASE_TABLE,RLS_ENABLED,policies=4,est_rows=6042,
-6_TABLE_RLS_AND_VIEW,sales_item_mappings,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=0,
-6_TABLE_RLS_AND_VIEW,service_tracking,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,system_parameters,BASE_TABLE,RLS_ENABLED,policies=10,est_rows=6,
-6_TABLE_RLS_AND_VIEW,system_settings,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=0,
-6_TABLE_RLS_AND_VIEW,technician_rates,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,technician_rates_legacy_archive,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,
-6_TABLE_RLS_AND_VIEW,user_profiles,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=0,
-6_TABLE_RLS_AND_VIEW,vendor_product_mapping,BASE_TABLE,RLS_ENABLED,policies=5,est_rows=6357,
-6_TABLE_RLS_AND_VIEW,vw_carrier_freight_summary,VIEW,RLS_DISABLED,policies=0,est_rows=0,
-6_TABLE_RLS_AND_VIEW,vw_monthly_profit_summary,VIEW,RLS_DISABLED,policies=0,est_rows=0,
-6_TABLE_RLS_AND_VIEW,vw_sales_profit_analysis,VIEW,RLS_DISABLED,policies=0,est_rows=0,
+6_TABLE_RLS_AND_VIEW,accounting_periods,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,agri.plantation_zones,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=agri
+6_TABLE_RLS_AND_VIEW,app_roles,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,approval_logs,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,asset_depreciation_ledger,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,audit_logs,BASE_TABLE,RLS_ENABLED,policies=0,est_rows=812,schema=public
+6_TABLE_RLS_AND_VIEW,backup_abb_before_reseq_20261115,BASE_TABLE,RLS_DISABLED,policies=0,est_rows=272,schema=public
+6_TABLE_RLS_AND_VIEW,bank_reconciliation_allocations,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,bank_statement_imports,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,bank_statement_lines,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=206,schema=public
+6_TABLE_RLS_AND_VIEW,billing_note_items,BASE_TABLE,RLS_ENABLED,policies=4,est_rows=94,schema=public
+6_TABLE_RLS_AND_VIEW,contact_bank_accounts,BASE_TABLE,RLS_ENABLED,policies=4,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,contact_persons,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,contacts,BASE_TABLE,RLS_ENABLED,policies=6,est_rows=419,schema=public
+6_TABLE_RLS_AND_VIEW,depreciation_ledgers,BASE_TABLE,RLS_ENABLED,policies=0,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,doc_details,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=426,schema=public
+6_TABLE_RLS_AND_VIEW,doc_headers,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=618,schema=public
+6_TABLE_RLS_AND_VIEW,document_allocations,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=99,schema=public
+6_TABLE_RLS_AND_VIEW,document_items,BASE_TABLE,RLS_ENABLED,policies=5,est_rows=2066,schema=public
+6_TABLE_RLS_AND_VIEW,documents,BASE_TABLE,RLS_ENABLED,policies=11,est_rows=664,schema=public
+6_TABLE_RLS_AND_VIEW,expense_installments,BASE_TABLE,RLS_ENABLED,policies=0,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,expense_items,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,expenses,BASE_TABLE,RLS_ENABLED,policies=5,est_rows=13,schema=public
+6_TABLE_RLS_AND_VIEW,fixed_assets,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,fnb.branches,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=fnb
+6_TABLE_RLS_AND_VIEW,holding.bank_accounts,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=holding
+6_TABLE_RLS_AND_VIEW,holding.business_units,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=holding
+6_TABLE_RLS_AND_VIEW,holding.corporate_documents,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=holding
+6_TABLE_RLS_AND_VIEW,holding.legal_entities,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=holding
+6_TABLE_RLS_AND_VIEW,holding.liff_user_registrations,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=holding
+6_TABLE_RLS_AND_VIEW,holding.line_channels,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=holding
+6_TABLE_RLS_AND_VIEW,holding.line_webhook_logs,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=holding
+6_TABLE_RLS_AND_VIEW,holding.user_workspace_grants,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=holding
+6_TABLE_RLS_AND_VIEW,hr_payroll_items,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,hr_payroll_periods,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=1,schema=public
+6_TABLE_RLS_AND_VIEW,inventory_ledger,BASE_TABLE,RLS_ENABLED,policies=8,est_rows=1646,schema=public
+6_TABLE_RLS_AND_VIEW,line_known_groups,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=107,schema=public
+6_TABLE_RLS_AND_VIEW,line_notification_logs,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,line_webhook_events_log,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=4477,schema=public
+6_TABLE_RLS_AND_VIEW,material_stock_ledger,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,material_vendor_mappings,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=15,schema=public
+6_TABLE_RLS_AND_VIEW,mst_asset_categories,BASE_TABLE,RLS_ENABLED,policies=0,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,mst_bank_accounts,BASE_TABLE,RLS_ENABLED,policies=6,est_rows=4,schema=public
+6_TABLE_RLS_AND_VIEW,mst_brands,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=54,schema=public
+6_TABLE_RLS_AND_VIEW,mst_bundle_kits,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,mst_bundle_slot_models,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,mst_bundle_slots,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,mst_carriers,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=14,schema=public
+6_TABLE_RLS_AND_VIEW,mst_categories,BASE_TABLE,RLS_ENABLED,policies=5,est_rows=123,schema=public
+6_TABLE_RLS_AND_VIEW,mst_colors,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=77,schema=public
+6_TABLE_RLS_AND_VIEW,mst_document_taxonomy,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=13,schema=public
+6_TABLE_RLS_AND_VIEW,mst_employees,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=5,schema=public
+6_TABLE_RLS_AND_VIEW,mst_expense_categories,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,mst_genders,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,mst_material_categories,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,mst_materials,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=22,schema=public
+6_TABLE_RLS_AND_VIEW,mst_sizes,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=73,schema=public
+6_TABLE_RLS_AND_VIEW,mst_uom,BASE_TABLE,RLS_ENABLED,policies=4,est_rows=20,schema=public
+6_TABLE_RLS_AND_VIEW,mst_wht_rates,BASE_TABLE,RLS_ENABLED,policies=6,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,parameter_change_requests,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=2,schema=public
+6_TABLE_RLS_AND_VIEW,payment_allocations,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,payment_transactions,BASE_TABLE,RLS_ENABLED,policies=4,est_rows=13,schema=public
+6_TABLE_RLS_AND_VIEW,product_boms,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,product_model_bom_materials,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,product_model_color_images,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=381,schema=public
+6_TABLE_RLS_AND_VIEW,product_models,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=206,schema=public
+6_TABLE_RLS_AND_VIEW,production_job_items,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,production_job_materials,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,production_job_operations,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,production_jobs,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=2,schema=public
+6_TABLE_RLS_AND_VIEW,products,BASE_TABLE,RLS_ENABLED,policies=4,est_rows=6042,schema=public
+6_TABLE_RLS_AND_VIEW,prop.land_estates,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=prop
+6_TABLE_RLS_AND_VIEW,sales_item_mappings,BASE_TABLE,RLS_ENABLED,policies=2,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,service_tracking,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,system_parameters,BASE_TABLE,RLS_ENABLED,policies=10,est_rows=6,schema=public
+6_TABLE_RLS_AND_VIEW,system_settings,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,technician_rates,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,technician_rates_legacy_archive,BASE_TABLE,RLS_ENABLED,policies=1,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,user_profiles,BASE_TABLE,RLS_ENABLED,policies=3,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,vendor_product_mapping,BASE_TABLE,RLS_ENABLED,policies=5,est_rows=6357,schema=public
+6_TABLE_RLS_AND_VIEW,vw_carrier_freight_summary,VIEW,VIEW,policies=0,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,vw_monthly_profit_summary,VIEW,VIEW,policies=0,est_rows=0,schema=public
+6_TABLE_RLS_AND_VIEW,vw_sales_profit_analysis,VIEW,VIEW,policies=0,est_rows=0,schema=public
+7_STORAGE_BUCKET,company_assets,company_assets,PUBLIC_BUCKET,limit=5242880,"image/jpeg, image/jpg, image/png, image/webp, image/svg+xml",
+7_STORAGE_BUCKET,corporate_vault,corporate_vault,PRIVATE_BUCKET,limit=20971520,"application/pdf, image/jpeg, image/png, image/webp",
+7_STORAGE_BUCKET,document_attachments,document_attachments,PUBLIC_BUCKET,limit=none,ANY,
+7_STORAGE_BUCKET,expense_documents,expense_documents,PUBLIC_BUCKET,limit=none,ANY,
+7_STORAGE_BUCKET,financial_slips,financial_slips,PRIVATE_BUCKET,limit=none,ANY,
+7_STORAGE_BUCKET,payment_qr_codes,payment_qr_codes,PUBLIC_BUCKET,limit=5242880,"image/jpeg, image/png, image/webp",
+7_STORAGE_BUCKET,procurement_bills,procurement_bills,PUBLIC_BUCKET,limit=10485760,"image/jpeg, image/png, image/webp, application/pdf",
+7_STORAGE_BUCKET,product_assets,product_assets,PUBLIC_BUCKET,limit=5242880,"image/jpeg, image/jpg, image/png, image/webp, image/gif",
+7_STORAGE_BUCKET,production_attachments,production_attachments,PUBLIC_BUCKET,limit=10485760,"image/jpeg, image/jpg, image/png, image/webp, image/gif, application/pdf",

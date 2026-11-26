@@ -40,10 +40,12 @@ type NavigationGroup = {
 
 const WORKSPACE_NAV: Record<Exclude<WorkspaceKey, "supthavee">, NavigationItem[]> = {
   fnb: [
-    { label: "ภาพรวมร้านเครื่องดื่ม", href: "/fnb" },
-    { label: "สาขาและตั้งค่าแบรนด์", href: "/fnb?tab=branches" },
-    { label: "สมุดบัญชี & QR รับเงิน", href: "/holding/bank-accounts?workspace=fnb" },
-    { label: "คลังเอกสารบริษัท", href: "/holding/vault?workspace=fnb" },
+    { label: "ภาพรวม & ยอดขาย 5 สาขา", href: "/fnb" },
+    { label: "ปฏิบัติการหน้าร้าน 3 ช่วงเวลา", href: "/fnb/operations" },
+    { label: "รับของเข้า & ชนบิลภาษี (คุณจวง)", href: "/fnb/procurement" },
+    { label: "วัตถุดิบ หลายแหล่งซื้อ & นำเข้าราคา", href: "/fnb/items" },
+    { label: "เมนู สูตรชง & เบสเตรียมขาย (BOM)", href: "/fnb/menus" },
+    { label: "โอนของข้ามสาขา & นับสต็อก Blind Count", href: "/fnb/inventory" },
   ],
   agri: [
     { label: "ภาพรวมสวนยางพารา", href: "/plantation" },
@@ -345,7 +347,10 @@ function SidebarContent({
           <div className="space-y-1">
             {WORKSPACE_NAV[workspace].map((item) => {
               const itemPath = normalizePathname(item.href);
-              const isActive = pathname === itemPath || pathname.startsWith(`${itemPath}/`);
+              const exactOnly = itemPath === "/fnb" || itemPath === "/plantation" || itemPath === "/property" || itemPath === "/holding";
+              const isActive = exactOnly
+                ? pathname === itemPath
+                : pathname === itemPath || pathname.startsWith(`${itemPath}/`);
               return (
                 <Link
                   key={item.href}
