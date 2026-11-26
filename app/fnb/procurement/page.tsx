@@ -1,12 +1,12 @@
 import { listExpiryWorkspaceAction, listProcurementQueueAction, listReceiveItemsAction } from "@/lib/actions/fnb-procurement";
 import { listFnbBranchOptionsAction } from "@/lib/actions/fnb-operations";
-import { requireSuperAdmin } from "@/lib/holding/workspace-access";
+import { requireFnbProcurementOffice } from "@/lib/holding/workspace-access";
 import { ProcurementWorkspace } from "@/app/fnb/procurement/procurement-workspace";
 
 export const dynamic = "force-dynamic";
 
 export default async function FnbProcurementPage() {
-  await requireSuperAdmin();
+  await requireFnbProcurementOffice();
   const [branches, queue, items, expiry] = await Promise.all([
     listFnbBranchOptionsAction(),
     listProcurementQueueAction(),

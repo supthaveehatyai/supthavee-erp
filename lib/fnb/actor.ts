@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { requireSessionUserId } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server-admin";
+import { requireFnbStoreOperationAccess } from "@/lib/holding/workspace-access";
 import { schemaAdmin } from "@/lib/holding/schema-db";
 import { FNB_LIFF_SUSPENDED_MESSAGE, type FnbActor, type FnbBrandCode } from "@/types/fnb";
 
@@ -61,17 +62,21 @@ export async function resolveFnbActor(input: {
   brandLock: string | null;
   branchCode: string | null;
 }): Promise<{ ok: true; actor: FnbActor } | { ok: false; error: string }> {
-  if (input.actorSource === "liff") {
-    const gate = await readLiffActor();
-    if (!gate.actor) return { ok: false, error: gate.error || FNB_LIFF_SUSPENDED_MESSAGE };
-    const expected = brandOf(input.brandLock);
-    if (expected && gate.actor.brandCode !== expected) return { ok: false, error: "บัญชีนี้ไม่ได้รับสิทธิ์แบรนด์นี้" };
-    if (gate.actor.branchCode && input.branchCode && gate.actor.branchCode !== input.branchCode) {
-      return { ok: false, error: "บัญชีนี้ประจำอีกสาขาหนึ่ง" };
-    }
-    return { ok: true, actor: gate.actor };
+  const gate = await requireFnbStoreOperationAccess(input.branchCode || undefined);
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const expected = brandOf(input.brandLock);
+  if (expected && !gate.ctx.isSuperAdmin && gate.ctx.assignedBrandCode && gate.ctx.assignedBrandCode !== expected) {
+    return { ok: false, error: "บัญชีนี้ไม่ได้รับสิทธิ์แบรนด์นี้" };
   }
-  const desk = await readDesktopActor();
-  if (!desk.actor) return { ok: false, error: desk.error || "กรุณาเข้าสู่ระบบก่อนบันทึกเอกสาร" };
-  return { ok: true, actor: desk.actor };
+  return {
+    ok: true,
+    actor: {
+      name: gate.displayActorName,
+      lineUserId: null,
+      userId: gate.userId,
+      branchCode: input.branchCode,
+      brandCode: expected ?? (gate.ctx.assignedBrandCode === "LUCKY_CUP" || gate.ctx.assignedBrandCode === "CHATORN" ? gate.ctx.assignedBrandCode : null),
+      source: input.actorSource === "liff" ? "liff" : "desktop",
+    },
+  };
 }

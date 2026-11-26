@@ -10,12 +10,14 @@ import {
   canAccessPath,
   isAuthPath,
   isHoldingWorkspacePath,
+  isLiffPath,
   isPublicLineWebhookPath,
   normalizePathname,
   parseAccessibleModules,
   prefersProductionKanbanHome,
 } from "@/lib/auth/module-access";
-import { SUPER_ADMIN_FULL_NAME } from "@/types/holding";
+import { accessRedirect, isSupthaveeErpPath, parseAccessPayload } from "@/lib/holding/access-routes";
+import { SUPER_ADMIN_FULL_NAME, type UserAccessContext } from "@/types/holding";
 
 function isStaticAsset(pathname: string): boolean {
   return (
@@ -88,7 +90,18 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   }
 
   if (user && !onAuthPage) {
-    if (isHoldingWorkspacePath(pathname)) {
+    const context = await loadAccessContext(user.id);
+    if (context) {
+      const target = accessRedirect(pathname, context);
+      const targetPath = target?.split("?")[0] ?? "";
+      if (target && normalizePathname(targetPath) !== normalizePathname(pathname)) {
+        const nextUrl = request.nextUrl.clone();
+        const [nextPath, nextQuery] = target.split("?");
+        nextUrl.pathname = nextPath || "/forbidden";
+        nextUrl.search = nextQuery ? `?${nextQuery}` : "";
+        return NextResponse.redirect(nextUrl);
+      }
+    } else if (isHoldingWorkspacePath(pathname) || isLiffPath(pathname)) {
       const superAdmin = await loadSuperAdminFlag(user.id);
       if (!superAdmin) {
         const forbiddenUrl = request.nextUrl.clone();
@@ -99,7 +112,7 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
       }
     }
     const access = await loadModuleAccess(user.id);
-    if (access) {
+    if (access && (!context || isSupthaveeErpPath(pathname))) {
       const path = normalizePathname(pathname);
       const sendToKanban =
         prefersProductionKanbanHome(access.roleCode, access.modules) &&
@@ -170,6 +183,22 @@ async function loadModuleAccess(userId: string): Promise<{
     );
 
     return { roleCode, modules };
+  } catch {
+    return null;
+  }
+}
+
+async function loadAccessContext(userId: string): Promise<UserAccessContext | null> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) return null;
+  try {
+    const admin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const { data, error } = await admin.schema("holding").rpc("get_user_access_context", { p_user_id: userId });
+    if (error || !data) return null;
+    return parseAccessPayload(data);
   } catch {
     return null;
   }

@@ -12,10 +12,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export function LoginForm() {
+export function LoginForm({
+  nextPath = null,
+  deactivated = false,
+}: {
+  nextPath?: string | null;
+  deactivated?: boolean;
+}) {
   const [email, setEmail] = useState("");
   const [pin, setPin] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    deactivated ? "บัญชีนี้ถูกระงับสิทธิ์การใช้งานแล้ว" : null,
+  );
   const [isPending, startTransition] = useTransition();
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -26,6 +34,7 @@ export function LoginForm() {
       const result = await signInWithPin(
         email.trim().toLowerCase(),
         String(pin).trim(),
+        nextPath,
       );
       // Successful login redirects — result only returns on failure.
       if (result && !result.success) {

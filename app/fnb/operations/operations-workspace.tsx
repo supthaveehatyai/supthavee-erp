@@ -130,7 +130,7 @@ export function OperationsWorkspace({
       {message ? <p className={`rounded-lg px-3 py-2 text-sm ${message.includes("รออนุมัติ") ? "bg-amber-50 text-amber-900" : message.includes("เรียบร้อย") || message.includes("แล้ว") ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`}>{message}</p> : null}
       {superAdmin ? <ApprovalQueue requests={approvals} onDone={() => { void listPendingShiftApprovalsAction().then((listed) => setApprovals(listed.data)); }} /> : null}
       <div className="grid gap-3 rounded-xl border border-red-100 bg-white p-4 md:grid-cols-3">
-        <select className={field} value={branch} onChange={(event) => setBranch(event.target.value)}>
+        <select className={field} value={branch} disabled={branches.length <= 1} onChange={(event) => setBranch(event.target.value)}>
           {branches.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code} {item.branch_name_th}</option>)}
         </select>
         <p className="flex h-10 items-center rounded-md bg-red-50 px-3 text-sm text-red-900">ผู้ปฏิบัติงาน: {staffName || "บัญชีที่ล็อกอิน"}</p>
@@ -591,7 +591,7 @@ function PosExcelBox({ branches }: { branches: FnbBranchOption[] }) {
   return (
     <section className="space-y-3 rounded-xl border bg-white p-4" onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const file = event.dataTransfer.files?.[0]; if (file) read(file); }}>
       <h2 className="font-semibold">นำเข้า Excel POS</h2>
-      <select className={field} value={branch} onChange={(event) => setBranch(event.target.value)}>{branches.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code}</option>)}</select>
+      <select className={field} value={branch} disabled={branches.length <= 1} onChange={(event) => setBranch(event.target.value)}>{branches.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code}</option>)}</select>
       <input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) read(file); }} />
       {preview ? <button type="button" className="rounded-md bg-red-700 px-4 py-2 text-sm text-white" disabled={busy} onClick={() => {
         setBusy(true);

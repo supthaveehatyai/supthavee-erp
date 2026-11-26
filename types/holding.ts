@@ -2,6 +2,56 @@ export type WorkspaceKey = "supthavee" | "fnb" | "agri" | "prop" | "holding";
 
 export const SUPER_ADMIN_FULL_NAME = "ณัฐวัฒน์ ลิ่มวรวิวัฒน์";
 
+export const SUPER_ADMIN_EMAIL = "nuttawat.lim@gmail.com";
+
+export type WorkspaceRole =
+  | "SUPER_ADMIN"
+  | "SUPTHAVEE_STAFF"
+  | "FNB_STORE_STAFF"
+  | "FNB_BRANCH_MANAGER"
+  | "FNB_ACCOUNTANT"
+  | "PROP_MANAGER"
+  | "AGRI_MANAGER";
+
+export type UserAccessContext = {
+  userId: string;
+  email: string;
+  fullName: string;
+  displayActorName: string;
+  roleCode: string;
+  isActive: boolean;
+  isSuperAdmin: boolean;
+  primaryWorkspace: WorkspaceKey;
+  workspaceRole: WorkspaceRole;
+  allowedWorkspaces: WorkspaceKey[];
+  assignedBrandCode: "LUCKY_CUP" | "CHATORN" | null;
+  allowedBranchCodes: string[];
+  canViewFnbReports: boolean;
+  canViewCostPrice: boolean;
+};
+
+export type FnbStaffDraft = {
+  userId?: string;
+  fullName: string;
+  staffNickname: string;
+  email: string;
+  pin?: string;
+  brandCode: "LUCKY_CUP" | "CHATORN";
+  workspaceRole: "FNB_STORE_STAFF" | "FNB_BRANCH_MANAGER" | "FNB_ACCOUNTANT";
+  branchCodes: string[];
+};
+
+export type FnbStaffAccountRow = {
+  userId: string;
+  email: string;
+  fullName: string;
+  staffNickname: string;
+  workspaceRole: string;
+  brandCode: string | null;
+  branchCodes: string[];
+  isActive: boolean;
+};
+
 export const HOLDING_WORKSPACE_PREFIXES = [
   "/holding",
   "/fnb",

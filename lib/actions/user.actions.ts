@@ -9,6 +9,7 @@ import { revalidatePath } from "next/cache";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { requireAdmin } from "@/lib/auth/require-admin";
+import { schemaAdmin } from "@/lib/holding/schema-db";
 import { logAuditTrail } from "@/lib/supabase/auditService";
 import type { Database } from "@/src/types/supabase";
 import type {
@@ -400,12 +401,29 @@ export async function createUserWithPin(
       });
 
     if (profileError) {
-      // Compensating cleanup — อย่าทิ้ง orphan auth user
       await supabaseAdmin.auth.admin.deleteUser(userId);
       return {
         success: false,
         error: `สร้าง Auth สำเร็จ แต่บันทึก user_profiles ไม่สำเร็จ: ${profileError.message}`,
       };
+    }
+
+    const fnbRole = normalizedRole === "fnb_staff" || normalizedRole === "fnb_accountant";
+    const grant = await schemaAdmin().schema("holding").from("user_workspace_grants").insert({
+      user_id: userId,
+      is_super_admin: false,
+      primary_workspace: fnbRole ? "fnb" : "supthavee",
+      workspace_role: normalizedRole === "fnb_accountant" ? "FNB_ACCOUNTANT" : normalizedRole === "fnb_staff" ? "FNB_STORE_STAFF" : "SUPTHAVEE_STAFF",
+      allowed_workspaces: fnbRole ? ["fnb"] : ["supthavee"],
+      allowed_branch_codes: [],
+      can_view_fnb_reports: false,
+      can_view_cost_price: false,
+      is_active: true,
+    });
+    if (grant.error) {
+      await supabaseAdmin.from("user_profiles").delete().eq("id", userId);
+      await supabaseAdmin.auth.admin.deleteUser(userId);
+      return { success: false, error: `บันทึกสิทธิ์แยกธุรกิจไม่สำเร็จ: ${grant.error.message}` };
     }
 
     revalidatePath(USERS_PATH);
@@ -481,6 +499,16 @@ export async function deactivateUser(
       };
     }
 
+    await schemaAdmin()
+      .schema("holding")
+      .from("user_workspace_grants")
+      .update({
+        is_active: false,
+        deactivated_at: new Date().toISOString(),
+        deactivation_reason: "ระงับสิทธิ์ทันที",
+      })
+      .eq("user_id", id);
+
     // (B) Ban at Auth layer — ~100 years
     const { error: banError } = await supabaseAdmin.auth.admin.updateUserById(
       id,
@@ -496,6 +524,11 @@ export async function deactivateUser(
           updated_at: new Date().toISOString(),
         })
         .eq("id", id);
+      await schemaAdmin()
+        .schema("holding")
+        .from("user_workspace_grants")
+        .update({ is_active: true, deactivated_at: null, deactivation_reason: null })
+        .eq("user_id", id);
 
       return {
         success: false,

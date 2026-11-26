@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { Geist, Geist_Mono, Sarabun } from "next/font/google";
 import { Toaster } from "sonner";
 import { ForbiddenScreen } from "@/components/auth/forbidden-screen";
@@ -12,7 +13,8 @@ import {
   isLiffPath,
   resolveModuleForPath,
 } from "@/lib/auth/module-access";
-import { getSuperAdminStatus } from "@/lib/holding/workspace-access";
+import { accessRedirect } from "@/lib/holding/access-routes";
+import { getUserAccessContext } from "@/lib/holding/workspace-access";
 import AppShell from "./app-shell";
 import "./globals.css";
 
@@ -53,17 +55,23 @@ export default async function RootLayout({
 
   // Never call getCurrentAuthUser on /login or /auth — cookie refresh in RSC
   // causes an HTTP-200 re-render loop (ERR_TOO_MANY_REDIRECTS-style navigation).
-  const currentUser = onAuthPage || isLiffPath(pathname) ? null : await getCurrentAuthUser();
-  const isSuperAdmin = currentUser
-    ? await getSuperAdminStatus(currentUser.userId, currentUser.displayName)
-    : false;
+  const currentUser = onAuthPage ? null : await getCurrentAuthUser();
+  const access = currentUser ? await getUserAccessContext(currentUser.userId) : null;
+  const isSuperAdmin = access?.isSuperAdmin === true;
+  if (access && pathname) {
+    const target = accessRedirect(pathname, access);
+    const targetPath = target?.split("?")[0] ?? "";
+    if (target && targetPath !== pathname) redirect(target);
+  }
 
+  const onWorkspace = isHoldingWorkspacePath(pathname) || isLiffPath(pathname);
   const allowed =
     onAuthPage ||
-    isLiffPath(pathname) ||
     !currentUser ||
-    (isHoldingWorkspacePath(pathname)
-      ? isSuperAdmin
+    (onWorkspace
+      ? access
+        ? true
+        : isSuperAdmin
       : canAccessPath(
           pathname,
           currentUser.accessibleModules,

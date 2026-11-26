@@ -106,6 +106,7 @@ export function RolePermissionsPanel({ roles }: RolePermissionsPanelProps) {
 function RolePermissionItem({ role }: { role: RolePermissionRow }) {
   const router = useRouter();
   const isAdmin = isAdminRoleCode(role.role_code);
+  const lockedFnbRole = role.role_code === "fnb_staff" || role.role_code === "fnb_accountant";
   const [modules, setModules] = useState<AccessibleModules>(
     role.accessible_modules,
   );
@@ -116,12 +117,12 @@ function RolePermissionItem({ role }: { role: RolePermissionRow }) {
   }, [role.accessible_modules]);
 
   function toggleModule(key: (typeof ERP_MODULE_KEYS)[number], checked: boolean) {
-    if (isAdmin) return;
+    if (isAdmin || lockedFnbRole) return;
     setModules((prev) => ({ ...prev, [key]: checked }));
   }
 
   async function handleSave() {
-    if (isSubmitting || isAdmin) return;
+    if (isSubmitting || isAdmin || lockedFnbRole) return;
     setIsSubmitting(true);
     try {
       const result = await updateRoleAccessibleModules(role.role_code, modules);
@@ -165,6 +166,11 @@ function RolePermissionItem({ role }: { role: RolePermissionRow }) {
             บทบาท Admin มีสิทธิ์ทุกโมดูลเสมอ — ไม่สามารถปิดได้ (ITGC / SoD)
           </p>
         ) : null}
+        {lockedFnbRole ? (
+          <p className="mb-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800">
+            บทบาทร้านน้ำถูกล็อก — ห้ามเปิดโมดูลทรัพย์ทวีให้บัญชีนี้
+          </p>
+        ) : null}
 
         <ul className="space-y-2">
           {ERP_MODULE_KEYS.map((key) => (
@@ -181,7 +187,7 @@ function RolePermissionItem({ role }: { role: RolePermissionRow }) {
               <Switch
                 id={`role-${role.role_code}-${key}`}
                 checked={modules[key]}
-                disabled={isSubmitting || isAdmin}
+                disabled={isSubmitting || isAdmin || lockedFnbRole}
                 onCheckedChange={(checked) => toggleModule(key, checked)}
                 aria-label={ERP_MODULE_LABELS[key]}
               />
@@ -189,7 +195,7 @@ function RolePermissionItem({ role }: { role: RolePermissionRow }) {
           ))}
         </ul>
 
-        {!isAdmin ? (
+        {!isAdmin && !lockedFnbRole ? (
           <div className="mt-4 flex justify-end">
             <Button
               type="button"

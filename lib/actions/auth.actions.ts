@@ -10,6 +10,8 @@ import { redirect } from "next/navigation";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { createClient } from "@/lib/supabase/server-admin";
 import { createSupabaseSSRClient } from "@/lib/supabase/ssr-server";
+import { accessRedirect, fnbStaffHome, safeInternalPath } from "@/lib/holding/access-routes";
+import { getUserAccessContext } from "@/lib/holding/workspace-access";
 import type { AuthGateProfile, SignInWithPinResult, SignOutResult } from "@/types/auth";
 
 const DASHBOARD_PATH = "/dashboard";
@@ -146,6 +148,7 @@ async function syncAuthPasswordToPin(
 export async function signInWithPin(
   email: string,
   pin: string,
+  nextPath?: string | null,
 ): Promise<SignInWithPinResult> {
   const normalizedEmail = normalizeEmail(email);
   const pinInput = pinAsString(pin).toString();
@@ -175,7 +178,7 @@ export async function signInWithPin(
     if (profile.is_active === false) {
       return {
         success: false,
-        error: "บัญชีนี้ถูกระงับการใช้งาน — ติดต่อผู้ดูแลระบบ",
+        error: "บัญชีนี้ถูกระงับสิทธิ์การใช้งานแล้ว",
       };
     }
 
@@ -218,7 +221,21 @@ export async function signInWithPin(
       };
     }
 
-    redirect(DASHBOARD_PATH);
+    const ctx = await getUserAccessContext(profile.id);
+    if (ctx && !ctx.isActive) {
+      await supabase.auth.signOut();
+      return { success: false, error: "บัญชีนี้ถูกระงับสิทธิ์การใช้งานแล้ว" };
+    }
+    const requested = safeInternalPath(nextPath);
+    let destination = DASHBOARD_PATH;
+    if (ctx?.workspaceRole === "FNB_STORE_STAFF" || ctx?.workspaceRole === "FNB_ACCOUNTANT") {
+      destination = fnbStaffHome(ctx);
+    } else if (ctx?.workspaceRole === "FNB_BRANCH_MANAGER") {
+      destination = requested && accessRedirect(requested, ctx) === null ? requested : fnbStaffHome(ctx);
+    } else if (requested && (!ctx || accessRedirect(requested, ctx) === null)) {
+      destination = requested;
+    }
+    redirect(destination);
   } catch (err) {
     if (isRedirectError(err)) throw err;
 

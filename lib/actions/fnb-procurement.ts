@@ -6,7 +6,7 @@ import { parseVendorCatalogSheet } from "@/lib/fnb/excel";
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
-import { requireSuperAdmin } from "@/lib/holding/workspace-access";
+import { requireFnbProcurementOffice, requireSuperAdmin } from "@/lib/holding/workspace-access";
 import type { FnbActionResult, FnbBrandCode, FnbExpiryLotRow, FnbGoodsReceiptLineRow, FnbGoodsReceiptRow, FnbItemRow, FnbReimbursementRow, FnbUnpackLine, FnbVendorSheetPreview } from "@/types/fnb";
 
 function asciiBranch(code: string): string {
@@ -41,7 +41,7 @@ function lineMoney(qty: number, unitPrice: number, vatMode: string) {
 
 export async function listProcurementQueueAction(): Promise<FnbActionResult<{ receipts: FnbGoodsReceiptRow[]; payouts: FnbReimbursementRow[] }>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbProcurementOffice();
     const db = schemaAdmin().schema("fnb");
     const [receipts, payouts] = await Promise.all([
       db.from("goods_receipts").select("*").order("received_date", { ascending: false }).limit(80),
@@ -82,7 +82,7 @@ export async function listProcurementQueueAction(): Promise<FnbActionResult<{ re
 
 export async function listReceiptLinesAction(grId: string): Promise<FnbActionResult<FnbGoodsReceiptLineRow[]>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbProcurementOffice();
     const listed = await schemaAdmin().schema("fnb").from("goods_receipt_lines").select("*").eq("gr_id", grId).limit(200);
     if (listed.error) return fail([], listed.error, "อ่านรายการรับของไม่สำเร็จ");
     return result(asRows(listed.data).map((row) => ({
@@ -177,7 +177,7 @@ export async function submitBlindGoodsReceiptAction(formData: FormData): Promise
 
 export async function previewVendorSheetAction(formData: FormData): Promise<FnbActionResult<FnbVendorSheetPreview>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbProcurementOffice();
     const file = formData.get("file");
     if (!(file instanceof File)) return result({ branch_code: null, rows: [] }, "ไม่พบไฟล์ Excel");
     const parsed = parseVendorCatalogSheet(await file.arrayBuffer());
@@ -300,7 +300,7 @@ export async function saveExpiryLotsAction(input: {
 
 export async function parseFnbBillImageAction(formData: FormData): Promise<FnbActionResult<{ vendor_name: string; invoice_no: string; lines: { name: string; qty: number; uom: string; price: number }[] }>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbProcurementOffice();
     const file = formData.get("file");
     if (!(file instanceof File)) return result({ vendor_name: "", invoice_no: "", lines: [] }, "ไม่พบรูปบิล");
     const apiKey = resolveGeminiApiKey();
@@ -351,7 +351,7 @@ export async function confirmHqGoodsReceiptAction(input: {
   lines: { id?: string; item_id: string; item_description: string; received_qty: number; received_uom: string; recipe_qty_per_unit: number; unit_price: number; line_vat_mode: string }[];
 }): Promise<FnbActionResult<{ ok: boolean; mismatch: boolean }>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbProcurementOffice();
     const db = schemaAdmin().schema("fnb");
     const branch = await db.from("branches").select("vat_branch_code,legal_entity_id").eq("branch_code", input.receiving_branch_code).maybeSingle();
     if (branch.error) return fail({ ok: false, mismatch: false }, branch.error, "อ่านสาขาไม่สำเร็จ");
@@ -480,7 +480,7 @@ export async function submitStaffReimbursementAction(formData: FormData): Promis
 
 export async function markReimbursementsPaidAction(formData: FormData): Promise<FnbActionResult<{ paid: number }>> {
   try {
-    const admin = await requireSuperAdmin();
+    const admin = await requireFnbProcurementOffice();
     const ids = text(formData.get("ids")).split(",").map((id) => id.trim()).filter(Boolean);
     const slip = formData.get("slip");
     const branch = text(formData.get("branch_code")) || "HQ";

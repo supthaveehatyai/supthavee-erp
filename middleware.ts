@@ -7,7 +7,7 @@
  */
 
 import { NextResponse, type NextRequest } from "next/server";
-import { isAuthPath, isLiffPath, isPublicLineWebhookPath } from "@/lib/auth/module-access";
+import { isAuthPath, isPublicLineWebhookPath } from "@/lib/auth/module-access";
 import { updateSession } from "@/lib/supabase/update-session";
 
 export async function middleware(request: NextRequest) {
@@ -19,7 +19,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (isLiffPath(request.nextUrl.pathname)) {
+  if (request.nextUrl.pathname === "/liff/register" || request.nextUrl.pathname.startsWith("/liff/register/")) {
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set("x-pathname", request.nextUrl.pathname);
     return NextResponse.next({ request: { headers: requestHeaders } });

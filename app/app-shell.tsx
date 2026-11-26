@@ -48,6 +48,7 @@ const WORKSPACE_NAV: Record<Exclude<WorkspaceKey, "supthavee">, NavigationItem[]
     { label: "วัตถุดิบ หลายแหล่งซื้อ & นำเข้าราคา", href: "/fnb/items" },
     { label: "เมนู สูตรชง & เบสเตรียมขาย (BOM)", href: "/fnb/menus" },
     { label: "โอนของข้ามสาขา & นับสต็อก Blind Count", href: "/fnb/inventory" },
+    { label: "พนักงานร้านน้ำ & สิทธิ์แยกธุรกิจ", href: "/settings/users?tab=fnb-staff" },
   ],
   agri: [
     { label: "ภาพรวมสวนยางพารา", href: "/plantation" },

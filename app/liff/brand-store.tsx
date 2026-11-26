@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { signOut } from "@/lib/actions/auth.actions";
 import { OperationsWorkspace } from "@/app/fnb/operations/operations-workspace";
 import { ExpiryPanel, ManualReceive } from "@/app/fnb/procurement/procurement-workspace";
 import type { FnbBranchOption, FnbBrandCode, FnbExpiryLotRow, FnbItemRow, FnbUnpackLine } from "@/types/fnb";
@@ -15,6 +16,7 @@ export function BrandStore({
   lots,
   schemaMessage,
   actorName,
+  branchLabel,
 }: {
   brand: FnbBrandCode;
   title: string;
@@ -25,11 +27,20 @@ export function BrandStore({
   lots: FnbExpiryLotRow[];
   schemaMessage: string | null;
   actorName: string;
+  branchLabel: string;
 }) {
   const [tab, setTab] = useState<"ops" | "receive" | "lots">("ops");
   return (
     <main className="min-h-screen bg-red-50 px-3 py-4">
-      <p className="text-xs font-semibold text-red-700">{title}</p>
+      <header className="mb-3 flex items-start justify-between gap-3 rounded-2xl bg-white px-3 py-3 shadow-sm">
+        <div>
+          <p className="text-sm font-semibold text-red-800">{brand === "LUCKY_CUP" ? "🔴 Lucky Cup" : "🟠 ชาทรตะโหมด"}</p>
+          <p className="mt-1 text-sm text-slate-800">👤 พนักงาน: {actorName}</p>
+          {branchLabel ? <p className="text-xs text-slate-500">{branchLabel}</p> : null}
+        </div>
+        <button type="button" className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white" onClick={() => { void signOut(); }}>ออกจากระบบ</button>
+      </header>
+      <p className="sr-only">{title}</p>
       {schemaMessage ? <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{schemaMessage}</p> : null}
       <div className="mb-4 flex flex-wrap gap-2">
         <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "ops" ? "bg-red-700 text-white" : "bg-white ring-1 ring-red-200"}`} onClick={() => setTab("ops")}>ปฏิบัติการร้าน</button>
