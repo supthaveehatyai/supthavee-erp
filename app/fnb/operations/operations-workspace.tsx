@@ -4,6 +4,8 @@ import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { ApprovalQueue } from "@/app/fnb/approval-queue";
 import { CashFloatNote } from "@/components/fnb/cash-float-note";
+import { ClosingWipBanner } from "@/components/fnb/closing-wip-banner";
+import { WipPanel } from "@/components/fnb/wip-panel";
 import { MenuSalesPanel } from "@/components/fnb/menu-sales-panel";
 import { SopBoard } from "@/components/fnb/sop-board";
 import { SopPhotoBoard } from "@/components/fnb/sop-photo-board";
@@ -63,7 +65,7 @@ export function OperationsWorkspace({
   actorSource: "desktop" | "liff";
   initialApprovals?: FnbChangeRequestRow[];
 }) {
-  const [tab, setTab] = useState<FnbSopStageInstance>("OPENING");
+  const [tab, setTab] = useState<FnbSopStageInstance | "WIP">("OPENING");
   const [branch, setBranch] = useState(branches[0]?.branch_code ?? "");
   const [workDate, setWorkDate] = useState(today());
   const staffName = actorName;
@@ -136,6 +138,7 @@ export function OperationsWorkspace({
       </div>
       <div className="flex flex-wrap gap-2">
         <TabButton active={tab === "OPENING"} onClick={() => setTab("OPENING")}>1. เปิดร้าน (กะแรก)</TabButton>
+        <TabButton active={tab === "WIP"} onClick={() => setTab("WIP")}>ต้มเบสเพิ่มและเบิกเปิดของขึ้นบาร์</TabButton>
         <TabButton active={tab === "SHIFT_1"} onClick={() => setTab("SHIFT_1")}>2. ส่งเงินกะแรก</TabButton>
         <TabButton active={tab === "SHIFT_2"} onClick={() => setTab("SHIFT_2")}>3. ส่งเงินกะสอง</TabButton>
         {selected?.enable_shift_3 ? <TabButton active={tab === "SHIFT_3"} onClick={() => setTab("SHIFT_3")}>4. ส่งเงินกะสาม</TabButton> : null}
@@ -144,8 +147,9 @@ export function OperationsWorkspace({
       {tab === "OPENING" ? <MorningPanel brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} day={day} busy={busy === "open"} run={run} /> : null}
       {tab === "SHIFT_1" || tab === "SHIFT_2" ? <ClosePanel brand={brand} brandLock={brandLock} superAdmin={superAdmin} branch={branch} branches={branches} workDate={workDate} staffName={staffName} actorSource={actorSource} day={day} busy={busy} run={run} lockShift={tab === "SHIFT_1" ? "MORNING" : "AFTERNOON"} /> : null}
       {tab === "SHIFT_3" ? <Shift3Panel brandLock={brandLock} branch={branch} workDate={workDate} actorSource={actorSource} busy={busy === "shift3"} run={run} /> : null}
-      {tab === "CLOSING" ? <><WastePanel brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} shelfItems={shelfItems} day={day} busy={busy} run={run} /><MenuSalesPanel branch={branch} workDate={workDate} brand={brand} actorSource={actorSource} /></> : null}
-      <SopBoard branch={branch} workDate={workDate} stage={tab === "SHIFT_3" && !selected?.enable_shift_3 ? "CLOSING" : tab} brandLock={brandLock} actorSource={actorSource} actorName={staffName} superAdmin={superAdmin} />
+      {tab === "WIP" ? <WipPanel branch={branch} workDate={workDate} brand={brand} actorSource={actorSource} actorName={staffName} enableShift3={Boolean(selected?.enable_shift_3)} /> : null}
+      {tab === "CLOSING" ? <><ClosingWipBanner branch={branch} workDate={workDate} /><WastePanel brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} shelfItems={shelfItems} day={day} busy={busy} run={run} /><MenuSalesPanel branch={branch} workDate={workDate} brand={brand} actorSource={actorSource} /></> : null}
+      {tab !== "WIP" ? <SopBoard branch={branch} workDate={workDate} stage={tab} brandLock={brandLock} actorSource={actorSource} actorName={staffName} superAdmin={superAdmin} /> : null}
       {brandLock ? <ReimburseBox brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} busy={busy === "reimburse"} run={run} /> : null}
       {superAdmin ? <SopPhotoBoard workDate={workDate} /> : null}
       {superAdmin ? <SettlementPanel shifts={day?.shifts ?? []} busy={busy === "settle"} run={run} /> : null}

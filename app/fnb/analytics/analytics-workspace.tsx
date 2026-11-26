@@ -3,7 +3,8 @@
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { getMenuAnalyticsAction } from "@/lib/actions/fnb-menu-sales";
-import type { FnbMenuRank, FnbPromoHint } from "@/types/fnb";
+import { getWipCostAnalyticsAction } from "@/lib/actions/fnb-wip";
+import type { FnbMenuRank, FnbPromoHint, FnbWipCostRow } from "@/types/fnb";
 
 function today(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date());
@@ -14,6 +15,7 @@ export function AnalyticsWorkspace() {
   const [end, setEnd] = useState(today());
   const [ranks, setRanks] = useState<FnbMenuRank[]>([]);
   const [promos, setPromos] = useState<FnbPromoHint[]>([]);
+  const [costs, setCosts] = useState<FnbWipCostRow[]>([]);
   const [pending, startTransition] = useTransition();
   const branches = [...new Set(ranks.map((row) => row.branch_code))];
 
@@ -23,11 +25,12 @@ export function AnalyticsWorkspace() {
       <form className="flex flex-wrap gap-2" onSubmit={(event) => {
         event.preventDefault();
         startTransition(async () => {
-          const loaded = await getMenuAnalyticsAction(start, end);
+          const [loaded, wip] = await Promise.all([getMenuAnalyticsAction(start, end), getWipCostAnalyticsAction(start, end)]);
           if (loaded.error) toast.error(loaded.error);
           else toast.success("โหลดยอดขายรายเมนูแล้ว");
           setRanks(loaded.data.ranks);
           setPromos(loaded.data.promos);
+          setCosts(wip.data);
         });
       }}>
         <input className="h-10 rounded-md border px-3" type="date" value={start} onChange={(event) => setStart(event.target.value)} />
@@ -55,6 +58,20 @@ export function AnalyticsWorkspace() {
           </section>
         );
       })}
+      <section className="space-y-3 rounded-xl border bg-white p-4">
+        <h2 className="font-semibold">วิเคราะห์ต้นทุนเบิกทำเบส vs ความสูญเสียรายวันและรอบอายุหลายวัน</h2>
+        {costs.length === 0 ? <p className="text-sm">ยังไม่มียอดเบิกขึ้นบาร์ในช่วงวันที่นี้</p> : costs.map((row) => (
+          <article key={row.branch_code} className="rounded-lg bg-slate-50 p-3 text-sm">
+            <p className="font-semibold">{row.branch_code}</p>
+            <p>ต้นทุนวัตถุดิบเบิกขึ้นบาร์รวม {row.issued_cost.toFixed(2)} บาท</p>
+            <p>ต้นทุนขายตามเมนูจริง {row.sold_cogs.toFixed(2)} บาท</p>
+            <p>ความสูญเสียรายวันกลุ่มต้มสด/เลมอน {row.eod_waste.toFixed(2)} บาท ({row.eod_waste_pct.toFixed(1)}%)</p>
+            <p>ต้นทุนส่วนตัดเต็มถุงจากการต้มครึ่งสูตรช่วงเย็น {row.franchise_rule_cost.toFixed(2)} บาท</p>
+            <p>ความสูญเสียตามรอบอายุเปิดกล่อง {row.multi_day_waste.toFixed(2)} บาท ({row.multi_day_waste_pct.toFixed(1)}%)</p>
+            <p>ส่วนต่างตวงเกิน/หกหล่นหน้าบาร์ {row.unexplained.toFixed(2)} บาท</p>
+          </article>
+        ))}
+      </section>
       <section className="rounded-xl border border-amber-200 bg-amber-50 p-4">
         <h2 className="font-semibold">โปรแนะนำจากล็อตที่หมดอายุภายใน 14 วัน</h2>
         {promos.length === 0 ? <p className="text-sm">ยังไม่มีล็อตที่จับคู่กับสูตรเมนูได้</p> : promos.map((row, index) => (

@@ -462,6 +462,71 @@ export type FnbPromoHint = {
   menu_name_th: string;
 };
 
+export const FNB_OPEN_SHELF_MODES = ["DAILY_EOD", "HOURS_AFTER_OPEN", "DAYS_AFTER_OPEN", "NONE"] as const;
+export const FNB_DAILY_CLEAR_CODES = ["JT", "BT", "MMK", "ML", "LEM"] as const;
+
+export type FnbOpenShelfMode = (typeof FNB_OPEN_SHELF_MODES)[number];
+
+export type FnbOpenShelfRule = {
+  id: string | null;
+  item_id: string | null;
+  short_code: string;
+  name_th: string;
+  brand_code: "ALL" | "LUCKY_CUP" | "CHATORN";
+  open_shelf_life_mode: FnbOpenShelfMode;
+  open_shelf_life_value: number;
+  require_expiry_clear_photo: boolean;
+  locked: boolean;
+};
+
+export type FnbWipBatchRow = {
+  id: string;
+  batch_no: string;
+  batch_kind: string;
+  prep_base_code: string | null;
+  item_id: string | null;
+  item_label: string;
+  brew_portion_mode: string;
+  packs_deducted: number;
+  actual_usable_qty: number;
+  recipe_uom: string;
+  total_issued_cost_thb: number;
+  unbrewed_rule_cost_thb: number;
+  shelf_life_mode: string;
+  opened_at: string;
+  expires_at: string;
+  sticker_label_text: string | null;
+  opened_by_name: string;
+  batch_status: string;
+  theoretical_full_qty: number;
+  waste_qty: number;
+  waste_cost_thb: number;
+};
+
+export type FnbWipBoard = {
+  bases: { base_code: string; base_name_th: string; yield_qty_ml: number }[];
+  items: { id: string; short_code: string; name_th: string; count_uom: string }[];
+  brews: FnbWipBatchRow[];
+  containers: FnbWipBatchRow[];
+};
+
+export type FnbClosingWipContext = {
+  brews: { code: string; usable: number; full_qty: number; half_qty: number; packs: number; cost: number }[];
+  expired: FnbWipBatchRow[];
+};
+
+export type FnbWipCostRow = {
+  branch_code: string;
+  issued_cost: number;
+  sold_cogs: number;
+  eod_waste: number;
+  eod_waste_pct: number;
+  franchise_rule_cost: number;
+  multi_day_waste: number;
+  multi_day_waste_pct: number;
+  unexplained: number;
+};
+
 export type FnbCashFloatContext = {
   standard_cash_float: number;
   prev_shift_held_cash: number;

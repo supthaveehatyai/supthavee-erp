@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { listParLevelsAction, saveBranchShiftSettingsAction, saveParLevelAction, saveSopTemplateAction, toggleSopAssignmentAction } from "@/lib/actions/fnb-sop";
@@ -40,6 +41,7 @@ export function SopSettingsWorkspace({
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold">ตั้งค่าระเบียบหน้าร้านและกะสาขา</h1>
+      <Link href="/fnb/items?tab=shelf" className="inline-block rounded-md bg-red-700 px-3 py-2 text-sm text-white">อายุวัตถุดิบหลังเปิดใช้ / หลังผสม (แยกแบรนด์)</Link>
       {message ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{message}</p> : null}
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">วงเงินทอนประจำเก๊ะและเวลาเปิดปิด</h2>

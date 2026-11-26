@@ -2,12 +2,14 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { OpenShelfLifePanel } from "@/components/fnb/open-shelf-life-panel";
 import { commitFnbPriceExcelAction, previewFnbPriceExcelAction, saveFnbItemAction, saveFnbVendorPackAction } from "@/lib/actions/fnb-items";
 import { FNB_BRAND_SCOPES, FNB_CATEGORY_LABEL, FNB_FRONT_GROUPS, FNB_ITEM_CATEGORIES, FNB_RECIPE_UOMS, FNB_VAT_MODES, type FnbExcelPriceRow, type FnbItemRow, type FnbVendorPackRow } from "@/types/fnb";
 
 const field = "h-10 w-full rounded-md border border-slate-200 px-3 text-sm";
 
-export function ItemsWorkspace({ items, packs }: { items: FnbItemRow[]; packs: FnbVendorPackRow[] }) {
+export function ItemsWorkspace({ items, packs, initialTab = "items" }: { items: FnbItemRow[]; packs: FnbVendorPackRow[]; initialTab?: string }) {
+  const [tab, setTab] = useState(initialTab === "shelf" ? "shelf" : "items");
   const [brand, setBrand] = useState("ALL");
   const [category, setCategory] = useState("ALL");
   const [selected, setSelected] = useState(items[0]?.id ?? "");
@@ -34,6 +36,12 @@ export function ItemsWorkspace({ items, packs }: { items: FnbItemRow[]; packs: F
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-slate-900">วัตถุดิบหลายแหล่งซื้อ</h1>
       {message ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{message}</p> : null}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "items" ? "bg-red-700 text-white" : "bg-white ring-1 ring-red-200"}`} onClick={() => setTab("items")}>รายการวัตถุดิบ</button>
+        <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "shelf" ? "bg-red-700 text-white" : "bg-white ring-1 ring-red-200"}`} onClick={() => setTab("shelf")}>อายุวัตถุดิบหลังเปิดใช้ / หลังผสม (แยกแบรนด์)</button>
+      </div>
+      {tab === "shelf" ? <OpenShelfLifePanel /> : null}
+      {tab === "items" ? <>
       <div className="flex flex-wrap gap-2">
         <select className={field} value={brand} onChange={(event) => setBrand(event.target.value)}>
           <option value="ALL">ทุกแบรนด์</option>
@@ -82,6 +90,7 @@ export function ItemsWorkspace({ items, packs }: { items: FnbItemRow[]; packs: F
           </div>
         ) : null}
       </section>
+      </> : null}
     </div>
   );
 

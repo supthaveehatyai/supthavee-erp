@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { resolveFnbActor } from "@/lib/fnb/actor";
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
+import { issueOpeningPrepFromSopAction } from "@/lib/actions/fnb-wip";
 import { requireSuperAdmin } from "@/lib/holding/workspace-access";
 import { schemaAdmin } from "@/lib/holding/schema-db";
 import type {
@@ -377,7 +378,16 @@ export async function submitSopTaskAction(formData: FormData): Promise<FnbAction
     if (saved.error) return fail(blank, saved.error, "ส่งหัวข้อไม่สำเร็จ");
     const body = saved.data && typeof saved.data === "object" ? saved.data as Record<string, unknown> : {};
     if (body.ok === false) return result({ ...blank, message: text(body.error) }, text(body.error) || "ส่งหัวข้อไม่สำเร็จ");
-    return result({ ok: true, mode: "CREATED", request_no: null, message: null });
+    const sticker = await issueOpeningPrepFromSopAction({
+      branch_code: text(formData.get("branch_code")),
+      work_date: text(formData.get("work_date")) || todayBangkok(),
+      stage_instance: text(formData.get("stage_instance")),
+      template_id: text(formData.get("template_id")),
+      staff_name: actor.actor.name,
+      line_user_id: actor.actor.lineUserId,
+      photo_urls: text(formData.get("photo_urls")).split("|").filter(Boolean),
+    });
+    return result({ ok: true, mode: "CREATED", request_no: null, message: sticker });
   } catch (error) {
     return caught(blank, error, "ส่งหัวข้อไม่สำเร็จ");
   }

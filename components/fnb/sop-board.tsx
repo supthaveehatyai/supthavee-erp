@@ -194,7 +194,7 @@ function TaskCard(props: {
           void submitSopTaskAction(body).then((saved) => {
             setBusy(false);
             if (saved.error || !saved.data.ok) props.onError(saved.error || saved.data.message || "ส่งหัวข้อไม่สำเร็จ");
-            else props.onDone(`ส่ง ${task.title_th} แล้ว`);
+            else props.onDone(saved.data.message || `ส่ง ${task.title_th} แล้ว`);
           });
         }}>
           {task.input_type !== "PHOTO_ONLY" && task.input_type !== "PASS_FAIL_PHOTO" ? <input className="h-10 w-full rounded-md border px-3 text-sm" name="numeric_value" type="number" step="0.01" placeholder="ตัวเลขที่ต้องส่ง" /> : null}
