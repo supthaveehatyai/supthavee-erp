@@ -1,6 +1,6 @@
 # System Blueprint: Supthavee ERP SuperApp
 
-Version: 32.0 (พฤศจิกายน 2026 — จบ Phase 32: Colorway Visual Catalog /sales/catalog & LINE Group Sales Bot)
+Version: 33.0 (พฤศจิกายน 2026 — จบ Phase 32.4: Customer-Safe `#รูป` vs Internal `#สต็อก` และเตรียมสถาปัตยกรรม Unified Holding ERP Phase 33–37)
 
 
 
@@ -130,11 +130,25 @@ Module H: TAS 2 Bill Price vs Stock Cost & Financial KPI (Phase 31–31.2 — Co
 - RPC `get_erp_financial_kpis_and_profit(p_start_date, p_end_date)` เป็นแหล่งเดียวของ Executive Dashboard และรายงานการเงิน รวม `CS_TAX` บวกฐานมัดจำตาม TFRS 15 หัก `CN` และ `AP_CN` หักต้นทุนเสื้อ วัตถุดิบ BOM วัสดุสิ้นเปลือง ค่าแรงบริการ และ OPEX แสดงสกุลเงิน `฿`
 - หน้า `/purchases/manual-receipt` เป็นกริด 50:50 ของ Smart SKU Picker กับ Material Combobox และแถวรับเข้าเหลือ 2 บรรทัด
 
-Module I: Colorway Visual Catalog & LINE Group Sales Bot (Phase 32 — Completed)
+Module I: Colorway Visual Catalog & LINE Group Sales Bot (Phase 32 / 32.4 — Completed)
 
 - หน้า `/sales/catalog` เมนู «แคตตาล็อกรูป & สต็อก» ค้นรุ่นกับสี กรอง Color Family และหมวดหมู่ และสต็อกพร้อมส่ง
 - In-App Catalog Cropper ตัดรูปแยกสี ใบ Catalog และตารางขนาดจากโปสเตอร์ในเว็บ โหมด Free มีมือจับ 8 จุดและกรอบเริ่ม «📏 กรอบตารางขนาด (Free)» เวลาตัดตารางขนาดให้เผื่อขอบบนและล่างของตารางไว้ในกรอบ เพื่อให้ตัวเลขรอบอกและความยาวไม่ชิดขอบรูปเมื่อซูมใน LINE
 - ถ้าสียังไม่มีรูปแยก ระบบใช้ `display_image_url` ของโปสเตอร์รวมรุ่น และป้ายบนการ์ดเป็น «โปสเตอร์รวม» เมื่อมีรูปสีแล้วป้ายเป็น «รูปเฉพาะสี»
 - B2B Data Masking: ข้อความบอท LINE ไม่แสดง `vendor_id`, `cost_price`, `last_invoice_unit_price` หรือ `wholesale_price` หน้าเว็บพนักงานยังเห็นช่วงราคาปลีกและราคาส่ง
 - บอท LINE OA `@hzr1801v` ตอบเฉพาะข้อความที่ขึ้นต้นด้วย `#` เช่น `#รูป ...`, `#พร้อมส่ง ...`, `#แคตตาล็อก ...`, `#ไซส์ ...` ผ่าน Reply Token ข้อความลูกค้า สลิป และแชทบัญชีที่ไม่มี `#` นำหน้าถูกเพิกเฉย 100% จึงไม่ล้างจุดเขียว Unread บน LINE OA Manager
+- Phase 32.4: `#รูป <query>` เป็นโหมดส่งลูกค้า (`inStockOnly = false`) ดึงทุกรุ่นรวมสต็อก 0 และแสดงเฉพาะชื่อไซส์ `ไซส์: S M L...` โดยไม่ใส่จำนวน `#สต็อก` / `#พร้อมส่ง` / `#เช็ค` เป็นโหมดภายใน (`inStockOnly = true`) แสดง `พร้อมส่ง: S(qty)...` `#คู่มือ` / `#คำสั่ง` / `#help` ส่งโพยคำสั่ง
+- `LineBotCommandGuideCard` เป็นคู่มือ `#` ที่คัดลอกคำสั่งได้ อยู่ที่มาตรฐานเอกสาร กล่องสถานะบอทบน `/sales/catalog` และท้ายหน้าตั้งค่าระบบ
+
+4. Unified Holding ERP Expansion Architecture (Phase 33–37)
+
+สถาปัตยกรรมนี้เป็นแผนขยายบน Supabase Cloud Pro โดยสคีมา `public` ของทรัพย์ทวีหาดใหญ่ยังเป็นระบบที่รันอยู่ ห้ามรบกวนตารางเดิม เวิร์กโฟลว์พนักงาน และธีมสีน้ำเงิน
+
+- 5-Schema Isolation และ 4-Color Workspace: `public` สีน้ำเงิน `bg-blue-700` (เสื้อผ้า ปัก-สกรีน), `fnb` สีแดง `bg-red-700` เส้นทาง `/fnb/*` และ `/liff/fnb/*`, `agri` สีเขียว `bg-emerald-700` เส้นทาง `/plantation/*` และ `/liff/agri/*`, `prop` สีน้ำตาล `bg-amber-900` เส้นทาง `/property/*` และ `/liff/prop/*`, `holding` ศูนย์บัญชาการเส้นทาง `/holding/*` ตัวสลับ 4 สีใน `app/app-shell.tsx` เห็นได้เฉพาะ Super Admin `ณัฐวัฒน์ ลิ่มวรวิวัฒน์`
+- Multi-entity และภาษี: ทรัพย์ทวีหาดใหญ่ `0905564000520` อยู่ใน `public` จัสมิน พลัส `0905569002377` ยื่น ภ.พ.30 รวมทุกสาขาในใบเดียว แต่แยกรายงานภาษีซื้อ-ขายและแยกสมุดบัญชีธนาคารรายสาขา ลิ่มวรวิวัฒน์ `0905569008812` บังคับ `business_unit_code` และรองรับบัญชีบุคคลธรรมดาช่วงเปลี่ยนผ่าน
+- Corporate Document Vault เก็บ PDF และรูปต่อบริษัทสำหรับเปิดพิมพ์หรือแชร์บนมือถือผ่าน Private Storage และ Signed URL บัญชีธนาคารแนบ QR รับเงินลูกค้าได้ด้วยคอลัมน์ nullable ที่อนุมัติแล้วบน `public.mst_bank_accounts` คือ `qr_image_url` และ `promptpay_note`
+- F&B สามกะ: เช้าปรับช็อตเอสเปรสโซ กลางวันฝากเงินเซเว่นพร้อมคิวเบิก 15 บาทให้คุณจวง กลางคืนปิดร้านด้วย Reverse BOM ของของเสียและเช็กชั้นหน้าร้านกับชั้นหลังร้าน วัตถุดิบด่วนท้องถิ่นจับคู่หน่วยนับได้หลายผู้ขาย และแยกสาขาที่รับของเข้าออกจากสาขาที่ออกใบกำกับภาษี
+- Property และ Land Estate Grouping: 1 กลุ่มโฉนดมีได้หลายฉบับ ติดสถานะกระทบยอดกับสำนักงานที่ดิน ประเมินและปันส่วนภาษีที่ดินและสิ่งปลูกสร้าง (ภ.ด.ส.) และออกรายงานค่าเช่ารายปี MAT สัญญาเช่าบุคคลหรือนิติบุคคลหัก ณ ที่จ่าย 5% มีมิเตอร์น้ำ-ไฟ และ LIFF ลูกบ้านส่งสลิป 1-ต่อ-1 บน LINE OA บ้านเช่า
+- สวนยางโหมดสินค้าเปลี่ยนตามผลผลิตได้ (น้ำยางสด / ยางแผ่น / ขี้ยาง) สงขลาสแกนบิลชั่งรายสายกรีด 40 ใบ สกลนครสรุปโซนขี้ยางหักค่าใช้จ่ายหลายแปลงและโอนหลายสลิป พร้อมตัวติดตามราคากลางรายวันจาก `thainr.com`
+- LINE ของธุรกิจใหม่เข้า `/api/line/holding/[channel_code]/webhook` แยกจาก `/api/line/webhook` ของ OA `@hzr1801v` เดิม
 

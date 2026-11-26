@@ -1,6 +1,6 @@
 # สรุปความคืบหน้า Supthavee ERP
 
-อัปเดตถึง Phase 32 — พฤศจิกายน 2026
+อัปเดตถึง Phase 32.4 / เตรียม Holding ERP v33.0 — พฤศจิกายน 2026
 สถิติภาพรวมปัจจุบัน:
 - โครงสร้างฐานข้อมูล Master Data, เอกสารบัญชี และคลังสินค้า: [✅ ทำงานบน Supabase Cloud & Vercel Production 100%]
 - สินค้าสำเร็จรูปและงานบริการ: 5,923+ SKUs (ตาราง `products` Schema Dump est_rows=6042) ผูกซัพพลายเออร์ `vendor_product_mapping` ประมาณ 6,357 แถว และทะเบียนวัตถุดิบโรงงาน `mst_materials` ประมาณ 22 รายการแยกจาก SKU เสื้อ
@@ -241,3 +241,4 @@
 219. Manual Receipt 50/50 Layout (Phase 31.2): หน้า `/purchases/manual-receipt` วาง Smart SKU Picker คู่ Material Combobox แบบ 50:50 และยุบแถวรับเข้าเหลือ 2 บรรทัดโดยไม่พิมพ์รหัส SKU ซ้ำ ฟอร์ม Product Matrix ของสินค้า `INC_VAT` กรอกราคาตามบิลรวม VAT แล้วบันทึกทุนก่อน VAT ด้วยการหาร 1.07 ครั้งเดียว
 220. Colorway Visual Catalog (Phase 32): หน้า `/sales/catalog` ค้นรูปแยกสีตามรุ่น กรอง `mst_colors.color_family` และสต็อกพร้อมส่งผ่าน `search_colorway_sales_catalog` รูปสีอยู่ที่ `product_model_color_images` ในถัง `product_assets` พาธ `colorways/{MODEL}/{COLOR}_{uuid}` ช่องใบ Catalog กับตารางขนาดอยู่ที่ `product_models` ผ่าน `set_product_model_visual_slot` (`MAIN` | `CATALOG` | `SIZE_CHART`) ถ้าสียังไม่มีรูป การ์ดใช้โปสเตอร์รวมของรุ่น เครื่องมือตัดรูปในเว็บมีกรอบ Free สำหรับตารางขนาดโดยเผื่อขอบบน-ล่าง และส่งออก WebP ขอบยาว 2048px คุณภาพ 0.92
 221. LINE Group Sales Bot (Phase 32): OA `@hzr1801v` ที่ `/api/line/webhook` ตอบเฉพาะคำสั่งขึ้นต้น `#` เช่น `#รูป PS031S` ด้วย Reply Token และ Flex ไม่เกิน 12 ใบต่อรุ่น ข้อความกับสลิปที่ไม่มี `#` ได้ `SKIPPED` จึงไม่ล้างจุดเขียว Unread บอทไม่ส่ง `vendor_id`, `cost_price`, `last_invoice_unit_price` หรือ `wholesale_price` สถานะตอบกลับลง `line_webhook_events_log.bot_reply_status` และลิงก์ webhook ถาวรอยู่ที่ `system_settings.line_webhook_url` จากโดเมน Production ของ Vercel
+222. Customer-Safe LINE Bot Split & Command Manual (Phase 32.4): `#รูป` ส่งลูกค้าได้โดยซ่อนจำนวนสต็อกและแสดงเฉพาะชื่อไซส์ รวมรุ่นที่สต็อกเป็น 0 ส่วน `#สต็อก` / `#พร้อมส่ง` / `#เช็ค` ใช้เช็กภายในและแสดงจำนวนพร้อมส่งรายไซส์ `#คู่มือ` ส่งโพยคำสั่ง และการ์ด `LineBotCommandGuideCard` อยู่ที่มาตรฐานเอกสาร กล่องบอทบน `/sales/catalog` และหน้าตั้งค่าระบบ

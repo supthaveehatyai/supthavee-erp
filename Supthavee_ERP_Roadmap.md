@@ -1,6 +1,6 @@
 # แผนการพัฒนาระบบ Supthavee ERP SuperApp
 
-อัปเดตล่าสุด: Phase 32 (พฤศจิกายน 2026) — Cloud Production
+อัปเดตล่าสุด: Phase 32.4 (พฤศจิกายน 2026) — Cloud Production · เตรียม Unified Holding ERP v33.0
 
 
 
@@ -484,3 +484,18 @@
 - [✅] B2B Data Masking บนบอท LINE: ไม่ส่ง `vendor_id`, `cost_price`, `last_invoice_unit_price` หรือ `wholesale_price` หน้าเว็บพนักงานยังเห็นราคาปลีกและราคาส่ง
 - [✅] บอท OA `@hzr1801v` ตอบเฉพาะคำสั่งที่ขึ้นต้นด้วย `#` เช่น `#รูป PS031S` และ `#รูป คอกลมสั้น แดง` ด้วย Reply Token แคร์รูเซลสูงสุด 12 ใบต่อรุ่น ข้อความและสลิปที่ไม่มี `#` นำหน้าได้สถานะ `SKIPPED` และไม่ล้างจุดเขียว Unread ของฝ่ายบัญชี
 - [✅] Webhook ถาวรชี้ `https://<VERCEL_PROJECT_PRODUCTION_URL>/api/line/webhook` บันทึกใน `system_settings.line_webhook_url` และเขียน `bot_reply_status` / `bot_reply_error` ลง `line_webhook_events_log` ก่อนตอบ HTTP 200
+
+## Phase 32.4: Customer-Safe `#รูป` vs Internal `#สต็อก` & Command Guide UI — [✅ เสร็จสมบูรณ์ 100%]
+
+- [✅] `#รูป <query>` ส่งลูกค้าได้: `inStockOnly = false` ดึงทุกรุ่นรวมสต็อก 0 และแสดงเฉพาะชื่อไซส์ `ไซส์: S M L...` โดยไม่ใส่จำนวน
+- [✅] `#สต็อก` / `#พร้อมส่ง` / `#เช็ค` ใช้ภายในร้าน: `inStockOnly = true` แสดง `พร้อมส่ง: S(qty)...` และถ้าของหน้าร้านเป็น 0 ให้แนะนำ `#รูป` เพื่อสั่งโรงงานโดยไม่ยิงรูปทิ้ง
+- [✅] `#คู่มือ` / `#คำสั่ง` / `#help` ส่งโพยคำสั่งกลับในแชท และการ์ด `LineBotCommandGuideCard` อยู่ที่มาตรฐานเอกสาร กล่องสถานะบอทบน `/sales/catalog` และท้ายหน้าตั้งค่าระบบ
+- [✅] ข้อความและสลิปที่ไม่มี `#` นำหน้ายังได้ `SKIPPED` และไม่ reply
+
+## Unified Holding ERP Master Roadmap (Phase 33–37 / Step 1–5) — [⏳ กำลังดำเนินการ — เริ่ม Step 1]
+
+- [⏳] Step 1 / Phase 33: แยก 5 สคีมา (`public`, `holding`, `fnb`, `prop`, `agri`) และตัวสลับเวิร์กสเปซ 4 สี โดยพนักงานทรัพย์ทวีที่ไม่ใช่ Super Admin ยังเห็นเฉพาะสีน้ำเงิน และห้ามเปลี่ยนตาราง `public` เดิม
+- [ ] Step 2 / Phase 34: ทะเบียนนิติบุคคล ภาษีหลายบริษัท (ภ.พ.30 ของจัสมิน พลัสรวมใบแต่แยกสมุดรายสาขา, `business_unit_code` ของลิ่มวรวิวัฒน์), QR รับเงิน และ Corporate Document Vault
+- [ ] Step 3 / Phase 35: ร้านเครื่องดื่มสามกะ (ปรับช็อตเช้า, ฝากเซเว่นและคิวเบิก 15 บาทคุณจวง, ปิดร้าน Reverse BOM) แยกสาขารับของกับสาขาออกใบกำกับ
+- [ ] Step 4 / Phase 36: บ้านเช่า ห้องเช่า ที่ดิน และ Land Estate Grouping (หลายโฉนดต่อกลุ่ม, ภ.ด.ส., รายงาน MAT, LIFF สลิปลูกบ้าน)
+- [ ] Step 5 / Phase 37: สวนยางน้ำยางสด/ยางแผ่น/ขี้ยาง สงขลาและสกลนคร พร้อมราคากลางรายวันจาก `thainr.com`
