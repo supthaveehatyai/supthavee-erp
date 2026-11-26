@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, MessageSquare, PackageSearch, ShieldCheck } from "lucide-react";
+import { Check, Copy, Landmark, MessageSquare, PackageSearch, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,15 @@ const COMMANDS: GuideCommand[] = [
     badgeVariant: "emerald",
     detail: "คำพ้อง #ตารางขนาด และ #size ส่งรูปตารางขนาด (รอบอก/ความยาว) ความละเอียดสูง",
     icon: ShieldCheck,
+  },
+  {
+    title: "#qr / #เลขบัญชี",
+    examples: ["#qr", "#เลขบัญชี", "#บัญชี"],
+    badge: "ส่งลูกค้าได้ · บัญชีรับโอน",
+    badgeVariant: "blue",
+    detail:
+      "ตอบชื่อธนาคาร ชื่อบัญชี เลขที่บัญชี หมายเหตุพร้อมเพย์ และรูป QR ที่เป็นลิงก์ HTTPS ของบัญชีทรัพย์ทวีที่เปิดใช้งาน",
+    icon: Landmark,
   },
   {
     title: "#คู่มือ",

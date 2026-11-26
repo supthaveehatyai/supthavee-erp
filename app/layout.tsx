@@ -8,8 +8,11 @@ import {
   canAccessPath,
   ERP_MODULE_LABELS,
   isAuthPath,
+  isHoldingWorkspacePath,
+  isLiffPath,
   resolveModuleForPath,
 } from "@/lib/auth/module-access";
+import { getSuperAdminStatus } from "@/lib/holding/workspace-access";
 import AppShell from "./app-shell";
 import "./globals.css";
 
@@ -50,16 +53,22 @@ export default async function RootLayout({
 
   // Never call getCurrentAuthUser on /login or /auth — cookie refresh in RSC
   // causes an HTTP-200 re-render loop (ERR_TOO_MANY_REDIRECTS-style navigation).
-  const currentUser = onAuthPage ? null : await getCurrentAuthUser();
+  const currentUser = onAuthPage || isLiffPath(pathname) ? null : await getCurrentAuthUser();
+  const isSuperAdmin = currentUser
+    ? await getSuperAdminStatus(currentUser.userId, currentUser.displayName)
+    : false;
 
   const allowed =
     onAuthPage ||
+    isLiffPath(pathname) ||
     !currentUser ||
-    canAccessPath(
-      pathname,
-      currentUser.accessibleModules,
-      currentUser.roleCode,
-    );
+    (isHoldingWorkspacePath(pathname)
+      ? isSuperAdmin
+      : canAccessPath(
+          pathname,
+          currentUser.accessibleModules,
+          currentUser.roleCode,
+        ));
   const deniedModule = allowed ? null : resolveModuleForPath(pathname);
 
   return (
@@ -69,6 +78,7 @@ export default async function RootLayout({
           userDisplayName={currentUser?.displayName ?? null}
           roleCode={currentUser?.roleCode ?? null}
           accessibleModules={currentUser?.accessibleModules ?? null}
+          isSuperAdmin={isSuperAdmin}
         >
           {allowed ? (
             children

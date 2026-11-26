@@ -61,6 +61,35 @@ export function isAuthPath(pathname: string): boolean {
   );
 }
 
+export function isLiffPath(pathname: string): boolean {
+  const path = normalizePathname(pathname);
+  return path === "/liff" || path.startsWith("/liff/");
+}
+
+/** LINE OA webhooks stay public. Holding channels must not inherit the ERP login redirect. */
+export function isPublicLineWebhookPath(pathname: string): boolean {
+  const path = normalizePathname(pathname);
+  return (
+    path === "/api/line/webhook" ||
+    path.startsWith("/api/line/webhook/") ||
+    path.startsWith("/api/line/holding/")
+  );
+}
+
+export function isHoldingWorkspacePath(pathname: string): boolean {
+  const path = normalizePathname(pathname);
+  return (
+    path === "/holding" ||
+    path.startsWith("/holding/") ||
+    path === "/fnb" ||
+    path.startsWith("/fnb/") ||
+    path === "/property" ||
+    path.startsWith("/property/") ||
+    path === "/plantation" ||
+    path.startsWith("/plantation/")
+  );
+}
+
 const PUBLIC_OR_UNGATED_PREFIXES = [
   ...AUTH_PATH_PREFIXES,
   "/forbidden",

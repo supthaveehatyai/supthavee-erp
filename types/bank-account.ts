@@ -12,6 +12,9 @@ export type BankAccount = {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  qr_image_url?: string | null;
+  qr_storage_path?: string | null;
+  promptpay_note?: string | null;
 };
 
 export type GetBankAccountsResult = {

@@ -9,10 +9,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   canAccessPath,
   isAuthPath,
+  isHoldingWorkspacePath,
+  isPublicLineWebhookPath,
   normalizePathname,
   parseAccessibleModules,
   prefersProductionKanbanHome,
 } from "@/lib/auth/module-access";
+import { SUPER_ADMIN_FULL_NAME } from "@/types/holding";
 
 function isStaticAsset(pathname: string): boolean {
   return (
@@ -71,7 +74,7 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
 
   const { pathname } = request.nextUrl;
 
-  if (isStaticAsset(pathname)) {
+  if (isStaticAsset(pathname) || isPublicLineWebhookPath(pathname)) {
     return supabaseResponse;
   }
 
@@ -85,6 +88,16 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   }
 
   if (user && !onAuthPage) {
+    if (isHoldingWorkspacePath(pathname)) {
+      const superAdmin = await loadSuperAdminFlag(user.id);
+      if (!superAdmin) {
+        const forbiddenUrl = request.nextUrl.clone();
+        forbiddenUrl.pathname = "/forbidden";
+        forbiddenUrl.search = "";
+        forbiddenUrl.searchParams.set("from", pathname);
+        return NextResponse.redirect(forbiddenUrl);
+      }
+    }
     const access = await loadModuleAccess(user.id);
     if (access) {
       const path = normalizePathname(pathname);
@@ -97,7 +110,7 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
         kanbanUrl.search = "";
         return NextResponse.redirect(kanbanUrl);
       }
-      if (!canAccessPath(pathname, access.modules, access.roleCode)) {
+      if (!isHoldingWorkspacePath(pathname) && !canAccessPath(pathname, access.modules, access.roleCode)) {
         const forbiddenUrl = request.nextUrl.clone();
         forbiddenUrl.pathname = "/forbidden";
         forbiddenUrl.search = "";
@@ -159,5 +172,39 @@ async function loadModuleAccess(userId: string): Promise<{
     return { roleCode, modules };
   } catch {
     return null;
+  }
+}
+
+async function loadSuperAdminFlag(userId: string): Promise<boolean> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) return false;
+  let fullName = "";
+  try {
+    const admin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const profile = await admin
+      .from("user_profiles")
+      .select("full_name")
+      .eq("id", userId)
+      .maybeSingle();
+    fullName = String(profile.data?.full_name ?? "").trim();
+    const grant = await admin
+      .schema("holding")
+      .from("user_workspace_grants")
+      .select("is_super_admin")
+      .eq("user_id", userId)
+      .eq("is_super_admin", true)
+      .maybeSingle();
+    const grantRow = grant.data as { is_super_admin?: boolean } | null;
+    if (!grant.error && grantRow?.is_super_admin === true) return true;
+    const schemaMissing =
+      grant.error?.code === "PGRST106" ||
+      /PGRST106|invalid schema|schema must be one of/i.test(grant.error?.message ?? "");
+    if (schemaMissing || !grantRow) return fullName === SUPER_ADMIN_FULL_NAME;
+    return false;
+  } catch {
+    return fullName === SUPER_ADMIN_FULL_NAME;
   }
 }

@@ -7,6 +7,7 @@ import {
 } from "@/lib/actions/bank-accounts";
 import type { BankAccount } from "@/types/bank-account";
 import { CreateBankAccountForm } from "@/app/(erp)/finance/bank-accounts/create-bank-account-form";
+import { BankQrUploader } from "@/app/(erp)/finance/bank-accounts/bank-qr-uploader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -139,6 +140,11 @@ export default async function BankAccountsPage() {
                                   สาขา: {account.branch_name}
                                 </span>
                               ) : null}
+                              <BankQrUploader
+                                bankAccountId={account.id}
+                                qrImageUrl={account.qr_image_url}
+                                promptpayNote={account.promptpay_note}
+                              />
                             </div>
                           </TableCell>
                           <TableCell className="text-center">

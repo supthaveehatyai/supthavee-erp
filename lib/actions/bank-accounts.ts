@@ -9,6 +9,10 @@
  */
 
 import { revalidatePath } from "next/cache";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { isAdminRoleCode } from "@/lib/auth/module-access";
+import { getSuperAdminStatus } from "@/lib/holding/workspace-access";
+import { schemaAdmin } from "@/lib/holding/schema-db";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import type {
   BankAccount,
@@ -30,6 +34,17 @@ const POSTGRES_UNIQUE_VIOLATION = "23505";
 const DUPLICATE_ACCOUNT_NO_ERROR = "เลขที่บัญชีซ้ำ";
 
 const EMPTY_LIST: GetBankAccountsResult = { data: [], error: null };
+const BANK_LIST_COLUMNS =
+  "id, bank_name, account_no, account_name, branch_name, is_active, created_at, updated_at";
+const BANK_LIST_COLUMNS_WITH_QR =
+  `${BANK_LIST_COLUMNS}, qr_image_url, qr_storage_path, promptpay_note`;
+const QR_COLUMN_MISSING =
+  "ยังไม่มีคอลัมน์ qr_image_url บน mst_bank_accounts — เพิ่มคอลัมน์แบบ NULL ได้บน Cloud ก่อนอัปโหลด QR";
+
+function isMissingQrColumn(error: { message?: string; code?: string } | null): boolean {
+  const message = String(error?.message ?? "");
+  return /qr_image_url|qr_storage_path|promptpay_note|PGRST204|schema cache/i.test(message);
+}
 
 function isUniqueViolation(error: {
   code?: string;
@@ -63,6 +78,9 @@ function toBankAccountList(data: unknown): BankAccount[] {
       is_active: Boolean(row.is_active),
       created_at: String(row.created_at ?? ""),
       updated_at: String(row.updated_at ?? ""),
+      qr_image_url: row.qr_image_url == null ? null : String(row.qr_image_url),
+      qr_storage_path: row.qr_storage_path == null ? null : String(row.qr_storage_path),
+      promptpay_note: row.promptpay_note == null ? null : String(row.promptpay_note),
     }))
     .filter((row) => Boolean(row.id));
 }
@@ -74,12 +92,18 @@ function toBankAccountList(data: unknown): BankAccount[] {
 export async function getBankAccounts(): Promise<GetBankAccountsResult> {
   try {
     const supabase = createSupabaseServerClient();
-    const { data, error } = await supabase
+    const extended = await supabase
       .from(MST_BANK_ACCOUNTS_TABLE)
-      .select(
-        "id, bank_name, account_no, account_name, branch_name, is_active, created_at, updated_at",
-      )
+      .select(BANK_LIST_COLUMNS_WITH_QR)
       .order("created_at", { ascending: true });
+    const fallback = extended.error && isMissingQrColumn(extended.error)
+      ? await supabase
+          .from(MST_BANK_ACCOUNTS_TABLE)
+          .select(BANK_LIST_COLUMNS)
+          .order("created_at", { ascending: true })
+      : null;
+    const data = fallback ? fallback.data : extended.data;
+    const error = fallback ? fallback.error : extended.error;
 
     if (error) {
       console.error("[getBankAccounts]", error.message, error);
@@ -227,6 +251,83 @@ export async function toggleBankAccountStatus(
 }
 
 /** Form action — must return void for Next.js <form action>. */
+async function requireBankAdmin(): Promise<MutateBankAccountResult | null> {
+  const user = await getCurrentAuthUser();
+  if (!user?.userId) return { success: false, error: "กรุณาเข้าสู่ระบบ" };
+  const superAdmin = await getSuperAdminStatus(user.userId, user.displayName);
+  if (!isAdminRoleCode(user.roleCode) && !superAdmin) {
+    return { success: false, error: "ต้องเป็นผู้ดูแลระบบจึงจะอัปโหลด QR ได้" };
+  }
+  return null;
+}
+
+export async function uploadSupthaveeBankQrAction(
+  formData: FormData,
+): Promise<MutateBankAccountResult> {
+  const denied = await requireBankAdmin();
+  if (denied) return denied;
+  const bankId = String(formData.get("bank_account_id") ?? "").trim();
+  const note = String(formData.get("promptpay_note") ?? "").trim();
+  const file = formData.get("file");
+  if (!bankId) return { success: false, error: "ไม่พบรหัสบัญชี" };
+  if (!(file instanceof File) || file.size <= 0) {
+    return { success: false, error: "กรุณาเลือกไฟล์รูป QR" };
+  }
+  if (file.size > 8 * 1024 * 1024) return { success: false, error: "ไฟล์ QR ใหญ่เกิน 8MB" };
+  if (!file.type.startsWith("image/")) return { success: false, error: "QR ต้องเป็นไฟล์รูปภาพ" };
+
+  const path = `supthavee/${bankId}_${crypto.randomUUID()}.webp`;
+  const admin = schemaAdmin();
+  const uploaded = await admin.storage.from("payment_qr_codes").upload(path, Buffer.from(await file.arrayBuffer()), {
+    contentType: "image/webp",
+    upsert: false,
+  });
+  if (uploaded.error) return { success: false, error: uploaded.error.message ?? "อัปโหลด QR ไม่สำเร็จ" };
+
+  const { data: publicUrl } = admin.storage.from("payment_qr_codes").getPublicUrl(path);
+  const updated = await admin
+    .from(MST_BANK_ACCOUNTS_TABLE)
+    .update({
+      qr_storage_path: path,
+      qr_image_url: publicUrl.publicUrl,
+      promptpay_note: note || null,
+    })
+    .eq("id", bankId);
+  if (updated.error) {
+    if (isMissingQrColumn(updated.error)) return { success: false, error: QR_COLUMN_MISSING };
+    return { success: false, error: updated.error.message ?? "บันทึก QR ไม่สำเร็จ" };
+  }
+  revalidateBankAccountPages();
+  return { success: true, error: null };
+}
+
+export async function clearSupthaveeBankQrAction(
+  bankAccountId: string,
+): Promise<MutateBankAccountResult> {
+  const denied = await requireBankAdmin();
+  if (denied) return denied;
+  const bankId = bankAccountId.trim();
+  if (!bankId) return { success: false, error: "ไม่พบรหัสบัญชี" };
+  const admin = schemaAdmin();
+  const current = await admin
+    .from(MST_BANK_ACCOUNTS_TABLE)
+    .select("qr_storage_path")
+    .eq("id", bankId)
+    .maybeSingle();
+  const storagePath = (current.data as { qr_storage_path?: string | null } | null)?.qr_storage_path;
+  if (storagePath) await admin.storage.from("payment_qr_codes").remove([storagePath]);
+  const updated = await admin
+    .from(MST_BANK_ACCOUNTS_TABLE)
+    .update({ qr_storage_path: null, qr_image_url: null, promptpay_note: null })
+    .eq("id", bankId);
+  if (updated.error) {
+    if (isMissingQrColumn(updated.error)) return { success: false, error: QR_COLUMN_MISSING };
+    return { success: false, error: updated.error.message ?? "ล้าง QR ไม่สำเร็จ" };
+  }
+  revalidateBankAccountPages();
+  return { success: true, error: null };
+}
+
 export async function toggleBankAccountStatusFormAction(
   id: string,
   currentStatus: boolean,

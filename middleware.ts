@@ -7,12 +7,21 @@
  */
 
 import { NextResponse, type NextRequest } from "next/server";
-import { isAuthPath } from "@/lib/auth/module-access";
+import { isAuthPath, isLiffPath, isPublicLineWebhookPath } from "@/lib/auth/module-access";
 import { updateSession } from "@/lib/supabase/update-session";
 
 export async function middleware(request: NextRequest) {
-  if (request.nextUrl.pathname.startsWith("/api/line")) {
+  if (
+    request.nextUrl.pathname.startsWith("/api/line") ||
+    isPublicLineWebhookPath(request.nextUrl.pathname)
+  ) {
     return NextResponse.next();
+  }
+
+  if (isLiffPath(request.nextUrl.pathname)) {
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set("x-pathname", request.nextUrl.pathname);
+    return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
   const { pathname } = request.nextUrl;

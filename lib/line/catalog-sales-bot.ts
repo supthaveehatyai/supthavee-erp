@@ -1,8 +1,9 @@
 import { createClient } from "@/lib/supabase/server-admin";
 import { replyLineMessages } from "@/lib/line/line-oa";
+import { replySupthaveeBankQr } from "@/lib/line/bank-qr-reply";
 
 const COMMAND_RE =
-  /^#(รูป|พร้อมส่ง|สต็อก|สต๊อก|แคตตาล็อก|แคตตาล๊อก|catalog|เช็ค|เช็ก|ไซส์|ตารางไซส์|ตารางขนาด|size|คู่มือ|คำสั่ง|help)\s*(.*)$/i;
+  /^#(เลขบัญชี|บัญชี|qr|รูป|พร้อมส่ง|สต็อก|สต๊อก|แคตตาล็อก|แคตตาล๊อก|catalog|เช็ค|เช็ก|ไซส์|ตารางไซส์|ตารางขนาด|size|คู่มือ|คำสั่ง|help)\s*(.*)$/i;
 const FLEX_LABEL_LIMIT = 20;
 const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
 const CATALOG_BUTTON_LABEL = "📋 ใบ Catalog";
@@ -19,9 +20,14 @@ const USAGE_GUIDE = [
   "#สต็อก เสื้อกีฬา สีฟ้า",
   "#พร้อมส่ง โปโล กรม",
   "#เช็ค PS031S",
+  "",
+  "เลขบัญชีรับโอน:",
+  "#qr",
+  "#เลขบัญชี",
+  "#บัญชี",
 ].join("\n");
 
-type CatalogCommandMode = "guide" | "size" | "catalog" | "photo";
+type CatalogCommandMode = "guide" | "size" | "catalog" | "photo" | "bank";
 
 export type LineCatalogCommand = {
   mode: CatalogCommandMode;
@@ -147,6 +153,9 @@ export function parseLineCatalogCommand(text: string): LineCatalogCommand | null
   if (!match) return null;
   const verb = match[1].toLowerCase();
   const query = (match[2] ?? "").trim();
+  if (verb === "qr" || verb === "เลขบัญชี" || verb === "บัญชี") {
+    return { mode: "bank", query, inStockOnly: false, showStockQty: false };
+  }
   if (verb === "คู่มือ" || verb === "คำสั่ง" || verb === "help" || !query) {
     return { mode: "guide", query: "", inStockOnly: false, showStockQty: false };
   }
@@ -605,6 +614,9 @@ export async function handleLineCatalogBotEvent(params: {
   if (!command || !params.replyToken || !params.token) return SKIPPED;
   if (command.mode === "guide") {
     return sendMessages(params.token, params.replyToken, [textMessage(USAGE_GUIDE)], USAGE_GUIDE);
+  }
+  if (command.mode === "bank") {
+    return replySupthaveeBankQr(params.token, params.replyToken);
   }
 
   const searched = await searchColorways(command.query, command.inStockOnly);

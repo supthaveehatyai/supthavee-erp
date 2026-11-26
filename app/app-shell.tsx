@@ -4,8 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { SignOutButton } from "@/components/auth/sign-out-button";
-import { canAccessPath, canSeeNavItem, isAuthPath, normalizePathname, STOCK_CARD_PATH } from "@/lib/auth/module-access";
+import { canAccessPath, canSeeNavItem, isAuthPath, isLiffPath, normalizePathname, STOCK_CARD_PATH } from "@/lib/auth/module-access";
 import { AccessProvider } from "@/components/auth/access-context";
+import { WORKSPACE_THEMES, type WorkspaceKey } from "@/types/holding";
 import type { AccessibleModules, ErpModuleKey } from "@/types/rbac";
 
 type IconName =
@@ -36,6 +37,42 @@ type NavigationGroup = {
   icon: IconName;
   items: NavigationItem[];
 };
+
+const WORKSPACE_NAV: Record<Exclude<WorkspaceKey, "supthavee">, NavigationItem[]> = {
+  fnb: [
+    { label: "ภาพรวมร้านเครื่องดื่ม", href: "/fnb" },
+    { label: "สาขาและตั้งค่าแบรนด์", href: "/fnb?tab=branches" },
+    { label: "สมุดบัญชี & QR รับเงิน", href: "/holding/bank-accounts?workspace=fnb" },
+    { label: "คลังเอกสารบริษัท", href: "/holding/vault?workspace=fnb" },
+  ],
+  agri: [
+    { label: "ภาพรวมสวนยางพารา", href: "/plantation" },
+    { label: "โซนสวนสงขลา & สกลนคร", href: "/plantation?tab=zones" },
+    { label: "สมุดบัญชีรับเงินยาง", href: "/holding/bank-accounts?workspace=agri" },
+    { label: "คลังเอกสารบริษัท", href: "/holding/vault?workspace=agri" },
+  ],
+  prop: [
+    { label: "ภาพรวมบ้านเช่า & ที่ดิน", href: "/property" },
+    { label: "ทะเบียนโฉนด & ภาษีที่ดิน", href: "/property?tab=land-tax" },
+    { label: "สมุดบัญชี & QR ค่าเช่า", href: "/holding/bank-accounts?workspace=prop" },
+    { label: "คลังเอกสารบริษัท", href: "/holding/vault?workspace=prop" },
+  ],
+  holding: [
+    { label: "ภาพรวมโฮลดิ้ง", href: "/holding" },
+    { label: "คลังเอกสารบริษัท PDF/ภาพ", href: "/holding/vault" },
+    { label: "ทะเบียนนิติบุคคล", href: "/holding/entities" },
+    { label: "สมุดบัญชีธนาคาร & QR ทุกธุรกิจ", href: "/holding/bank-accounts" },
+    { label: "ตั้งค่า LINE OA & อนุมัติสิทธิ์ LIFF", href: "/holding/line-access" },
+  ],
+};
+
+function workspaceFromPath(pathname: string): WorkspaceKey {
+  if (pathname === "/fnb" || pathname.startsWith("/fnb/")) return "fnb";
+  if (pathname === "/plantation" || pathname.startsWith("/plantation/")) return "agri";
+  if (pathname === "/property" || pathname.startsWith("/property/")) return "prop";
+  if (pathname === "/holding" || pathname.startsWith("/holding/")) return "holding";
+  return "supthavee";
+}
 
 const navigationGroups: NavigationGroup[] = [
   {
@@ -211,12 +248,17 @@ function SidebarContent({
   closeMenu,
   roleCode,
   accessibleModules,
+  isSuperAdmin,
+  workspace,
 }: {
   closeMenu: () => void;
   roleCode: string | null;
   accessibleModules: AccessibleModules | null;
+  isSuperAdmin: boolean;
+  workspace: WorkspaceKey;
 }) {
   const pathname = usePathname();
+  const theme = WORKSPACE_THEMES[workspace];
   const visibleGroups = navigationGroups
     .map((group) => ({
       ...group,
@@ -260,15 +302,67 @@ function SidebarContent({
   return (
     <>
       <div className="flex h-20 items-center gap-3 border-b border-white/10 px-5">
-        <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-white text-[13px] font-black tracking-tight text-blue-700 shadow-sm">
-          ST
+        <div className={`grid size-10 shrink-0 place-items-center rounded-xl bg-white text-[13px] font-black tracking-tight shadow-sm ${theme.badgeTextClass}`}>
+          {theme.badge}
         </div>
         <div className="min-w-0">
-          <p className="truncate text-sm font-bold text-white">SUPTHAVEE ERP</p>
-          <p className="truncate text-[11px] text-blue-200">Business Management</p>
+          <p className="truncate text-sm font-bold text-white">
+            {workspace === "supthavee" ? "SUPTHAVEE ERP" : theme.label}
+          </p>
+          <p className={`truncate text-[11px] ${theme.softTextClass}`}>
+            {workspace === "supthavee" ? "Business Management" : theme.subtitle}
+          </p>
         </div>
       </div>
+      {isSuperAdmin ? (
+        <div className="grid grid-cols-2 gap-1 border-b border-white/10 px-3 py-2">
+          {(["supthavee", "fnb", "agri", "prop"] as const).map((key) => {
+            const item = WORKSPACE_THEMES[key];
+            const active = workspace === key;
+            return (
+              <Link
+                key={key}
+                href={item.href}
+                onNavigate={closeMenu}
+                className={`rounded-md px-2 py-1.5 text-[11px] font-semibold ${active ? "bg-white/20 text-white" : "text-white/80 hover:bg-white/10"}`}
+              >
+                {item.badge} {item.label}
+              </Link>
+            );
+          })}
+          <Link
+            href={WORKSPACE_THEMES.holding.href}
+            onNavigate={closeMenu}
+            className={`col-span-2 rounded-md px-2 py-1.5 text-[11px] font-semibold ${workspace === "holding" ? "bg-white/20 text-white" : "text-white/80 hover:bg-white/10"}`}
+          >
+            HD ศูนย์โฮลดิ้ง & คลังเอกสารบริษัท
+          </Link>
+        </div>
+      ) : null}
 
+      {workspace !== "supthavee" ? (
+        <nav className="sidebar-scroll flex-1 overflow-y-auto px-3 py-5">
+          <div className="space-y-1">
+            {WORKSPACE_NAV[workspace].map((item) => {
+              const itemPath = normalizePathname(item.href);
+              const isActive = pathname === itemPath || pathname.startsWith(`${itemPath}/`);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onNavigate={closeMenu}
+                  className={`block rounded-lg px-3 py-2.5 text-sm transition ${
+                    isActive ? theme.activeLinkClass : "text-white/85 hover:bg-white/10 hover:text-white"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        </nav>
+      ) : (
+      <>
       <nav className="sidebar-scroll flex-1 overflow-y-auto px-3 py-5">
         <p className="mb-2 px-3 text-[10px] font-semibold tracking-[0.16em] text-blue-300/80">
           ภาพรวม
@@ -364,7 +458,18 @@ function SidebarContent({
             ตั้งค่าระบบ (Settings)
           </Link>
         ) : null}
+        {isSuperAdmin ? (
+          <Link
+            href="/holding/vault?workspace=supthavee"
+            onNavigate={closeMenu}
+            className="mt-1 flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs text-blue-200 transition hover:bg-white/10 hover:text-white"
+          >
+            คลังเอกสารบริษัท (Vault)
+          </Link>
+        ) : null}
       </div>
+      </>
+      )}
     </>
   );
 }
@@ -374,20 +479,24 @@ export default function AppShell({
   userDisplayName,
   roleCode = null,
   accessibleModules = null,
+  isSuperAdmin = false,
 }: {
   children: React.ReactNode;
   /** จาก `user_profiles.full_name` ผ่าน Root Layout — ไม่ใช้ brand เป็น fallback */
   userDisplayName?: string | null;
   roleCode?: string | null;
   accessibleModules?: AccessibleModules | null;
+  isSuperAdmin?: boolean;
 }) {
   const pathname = usePathname();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const workspace: WorkspaceKey = isSuperAdmin ? workspaceFromPath(pathname) : "supthavee";
+  const theme = WORKSPACE_THEMES[workspace];
 
-  // Auth routes render without ERP chrome (sidebar / top bar).
-  if (isAuthPath(pathname)) {
+  // Auth and LINE LIFF routes render without ERP chrome (sidebar / top bar).
+  if (isAuthPath(pathname) || isLiffPath(pathname)) {
     return (
-      <AccessProvider roleCode={roleCode} accessibleModules={accessibleModules}>
+      <AccessProvider roleCode={roleCode} accessibleModules={accessibleModules} isSuperAdmin={isSuperAdmin}>
         {children}
       </AccessProvider>
     );
@@ -401,13 +510,15 @@ export default function AppShell({
   );
 
   return (
-    <AccessProvider roleCode={roleCode} accessibleModules={accessibleModules}>
+    <AccessProvider roleCode={roleCode} accessibleModules={accessibleModules} isSuperAdmin={isSuperAdmin}>
     <div className="min-h-dvh bg-slate-50">
-      <aside className="app-shell-sidebar fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-blue-700 print:hidden lg:flex">
+      <aside className={`app-shell-sidebar fixed inset-y-0 left-0 z-40 hidden w-64 flex-col print:hidden lg:flex ${theme.shellClass}`}>
         <SidebarContent
           closeMenu={() => setIsMenuOpen(false)}
           roleCode={roleCode}
           accessibleModules={accessibleModules}
+          isSuperAdmin={isSuperAdmin}
+          workspace={workspace}
         />
       </aside>
 
@@ -421,7 +532,7 @@ export default function AppShell({
       )}
 
       <aside
-        className={`app-shell-sidebar fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-blue-700 shadow-2xl transition-transform duration-200 print:hidden lg:hidden ${
+        className={`app-shell-sidebar fixed inset-y-0 left-0 z-50 flex w-72 flex-col shadow-2xl transition-transform duration-200 print:hidden lg:hidden ${theme.shellClass} ${
           isMenuOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
@@ -429,6 +540,8 @@ export default function AppShell({
           closeMenu={() => setIsMenuOpen(false)}
           roleCode={roleCode}
           accessibleModules={accessibleModules}
+          isSuperAdmin={isSuperAdmin}
+          workspace={workspace}
         />
       </aside>
 
@@ -449,9 +562,11 @@ export default function AppShell({
               </span>
             </button>
             <div>
-              <p className="text-sm font-semibold text-slate-800">บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด</p>
+              <p className="text-sm font-semibold text-slate-800">
+                {workspace === "supthavee" ? "บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด" : theme.headerTitle}
+              </p>
               <p className="hidden text-[11px] text-slate-400 sm:block">
-                ระบบบริหารจัดการทรัพยากรองค์กร
+                {workspace === "supthavee" ? "ระบบบริหารจัดการทรัพยากรองค์กร" : theme.headerSubtitle}
               </p>
             </div>
           </div>
