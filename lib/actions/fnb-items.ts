@@ -28,6 +28,8 @@ function mapItem(row: Record<string, unknown>): FnbItemRow {
     is_front_back_checked: row.is_front_back_checked === true,
     front_back_group: row.front_back_group == null ? null : text(row.front_back_group),
     is_active: row.is_active !== false,
+    shelf_life_months: row.shelf_life_months == null ? null : num(row.shelf_life_months),
+    requires_expiry_tracking: row.requires_expiry_tracking !== false,
   };
 }
 
@@ -81,6 +83,8 @@ export async function saveFnbItemAction(input: {
   default_vat_mode: string;
   is_front_back_checked: boolean;
   front_back_group: string;
+  shelf_life_months: number;
+  requires_expiry_tracking: boolean;
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
     await requireSuperAdmin();
@@ -99,6 +103,8 @@ export async function saveFnbItemAction(input: {
       default_vat_mode: input.default_vat_mode,
       is_front_back_checked: Boolean(input.is_front_back_checked),
       front_back_group: input.is_front_back_checked ? input.front_back_group || null : null,
+      shelf_life_months: Number(input.shelf_life_months) || null,
+      requires_expiry_tracking: Boolean(input.requires_expiry_tracking),
       is_active: true,
     };
     const table = schemaAdmin().schema("fnb").from("items");

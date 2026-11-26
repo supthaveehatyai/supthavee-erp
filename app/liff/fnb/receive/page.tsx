@@ -1,14 +1,13 @@
-import { listReceiveItemsAction } from "@/lib/actions/fnb-procurement";
-import { listFnbBranchOptionsAction } from "@/lib/actions/fnb-operations";
-import { ProcurementWorkspace } from "@/app/fnb/procurement/procurement-workspace";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-export default async function LiffReceivePage() {
-  const [branches, items] = await Promise.all([listFnbBranchOptionsAction(), listReceiveItemsAction()]);
+export default function LiffReceiveRedirectPage() {
   return (
-    <main className="min-h-screen bg-red-50 px-3 py-4">
-      <ProcurementWorkspace branches={branches.data} receipts={[]} payouts={[]} items={items.data} liff />
+    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-3 px-4">
+      <h1 className="text-xl font-bold">รับของตามแบรนด์</h1>
+      <Link className="rounded-xl bg-red-700 px-4 py-3 text-center text-white" href="/liff/luckycup">Lucky Cup</Link>
+      <Link className="rounded-xl bg-red-900 px-4 py-3 text-center text-white" href="/liff/chatorn">ชาทรตะโหมด</Link>
     </main>
   );
 }

@@ -102,7 +102,13 @@ export function LineAccessWorkspace({
               <option value="APPROVED">APPROVED</option>
               <option value="REJECTED">REJECTED</option>
             </select>
-            <Button type="submit" disabled={pending}>บันทึกสิทธิ์</Button>
+            <select name="assigned_brand_code" defaultValue={row.assigned_brand_code ?? ""} className="h-10 rounded border border-slate-200 px-3 text-sm">
+              <option value="">ไม่ระบุแบรนด์</option>
+              <option value="LUCKY_CUP">LUCKY_CUP</option>
+              <option value="CHATORN">CHATORN</option>
+            </select>
+            <input name="branch_code" defaultValue={row.branch_code ?? ""} placeholder="รหัสสาขา เช่น LC-HDY" className="h-10 rounded border border-slate-200 px-3 text-sm" />
+            <Button type="submit" disabled={pending}>{pending ? "กำลังบันทึก..." : "บันทึกสิทธิ์"}</Button>
           </form>
         ))}
       </div>

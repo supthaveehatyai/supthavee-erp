@@ -362,7 +362,7 @@ export async function listLiffRegistrationsAction(): Promise<HoldingActionResult
     const listed = await schemaAdmin()
       .schema("holding")
       .from("liff_user_registrations")
-      .select("id, line_user_id, display_name, channel_code, workspace_key, status, created_at")
+      .select("id, line_user_id, display_name, channel_code, approval_status, assigned_workspace, assigned_brand_code, branch_code, created_at")
       .order("created_at", { ascending: false })
       .limit(200);
     if (listed.error) {
@@ -373,8 +373,10 @@ export async function listLiffRegistrationsAction(): Promise<HoldingActionResult
       line_user_id: String(row.line_user_id ?? ""),
       display_name: row.display_name == null ? null : String(row.display_name),
       channel_code: String(row.channel_code ?? ""),
-      workspace_key: row.workspace_key == null ? null : workspaceOf(row.workspace_key),
-      status: String(row.status ?? "PENDING"),
+      workspace_key: row.assigned_workspace == null ? null : workspaceOf(row.assigned_workspace),
+      status: String(row.approval_status ?? "PENDING"),
+      assigned_brand_code: row.assigned_brand_code == null ? null : String(row.assigned_brand_code),
+      branch_code: row.branch_code == null ? null : String(row.branch_code),
       created_at: String(row.created_at ?? ""),
     })));
   } catch (error) {
@@ -391,12 +393,16 @@ export async function approveLiffRegistrationAction(
     const id = String(formData.get("id") ?? "").trim();
     const status = String(formData.get("status") ?? "APPROVED").trim();
     if (!id) return empty({ ok: false }, "ไม่พบคำขอ");
+    const workspace = String(formData.get("workspace_key") ?? "");
+    const brand = String(formData.get("assigned_brand_code") ?? "");
     const updated = await schemaAdmin()
       .schema("holding")
       .from("liff_user_registrations")
       .update({
-        status,
-        workspace_key: workspaceOf(formData.get("workspace_key")),
+        approval_status: status === "REJECTED" ? "REVOKED" : status,
+        assigned_workspace: ["fnb", "agri", "prop", "holding"].includes(workspace) ? workspace : null,
+        assigned_brand_code: brand === "LUCKY_CUP" || brand === "CHATORN" ? brand : null,
+        branch_code: String(formData.get("branch_code") ?? "").trim() || null,
       })
       .eq("id", id);
     if (updated.error) {
@@ -419,12 +425,13 @@ export async function submitLiffRegistrationAction(
     if (!lineUserId || !channelCode) {
       return empty({ ok: false }, "กรุณาระบุ LINE user และรหัสช่องเป็นภาษาอังกฤษ");
     }
+    const workspace = String(formData.get("workspace_key") ?? "").trim();
     const inserted = await schemaAdmin().schema("holding").from("liff_user_registrations").insert({
       line_user_id: lineUserId,
       display_name: String(formData.get("display_name") ?? "").trim() || null,
       channel_code: channelCode,
-      workspace_key: String(formData.get("workspace_key") ?? "").trim() || null,
-      status: "PENDING",
+      assigned_workspace: ["fnb", "agri", "prop", "holding"].includes(workspace) ? workspace : null,
+      approval_status: "PENDING",
     });
     if (inserted.error) {
       return empty(

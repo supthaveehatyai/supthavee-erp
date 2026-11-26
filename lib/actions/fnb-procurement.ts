@@ -1,9 +1,12 @@
 "use server";
 
+import { generateWithGeminiFallback, resolveGeminiApiKey } from "@/lib/ai/gemini-client";
+import { parseVendorCatalogSheet } from "@/lib/fnb/excel";
+import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
 import { requireSuperAdmin } from "@/lib/holding/workspace-access";
-import type { FnbActionResult, FnbGoodsReceiptLineRow, FnbGoodsReceiptRow, FnbItemRow, FnbReimbursementRow } from "@/types/fnb";
+import type { FnbActionResult, FnbBrandCode, FnbExpiryLotRow, FnbGoodsReceiptLineRow, FnbGoodsReceiptRow, FnbItemRow, FnbReimbursementRow, FnbUnpackLine, FnbVendorSheetPreview } from "@/types/fnb";
 
 function asciiBranch(code: string): string {
   return code.replace(/[^A-Za-z0-9-]/g, "").slice(0, 16) || "BRANCH";
@@ -97,9 +100,9 @@ export async function listReceiptLinesAction(grId: string): Promise<FnbActionRes
   }
 }
 
-export async function listReceiveItemsAction(): Promise<FnbActionResult<Pick<FnbItemRow, "id" | "short_code" | "name_th" | "count_uom" | "default_purchase_uom" | "recipe_per_purchase_uom">[]>> {
+export async function listReceiveItemsAction(brandLock?: FnbBrandCode | null): Promise<FnbActionResult<Pick<FnbItemRow, "id" | "short_code" | "name_th" | "count_uom" | "default_purchase_uom" | "recipe_per_purchase_uom" | "shelf_life_months" | "requires_expiry_tracking" | "brand_scope">[]>> {
   try {
-    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,name_th,count_uom,default_purchase_uom,recipe_per_purchase_uom").eq("is_active", true).order("short_code", { ascending: true }).limit(500);
+    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,name_th,count_uom,default_purchase_uom,recipe_per_purchase_uom,shelf_life_months,requires_expiry_tracking,brand_scope").eq("is_active", true).order("short_code", { ascending: true }).limit(500);
     if (listed.error) return fail([], listed.error, "อ่านรายการสินค้าไม่สำเร็จ");
     return result(asRows(listed.data).map((row) => ({
       id: text(row.id),
@@ -108,70 +111,218 @@ export async function listReceiveItemsAction(): Promise<FnbActionResult<Pick<Fnb
       count_uom: text(row.count_uom),
       default_purchase_uom: text(row.default_purchase_uom),
       recipe_per_purchase_uom: num(row.recipe_per_purchase_uom) || 1,
-    })));
+      shelf_life_months: row.shelf_life_months == null ? null : num(row.shelf_life_months),
+      requires_expiry_tracking: row.requires_expiry_tracking !== false,
+      brand_scope: text(row.brand_scope),
+    })).filter((item) => {
+      if (!brandLock) return true;
+      if (item.brand_scope !== "ALL" && item.brand_scope !== brandLock) return false;
+      const label = `${item.short_code} ${item.name_th}`;
+      return brandLock === "LUCKY_CUP" ? !/ชาทร|chatorn/i.test(label) : !/lucky\s*cup|ลัคกี้|luckycup/i.test(label);
+    }));
   } catch (error) {
     return caught([], error, "อ่านรายการสินค้าไม่สำเร็จ");
   }
 }
 
-export async function submitBlindGoodsReceiptAction(formData: FormData): Promise<FnbActionResult<{ gr_no: string }>> {
+export async function submitBlindGoodsReceiptAction(formData: FormData): Promise<FnbActionResult<{ gr_no: string; line_count: number }>> {
   try {
     const branch = text(formData.get("receiving_branch_code"));
-    const lines = JSON.parse(text(formData.get("lines_json")) || "[]") as { item_id: string; item_description: string; received_qty: number; received_uom: string; recipe_qty_per_unit: number }[];
+    const brand = text(formData.get("brand_lock"));
+    const brandLock = brand === "LUCKY_CUP" || brand === "CHATORN" ? brand : null;
+    const branchRow = await schemaAdmin().schema("fnb").from("branches").select("brand_code,vat_branch_code").eq("branch_code", branch).maybeSingle();
+    if (branchRow.error) return fail({ gr_no: "", line_count: 0 }, branchRow.error, "อ่านสาขาไม่สำเร็จ");
+    const branchData = branchRow.data && typeof branchRow.data === "object" ? branchRow.data as Record<string, unknown> : {};
+    if (brandLock && text(branchData.brand_code) !== brandLock) return result({ gr_no: "", line_count: 0 }, "สาขานี้ไม่อยู่ในแบรนด์ที่เปิดใช้งาน");
+    const reveal = formData.get("reveal_cost") === "true";
+    if (reveal) await requireSuperAdmin();
+    const lines = JSON.parse(text(formData.get("lines_json")) || "[]") as { item_id: string; raw_desc?: string; raw_code?: string; received_qty: number; received_uom: string; recipe_qty_per_unit?: number; unit_price?: number; line_vat_mode?: string }[];
+    const safeLines = reveal ? lines : lines.map((line) => ({ ...line, unit_price: 0 }));
     const photos = await Promise.all(
       formData.getAll("photos").filter((entry): entry is File => entry instanceof File && entry.size > 0).map((file) => storeFile(branch, "gr", file)),
     );
-    const branchRow = await schemaAdmin().schema("fnb").from("branches").select("legal_entity_id,vat_branch_code").eq("branch_code", branch).maybeSingle();
-    if (branchRow.error) return fail({ gr_no: "" }, branchRow.error, "อ่านสาขาไม่สำเร็จ");
-    const branchData = branchRow.data && typeof branchRow.data === "object" ? branchRow.data as Record<string, unknown> : {};
-    const grId = crypto.randomUUID();
-    const grNo = `FNB-GR-${todayBangkok().replace(/-/g, "")}-${grId.slice(0, 4).toUpperCase()}`;
-    const header = await schemaAdmin().schema("fnb").from("goods_receipts").insert({
-      id: grId,
-      gr_no: grNo,
-      receiving_branch_code: branch,
-      tax_invoice_branch_code: text(branchData.vat_branch_code) || null,
-      legal_entity_id: text(branchData.legal_entity_id) || null,
-      received_date: todayBangkok(),
-      received_by_staff: text(formData.get("staff_name")),
-      vendor_name: text(formData.get("vendor_name")) || null,
-      accounting_tax_tier: "CORP_VAT",
-      doc_tax_status: "PENDING_HQ_MATCH",
-      vat_mode: "EX_VAT",
-      sub_total_ex_vat: 0,
-      discount_coupon_amount: 0,
-      freight_amount: 0,
-      under_moq_surcharge: 0,
-      vat_amount: 0,
-      grand_total: 0,
-      payment_status: "UNPAID",
-      delivery_photo_urls: photos,
-      branch_mismatch_warning: false,
+    const saved = await callFnbRpc("save_fnb_goods_receipt_transaction", {
+      p_receiving_branch_code: branch,
+      p_tax_invoice_branch_code: text(formData.get("tax_invoice_branch_code")) || text(branchData.vat_branch_code) || null,
+      p_received_date: text(formData.get("received_date")) || todayBangkok(),
+      p_received_by_staff: text(formData.get("staff_name")) || "พนักงาน",
+      p_vendor_name: text(formData.get("vendor_name")) || null,
+      p_vendor_invoice_no: text(formData.get("vendor_invoice_no")) || null,
+      p_doc_tax_status: text(formData.get("doc_tax_status")) || "PENDING_HQ_MATCH",
+      p_vat_mode: "MIXED",
+      p_discount_coupon_amount: reveal ? Number(formData.get("discount_coupon_amount") ?? 0) : 0,
+      p_freight_amount: reveal ? Number(formData.get("freight_amount") ?? 0) : 0,
+      p_under_moq_surcharge: reveal ? Number(formData.get("under_moq_surcharge") ?? 0) : 0,
+      p_delivery_photo_urls: photos,
+      p_invoice_file_urls: [],
+      p_notes: text(formData.get("notes")) || null,
+      p_lines: safeLines,
     });
-    if (header.error) return fail({ gr_no: "" }, header.error, "บันทึกรับของไม่สำเร็จ");
-    for (const line of lines) {
-      const qty = Number(line.received_qty) || 0;
-      if (!line.item_id || qty <= 0) continue;
-      const per = Number(line.recipe_qty_per_unit) || 1;
-      const inserted = await schemaAdmin().schema("fnb").from("goods_receipt_lines").insert({
-        gr_id: grId,
-        item_id: line.item_id,
-        item_description: line.item_description,
-        received_qty: qty,
-        received_uom: line.received_uom || "ชิ้น",
-        recipe_qty_per_unit: per,
-        total_recipe_qty: qty * per,
-        unit_price: 0,
-        line_vat_mode: "EX_VAT",
-        line_net_ex_vat: 0,
-        line_vat_amount: 0,
-        line_total_inc_vat: 0,
-      });
-      if (inserted.error) return fail({ gr_no: grNo }, inserted.error, "บันทึกรายการรับของไม่สำเร็จ");
-    }
-    return result({ gr_no: grNo });
+    if (saved.error) return fail({ gr_no: "", line_count: 0 }, saved.error, "บันทึกรับของไม่สำเร็จ");
+    const body = saved.data && typeof saved.data === "object" ? saved.data as Record<string, unknown> : {};
+    if (body.ok === false) return result({ gr_no: "", line_count: 0 }, text(body.error) || "บันทึกรับของไม่สำเร็จ");
+    return result({ gr_no: text(body.gr_no), line_count: safeLines.length });
   } catch (error) {
-    return caught({ gr_no: "" }, error, "บันทึกรับของไม่สำเร็จ");
+    return caught({ gr_no: "", line_count: 0 }, error, "บันทึกรับของไม่สำเร็จ");
+  }
+}
+
+export async function previewVendorSheetAction(formData: FormData): Promise<FnbActionResult<FnbVendorSheetPreview>> {
+  try {
+    await requireSuperAdmin();
+    const file = formData.get("file");
+    if (!(file instanceof File)) return result({ branch_code: null, rows: [] }, "ไม่พบไฟล์ Excel");
+    const parsed = parseVendorCatalogSheet(await file.arrayBuffer());
+    const [items, maps] = await Promise.all([
+      schemaAdmin().schema("fnb").from("items").select("id,short_code,external_code,name_th").limit(800),
+      schemaAdmin().schema("fnb").from("vendor_item_mappings").select("item_id,raw_vendor_code,raw_vendor_desc").limit(1000),
+    ]);
+    if (items.error) return fail(parsed, items.error, "จับคู่รหัสวัตถุดิบไม่สำเร็จ");
+    const byCode = new Map<string, { id: string; name: string }>();
+    for (const row of asRows(items.data)) {
+      const hit = { id: text(row.id), name: text(row.name_th) };
+      if (text(row.external_code)) byCode.set(text(row.external_code).toUpperCase(), hit);
+      if (text(row.short_code)) byCode.set(text(row.short_code).toUpperCase(), hit);
+    }
+    for (const row of asRows(maps.data)) {
+      const hit = { id: text(row.item_id), name: text(row.raw_vendor_desc) };
+      if (text(row.raw_vendor_code)) byCode.set(text(row.raw_vendor_code).toUpperCase(), hit);
+    }
+    return result({
+      branch_code: parsed.branch_code,
+      rows: parsed.rows.map((row) => {
+        const hit = byCode.get(row.external_code);
+        return { ...row, item_id: hit?.id ?? null, item_name: hit?.name ?? null };
+      }),
+    });
+  } catch (error) {
+    return caught({ branch_code: null, rows: [] }, error, "อ่านไฟล์ใบสั่งของไม่สำเร็จ");
+  }
+}
+
+export async function listExpiryWorkspaceAction(brandLock?: FnbBrandCode | null): Promise<FnbActionResult<{ pending: FnbUnpackLine[]; lots: FnbExpiryLotRow[] }>> {
+  try {
+    const db = schemaAdmin().schema("fnb");
+    const [lines, receipts, items, lots] = await Promise.all([
+      db.from("goods_receipt_lines").select("id,gr_id,item_id,item_description,received_qty,allocated_lot_qty,received_uom,expiry_tracking_status").limit(400),
+      db.from("goods_receipts").select("id,gr_no,receiving_branch_code").limit(200),
+      db.from("items").select("id,short_code,name_th,shelf_life_months,brand_scope").limit(500),
+      db.from("item_expiry_lots").select("id,branch_code,item_id,pack_qty,remaining_pack_qty,pack_uom,mfg_date,expiry_date,lot_status").eq("lot_status", "ACTIVE").limit(400),
+    ]);
+    if (lines.error) return fail({ pending: [], lots: [] }, lines.error, "อ่านรายการรอแกะกล่องไม่สำเร็จ");
+    const receiptById = new Map(asRows(receipts.data).map((row) => [text(row.id), row]));
+    const itemById = new Map(asRows(items.data).map((row) => [text(row.id), row]));
+    const branches = await db.from("branches").select("branch_code,brand_code").limit(20);
+    const brandByBranch = new Map(asRows(branches.data).map((row) => [text(row.branch_code), text(row.brand_code)]));
+    const allowed = (branchCode: string, label: string) => {
+      if (!brandLock) return true;
+      if (brandByBranch.get(branchCode) !== brandLock) return false;
+      return brandLock === "LUCKY_CUP" ? !/ชาทร|chatorn/i.test(label) : !/lucky\s*cup|ลัคกี้|luckycup/i.test(label);
+    };
+    const pending = asRows(lines.data).flatMap((row) => {
+      const status = text(row.expiry_tracking_status);
+      if (status !== "PENDING_UNPACK" && status !== "PARTIAL_UNPACK") return [];
+      const receipt = receiptById.get(text(row.gr_id));
+      const item = itemById.get(text(row.item_id));
+      const branch = text(receipt?.receiving_branch_code);
+      const label = `${text(item?.short_code)} ${text(item?.name_th) || text(row.item_description)}`;
+      if (!allowed(branch, label)) return [];
+      return [{
+        id: text(row.id),
+        gr_no: text(receipt?.gr_no),
+        branch_code: branch,
+        item_id: text(row.item_id),
+        short_code: text(item?.short_code),
+        name_th: text(item?.name_th) || text(row.item_description),
+        received_qty: num(row.received_qty),
+        allocated_lot_qty: num(row.allocated_lot_qty),
+        received_uom: text(row.received_uom),
+        expiry_tracking_status: status,
+        shelf_life_months: item?.shelf_life_months == null ? null : num(item.shelf_life_months),
+      }];
+    });
+    const activeLots = asRows(lots.data).flatMap((row) => {
+      const item = itemById.get(text(row.item_id));
+      const label = `${text(item?.short_code)} ${text(item?.name_th)}`;
+      if (!allowed(text(row.branch_code), label)) return [];
+      return [{
+        id: text(row.id),
+        branch_code: text(row.branch_code),
+        item_id: text(row.item_id),
+        short_code: text(item?.short_code),
+        name_th: text(item?.name_th),
+        pack_qty: num(row.pack_qty),
+        remaining_pack_qty: num(row.remaining_pack_qty),
+        pack_uom: text(row.pack_uom),
+        mfg_date: row.mfg_date == null ? null : text(row.mfg_date),
+        expiry_date: text(row.expiry_date),
+        lot_status: text(row.lot_status),
+      }];
+    }).sort((a, b) => a.expiry_date.localeCompare(b.expiry_date));
+    return result({ pending, lots: activeLots });
+  } catch (error) {
+    return caught({ pending: [], lots: [] }, error, "อ่านล็อตวันหมดอายุไม่สำเร็จ");
+  }
+}
+
+export async function saveExpiryLotsAction(input: {
+  gr_line_id: string;
+  staff_name: string;
+  brand_lock?: FnbBrandCode | null;
+  lots: { pack_qty: number; mfg_date: string; expiry_date: string; shelf_life_months: number | null }[];
+}): Promise<FnbActionResult<{ ok: boolean }>> {
+  try {
+    const saved = await callFnbRpc("save_gr_line_expiry_lots", {
+      p_gr_line_id: input.gr_line_id,
+      p_staff_name: input.staff_name,
+      p_lots: input.lots,
+    });
+    if (saved.error) return fail({ ok: false }, saved.error, "บันทึกล็อตไม่สำเร็จ");
+    const body = saved.data && typeof saved.data === "object" ? saved.data as Record<string, unknown> : {};
+    if (body.ok === false) return result({ ok: false }, text(body.error) || "บันทึกล็อตไม่สำเร็จ");
+    return result({ ok: true });
+  } catch (error) {
+    return caught({ ok: false }, error, "บันทึกล็อตไม่สำเร็จ");
+  }
+}
+
+export async function parseFnbBillImageAction(formData: FormData): Promise<FnbActionResult<{ vendor_name: string; invoice_no: string; lines: { name: string; qty: number; uom: string; price: number }[] }>> {
+  try {
+    await requireSuperAdmin();
+    const file = formData.get("file");
+    if (!(file instanceof File)) return result({ vendor_name: "", invoice_no: "", lines: [] }, "ไม่พบรูปบิล");
+    const apiKey = resolveGeminiApiKey();
+    if (!apiKey) return result({ vendor_name: "", invoice_no: "", lines: [] }, "ยังไม่ได้ตั้งค่า Gemini");
+    const generated = await generateWithGeminiFallback({
+      apiKey,
+      parts: [
+        { text: "อ่านบิลซื้อวัตถุดิบร้านกาแฟ ภาษาจีนหรือไทย ตอบ JSON เท่านั้น คีย์ vendor_name, invoice_no, lines เป็นอาร์เรย์ของ {name, qty, uom, price}. ไม่พบให้เป็นค่าว่างหรือ 0." },
+        { inlineData: { mimeType: file.type || "image/jpeg", data: Buffer.from(await file.arrayBuffer()).toString("base64") } },
+      ],
+    });
+    const match = generated.text.match(/\{[\s\S]*\}/);
+    const parsed = match ? JSON.parse(match[0]) as { vendor_name?: string; invoice_no?: string; lines?: { name?: string; qty?: number; uom?: string; price?: number }[] } : {};
+    return result({
+      vendor_name: text(parsed.vendor_name),
+      invoice_no: text(parsed.invoice_no),
+      lines: (parsed.lines ?? []).map((line) => ({ name: text(line.name), qty: num(line.qty), uom: text(line.uom), price: num(line.price) })),
+    });
+  } catch (error) {
+    return caught({ vendor_name: "", invoice_no: "", lines: [] }, error, "อ่านบิลไม่สำเร็จ");
+  }
+}
+
+export async function depleteExpiryLotAction(lotId: string): Promise<FnbActionResult<{ ok: boolean }>> {
+  try {
+    const updated = await schemaAdmin().schema("fnb").from("item_expiry_lots").update({
+      remaining_pack_qty: 0,
+      lot_status: "DEPLETED",
+      updated_at: new Date().toISOString(),
+    }).eq("id", lotId);
+    if (updated.error) return fail({ ok: false }, updated.error, "ตัดล็อตไม่สำเร็จ");
+    return result({ ok: true });
+  } catch (error) {
+    return caught({ ok: false }, error, "ตัดล็อตไม่สำเร็จ");
   }
 }
 

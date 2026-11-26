@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { toast } from "sonner";
 import { commitFnbPriceExcelAction, previewFnbPriceExcelAction, saveFnbItemAction, saveFnbVendorPackAction } from "@/lib/actions/fnb-items";
 import { FNB_BRAND_SCOPES, FNB_CATEGORY_LABEL, FNB_FRONT_GROUPS, FNB_ITEM_CATEGORIES, FNB_RECIPE_UOMS, FNB_VAT_MODES, type FnbExcelPriceRow, type FnbItemRow, type FnbVendorPackRow } from "@/types/fnb";
 
@@ -48,7 +49,7 @@ export function ItemsWorkspace({ items, packs }: { items: FnbItemRow[]; packs: F
           {visible.map((row) => (
             <button key={row.id} type="button" onClick={() => setSelected(row.id)} className={`block w-full rounded-lg border p-3 text-left ${row.id === selected ? "border-red-700 bg-red-50" : "border-slate-200 bg-white"}`}>
               <p className="font-semibold">{row.short_code} · {row.name_th}</p>
-              <p className="text-xs text-slate-500">{row.brand_scope} · {row.item_category} · {row.reference_purchase_price.toFixed(2)}</p>
+              <p className="text-xs text-slate-500">{row.brand_scope} · อายุ {row.shelf_life_months ?? "-"} เดือน · ราคา {row.reference_purchase_price.toFixed(2)} · {row.requires_expiry_tracking ? "ต้องคุมวันหมดอายุ" : "ไม่คุมวันหมดอายุ"}</p>
             </button>
           ))}
         </div>
@@ -72,10 +73,12 @@ export function ItemsWorkspace({ items, packs }: { items: FnbItemRow[]; packs: F
         {preview.length > 0 ? (
           <div className="mt-3 space-y-2">
             {preview.slice(0, 20).map((row) => <p key={row.external_code} className="text-sm">{row.action === "insert" ? "ใหม่" : "อัปเดต"} {row.external_code} {row.unit_price.toFixed(2)}</p>)}
-            <button className="rounded-md bg-red-700 px-4 py-2 text-sm text-white" disabled={pending} onClick={() => start(async () => {
+            <button className="rounded-md bg-red-700 px-4 py-2 text-sm text-white disabled:opacity-60" disabled={pending} onClick={() => start(async () => {
               const saved = await commitFnbPriceExcelAction(preview);
+              if (saved.error) toast.error(saved.error);
+              else toast.success(`ยืนยันอัปเดตราคา ${saved.data.saved} รายการแล้ว`);
               setMessage(saved.error ?? `บันทึก ${saved.data.saved} รายการ`);
-            })}>บันทึกราคา</button>
+            })}>{pending ? "กำลังบันทึก..." : "ยืนยันอัปเดตราคา"}</button>
           </div>
         ) : null}
       </section>
@@ -88,6 +91,8 @@ export function ItemsWorkspace({ items, packs }: { items: FnbItemRow[]; packs: F
     start(async () => {
       const parsed = await previewFnbPriceExcelAction(body);
       setPreview(parsed.data);
+      if (parsed.error) toast.error(parsed.error);
+      else toast.success(`อ่านได้ ${parsed.data.length} รายการ`);
       setMessage(parsed.error ?? `พบ ${parsed.data.length} รหัส`);
     });
   }
@@ -125,13 +130,17 @@ function ItemForm({
           default_vat_mode: String(form.get("default_vat_mode") ?? "EX_VAT"),
           is_front_back_checked: form.get("is_front_back_checked") === "on",
           front_back_group: String(form.get("front_back_group") ?? ""),
+          shelf_life_months: Number(form.get("shelf_life_months") ?? 0),
+          requires_expiry_tracking: form.get("requires_expiry_tracking") === "on",
         });
+        if (saved.error) toast.error(saved.error);
+        else toast.success("บันทึกวัตถุดิบแล้ว");
         setMessage(saved.error ?? "บันทึกวัตถุดิบแล้ว");
       });
     }}>
-      <input className={field} name="short_code" defaultValue={item?.short_code} placeholder="รหัสสั้น" required />
-      <input className={field} name="external_code" defaultValue={item?.external_code ?? ""} placeholder="รหัส X..." />
-      <input className={field} name="name_th" defaultValue={item?.name_th} placeholder="ชื่อ" required />
+      <label className="text-sm">รหัสย่อ<input className={field} name="short_code" defaultValue={item?.short_code} required /></label>
+      <label className="text-sm">รหัสคลังจีน<input className={field} name="external_code" defaultValue={item?.external_code ?? ""} /></label>
+      <label className="text-sm">ชื่อวัตถุดิบ<input className={field} name="name_th" defaultValue={item?.name_th} required /></label>
       <select className={field} name="brand_scope" defaultValue={item?.brand_scope ?? "ALL"}>{FNB_BRAND_SCOPES.map((scope) => <option key={scope}>{scope}</option>)}</select>
       <select className={field} name="item_category" defaultValue={item?.item_category ?? "RAW_MATERIAL"}>{FNB_ITEM_CATEGORIES.map((key) => <option key={key} value={key}>{FNB_CATEGORY_LABEL[key]}</option>)}</select>
       <select className={field} name="recipe_uom" defaultValue={item?.recipe_uom ?? "g"}>{FNB_RECIPE_UOMS.map((uom) => <option key={uom}>{uom}</option>)}</select>
@@ -141,6 +150,8 @@ function ItemForm({
       <input className={field} name="recipe_per_purchase_uom" type="number" step="0.0001" defaultValue={item?.recipe_per_purchase_uom ?? 1} />
       <input className={field} name="reference_purchase_price" type="number" step="0.01" defaultValue={item?.reference_purchase_price ?? 0} />
       <select className={field} name="default_vat_mode" defaultValue={item?.default_vat_mode ?? "EX_VAT"}>{FNB_VAT_MODES.map((mode) => <option key={mode}>{mode}</option>)}</select>
+      <label className="text-sm">อายุเก็บรักษา (เดือน นับจากวันผลิต) เช่น 9, 12, 18 เดือน<input className={field} name="shelf_life_months" type="number" defaultValue={item?.shelf_life_months ?? ""} /></label>
+      <label className="flex items-center gap-2 text-sm"><input name="requires_expiry_tracking" type="checkbox" defaultChecked={item?.requires_expiry_tracking !== false} />ต้องแกะกล่องลงวันหมดอายุหลังรับของ</label>
       <label className="flex items-center gap-2 text-sm"><input name="is_front_back_checked" type="checkbox" defaultChecked={item?.is_front_back_checked} />เช็กหน้า/หลัง</label>
       <select className={field} name="front_back_group" defaultValue={item?.front_back_group ?? "BAKERY_CAKE"}>{FNB_FRONT_GROUPS.map((group) => <option key={group}>{group}</option>)}</select>
       <button className="rounded-md bg-red-700 px-4 py-2 text-sm text-white md:col-span-2" disabled={pending}>{item ? "บันทึกการแก้ไข" : "เพิ่มวัตถุดิบ"}</button>

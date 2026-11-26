@@ -241,6 +241,8 @@ export type LiffRegistrationRow = {
   channel_code: string;
   workspace_key: WorkspaceKey | null;
   status: string;
+  assigned_brand_code: string | null;
+  branch_code: string | null;
   created_at: string;
 };
 

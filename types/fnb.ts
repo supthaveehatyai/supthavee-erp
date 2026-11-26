@@ -68,6 +68,131 @@ export type FnbBranchOption = {
   target_open_date: string | null;
 };
 
+export type FnbBrandCode = "LUCKY_CUP" | "CHATORN";
+
+export type FnbSubmitResult = {
+  ok: boolean;
+  mode: string | null;
+  request_no: string | null;
+  message: string | null;
+};
+
+export type FnbOpeningCard = {
+  staff_name: string;
+  calibration_shots: number;
+  dose_per_shot_g: number;
+  extraction_time_sec: number | null;
+  liquid_yield_g: number | null;
+  total_coffee_used_g: number;
+  last_edit_reason: string | null;
+};
+
+export type FnbShiftCard = {
+  id: string;
+  shift_type: string;
+  entry_mode: string;
+  staff_name: string;
+  gross_sales: number;
+  discount_total: number;
+  net_sales_inc_vat: number;
+  cash_pos_amount: number;
+  cash_counted_amount: number;
+  cash_variance: number | null;
+  cash_variance_reason: string | null;
+  qr_amount: number;
+  lineman_gross_amount: number;
+  grab_gross_amount: number;
+  webapp_amount: number;
+  morning_cash_quick: number;
+  afternoon_cash_quick: number;
+  deposit_method: string;
+  bank_deposit_amount: number;
+  seven_eleven_deposit_amount: number;
+  seven_eleven_fee_thb: number;
+  platform_settlement_status: string;
+  lineman_net_payout: number | null;
+  grab_net_payout: number | null;
+  webapp_net_payout: number | null;
+  weather_or_shift_note: string | null;
+};
+
+export type FnbWasteCard = {
+  staff_name: string;
+  total_waste_cost_thb: number;
+  last_edit_reason: string | null;
+  summary: unknown;
+};
+
+export type FnbShelfCard = {
+  staff_name: string;
+  item_count: number;
+  last_edit_reason: string | null;
+};
+
+export type FnbDayState = {
+  opening: FnbOpeningCard | null;
+  shifts: FnbShiftCard[];
+  waste: FnbWasteCard | null;
+  shelf: FnbShelfCard | null;
+  pending: { request_no: string; shift_type: string }[];
+};
+
+export type FnbChangeRequestRow = {
+  id: string;
+  request_no: string;
+  branch_code: string;
+  work_date: string;
+  shift_type: string;
+  requested_by_name: string;
+  edit_reason: string;
+  old_payload: Record<string, unknown>;
+  proposed_payload: Record<string, unknown>;
+};
+
+export type FnbUnpackLine = {
+  id: string;
+  gr_no: string;
+  branch_code: string;
+  item_id: string;
+  short_code: string;
+  name_th: string;
+  received_qty: number;
+  allocated_lot_qty: number;
+  received_uom: string;
+  expiry_tracking_status: string;
+  shelf_life_months: number | null;
+};
+
+export type FnbExpiryLotRow = {
+  id: string;
+  branch_code: string;
+  item_id: string;
+  short_code: string;
+  name_th: string;
+  pack_qty: number;
+  remaining_pack_qty: number;
+  pack_uom: string;
+  mfg_date: string | null;
+  expiry_date: string;
+  lot_status: string;
+};
+
+export type FnbVendorSheetRow = {
+  raw_code: string;
+  raw_desc: string;
+  received_qty: number;
+  received_uom: string;
+  unit_price: number;
+  external_code: string;
+  item_id: string | null;
+  item_name: string | null;
+};
+
+export type FnbVendorSheetPreview = {
+  branch_code: string | null;
+  rows: FnbVendorSheetRow[];
+};
+
 export type FnbItemRow = {
   id: string;
   short_code: string;
@@ -89,6 +214,8 @@ export type FnbItemRow = {
   is_front_back_checked: boolean;
   front_back_group: string | null;
   is_active: boolean;
+  shelf_life_months: number | null;
+  requires_expiry_tracking: boolean;
 };
 
 export type FnbVendorPackRow = {

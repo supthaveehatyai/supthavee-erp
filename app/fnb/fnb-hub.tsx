@@ -2,7 +2,8 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import type { FnbBranchRow } from "@/types/holding";
-import type { FnbBranchKpi } from "@/types/fnb";
+import type { FnbBranchKpi, FnbChangeRequestRow } from "@/types/fnb";
+import { ApprovalQueue } from "@/app/fnb/approval-queue";
 
 const CT_BNP_OPENING = "2026-12-26";
 
@@ -20,11 +21,13 @@ export function FnbHub({
   kpis,
   schemaMessage,
   initialTab,
+  approvals,
 }: {
   branches: FnbBranchRow[];
   kpis: FnbBranchKpi[];
   schemaMessage: string | null;
   initialTab: string;
+  approvals: FnbChangeRequestRow[];
 }) {
   const [brand, setBrand] = useState(initialTab === "branches" ? "all" : "all");
   const [branchCode, setBranchCode] = useState("all");
@@ -61,6 +64,7 @@ export function FnbHub({
         <p className="text-sm text-slate-500">Lucky Cup และชาทรตะโหมด รวม {branches.length} สาขา</p>
       </div>
       {schemaMessage ? <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{schemaMessage}</div> : null}
+      <ApprovalQueue requests={approvals} />
       <div className="flex flex-wrap gap-2">
         <FilterButton active={brand === "all" && branchCode === "all"} onClick={() => { setBrand("all"); setBranchCode("all"); }}>
           ทุกแบรนด์รวม ({branches.length} สาขา)
