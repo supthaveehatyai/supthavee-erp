@@ -2,17 +2,23 @@ import { createClient } from "@/lib/supabase/server-admin";
 import { replyLineMessages } from "@/lib/line/line-oa";
 
 const COMMAND_RE =
-  /^#(รูป|พร้อมส่ง|สต็อก|แคตตาล็อก|catalog|เช็ค|ไซส์|ตารางไซส์|ตารางขนาด|size)\s*(.*)$/i;
+  /^#(รูป|พร้อมส่ง|สต็อก|สต๊อก|แคตตาล็อก|แคตตาล๊อก|catalog|เช็ค|เช็ก|ไซส์|ตารางไซส์|ตารางขนาด|size|คู่มือ|คำสั่ง|help)\s*(.*)$/i;
 const FLEX_LABEL_LIMIT = 20;
 const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
 const CATALOG_BUTTON_LABEL = "📋 ใบ Catalog";
 const SIZE_BUTTON_LABEL = "📏 ตารางขนาด";
 
 const USAGE_GUIDE = [
+  "ส่งให้ลูกค้า (ซ่อนจำนวนสต็อก):",
+  "#รูป เสื้อกีฬา สีฟ้า",
   "#รูป PS031S",
-  "#รูป คอกลมสั้น แดง",
-  "#พร้อมส่ง โปโล กรม",
+  "#แคตตาล็อก PS031S",
   "#ไซส์ PS031S",
+  "",
+  "เช็กสต็อกภายในร้าน (แสดงจำนวนพร้อมส่ง):",
+  "#สต็อก เสื้อกีฬา สีฟ้า",
+  "#พร้อมส่ง โปโล กรม",
+  "#เช็ค PS031S",
 ].join("\n");
 
 type CatalogCommandMode = "guide" | "size" | "catalog" | "photo";
@@ -21,6 +27,7 @@ export type LineCatalogCommand = {
   mode: CatalogCommandMode;
   query: string;
   inStockOnly: boolean;
+  showStockQty: boolean;
 };
 
 export type LineBotReplyResult = {
@@ -140,15 +147,28 @@ export function parseLineCatalogCommand(text: string): LineCatalogCommand | null
   if (!match) return null;
   const verb = match[1].toLowerCase();
   const query = (match[2] ?? "").trim();
-  if (!query) return { mode: "guide", query: "", inStockOnly: false };
+  if (verb === "คู่มือ" || verb === "คำสั่ง" || verb === "help" || !query) {
+    return { mode: "guide", query: "", inStockOnly: false, showStockQty: false };
+  }
   if (verb === "ไซส์" || verb === "ตารางไซส์" || verb === "ตารางขนาด" || verb === "size") {
-    return { mode: "size", query, inStockOnly: false };
+    return { mode: "size", query, inStockOnly: false, showStockQty: false };
   }
-  if (verb === "แคตตาล็อก" || verb === "catalog") {
-    return { mode: "catalog", query, inStockOnly: false };
+  if (verb === "แคตตาล็อก" || verb === "แคตตาล๊อก" || verb === "catalog") {
+    return { mode: "catalog", query, inStockOnly: false, showStockQty: false };
   }
-  const inStockOnly = verb === "พร้อมส่ง" || verb === "สต็อก" || verb === "เช็ค";
-  return { mode: "photo", query, inStockOnly };
+  if (verb === "รูป") {
+    return { mode: "photo", query, inStockOnly: false, showStockQty: false };
+  }
+  if (
+    verb === "สต็อก" ||
+    verb === "สต๊อก" ||
+    verb === "พร้อมส่ง" ||
+    verb === "เช็ค" ||
+    verb === "เช็ก"
+  ) {
+    return { mode: "photo", query, inStockOnly: true, showStockQty: true };
+  }
+  return null;
 }
 
 function readSizes(value: unknown): BotSize[] {
@@ -224,7 +244,24 @@ function retailLabel(min: number | null, max: number | null): string | null {
   return `฿${formatBaht(Math.min(min, high))}–${formatBaht(Math.max(min, high))}`;
 }
 
-function readyLine(row: BotColorway): { text: string; color: string } {
+function sizeLabels(row: BotColorway): string[] {
+  return [
+    ...new Set(
+      row.sizes
+        .map((size) => size.size.trim())
+        .filter((size) => Boolean(size) && size !== "00"),
+    ),
+  ];
+}
+
+function readyLine(row: BotColorway, showStockQty: boolean): { text: string; color: string } {
+  const labels = sizeLabels(row);
+  if (!showStockQty) {
+    return {
+      text: labels.length > 0 ? `ไซส์: ${labels.join(" ")}` : "สอบถามไซส์ได้ที่ร้าน",
+      color: "#475569",
+    };
+  }
   const ready = row.sizes.filter((size) => size.on_hand_qty > 0);
   if (row.total_on_hand_qty > 0 && ready.length > 0) {
     return {
@@ -234,11 +271,10 @@ function readyLine(row: BotColorway): { text: string; color: string } {
       color: "#059669",
     };
   }
-  const labels = row.sizes.map((size) => size.size).filter(Boolean);
   return {
     text: labels.length
-      ? `สินค้าสั่งผลิต / เช็คสต็อกหน้าร้าน (${labels.join(" ")})`
-      : "สินค้าสั่งผลิต / เช็คสต็อกหน้าร้าน",
+      ? `สต็อกหน้าร้าน 0 (ไซส์ในระบบ: ${labels.join(" ")})`
+      : "สต็อกหน้าร้าน 0",
     color: "#64748B",
   };
 }
@@ -247,16 +283,24 @@ function displayName(row: { catalog_name: string | null; model_name: string }): 
   return lineText(row.catalog_name || row.model_name);
 }
 
-function summarizeRows(rows: BotColorway[]): string {
+function summarizeRows(rows: BotColorway[], showStockQty = false): string {
   const first = rows[0];
   const price = retailLabel(first.min_retail_price, first.max_retail_price);
-  const sizes = [
-    ...new Set(rows.flatMap((row) => row.sizes.map((size) => size.size)).filter(Boolean)),
-  ];
+  const sizeLine = showStockQty
+    ? rows
+        .slice(0, 8)
+        .map((row) => `${row.color_name} ${readyLine(row, true).text}`)
+        .join("\n")
+    : (() => {
+        const labels = [
+          ...new Set(rows.flatMap((row) => sizeLabels(row))),
+        ];
+        return labels.length ? `ไซส์: ${labels.join(" ")}` : "สอบถามไซส์ได้ที่ร้าน";
+      })();
   return [
     `${displayName(first)} (${lineText(first.model_code)})`,
     price ? `ราคาปลีก ${price}` : "สอบถามราคาได้ที่ร้าน",
-    sizes.length ? `ไซส์: ${sizes.join(" ")}` : "สอบถามไซส์ได้ที่ร้าน",
+    sizeLine,
   ].join("\n");
 }
 
@@ -287,11 +331,11 @@ function sizeUrlOf(row: { size_chart_image_url: string | null }): string | null 
   return toSafeLineHttpsUrl(row.size_chart_image_url);
 }
 
-function buildBubble(row: BotColorway): LineMessage {
+function buildBubble(row: BotColorway, showStockQty: boolean): LineMessage {
   const displayUrl = toSafeLineHttpsUrl(row.display_image_url);
   const title = displayName(row);
   const price = retailLabel(row.min_retail_price, row.max_retail_price);
-  const ready = readyLine(row);
+  const ready = readyLine(row, showStockQty);
   const body: LineMessage[] = [
     {
       type: "text",
@@ -410,9 +454,13 @@ function buildBubble(row: BotColorway): LineMessage {
   return bubble;
 }
 
-function flexCarousel(rows: BotColorway[], bubbleLimit: number): LineMessage | null {
+function flexCarousel(
+  rows: BotColorway[],
+  bubbleLimit: number,
+  showStockQty: boolean,
+): LineMessage | null {
   const cap = bubbleLimit > 1 ? Math.min(12, bubbleLimit) : 1;
-  const bubbles = rows.slice(0, cap).map(buildBubble);
+  const bubbles = rows.slice(0, cap).map((row) => buildBubble(row, showStockQty));
   if (bubbles.length === 0) return null;
   const alt = rows
     .slice(0, cap)
@@ -570,23 +618,40 @@ export async function handleLineCatalogBotEvent(params: {
     const first = searched.rows[0];
     const sheet = sheetUrlOf(first);
     const size = sizeUrlOf(first);
-    const flex = flexCarousel(searched.rows, 12);
+    const flex = flexCarousel(searched.rows, 12, command.showStockQty);
     const messages = [...imagePair(sheet, size)];
     if (flex) messages.push(flex);
-    const summary = summarizeRows(searched.rows);
+    const summary = summarizeRows(searched.rows, command.showStockQty);
     if (messages.length === 0) messages.push(textMessage(summary));
     return sendMessages(params.token, params.replyToken, messages, summary);
   }
 
   if (command.mode === "photo" && searched.rows.length > 0) {
-    const summary = summarizeRows(searched.rows);
-    const flex = flexCarousel(searched.rows, bubbleCapFor(searched.rows));
+    const summary = summarizeRows(searched.rows, command.showStockQty);
+    const flex = flexCarousel(searched.rows, bubbleCapFor(searched.rows), command.showStockQty);
     return sendMessages(
       params.token,
       params.replyToken,
       [flex ?? textMessage(summary)],
       summary,
     );
+  }
+
+  if (command.mode === "photo" && command.showStockQty && searched.rows.length === 0) {
+    const allRows = await searchColorways(command.query, false);
+    if (allRows.error) {
+      return sendMessages(params.token, params.replyToken, [
+        textMessage("ระบบค้นหาสินค้าชั่วคราวไม่พร้อม ลองใหม่อีกครั้ง"),
+      ]);
+    }
+    if (allRows.rows.length > 0) {
+      const notice = [
+        `ไม่พบสต็อกพร้อมส่งหน้าร้านสำหรับ "${command.query}" (สต็อกคงเหลือ 0)`,
+        "หากต้องการส่งรูปและไซส์ให้ลูกค้าเพื่อสั่งโรงงาน พิมพ์:",
+        `#รูป ${command.query}`,
+      ].join("\n");
+      return sendMessages(params.token, params.replyToken, [textMessage(notice)], notice);
+    }
   }
 
   const focused = focusRows(searched.rows, command.query);
@@ -671,9 +736,9 @@ async function replyForKnownRows(
       messages.push(textMessage(displayName(first)));
       return sendMessages(token, replyToken, messages, summary);
     }
-    const flex = flexCarousel(rows, cap);
+    const flex = flexCarousel(rows, cap, false);
     return sendMessages(token, replyToken, [flex ?? textMessage(summary)], summary);
   }
-  const flex = flexCarousel(rows, cap);
+  const flex = flexCarousel(rows, cap, false);
   return sendMessages(token, replyToken, [flex ?? textMessage(summary)], summary);
 }

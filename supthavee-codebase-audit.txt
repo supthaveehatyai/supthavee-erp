@@ -1,9 +1,15 @@
 ====================================================================
 SUPTHAVEE ERP SUPERAPP - CODEBASE ARCHITECTURE AUDIT
-Generated At: 2026-11-23T05:35:27.227Z
+Generated At: 2026-11-25T05:12:28.603Z
 ====================================================================
 
 [1] GIT STATUS & RECENT COMMITS (Branch: main)
+?? scripts/audit-codebase.mjs
+2c1af5a 202611251150 Docs Lock Phase 32
+c1d0e72 202611231834 Product System 02
+60f8682 feat(phase32.3): optional model catalog, size chart cropper & LINE sales bot
+0f8aeb1 202611231340 Product System 01
+b693689 chore(docs): sync schema, blueprint, roadmap(.md), summary & doc standards through Phase 31.2
 420d87c 202611231127 Buy System rev03
 3ee3280 202611212012 Buy System rev02
 2127a32 202611211737 Buy System rev01
@@ -11,11 +17,6 @@ Generated At: 2026-11-23T05:35:27.227Z
 711a452 202611211531 Sale System rev59
 2a46ebb 202611211348 Sale System rev58
 9c58573 202611200945 Sale System rev57
-3773e30 202611191117 Sale System rev56
-d1310ac 202611161224 Sale System rev55
-8d890fe 202611160959 Sale System rev54
-6064bdb 202611160040 Sale System rev52
-dc387ee 202611160012 Sale System rev51
 
 [2] PACKAGE.JSON (Scripts & Dependencies)
 {
@@ -79,7 +80,7 @@ dc387ee 202611160012 Sale System rev51
 
 [3] ENVIRONMENT VARIABLE KEYS (Secrets Masked)
 
-[4] PROJECT FILE TREE (707 source files)
+[4] PROJECT FILE TREE (715 source files)
   app/(auth)/login/login-form.tsx
   app/(auth)/login/page.tsx
   app/(dashboard)/accounting-periods/accounting-periods-panel.tsx
@@ -96,11 +97,6 @@ dc387ee 202611160012 Sale System rev51
   app/(dashboard)/settings/parameters/wht-rates-table.tsx
   app/(erp)/dashboard/executive-dashboard.tsx
   app/(erp)/dashboard/page.tsx
-  app/(erp)/expenses/actions.ts
-  app/(erp)/expenses/create/expense-category-combobox.tsx
-  app/(erp)/expenses/create/expense-create-workspace.tsx
-  app/(erp)/expenses/create/page.tsx
-  app/(erp)/expenses/page.tsx
   app/(erp)/expenses/[id]/edit/page.tsx
   app/(erp)/expenses/[id]/expense-attachment-preview.tsx
   app/(erp)/expenses/[id]/expense-detail-actions.tsx
@@ -111,6 +107,11 @@ dc387ee 202611160012 Sale System rev51
   app/(erp)/expenses/[id]/print-wht/auto-print.tsx
   app/(erp)/expenses/[id]/print-wht/page.tsx
   app/(erp)/expenses/[id]/print-wht/wht-50tawi-certificate.tsx
+  app/(erp)/expenses/actions.ts
+  app/(erp)/expenses/create/expense-category-combobox.tsx
+  app/(erp)/expenses/create/expense-create-workspace.tsx
+  app/(erp)/expenses/create/page.tsx
+  app/(erp)/expenses/page.tsx
   app/(erp)/finance/ap-ar/ap-ar-dashboard.tsx
   app/(erp)/finance/ap-ar/page.tsx
   app/(erp)/finance/ap-payment/components/APPaymentClient.tsx
@@ -121,9 +122,9 @@ dc387ee 202611160012 Sale System rev51
   app/(erp)/finance/ar-writeoff/page.tsx
   app/(erp)/finance/bank-accounts/create-bank-account-form.tsx
   app/(erp)/finance/bank-accounts/page.tsx
+  app/(erp)/finance/billing-notes/[id]/page.tsx
   app/(erp)/finance/billing-notes/create/page.tsx
   app/(erp)/finance/billing-notes/page.tsx
-  app/(erp)/finance/billing-notes/[id]/page.tsx
   app/(erp)/finance/deposits/create/deposit-create-form.tsx
   app/(erp)/finance/deposits/create/page.tsx
   app/(erp)/finance/deposits/page.tsx
@@ -150,16 +151,29 @@ dc387ee 202611160012 Sale System rev51
   app/(erp)/profit-analysis/page.tsx
   app/(erp)/profit-analysis/profit-analysis-dashboard.tsx
   app/(erp)/profit-analysis/profit-analysis-month-picker.tsx
+  app/(erp)/purchases/[doc_no]/page.tsx
+  app/(erp)/purchases/[doc_no]/purchase-document-controls.tsx
+  app/(erp)/purchases/[doc_no]/purchase-tax-invoice-controls.tsx
   app/(erp)/purchases/credit-note/page.tsx
   app/(erp)/purchases/credit-note/purchase-credit-note-form.tsx
   app/(erp)/purchases/manual-receipt/manual-receipt-preview-dialog.tsx
   app/(erp)/purchases/manual-receipt/manual-receipt-workspace.tsx
   app/(erp)/purchases/manual-receipt/page.tsx
   app/(erp)/purchases/page.tsx
-  app/(erp)/purchases/[doc_no]/page.tsx
-  app/(erp)/purchases/[doc_no]/purchase-document-controls.tsx
-  app/(erp)/purchases/[doc_no]/purchase-tax-invoice-controls.tsx
   app/(erp)/reports/page.tsx
+  app/(erp)/sales/[doc_no]/convert-document-dropdown.tsx
+  app/(erp)/sales/[doc_no]/delete-draft-document-button.tsx
+  app/(erp)/sales/[doc_no]/duplicate-document-button.tsx
+  app/(erp)/sales/[doc_no]/issue-credit-note-button.tsx
+  app/(erp)/sales/[doc_no]/issue-document-button.tsx
+  app/(erp)/sales/[doc_no]/issue-sales-receipt-button.tsx
+  app/(erp)/sales/[doc_no]/page.tsx
+  app/(erp)/sales/[doc_no]/print-document-button.tsx
+  app/(erp)/sales/[doc_no]/sales-header-edit-dialog.tsx
+  app/(erp)/sales/[doc_no]/void-document-actions.tsx
+  app/(erp)/sales/[doc_no]/void-sales-document-button.tsx
+  app/(erp)/sales/catalog/page.tsx
+  app/(erp)/sales/catalog/sales-catalog-workspace.tsx
   app/(erp)/sales/cn/create/credit-note-create-workspace.tsx
   app/(erp)/sales/cn/create/page.tsx
   app/(erp)/sales/create/contact-person-combobox.tsx
@@ -174,17 +188,6 @@ dc387ee 202611160012 Sale System rev51
   app/(erp)/sales/orders/page.tsx
   app/(erp)/sales/page.tsx
   app/(erp)/sales/reconcile/page.tsx
-  app/(erp)/sales/[doc_no]/convert-document-dropdown.tsx
-  app/(erp)/sales/[doc_no]/delete-draft-document-button.tsx
-  app/(erp)/sales/[doc_no]/duplicate-document-button.tsx
-  app/(erp)/sales/[doc_no]/issue-credit-note-button.tsx
-  app/(erp)/sales/[doc_no]/issue-document-button.tsx
-  app/(erp)/sales/[doc_no]/issue-sales-receipt-button.tsx
-  app/(erp)/sales/[doc_no]/page.tsx
-  app/(erp)/sales/[doc_no]/print-document-button.tsx
-  app/(erp)/sales/[doc_no]/sales-header-edit-dialog.tsx
-  app/(erp)/sales/[doc_no]/void-document-actions.tsx
-  app/(erp)/sales/[doc_no]/void-sales-document-button.tsx
   app/(erp)/settings/company/page.tsx
   app/(erp)/settings/master-data/category-management.tsx
   app/(erp)/settings/master-data/master-data-hub.tsx
@@ -362,6 +365,7 @@ dc387ee 202611160012 Sale System rev51
   components/production/send-to-production-button.tsx
   components/products/BOMSetupPanel.tsx
   components/products/bundle-kits-manager.tsx
+  components/products/PosterColorwayCropperDialog.tsx
   components/products/ProductModelImageUpload.tsx
   components/products/ProductModelPreviewSheet.tsx
   components/sales/bank-reconcile-workspace.tsx
@@ -372,6 +376,7 @@ dc387ee 202611160012 Sale System rev51
   components/sales/ecommerce-order-importer.tsx
   components/sales/goods-qty-badge.tsx
   components/sales/handwritten-bill-dropzone.tsx
+  components/sales/line-sales-bot-dialog.tsx
   components/sales/LineItemProductThumb.tsx
   components/sales/model-matrix-picker.tsx
   components/sales/print-document-template.tsx
@@ -434,6 +439,7 @@ dc387ee 202611160012 Sale System rev51
   lib/actions/bank-reconcile-actions.ts
   lib/actions/bom-actions.ts
   lib/actions/carrier-actions.ts
+  lib/actions/colorway-catalog-actions.ts
   lib/actions/contacts.ts
   lib/actions/credit-note-actions.ts
   lib/actions/dashboard-actions.ts
@@ -462,10 +468,10 @@ dc387ee 202611160012 Sale System rev51
   lib/actions/product-actions.ts
   lib/actions/product.actions.ts
   lib/actions/product.ts
+  lib/actions/production-actions.ts
   lib/actions/production/batch-send-to-production.ts
   lib/actions/production/job-operations-actions.ts
   lib/actions/production/send-to-production-action.ts
-  lib/actions/production-actions.ts
   lib/actions/profit-analysis.actions.ts
   lib/actions/purchase-credit-note.ts
   lib/actions/purchase-document-control.ts
@@ -521,6 +527,7 @@ dc387ee 202611160012 Sale System rev51
   lib/inventory/landed-cost.ts
   lib/inventory/ledger-balances.ts
   lib/inventory/stock-availability.ts
+  lib/line/catalog-sales-bot.ts
   lib/line/line-oa.ts
   lib/line/line-target.ts
   lib/line/slip-jpeg.ts
@@ -541,13 +548,13 @@ dc387ee 202611160012 Sale System rev51
   lib/sales/resolve-one-time-contact.ts
   lib/sales/sales-ocr-parse.ts
   lib/sales/service-line-price.ts
+  lib/supabase-server.ts
+  lib/supabase.ts
   lib/supabase/auditService.ts
   lib/supabase/fetch-all-pages.ts
   lib/supabase/server-admin.ts
   lib/supabase/ssr-server.ts
   lib/supabase/update-session.ts
-  lib/supabase-server.ts
-  lib/supabase.ts
   lib/tax/document-register-data.ts
   lib/tax/document-register-excel.ts
   lib/tax/monthly-wht-report-data.ts
@@ -558,6 +565,7 @@ dc387ee 202611160012 Sale System rev51
   lib/tax/wht-50tawi-data.ts
   lib/tax/wht-50tawi-format.ts
   lib/tax/wht-export.ts
+  lib/utils.ts
   lib/utils/accounting.ts
   lib/utils/billing-list-sort.ts
   lib/utils/billing-period.ts
@@ -595,7 +603,6 @@ dc387ee 202611160012 Sale System rev51
   lib/utils/uom-conversion.ts
   lib/utils/vendor-calc-mode.ts
   lib/utils/void-remark.ts
-  lib/utils.ts
   lib/validations/ap-writeoff.ts
   lib/validations/ar-writeoff.ts
   lib/validations/contacts.ts
@@ -606,73 +613,6 @@ dc387ee 202611160012 Sale System rev51
   lib/validations/refund.ts
   lib/validations/sales-document.ts
   lib/validations/system-settings.ts
-  types/account-receivable.ts
-  types/accounting-period.ts
-  types/ap-payment.ts
-  types/ap-writeoff.ts
-  types/approval.ts
-  types/ar-writeoff.ts
-  types/audit.ts
-  types/auth.ts
-  types/available-deposit.ts
-  types/bank-account.ts
-  types/bank-reconcile.ts
-  types/batch-sales-pdf.ts
-  types/billing.ts
-  types/bom.ts
-  types/bundle-kit.ts
-  types/carrier.ts
-  types/cash-receipt.ts
-  types/contact-bank-account.ts
-  types/contact.ts
-  types/credit-note.ts
-  types/dashboard.ts
-  types/database.types.ts
-  types/deposit.ts
-  types/depreciation.ts
-  types/document-allocation.ts
-  types/document-preview.ts
-  types/document.ts
-  types/expense.ts
-  types/finance-report.ts
-  types/fixed-asset.ts
-  types/fixed-assets.ts
-  types/gemini-model.ts
-  types/inventory-adjustment.ts
-  types/kanban.ts
-  types/manual-receipt.ts
-  types/master-category.ts
-  types/master-size.ts
-  types/material.ts
-  types/ocr-line-match.ts
-  types/parameter.ts
-  types/payment-register.ts
-  types/payment-transaction-meta.ts
-  types/payment.ts
-  types/payroll.ts
-  types/print-document.ts
-  types/procurement-bills.ts
-  types/product-matrix.ts
-  types/product-preview.ts
-  types/product-sale.ts
-  types/production.ts
-  types/profit-analysis.ts
-  types/purchase-document-control.ts
-  types/rbac.ts
-  types/refund.ts
-  types/sales-ocr.ts
-  types/sales-order.ts
-  types/storage-tier.ts
-  types/supabase.ts
-  types/system-settings.ts
-  types/tax-ledger.ts
-  types/tax-wht-print.ts
-  types/tax.ts
-  types/technician-billing.ts
-  types/technician-rate.ts
-  types/user.ts
-  types/wht-rate.ts
-  utils/supabase/server.ts
   supabase/.branches/_current_branch
   supabase/.env.local
   supabase/.temp/cli-latest
@@ -689,13 +629,13 @@ dc387ee 202611160012 Sale System rev51
   supabase/.temp/storage-migration
   supabase/.temp/storage-version
   supabase/config.toml
+  supabase/functions/_shared/gemini-model.ts
   supabase/functions/ocr-expense/config.toml
   supabase/functions/ocr-expense/deno.json
   supabase/functions/ocr-expense/index.ts
   supabase/functions/process-receipt-ocr/config.toml
   supabase/functions/process-receipt-ocr/deno.json
   supabase/functions/process-receipt-ocr/index.ts
-  supabase/functions/_shared/gemini-model.ts
   supabase/migrations/20260720013414_create_procurement_tables.sql
   supabase/migrations/20260720083500_contacts_contact_persons_vendor_product_mapping.sql
   supabase/migrations/20260720083600_master_data_public_read_rls.sql
@@ -787,6 +727,75 @@ dc387ee 202611160012 Sale System rev51
   supabase/seed.sql
   supabase/snippets/Untitled query 475.sql
   supabase/snippets/Untitled query 596.sql
+  types/account-receivable.ts
+  types/accounting-period.ts
+  types/ap-payment.ts
+  types/ap-writeoff.ts
+  types/approval.ts
+  types/ar-writeoff.ts
+  types/audit.ts
+  types/auth.ts
+  types/available-deposit.ts
+  types/bank-account.ts
+  types/bank-reconcile.ts
+  types/batch-sales-pdf.ts
+  types/billing.ts
+  types/bom.ts
+  types/bundle-kit.ts
+  types/carrier.ts
+  types/cash-receipt.ts
+  types/colorway-catalog.ts
+  types/contact-bank-account.ts
+  types/contact.ts
+  types/credit-note.ts
+  types/dashboard.ts
+  types/database.types.ts
+  types/deposit.ts
+  types/depreciation.ts
+  types/document-allocation.ts
+  types/document-preview.ts
+  types/document.ts
+  types/expense.ts
+  types/finance-report.ts
+  types/fixed-asset.ts
+  types/fixed-assets.ts
+  types/gemini-model.ts
+  types/inventory-adjustment.ts
+  types/kanban.ts
+  types/line-sales-bot.ts
+  types/manual-receipt.ts
+  types/master-category.ts
+  types/master-size.ts
+  types/material.ts
+  types/ocr-line-match.ts
+  types/parameter.ts
+  types/payment-register.ts
+  types/payment-transaction-meta.ts
+  types/payment.ts
+  types/payroll.ts
+  types/print-document.ts
+  types/procurement-bills.ts
+  types/product-matrix.ts
+  types/product-preview.ts
+  types/product-sale.ts
+  types/production.ts
+  types/profit-analysis.ts
+  types/purchase-document-control.ts
+  types/rbac.ts
+  types/refund.ts
+  types/sales-ocr.ts
+  types/sales-order.ts
+  types/storage-tier.ts
+  types/supabase.ts
+  types/system-settings.ts
+  types/tax-ledger.ts
+  types/tax-wht-print.ts
+  types/tax.ts
+  types/technician-billing.ts
+  types/technician-rate.ts
+  types/user.ts
+  types/wht-rate.ts
+  utils/supabase/server.ts
 
 [5] ROUTES, SERVER ACTIONS & SUPABASE RPC CALLS
 - app/(auth)/login/page.tsx
@@ -794,16 +803,16 @@ dc387ee 202611160012 Sale System rev51
 - app/(dashboard)/approvals/page.tsx
 - app/(dashboard)/settings/parameters/page.tsx
 - app/(erp)/dashboard/page.tsx
-- app/(erp)/expenses/actions.ts [USE SERVER]
-    exported async fns: updateExpenseDirectAction
-- app/(erp)/expenses/create/page.tsx
-- app/(erp)/expenses/page.tsx
 - app/(erp)/expenses/[id]/edit/page.tsx
     exported async fns: generateMetadata
 - app/(erp)/expenses/[id]/page.tsx
     exported async fns: generateMetadata
 - app/(erp)/expenses/[id]/print-wht/page.tsx
     exported async fns: generateMetadata
+- app/(erp)/expenses/actions.ts [USE SERVER]
+    exported async fns: updateExpenseDirectAction
+- app/(erp)/expenses/create/page.tsx
+- app/(erp)/expenses/page.tsx
 - app/(erp)/finance/ap-ar/page.tsx
 - app/(erp)/finance/ap-payment/page.tsx
 - app/(erp)/finance/ap-writeoff/create/page.tsx
@@ -811,10 +820,10 @@ dc387ee 202611160012 Sale System rev51
 - app/(erp)/finance/ar-writeoff/create/page.tsx
 - app/(erp)/finance/ar-writeoff/page.tsx
 - app/(erp)/finance/bank-accounts/page.tsx
-- app/(erp)/finance/billing-notes/create/page.tsx
-- app/(erp)/finance/billing-notes/page.tsx
 - app/(erp)/finance/billing-notes/[id]/page.tsx
     exported async fns: generateMetadata
+- app/(erp)/finance/billing-notes/create/page.tsx
+- app/(erp)/finance/billing-notes/page.tsx
 - app/(erp)/finance/deposits/create/page.tsx
 - app/(erp)/finance/deposits/page.tsx
 - app/(erp)/finance/payments/page.tsx
@@ -827,12 +836,15 @@ dc387ee 202611160012 Sale System rev51
 - app/(erp)/knowledge-base/document-standards/page.tsx
 - app/(erp)/production/kanban/page.tsx
 - app/(erp)/profit-analysis/page.tsx
+- app/(erp)/purchases/[doc_no]/page.tsx
+    exported async fns: generateMetadata
 - app/(erp)/purchases/credit-note/page.tsx
 - app/(erp)/purchases/manual-receipt/page.tsx
 - app/(erp)/purchases/page.tsx
-- app/(erp)/purchases/[doc_no]/page.tsx
-    exported async fns: generateMetadata
 - app/(erp)/reports/page.tsx
+- app/(erp)/sales/[doc_no]/page.tsx
+    exported async fns: generateMetadata
+- app/(erp)/sales/catalog/page.tsx
 - app/(erp)/sales/cn/create/page.tsx
 - app/(erp)/sales/create/page.tsx
 - app/(erp)/sales/edit/[id]/page.tsx
@@ -842,8 +854,6 @@ dc387ee 202611160012 Sale System rev51
 - app/(erp)/sales/orders/page.tsx
 - app/(erp)/sales/page.tsx
 - app/(erp)/sales/reconcile/page.tsx
-- app/(erp)/sales/[doc_no]/page.tsx
-    exported async fns: generateMetadata
 - app/(erp)/settings/company/page.tsx
 - app/(erp)/settings/master-data/page.tsx
 - app/(erp)/settings/master-data/sizes/page.tsx
@@ -900,6 +910,8 @@ dc387ee 202611160012 Sale System rev51
 - app/actions/inventory-actions.ts [USE SERVER]
 - app/actions/kanban-actions.ts [USE SERVER]
     exported async fns: getProductionJobs, getKanbanBoardData, createProductionJob, updateJobStatus, getJobDetails, cancelProductionJob, lookupTechnicianWageForService, getTechnicianOptions, updateProductionJobAssignment
+- app/actions/payment-slips.ts [USE SERVER]
+    exported async fns: getPaymentSlipStorageMeta, getPaymentTransactionStorageMetaByDocumentId
 - app/actions/refunds.ts [USE SERVER]
     exported async fns: getAvailableDeposits, getRefundParties, createRefundDocument
     supabase.rpc(): is_period_closed
@@ -942,7 +954,6 @@ dc387ee 202611160012 Sale System rev51
     exported async fns: uploadProductModelImage, findProductModelByCode, getProductModelById, listLoadableProductModels, insertDraftProductModel, overwriteDraftProductModel, saveDraftProductModel, generateSkusFromModel, getProductModelPreview, updateProductModel
 - app/products/materials/page.tsx
 - app/products/page.tsx
-- components/tax/wht-50tawi-print-layout.tsx
 - lib/actions/account-receivables.ts [USE SERVER]
     exported async fns: getAccountReceivables
 - lib/actions/audit-actions.ts [USE SERVER]
@@ -962,6 +973,9 @@ dc387ee 202611160012 Sale System rev51
     exported async fns: searchRawMaterialModels, getBOMByModelId, addBOMItem, removeBOMItem, searchBomMaterials, getModelMaterialBom, saveModelMaterialBom
 - lib/actions/carrier-actions.ts [USE SERVER]
     exported async fns: getActiveCarriers, createCarrier, listDestFreightSummary, confirmCarrierReceipt
+- lib/actions/colorway-catalog-actions.ts [USE SERVER]
+    exported async fns: searchColorwayCatalogAction, getCatalogFilterMetadataAction, getModelCropperStateAction, uploadColorwayCroppedImageAction, deleteColorwayImageAction, updateModelCatalogMetaAction, uploadModelVisualSlotAction, clearModelVisualSlotAction, copyMainImageToCatalogSlotAction, uploadModelMasterPosterAction, getLineSalesBotDiagnosticsAction
+    supabase.rpc(): set_product_model_visual_slot, search_colorway_sales_catalog, get_model_colorway_cropper_state, upsert_product_model_color_image, delete_product_model_color_image, update_product_model_catalog_meta
 - lib/actions/contacts.ts [USE SERVER]
     exported async fns: getContacts, createContact, toggleContactStatus, importContacts
 - lib/actions/credit-note-actions.ts [USE SERVER]
@@ -1022,15 +1036,15 @@ dc387ee 202611160012 Sale System rev51
     exported async fns: searchProductModels, getModelMatrixForSale
 - lib/actions/product.ts [USE SERVER]
     exported async fns: getModelsByVendorForQuickCreate, getSizesByBrand, quickCreateSKU
+- lib/actions/production-actions.ts [USE SERVER]
+    exported async fns: getProductionJobs, backflushBomForCompletedJob, updateJobStatus, createProductionJob, createProductionJobFromSO, searchManufacturedModels, getProductionJobDetails, executeMaterialBackflush
+    supabase.rpc(): backflush_bom_for_production
 - lib/actions/production/batch-send-to-production.ts [USE SERVER]
     exported async fns: uploadBatchModelMockup, batchSendToProduction
 - lib/actions/production/job-operations-actions.ts [USE SERVER]
     exported async fns: getJobOperations, upsertJobOperation, deleteJobOperation, getRoutingActivityRates
 - lib/actions/production/send-to-production-action.ts [USE SERVER]
     exported async fns: sendToProduction, sendDocumentToKanban, uploadDocumentItemMockup
-- lib/actions/production-actions.ts [USE SERVER]
-    exported async fns: getProductionJobs, backflushBomForCompletedJob, updateJobStatus, createProductionJob, createProductionJobFromSO, searchManufacturedModels, getProductionJobDetails, executeMaterialBackflush
-    supabase.rpc(): backflush_bom_for_production
 - lib/actions/profit-analysis.actions.ts [USE SERVER]
     exported async fns: getMonthlyProfitKpi, getSalesProfitRows, getProfitAnalysisDashboard
 - lib/actions/purchase-credit-note.ts [USE SERVER]
@@ -1081,16 +1095,20 @@ dc387ee 202611160012 Sale System rev51
 - lib/inventory/ledger-balances.ts
     exported async fns: fetchOnHandQtyByProductIds
     supabase.rpc(): get_on_hand_qty_by_product_ids
+- lib/line/catalog-sales-bot.ts
+    exported async fns: handleLineCatalogBotEvent
+    supabase.rpc(): search_colorway_sales_catalog, lookup_model_catalog_for_bot
 - supabase/functions/process-receipt-ocr/index.ts
     supabase.rpc(): record_and_get_ocr_quota
 
-[6] UNIQUE SUPABASE RPCs REFERENCED IN CODE (57)
+[6] UNIQUE SUPABASE RPCs REFERENCED IN CODE (64)
   - admin_revise_purchase_vat_mode
   - attach_sales_document_wht_certificate
   - backflush_bom_for_production
   - calculate_monthly_depreciation
   - convert_purchase_bill_tax_mode
   - delete_billing_note_transaction
+  - delete_product_model_color_image
   - delete_skus_safely
   - generate_abb_channel_doc_no
   - generate_document_no
@@ -1103,6 +1121,7 @@ dc387ee 202611160012 Sale System rev51
   - get_batch_sales_documents_for_pdf
   - get_erp_financial_kpis_and_profit
   - get_line_webhook_status_summary
+  - get_model_colorway_cropper_state
   - get_on_hand_qty_by_product_ids
   - get_recommended_conversion_date
   - get_reconcile_candidate_documents
@@ -1115,6 +1134,7 @@ dc387ee 202611160012 Sale System rev51
   - issue_credit_note_transaction
   - issue_document_transaction
   - issue_receipt_for_tax_invoice
+  - lookup_model_catalog_for_bot
   - match_vendor_ocr_line_item
   - match_vendor_tax_invoice_transaction
   - process_ar_receipt_transaction
@@ -1127,6 +1147,8 @@ dc387ee 202611160012 Sale System rev51
   - save_expense_direct_no_draft
   - save_manual_goods_receipt_transaction
   - save_vendor_rounding_calc_mode
+  - search_colorway_sales_catalog
+  - set_product_model_visual_slot
   - set_purchase_tax_invoice_status
   - settle_ap_invoices_bulk_fast
   - settle_sales_document_payment
@@ -1135,10 +1157,12 @@ dc387ee 202611160012 Sale System rev51
   - update_billing_note_transaction
   - update_employee_id_card_attachment
   - update_expense_direct
+  - update_product_model_catalog_meta
   - update_sales_document_direct
   - upsert_contact_bank_account
   - upsert_material_vendor_mapping
   - upsert_ocr_vendor_mapping
+  - upsert_product_model_color_image
   - void_document_transaction
   - void_document_with_stock_reversal
   - void_sales_document

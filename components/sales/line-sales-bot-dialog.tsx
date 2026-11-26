@@ -5,6 +5,7 @@ import { Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { registerAndVerifyLineWebhookUrlAction } from "@/app/actions/finance/line-oa";
 import { getLineSalesBotDiagnosticsAction } from "@/lib/actions/colorway-catalog-actions";
+import { LineBotCommandGuideCard } from "@/components/line/line-bot-command-guide-card";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -138,6 +139,8 @@ export function LineSalesBotDialog() {
                   🔗 ซิงก์ Webhook ถาวรเข้า LINE OA ทันที
                 </Button>
               </div>
+
+              <LineBotCommandGuideCard compact />
 
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-slate-800">เหตุการณ์ Webhook ล่าสุด 8 รายการ</p>

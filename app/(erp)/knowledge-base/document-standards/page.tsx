@@ -31,6 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { LineBotCommandGuideCard } from "@/components/line/line-bot-command-guide-card";
 import { DocumentPaperSizeSelect } from "./document-paper-size-select";
 
 export const metadata: Metadata = {
@@ -454,6 +455,8 @@ export default async function DocumentStandardsPage() {
           </p>
         ) : null}
       </div>
+
+      <LineBotCommandGuideCard />
 
       <Card className="border-amber-200 bg-amber-50/40 shadow-sm">
         <CardHeader className="pb-3">

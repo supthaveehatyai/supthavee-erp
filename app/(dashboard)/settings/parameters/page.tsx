@@ -5,6 +5,8 @@ import { getAllWhtRates } from "@/lib/actions/wht-rate-actions";
 import { ParameterApprovalTable } from "./parameter-approval-table";
 import { ParameterSettingsForm } from "./parameter-settings-form";
 import { WhtRatesTable } from "./wht-rates-table";
+import { LineBotCommandGuideCard } from "@/components/line/line-bot-command-guide-card";
+import { LineSalesBotDialog } from "@/components/sales/line-sales-bot-dialog";
 import {
   PageModeTabs,
   SETTINGS_HUB_TABS,
@@ -76,6 +78,19 @@ export default async function SystemParametersPage() {
       ) : (
         <WhtRatesTable rows={whtRatesResult.data} isAdmin={isAdmin} />
       )}
+
+      <section className="flex flex-col gap-4 border-t border-slate-200 pt-6">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-lg font-semibold text-slate-900">LINE OA แคตตาล็อกขาย</h2>
+          <p className="text-sm text-slate-500">
+            โพยคำสั่ง # สำหรับพนักงาน และปุ่มตรวจสถานะบอท @hzr1801v
+          </p>
+        </div>
+        <LineBotCommandGuideCard compact />
+        <div>
+          <LineSalesBotDialog />
+        </div>
+      </section>
     </div>
   );
 }
