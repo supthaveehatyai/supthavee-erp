@@ -6,7 +6,9 @@ import { useState } from "react";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { canAccessPath, canSeeNavItem, isAuthPath, isLiffPath, normalizePathname, STOCK_CARD_PATH } from "@/lib/auth/module-access";
 import { AccessProvider } from "@/components/auth/access-context";
-import { WORKSPACE_THEMES, type WorkspaceKey, type WorkspaceRole } from "@/types/holding";
+import { allowsFnbHref } from "@/lib/holding/access-routes";
+import { fnbModulePermissionsFrom, type FnbModulePermissions } from "@/types/fnb";
+import { WORKSPACE_THEMES, type WorkspaceKey } from "@/types/holding";
 import type { AccessibleModules, ErpModuleKey } from "@/types/rbac";
 
 type IconName =
@@ -253,17 +255,11 @@ function Icon({
 function visibleWorkspaceItems(
   workspace: Exclude<WorkspaceKey, "supthavee">,
   isSuperAdmin: boolean,
-  role: WorkspaceRole,
+  permissions: FnbModulePermissions,
 ): NavigationItem[] {
   const items = WORKSPACE_NAV[workspace];
   if (workspace !== "fnb" || isSuperAdmin) return items;
-  if (role === "FNB_HR_ACCOUNTANT") {
-    return items.filter((item) => item.href === "/fnb/people" || item.href.startsWith("/fnb/procurement"));
-  }
-  if (role === "FNB_HR") return items.filter((item) => item.href === "/fnb/people");
-  if (role === "FNB_ACCOUNTANT") return items.filter((item) => item.href.startsWith("/fnb/procurement"));
-  if (role === "FNB_BRANCH_MANAGER") return items.filter((item) => item.href.startsWith("/fnb/operations"));
-  return items.filter((item) => item.href === "/fnb/people");
+  return items.filter((item) => allowsFnbHref(item.href, permissions));
 }
 
 function SidebarContent({
@@ -272,14 +268,14 @@ function SidebarContent({
   accessibleModules,
   isSuperAdmin,
   workspace,
-  workspaceRole,
+  fnbModulePermissions,
 }: {
   closeMenu: () => void;
   roleCode: string | null;
   accessibleModules: AccessibleModules | null;
   isSuperAdmin: boolean;
   workspace: WorkspaceKey;
-  workspaceRole: WorkspaceRole;
+  fnbModulePermissions: FnbModulePermissions;
 }) {
   const pathname = usePathname();
   const theme = WORKSPACE_THEMES[workspace];
@@ -367,7 +363,7 @@ function SidebarContent({
       {workspace !== "supthavee" ? (
         <nav className="sidebar-scroll flex-1 overflow-y-auto px-3 py-5">
           <div className="space-y-1">
-            {visibleWorkspaceItems(workspace, isSuperAdmin, workspaceRole).map((item) => {
+            {visibleWorkspaceItems(workspace, isSuperAdmin, fnbModulePermissions).map((item) => {
               const itemPath = normalizePathname(item.href);
               const exactOnly = itemPath === "/fnb" || itemPath === "/plantation" || itemPath === "/property" || itemPath === "/holding";
               const isActive = exactOnly
@@ -507,7 +503,7 @@ export default function AppShell({
   roleCode = null,
   accessibleModules = null,
   isSuperAdmin = false,
-  workspaceRole = "SUPTHAVEE_STAFF",
+  fnbModulePermissions = fnbModulePermissionsFrom(null),
 }: {
   children: React.ReactNode;
   /** จาก `user_profiles.full_name` ผ่าน Root Layout — ไม่ใช้ brand เป็น fallback */
@@ -515,11 +511,11 @@ export default function AppShell({
   roleCode?: string | null;
   accessibleModules?: AccessibleModules | null;
   isSuperAdmin?: boolean;
-  workspaceRole?: WorkspaceRole;
+  fnbModulePermissions?: FnbModulePermissions;
 }) {
   const pathname = usePathname();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const fnbDesk = !isSuperAdmin && pathname.startsWith("/fnb") && (workspaceRole === "FNB_HR" || workspaceRole === "FNB_HR_ACCOUNTANT" || workspaceRole === "FNB_ACCOUNTANT" || workspaceRole === "FNB_BRANCH_MANAGER");
+  const fnbDesk = !isSuperAdmin && pathname.startsWith("/fnb");
   const workspace: WorkspaceKey = isSuperAdmin ? workspaceFromPath(pathname) : fnbDesk ? "fnb" : "supthavee";
   const theme = WORKSPACE_THEMES[workspace];
 
@@ -549,7 +545,7 @@ export default function AppShell({
           accessibleModules={accessibleModules}
           isSuperAdmin={isSuperAdmin}
           workspace={workspace}
-          workspaceRole={workspaceRole}
+          fnbModulePermissions={fnbModulePermissions}
         />
       </aside>
 
@@ -573,7 +569,7 @@ export default function AppShell({
           accessibleModules={accessibleModules}
           isSuperAdmin={isSuperAdmin}
           workspace={workspace}
-          workspaceRole={workspaceRole}
+          fnbModulePermissions={fnbModulePermissions}
         />
       </aside>
 

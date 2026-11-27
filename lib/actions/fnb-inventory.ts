@@ -3,12 +3,18 @@
 import { resolveFnbActor } from "@/lib/fnb/actor";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
-import { requireSuperAdmin } from "@/lib/holding/workspace-access";
+import { requireFnbModuleAccess } from "@/lib/holding/workspace-access";
+import type { UserAccessContext } from "@/types/holding";
 import type { FnbActionResult, FnbStockBalanceRow } from "@/types/fnb";
+
+function branchAllowed(ctx: UserAccessContext, branchCode: string): boolean {
+  if (ctx.isSuperAdmin) return true;
+  return ctx.allowedBranchCodes.includes(branchCode);
+}
 
 export async function listFnbStockAction(): Promise<FnbActionResult<FnbStockBalanceRow[]>> {
   try {
-    await requireSuperAdmin();
+    const ctx = await requireFnbModuleAccess("branch_inventory_transfer");
     const db = schemaAdmin().schema("fnb");
     const [items, ledger] = await Promise.all([
       db.from("items").select("id,short_code,name_th,count_uom,recipe_uom,recipe_per_count_uom").eq("is_active", true).limit(500),
@@ -27,6 +33,8 @@ export async function listFnbStockAction(): Promise<FnbActionResult<FnbStockBala
       const [branch, itemId] = key.split("|");
       const item = catalog.get(itemId);
       if (!item || Math.abs(qty) < 0.0001) continue;
+      if (!branchAllowed(ctx, branch)) continue;
+      const hideQty = !ctx.isSuperAdmin && ctx.fnbGuardrailPermissions.enforce_blind_count;
       balances.push({
         branch_code: branch,
         item_id: itemId,
@@ -35,7 +43,7 @@ export async function listFnbStockAction(): Promise<FnbActionResult<FnbStockBala
         count_uom: text(item.count_uom),
         recipe_uom: text(item.recipe_uom),
         recipe_per_count_uom: num(item.recipe_per_count_uom) || 1,
-        on_hand_recipe: qty,
+        on_hand_recipe: hideQty ? 0 : qty,
       });
     }
     return result(balances.sort((a, b) => a.branch_code.localeCompare(b.branch_code) || a.short_code.localeCompare(b.short_code)));
@@ -53,7 +61,10 @@ export async function transferFnbStockAction(input: {
   qty_in_count_uom: number;
 }): Promise<FnbActionResult<{ transfer_no: string }>> {
   try {
-    await requireSuperAdmin();
+    const ctx = await requireFnbModuleAccess("branch_inventory_transfer");
+    if (!branchAllowed(ctx, input.from_branch_code) || !branchAllowed(ctx, input.to_branch_code)) {
+      return result({ transfer_no: "" }, "ไม่มีสิทธิ์โอนสินค้าของสาขานี้");
+    }
     const actor = await resolveFnbActor({ actorSource: input.actor_source ?? "desktop", brandLock: null, branchCode: input.from_branch_code });
     if (!actor.ok) return result({ transfer_no: "" }, actor.error);
     const staffName = actor.actor.name;
@@ -119,7 +130,8 @@ export async function submitBlindCountAction(input: {
   lines: { item_id: string; closed_pack_count: number; open_pack_weight_g: number }[];
 }): Promise<FnbActionResult<{ count_no: string; lines: { short_code: string; counted: number; system: number; variance: number; cost: number }[] }>> {
   try {
-    await requireSuperAdmin();
+    const ctx = await requireFnbModuleAccess("branch_inventory_transfer");
+    if (!branchAllowed(ctx, input.branch_code)) return result({ count_no: "", lines: [] }, "ไม่มีสิทธิ์นับสต็อกของสาขานี้");
     const actor = await resolveFnbActor({ actorSource: input.actor_source ?? "desktop", brandLock: null, branchCode: input.branch_code });
     if (!actor.ok) return result({ count_no: "", lines: [] }, actor.error);
     const staffName = actor.actor.name;
@@ -166,7 +178,15 @@ export async function submitBlindCountAction(input: {
         variance_cost_thb: cost,
       });
       if (inserted.error) return fail({ count_no: countNo, lines: report }, inserted.error, "บันทึกบรรทัดนับไม่สำเร็จ");
-      report.push({ short_code: text(item.short_code), counted, system: systemQty, variance, cost });
+      const showSystem = ctx.isSuperAdmin || !ctx.fnbGuardrailPermissions.enforce_blind_count;
+      const showCost = ctx.isSuperAdmin || ctx.fnbGuardrailPermissions.can_view_cost_price;
+      report.push({
+        short_code: text(item.short_code),
+        counted,
+        system: showSystem ? systemQty : 0,
+        variance: showSystem ? variance : 0,
+        cost: showCost ? cost : 0,
+      });
     }
     return result({ count_no: countNo, lines: report });
   } catch (error) {

@@ -1,3 +1,5 @@
+import type { FnbRolePermissionRow } from "@/types/fnb";
+
 export type IamDirectoryRow = {
   userId: string;
   fullName: string;
@@ -70,6 +72,7 @@ export type FnbEmployeeCard = {
   userId: string | null;
   employmentStatus: string;
   hidePay: boolean;
+  systemRole: string;
 };
 
 export type FnbBranchChoice = { code: string; name: string; brand: string };
@@ -80,7 +83,9 @@ export type FnbPeoplePayload = {
   employees: FnbEmployeeCard[];
   canSetTier: boolean;
   canApprovePayroll: boolean;
+  canEditRolePermissions: boolean;
   actorName: string;
+  roles: FnbRolePermissionRow[];
 };
 
 export type FnbPayrollDraftLine = {

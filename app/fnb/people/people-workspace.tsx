@@ -15,9 +15,10 @@ import {
 } from "@/lib/actions/fnb-people";
 import { payrollAmounts } from "@/lib/fnb/payroll-math";
 import type { FnbEmployeeCard, FnbPayrollDraftLine, FnbPeoplePayload } from "@/types/iam";
+import { FnbRoleMatrix } from "./role-matrix";
 
 export function FnbPeopleWorkspace({ payload }: { payload: FnbPeoplePayload }) {
-  const [tab, setTab] = useState<"people" | "payroll">("people");
+  const [tab, setTab] = useState<"people" | "payroll" | "roles">("people");
   return (
     <div className="space-y-4">
       <div>
@@ -28,8 +29,11 @@ export function FnbPeopleWorkspace({ payload }: { payload: FnbPeoplePayload }) {
       <div className="flex gap-2">
         <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "people" ? "bg-red-700 text-white" : "bg-white"}`} onClick={() => setTab("people")}>ทะเบียนพนักงานและรหัสล็อกอิน</button>
         <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "payroll" ? "bg-red-700 text-white" : "bg-white"}`} onClick={() => setTab("payroll")}>เตรียมเงินเดือนและชั่วโมงพาร์ทไทม์</button>
+        <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "roles" ? "bg-red-700 text-white" : "bg-white"}`} onClick={() => setTab("roles")}>🛡️ จัดการสิทธิ์ระดับบทบาท (Role Permissions)</button>
       </div>
-      {tab === "people" ? <PeopleTab payload={payload} /> : <PayrollTab payload={payload} />}
+      {tab === "people" ? <PeopleTab payload={payload} /> : null}
+      {tab === "payroll" ? <PayrollTab payload={payload} /> : null}
+      {tab === "roles" ? <FnbRoleMatrix roles={payload.roles} canEdit={payload.canEditRolePermissions} /> : null}
     </div>
   );
 }
@@ -91,6 +95,13 @@ function PeopleTab({ payload }: { payload: FnbPeoplePayload }) {
             </div>
           </div>
           <label className="text-sm">วันเริ่มงานจริง<input type="date" name="hire_date" defaultValue={editing?.hireDate || new Date().toISOString().slice(0, 10)} className="mt-1 w-full rounded-lg border px-3 py-2" /></label>
+          <label className="text-sm">บทบาท (System Role)
+            <select name="system_role" defaultValue={editing?.systemRole || payload.roles.find((role) => role.isActive)?.roleCode || "FNB_STORE_STAFF"} className="mt-1 w-full rounded-lg border px-3 py-2">
+              {(payload.roles.filter((role) => role.isActive).length > 0 ? payload.roles.filter((role) => role.isActive) : [{ roleCode: "FNB_STORE_STAFF", roleNameTh: "พนักงานหน้าร้าน" }]).map((role) => (
+                <option key={role.roleCode} value={role.roleCode}>{role.roleNameTh} ({role.roleCode})</option>
+              ))}
+            </select>
+          </label>
           <label className="text-sm">ประเภทการจ้าง
             <select name="employment_type" defaultValue={editing?.employmentType || "FULL_TIME_MONTHLY"} className="mt-1 w-full rounded-lg border px-3 py-2">
               <option value="FULL_TIME_MONTHLY">ประจำรายเดือน</option>

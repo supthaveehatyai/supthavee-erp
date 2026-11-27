@@ -1,3 +1,5 @@
+import type { FnbGuardrailPermissions, FnbModulePermissions } from "@/types/fnb";
+
 export type WorkspaceKey = "supthavee" | "fnb" | "agri" | "prop" | "holding";
 
 export const SUPER_ADMIN_FULL_NAME = "ณัฐวัฒน์ ลิ่มวรวิวัฒน์";
@@ -14,7 +16,8 @@ export type WorkspaceRole =
   | "FNB_HR"
   | "FNB_HR_ACCOUNTANT"
   | "PROP_MANAGER"
-  | "AGRI_MANAGER";
+  | "AGRI_MANAGER"
+  | `FNB_${string}`;
 
 export type UserAccessContext = {
   userId: string;
@@ -39,6 +42,8 @@ export type UserAccessContext = {
   hrAllowedBrandCodes: Array<"LUCKY_CUP" | "CHATORN">;
   hrCanPreparePayroll: boolean;
   hrCanViewExecPrivatePay: boolean;
+  fnbModulePermissions: FnbModulePermissions;
+  fnbGuardrailPermissions: FnbGuardrailPermissions;
 };
 
 export type FnbStaffDraft = {

@@ -541,3 +541,117 @@ export type FnbPosImportPreview = {
   net_sales_total: number;
   cancelled_orders_json: unknown[];
 };
+
+/** Group 1 — missing keys stay closed. */
+export const FNB_MODULE_PERMISSION_DEFS = [
+  { key: "store_portal", label: "พอร์ทัลหน้าร้านมือถือ (เปิดร้าน / ส่งเงินกะ / WIP / ปิดร้าน)" },
+  { key: "goods_receipt_expiry", label: "รับสินค้าเข้าสาขา & แกะล็อตวันหมดอายุ (FEFO)" },
+  { key: "branch_inventory_transfer", label: "คลังสาขา โอนสินค้าระหว่างสาขา & นับสต็อก" },
+  { key: "own_branch_menu_sales", label: "ดูยอดขายรายเมนู (เฉพาะสาขาที่สังกัด)" },
+  { key: "hq_tax_reimburse", label: "ชนบิลภาษี โอนคืนพนักงาน 15฿ & กระทบยอดแพลตฟอร์ม" },
+  { key: "master_items_bom", label: "ทะเบียนวัตถุดิบ หลายแหล่งซื้อ & สูตรชง (BOM)" },
+  { key: "sop_shift_settings", label: "ตั้งค่าระเบียบ SOP เงินทอนเก๊ะ & กะสาขา" },
+  { key: "people_payroll", label: "บุคลากร รหัสล็อกอิน & เตรียมเงินเดือน" },
+  { key: "all_branch_analytics", label: "แดชบอร์ดยอดขายรวม & วิเคราะห์โปรโมชั่นทุกสาขา" },
+  { key: "tax_accounting_reports", label: "รายงานภาษีซื้อ-ขายรายสาขา & สรุป ภ.พ.30 (เตรียมเชื่อมเฟสถัดไป)" },
+] as const;
+
+/** Group 2 — confidentiality and internal control. Missing keys use defaultValue. */
+export const FNB_GUARDRAIL_PERMISSION_DEFS = [
+  { key: "can_view_cost_price", label: "แสดงราคาทุนวัตถุดิบและต้นทุนสูตร BOM", defaultValue: false },
+  { key: "enforce_blind_count", label: "บังคับซ่อนยอดคงเหลือในระบบตอนนับสต็อก (Blind Count)", defaultValue: true },
+  { key: "can_approve_financial_edits", label: "สิทธิ์อนุมัติแก้ตัวเลขปิดกะ & อนุมัติงวดเงินเดือน", defaultValue: false },
+] as const;
+
+export type FnbModulePermissionKey = (typeof FNB_MODULE_PERMISSION_DEFS)[number]["key"];
+export type FnbGuardrailPermissionKey = (typeof FNB_GUARDRAIL_PERMISSION_DEFS)[number]["key"];
+export type FnbModulePermissions = Record<FnbModulePermissionKey, boolean>;
+export type FnbGuardrailPermissions = Record<FnbGuardrailPermissionKey, boolean>;
+
+export type FnbRolePermissionRow = {
+  roleCode: string;
+  appRoleCode: string;
+  roleNameTh: string;
+  description: string;
+  isSystemBuiltin: boolean;
+  isActive: boolean;
+  modulePermissions: FnbModulePermissions;
+  guardrailPermissions: FnbGuardrailPermissions;
+};
+
+export type FnbScopedMenuSale = {
+  menuName: string;
+  categoryName: string;
+  qtySold: number;
+  grossAmount: number;
+  qtyR: number;
+  qtyL: number;
+  estimatedBomCost?: number;
+};
+
+export type FnbScopedMenuCategory = {
+  name: string;
+  qtySold: number;
+  grossAmount: number;
+};
+
+export type FnbScopedMenuSales = {
+  branchCode: string;
+  totalCups: number;
+  totalAmount: number;
+  menus: FnbScopedMenuSale[];
+  categories: FnbScopedMenuCategory[];
+  showCost: boolean;
+};
+
+export function fnbModulePermissionsFrom(raw: unknown): FnbModulePermissions {
+  const source = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const next = {} as FnbModulePermissions;
+  for (const def of FNB_MODULE_PERMISSION_DEFS) next[def.key] = source[def.key] === true;
+  return next;
+}
+
+export function fnbGuardrailPermissionsFrom(raw: unknown): FnbGuardrailPermissions {
+  const source = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const next = {} as FnbGuardrailPermissions;
+  for (const def of FNB_GUARDRAIL_PERMISSION_DEFS) {
+    next[def.key] = source[def.key] === undefined ? def.defaultValue : source[def.key] === true;
+  }
+  return next;
+}
+
+export function allFnbModulePermissions(enabled: boolean): FnbModulePermissions {
+  const next = {} as FnbModulePermissions;
+  for (const def of FNB_MODULE_PERMISSION_DEFS) next[def.key] = enabled;
+  return next;
+}
+
+export const FNB_SUPER_ADMIN_GUARDRAILS: FnbGuardrailPermissions = {
+  can_view_cost_price: true,
+  enforce_blind_count: false,
+  can_approve_financial_edits: true,
+};
+
+/** Used only when fnb.role_permissions cannot be read. Matches the cloud seed. */
+export const FNB_BUILTIN_ROLE_DEFAULTS: Record<string, { modules: unknown; guards: unknown }> = {
+  FNB_STORE_STAFF: {
+    modules: { store_portal: true, goods_receipt_expiry: true },
+    guards: { can_view_cost_price: false, enforce_blind_count: true, can_approve_financial_edits: false },
+  },
+  FNB_BRANCH_MANAGER: {
+    modules: { store_portal: true, goods_receipt_expiry: true, branch_inventory_transfer: true, own_branch_menu_sales: true },
+    guards: { can_view_cost_price: false, enforce_blind_count: true, can_approve_financial_edits: false },
+  },
+  FNB_ACCOUNTANT: {
+    modules: { goods_receipt_expiry: true, hq_tax_reimburse: true, master_items_bom: true, tax_accounting_reports: true },
+    guards: { can_view_cost_price: true, enforce_blind_count: false, can_approve_financial_edits: false },
+  },
+  FNB_HR: {
+    modules: { people_payroll: true },
+    guards: { can_view_cost_price: false, enforce_blind_count: true, can_approve_financial_edits: false },
+  },
+  FNB_HR_ACCOUNTANT: {
+    modules: { people_payroll: true, goods_receipt_expiry: true, hq_tax_reimburse: true, master_items_bom: true, tax_accounting_reports: true },
+    guards: { can_view_cost_price: true, enforce_blind_count: false, can_approve_financial_edits: false },
+  },
+};

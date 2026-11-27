@@ -35,6 +35,8 @@ export default async function LuckyCupLiffPage() {
       schemaMessage={visible.length === 0 ? "บัญชียังไม่ถูกกำหนดสาขา" : branches.error || shelf.error || items.error || expiry.error}
       actorName={ctx.displayActorName}
       branchLabel={branchLabel}
+      showGoodsReceipt={ctx.isSuperAdmin || ctx.fnbModulePermissions.goods_receipt_expiry}
+      showMenuSales={ctx.isSuperAdmin || ctx.fnbModulePermissions.own_branch_menu_sales}
     />
   );
 }

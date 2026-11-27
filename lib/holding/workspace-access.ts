@@ -4,8 +4,16 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireSessionUserId } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server-admin";
+import {
+  FNB_BUILTIN_ROLE_DEFAULTS,
+  FNB_SUPER_ADMIN_GUARDRAILS,
+  allFnbModulePermissions,
+  fnbGuardrailPermissionsFrom,
+  fnbModulePermissionsFrom,
+  type FnbModulePermissionKey,
+} from "@/types/fnb";
 import { SUPER_ADMIN_EMAIL, SUPER_ADMIN_FULL_NAME, type UserAccessContext, type WorkspaceKey } from "@/types/holding";
-import { accessRedirect, fnbStaffHome, parseAccessPayload } from "@/lib/holding/access-routes";
+import { accessRedirect, allowsFnbModule, fnbStaffHome, parseAccessPayload } from "@/lib/holding/access-routes";
 import { isSchemaUnavailable, schemaAdmin } from "@/lib/holding/schema-db";
 
 function nameMatches(fullName?: string | null): boolean {
@@ -75,6 +83,51 @@ async function fallbackAccess(userId: string): Promise<UserAccessContext | null>
   });
 }
 
+async function applyFnbRolePermissions(ctx: UserAccessContext): Promise<UserAccessContext> {
+  if (ctx.isSuperAdmin) {
+    return {
+      ...ctx,
+      fnbModulePermissions: allFnbModulePermissions(true),
+      fnbGuardrailPermissions: FNB_SUPER_ADMIN_GUARDRAILS,
+      canViewFnbReports: true,
+      canViewCostPrice: true,
+    };
+  }
+  if (!ctx.workspaceRole.startsWith("FNB_")) {
+    return {
+      ...ctx,
+      fnbModulePermissions: fnbModulePermissionsFrom(null),
+      fnbGuardrailPermissions: fnbGuardrailPermissionsFrom(null),
+    };
+  }
+  const listed = await schemaAdmin()
+    .schema("fnb")
+    .from("role_permissions")
+    .select("module_permissions, guardrail_permissions, is_active")
+    .eq("role_code", ctx.workspaceRole)
+    .maybeSingle();
+  const row = listed.data as { module_permissions?: unknown; guardrail_permissions?: unknown; is_active?: boolean } | null;
+  const closed = {
+    ...ctx,
+    fnbModulePermissions: fnbModulePermissionsFrom(null),
+    fnbGuardrailPermissions: fnbGuardrailPermissionsFrom(null),
+    canViewCostPrice: false,
+    canViewFnbReports: false,
+  };
+  if (row?.is_active === false) return closed;
+  const fallback = !row && listed.error ? FNB_BUILTIN_ROLE_DEFAULTS[ctx.workspaceRole] : null;
+  if (!row && !fallback) return closed;
+  const modules = fnbModulePermissionsFrom(row ? row.module_permissions : fallback?.modules);
+  const guards = fnbGuardrailPermissionsFrom(row ? row.guardrail_permissions : fallback?.guards);
+  return {
+    ...ctx,
+    fnbModulePermissions: modules,
+    fnbGuardrailPermissions: guards,
+    canViewCostPrice: guards.can_view_cost_price,
+    canViewFnbReports: modules.all_branch_analytics,
+  };
+}
+
 export async function getUserAccessContext(userId: string): Promise<UserAccessContext | null> {
   try {
     const rpc = await (createClient() as unknown as HoldingRpc)
@@ -82,13 +135,14 @@ export async function getUserAccessContext(userId: string): Promise<UserAccessCo
       .rpc("get_user_access_context", { p_user_id: userId });
     if (!rpc.error && rpc.data) {
       const parsed = parseAccessPayload(rpc.data);
-      if (parsed) return { ...parsed, userId: parsed.userId || userId };
+      if (parsed) return applyFnbRolePermissions({ ...parsed, userId: parsed.userId || userId });
     }
   } catch {
     // Fall through to the table read.
   }
   try {
-    return await fallbackAccess(userId);
+    const parsed = await fallbackAccess(userId);
+    return parsed ? applyFnbRolePermissions(parsed) : null;
   } catch {
     return null;
   }
@@ -114,29 +168,54 @@ export async function requireWorkspacePageAccess(workspace: WorkspaceKey): Promi
   return ctx;
 }
 
-export async function requireFnbExecutiveAccess(): Promise<UserAccessContext> {
-  const ctx = await requireActiveContext();
-  if (ctx.isSuperAdmin || ctx.canViewFnbReports) return ctx;
+function denyFnb(ctx: UserAccessContext): never {
   redirect(ctx.allowedWorkspaces.includes("fnb") ? fnbStaffHome(ctx) : "/forbidden");
 }
 
-export async function requireFnbDeskAccess(): Promise<UserAccessContext> {
+export async function requireFnbModuleAccess(moduleKey: FnbModulePermissionKey): Promise<UserAccessContext> {
   const ctx = await requireActiveContext();
-  if (ctx.isSuperAdmin || ctx.workspaceRole === "FNB_BRANCH_MANAGER") return ctx;
-  redirect(ctx.allowedWorkspaces.includes("fnb") ? fnbStaffHome(ctx) : "/forbidden");
+  if (ctx.isSuperAdmin || allowsFnbModule(ctx.fnbModulePermissions, moduleKey)) return ctx;
+  return denyFnb(ctx);
+}
+
+export async function requireAnyFnbModule(moduleKeys: FnbModulePermissionKey[]): Promise<UserAccessContext> {
+  const ctx = await requireActiveContext();
+  if (ctx.isSuperAdmin || moduleKeys.some((key) => allowsFnbModule(ctx.fnbModulePermissions, key))) return ctx;
+  return denyFnb(ctx);
+}
+
+export async function requireFnbExecutiveAccess(): Promise<UserAccessContext> {
+  return requireFnbModuleAccess("all_branch_analytics");
+}
+
+export async function requireFnbDeskAccess(): Promise<UserAccessContext> {
+  return requireFnbModuleAccess("store_portal");
 }
 
 export async function requireFnbProcurementOffice(): Promise<UserAccessContext> {
   const ctx = await requireActiveContext();
-  if (ctx.isSuperAdmin || ctx.workspaceRole === "FNB_ACCOUNTANT" || ctx.workspaceRole === "FNB_HR_ACCOUNTANT") return ctx;
-  redirect(ctx.allowedWorkspaces.includes("fnb") ? fnbStaffHome(ctx) : "/forbidden");
+  if (ctx.isSuperAdmin || allowsFnbModule(ctx.fnbModulePermissions, "procurement")) return ctx;
+  return denyFnb(ctx);
+}
+
+export async function requireFnbTaxDesk(): Promise<UserAccessContext> {
+  return requireFnbModuleAccess("hq_tax_reimburse");
 }
 
 export async function requireFnbPeopleAccess(): Promise<UserAccessContext> {
   const ctx = await requireActiveContext();
   const hrDesk = ctx.workspaceRole === "FNB_HR" || ctx.workspaceRole === "FNB_HR_ACCOUNTANT" || (ctx.isHrManager && ctx.hrAllowedWorkspaces.includes("fnb"));
-  if (ctx.isSuperAdmin || (hrDesk && ctx.allowedWorkspaces.includes("fnb"))) return ctx;
-  redirect(ctx.allowedWorkspaces.includes("fnb") ? fnbStaffHome(ctx) : "/forbidden");
+  if (ctx.isSuperAdmin || ctx.fnbModulePermissions.people_payroll || (hrDesk && ctx.allowedWorkspaces.includes("fnb"))) return ctx;
+  return denyFnb(ctx);
+}
+
+export async function readFnbFinancialApprover(): Promise<UserAccessContext | null> {
+  const owner = await requireSessionUserId();
+  if (!owner.ok) return null;
+  const ctx = await getUserAccessContext(owner.userId);
+  if (!ctx?.isActive) return null;
+  if (ctx.isSuperAdmin || ctx.fnbGuardrailPermissions.can_approve_financial_edits) return ctx;
+  return null;
 }
 
 export async function requireFnbStoreOperationAccess(branchCode?: string): Promise<

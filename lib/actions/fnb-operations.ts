@@ -6,7 +6,7 @@ import { parseLuckyCupPosWorkbook } from "@/lib/fnb/excel";
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
-import { requireSuperAdmin } from "@/lib/holding/workspace-access";
+import { readFnbFinancialApprover, requireFnbModuleAccess } from "@/lib/holding/workspace-access";
 import type {
   FnbActionResult,
   FnbBranchKpi,
@@ -101,7 +101,7 @@ export async function listFnbBranchOptionsAction(brandLock?: FnbBrandCode | null
 
 export async function getFnbDashboardAction(): Promise<FnbActionResult<FnbBranchKpi[]>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("all_branch_analytics");
     const db = schemaAdmin().schema("fnb");
     const today = todayBangkok();
     const month = today.slice(0, 7);
@@ -201,9 +201,10 @@ export async function recordShiftClosingAction(formData: FormData): Promise<FnbA
     let superAdmin = false;
     let actorId: string | null = null;
     if (formData.get("is_super_admin") === "true") {
-      const admin = await requireSuperAdmin();
+      const approver = await readFnbFinancialApprover();
+      if (!approver) return result({ ok: false, mode: null, request_no: null, message: "ไม่มีสิทธิ์อนุมัติแก้ตัวเลขปิดกะ" }, "ไม่มีสิทธิ์อนุมัติแก้ตัวเลขปิดกะ");
       superAdmin = true;
-      actorId = admin.userId;
+      actorId = approver.userId;
     }
     const qr = Number(formData.get("qr_amount") ?? 0);
     const lineman = Number(formData.get("lineman_gross_amount") ?? 0);
@@ -420,7 +421,7 @@ export async function prefillPosSlipAction(formData: FormData): Promise<FnbActio
 
 export async function previewPosExcelAction(formData: FormData): Promise<FnbActionResult<FnbPosImportPreview | null>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("all_branch_analytics");
     const file = formData.get("file");
     if (!(file instanceof File)) return result(null, "ไม่พบไฟล์ Excel");
     return result(parseLuckyCupPosWorkbook(await file.arrayBuffer(), file.name));
@@ -431,7 +432,7 @@ export async function previewPosExcelAction(formData: FormData): Promise<FnbActi
 
 export async function commitPosExcelAction(input: FnbPosImportPreview & { branch_code: string }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
-    const admin = await requireSuperAdmin();
+    const admin = await requireFnbModuleAccess("all_branch_analytics");
     const denied = await assertBranchBrand(input.branch_code, "LUCKY_CUP");
     if (denied) return result({ ok: false }, denied);
     const saved = await schemaAdmin().schema("fnb").from("pos_excel_imports").insert({
@@ -530,7 +531,8 @@ export async function getFnbDayStateAction(branchCode: string, workDate: string,
 
 export async function listPendingShiftApprovalsAction(): Promise<FnbActionResult<FnbChangeRequestRow[]>> {
   try {
-    await requireSuperAdmin();
+    const approver = await readFnbFinancialApprover();
+    if (!approver) return result([]);
     const listed = await schemaAdmin().schema("fnb").from("operation_change_requests").select("id,request_no,branch_code,work_date,shift_type,requested_by_name,edit_reason,old_payload,proposed_payload,approval_status").eq("approval_status", "PENDING").limit(100);
     if (listed.error) return fail([], listed.error, "อ่านคิวอนุมัติไม่สำเร็จ");
     return result(asRows(listed.data).map((row) => ({
@@ -551,7 +553,8 @@ export async function listPendingShiftApprovalsAction(): Promise<FnbActionResult
 
 export async function reviewShiftChangeAction(requestId: string, decision: "APPROVED" | "REJECTED", comment: string): Promise<FnbActionResult<FnbSubmitResult>> {
   try {
-    const admin = await requireSuperAdmin();
+    const admin = await readFnbFinancialApprover();
+    if (!admin) return result({ ok: false, mode: null, request_no: null, message: "ไม่มีสิทธิ์อนุมัติแก้ตัวเลขปิดกะ" }, "ไม่มีสิทธิ์อนุมัติแก้ตัวเลขปิดกะ");
     const saved = await callFnbRpc("review_shift_change_request", {
       p_request_id: requestId,
       p_decision: decision,
@@ -573,7 +576,7 @@ export async function settlePlatformPayoutAction(input: {
   platform_deduction_note: string;
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
-    const admin = await requireSuperAdmin();
+    const admin = await requireFnbModuleAccess("hq_tax_reimburse");
     const updated = await schemaAdmin().schema("fnb").from("shift_closings").update({
       lineman_net_payout: Number(input.lineman_net_payout) || 0,
       grab_net_payout: Number(input.grab_net_payout) || 0,

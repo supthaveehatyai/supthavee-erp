@@ -20,14 +20,20 @@ export function ProcurementWorkspace({
   pending,
   lots,
   payouts,
+  showGoods = true,
+  showPayout = true,
+  revealCost = true,
 }: {
   branches: FnbBranchOption[];
   items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom">[];
   pending: FnbUnpackLine[];
   lots: FnbExpiryLotRow[];
   payouts: FnbReimbursementRow[];
+  showGoods?: boolean;
+  showPayout?: boolean;
+  revealCost?: boolean;
 }) {
-  const [tab, setTab] = useState<"scan" | "manual" | "lots" | "pay">("scan");
+  const [tab, setTab] = useState<"scan" | "manual" | "lots" | "pay">(showGoods ? "scan" : "pay");
   const [message, setMessage] = useState("");
   useEffect(() => {
     const block = (event: DragEvent) => event.preventDefault();
@@ -43,15 +49,15 @@ export function ProcurementWorkspace({
       <h1 className="text-2xl font-bold text-slate-900">รับของเข้าและชนบิลภาษี</h1>
       {message ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{message}</p> : null}
       <div className="flex flex-wrap gap-2">
-        <Tab active={tab === "scan"} onClick={() => setTab("scan")}>สแกนบิล / นำเข้าใบสั่งของ</Tab>
-        <Tab active={tab === "manual"} onClick={() => setTab("manual")}>รับวัตถุดิบเข้าด่วน</Tab>
-        <Tab active={tab === "lots"} onClick={() => setTab("lots")}>แกะกล่องลงวันหมดอายุ</Tab>
-        <Tab active={tab === "pay"} onClick={() => setTab("pay")}>คิวโอนคืนพนักงาน</Tab>
+        {showGoods ? <Tab active={tab === "scan"} onClick={() => setTab("scan")}>สแกนบิล / นำเข้าใบสั่งของ</Tab> : null}
+        {showGoods ? <Tab active={tab === "manual"} onClick={() => setTab("manual")}>รับวัตถุดิบเข้าด่วน</Tab> : null}
+        {showGoods ? <Tab active={tab === "lots"} onClick={() => setTab("lots")}>แกะกล่องลงวันหมดอายุ</Tab> : null}
+        {showPayout ? <Tab active={tab === "pay"} onClick={() => setTab("pay")}>คิวโอนคืนพนักงาน</Tab> : null}
       </div>
-      {tab === "scan" ? <ScanTab branches={branches} items={items} setMessage={setMessage} /> : null}
-      {tab === "manual" ? <ManualReceive branches={branches} items={items} brandLock={null} revealCost setMessage={setMessage} /> : null}
-      {tab === "lots" ? <ExpiryPanel pending={pending} lots={lots} brandLock={null} /> : null}
-      {tab === "pay" ? <PayoutQueue payouts={payouts} setMessage={setMessage} /> : null}
+      {tab === "scan" && showGoods ? <ScanTab branches={branches} items={items} setMessage={setMessage} /> : null}
+      {tab === "manual" && showGoods ? <ManualReceive branches={branches} items={items} brandLock={null} revealCost={revealCost} setMessage={setMessage} /> : null}
+      {tab === "lots" && showGoods ? <ExpiryPanel pending={pending} lots={lots} brandLock={null} /> : null}
+      {tab === "pay" && showPayout ? <PayoutQueue payouts={payouts} setMessage={setMessage} /> : null}
     </div>
   );
 }

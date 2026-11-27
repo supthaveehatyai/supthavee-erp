@@ -3,7 +3,7 @@
 import { parseLuckyCupPriceWorkbook } from "@/lib/fnb/excel";
 import { asRows, caught, fail, num, result, text } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
-import { requireSuperAdmin } from "@/lib/holding/workspace-access";
+import { requireAnyFnbModule, requireFnbModuleAccess } from "@/lib/holding/workspace-access";
 import type { FnbActionResult, FnbExcelPriceRow, FnbItemRow, FnbVendorPackRow } from "@/types/fnb";
 
 function mapItem(row: Record<string, unknown>): FnbItemRow {
@@ -53,7 +53,7 @@ function mapPack(row: Record<string, unknown>): FnbVendorPackRow {
 
 export async function listFnbItemsAction(): Promise<FnbActionResult<{ items: FnbItemRow[]; packs: FnbVendorPackRow[] }>> {
   try {
-    await requireSuperAdmin();
+    await requireAnyFnbModule(["master_items_bom", "sop_shift_settings"]);
     const db = schemaAdmin().schema("fnb");
     const [items, packs] = await Promise.all([
       db.from("items").select("*").order("short_code", { ascending: true }).limit(500),
@@ -87,7 +87,7 @@ export async function saveFnbItemAction(input: {
   requires_expiry_tracking: boolean;
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("master_items_bom");
     const payload = {
       short_code: input.short_code.trim(),
       external_code: input.external_code.trim() || null,
@@ -132,7 +132,7 @@ export async function saveFnbVendorPackAction(input: {
   is_local_urgent_pack: boolean;
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("master_items_bom");
     const payload = {
       item_id: input.item_id,
       vendor_name: input.vendor_name.trim(),
@@ -160,7 +160,7 @@ export async function saveFnbVendorPackAction(input: {
 
 export async function previewFnbPriceExcelAction(formData: FormData): Promise<FnbActionResult<FnbExcelPriceRow[]>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("master_items_bom");
     const file = formData.get("file");
     if (!(file instanceof File) || file.size === 0) return result([], "ไม่พบไฟล์ Excel");
     const listed = await schemaAdmin().schema("fnb").from("items").select("external_code,short_code").limit(1000);
@@ -176,7 +176,7 @@ export async function previewFnbPriceExcelAction(formData: FormData): Promise<Fn
 
 export async function commitFnbPriceExcelAction(rows: FnbExcelPriceRow[]): Promise<FnbActionResult<{ saved: number }>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("master_items_bom");
     const db = schemaAdmin().schema("fnb");
     const listed = await db.from("items").select("id,external_code,short_code").limit(1000);
     if (listed.error) return fail({ saved: 0 }, listed.error, "อ่านวัตถุดิบไม่สำเร็จ");

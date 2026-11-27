@@ -1,5 +1,11 @@
 import { normalizePathname } from "@/lib/auth/module-access";
 import {
+  fnbGuardrailPermissionsFrom,
+  fnbModulePermissionsFrom,
+  type FnbModulePermissionKey,
+  type FnbModulePermissions,
+} from "@/types/fnb";
+import {
   SUPER_ADMIN_EMAIL,
   type UserAccessContext,
   type WorkspaceKey,
@@ -22,6 +28,31 @@ const ROLES: WorkspaceRole[] = [
 
 const EXECUTIVE_FNB = ["/fnb/analytics", "/fnb/items", "/fnb/menus", "/fnb/sop-settings"];
 
+export function allowsFnbModule(perms: FnbModulePermissions, key: FnbModulePermissionKey | "procurement"): boolean {
+  if (key === "procurement") return perms.goods_receipt_expiry || perms.hq_tax_reimburse;
+  return perms[key] === true;
+}
+
+export function fnbPermissionForPath(pathname: string): FnbModulePermissionKey | "procurement" | null {
+  const path = normalizePathname(pathname);
+  if (path.startsWith("/liff/register")) return null;
+  if (path.startsWith("/liff/luckycup") || path.startsWith("/liff/chatorn") || path.startsWith("/liff")) return "store_portal";
+  if (path === "/fnb" || path.startsWith("/fnb/analytics")) return "all_branch_analytics";
+  if (path.startsWith("/fnb/operations")) return "store_portal";
+  if (path.startsWith("/fnb/sop-settings")) return "sop_shift_settings";
+  if (path.startsWith("/fnb/items") || path.startsWith("/fnb/menus")) return "master_items_bom";
+  if (path.startsWith("/fnb/procurement")) return "procurement";
+  if (path.startsWith("/fnb/inventory")) return "branch_inventory_transfer";
+  if (path.startsWith("/fnb/people")) return "people_payroll";
+  if (path === "/fnb" || path.startsWith("/fnb/")) return "all_branch_analytics";
+  return null;
+}
+
+export function allowsFnbHref(href: string, perms: FnbModulePermissions): boolean {
+  const key = fnbPermissionForPath(href.split("?")[0] ?? href);
+  return key ? allowsFnbModule(perms, key) : false;
+}
+
 export function safeInternalPath(value: string | null | undefined): string | null {
   const raw = String(value ?? "").trim();
   if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\") || raw.includes("://")) {
@@ -31,10 +62,20 @@ export function safeInternalPath(value: string | null | undefined): string | nul
   return path.startsWith("/") ? path : null;
 }
 
-export function fnbStaffHome(ctx: Pick<UserAccessContext, "workspaceRole" | "assignedBrandCode">): string {
+export function fnbStaffHome(ctx: UserAccessContext): string {
+  const brandHome = ctx.assignedBrandCode === "CHATORN" ? "/liff/chatorn" : "/liff/luckycup";
   if (ctx.workspaceRole === "FNB_HR" || ctx.workspaceRole === "FNB_HR_ACCOUNTANT") return "/fnb/people";
   if (ctx.workspaceRole === "FNB_ACCOUNTANT") return "/fnb/procurement";
-  return ctx.assignedBrandCode === "CHATORN" ? "/liff/chatorn" : "/liff/luckycup";
+  if (ctx.workspaceRole === "FNB_STORE_STAFF" || ctx.workspaceRole === "FNB_BRANCH_MANAGER") return brandHome;
+  const perms = ctx.fnbModulePermissions ?? fnbModulePermissionsFrom(null);
+  if (perms.people_payroll) return "/fnb/people";
+  if (perms.goods_receipt_expiry || perms.hq_tax_reimburse) return "/fnb/procurement";
+  if (perms.branch_inventory_transfer) return "/fnb/inventory";
+  if (perms.all_branch_analytics) return "/fnb";
+  if (perms.master_items_bom) return "/fnb/items";
+  if (perms.sop_shift_settings) return "/fnb/sop-settings";
+  if (perms.store_portal) return brandHome;
+  return brandHome;
 }
 
 export function homeAfterLogin(ctx: UserAccessContext): string {
@@ -115,26 +156,10 @@ export function accessRedirect(pathname: string, ctx: UserAccessContext): string
   const liffPath = path === "/liff" || path.startsWith("/liff/");
   if ((fnbPath || liffPath) && !hasWorkspace(ctx, "fnb")) return "/forbidden";
 
-  if ((ctx.workspaceRole === "FNB_STORE_STAFF" || ctx.workspaceRole === "FNB_BRANCH_MANAGER") && (fnbPath || liffPath)) {
-    return home;
-  }
-  if (ctx.workspaceRole === "FNB_HR" || ctx.workspaceRole === "FNB_HR_ACCOUNTANT") {
-    const people = path === "/fnb/people" || path.startsWith("/fnb/people/");
-    const procure = path === "/fnb/procurement" || path.startsWith("/fnb/procurement/");
-    if (liffPath) return "/fnb/people";
-    if (fnbPath && !people && !(ctx.workspaceRole === "FNB_HR_ACCOUNTANT" && procure)) return "/fnb/people";
-  }
-  if (ctx.workspaceRole === "FNB_STORE_STAFF" && fnbPath) return home;
-  if (
-    ctx.workspaceRole === "FNB_ACCOUNTANT" &&
-    fnbPath &&
-    path !== "/fnb/procurement" &&
-    !path.startsWith("/fnb/procurement/")
-  ) {
-    return "/fnb/procurement";
-  }
-  if (isFnbExecutivePath(path) && !ctx.canViewFnbReports) {
-    return hasWorkspace(ctx, "fnb") ? home : "/forbidden";
+  if ((fnbPath || liffPath) && !path.startsWith("/liff/register")) {
+    const needed = fnbPermissionForPath(path);
+    const perms = ctx.fnbModulePermissions ?? fnbModulePermissionsFrom(null);
+    if (!needed || !allowsFnbModule(perms, needed)) return home;
   }
 
   if (path.startsWith("/liff/luckycup") && ctx.assignedBrandCode === "CHATORN") return "/liff/chatorn";
@@ -153,7 +178,9 @@ function asWorkspace(value: unknown): WorkspaceKey {
 }
 
 function asRole(value: unknown, email: string): WorkspaceRole {
-  if (ROLES.includes(value as WorkspaceRole)) return value as WorkspaceRole;
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (ROLES.includes(raw as WorkspaceRole)) return raw as WorkspaceRole;
+  if (raw.startsWith("FNB_")) return raw as WorkspaceRole;
   return email.trim().toLowerCase() === SUPER_ADMIN_EMAIL ? "SUPER_ADMIN" : "SUPTHAVEE_STAFF";
 }
 
@@ -206,5 +233,7 @@ export function parseAccessPayload(raw: unknown): UserAccessContext | null {
       : [],
     hrCanPreparePayroll: row.hr_can_prepare_payroll === true,
     hrCanViewExecPrivatePay: row.hr_can_view_exec_private_pay === true,
+    fnbModulePermissions: fnbModulePermissionsFrom(null),
+    fnbGuardrailPermissions: fnbGuardrailPermissionsFrom(null),
   };
 }

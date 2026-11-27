@@ -3,9 +3,10 @@
 import { resolveFnbActor } from "@/lib/fnb/actor";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
 import { generateWithGeminiFallback, resolveGeminiApiKey } from "@/lib/ai/gemini-client";
-import { requireSuperAdmin } from "@/lib/holding/workspace-access";
+import { getUserAccessContext, requireFnbModuleAccess } from "@/lib/holding/workspace-access";
+import { requireSessionUserId } from "@/lib/auth/current-user";
 import { schemaAdmin } from "@/lib/holding/schema-db";
-import type { FnbActionResult, FnbBrandCode, FnbMenuRank, FnbMenuSalesDraft, FnbMenuSalesLine, FnbPromoHint } from "@/types/fnb";
+import type { FnbActionResult, FnbBrandCode, FnbMenuRank, FnbMenuSalesDraft, FnbMenuSalesLine, FnbPromoHint, FnbScopedMenuSales } from "@/types/fnb";
 
 const PROMPT = `อ่านสลิป POS ภาษาไทย "รายงานยอดขายสินค้า" คืน JSON เท่านั้น
 fields: summary_only (true เมื่อหัวสลิปเป็น จัดกลุ่มตาม: สินค้า และไม่มีรายการเมนูย่อย), slip_printed_at (ISO หรือ null), reported_total_qty, reported_total_amount, lines[{line_seq, menu_name_th, category_name, cup_size (R หรือ L หรือ null), qty_sold, gross_amount}]
@@ -158,7 +159,7 @@ export async function listBrandMenusAction(brand: FnbBrandCode): Promise<FnbActi
 export async function getMenuAnalyticsAction(startDate: string, endDate: string): Promise<FnbActionResult<{ ranks: FnbMenuRank[]; promos: FnbPromoHint[] }>> {
   const empty = { ranks: [] as FnbMenuRank[], promos: [] as FnbPromoHint[] };
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("all_branch_analytics");
     const db = schemaAdmin().schema("fnb");
     const [lines, lots, items, bom, menus] = await Promise.all([
       db.from("daily_menu_sales_lines").select("branch_code, work_date, menu_name_th, category_name, cup_size, qty_sold, gross_amount").gte("work_date", startDate).lte("work_date", endDate).limit(5000),
@@ -208,6 +209,67 @@ export async function getMenuAnalyticsAction(startDate: string, endDate: string)
     return result({ ranks: [...grouped.values()], promos: promos.slice(0, 40) });
   } catch (error) {
     return caught(empty, error, "อ่านวิเคราะห์เมนูไม่สำเร็จ");
+  }
+}
+
+export async function getScopedBranchMenuSalesAction(input: { branchCode: string; dateFrom: string; dateTo: string }): Promise<FnbActionResult<FnbScopedMenuSales | null>> {
+  const empty = null;
+  try {
+    const owner = await requireSessionUserId();
+    if (!owner.ok) return result(empty, "กรุณาเข้าสู่ระบบ");
+    const ctx = await getUserAccessContext(owner.userId);
+    if (!ctx?.isActive) return result(empty, "บัญชีนี้ถูกระงับสิทธิ์การใช้งานแล้ว");
+    const branchCode = text(input.branchCode);
+    const dateFrom = text(input.dateFrom);
+    const dateTo = text(input.dateTo);
+    if (!branchCode || !dateFrom || !dateTo) return result(empty, "เลือกสาขาและช่วงวันที่");
+    const branch = await schemaAdmin().schema("fnb").from("branches").select("brand_code").eq("branch_code", branchCode).maybeSingle();
+    const brand = text((branch.data as { brand_code?: string } | null)?.brand_code);
+    if (!ctx.isSuperAdmin) {
+      if (!ctx.fnbModulePermissions.own_branch_menu_sales) return result(empty, "ไม่มีสิทธิ์ดูยอดขายรายเมนู");
+      if (!ctx.allowedBranchCodes.includes(branchCode)) return result(empty, "สาขานี้อยู่นอกพื้นที่ที่ได้รับมอบหมาย");
+      if (ctx.assignedBrandCode && brand !== ctx.assignedBrandCode) return result(empty, "ไม่มีสิทธิ์ข้ามแบรนด์ร้านน้ำ");
+    }
+    const showCost = ctx.isSuperAdmin || ctx.fnbGuardrailPermissions.can_view_cost_price;
+    const columns = showCost
+      ? "menu_name_th, category_name, cup_size, qty_sold, gross_amount, estimated_bom_cost"
+      : "menu_name_th, category_name, cup_size, qty_sold, gross_amount";
+    const listed = await schemaAdmin().schema("fnb").from("daily_menu_sales_lines").select(columns).eq("branch_code", branchCode).gte("work_date", dateFrom).lte("work_date", dateTo).limit(5000);
+    if (listed.error) return fail(empty, listed.error, "อ่านยอดขายรายเมนูไม่สำเร็จ");
+    const menus = new Map<string, { menuName: string; categoryName: string; qtySold: number; grossAmount: number; qtyR: number; qtyL: number; estimatedBomCost?: number }>();
+    const categories = new Map<string, { name: string; qtySold: number; grossAmount: number }>();
+    let totalCups = 0;
+    let totalAmount = 0;
+    for (const row of asRows(listed.data)) {
+      const menuName = text(row.menu_name_th) || "ไม่ระบุเมนู";
+      const categoryName = text(row.category_name) || "ไม่ระบุหมวด";
+      const qty = num(row.qty_sold);
+      const gross = num(row.gross_amount);
+      const size = text(row.cup_size).toUpperCase();
+      totalCups += qty;
+      totalAmount += gross;
+      const menu = menus.get(menuName) ?? { menuName, categoryName, qtySold: 0, grossAmount: 0, qtyR: 0, qtyL: 0, ...(showCost ? { estimatedBomCost: 0 } : {}) };
+      menu.qtySold += qty;
+      menu.grossAmount += gross;
+      if (showCost && menu.estimatedBomCost != null) menu.estimatedBomCost += num(row.estimated_bom_cost);
+      if (size.startsWith("R")) menu.qtyR += qty;
+      if (size.startsWith("L")) menu.qtyL += qty;
+      menus.set(menuName, menu);
+      const category = categories.get(categoryName) ?? { name: categoryName, qtySold: 0, grossAmount: 0 };
+      category.qtySold += qty;
+      category.grossAmount += gross;
+      categories.set(categoryName, category);
+    }
+    return result({
+      branchCode,
+      totalCups,
+      totalAmount,
+      menus: [...menus.values()].sort((a, b) => b.qtySold - a.qtySold).slice(0, 20),
+      categories: [...categories.values()].sort((a, b) => b.qtySold - a.qtySold),
+      showCost,
+    });
+  } catch (error) {
+    return caught(empty, error, "อ่านยอดขายรายเมนูไม่สำเร็จ");
   }
 }
 

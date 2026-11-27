@@ -4,9 +4,16 @@ import { revalidatePath } from "next/cache";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { payrollAmounts } from "@/lib/fnb/payroll-math";
 import { schemaAdmin } from "@/lib/holding/schema-db";
-import { requireFnbPeopleAccess, requireSuperAdmin } from "@/lib/holding/workspace-access";
+import { requireFnbPeopleAccess } from "@/lib/holding/workspace-access";
 import { createClient } from "@/lib/supabase/server-admin";
 import type { UserAccessContext } from "@/types/holding";
+import {
+  fnbGuardrailPermissionsFrom,
+  fnbModulePermissionsFrom,
+  type FnbGuardrailPermissions,
+  type FnbModulePermissions,
+  type FnbRolePermissionRow,
+} from "@/types/fnb";
 import type { FnbEmployeeCard, FnbPayrollBundle, FnbPayrollDraftLine, FnbPeoplePayload } from "@/types/iam";
 
 const PRIVATE_TIERS = new Set(["EXECUTIVE_CONFIDENTIAL", "INTERNAL_PRIVATE"]);
@@ -31,6 +38,71 @@ function brandsOf(ctx: UserAccessContext): Array<"LUCKY_CUP" | "CHATORN"> {
 
 function canSeePrivatePay(ctx: UserAccessContext): boolean {
   return ctx.isSuperAdmin || ctx.hrCanViewExecPrivatePay;
+}
+
+function mapRole(row: Record<string, unknown>): FnbRolePermissionRow {
+  return {
+    roleCode: text(row.role_code),
+    appRoleCode: text(row.app_role_code) || text(row.role_code).toLowerCase(),
+    roleNameTh: text(row.role_name_th),
+    description: text(row.description),
+    isSystemBuiltin: row.is_system_builtin === true,
+    isActive: row.is_active !== false,
+    modulePermissions: fnbModulePermissionsFrom(row.module_permissions),
+    guardrailPermissions: fnbGuardrailPermissionsFrom(row.guardrail_permissions),
+  };
+}
+
+async function readFnbRoles(): Promise<FnbRolePermissionRow[]> {
+  const listed = await schemaAdmin().schema("fnb").from("role_permissions").select("role_code, app_role_code, role_name_th, description, is_system_builtin, is_active, module_permissions, guardrail_permissions, sort_order").order("sort_order", { ascending: true });
+  return (Array.isArray(listed.data) ? listed.data as Record<string, unknown>[] : []).map(mapRole);
+}
+
+type FnbRpc = {
+  schema: (name: "fnb") => {
+    rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>;
+  };
+};
+
+export async function listFnbRolePermissionsAction(): Promise<{ data: FnbRolePermissionRow[]; error: string | null }> {
+  try {
+    await requireFnbPeopleAccess();
+    return { data: await readFnbRoles(), error: null };
+  } catch (err) {
+    if (isRedirectError(err)) throw err;
+    return { data: [], error: err instanceof Error ? err.message : "อ่านสิทธิ์บทบาทไม่สำเร็จ" };
+  }
+}
+
+export async function upsertFnbRolePermissionAction(input: {
+  roleCode: string;
+  roleNameTh: string;
+  description?: string;
+  modulePermissions: FnbModulePermissions;
+  guardrailPermissions: FnbGuardrailPermissions;
+}): Promise<{ success: boolean; error?: string; roleCode?: string }> {
+  try {
+    const ctx = await requireFnbPeopleAccess();
+    if (!ctx.isSuperAdmin) return { success: false, error: "เฉพาะผู้บริหารสูงสุด (Super Admin) เท่านั้นที่มีสิทธิ์แก้ไขตารางสิทธิ์ระดับบทบาท" };
+    const modules = fnbModulePermissionsFrom(input.modulePermissions);
+    const guards = fnbGuardrailPermissionsFrom(input.guardrailPermissions);
+    const saved = await (createClient() as unknown as FnbRpc).schema("fnb").rpc("upsert_fnb_role_permission", {
+      p_actor_user_id: ctx.userId,
+      p_role_code: input.roleCode,
+      p_role_name_th: input.roleNameTh,
+      p_description: input.description ?? input.roleNameTh,
+      p_module_permissions: modules,
+      p_guardrail_permissions: guards,
+    });
+    if (saved.error) return { success: false, error: saved.error.message ?? "อัปเดตสิทธิ์บทบาทไม่สำเร็จ" };
+    const body = saved.data as { ok?: boolean; error?: string; role_code?: string } | null;
+    if (!body?.ok) return { success: false, error: body?.error ?? "อัปเดตสิทธิ์บทบาทไม่สำเร็จ" };
+    revalidatePath("/fnb/people");
+    return { success: true, roleCode: text(body.role_code) };
+  } catch (err) {
+    if (isRedirectError(err)) throw err;
+    return { success: false, error: err instanceof Error ? err.message : "อัปเดตสิทธิ์บทบาทไม่สำเร็จ" };
+  }
 }
 
 async function audit(ctx: UserAccessContext, action: string, targetName: string, details: Record<string, unknown>) {
@@ -68,7 +140,7 @@ export async function getFnbPeoplePayloadAction(): Promise<{ data: FnbPeoplePayl
     const brands = brandsOf(ctx);
     const [branches, employees] = await Promise.all([
       schemaAdmin().schema("fnb").from("branches").select("branch_code, branch_name_th, brand_code").order("sort_order", { ascending: true }),
-      schemaAdmin().schema("fnb").from("employees").select("id, emp_code, user_id, full_name_th, nickname, first_name_en, last_name_en, username, brand_code, primary_branch_code, allowed_branch_codes, hire_date, employment_type, compensation_tier, base_pay_rate, position_allowance, diligence_allowance_default, is_sso_enrolled, bank_account_no, has_system_login, employment_status").order("emp_code", { ascending: true }),
+      schemaAdmin().schema("fnb").from("employees").select("id, emp_code, user_id, full_name_th, nickname, first_name_en, last_name_en, username, brand_code, primary_branch_code, allowed_branch_codes, hire_date, employment_type, compensation_tier, base_pay_rate, position_allowance, diligence_allowance_default, is_sso_enrolled, bank_account_no, has_system_login, employment_status, system_role").order("emp_code", { ascending: true }),
     ]);
     const seePrivate = canSeePrivatePay(ctx);
     const cards: FnbEmployeeCard[] = (Array.isArray(employees.data) ? employees.data as Record<string, unknown>[] : [])
@@ -100,8 +172,10 @@ export async function getFnbPeoplePayloadAction(): Promise<{ data: FnbPeoplePayl
           userId: text(row.user_id) || null,
           employmentStatus: text(row.employment_status),
           hidePay,
+          systemRole: text(row.system_role) || "FNB_STORE_STAFF",
         };
       });
+    const roles = await readFnbRoles();
     return {
       data: {
         brands,
@@ -110,8 +184,10 @@ export async function getFnbPeoplePayloadAction(): Promise<{ data: FnbPeoplePayl
           .map((row) => ({ code: text(row.branch_code), name: text(row.branch_name_th), brand: text(row.brand_code) })),
         employees: cards,
         canSetTier: seePrivate,
-        canApprovePayroll: ctx.isSuperAdmin,
+        canApprovePayroll: ctx.isSuperAdmin || ctx.fnbGuardrailPermissions.can_approve_financial_edits,
+        canEditRolePermissions: ctx.isSuperAdmin,
         actorName: ctx.displayActorName,
+        roles,
       },
       error: null,
     };
@@ -146,6 +222,11 @@ export async function saveFnbEmployeeAction(formData: FormData): Promise<{ succe
     const existingId = text(formData.get("id"));
     const username = await usernameFor(first, last, text(formData.get("user_id")) || null);
     if (!username) return { success: false, error: "สร้างชื่อผู้ใช้ไม่สำเร็จ" };
+    const systemRole = text(formData.get("system_role")).toUpperCase() || "FNB_STORE_STAFF";
+    if (!/^FNB_[A-Z0-9_]+$/.test(systemRole)) return { success: false, error: "บทบาทต้องขึ้นต้นด้วย FNB_" };
+    const roles = await readFnbRoles();
+    const chosen = roles.find((role) => role.roleCode === systemRole && role.isActive);
+    if (roles.length > 0 && !chosen) return { success: false, error: "บทบาทนี้ยังไม่เปิดใช้งาน" };
     const tier = canSeePrivatePay(ctx) ? text(formData.get("compensation_tier")) || "GENERAL_STAFF" : "GENERAL_STAFF";
     if (!["GENERAL_STAFF", "EXECUTIVE_CONFIDENTIAL", "INTERNAL_PRIVATE"].includes(tier)) {
       return { success: false, error: "ชั้นความลับค่าตอบแทนไม่ถูกต้อง" };
@@ -170,6 +251,7 @@ export async function saveFnbEmployeeAction(formData: FormData): Promise<{ succe
       is_sso_enrolled: formData.get("is_sso_enrolled") === "true",
       bank_account_no: text(formData.get("bank_account_no")) || null,
       employment_status: "ACTIVE",
+      system_role: systemRole,
       updated_at: new Date().toISOString(),
     };
     let employeeId = existingId;
@@ -193,15 +275,19 @@ export async function saveFnbEmployeeAction(formData: FormData): Promise<{ succe
         ...payload,
         id: employeeId,
         emp_code: `LC-STF-${Date.now().toString().slice(-6)}`,
-        system_role: "FNB_STORE_STAFF",
         has_system_login: false,
       });
       if (saved.error) return { success: false, error: saved.error.message ?? "สร้างพนักงานไม่สำเร็จ" };
     }
     await storePrivateFile(employeeId, "idcard", formData.get("id_card"));
     await storePrivateFile(employeeId, "bankbook", formData.get("bank_book"));
+    const linkedUser = text(formData.get("user_id"));
+    if (linkedUser) {
+      await schemaAdmin().schema("holding").from("user_workspace_grants").update({ workspace_role: systemRole }).eq("user_id", linkedUser);
+      await createClient().from("user_profiles").update({ role_code: chosen?.appRoleCode || systemRole.toLowerCase(), updated_at: new Date().toISOString() }).eq("id", linkedUser);
+    }
     if (formData.get("open_login") === "true") {
-      const opened = await ensureLogin(ctx, employeeId, username, fullName, nickname, brand, primary, allowed, text(payload.hire_date));
+      const opened = await ensureLogin(ctx, employeeId, username, fullName, nickname, brand, primary, allowed, text(payload.hire_date), systemRole, chosen?.appRoleCode || systemRole.toLowerCase());
       if (!opened.success) return opened;
     }
     await audit(ctx, "EMPLOYEE_SAVED", fullName, { employeeId, username, brand });
@@ -237,6 +323,8 @@ async function ensureLogin(
   primary: string,
   allowed: string[],
   hireDate: string,
+  systemRole: string,
+  appRoleCode: string,
 ): Promise<{ success: boolean; error?: string }> {
   const existing = await schemaAdmin().schema("fnb").from("employees").select("user_id").eq("id", employeeId).maybeSingle();
   if (text((existing.data as { user_id?: string } | null)?.user_id)) return { success: true };
@@ -246,7 +334,7 @@ async function ensureLogin(
     email,
     password: "555555",
     email_confirm: true,
-    user_metadata: { full_name: fullName, role_code: "fnb_staff" },
+    user_metadata: { full_name: fullName, role_code: appRoleCode },
   });
   if (created.error || !created.data.user?.id) return { success: false, error: created.error?.message ?? "เปิดรหัสล็อกอินไม่สำเร็จ" };
   const userId = created.data.user.id;
@@ -254,7 +342,7 @@ async function ensureLogin(
     id: userId,
     email,
     full_name: fullName,
-    role_code: "fnb_staff",
+    role_code: appRoleCode,
     is_active: true,
     pin_code: "555555",
     data_access_scope: "OWN",
@@ -271,7 +359,7 @@ async function ensureLogin(
     must_change_pin: true,
     is_super_admin: false,
     primary_workspace: "fnb",
-    workspace_role: "FNB_STORE_STAFF",
+    workspace_role: systemRole,
     allowed_workspaces: ["fnb"],
     assigned_brand_code: brand,
     allowed_branch_codes: allowed,
@@ -481,11 +569,13 @@ export async function submitFnbPayrollAction(input: { year: number; month: numbe
 
 export async function approveFnbPayrollAction(periodId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const actor = await requireSuperAdmin();
     const ctx = await requireFnbPeopleAccess();
+    if (!ctx.isSuperAdmin && !ctx.fnbGuardrailPermissions.can_approve_financial_edits) {
+      return { success: false, error: "ไม่มีสิทธิ์อนุมัติงวดเงินเดือน" };
+    }
     const saved = await schemaAdmin().schema("fnb").from("payroll_periods").update({
       status: "APPROVED_LOCKED",
-      approved_by_user_id: actor.userId,
+      approved_by_user_id: ctx.userId,
       approved_by_name: ctx.displayActorName,
       approved_at: new Date().toISOString(),
     }).eq("id", periodId);

@@ -87,7 +87,7 @@ export default async function RootLayout({
           roleCode={currentUser?.roleCode ?? null}
           accessibleModules={currentUser?.accessibleModules ?? null}
           isSuperAdmin={isSuperAdmin}
-          workspaceRole={access?.workspaceRole ?? "SUPTHAVEE_STAFF"}
+          fnbModulePermissions={access?.fnbModulePermissions}
         >
           {allowed ? (
             children

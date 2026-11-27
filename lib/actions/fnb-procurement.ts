@@ -6,7 +6,8 @@ import { parseVendorCatalogSheet } from "@/lib/fnb/excel";
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
-import { requireFnbProcurementOffice, requireSuperAdmin } from "@/lib/holding/workspace-access";
+import { getUserAccessContext, requireFnbProcurementOffice, requireFnbTaxDesk } from "@/lib/holding/workspace-access";
+import { requireSessionUserId } from "@/lib/auth/current-user";
 import type { FnbActionResult, FnbBrandCode, FnbExpiryLotRow, FnbGoodsReceiptLineRow, FnbGoodsReceiptRow, FnbItemRow, FnbReimbursementRow, FnbUnpackLine, FnbVendorSheetPreview } from "@/types/fnb";
 
 function asciiBranch(code: string): string {
@@ -41,7 +42,7 @@ function lineMoney(qty: number, unitPrice: number, vatMode: string) {
 
 export async function listProcurementQueueAction(): Promise<FnbActionResult<{ receipts: FnbGoodsReceiptRow[]; payouts: FnbReimbursementRow[] }>> {
   try {
-    await requireFnbProcurementOffice();
+    const ctx = await requireFnbProcurementOffice();
     const db = schemaAdmin().schema("fnb");
     const [receipts, payouts] = await Promise.all([
       db.from("goods_receipts").select("*").order("received_date", { ascending: false }).limit(80),
@@ -63,7 +64,7 @@ export async function listProcurementQueueAction(): Promise<FnbActionResult<{ re
         branch_mismatch_warning: row.branch_mismatch_warning === true,
         received_date: text(row.received_date),
       })),
-      payouts: asRows(payouts.data).map((row) => ({
+      payouts: ctx.isSuperAdmin || ctx.fnbModulePermissions.hq_tax_reimburse ? asRows(payouts.data).map((row) => ({
         id: text(row.id),
         reimb_no: text(row.reimb_no),
         branch_code: text(row.branch_code),
@@ -73,7 +74,7 @@ export async function listProcurementQueueAction(): Promise<FnbActionResult<{ re
         total_amount: num(row.total_amount),
         payout_status: text(row.payout_status),
         payee_bank_info: row.payee_bank_info == null ? null : text(row.payee_bank_info),
-      })),
+      })) : [],
     });
   } catch (error) {
     return caught({ receipts: [], payouts: [] }, error, "อ่านคิวจัดซื้อไม่สำเร็จ");
@@ -142,8 +143,12 @@ export async function submitBlindGoodsReceiptAction(formData: FormData): Promise
     if (branchRow.error) return fail({ gr_no: "", line_count: 0 }, branchRow.error, "อ่านสาขาไม่สำเร็จ");
     const branchData = branchRow.data && typeof branchRow.data === "object" ? branchRow.data as Record<string, unknown> : {};
     if (brandLock && text(branchData.brand_code) !== brandLock) return result({ gr_no: "", line_count: 0 }, "สาขานี้ไม่อยู่ในแบรนด์ที่เปิดใช้งาน");
-    const reveal = formData.get("reveal_cost") === "true";
-    if (reveal) await requireSuperAdmin();
+    let reveal = formData.get("reveal_cost") === "true";
+    if (reveal) {
+      const owner = await requireSessionUserId();
+      const access = owner.ok ? await getUserAccessContext(owner.userId) : null;
+      reveal = Boolean(access?.isSuperAdmin || access?.fnbGuardrailPermissions.can_view_cost_price);
+    }
     const lines = JSON.parse(text(formData.get("lines_json")) || "[]") as { item_id: string; raw_desc?: string; raw_code?: string; received_qty: number; received_uom: string; recipe_qty_per_unit?: number; unit_price?: number; line_vat_mode?: string }[];
     const safeLines = reveal ? lines : lines.map((line) => ({ ...line, unit_price: 0 }));
     const photos = await Promise.all(
@@ -351,7 +356,7 @@ export async function confirmHqGoodsReceiptAction(input: {
   lines: { id?: string; item_id: string; item_description: string; received_qty: number; received_uom: string; recipe_qty_per_unit: number; unit_price: number; line_vat_mode: string }[];
 }): Promise<FnbActionResult<{ ok: boolean; mismatch: boolean }>> {
   try {
-    await requireFnbProcurementOffice();
+    await requireFnbTaxDesk();
     const db = schemaAdmin().schema("fnb");
     const branch = await db.from("branches").select("vat_branch_code,legal_entity_id").eq("branch_code", input.receiving_branch_code).maybeSingle();
     if (branch.error) return fail({ ok: false, mismatch: false }, branch.error, "อ่านสาขาไม่สำเร็จ");
@@ -480,7 +485,7 @@ export async function submitStaffReimbursementAction(formData: FormData): Promis
 
 export async function markReimbursementsPaidAction(formData: FormData): Promise<FnbActionResult<{ paid: number }>> {
   try {
-    const admin = await requireFnbProcurementOffice();
+    const admin = await requireFnbTaxDesk();
     const ids = text(formData.get("ids")).split(",").map((id) => id.trim()).filter(Boolean);
     const slip = formData.get("slip");
     const branch = text(formData.get("branch_code")) || "HQ";

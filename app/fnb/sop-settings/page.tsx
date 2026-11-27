@@ -1,13 +1,13 @@
 import { listFnbItemsAction } from "@/lib/actions/fnb-items";
 import { listFnbBranchOptionsAction } from "@/lib/actions/fnb-operations";
 import { listSopTemplatesAction } from "@/lib/actions/fnb-sop";
-import { requireFnbExecutiveAccess } from "@/lib/holding/workspace-access";
+import { requireFnbModuleAccess } from "@/lib/holding/workspace-access";
 import { SopSettingsWorkspace } from "@/app/fnb/sop-settings/sop-settings-workspace";
 
 export const dynamic = "force-dynamic";
 
 export default async function SopSettingsPage() {
-  await requireFnbExecutiveAccess();
+  await requireFnbModuleAccess("sop_shift_settings");
   const [branches, templates, items] = await Promise.all([
     listFnbBranchOptionsAction(),
     listSopTemplatesAction(),

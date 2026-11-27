@@ -2,7 +2,7 @@ import { listFnbBranchesAction } from "@/lib/actions/holding-entities";
 import { getFnbDashboardAction, listPendingShiftApprovalsAction } from "@/lib/actions/fnb-operations";
 import { listEarlyWarningsAction } from "@/lib/actions/fnb-sop";
 import { getWipCostAnalyticsAction } from "@/lib/actions/fnb-wip";
-import { requireFnbExecutiveAccess } from "@/lib/holding/workspace-access";
+import { requireFnbModuleAccess } from "@/lib/holding/workspace-access";
 import type { FnbBranchRow } from "@/types/holding";
 import { FnbHub } from "@/app/fnb/fnb-hub";
 
@@ -21,7 +21,7 @@ export default async function FnbPage({
 }: {
   searchParams: Promise<{ tab?: string }>;
 }) {
-  await requireFnbExecutiveAccess();
+  await requireFnbModuleAccess("all_branch_analytics");
   const params = await searchParams;
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date());
   const [listed, dashboard, approvals, warnings, wipCosts] = await Promise.all([

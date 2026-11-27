@@ -2,12 +2,12 @@
 
 import { asRows, caught, fail, num, result, text } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
-import { requireSuperAdmin } from "@/lib/holding/workspace-access";
+import { requireFnbModuleAccess } from "@/lib/holding/workspace-access";
 import type { FnbActionResult, FnbMenuBomLineRow, FnbMenuRow, FnbPrepBaseRow } from "@/types/fnb";
 
 export async function listFnbMenusAction(): Promise<FnbActionResult<{ bases: FnbPrepBaseRow[]; menus: FnbMenuRow[]; lines: FnbMenuBomLineRow[] }>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("master_items_bom");
     const db = schemaAdmin().schema("fnb");
     const [bases, menus, lines] = await Promise.all([
       db.from("prep_bases").select("*").order("base_code", { ascending: true }).limit(50),
@@ -60,7 +60,7 @@ export async function savePrepBaseAction(input: {
   shelf_life_hours: number;
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("master_items_bom");
     const existing = await schemaAdmin().schema("fnb").from("prep_bases").select("base_code").eq("base_code", input.base_code).maybeSingle();
     if (existing.error) return fail({ ok: false }, existing.error, "บันทึกเบสไม่สำเร็จ");
     const payload = {
@@ -92,7 +92,7 @@ export async function saveMenuAction(input: {
   bom: { component_type: string; item_id: string; prep_base_code: string; usage_qty: number; usage_uom: string }[];
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("master_items_bom");
     const db = schemaAdmin().schema("fnb");
     const payload = {
       brand_code: input.brand_code,
@@ -132,7 +132,7 @@ export async function saveMenuAction(input: {
 
 export async function copyMenuToChatornAction(menuId: string): Promise<FnbActionResult<{ menu_code: string }>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("master_items_bom");
     const db = schemaAdmin().schema("fnb");
     const menu = await db.from("menus").select("*").eq("id", menuId).maybeSingle();
     if (menu.error || !menu.data) return fail({ menu_code: "" }, menu.error, "ไม่พบเมนูต้นทาง");

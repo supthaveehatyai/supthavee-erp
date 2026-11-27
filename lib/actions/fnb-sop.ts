@@ -6,7 +6,7 @@ import { resolveFnbActor } from "@/lib/fnb/actor";
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
 import { issueOpeningPrepFromSopAction } from "@/lib/actions/fnb-wip";
-import { requireSuperAdmin } from "@/lib/holding/workspace-access";
+import { requireAnyFnbModule, requireFnbModuleAccess } from "@/lib/holding/workspace-access";
 import { schemaAdmin } from "@/lib/holding/schema-db";
 import type {
   FnbActionResult,
@@ -71,7 +71,7 @@ async function actorOf(formData: FormData) {
 
 export async function listSopTemplatesAction(): Promise<FnbActionResult<FnbSopTemplate[]>> {
   try {
-    await requireSuperAdmin();
+    await requireAnyFnbModule(["sop_shift_settings", "store_portal"]);
     const db = schemaAdmin().schema("fnb");
     const [templates, assignments] = await Promise.all([
       db.from("sop_templates").select("*").order("sort_order", { ascending: true }).limit(500),
@@ -110,7 +110,7 @@ export async function listSopTemplatesAction(): Promise<FnbActionResult<FnbSopTe
 
 export async function saveSopTemplateAction(formData: FormData): Promise<FnbActionResult<{ id: string }>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("sop_shift_settings");
     const db = schemaAdmin().schema("fnb");
     const id = text(formData.get("id"));
     const stage = text(formData.get("stage_code"));
@@ -151,7 +151,7 @@ export async function saveSopTemplateAction(formData: FormData): Promise<FnbActi
 
 export async function toggleSopAssignmentAction(templateId: string, branchCode: string, enabled: boolean): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("sop_shift_settings");
     const db = schemaAdmin().schema("fnb");
     const payload = { template_id: templateId, branch_code: branchCode, is_enabled: enabled, updated_at: new Date().toISOString() };
     const existing = await db.from("sop_branch_assignments").select("template_id").eq("template_id", templateId).eq("branch_code", branchCode).maybeSingle();
@@ -167,7 +167,7 @@ export async function toggleSopAssignmentAction(templateId: string, branchCode: 
 
 export async function saveBranchShiftSettingsAction(formData: FormData): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("sop_shift_settings");
     const branch = text(formData.get("branch_code"));
     const updated = await schemaAdmin().schema("fnb").from("branches").update({
       standard_cash_float: Number(formData.get("standard_cash_float") ?? 0) || 0,
@@ -193,7 +193,7 @@ export async function saveBranchShiftSettingsAction(formData: FormData): Promise
 
 export async function listParLevelsAction(branchCode: string): Promise<FnbActionResult<FnbParLevelRow[]>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("sop_shift_settings");
     const db = schemaAdmin().schema("fnb");
     const [pars, items] = await Promise.all([
       db.from("branch_item_par_levels").select("*").eq("branch_code", branchCode).limit(500),
@@ -221,7 +221,7 @@ export async function listParLevelsAction(branchCode: string): Promise<FnbAction
 
 export async function saveParLevelAction(formData: FormData): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("sop_shift_settings");
     const db = schemaAdmin().schema("fnb");
     const branchCode = text(formData.get("branch_code"));
     const itemId = text(formData.get("item_id"));
@@ -434,7 +434,7 @@ export async function lockSopStageAction(formData: FormData): Promise<FnbActionR
 
 export async function requestSopRetakeAction(submissionId: string): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("sop_shift_settings");
     const actor = await readDesktopName();
     const updated = await schemaAdmin().schema("fnb").from("sop_task_submissions").update({
       manager_review_status: "RETAKE_REQUIRED",
@@ -452,7 +452,7 @@ export async function requestSopRetakeAction(submissionId: string): Promise<FnbA
 
 export async function listSopPhotoBoardAction(templateId: string, workDate: string): Promise<FnbActionResult<{ branch_code: string; staff: string; at: string; urls: string[] }[]>> {
   try {
-    await requireSuperAdmin();
+    await requireAnyFnbModule(["sop_shift_settings", "store_portal"]);
     const listed = await schemaAdmin().schema("fnb").from("sop_task_submissions")
       .select("branch_code, submitted_by_name, server_submitted_at, photo_urls")
       .eq("template_id", templateId)
@@ -538,7 +538,7 @@ export async function saveShift3HandoverAction(formData: FormData): Promise<FnbA
 export async function listEarlyWarningsAction(): Promise<FnbActionResult<{ par: FnbParLevelRow[]; expiry: FnbExpiryAlert[] }>> {
   const empty = { par: [] as FnbParLevelRow[], expiry: [] as FnbExpiryAlert[] };
   try {
-    await requireSuperAdmin();
+    await requireFnbModuleAccess("all_branch_analytics");
     const db = schemaAdmin().schema("fnb");
     const [pars, lots, items] = await Promise.all([
       db.from("branch_item_par_levels").select("*").eq("is_below_par", true).limit(200),

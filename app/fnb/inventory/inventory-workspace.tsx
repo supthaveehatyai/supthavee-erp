@@ -9,9 +9,13 @@ const field = "h-10 w-full rounded-md border border-slate-200 px-3 text-sm";
 export function InventoryWorkspace({
   branches,
   balances,
+  blindCount = false,
+  showCost = true,
 }: {
   branches: FnbBranchOption[];
   balances: FnbStockBalanceRow[];
+  blindCount?: boolean;
+  showCost?: boolean;
 }) {
   const [branch, setBranch] = useState(branches[0]?.branch_code ?? "");
   const [message, setMessage] = useState("");
@@ -28,14 +32,14 @@ export function InventoryWorkspace({
       </select>
       <div className="overflow-auto rounded-xl border bg-white">
         <table className="min-w-full text-sm">
-          <thead className="bg-red-50 text-left"><tr><th className="p-2">รหัส</th><th className="p-2">ชื่อ</th><th className="p-2">หน่วยนับ</th><th className="p-2">หน่วยสูตร</th></tr></thead>
+          <thead className="bg-red-50 text-left"><tr><th className="p-2">รหัส</th><th className="p-2">ชื่อ</th>{blindCount ? null : <th className="p-2">หน่วยนับ</th>}{blindCount ? null : <th className="p-2">หน่วยสูตร</th>}</tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.item_id} className="border-t">
                 <td className="p-2">{row.short_code}</td>
                 <td className="p-2">{row.name_th}</td>
-                <td className="p-2">{(row.on_hand_recipe / (row.recipe_per_count_uom || 1)).toFixed(2)} {row.count_uom}</td>
-                <td className="p-2">{row.on_hand_recipe.toFixed(2)} {row.recipe_uom}</td>
+                {blindCount ? null : <td className="p-2">{(row.on_hand_recipe / (row.recipe_per_count_uom || 1)).toFixed(2)} {row.count_uom}</td>}
+                {blindCount ? null : <td className="p-2">{row.on_hand_recipe.toFixed(2)} {row.recipe_uom}</td>}
               </tr>
             ))}
           </tbody>
@@ -73,7 +77,12 @@ export function InventoryWorkspace({
         start(async () => {
           const saved = await submitBlindCountAction({ branch_code: branch, staff_name: "", actor_source: "desktop", lines });
           setMessage(saved.error ?? `นับ ${saved.data.count_no} แล้ว`);
-          setReport(saved.data.lines.map((line) => `${line.short_code} นับ ${line.counted.toFixed(2)} ระบบ ${line.system.toFixed(2)} ส่วนต่าง ${line.variance.toFixed(2)} บาท ${line.cost.toFixed(2)}`).join("\n"));
+          setReport(saved.data.lines.map((line) => {
+            const counted = `${line.short_code} นับ ${line.counted.toFixed(2)}`;
+            const system = blindCount ? "" : ` ระบบ ${line.system.toFixed(2)} ส่วนต่าง ${line.variance.toFixed(2)}`;
+            const cost = showCost ? ` บาท ${line.cost.toFixed(2)}` : "";
+            return `${counted}${system}${cost}`;
+          }).join("\n"));
         });
       }}>
         <h2 className="font-semibold">นับสต็อกแบบปิดตา</h2>
