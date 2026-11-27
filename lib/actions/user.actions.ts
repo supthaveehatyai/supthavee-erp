@@ -10,6 +10,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { schemaAdmin } from "@/lib/holding/schema-db";
+import { getUserAccessContext } from "@/lib/holding/workspace-access";
+import type { UserAccessContext } from "@/types/holding";
 import { logAuditTrail } from "@/lib/supabase/auditService";
 import type { Database } from "@/src/types/supabase";
 import type {
@@ -192,9 +194,23 @@ async function assertAdminActor(
 /**
  * รายชื่อผู้ใช้ — Join user_profiles × app_roles (Service Role).
  */
+async function assertSupthaveeUserDesk(): Promise<
+  { ok: true; ctx: UserAccessContext | null; roleCode: string } | { ok: false; error: string }
+> {
+  const current = await getCurrentAuthUser();
+  if (!current?.userId) return { ok: false, error: "Unauthorized" };
+  const ctx = await getUserAccessContext(current.userId);
+  if (ctx && !ctx.isActive) return { ok: false, error: "บัญชีนี้ถูกระงับสิทธิ์การเข้าใช้งานแล้ว กรุณาติดต่อผู้ดูแลระบบ" };
+  const roleCode = String(current.roleCode ?? "").toLowerCase();
+  if (ctx?.isSuperAdmin || roleCode === "admin" || ctx?.workspaceRole === "SUPTHAVEE_HR") {
+    return { ok: true, ctx, roleCode };
+  }
+  return { ok: false, error: "ไม่มีสิทธิ์จัดการผู้ใช้งานทรัพย์ทวี" };
+}
+
 export async function getUsers(): Promise<GetUsersResult> {
   try {
-    const gate = await requireAdmin();
+    const gate = await assertSupthaveeUserDesk();
     if (!gate.ok) {
       return { success: false, error: gate.error, data: [] };
     }
@@ -281,23 +297,34 @@ export async function createUserWithPin(
   roleCode: string,
   fullName: string,
   abac?: UserAbacInput,
+  identity?: { firstNameEn?: string; lastNameEn?: string },
 ): Promise<CreateUserWithPinResult> {
   try {
-    const gate = await requireAdmin();
-    if (!gate.ok) {
-      return { success: false, error: gate.error };
+    const desk = await assertSupthaveeUserDesk();
+    if (!desk.ok) {
+      return { success: false, error: desk.error };
     }
 
-    const normalizedEmail = String(email ?? "")
-      .trim()
-      .toLowerCase();
-    const password = String(pin ?? "");
+    const firstEn = String(identity?.firstNameEn ?? "").trim();
+    const lastEn = String(identity?.lastNameEn ?? "").trim();
+    const normalizedEmail = String(email ?? "").trim().toLowerCase();
+    const password = "555555";
+    void pin;
     const normalizedRole = String(roleCode ?? "")
       .trim()
       .toLowerCase();
     const name = String(fullName ?? "").trim();
 
-    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    if (!firstEn || !lastEn) {
+      return { success: false, error: "กรุณาระบุชื่อและนามสกุลภาษาอังกฤษ" };
+    }
+    if (normalizedRole.startsWith("fnb_")) {
+      return { success: false, error: "สร้างพนักงานร้านน้ำได้ที่เมนูบุคลากรของร้านน้ำเท่านั้น" };
+    }
+    if (normalizedRole === "admin" && !desk.ctx?.isSuperAdmin && desk.roleCode !== "admin") {
+      return { success: false, error: "ไม่สามารถแต่งตั้งสิทธิ์ Admin ได้" };
+    }
+    if (normalizedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       return { success: false, error: "กรุณาระบุอีเมลให้ถูกต้อง" };
     }
     if (!name) {
@@ -347,22 +374,33 @@ export async function createUserWithPin(
       };
     }
 
+    const usernameRpc = await (supabaseAdmin as unknown as {
+      schema: (name: "holding") => {
+        rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>;
+      };
+    }).schema("holding").rpc("generate_unique_username", { p_first_en: firstEn, p_last_en: lastEn });
+    const username = String(usernameRpc.data ?? "").trim().toLowerCase();
+    if (!username) {
+      return { success: false, error: usernameRpc.error?.message ?? "สร้างชื่อผู้ใช้ไม่สำเร็จ" };
+    }
+    const loginEmail = normalizedEmail || `${username}@supthavee.local`;
+
     const { data: existingProfile } = await supabaseAdmin
       .from("user_profiles")
       .select("id")
-      .eq("email", normalizedEmail)
+      .eq("email", loginEmail)
       .maybeSingle();
 
     if (existingProfile) {
       return {
         success: false,
-        error: `อีเมล ${normalizedEmail} มีในระบบแล้ว`,
+        error: `อีเมล ${loginEmail} มีในระบบแล้ว`,
       };
     }
 
     const { data: created, error: createError } =
       await supabaseAdmin.auth.admin.createUser({
-        email: normalizedEmail,
+        email: loginEmail,
         password,
         email_confirm: true,
         user_metadata: {
@@ -390,7 +428,7 @@ export async function createUserWithPin(
       .from("user_profiles")
       .insert({
         id: userId,
-        email: normalizedEmail,
+        email: loginEmail,
         full_name: name,
         role_code: normalizedRole,
         is_active: true,
@@ -408,14 +446,18 @@ export async function createUserWithPin(
       };
     }
 
-    const fnbRole = normalizedRole === "fnb_staff" || normalizedRole === "fnb_accountant";
+    const workspaceRole = normalizedRole === "hr" || normalizedRole === "supthavee_hr" ? "SUPTHAVEE_HR" : "SUPTHAVEE_STAFF";
     const grant = await schemaAdmin().schema("holding").from("user_workspace_grants").insert({
       user_id: userId,
       is_super_admin: false,
-      primary_workspace: fnbRole ? "fnb" : "supthavee",
-      workspace_role: normalizedRole === "fnb_accountant" ? "FNB_ACCOUNTANT" : normalizedRole === "fnb_staff" ? "FNB_STORE_STAFF" : "SUPTHAVEE_STAFF",
-      allowed_workspaces: fnbRole ? ["fnb"] : ["supthavee"],
+      primary_workspace: "supthavee",
+      workspace_role: workspaceRole,
+      allowed_workspaces: ["supthavee"],
       allowed_branch_codes: [],
+      username,
+      first_name_en: firstEn,
+      last_name_en: lastEn,
+      must_change_pin: true,
       can_view_fnb_reports: false,
       can_view_cost_price: false,
       is_active: true,
@@ -434,6 +476,47 @@ export async function createUserWithPin(
       err instanceof Error ? err.message : "สร้างผู้ใช้งานไม่สำเร็จ";
     return { success: false, error: message };
   }
+}
+
+export async function previewSupthaveeUsername(firstNameEn: string, lastNameEn: string): Promise<string> {
+  const desk = await assertSupthaveeUserDesk();
+  if (!desk.ok) return "";
+  const rpc = await (createSupabaseAdminClient() as unknown as {
+    schema: (name: "holding") => {
+      rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>;
+    };
+  }).schema("holding").rpc("generate_unique_username", { p_first_en: firstNameEn, p_last_en: lastNameEn });
+  return String(rpc.data ?? "").trim().toLowerCase();
+}
+
+export async function listSupthaveeGrantMeta(): Promise<Record<string, { username: string; mustChangePin: boolean; workspaces: string[] }>> {
+  const desk = await assertSupthaveeUserDesk();
+  if (!desk.ok) return {};
+  const listed = await schemaAdmin().schema("holding").from("user_workspace_grants").select("user_id, username, must_change_pin, allowed_workspaces");
+  const rows = Array.isArray(listed.data) ? listed.data as Record<string, unknown>[] : [];
+  return Object.fromEntries(rows.map((row) => [String(row.user_id), {
+    username: String(row.username ?? ""),
+    mustChangePin: row.must_change_pin === true,
+    workspaces: Array.isArray(row.allowed_workspaces) ? row.allowed_workspaces.map((item) => String(item)) : [],
+  }]));
+}
+
+export async function resetSupthaveePin(userId: string): Promise<{ success: boolean; error?: string }> {
+  const desk = await assertSupthaveeUserDesk();
+  if (!desk.ok) return { success: false, error: desk.error };
+  const id = String(userId ?? "").trim();
+  const meta = await schemaAdmin().schema("holding").from("user_workspace_grants").select("is_super_admin, allowed_workspaces").eq("user_id", id).maybeSingle();
+  const row = meta.data as { is_super_admin?: boolean; allowed_workspaces?: string[] } | null;
+  if (row?.is_super_admin && !desk.ctx?.isSuperAdmin) return { success: false, error: "ไม่สามารถรีเซ็ตรหัส Super Admin ได้" };
+  if (row && !row.allowed_workspaces?.includes("supthavee")) return { success: false, error: "บัญชีนี้ไม่ใช่ผู้ใช้ทรัพย์ทวี" };
+  const admin = createSupabaseAdminClient();
+  const auth = await admin.auth.admin.updateUserById(id, { password: "555555", email_confirm: true });
+  if (auth.error) return { success: false, error: auth.error.message };
+  const profile = await admin.from("user_profiles").update({ pin_code: "555555", updated_at: new Date().toISOString() }).eq("id", id);
+  if (profile.error) return { success: false, error: profile.error.message };
+  await schemaAdmin().schema("holding").from("user_workspace_grants").update({ must_change_pin: true, pin_changed_at: null }).eq("user_id", id);
+  revalidatePath(USERS_PATH);
+  return { success: true };
 }
 
 /**

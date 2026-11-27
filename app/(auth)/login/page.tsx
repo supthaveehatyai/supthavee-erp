@@ -43,7 +43,7 @@ export default async function LoginPage({
             บริษัท ทรัพย์ทวี หาดใหญ่ จำกัด
           </h1>
           <p className="mt-2 text-sm text-slate-400">
-            เข้าสู่ระบบด้วยอีเมลและรหัส PIN 6 หลัก
+            เข้าสู่ระบบด้วยชื่อผู้ใช้หรืออีเมล และรหัส PIN 6 หลัก
           </p>
         </div>
 

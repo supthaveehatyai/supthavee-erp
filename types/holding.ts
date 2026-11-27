@@ -7,19 +7,24 @@ export const SUPER_ADMIN_EMAIL = "nuttawat.lim@gmail.com";
 export type WorkspaceRole =
   | "SUPER_ADMIN"
   | "SUPTHAVEE_STAFF"
+  | "SUPTHAVEE_HR"
   | "FNB_STORE_STAFF"
   | "FNB_BRANCH_MANAGER"
   | "FNB_ACCOUNTANT"
+  | "FNB_HR"
+  | "FNB_HR_ACCOUNTANT"
   | "PROP_MANAGER"
   | "AGRI_MANAGER";
 
 export type UserAccessContext = {
   userId: string;
   email: string;
+  username: string;
   fullName: string;
   displayActorName: string;
   roleCode: string;
   isActive: boolean;
+  mustChangePin: boolean;
   isSuperAdmin: boolean;
   primaryWorkspace: WorkspaceKey;
   workspaceRole: WorkspaceRole;
@@ -28,6 +33,12 @@ export type UserAccessContext = {
   allowedBranchCodes: string[];
   canViewFnbReports: boolean;
   canViewCostPrice: boolean;
+  isHrManager: boolean;
+  hrAllowedWorkspaces: WorkspaceKey[];
+  hrAllowedEntityIds: string[];
+  hrAllowedBrandCodes: Array<"LUCKY_CUP" | "CHATORN">;
+  hrCanPreparePayroll: boolean;
+  hrCanViewExecPrivatePay: boolean;
 };
 
 export type FnbStaffDraft = {

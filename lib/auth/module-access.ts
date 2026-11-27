@@ -52,7 +52,7 @@ export const MODULE_PATH_PREFIXES: Record<ErpModuleKey, readonly string[]> = {
 };
 
 /** Login / OAuth callback — skip session guards and never redirect away */
-export const AUTH_PATH_PREFIXES = ["/login", "/auth"] as const;
+export const AUTH_PATH_PREFIXES = ["/login", "/auth", "/change-pin"] as const;
 
 export function isAuthPath(pathname: string): boolean {
   const path = pathname.trim();

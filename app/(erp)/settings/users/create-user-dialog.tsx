@@ -9,7 +9,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { UserPlus } from "lucide-react";
 import { toast } from "sonner";
-import { createUserWithPin } from "@/lib/actions/user.actions";
+import { createUserWithPin, previewSupthaveeUsername } from "@/lib/actions/user.actions";
 import type { AppRoleOption, DataAccessScope } from "@/types/user";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,20 +43,22 @@ export function CreateUserDialog({ roles }: CreateUserDialogProps) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
-  const [pin, setPin] = useState("");
+  const [firstEn, setFirstEn] = useState("");
+  const [lastEn, setLastEn] = useState("");
+  const [username, setUsername] = useState("");
   const [roleCode, setRoleCode] = useState(defaultRole);
   const [dataAccessScope, setDataAccessScope] = useState<DataAccessScope>(
     defaultScopeForRole(defaultRole),
   );
   const [approvalLimit, setApprovalLimit] = useState("0");
-  const [pinError, setPinError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   function resetForm() {
     setEmail("");
     setFullName("");
-    setPin("");
-    setPinError(null);
+    setFirstEn("");
+    setLastEn("");
+    setUsername("");
     setRoleCode(defaultRole);
     setDataAccessScope(defaultScopeForRole(defaultRole));
     setApprovalLimit("0");
@@ -66,23 +68,17 @@ export function CreateUserDialog({ roles }: CreateUserDialogProps) {
     event.preventDefault();
     if (isSubmitting) return;
 
-    if (pin.length < 6) {
-      setPinError("รหัสผ่าน (PIN) ต้องมีอย่างน้อย 6 ตัวอักษร");
-      return;
-    }
     const parsedLimit = Number(approvalLimit);
     if (!Number.isFinite(parsedLimit) || parsedLimit < 0) {
       toast.error("วงเงินอนุมัติต้องเป็นตัวเลขที่ไม่ติดลบ");
       return;
     }
-    setPinError(null);
-
     setIsSubmitting(true);
     try {
-      const result = await createUserWithPin(email, pin, roleCode, fullName, {
+      const result = await createUserWithPin(email, "555555", roleCode, fullName, {
         data_access_scope: dataAccessScope,
         approval_limit: parsedLimit,
-      });
+      }, { firstNameEn: firstEn, lastNameEn: lastEn });
       if (!result.success) {
         toast.error(result.error ?? "สร้างผู้ใช้งานไม่สำเร็จ");
         return;
@@ -139,47 +135,30 @@ export function CreateUserDialog({ roles }: CreateUserDialogProps) {
             />
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="create-email">อีเมล</Label>
-            <Input
-              id="create-email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="user@company.com"
-              disabled={isSubmitting}
-              required
-              autoComplete="email"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="create-first-en">ชื่อภาษาอังกฤษ (First Name EN)</Label>
+              <Input id="create-first-en" value={firstEn} disabled={isSubmitting} onChange={(event) => {
+                const value = event.target.value;
+                setFirstEn(value);
+                void previewSupthaveeUsername(value, lastEn).then(setUsername);
+              }} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="create-last-en">นามสกุลภาษาอังกฤษ (Last Name EN)</Label>
+              <Input id="create-last-en" value={lastEn} disabled={isSubmitting} onChange={(event) => {
+                const value = event.target.value;
+                setLastEn(value);
+                void previewSupthaveeUsername(firstEn, value).then(setUsername);
+              }} />
+            </div>
           </div>
-
+          <p className="text-sm text-slate-600">Username: <span className="font-semibold text-slate-900">{username || "firstname.las"}</span></p>
           <div className="space-y-1.5">
-            <Label htmlFor="create-pin">รหัสผ่าน (PIN 6 หลัก)</Label>
-            <Input
-              id="create-pin"
-              type="password"
-              value={pin}
-              onChange={(e) => {
-                setPin(e.target.value);
-                if (pinError && e.target.value.length >= 6) {
-                  setPinError(null);
-                }
-              }}
-              placeholder="อย่างน้อย 6 ตัวอักษร"
-              disabled={isSubmitting}
-              required
-              minLength={6}
-              autoComplete="new-password"
-              inputMode="numeric"
-            />
-            {pinError ? (
-              <p className="text-xs text-red-600">{pinError}</p>
-            ) : (
-              <p className="text-xs text-slate-500">
-                ใช้เป็นรหัสเข้าสู่ระบบ — บังคับอย่างน้อย 6 ตัวอักษร
-              </p>
-            )}
+            <Label htmlFor="create-email">อีเมลส่วนตัว (ไม่บังคับ)</Label>
+            <Input id="create-email" type="text" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="เว้นว่างได้ ระบบจะใช้อีเมลภายใน" disabled={isSubmitting} />
           </div>
+          <p className="text-xs text-slate-500">รหัสเริ่มต้นคือ 555555 และต้องเปลี่ยนเมื่อเข้าสู่ระบบครั้งแรก</p>
 
           <div className="space-y-1.5">
             <Label htmlFor="create-role">สิทธิ์ (Role)</Label>

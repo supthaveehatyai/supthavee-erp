@@ -13,7 +13,7 @@ import {
   isLiffPath,
   resolveModuleForPath,
 } from "@/lib/auth/module-access";
-import { accessRedirect } from "@/lib/holding/access-routes";
+import { accessRedirect, canOpenSupthaveeUsers } from "@/lib/holding/access-routes";
 import { getUserAccessContext } from "@/lib/holding/workspace-access";
 import AppShell from "./app-shell";
 import "./globals.css";
@@ -76,7 +76,7 @@ export default async function RootLayout({
           pathname,
           currentUser.accessibleModules,
           currentUser.roleCode,
-        ));
+        ) || (access ? canOpenSupthaveeUsers(pathname, access, currentUser.roleCode) : false));
   const deniedModule = allowed ? null : resolveModuleForPath(pathname);
 
   return (
@@ -87,6 +87,7 @@ export default async function RootLayout({
           roleCode={currentUser?.roleCode ?? null}
           accessibleModules={currentUser?.accessibleModules ?? null}
           isSuperAdmin={isSuperAdmin}
+          workspaceRole={access?.workspaceRole ?? "SUPTHAVEE_STAFF"}
         >
           {allowed ? (
             children

@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import {
   deactivateUser,
   reactivateUser,
+  resetSupthaveePin,
 } from "@/lib/actions/user.actions";
 import type { ManagedUser } from "@/types/user";
 import { USER_PROFILE_SEARCH_PARAM } from "@/types/user";
@@ -111,6 +112,21 @@ export function UserRowActions({ user }: UserRowActionsProps) {
             >
               <Shield className="size-4 shrink-0" />
               <span className="break-words">แก้ไขโปรไฟล์ (ABAC)</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={isPending}
+              onSelect={() => {
+                startTransition(async () => {
+                  const saved = await resetSupthaveePin(user.id);
+                  if (!saved.success) toast.error(saved.error ?? "รีเซ็ต PIN ไม่สำเร็จ");
+                  else {
+                    toast.success("รีเซ็ตกลับเป็นรหัสเริ่มต้น 555555 แล้ว");
+                    router.refresh();
+                  }
+                });
+              }}
+            >
+              <span className="break-words">รีเซ็ตกลับเป็นรหัสเริ่มต้น 555555</span>
             </DropdownMenuItem>
             {user.is_active ? (
               <DropdownMenuItem

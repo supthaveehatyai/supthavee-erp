@@ -6,7 +6,7 @@ import { useState } from "react";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { canAccessPath, canSeeNavItem, isAuthPath, isLiffPath, normalizePathname, STOCK_CARD_PATH } from "@/lib/auth/module-access";
 import { AccessProvider } from "@/components/auth/access-context";
-import { WORKSPACE_THEMES, type WorkspaceKey } from "@/types/holding";
+import { WORKSPACE_THEMES, type WorkspaceKey, type WorkspaceRole } from "@/types/holding";
 import type { AccessibleModules, ErpModuleKey } from "@/types/rbac";
 
 type IconName =
@@ -48,7 +48,7 @@ const WORKSPACE_NAV: Record<Exclude<WorkspaceKey, "supthavee">, NavigationItem[]
     { label: "วัตถุดิบ หลายแหล่งซื้อ & นำเข้าราคา", href: "/fnb/items" },
     { label: "เมนู สูตรชง & เบสเตรียมขาย (BOM)", href: "/fnb/menus" },
     { label: "โอนของข้ามสาขา & นับสต็อก Blind Count", href: "/fnb/inventory" },
-    { label: "พนักงานร้านน้ำ & สิทธิ์แยกธุรกิจ", href: "/settings/users?tab=fnb-staff" },
+    { label: "บุคลากร & เงินเดือนร้านน้ำ", href: "/fnb/people" },
   ],
   agri: [
     { label: "ภาพรวมสวนยางพารา", href: "/plantation" },
@@ -64,6 +64,7 @@ const WORKSPACE_NAV: Record<Exclude<WorkspaceKey, "supthavee">, NavigationItem[]
   ],
   holding: [
     { label: "ภาพรวมโฮลดิ้ง", href: "/holding" },
+    { label: "บุคลากร & สิทธิ์ทั้งเครือ (IAM & HR Hub)", href: "/holding/people" },
     { label: "คลังเอกสารบริษัท PDF/ภาพ", href: "/holding/vault" },
     { label: "ทะเบียนนิติบุคคล", href: "/holding/entities" },
     { label: "สมุดบัญชีธนาคาร & QR ทุกธุรกิจ", href: "/holding/bank-accounts" },
@@ -249,18 +250,36 @@ function Icon({
   );
 }
 
+function visibleWorkspaceItems(
+  workspace: Exclude<WorkspaceKey, "supthavee">,
+  isSuperAdmin: boolean,
+  role: WorkspaceRole,
+): NavigationItem[] {
+  const items = WORKSPACE_NAV[workspace];
+  if (workspace !== "fnb" || isSuperAdmin) return items;
+  if (role === "FNB_HR_ACCOUNTANT") {
+    return items.filter((item) => item.href === "/fnb/people" || item.href.startsWith("/fnb/procurement"));
+  }
+  if (role === "FNB_HR") return items.filter((item) => item.href === "/fnb/people");
+  if (role === "FNB_ACCOUNTANT") return items.filter((item) => item.href.startsWith("/fnb/procurement"));
+  if (role === "FNB_BRANCH_MANAGER") return items.filter((item) => item.href.startsWith("/fnb/operations"));
+  return items.filter((item) => item.href === "/fnb/people");
+}
+
 function SidebarContent({
   closeMenu,
   roleCode,
   accessibleModules,
   isSuperAdmin,
   workspace,
+  workspaceRole,
 }: {
   closeMenu: () => void;
   roleCode: string | null;
   accessibleModules: AccessibleModules | null;
   isSuperAdmin: boolean;
   workspace: WorkspaceKey;
+  workspaceRole: WorkspaceRole;
 }) {
   const pathname = usePathname();
   const theme = WORKSPACE_THEMES[workspace];
@@ -348,7 +367,7 @@ function SidebarContent({
       {workspace !== "supthavee" ? (
         <nav className="sidebar-scroll flex-1 overflow-y-auto px-3 py-5">
           <div className="space-y-1">
-            {WORKSPACE_NAV[workspace].map((item) => {
+            {visibleWorkspaceItems(workspace, isSuperAdmin, workspaceRole).map((item) => {
               const itemPath = normalizePathname(item.href);
               const exactOnly = itemPath === "/fnb" || itemPath === "/plantation" || itemPath === "/property" || itemPath === "/holding";
               const isActive = exactOnly
@@ -488,6 +507,7 @@ export default function AppShell({
   roleCode = null,
   accessibleModules = null,
   isSuperAdmin = false,
+  workspaceRole = "SUPTHAVEE_STAFF",
 }: {
   children: React.ReactNode;
   /** จาก `user_profiles.full_name` ผ่าน Root Layout — ไม่ใช้ brand เป็น fallback */
@@ -495,10 +515,12 @@ export default function AppShell({
   roleCode?: string | null;
   accessibleModules?: AccessibleModules | null;
   isSuperAdmin?: boolean;
+  workspaceRole?: WorkspaceRole;
 }) {
   const pathname = usePathname();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const workspace: WorkspaceKey = isSuperAdmin ? workspaceFromPath(pathname) : "supthavee";
+  const fnbDesk = !isSuperAdmin && pathname.startsWith("/fnb") && (workspaceRole === "FNB_HR" || workspaceRole === "FNB_HR_ACCOUNTANT" || workspaceRole === "FNB_ACCOUNTANT" || workspaceRole === "FNB_BRANCH_MANAGER");
+  const workspace: WorkspaceKey = isSuperAdmin ? workspaceFromPath(pathname) : fnbDesk ? "fnb" : "supthavee";
   const theme = WORKSPACE_THEMES[workspace];
 
   // Auth and LINE LIFF routes render without ERP chrome (sidebar / top bar).
@@ -527,6 +549,7 @@ export default function AppShell({
           accessibleModules={accessibleModules}
           isSuperAdmin={isSuperAdmin}
           workspace={workspace}
+          workspaceRole={workspaceRole}
         />
       </aside>
 
@@ -550,6 +573,7 @@ export default function AppShell({
           accessibleModules={accessibleModules}
           isSuperAdmin={isSuperAdmin}
           workspace={workspace}
+          workspaceRole={workspaceRole}
         />
       </aside>
 

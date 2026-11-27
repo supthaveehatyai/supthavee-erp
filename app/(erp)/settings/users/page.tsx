@@ -1,11 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Shield, Users } from "lucide-react";
-import { listFnbStaffAccounts, listUserWorkspaceBadges } from "@/lib/actions/fnb-staff-access";
 import { getRolePermissions } from "@/lib/actions/role-permissions";
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
-import { getUserAccessContext } from "@/lib/holding/workspace-access";
-import { getAppRoles, getUsers } from "@/lib/actions/user.actions";
+import { getAppRoles, getUsers, listSupthaveeGrantMeta } from "@/lib/actions/user.actions";
 import type { ManagedUser } from "@/types/user";
 import {
   DATA_ACCESS_SCOPE_LABELS,
@@ -32,7 +29,6 @@ import {
   SETTINGS_HUB_TABS,
 } from "@/components/shared/page-mode-tabs";
 import { CreateUserDialog } from "./create-user-dialog";
-import { FnbStaffPanel } from "./fnb-staff-panel";
 import { RolePermissionsPanel } from "./role-permissions-panel";
 import { UserProfileFormSheet } from "./user-profile-form-sheet";
 import { UserRowActions } from "./user-row-actions";
@@ -75,7 +71,13 @@ function StatusBadge({ active }: { active: boolean }) {
   );
 }
 
-function UsersTable({ users, badges }: { users: ManagedUser[]; badges: Record<string, string> }) {
+function UsersTable({
+  users,
+  meta,
+}: {
+  users: ManagedUser[];
+  meta: Record<string, { username: string; mustChangePin: boolean }>;
+}) {
   if (users.length === 0) {
     return (
       <p className="px-2 py-10 text-center text-sm text-slate-500">
@@ -90,7 +92,7 @@ function UsersTable({ users, badges }: { users: ManagedUser[]; badges: Record<st
         <TableHeader>
           <TableRow>
             <TableHead className="w-[16%]">ชื่อ</TableHead>
-            <TableHead className="w-[14%]">ธุรกิจ</TableHead>
+            <TableHead className="w-[14%]">Username</TableHead>
             <TableHead className="w-[22%]">อีเมล</TableHead>
             <TableHead className="w-[16%]">สิทธิ์ / Role</TableHead>
             <TableHead className="w-[14%]">Data Access</TableHead>
@@ -115,7 +117,12 @@ function UsersTable({ users, badges }: { users: ManagedUser[]; badges: Record<st
                   {user.full_name}
                 </Link>
               </TableCell>
-              <TableCell className="text-xs text-slate-700">{badges[user.id] ?? "🔵 เฉพาะทรัพย์ทวี"}</TableCell>
+              <TableCell className="text-xs text-slate-700">
+                <p className="font-medium text-slate-900">{meta[user.id]?.username || "—"}</p>
+                <p className={meta[user.id]?.mustChangePin ? "text-amber-700" : "text-emerald-700"}>
+                  {meta[user.id]?.mustChangePin ? "รอเปลี่ยนจาก 555555" : "ตั้งรหัสส่วนตัวแล้ว"}
+                </p>
+              </TableCell>
               <TableCell className="break-all text-slate-700">
                 {user.email}
               </TableCell>
@@ -158,24 +165,25 @@ export default async function UsersSettingsPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const profileUserId = readSearchParam(params, USER_PROFILE_SEARCH_PARAM) ?? "";
   const requestedTab = readSearchParam(params, "tab");
-  const current = await getCurrentAuthUser();
-  const access = current ? await getUserAccessContext(current.userId) : null;
-  const superAdmin = access?.isSuperAdmin === true;
-  const tab = requestedTab === "roles" ? "roles" : requestedTab === "fnb-staff" && superAdmin ? "fnb-staff" : "users";
+  const tab = requestedTab === "roles" ? "roles" : "users";
 
-  const [usersResult, rolesResult, permissionsResult, badges, fnbStaff] = await Promise.all([
+  const [usersResult, rolesResult, permissionsResult, grantMeta] = await Promise.all([
     getUsers(),
     getAppRoles(),
     getRolePermissions(),
-    listUserWorkspaceBadges(),
-    superAdmin ? listFnbStaffAccounts() : Promise.resolve({ data: [], error: null }),
+    listSupthaveeGrantMeta(),
   ]);
-  const supthaveeRoles = rolesResult.data.filter(
-    (role) => role.role_code !== "fnb_staff" && role.role_code !== "fnb_accountant",
-  );
+  const supthaveeRoles = rolesResult.data.filter((role) => !role.role_code.startsWith("fnb_"));
+  const supthaveePermissions = permissionsResult.data.filter((role) => !role.role_code.startsWith("fnb_"));
+  const supthaveeUsers = usersResult.data.filter((user) => {
+    const grant = grantMeta[user.id];
+    if (user.role_code.startsWith("fnb_")) return false;
+    if (!grant) return true;
+    return grant.workspaces.includes("supthavee");
+  });
 
   const profileUser = profileUserId
-    ? (usersResult.data.find((row) => row.id === profileUserId) ?? null)
+    ? (supthaveeUsers.find((row) => row.id === profileUserId) ?? null)
     : null;
   const profileError =
     profileUserId && !profileUser
@@ -227,18 +235,6 @@ export default async function UsersSettingsPage({ searchParams }: PageProps) {
           <Shield className="size-4" />
           จัดการสิทธิ์ระดับบทบาท (Role Permissions)
         </Link>
-        {superAdmin ? (
-          <Link
-            href="/settings/users?tab=fnb-staff"
-            className={`inline-flex h-10 items-center rounded-xl px-4 text-sm font-semibold transition ${
-              tab === "fnb-staff"
-                ? "bg-red-700 text-white shadow-sm"
-                : "border border-red-200 bg-white text-red-800 hover:bg-red-50"
-            }`}
-          >
-            🔴 พนักงานร้านน้ำ (Lucky Cup / ชาทร) & สิทธิ์ข้ามธุรกิจ
-          </Link>
-        ) : null}
       </div>
 
       {tab === "users" ? (
@@ -259,28 +255,15 @@ export default async function UsersSettingsPage({ searchParams }: PageProps) {
             <CardHeader className="pb-3">
               <CardTitle className="text-base">รายชื่อผู้ใช้งาน</CardTitle>
               <CardDescription>
-                {usersResult.data.length} คน · Inactive = ระงับสิทธิ์
+                {supthaveeUsers.length} คน · Inactive = ระงับสิทธิ์
                 (ไม่ลบประวัติ)
               </CardDescription>
             </CardHeader>
             <CardContent className="px-0 sm:px-6">
-              <UsersTable users={usersResult.data} badges={badges} />
+              <UsersTable users={supthaveeUsers} meta={grantMeta} />
             </CardContent>
           </Card>
         </>
-      ) : tab === "fnb-staff" ? (
-        <Card className="border-red-200 shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">พนักงานร้านน้ำและสิทธิ์แยกธุรกิจ</CardTitle>
-            <CardDescription>
-              บัญชีนี้เข้าได้เฉพาะพอร์ทัลร้านน้ำของแบรนด์และสาขาที่กำหนด
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {fnbStaff.error ? <p className="mb-3 text-sm text-red-700">{fnbStaff.error}</p> : null}
-            <FnbStaffPanel rows={fnbStaff.data} />
-          </CardContent>
-        </Card>
       ) : (
         <>
           {!permissionsResult.success ? (
@@ -299,7 +282,7 @@ export default async function UsersSettingsPage({ searchParams }: PageProps) {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <RolePermissionsPanel roles={permissionsResult.data} />
+              <RolePermissionsPanel roles={supthaveePermissions} />
             </CardContent>
           </Card>
         </>

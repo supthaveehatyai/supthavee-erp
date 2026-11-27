@@ -10,9 +10,12 @@ const WORKSPACES: WorkspaceKey[] = ["supthavee", "fnb", "agri", "prop", "holding
 const ROLES: WorkspaceRole[] = [
   "SUPER_ADMIN",
   "SUPTHAVEE_STAFF",
+  "SUPTHAVEE_HR",
   "FNB_STORE_STAFF",
   "FNB_BRANCH_MANAGER",
   "FNB_ACCOUNTANT",
+  "FNB_HR",
+  "FNB_HR_ACCOUNTANT",
   "PROP_MANAGER",
   "AGRI_MANAGER",
 ];
@@ -29,9 +32,33 @@ export function safeInternalPath(value: string | null | undefined): string | nul
 }
 
 export function fnbStaffHome(ctx: Pick<UserAccessContext, "workspaceRole" | "assignedBrandCode">): string {
+  if (ctx.workspaceRole === "FNB_HR" || ctx.workspaceRole === "FNB_HR_ACCOUNTANT") return "/fnb/people";
   if (ctx.workspaceRole === "FNB_ACCOUNTANT") return "/fnb/procurement";
-  if (ctx.workspaceRole === "FNB_BRANCH_MANAGER") return "/fnb/operations";
   return ctx.assignedBrandCode === "CHATORN" ? "/liff/chatorn" : "/liff/luckycup";
+}
+
+export function homeAfterLogin(ctx: UserAccessContext): string {
+  if (ctx.mustChangePin) return "/change-pin";
+  if (
+    ctx.workspaceRole === "FNB_STORE_STAFF" ||
+    ctx.workspaceRole === "FNB_BRANCH_MANAGER" ||
+    ctx.workspaceRole === "FNB_ACCOUNTANT" ||
+    ctx.workspaceRole === "FNB_HR" ||
+    ctx.workspaceRole === "FNB_HR_ACCOUNTANT"
+  ) {
+    return fnbStaffHome(ctx);
+  }
+  return "/dashboard";
+}
+
+export function canOpenSupthaveeUsers(
+  pathname: string,
+  ctx: Pick<UserAccessContext, "isSuperAdmin" | "workspaceRole">,
+  roleCode: string | null | undefined,
+): boolean {
+  const path = normalizePathname(pathname);
+  if (path !== "/settings/users" && !path.startsWith("/settings/users/")) return false;
+  return ctx.isSuperAdmin || ctx.workspaceRole === "SUPTHAVEE_HR" || String(roleCode ?? "").toLowerCase() === "admin";
 }
 
 export function isFnbExecutivePath(pathname: string): boolean {
@@ -66,6 +93,8 @@ function hasWorkspace(ctx: UserAccessContext, workspace: WorkspaceKey): boolean 
 export function accessRedirect(pathname: string, ctx: UserAccessContext): string | null {
   const path = normalizePathname(pathname);
   if (!ctx.isActive) return "/login?reason=deactivated";
+  if (path === "/change-pin") return ctx.mustChangePin ? null : homeAfterLogin({ ...ctx, mustChangePin: false });
+  if (ctx.mustChangePin) return "/change-pin";
   if (ctx.isSuperAdmin) return null;
 
   const home = fnbStaffHome(ctx);
@@ -86,6 +115,15 @@ export function accessRedirect(pathname: string, ctx: UserAccessContext): string
   const liffPath = path === "/liff" || path.startsWith("/liff/");
   if ((fnbPath || liffPath) && !hasWorkspace(ctx, "fnb")) return "/forbidden";
 
+  if ((ctx.workspaceRole === "FNB_STORE_STAFF" || ctx.workspaceRole === "FNB_BRANCH_MANAGER") && (fnbPath || liffPath)) {
+    return home;
+  }
+  if (ctx.workspaceRole === "FNB_HR" || ctx.workspaceRole === "FNB_HR_ACCOUNTANT") {
+    const people = path === "/fnb/people" || path.startsWith("/fnb/people/");
+    const procure = path === "/fnb/procurement" || path.startsWith("/fnb/procurement/");
+    if (liffPath) return "/fnb/people";
+    if (fnbPath && !people && !(ctx.workspaceRole === "FNB_HR_ACCOUNTANT" && procure)) return "/fnb/people";
+  }
   if (ctx.workspaceRole === "FNB_STORE_STAFF" && fnbPath) return home;
   if (
     ctx.workspaceRole === "FNB_ACCOUNTANT" &&
@@ -156,5 +194,17 @@ export function parseAccessPayload(raw: unknown): UserAccessContext | null {
     allowedBranchCodes: branches,
     canViewFnbReports: row.can_view_fnb_reports === true,
     canViewCostPrice: row.can_view_cost_price === true,
+    username: String(row.username ?? email),
+    mustChangePin: row.must_change_pin === true,
+    isHrManager: row.is_hr_manager === true,
+    hrAllowedWorkspaces: (Array.isArray(row.hr_allowed_workspaces) ? row.hr_allowed_workspaces : []).filter(
+      (item): item is WorkspaceKey => WORKSPACES.includes(item as WorkspaceKey),
+    ),
+    hrAllowedEntityIds: Array.isArray(row.hr_allowed_entity_ids) ? row.hr_allowed_entity_ids.map((item) => String(item)) : [],
+    hrAllowedBrandCodes: Array.isArray(row.hr_allowed_brand_codes)
+      ? row.hr_allowed_brand_codes.filter((item): item is "LUCKY_CUP" | "CHATORN" => item === "LUCKY_CUP" || item === "CHATORN")
+      : [],
+    hrCanPreparePayroll: row.hr_can_prepare_payroll === true,
+    hrCanViewExecPrivatePay: row.hr_can_view_exec_private_pay === true,
   };
 }

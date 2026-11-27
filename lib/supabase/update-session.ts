@@ -16,7 +16,7 @@ import {
   parseAccessibleModules,
   prefersProductionKanbanHome,
 } from "@/lib/auth/module-access";
-import { accessRedirect, isSupthaveeErpPath, parseAccessPayload } from "@/lib/holding/access-routes";
+import { accessRedirect, canOpenSupthaveeUsers, isSupthaveeErpPath, parseAccessPayload } from "@/lib/holding/access-routes";
 import { SUPER_ADMIN_FULL_NAME, type UserAccessContext } from "@/types/holding";
 
 function isStaticAsset(pathname: string): boolean {
@@ -123,7 +123,11 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
         kanbanUrl.search = "";
         return NextResponse.redirect(kanbanUrl);
       }
-      if (!isHoldingWorkspacePath(pathname) && !canAccessPath(pathname, access.modules, access.roleCode)) {
+      if (
+        !isHoldingWorkspacePath(pathname) &&
+        !canAccessPath(pathname, access.modules, access.roleCode) &&
+        !(context && canOpenSupthaveeUsers(pathname, context, access.roleCode))
+      ) {
         const forbiddenUrl = request.nextUrl.clone();
         forbiddenUrl.pathname = "/forbidden";
         forbiddenUrl.search = "";

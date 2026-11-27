@@ -64,6 +64,14 @@ async function fallbackAccess(userId: string): Promise<UserAccessContext | null>
     allowed_branch_codes: row?.allowed_branch_codes ?? [],
     can_view_fnb_reports: row ? row.can_view_fnb_reports === true : superEmail,
     can_view_cost_price: row ? row.can_view_cost_price === true : superEmail,
+    username: row?.username ?? email,
+    must_change_pin: row?.must_change_pin === true,
+    is_hr_manager: row ? row.is_hr_manager === true || row.is_super_admin === true : superEmail,
+    hr_allowed_workspaces: row?.hr_allowed_workspaces ?? (superEmail ? ["supthavee", "fnb", "agri", "prop", "holding"] : []),
+    hr_allowed_entity_ids: row?.hr_allowed_entity_ids ?? [],
+    hr_allowed_brand_codes: row?.hr_allowed_brand_codes ?? (superEmail ? ["LUCKY_CUP", "CHATORN"] : []),
+    hr_can_prepare_payroll: row ? row.hr_can_prepare_payroll === true || row.is_super_admin === true : superEmail,
+    hr_can_view_exec_private_pay: row ? row.hr_can_view_exec_private_pay === true || row.is_super_admin === true : superEmail,
   });
 }
 
@@ -118,9 +126,16 @@ export async function requireFnbDeskAccess(): Promise<UserAccessContext> {
   redirect(ctx.allowedWorkspaces.includes("fnb") ? fnbStaffHome(ctx) : "/forbidden");
 }
 
-export async function requireFnbProcurementOffice(): Promise<{ userId: string }> {
+export async function requireFnbProcurementOffice(): Promise<UserAccessContext> {
   const ctx = await requireActiveContext();
-  if (ctx.isSuperAdmin || ctx.workspaceRole === "FNB_ACCOUNTANT") return { userId: ctx.userId };
+  if (ctx.isSuperAdmin || ctx.workspaceRole === "FNB_ACCOUNTANT" || ctx.workspaceRole === "FNB_HR_ACCOUNTANT") return ctx;
+  redirect(ctx.allowedWorkspaces.includes("fnb") ? fnbStaffHome(ctx) : "/forbidden");
+}
+
+export async function requireFnbPeopleAccess(): Promise<UserAccessContext> {
+  const ctx = await requireActiveContext();
+  const hrDesk = ctx.workspaceRole === "FNB_HR" || ctx.workspaceRole === "FNB_HR_ACCOUNTANT" || (ctx.isHrManager && ctx.hrAllowedWorkspaces.includes("fnb"));
+  if (ctx.isSuperAdmin || (hrDesk && ctx.allowedWorkspaces.includes("fnb"))) return ctx;
   redirect(ctx.allowedWorkspaces.includes("fnb") ? fnbStaffHome(ctx) : "/forbidden");
 }
 
@@ -137,10 +152,12 @@ export async function requireFnbStoreOperationAccess(branchCode?: string): Promi
   }
   const code = String(branchCode ?? "").trim();
   const silo = !ctx.isSuperAdmin && (ctx.workspaceRole === "FNB_STORE_STAFF" || ctx.workspaceRole === "FNB_BRANCH_MANAGER");
-  if (silo && code) {
-    if (!ctx.allowedBranchCodes.includes(code)) {
-      return { ok: false, error: "ไม่มีสิทธิ์บันทึกข้อมูลของสาขานี้" };
-    }
+  if (!ctx.isSuperAdmin && code && ctx.allowedBranchCodes.length > 0 && !ctx.allowedBranchCodes.includes(code)) {
+    return { ok: false, error: "ไม่มีสิทธิ์บันทึกข้อมูลของสาขานี้" };
+  }
+  const brandLimit = new Set(ctx.hrAllowedBrandCodes);
+  if (ctx.assignedBrandCode) brandLimit.add(ctx.assignedBrandCode);
+  if (!ctx.isSuperAdmin && code && (silo || brandLimit.size > 0)) {
     const branch = await schemaAdmin()
       .schema("fnb")
       .from("branches")
@@ -148,7 +165,7 @@ export async function requireFnbStoreOperationAccess(branchCode?: string): Promi
       .eq("branch_code", code)
       .maybeSingle();
     const brand = (branch.data as { brand_code?: string } | null)?.brand_code ?? "";
-    if (!ctx.assignedBrandCode || brand !== ctx.assignedBrandCode) {
+    if (brandLimit.size > 0 && !brandLimit.has(brand as "LUCKY_CUP" | "CHATORN")) {
       return { ok: false, error: "ไม่มีสิทธิ์ข้ามแบรนด์ร้านน้ำ" };
     }
   }

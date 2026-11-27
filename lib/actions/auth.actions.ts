@@ -10,7 +10,9 @@ import { redirect } from "next/navigation";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { createClient } from "@/lib/supabase/server-admin";
 import { createSupabaseSSRClient } from "@/lib/supabase/ssr-server";
-import { accessRedirect, fnbStaffHome, safeInternalPath } from "@/lib/holding/access-routes";
+import { accessRedirect, homeAfterLogin, safeInternalPath } from "@/lib/holding/access-routes";
+import { weakPinReason } from "@/lib/holding/pin-policy";
+import { schemaAdmin } from "@/lib/holding/schema-db";
 import { getUserAccessContext } from "@/lib/holding/workspace-access";
 import type { AuthGateProfile, SignInWithPinResult, SignOutResult } from "@/types/auth";
 
@@ -33,6 +35,67 @@ function escapeIlikeExact(raw: string): string {
 
 function pinsMatch(pinInput: unknown, dbPin: unknown): boolean {
   return pinAsString(pinInput).toString() === pinAsString(dbPin).toString();
+}
+
+function loginBlockMessage(reason: string): string {
+  if (reason === "DEACTIVATED") return "บัญชีนี้ถูกระงับสิทธิ์การเข้าใช้งานแล้ว กรุณาติดต่อผู้ดูแลระบบ";
+  if (reason === "NOT_STARTED_YET") return "บัญชียังไม่เปิดใช้งานจนถึงวันเริ่มงานจริง";
+  if (reason === "TEMP_LOCKED") return "กดรหัส PIN ผิดเกิน 5 ครั้ง ระบบล็อกชั่วคราว 15 นาที";
+  return "ชื่อผู้ใช้หรือรหัส PIN ไม่ถูกต้อง";
+}
+
+type HoldingAuth = {
+  schema: (name: "holding") => {
+    rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>;
+  };
+};
+
+async function resolveLogin(
+  admin: ReturnType<typeof createClient>,
+  identifier: string,
+): Promise<{ ok: true; userId: string; authEmail: string; mustChangePin: boolean } | { ok: false; error: string }> {
+  const rpc = await (admin as unknown as HoldingAuth).schema("holding").rpc("resolve_login_identifier", { p_identifier: identifier });
+  const row = rpc.data && typeof rpc.data === "object" ? rpc.data as Record<string, unknown> : null;
+  if (!rpc.error && row) {
+    if (row.ok === true) {
+      return {
+        ok: true,
+        userId: String(row.user_id),
+        authEmail: normalizeEmail(row.auth_email),
+        mustChangePin: row.must_change_pin === true,
+      };
+    }
+    return { ok: false, error: loginBlockMessage(String(row.reason ?? "")) };
+  }
+  const profile = identifier.includes("@") ? await loadProfileByEmail(admin, identifier) : null;
+  if (!profile || profile.is_active === false) {
+    return { ok: false, error: profile ? loginBlockMessage("DEACTIVATED") : loginBlockMessage("NOT_FOUND") };
+  }
+  return { ok: true, userId: profile.id, authEmail: normalizeEmail(profile.email), mustChangePin: false };
+}
+
+async function loadProfileById(
+  admin: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<AuthGateProfile | null> {
+  const { data, error } = await admin
+    .from("user_profiles")
+    .select("id, email, is_active, full_name, pin_code")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data as AuthGateProfile;
+}
+
+async function recordLogin(
+  admin: ReturnType<typeof createClient>,
+  userId: string,
+  success: boolean,
+): Promise<void> {
+  await (admin as unknown as HoldingAuth).schema("holding").rpc("record_login_attempt", {
+    p_user_id: userId,
+    p_success: success,
+  });
 }
 
 async function loadProfileByEmail(
@@ -150,11 +213,11 @@ export async function signInWithPin(
   pin: string,
   nextPath?: string | null,
 ): Promise<SignInWithPinResult> {
-  const normalizedEmail = normalizeEmail(email);
+  const identifier = normalizeEmail(email);
   const pinInput = pinAsString(pin).toString();
 
-  if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-    return { success: false, error: "กรุณาระบุอีเมลให้ถูกต้อง" };
+  if (!identifier || identifier.length < 3) {
+    return { success: false, error: "กรุณาระบุชื่อผู้ใช้หรืออีเมล" };
   }
 
   if (!/^\d{6}$/.test(pinInput)) {
@@ -166,27 +229,23 @@ export async function signInWithPin(
 
   try {
     const admin = createClient();
-    const profile = await loadProfileByEmail(admin, normalizedEmail);
+    const resolved = await resolveLogin(admin, identifier);
+    if (!resolved.ok) return { success: false, error: resolved.error };
+    const profile = await loadProfileById(admin, resolved.userId);
 
     if (!profile) {
       return {
         success: false,
-        error: "อีเมลหรือรหัส PIN ไม่ถูกต้อง",
-      };
-    }
-
-    if (profile.is_active === false) {
-      return {
-        success: false,
-        error: "บัญชีนี้ถูกระงับสิทธิ์การใช้งานแล้ว",
+        error: "ชื่อผู้ใช้หรือรหัส PIN ไม่ถูกต้อง",
       };
     }
 
     const dbPin = pinAsString(profile.pin_code).toString();
     if (!dbPin || !pinsMatch(pinInput, dbPin)) {
+      await recordLogin(admin, profile.id, false);
       return {
         success: false,
-        error: "อีเมลหรือรหัส PIN ไม่ถูกต้อง",
+        error: "ชื่อผู้ใช้หรือรหัส PIN ไม่ถูกต้อง",
       };
     }
 
@@ -194,7 +253,7 @@ export async function signInWithPin(
     const synced = await syncAuthPasswordToPin(
       admin,
       profile.id,
-      normalizedEmail,
+      resolved.authEmail,
       pinInput,
     );
     if (!synced) {
@@ -206,7 +265,7 @@ export async function signInWithPin(
 
     const supabase = await createSupabaseSSRClient();
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: normalizedEmail,
+      email: resolved.authEmail,
       password: pinInput,
     });
 
@@ -217,24 +276,23 @@ export async function signInWithPin(
       );
       return {
         success: false,
-        error: "อีเมลหรือรหัส PIN ไม่ถูกต้อง",
+        error: "ชื่อผู้ใช้หรือรหัส PIN ไม่ถูกต้อง",
       };
     }
 
+    await recordLogin(admin, profile.id, true);
     const ctx = await getUserAccessContext(profile.id);
     if (ctx && !ctx.isActive) {
       await supabase.auth.signOut();
-      return { success: false, error: "บัญชีนี้ถูกระงับสิทธิ์การใช้งานแล้ว" };
+      return { success: false, error: "บัญชีนี้ถูกระงับสิทธิ์การเข้าใช้งานแล้ว กรุณาติดต่อผู้ดูแลระบบ" };
     }
+    if (ctx?.mustChangePin || resolved.mustChangePin) redirect("/change-pin");
     const requested = safeInternalPath(nextPath);
-    let destination = DASHBOARD_PATH;
-    if (ctx?.workspaceRole === "FNB_STORE_STAFF" || ctx?.workspaceRole === "FNB_ACCOUNTANT") {
-      destination = fnbStaffHome(ctx);
-    } else if (ctx?.workspaceRole === "FNB_BRANCH_MANAGER") {
-      destination = requested && accessRedirect(requested, ctx) === null ? requested : fnbStaffHome(ctx);
-    } else if (requested && (!ctx || accessRedirect(requested, ctx) === null)) {
-      destination = requested;
-    }
+    const destination = ctx
+      ? requested && accessRedirect(requested, ctx) === null && homeAfterLogin(ctx) === DASHBOARD_PATH
+        ? requested
+        : homeAfterLogin(ctx)
+      : requested || DASHBOARD_PATH;
     redirect(destination);
   } catch (err) {
     if (isRedirectError(err)) throw err;
@@ -265,4 +323,40 @@ export async function signOut(): Promise<SignOutResult> {
   }
 
   redirect(LOGIN_PATH);
+}
+
+export async function changeOwnPin(pin: string, confirm: string): Promise<SignInWithPinResult> {
+  const nextPin = pinAsString(pin);
+  const weak = weakPinReason(nextPin);
+  if (weak) return { success: false, error: weak };
+  if (nextPin !== pinAsString(confirm)) return { success: false, error: "รหัส PIN ทั้งสองช่องไม่ตรงกัน" };
+  try {
+    const supabase = await createSupabaseSSRClient();
+    const { data } = await supabase.auth.getUser();
+    if (!data.user?.id) redirect("/login");
+    const admin = createClient();
+    const updated = await admin.auth.admin.updateUserById(data.user.id, { password: nextPin, email_confirm: true });
+    if (updated.error) return { success: false, error: updated.error.message };
+    const profile = await admin.from("user_profiles").update({ pin_code: nextPin, updated_at: new Date().toISOString() }).eq("id", data.user.id);
+    if (profile.error) return { success: false, error: profile.error.message };
+    const grant = await schemaAdmin().schema("holding").from("user_workspace_grants").update({
+      must_change_pin: false,
+      pin_changed_at: new Date().toISOString(),
+    }).eq("user_id", data.user.id);
+    if (grant.error) return { success: false, error: grant.error.message ?? "บันทึกสถานะ PIN ไม่สำเร็จ" };
+    const ctx = await getUserAccessContext(data.user.id);
+    await schemaAdmin().schema("holding").from("iam_hr_audit_logs").insert({
+      workspace_key: ctx?.primaryWorkspace ?? "supthavee",
+      action_type: "PIN_CHANGED",
+      actor_user_id: data.user.id,
+      actor_name: ctx?.displayActorName || ctx?.username || "ผู้ใช้งาน",
+      target_user_id: data.user.id,
+      target_name: ctx?.fullName || null,
+      details_json: { source: "first-login" },
+    });
+    redirect(ctx ? homeAfterLogin({ ...ctx, mustChangePin: false }) : DASHBOARD_PATH);
+  } catch (err) {
+    if (isRedirectError(err)) throw err;
+    return { success: false, error: err instanceof Error ? err.message : "เปลี่ยนรหัส PIN ไม่สำเร็จ" };
+  }
 }
