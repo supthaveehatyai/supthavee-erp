@@ -309,6 +309,10 @@ export async function listFrontBackItemsAction(brandLock?: FnbBrandCode | null):
       is_active: true,
       shelf_life_months: row.shelf_life_months == null ? null : num(row.shelf_life_months),
       requires_expiry_tracking: row.requires_expiry_tracking !== false,
+      alias_codes: Array.isArray(row.alias_codes) ? row.alias_codes.map((code) => text(code)) : [],
+      track_front_display_daily: row.track_front_display_daily === true,
+      backroom_count_schedule: text(row.backroom_count_schedule) || "WEEKLY_2X",
+      backroom_count_weekdays: Array.isArray(row.backroom_count_weekdays) ? row.backroom_count_weekdays.map((day) => Number(day)) : [],
     })).filter((item) => {
       if (!brandLock) return true;
       if (item.brand_scope !== "ALL" && item.brand_scope !== brandLock) return false;

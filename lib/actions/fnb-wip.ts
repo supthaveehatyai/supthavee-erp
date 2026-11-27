@@ -194,7 +194,7 @@ export async function listWipBoardAction(input: {
     const db = schemaAdmin().schema("fnb");
     const [bases, items, batches] = await Promise.all([
       db.from("prep_bases").select("base_code, base_name_th, yield_qty_ml, brand_code, is_active").eq("is_active", true).limit(20),
-      db.from("items").select("id, short_code, name_th, count_uom, brand_scope").eq("is_active", true).order("short_code", { ascending: true }).limit(2000),
+      db.from("items").select("id, short_code, alias_codes, external_code, name_th, count_uom, brand_scope").eq("is_active", true).order("short_code", { ascending: true }).limit(2000),
       db.from("bar_wip_batches").select("*").eq("branch_code", input.branch_code).limit(500),
     ]);
     if (bases.error) return fail(empty, bases.error, "อ่านเบสไม่สำเร็จ");
@@ -210,7 +210,14 @@ export async function listWipBoardAction(input: {
         .map((row) => ({ base_code: text(row.base_code), base_name_th: text(row.base_name_th), yield_qty_ml: num(row.yield_qty_ml) })),
       items: asRows(items.data)
         .filter((row) => keepsBrand(`${text(row.short_code)} ${text(row.name_th)}`, text(row.brand_scope), brand))
-        .map((row) => ({ id: text(row.id), short_code: text(row.short_code), name_th: text(row.name_th), count_uom: text(row.count_uom) })),
+        .map((row) => ({
+          id: text(row.id),
+          short_code: text(row.short_code),
+          name_th: text(row.name_th),
+          count_uom: text(row.count_uom),
+          alias_codes: Array.isArray(row.alias_codes) ? row.alias_codes.map((code) => text(code)) : [],
+          external_code: row.external_code == null ? null : text(row.external_code),
+        })),
       brews: rows.filter((row) => row.batch.batch_kind === "PREP_BASE" && row.work_date === input.work_date).map((row) => row.batch),
       containers: rows.filter((row) => row.batch.batch_status === "ACTIVE" && (row.batch.shelf_life_mode === "HOURS_AFTER_OPEN" || row.batch.shelf_life_mode === "DAYS_AFTER_OPEN")).map((row) => row.batch),
     });

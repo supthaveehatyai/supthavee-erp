@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { submitBlindCountAction, transferFnbStockAction } from "@/lib/actions/fnb-inventory";
+import { NightCloseCount } from "@/components/fnb/store-day-board";
+import { itemMatches } from "@/lib/fnb/item-search";
 import type { FnbBranchOption, FnbStockBalanceRow } from "@/types/fnb";
 
 const field = "h-10 w-full rounded-md border border-slate-200 px-3 text-sm";
@@ -18,19 +21,30 @@ export function InventoryWorkspace({
   showCost?: boolean;
 }) {
   const [branch, setBranch] = useState(branches[0]?.branch_code ?? "");
+  const [query, setQuery] = useState("");
+  const [tab, setTab] = useState<"stock" | "cycle">("stock");
   const [message, setMessage] = useState("");
   const [report, setReport] = useState("");
   const [pending, start] = useTransition();
-  const rows = useMemo(() => balances.filter((row) => row.branch_code === branch), [balances, branch]);
+  const rows = useMemo(() => balances.filter((row) => row.branch_code === branch && itemMatches(query, { short_code: row.short_code, name_th: row.name_th, alias_codes: row.alias_codes, external_code: row.external_code })), [balances, branch, query]);
   const sameEntity = branches.filter((item) => item.legal_entity_id && item.legal_entity_id === branches.find((row) => row.branch_code === branch)?.legal_entity_id);
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold text-slate-900">สต็อกสาขา โอนของ และนับแบบปิดตา</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold text-slate-900">สต็อกสาขา โอนของ และนับแบบปิดตา</h1>
+        <Link href="/fnb/sop-settings" className="text-sm text-red-700">ตั้งจุดจัดเก็บและความสะอาด</Link>
+      </div>
+      <div className="flex gap-2">
+        <button type="button" className={`rounded-full px-3 py-1 text-sm ${tab === "stock" ? "bg-red-700 text-white" : "bg-white"}`} onClick={() => setTab("stock")}>สต็อกและโอน</button>
+        <button type="button" className={`rounded-full px-3 py-1 text-sm ${tab === "cycle" ? "bg-red-700 text-white" : "bg-white"}`} onClick={() => setTab("cycle")}>รอบนับโกดัง</button>
+      </div>
+      <input className={field} value={query} placeholder="ค้นรหัสย่อ รหัสเรียก หรือชื่อ" onChange={(event) => setQuery(event.target.value)} />
       {message ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{message}</p> : null}
       <select className={field} value={branch} onChange={(event) => setBranch(event.target.value)}>
         {branches.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code} {item.branch_name_th}</option>)}
       </select>
-      <div className="overflow-auto rounded-xl border bg-white">
+      {tab === "cycle" ? <NightCloseCount branch={branch} workDate={new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date())} actorSource="desktop" brandLock={null} staffName="" warehouseOnly /> : null}
+      {tab === "stock" ? <><div className="overflow-auto rounded-xl border bg-white">
         <table className="min-w-full text-sm">
           <thead className="bg-red-50 text-left"><tr><th className="p-2">รหัส</th><th className="p-2">ชื่อ</th>{blindCount ? null : <th className="p-2">หน่วยนับ</th>}{blindCount ? null : <th className="p-2">หน่วยสูตร</th>}</tr></thead>
           <tbody>
@@ -97,6 +111,7 @@ export function InventoryWorkspace({
         <button className="rounded-md bg-red-700 px-4 py-2 text-sm text-white" disabled={pending}>ส่งใบนับ</button>
         {report ? <pre className="whitespace-pre-wrap text-sm">{report}</pre> : null}
       </form>
+      </> : null}
     </div>
   );
 }

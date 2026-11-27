@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { OpenShelfLifePanel } from "@/components/fnb/open-shelf-life-panel";
 import { commitFnbPriceExcelAction, previewFnbPriceExcelAction, saveFnbItemAction, saveFnbVendorPackAction } from "@/lib/actions/fnb-items";
-import { FNB_BRAND_SCOPES, FNB_CATEGORY_LABEL, FNB_FRONT_GROUPS, FNB_ITEM_CATEGORIES, FNB_RECIPE_UOMS, FNB_VAT_MODES, type FnbExcelPriceRow, type FnbItemRow, type FnbVendorPackRow } from "@/types/fnb";
+import { itemMatches } from "@/lib/fnb/item-search";
+import { FNB_BACKROOM_SCHEDULE_LABEL, FNB_BACKROOM_SCHEDULES, FNB_BRAND_SCOPES, FNB_CATEGORY_LABEL, FNB_FRONT_GROUPS, FNB_ITEM_CATEGORIES, FNB_RECIPE_UOMS, FNB_VAT_MODES, FNB_WEEKDAY_OPTIONS, type FnbExcelPriceRow, type FnbItemRow, type FnbVendorPackRow } from "@/types/fnb";
 
 const field = "h-10 w-full rounded-md border border-slate-200 px-3 text-sm";
 
@@ -13,12 +14,13 @@ export function ItemsWorkspace({ items, packs, initialTab = "items" }: { items: 
   const [brand, setBrand] = useState("ALL");
   const [category, setCategory] = useState("ALL");
   const [selected, setSelected] = useState(items[0]?.id ?? "");
+  const [query, setQuery] = useState("");
   const [preview, setPreview] = useState<FnbExcelPriceRow[]>([]);
   const [message, setMessage] = useState("");
   const [pending, start] = useTransition();
   const visible = useMemo(
-    () => items.filter((item) => (brand === "ALL" || item.brand_scope === brand) && (category === "ALL" || item.item_category === category)),
-    [items, brand, category],
+    () => items.filter((item) => (brand === "ALL" || item.brand_scope === brand) && (category === "ALL" || item.item_category === category) && itemMatches(query, item)),
+    [items, brand, category, query],
   );
   const item = items.find((row) => row.id === selected) ?? null;
   const itemPacks = packs.filter((pack) => pack.item_id === selected);
@@ -47,6 +49,7 @@ export function ItemsWorkspace({ items, packs, initialTab = "items" }: { items: 
           <option value="ALL">ทุกแบรนด์</option>
           {FNB_BRAND_SCOPES.map((scope) => <option key={scope} value={scope}>{scope}</option>)}
         </select>
+        <input className={field} value={query} placeholder="ค้นรหัสย่อ รหัสเรียก รหัสคลัง หรือชื่อ" onChange={(event) => setQuery(event.target.value)} />
         <select className={field} value={category} onChange={(event) => setCategory(event.target.value)}>
           <option value="ALL">ทุกหมวด</option>
           {FNB_ITEM_CATEGORIES.map((key) => <option key={key} value={key}>{FNB_CATEGORY_LABEL[key]}</option>)}
@@ -56,7 +59,7 @@ export function ItemsWorkspace({ items, packs, initialTab = "items" }: { items: 
         <div className="max-h-[32rem] space-y-2 overflow-auto">
           {visible.map((row) => (
             <button key={row.id} type="button" onClick={() => setSelected(row.id)} className={`block w-full rounded-lg border p-3 text-left ${row.id === selected ? "border-red-700 bg-red-50" : "border-slate-200 bg-white"}`}>
-              <p className="font-semibold">{row.short_code} · {row.name_th}</p>
+              <p className="font-semibold">{row.short_code}{row.alias_codes?.length ? ` / ${row.alias_codes.join(" ")}` : ""} · {row.name_th}</p>
               <p className="text-xs text-slate-500">{row.brand_scope} · อายุ {row.shelf_life_months ?? "-"} เดือน · ราคา {row.reference_purchase_price.toFixed(2)} · {row.requires_expiry_tracking ? "ต้องคุมวันหมดอายุ" : "ไม่คุมวันหมดอายุ"}</p>
             </button>
           ))}
@@ -141,13 +144,18 @@ function ItemForm({
           front_back_group: String(form.get("front_back_group") ?? ""),
           shelf_life_months: Number(form.get("shelf_life_months") ?? 0),
           requires_expiry_tracking: form.get("requires_expiry_tracking") === "on",
+          alias_codes: String(form.get("alias_codes") ?? ""),
+          track_front_display_daily: form.get("track_front_display_daily") === "on",
+          backroom_count_schedule: String(form.get("backroom_count_schedule") ?? "WEEKLY_2X"),
+          backroom_count_weekdays: form.getAll("weekday").map((day) => Number(day)),
         });
         if (saved.error) toast.error(saved.error);
         else toast.success("บันทึกวัตถุดิบแล้ว");
         setMessage(saved.error ?? "บันทึกวัตถุดิบแล้ว");
       });
     }}>
-      <label className="text-sm">รหัสย่อ<input className={field} name="short_code" defaultValue={item?.short_code} required /></label>
+      <label className="text-sm">รหัสย่อตามคู่มือ (Short Code)<input className={field} name="short_code" defaultValue={item?.short_code} required /></label>
+      <label className="text-sm">รหัสเรียกติดปากสำรอง (Aliases)<input className={field} name="alias_codes" defaultValue={item?.alias_codes?.join(", ") ?? ""} placeholder="PS, CWT" /></label>
       <label className="text-sm">รหัสคลังจีน<input className={field} name="external_code" defaultValue={item?.external_code ?? ""} /></label>
       <label className="text-sm">ชื่อวัตถุดิบ<input className={field} name="name_th" defaultValue={item?.name_th} required /></label>
       <select className={field} name="brand_scope" defaultValue={item?.brand_scope ?? "ALL"}>{FNB_BRAND_SCOPES.map((scope) => <option key={scope}>{scope}</option>)}</select>
@@ -161,6 +169,11 @@ function ItemForm({
       <select className={field} name="default_vat_mode" defaultValue={item?.default_vat_mode ?? "EX_VAT"}>{FNB_VAT_MODES.map((mode) => <option key={mode}>{mode}</option>)}</select>
       <label className="text-sm">อายุเก็บรักษา (เดือน นับจากวันผลิต) เช่น 9, 12, 18 เดือน<input className={field} name="shelf_life_months" type="number" defaultValue={item?.shelf_life_months ?? ""} /></label>
       <label className="flex items-center gap-2 text-sm"><input name="requires_expiry_tracking" type="checkbox" defaultChecked={item?.requires_expiry_tracking !== false} />ต้องแกะกล่องลงวันหมดอายุหลังรับของ</label>
+      <label className="flex items-center gap-2 text-sm md:col-span-2"><input name="track_front_display_daily" type="checkbox" defaultChecked={item ? item.track_front_display_daily : false} />เช็คจำนวนชั้นโชว์/ตู้แช่หน้าร้านทุกวัน (เปิด-ปิดร้าน)</label>
+      <label className="text-sm md:col-span-2">รอบความถี่ตรวจนับคลังหลังร้าน / วัสดุสิ้นเปลืองตอนปิดร้าน
+        <select className={field} name="backroom_count_schedule" defaultValue={item?.backroom_count_schedule || "WEEKLY_2X"}>{FNB_BACKROOM_SCHEDULES.map((key) => <option key={key} value={key}>{FNB_BACKROOM_SCHEDULE_LABEL[key]}</option>)}</select>
+      </label>
+      <div className="flex flex-wrap gap-3 text-sm md:col-span-2">{FNB_WEEKDAY_OPTIONS.map((day) => <label key={day.day} className="flex items-center gap-1"><input type="checkbox" name="weekday" value={day.day} defaultChecked={item?.backroom_count_weekdays?.includes(day.day)} />{day.label}</label>)}</div>
       <label className="flex items-center gap-2 text-sm"><input name="is_front_back_checked" type="checkbox" defaultChecked={item?.is_front_back_checked} />เช็กหน้า/หลัง</label>
       <select className={field} name="front_back_group" defaultValue={item?.front_back_group ?? "BAKERY_CAKE"}>{FNB_FRONT_GROUPS.map((group) => <option key={group}>{group}</option>)}</select>
       <button className="rounded-md bg-red-700 px-4 py-2 text-sm text-white md:col-span-2" disabled={pending}>{item ? "บันทึกการแก้ไข" : "เพิ่มวัตถุดิบ"}</button>

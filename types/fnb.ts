@@ -48,6 +48,34 @@ export const FNB_SCOOP_HINTS = [
 
 export const FNB_NOTE_VALUES = [1000, 500, 100, 50, 20, 10, 5, 2, 1] as const;
 
+export const FNB_BACKROOM_SCHEDULES = ["DAILY", "EVERY_3_DAYS", "WEEKLY_2X", "WEEKLY_1X", "MONTHLY_ONLY"] as const;
+export const FNB_BACKROOM_SCHEDULE_LABEL: Record<(typeof FNB_BACKROOM_SCHEDULES)[number], string> = {
+  DAILY: "นับทุกคืน",
+  EVERY_3_DAYS: "นับทุก 3 วัน",
+  WEEKLY_2X: "สัปดาห์ละ 2 ครั้ง",
+  WEEKLY_1X: "สัปดาห์ละ 1 ครั้ง",
+  MONTHLY_ONLY: "นับเฉพาะรอบเดือน",
+};
+export const FNB_WEEKDAY_OPTIONS = [
+  { day: 1, label: "จันทร์" },
+  { day: 2, label: "อังคาร" },
+  { day: 3, label: "พุธ" },
+  { day: 4, label: "พฤหัส" },
+  { day: 5, label: "ศุกร์" },
+  { day: 6, label: "เสาร์" },
+  { day: 0, label: "อาทิตย์" },
+] as const;
+export const FNB_FRONT_DISPLAY_CATEGORIES = ["MERCHANDISE", "BAKERY_FROZEN", "ICE_CREAM"] as const;
+export const FNB_SAUCE_OPEN_DAYS: Record<string, number> = {
+  SB: 2, MB: 5, CS: 6, BS: 14, PF: 4, PS: 4, X: 9, CJ: 6, WMK: 3, CW: 1, CWT: 1, CMK: 1,
+};
+export const FNB_PREP_BASES = [
+  { code: "JT", yieldMl: 1950, label: "น้ำชามะลิ JT" },
+  { code: "BT", yieldMl: 2800, label: "น้ำชาดำ BT" },
+  { code: "ML", yieldMl: 750, label: "มัทฉะเข้มข้น ML (50g + น้ำ 750ml)" },
+  { code: "MMK", yieldMl: 1000, label: "เบสนมมัทฉะ MMK (50g + นม 1,000ml)" },
+] as const;
+
 export type FnbVatMode = (typeof FNB_VAT_MODES)[number];
 export type FnbItemCategory = (typeof FNB_ITEM_CATEGORIES)[number];
 export type FnbBrandScope = (typeof FNB_BRAND_SCOPES)[number];
@@ -227,6 +255,10 @@ export type FnbItemRow = {
   is_active: boolean;
   shelf_life_months: number | null;
   requires_expiry_tracking: boolean;
+  alias_codes: string[];
+  track_front_display_daily: boolean;
+  backroom_count_schedule: string;
+  backroom_count_weekdays: number[];
 };
 
 export type FnbVendorPackRow = {
@@ -335,6 +367,8 @@ export type FnbStockBalanceRow = {
   recipe_uom: string;
   recipe_per_count_uom: number;
   on_hand_recipe: number;
+  alias_codes?: string[];
+  external_code?: string | null;
 };
 
 export type FnbExcelPriceRow = {
@@ -505,7 +539,7 @@ export type FnbWipBatchRow = {
 
 export type FnbWipBoard = {
   bases: { base_code: string; base_name_th: string; yield_qty_ml: number }[];
-  items: { id: string; short_code: string; name_th: string; count_uom: string }[];
+  items: { id: string; short_code: string; name_th: string; count_uom: string; alias_codes: string[]; external_code: string | null }[];
   brews: FnbWipBatchRow[];
   containers: FnbWipBatchRow[];
 };
@@ -531,6 +565,74 @@ export type FnbCashFloatContext = {
   standard_cash_float: number;
   prev_shift_held_cash: number;
   closing_time: string | null;
+};
+
+export type FnbStorageZone = {
+  id: string;
+  branchCode: string;
+  locationCode: string;
+  locationNameTh: string;
+  zoneType: string;
+  defaultCountSchedule: string;
+  countWeekdays: number[];
+  isDefaultGrTarget: boolean;
+  sortOrder: number;
+};
+
+export type FnbCleaningSpot = {
+  id: string;
+  branchCode: string;
+  stageCode: "OPENING" | "CLOSING";
+  spotNameTh: string;
+  sortOrder: number;
+  photoUrl: string | null;
+};
+
+export type FnbZoneCountLine = {
+  itemId: string;
+  shortCode: string;
+  nameTh: string;
+  aliases: string[];
+  locationCode: string;
+  openingQty: number;
+  replenishedQty: number;
+  posSoldQty: number;
+  expectedQty: number;
+  countedQty: number | null;
+  nearestExpiry: string | null;
+  shrinkageQty: number;
+  suggestReplenishQty: number;
+  belowLastClose: boolean;
+  dueTonight: boolean;
+};
+
+export type FnbSauceWatch = {
+  code: string;
+  nameTh: string;
+  openDays: number;
+  batchId: string | null;
+  expiresAt: string | null;
+  sticker: string | null;
+};
+
+export type FnbStoreDayBoard = {
+  locations: FnbStorageZone[];
+  openingSpots: FnbCleaningSpot[];
+  closingSpots: FnbCleaningSpot[];
+  frontOpeningLines: FnbZoneCountLine[];
+  frontLines: FnbZoneCountLine[];
+  backroomLines: FnbZoneCountLine[];
+  warehouseLines: FnbZoneCountLine[];
+  warehouseDue: boolean;
+  sauces: FnbSauceWatch[];
+  calibration: {
+    grinderDoseG: number | null;
+    espressoTimeSec: number | null;
+    espressoYieldG: number | null;
+    syrupRandomG: number | null;
+    syrupActualG: number | null;
+    syrupAdjusted: boolean;
+  } | null;
 };
 
 export type FnbPosImportPreview = {

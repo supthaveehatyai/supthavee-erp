@@ -4,7 +4,7 @@ import { parseLuckyCupPriceWorkbook } from "@/lib/fnb/excel";
 import { asRows, caught, fail, num, result, text } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
 import { requireAnyFnbModule, requireFnbModuleAccess } from "@/lib/holding/workspace-access";
-import type { FnbActionResult, FnbExcelPriceRow, FnbItemRow, FnbVendorPackRow } from "@/types/fnb";
+import { FNB_FRONT_DISPLAY_CATEGORIES, type FnbActionResult, type FnbExcelPriceRow, type FnbItemRow, type FnbVendorPackRow } from "@/types/fnb";
 
 function mapItem(row: Record<string, unknown>): FnbItemRow {
   return {
@@ -30,6 +30,10 @@ function mapItem(row: Record<string, unknown>): FnbItemRow {
     is_active: row.is_active !== false,
     shelf_life_months: row.shelf_life_months == null ? null : num(row.shelf_life_months),
     requires_expiry_tracking: row.requires_expiry_tracking !== false,
+    alias_codes: Array.isArray(row.alias_codes) ? row.alias_codes.map((code) => text(code)).filter(Boolean) : [],
+    track_front_display_daily: row.track_front_display_daily === true,
+    backroom_count_schedule: text(row.backroom_count_schedule) || "WEEKLY_2X",
+    backroom_count_weekdays: Array.isArray(row.backroom_count_weekdays) ? row.backroom_count_weekdays.map((day) => Number(day)).filter((day) => Number.isFinite(day)) : [],
   };
 }
 
@@ -85,11 +89,25 @@ export async function saveFnbItemAction(input: {
   front_back_group: string;
   shelf_life_months: number;
   requires_expiry_tracking: boolean;
+  alias_codes?: string;
+  track_front_display_daily?: boolean;
+  backroom_count_schedule?: string;
+  backroom_count_weekdays?: number[];
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
     await requireFnbModuleAccess("master_items_bom");
+    const shortCode = input.short_code.trim().toUpperCase();
+    if (!shortCode) return result({ ok: false }, "กรอกรหัสย่อตามคู่มือ");
+    const clash = await schemaAdmin().schema("fnb").from("items").select("id").eq("short_code", shortCode).maybeSingle();
+    const clashId = text((clash.data as { id?: string } | null)?.id);
+    if (clashId && clashId !== input.id) return result({ ok: false }, `รหัสย่อ ${shortCode} ถูกใช้แล้ว`);
+    const aliases = String(input.alias_codes ?? "").split(/[,|\s]+/).map((code) => code.trim().toUpperCase()).filter(Boolean);
+    const schedule = ["DAILY", "EVERY_3_DAYS", "WEEKLY_2X", "WEEKLY_1X", "MONTHLY_ONLY"].includes(String(input.backroom_count_schedule))
+      ? String(input.backroom_count_schedule)
+      : "WEEKLY_2X";
+    const autoFront = (FNB_FRONT_DISPLAY_CATEGORIES as readonly string[]).includes(input.item_category);
     const payload = {
-      short_code: input.short_code.trim(),
+      short_code: shortCode,
       external_code: input.external_code.trim() || null,
       brand_scope: input.brand_scope,
       item_category: input.item_category,
@@ -105,6 +123,10 @@ export async function saveFnbItemAction(input: {
       front_back_group: input.is_front_back_checked ? input.front_back_group || null : null,
       shelf_life_months: Number(input.shelf_life_months) || null,
       requires_expiry_tracking: Boolean(input.requires_expiry_tracking),
+      alias_codes: aliases,
+      track_front_display_daily: input.id ? Boolean(input.track_front_display_daily) : autoFront || Boolean(input.track_front_display_daily),
+      backroom_count_schedule: schedule,
+      backroom_count_weekdays: (input.backroom_count_weekdays ?? []).map(Number).filter((day) => day >= 0 && day <= 6),
       is_active: true,
     };
     const table = schemaAdmin().schema("fnb").from("items");
@@ -163,10 +185,10 @@ export async function previewFnbPriceExcelAction(formData: FormData): Promise<Fn
     await requireFnbModuleAccess("master_items_bom");
     const file = formData.get("file");
     if (!(file instanceof File) || file.size === 0) return result([], "ไม่พบไฟล์ Excel");
-    const listed = await schemaAdmin().schema("fnb").from("items").select("external_code,short_code").limit(1000);
+    const listed = await schemaAdmin().schema("fnb").from("items").select("external_code,short_code,alias_codes").limit(1000);
     if (listed.error) return fail([], listed.error, "อ่านรหัสวัตถุดิบไม่สำเร็จ");
     const known = new Set(
-      asRows(listed.data).flatMap((row) => [text(row.external_code), text(row.short_code)].filter(Boolean).map((code) => code.toUpperCase())),
+      asRows(listed.data).flatMap((row) => [text(row.external_code), text(row.short_code), ...(Array.isArray(row.alias_codes) ? row.alias_codes.map((code) => text(code)) : [])].filter(Boolean).map((code) => code.toUpperCase())),
     );
     return result(parseLuckyCupPriceWorkbook(await file.arrayBuffer(), known));
   } catch (error) {
@@ -178,12 +200,13 @@ export async function commitFnbPriceExcelAction(rows: FnbExcelPriceRow[]): Promi
   try {
     await requireFnbModuleAccess("master_items_bom");
     const db = schemaAdmin().schema("fnb");
-    const listed = await db.from("items").select("id,external_code,short_code").limit(1000);
+    const listed = await db.from("items").select("id,external_code,short_code,alias_codes").limit(1000);
     if (listed.error) return fail({ saved: 0 }, listed.error, "อ่านวัตถุดิบไม่สำเร็จ");
     const byCode = new Map<string, string>();
     for (const row of asRows(listed.data)) {
       if (text(row.external_code)) byCode.set(text(row.external_code).toUpperCase(), text(row.id));
       if (text(row.short_code)) byCode.set(text(row.short_code).toUpperCase(), text(row.id));
+      for (const alias of Array.isArray(row.alias_codes) ? row.alias_codes : []) byCode.set(text(alias).toUpperCase(), text(row.id));
     }
     let saved = 0;
     for (const row of rows) {

@@ -17,7 +17,7 @@ export async function listFnbStockAction(): Promise<FnbActionResult<FnbStockBala
     const ctx = await requireFnbModuleAccess("branch_inventory_transfer");
     const db = schemaAdmin().schema("fnb");
     const [items, ledger] = await Promise.all([
-      db.from("items").select("id,short_code,name_th,count_uom,recipe_uom,recipe_per_count_uom").eq("is_active", true).limit(500),
+      db.from("items").select("id,short_code,alias_codes,external_code,name_th,count_uom,recipe_uom,recipe_per_count_uom").eq("is_active", true).limit(500),
       db.from("stock_ledger").select("branch_code,item_id,qty_delta").limit(5000),
     ]);
     if (items.error) return fail([], items.error, "อ่านสินค้าไม่สำเร็จ");
@@ -44,6 +44,8 @@ export async function listFnbStockAction(): Promise<FnbActionResult<FnbStockBala
         recipe_uom: text(item.recipe_uom),
         recipe_per_count_uom: num(item.recipe_per_count_uom) || 1,
         on_hand_recipe: hideQty ? 0 : qty,
+        alias_codes: Array.isArray(item.alias_codes) ? item.alias_codes.map((code) => text(code)) : [],
+        external_code: item.external_code == null ? null : text(item.external_code),
       });
     }
     return result(balances.sort((a, b) => a.branch_code.localeCompare(b.branch_code) || a.short_code.localeCompare(b.short_code)));

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { listParLevelsAction, saveBranchShiftSettingsAction, saveParLevelAction, saveSopTemplateAction, toggleSopAssignmentAction } from "@/lib/actions/fnb-sop";
+import { BranchPlaceManager } from "@/components/fnb/branch-place-manager";
 import { FNB_BRANCH_CODES, FNB_SOP_INPUT_TYPES, type FnbBranchOption, type FnbParLevelRow, type FnbSopTemplate } from "@/types/fnb";
 
 const field = "h-10 w-full rounded-md border border-slate-200 px-3 text-sm";
@@ -43,6 +44,7 @@ export function SopSettingsWorkspace({
       <h1 className="text-2xl font-bold">ตั้งค่าระเบียบหน้าร้านและกะสาขา</h1>
       <Link href="/fnb/items?tab=shelf" className="inline-block rounded-md bg-red-700 px-3 py-2 text-sm text-white">อายุวัตถุดิบหลังเปิดใช้ / หลังผสม (แยกแบรนด์)</Link>
       {message ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{message}</p> : null}
+      <BranchPlaceManager branches={branches.map((branch) => ({ branch_code: branch.branch_code, branch_name_th: branch.branch_name_th }))} />
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">วงเงินทอนประจำเก๊ะและเวลาเปิดปิด</h2>
         {branches.map((branch) => (

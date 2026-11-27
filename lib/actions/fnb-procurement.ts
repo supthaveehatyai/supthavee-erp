@@ -8,7 +8,7 @@ import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb
 import { schemaAdmin } from "@/lib/holding/schema-db";
 import { getUserAccessContext, requireFnbProcurementOffice, requireFnbTaxDesk } from "@/lib/holding/workspace-access";
 import { requireSessionUserId } from "@/lib/auth/current-user";
-import type { FnbActionResult, FnbBrandCode, FnbExpiryLotRow, FnbGoodsReceiptLineRow, FnbGoodsReceiptRow, FnbItemRow, FnbReimbursementRow, FnbUnpackLine, FnbVendorSheetPreview } from "@/types/fnb";
+import { FNB_FRONT_DISPLAY_CATEGORIES, type FnbActionResult, type FnbBrandCode, type FnbExpiryLotRow, type FnbGoodsReceiptLineRow, type FnbGoodsReceiptRow, type FnbItemRow, type FnbReimbursementRow, type FnbUnpackLine, type FnbVendorSheetPreview } from "@/types/fnb";
 
 function asciiBranch(code: string): string {
   return code.replace(/[^A-Za-z0-9-]/g, "").slice(0, 16) || "BRANCH";
@@ -102,9 +102,9 @@ export async function listReceiptLinesAction(grId: string): Promise<FnbActionRes
   }
 }
 
-export async function listReceiveItemsAction(brandLock?: FnbBrandCode | null): Promise<FnbActionResult<Pick<FnbItemRow, "id" | "short_code" | "name_th" | "count_uom" | "default_purchase_uom" | "recipe_per_purchase_uom" | "shelf_life_months" | "requires_expiry_tracking" | "brand_scope">[]>> {
+export async function listReceiveItemsAction(brandLock?: FnbBrandCode | null): Promise<FnbActionResult<Pick<FnbItemRow, "id" | "short_code" | "name_th" | "count_uom" | "default_purchase_uom" | "recipe_per_purchase_uom" | "shelf_life_months" | "requires_expiry_tracking" | "brand_scope" | "alias_codes" | "external_code" | "item_category">[]>> {
   try {
-    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,name_th,count_uom,default_purchase_uom,recipe_per_purchase_uom,shelf_life_months,requires_expiry_tracking,brand_scope").eq("is_active", true).order("short_code", { ascending: true }).limit(500);
+    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,alias_codes,external_code,name_th,count_uom,default_purchase_uom,recipe_per_purchase_uom,shelf_life_months,requires_expiry_tracking,brand_scope,item_category").eq("is_active", true).order("short_code", { ascending: true }).limit(500);
     if (listed.error) return fail([], listed.error, "อ่านรายการสินค้าไม่สำเร็จ");
     return result(asRows(listed.data).map((row) => ({
       id: text(row.id),
@@ -116,6 +116,9 @@ export async function listReceiveItemsAction(brandLock?: FnbBrandCode | null): P
       shelf_life_months: row.shelf_life_months == null ? null : num(row.shelf_life_months),
       requires_expiry_tracking: row.requires_expiry_tracking !== false,
       brand_scope: text(row.brand_scope),
+      alias_codes: Array.isArray(row.alias_codes) ? row.alias_codes.map((code) => text(code)) : [],
+      external_code: row.external_code == null ? null : text(row.external_code),
+      item_category: text(row.item_category),
     })).filter((item) => {
       if (!brandLock) return true;
       if (item.brand_scope !== "ALL" && item.brand_scope !== brandLock) return false;
@@ -174,7 +177,21 @@ export async function submitBlindGoodsReceiptAction(formData: FormData): Promise
     if (saved.error) return fail({ gr_no: "", line_count: 0 }, saved.error, "บันทึกรับของไม่สำเร็จ");
     const body = saved.data && typeof saved.data === "object" ? saved.data as Record<string, unknown> : {};
     if (body.ok === false) return result({ gr_no: "", line_count: 0 }, text(body.error) || "บันทึกรับของไม่สำเร็จ");
-    return result({ gr_no: text(body.gr_no), line_count: safeLines.length });
+    const grNo = text(body.gr_no);
+    const target = text(formData.get("target_location_code"));
+    if (grNo && target) {
+      await schemaAdmin().schema("fnb").from("goods_receipts").update({ target_location_code: target }).eq("gr_no", grNo);
+    }
+    const frontCats = new Set<string>(FNB_FRONT_DISPLAY_CATEGORIES);
+    for (const line of safeLines) {
+      if (!line.item_id) continue;
+      const item = await schemaAdmin().schema("fnb").from("items").select("item_category").eq("id", line.item_id).maybeSingle();
+      const category = text((item.data as { item_category?: string } | null)?.item_category);
+      if (frontCats.has(category)) {
+        await schemaAdmin().schema("fnb").from("items").update({ track_front_display_daily: true }).eq("id", line.item_id);
+      }
+    }
+    return result({ gr_no: grNo, line_count: safeLines.length });
   } catch (error) {
     return caught({ gr_no: "", line_count: 0 }, error, "บันทึกรับของไม่สำเร็จ");
   }

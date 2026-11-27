@@ -9,6 +9,7 @@ import { WipPanel } from "@/components/fnb/wip-panel";
 import { MenuSalesPanel } from "@/components/fnb/menu-sales-panel";
 import { SopBoard } from "@/components/fnb/sop-board";
 import { SopPhotoBoard } from "@/components/fnb/sop-photo-board";
+import { MiddayShortcuts, NightCloseCount, OpeningChecklist } from "@/components/fnb/store-day-board";
 import { saveShift3HandoverAction } from "@/lib/actions/fnb-sop";
 import {
   commitPosExcelAction,
@@ -144,11 +145,12 @@ export function OperationsWorkspace({
         {selected?.enable_shift_3 ? <TabButton active={tab === "SHIFT_3"} onClick={() => setTab("SHIFT_3")}>4. ส่งเงินกะสาม</TabButton> : null}
         <TabButton active={tab === "CLOSING"} onClick={() => setTab("CLOSING")}>{`${selected?.enable_shift_3 ? "5" : "4"}. ปิดร้านและยอดขายรายเมนู (${selected?.enable_shift_3 ? "กะสาม" : "กะสอง"})`}</TabButton>
       </div>
-      {tab === "OPENING" ? <MorningPanel brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} day={day} busy={busy === "open"} run={run} /> : null}
+      <MiddayShortcuts branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brandLock} staffName={staffName} brand={brand} />
+      {tab === "OPENING" ? <><MorningPanel brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} day={day} busy={busy === "open"} run={run} /><OpeningChecklist branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brandLock} staffName={staffName} /></> : null}
       {tab === "SHIFT_1" || tab === "SHIFT_2" ? <ClosePanel brand={brand} brandLock={brandLock} superAdmin={superAdmin} branch={branch} branches={branches} workDate={workDate} staffName={staffName} actorSource={actorSource} day={day} busy={busy} run={run} lockShift={tab === "SHIFT_1" ? "MORNING" : "AFTERNOON"} /> : null}
       {tab === "SHIFT_3" ? <Shift3Panel brandLock={brandLock} branch={branch} workDate={workDate} actorSource={actorSource} busy={busy === "shift3"} run={run} /> : null}
       {tab === "WIP" ? <WipPanel branch={branch} workDate={workDate} brand={brand} actorSource={actorSource} actorName={staffName} enableShift3={Boolean(selected?.enable_shift_3)} /> : null}
-      {tab === "CLOSING" ? <><ClosingWipBanner branch={branch} workDate={workDate} /><WastePanel brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} shelfItems={shelfItems} day={day} busy={busy} run={run} /><MenuSalesPanel branch={branch} workDate={workDate} brand={brand} actorSource={actorSource} /></> : null}
+      {tab === "CLOSING" ? <><ClosingWipBanner branch={branch} workDate={workDate} /><WastePanel brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} shelfItems={shelfItems} day={day} busy={busy} run={run} /><MenuSalesPanel branch={branch} workDate={workDate} brand={brand} actorSource={actorSource} /><NightCloseCount branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brandLock} staffName={staffName} /></> : null}
       {tab !== "WIP" ? <SopBoard branch={branch} workDate={workDate} stage={tab} brandLock={brandLock} actorSource={actorSource} actorName={staffName} superAdmin={superAdmin} /> : null}
       {brandLock ? <ReimburseBox brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} busy={busy === "reimburse"} run={run} /> : null}
       {superAdmin ? <SopPhotoBoard workDate={workDate} /> : null}

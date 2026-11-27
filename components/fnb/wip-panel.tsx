@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { LiveWatermarkCamera } from "@/components/fnb/live-watermark-camera";
 import { closeWipBatchAction, issueWipBatchAction, listWipBoardAction } from "@/lib/actions/fnb-wip";
+import { itemMatches } from "@/lib/fnb/item-search";
 import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
 import type { FnbBrandCode, FnbWipBatchRow, FnbWipBoard } from "@/types/fnb";
 
@@ -111,6 +112,9 @@ function BrewForm(props: {
   const [open, setOpen] = useState(false);
   const [urls, setUrls] = useState<string[]>([]);
   const [portion, setPortion] = useState<"FULL_RECIPE" | "HALF_LIQUID_FULL_PACK">("FULL_RECIPE");
+  const [pct, setPct] = useState(1);
+  const [baseCode, setBaseCode] = useState(props.bases[0]?.base_code ?? "BT");
+  const selected = props.bases.find((base) => base.base_code === baseCode) ?? props.bases[0];
   if (!open) return <button type="button" className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" onClick={() => setOpen(true)}>➕ ต้มเบสเพิ่ม</button>;
   return (
     <form className="space-y-2 rounded-lg bg-red-50 p-3" onSubmit={(event) => {
@@ -122,13 +126,15 @@ function BrewForm(props: {
       body.set("work_date", props.workDate);
       body.set("batch_kind", "PREP_BASE");
       body.set("brew_portion_mode", portion);
+      body.set("pack_qty", portion === "FULL_RECIPE" ? String(pct) : "1");
       body.set("photo_urls", urls.join("|"));
       void issueWipBatchAction(body).then((saved) => {
         if (saved.error || !saved.data.ok) props.onError(saved.error || saved.data.message || "ต้มเบสไม่สำเร็จ");
         else { setOpen(false); props.onDone(saved.data.sticker || "ติดป้ายตามเวลาที่ระบบคำนวณ"); }
       });
     }}>
-      <select className="h-10 w-full rounded-md border px-3 text-sm" name="prep_base_code">{props.bases.map((base) => <option key={base.base_code} value={base.base_code}>{base.base_code} {base.base_name_th} · {base.yield_qty_ml.toFixed(0)} ml</option>)}</select>
+      <select className="h-10 w-full rounded-md border px-3 text-sm" name="prep_base_code" value={baseCode} onChange={(event) => setBaseCode(event.target.value)}>{props.bases.map((base) => <option key={base.base_code} value={base.base_code}>{base.base_code} {base.base_name_th} · {base.yield_qty_ml.toFixed(0)} ml</option>)}</select>
+      {portion === "FULL_RECIPE" ? <div className="flex flex-wrap gap-2">{[0.25, 0.5, 0.75, 1].map((part) => <button key={part} type="button" className={`rounded-full px-3 py-1 text-sm ${pct === part ? "bg-red-700 text-white" : "bg-white"}`} onClick={() => setPct(part)}>{Math.round(part * 100)}% ({Math.round((selected?.yield_qty_ml ?? 0) * part)} ml)</button>)}</div> : null}
       <select className="h-10 w-full rounded-md border px-3 text-sm" name="shift_instance"><option value="SHIFT_1">กะแรก</option><option value="SHIFT_2">กะสอง</option>{props.enableShift3 ? <option value="SHIFT_3">กะสาม</option> : null}</select>
       <label className="flex gap-2 text-sm"><input type="radio" checked={portion === "FULL_RECIPE"} onChange={() => setPortion("FULL_RECIPE")} />ต้มเต็มสูตรมาตรฐาน (1 ถุงเต็ม ได้น้ำเบสเต็มหม้อ)</label>
       <label className="flex gap-2 text-sm"><input type="radio" checked={portion === "HALF_LIQUID_FULL_PACK"} onChange={() => setPortion("HALF_LIQUID_FULL_PACK")} />ต้มครึ่งสูตรช่วงเย็นใกล้ปิดร้าน (ได้น้ำเบสครึ่งหม้อ — ระบบตัดสต็อกเต็ม 1 ถุงตามมาตรฐานแฟรนไชส์)</label>
@@ -154,7 +160,7 @@ function OpenItemForm(props: {
 }) {
   const [query, setQuery] = useState("");
   const [urls, setUrls] = useState<string[]>([]);
-  const visible = props.items.filter((item) => `${item.short_code} ${item.name_th}`.toLowerCase().includes(query.toLowerCase())).slice(0, 80);
+  const visible = props.items.filter((item) => itemMatches(query, item)).slice(0, 80);
   return (
     <form className="space-y-2" onSubmit={(event) => {
       event.preventDefault();

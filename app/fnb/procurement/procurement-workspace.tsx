@@ -10,6 +10,8 @@ import {
   saveExpiryLotsAction,
   submitBlindGoodsReceiptAction,
 } from "@/lib/actions/fnb-procurement";
+import { listBranchZonesAction } from "@/lib/actions/fnb-store-day";
+import { itemMatches } from "@/lib/fnb/item-search";
 import type { FnbBranchOption, FnbBrandCode, FnbExpiryLotRow, FnbItemRow, FnbReimbursementRow, FnbUnpackLine, FnbVendorSheetRow } from "@/types/fnb";
 
 const field = "h-10 w-full rounded-md border border-slate-200 px-3 text-sm";
@@ -169,8 +171,21 @@ export function ManualReceive({
   setMessage?: (message: string) => void;
 }) {
   const [lines, setLines] = useState([{ item_id: items[0]?.id ?? "", qty: "", uom: items[0]?.default_purchase_uom ?? "" }]);
+  const [query, setQuery] = useState("");
+  const [zones, setZones] = useState<{ locationCode: string; locationNameTh: string; isDefaultGrTarget: boolean }[]>([]);
+  const [location, setLocation] = useState("");
   const [busy, setBusy] = useState(false);
   const [, start] = useTransition();
+  const visible = items.filter((item) => itemMatches(query, item));
+  useEffect(() => {
+    const branch = branches[0]?.branch_code;
+    if (!branch) return;
+    void listBranchZonesAction(branch).then((loaded) => {
+      const next = loaded.data.map((row) => ({ locationCode: row.locationCode, locationNameTh: row.locationNameTh, isDefaultGrTarget: row.isDefaultGrTarget }));
+      setZones(next);
+      setLocation(next.find((row) => row.isDefaultGrTarget)?.locationCode ?? next[0]?.locationCode ?? "");
+    });
+  }, [branches]);
   return (
     <form className="space-y-3 rounded-xl border bg-white p-4" onSubmit={(event) => {
       event.preventDefault();
@@ -192,12 +207,14 @@ export function ManualReceive({
     }}>
       <h2 className="font-semibold">รับวัตถุดิบเข้าด่วน</h2>
       <div className="grid gap-2 md:grid-cols-2">
-        <select className={field} name="receiving_branch_code">{branches.map((branch) => <option key={branch.branch_code} value={branch.branch_code}>{branch.branch_code} {branch.branch_name_th}</option>)}</select>
+        <select className={field} name="receiving_branch_code" onChange={(event) => { void listBranchZonesAction(event.target.value).then((loaded) => { const next = loaded.data.map((row) => ({ locationCode: row.locationCode, locationNameTh: row.locationNameTh, isDefaultGrTarget: row.isDefaultGrTarget })); setZones(next); setLocation(next.find((row) => row.isDefaultGrTarget)?.locationCode ?? next[0]?.locationCode ?? ""); }); }}>{branches.map((branch) => <option key={branch.branch_code} value={branch.branch_code}>{branch.branch_code} {branch.branch_name_th}</option>)}</select>
+        <select className={field} name="target_location_code" value={location} onChange={(event) => setLocation(event.target.value)}>{zones.map((zone) => <option key={zone.locationCode} value={zone.locationCode}>รับเข้าเก็บที่ {zone.locationNameTh}</option>)}</select>
+        <input className={`${field} md:col-span-2`} value={query} placeholder="ค้นรหัสย่อ รหัสเรียก หรือชื่อสินค้า" onChange={(event) => setQuery(event.target.value)} />
         <input className={field} name="vendor_name" placeholder="ผู้ขาย" />
       </div>
       {lines.map((line, index) => (
         <div key={index} className="grid gap-2 md:grid-cols-3">
-          <select className={field} value={line.item_id} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, item_id: event.target.value } : row))}>{items.map((item) => <option key={item.id} value={item.id}>{item.short_code} {item.name_th}</option>)}</select>
+          <select className={field} value={line.item_id} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, item_id: event.target.value } : row))}>{(visible.some((item) => item.id === line.item_id) ? visible : items.filter((item) => item.id === line.item_id).concat(visible)).map((item) => <option key={item.id} value={item.id}>{item.short_code} {item.name_th}</option>)}</select>
           <input className={field} type="number" step="0.01" placeholder="จำนวนที่รับ" value={line.qty} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, qty: event.target.value } : row))} />
           <input className={field} placeholder="หน่วยรับ เช่น แกลลอน" value={line.uom} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, uom: event.target.value } : row))} />
         </div>
