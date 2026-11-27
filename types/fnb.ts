@@ -1,4 +1,35 @@
-export const FNB_BRAND_SCOPES = ["ALL", "LUCKY_CUP", "CHATORN"] as const;
+export const FNB_BRAND_SCOPES = ["LUCKY_CUP", "CHATORN"] as const;
+export const FNB_BRAND_THEME = {
+  LUCKY_CUP: {
+    label: "Lucky Cup",
+    badge: "🔴 Lucky Cup",
+    color: "#DC2626",
+    hover: "#B91C1C",
+    tint: "#FEF2F2",
+    shellClass: "bg-[#DC2626]",
+    frameClass: "border-[#DC2626]",
+    tintClass: "bg-red-50",
+  },
+  CHATORN: {
+    label: "ชาทรตะโหมด",
+    badge: "🍷 ชาทรตะโหมด",
+    color: "#6B0F1A",
+    hover: "#520B13",
+    tint: "#FDF2F4",
+    shellClass: "bg-[#6B0F1A]",
+    frameClass: "border-[#6B0F1A]",
+    tintClass: "bg-[#FDF2F4]",
+  },
+} as const;
+export const FNB_STOCK_SHEET_GROUPS = [
+  { key: "RAW_MATERIAL", label: "วัตถุดิบชง" },
+  { key: "BAKERY_FROZEN", label: "เบเกอรี่และเค้ก" },
+  { key: "ICE_CREAM", label: "ไอศกรีม" },
+  { key: "MERCHANDISE", label: "ของพรีเมียม" },
+  { key: "PACKAGING", label: "บรรจุภัณฑ์" },
+  { key: "CLEANING_SUPPLY", label: "น้ำยาและของใช้สิ้นเปลือง" },
+  { key: "EQUIPMENT_CAPEX", label: "อุปกรณ์" },
+] as const;
 export const FNB_ITEM_CATEGORIES = [
   "RAW_MATERIAL",
   "PACKAGING",
@@ -259,6 +290,7 @@ export type FnbItemRow = {
   track_front_display_daily: boolean;
   backroom_count_schedule: string;
   backroom_count_weekdays: number[];
+  allow_decimal_count_qty: boolean;
 };
 
 export type FnbVendorPackRow = {
@@ -539,7 +571,7 @@ export type FnbWipBatchRow = {
 
 export type FnbWipBoard = {
   bases: { base_code: string; base_name_th: string; yield_qty_ml: number }[];
-  items: { id: string; short_code: string; name_th: string; count_uom: string; alias_codes: string[]; external_code: string | null }[];
+  items: { id: string; short_code: string; name_th: string; count_uom: string; alias_codes: string[]; external_code: string | null; allow_decimal_count_qty: boolean }[];
   brews: FnbWipBatchRow[];
   containers: FnbWipBatchRow[];
 };
@@ -604,6 +636,8 @@ export type FnbZoneCountLine = {
   suggestReplenishQty: number;
   belowLastClose: boolean;
   dueTonight: boolean;
+  countUom: string;
+  allowDecimal: boolean;
 };
 
 export type FnbSauceWatch = {
@@ -679,6 +713,7 @@ export type FnbRolePermissionRow = {
   isActive: boolean;
   modulePermissions: FnbModulePermissions;
   guardrailPermissions: FnbGuardrailPermissions;
+  brandCode: string;
 };
 
 export type FnbScopedMenuSale = {

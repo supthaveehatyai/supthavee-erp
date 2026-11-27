@@ -313,12 +313,8 @@ export async function listFrontBackItemsAction(brandLock?: FnbBrandCode | null):
       track_front_display_daily: row.track_front_display_daily === true,
       backroom_count_schedule: text(row.backroom_count_schedule) || "WEEKLY_2X",
       backroom_count_weekdays: Array.isArray(row.backroom_count_weekdays) ? row.backroom_count_weekdays.map((day) => Number(day)) : [],
-    })).filter((item) => {
-      if (!brandLock) return true;
-      if (item.brand_scope !== "ALL" && item.brand_scope !== brandLock) return false;
-      const label = `${item.short_code} ${item.name_th}`;
-      return brandLock === "LUCKY_CUP" ? !/ชาทร|chatorn/i.test(label) : !/lucky\s*cup|ลัคกี้|luckycup/i.test(label);
-    }));
+      allow_decimal_count_qty: row.allow_decimal_count_qty === true,
+    })).filter((item) => !brandLock || item.brand_scope === brandLock));
   } catch (error) {
     return caught([], error, "อ่านรายการเช็กของไม่สำเร็จ");
   }

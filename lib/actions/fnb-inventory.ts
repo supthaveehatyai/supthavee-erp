@@ -72,14 +72,18 @@ export async function transferFnbStockAction(input: {
     const staffName = actor.actor.name;
     const db = schemaAdmin().schema("fnb");
     const [from, to, item] = await Promise.all([
-      db.from("branches").select("legal_entity_id").eq("branch_code", input.from_branch_code).maybeSingle(),
-      db.from("branches").select("legal_entity_id").eq("branch_code", input.to_branch_code).maybeSingle(),
-      db.from("items").select("recipe_per_count_uom,moving_avg_cost_per_recipe_unit").eq("id", input.item_id).maybeSingle(),
+      db.from("branches").select("legal_entity_id,brand_code").eq("branch_code", input.from_branch_code).maybeSingle(),
+      db.from("branches").select("legal_entity_id,brand_code").eq("branch_code", input.to_branch_code).maybeSingle(),
+      db.from("items").select("recipe_per_count_uom,moving_avg_cost_per_recipe_unit,brand_scope").eq("id", input.item_id).maybeSingle(),
     ]);
     if (from.error || to.error || item.error) return fail({ transfer_no: "" }, from.error ?? to.error ?? item.error, "อ่านข้อมูลโอนไม่สำเร็จ");
     const fromEntity = text((from.data as Record<string, unknown> | null)?.legal_entity_id);
     const toEntity = text((to.data as Record<string, unknown> | null)?.legal_entity_id);
     if (!fromEntity || fromEntity !== toEntity) return result({ transfer_no: "" }, "โอนได้เฉพาะสาขาในนิติบุคคลเดียวกัน");
+    const fromBrand = text((from.data as Record<string, unknown> | null)?.brand_code);
+    const toBrand = text((to.data as Record<string, unknown> | null)?.brand_code);
+    const itemBrand = text((item.data as Record<string, unknown> | null)?.brand_scope);
+    if (!fromBrand || fromBrand !== toBrand || itemBrand !== fromBrand) return result({ transfer_no: "" }, "โอนได้เฉพาะภายในแบรนด์เดียวกัน");
     const per = num((item.data as Record<string, unknown> | null)?.recipe_per_count_uom) || 1;
     const recipeQty = (Number(input.qty_in_count_uom) || 0) * per;
     const unit = num((item.data as Record<string, unknown> | null)?.moving_avg_cost_per_recipe_unit);
@@ -193,5 +197,24 @@ export async function submitBlindCountAction(input: {
     return result({ count_no: countNo, lines: report });
   } catch (error) {
     return caught({ count_no: "", lines: [] }, error, "บันทึกใบนับไม่สำเร็จ");
+  }
+}
+
+export async function listBrandCountItemsAction(brand: string): Promise<FnbActionResult<{ id: string; short_code: string; name_th: string; item_category: string; count_uom: string; allow_decimal_count_qty: boolean; recipe_per_count_uom: number }[]>> {
+  try {
+    await requireFnbModuleAccess("branch_inventory_transfer");
+    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,name_th,item_category,count_uom,allow_decimal_count_qty,recipe_per_count_uom,brand_scope,is_active").eq("is_active", true).eq("brand_scope", brand).order("short_code", { ascending: true }).limit(800);
+    if (listed.error) return fail([], listed.error, "อ่านสินค้าแบรนด์ไม่สำเร็จ");
+    return result(asRows(listed.data).map((row) => ({
+      id: text(row.id),
+      short_code: text(row.short_code),
+      name_th: text(row.name_th),
+      item_category: text(row.item_category),
+      count_uom: text(row.count_uom) || "ชิ้น",
+      allow_decimal_count_qty: row.allow_decimal_count_qty === true,
+      recipe_per_count_uom: num(row.recipe_per_count_uom) || 1,
+    })));
+  } catch (error) {
+    return caught([], error, "อ่านสินค้าแบรนด์ไม่สำเร็จ");
   }
 }

@@ -17,7 +17,6 @@ import {
   listPendingShiftApprovalsAction,
   prefillPosSlipAction,
   previewPosExcelAction,
-  recordMorningOpeningAction,
   recordNightWasteAction,
   recordShiftClosingAction,
   saveShelfChecksAction,
@@ -146,7 +145,7 @@ export function OperationsWorkspace({
         <TabButton active={tab === "CLOSING"} onClick={() => setTab("CLOSING")}>{`${selected?.enable_shift_3 ? "5" : "4"}. ปิดร้านและยอดขายรายเมนู (${selected?.enable_shift_3 ? "กะสาม" : "กะสอง"})`}</TabButton>
       </div>
       <MiddayShortcuts branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brandLock} staffName={staffName} brand={brand} />
-      {tab === "OPENING" ? <><MorningPanel brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} day={day} busy={busy === "open"} run={run} /><OpeningChecklist branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brandLock} staffName={staffName} /></> : null}
+      {tab === "OPENING" ? <OpeningChecklist branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brand} staffName={staffName} /> : null}
       {tab === "SHIFT_1" || tab === "SHIFT_2" ? <ClosePanel brand={brand} brandLock={brandLock} superAdmin={superAdmin} branch={branch} branches={branches} workDate={workDate} staffName={staffName} actorSource={actorSource} day={day} busy={busy} run={run} lockShift={tab === "SHIFT_1" ? "MORNING" : "AFTERNOON"} /> : null}
       {tab === "SHIFT_3" ? <Shift3Panel brandLock={brandLock} branch={branch} workDate={workDate} actorSource={actorSource} busy={busy === "shift3"} run={run} /> : null}
       {tab === "WIP" ? <WipPanel branch={branch} workDate={workDate} brand={brand} actorSource={actorSource} actorName={staffName} enableShift3={Boolean(selected?.enable_shift_3)} /> : null}
@@ -156,64 +155,6 @@ export function OperationsWorkspace({
       {superAdmin ? <SopPhotoBoard workDate={workDate} /> : null}
       {superAdmin ? <SettlementPanel shifts={day?.shifts ?? []} busy={busy === "settle"} run={run} /> : null}
     </div>
-  );
-}
-
-function MorningPanel({
-  brandLock,
-  branch,
-  workDate,
-  staffName,
-  actorSource,
-  day,
-  busy,
-  run,
-}: {
-  brandLock: FnbBrandCode | null;
-  branch: string;
-  workDate: string;
-  staffName: string;
-  actorSource: "desktop" | "liff";
-  day: FnbDayState | null;
-  busy: boolean;
-  run: (key: string, task: () => Promise<{ error: string | null; data: FnbSubmitResult }>, success: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [shots, setShots] = useState(1);
-  const locked = Boolean(day?.opening) && !editing;
-  return (
-    <section className="space-y-3 rounded-xl border border-red-100 bg-white p-4">
-      {day?.opening && !editing ? (
-        <div className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">
-          บันทึกเปิดร้านวันนี้เรียบร้อยแล้ว — บันทึกได้วันละ 1 ครั้ง
-          <p>พนักงาน {day.opening.staff_name} · ช็อต {day.opening.calibration_shots} · กาแฟ {day.opening.total_coffee_used_g} g</p>
-          <button type="button" className="mt-2 rounded-md border border-emerald-700 px-3 py-1" onClick={() => { setEditing(true); setShots(day.opening?.calibration_shots ?? 1); }}>แก้ไขข้อมูลเปิดร้าน</button>
-        </div>
-      ) : null}
-      {locked ? null : (
-        <form className="space-y-3" onSubmit={(event) => {
-          event.preventDefault();
-          const body = new FormData(event.currentTarget);
-          fillCommon(body, { brandLock, branch, workDate, staffName, actorSource });
-          body.set("calibration_shots", String(shots));
-          body.set("is_edit", day?.opening ? "true" : "false");
-          run("open", () => recordMorningOpeningAction(body), "บันทึกเปิดร้านเรียบร้อยแล้ว");
-          setEditing(false);
-        }}>
-          <label className="block text-sm">จำนวนช็อตเทสต์
-            <span className="mt-1 flex items-center gap-2"><button type="button" className="h-10 w-10 rounded-md border" onClick={() => setShots((value) => Math.max(0, value - 1))}>-</button><b>{shots}</b><button type="button" className="h-10 w-10 rounded-md border" onClick={() => setShots((value) => value + 1)}>+</button></span>
-          </label>
-          <div className="grid gap-3 md:grid-cols-3">
-            <label className="text-sm">โดสต่อช็อต (g)<input className={field} name="dose_per_shot_g" type="number" defaultValue={day?.opening?.dose_per_shot_g ?? 20} /></label>
-            <label className="text-sm">เวลาสกัด (เป้า 22–28 วิ)<input className={field} name="extraction_time_sec" type="number" defaultValue={day?.opening?.extraction_time_sec ?? 25} /></label>
-            <label className="text-sm">น้ำหนักน้ำกาแฟ (เป้า 38–42 g)<input className={field} name="liquid_yield_g" type="number" defaultValue={day?.opening?.liquid_yield_g ?? 40} /></label>
-          </div>
-          <PhotoDrop name="photos" camera label="รูปตาชั่ง บาร์ ตู้ขนม และห้องน้ำ" />
-          {day?.opening ? <label className="block text-sm">สาเหตุการแก้ไข *<input className={field} name="edit_reason" required minLength={3} /></label> : null}
-          <SaveButton busy={busy}>บันทึกเปิดร้าน</SaveButton>
-        </form>
-      )}
-    </section>
   );
 }
 
@@ -595,7 +536,7 @@ function PosExcelBox({ branches }: { branches: FnbBranchOption[] }) {
       <h2 className="font-semibold">นำเข้า Excel POS</h2>
       <select className={field} value={branch} disabled={branches.length <= 1} onChange={(event) => setBranch(event.target.value)}>{branches.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code}</option>)}</select>
       <input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) read(file); }} />
-      {preview ? <button type="button" className="rounded-md bg-red-700 px-4 py-2 text-sm text-white" disabled={busy} onClick={() => {
+      {preview ? <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-4 py-2 text-sm text-white" disabled={busy} onClick={() => {
         setBusy(true);
         start(async () => {
           const saved = await commitPosExcelAction({ ...preview, branch_code: branch });
@@ -671,9 +612,9 @@ function PhotoDrop({ name, label, camera, onFile }: { name: string; label: strin
 }
 
 function SaveButton({ busy, children }: { busy: boolean; children: string }) {
-  return <button className="inline-flex items-center gap-2 rounded-md bg-red-700 px-4 py-2 text-sm text-white disabled:opacity-60" disabled={busy}>{busy ? <span className="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : null}{busy ? "กำลังบันทึก..." : children}</button>;
+  return <button className="inline-flex items-center gap-2 rounded-md bg-[var(--fnb-brand)] px-4 py-2 text-sm text-white disabled:opacity-60" disabled={busy}>{busy ? <span className="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : null}{busy ? "กำลังบันทึก..." : children}</button>;
 }
 
 function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {
-  return <button type="button" onClick={onClick} className={`rounded-full px-3 py-1.5 text-sm ${active ? "bg-red-700 text-white" : "bg-white text-red-800 ring-1 ring-red-200"}`}>{children}</button>;
+  return <button type="button" onClick={onClick} className={`rounded-full px-3 py-1.5 text-sm ${active ? "bg-[var(--fnb-brand)] text-white" : "bg-white text-red-800 ring-1 ring-red-200"}`}>{children}</button>;
 }

@@ -6,6 +6,7 @@ import { LiveWatermarkCamera } from "@/components/fnb/live-watermark-camera";
 import { closeWipBatchAction, issueWipBatchAction, listWipBoardAction } from "@/lib/actions/fnb-wip";
 import { itemMatches } from "@/lib/fnb/item-search";
 import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
+import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import type { FnbBrandCode, FnbWipBatchRow, FnbWipBoard } from "@/types/fnb";
 
 function clock(iso: string): string {
@@ -115,7 +116,7 @@ function BrewForm(props: {
   const [pct, setPct] = useState(1);
   const [baseCode, setBaseCode] = useState(props.bases[0]?.base_code ?? "BT");
   const selected = props.bases.find((base) => base.base_code === baseCode) ?? props.bases[0];
-  if (!open) return <button type="button" className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" onClick={() => setOpen(true)}>➕ ต้มเบสเพิ่ม</button>;
+  if (!open) return <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" onClick={() => setOpen(true)}>➕ ต้มเบสเพิ่ม</button>;
   return (
     <form className="space-y-2 rounded-lg bg-red-50 p-3" onSubmit={(event) => {
       event.preventDefault();
@@ -134,13 +135,13 @@ function BrewForm(props: {
       });
     }}>
       <select className="h-10 w-full rounded-md border px-3 text-sm" name="prep_base_code" value={baseCode} onChange={(event) => setBaseCode(event.target.value)}>{props.bases.map((base) => <option key={base.base_code} value={base.base_code}>{base.base_code} {base.base_name_th} · {base.yield_qty_ml.toFixed(0)} ml</option>)}</select>
-      {portion === "FULL_RECIPE" ? <div className="flex flex-wrap gap-2">{[0.25, 0.5, 0.75, 1].map((part) => <button key={part} type="button" className={`rounded-full px-3 py-1 text-sm ${pct === part ? "bg-red-700 text-white" : "bg-white"}`} onClick={() => setPct(part)}>{Math.round(part * 100)}% ({Math.round((selected?.yield_qty_ml ?? 0) * part)} ml)</button>)}</div> : null}
+      {portion === "FULL_RECIPE" ? <div className="flex flex-wrap gap-2">{[0.25, 0.5, 0.75, 1].map((part) => <button key={part} type="button" className={`rounded-full px-3 py-1 text-sm ${pct === part ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setPct(part)}>{Math.round(part * 100)}% ({Math.round((selected?.yield_qty_ml ?? 0) * part)} ml)</button>)}</div> : null}
       <select className="h-10 w-full rounded-md border px-3 text-sm" name="shift_instance"><option value="SHIFT_1">กะแรก</option><option value="SHIFT_2">กะสอง</option>{props.enableShift3 ? <option value="SHIFT_3">กะสาม</option> : null}</select>
       <label className="flex gap-2 text-sm"><input type="radio" checked={portion === "FULL_RECIPE"} onChange={() => setPortion("FULL_RECIPE")} />ต้มเต็มสูตรมาตรฐาน (1 ถุงเต็ม ได้น้ำเบสเต็มหม้อ)</label>
       <label className="flex gap-2 text-sm"><input type="radio" checked={portion === "HALF_LIQUID_FULL_PACK"} onChange={() => setPortion("HALF_LIQUID_FULL_PACK")} />ต้มครึ่งสูตรช่วงเย็นใกล้ปิดร้าน (ได้น้ำเบสครึ่งหม้อ — ระบบตัดสต็อกเต็ม 1 ถุงตามมาตรฐานแฟรนไชส์)</label>
       {portion === "HALF_LIQUID_FULL_PACK" ? <p className="text-sm text-amber-900">เหมาะสำหรับช่วงเย็น เช่น 16:00 น. ก่อนร้านปิด 20:00 น. เพื่อลดน้ำชาเหลือทิ้ง โดยระบบยังคงตัดสต็อกใบชาเต็ม 1 ถุงตามเกณฑ์แฟรนไชส์</p> : null}
       <LiveWatermarkCamera branchCode={props.branch} stage="WIP" staffName={props.actorName} taskTitle="ต้มเบสเพิ่ม" liveCameraOnly onCapture={(file, live) => void props.capture(file, live, (url) => setUrls((current) => [...current, url]))} />
-      <button className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" disabled={props.busy}>{props.busy ? "กำลังบันทึก..." : "บันทึกต้มเบสเพิ่ม"}</button>
+      <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={props.busy}>{props.busy ? "กำลังบันทึก..." : "บันทึกต้มเบสเพิ่ม"}</button>
     </form>
   );
 }
@@ -160,7 +161,9 @@ function OpenItemForm(props: {
 }) {
   const [query, setQuery] = useState("");
   const [urls, setUrls] = useState<string[]>([]);
+  const [qty, setQty] = useState("1");
   const visible = props.items.filter((item) => itemMatches(query, item)).slice(0, 80);
+  const selected = visible.find((item) => item.id === query) ?? visible[0];
   return (
     <form className="space-y-2" onSubmit={(event) => {
       event.preventDefault();
@@ -172,17 +175,29 @@ function OpenItemForm(props: {
       body.set("batch_kind", "OPEN_ITEM");
       body.set("brew_portion_mode", "FULL_RECIPE");
       body.set("photo_urls", urls.join("|"));
+      body.set("pack_qty", selected?.allow_decimal_count_qty ? qty : String(Math.trunc(Number(qty) || 0)));
       void issueWipBatchAction(body).then((saved) => {
         if (saved.error || !saved.data.ok) props.onError(saved.error || saved.data.message || "เบิกเปิดของไม่สำเร็จ");
         else props.onDone(saved.data.sticker || "ติดป้ายวันหมดอายุ");
       });
     }}>
-      <input className="h-10 w-full rounded-md border px-3 text-sm" value={query} placeholder="ค้นหา LEM MK CMK WMK SB MB CJ ไซรัป" onChange={(event) => setQuery(event.target.value)} />
-      <select className="h-10 w-full rounded-md border px-3 text-sm" name="item_id">{visible.map((item) => <option key={item.id} value={item.id}>{item.short_code} {item.name_th}</option>)}</select>
-      <input className="h-10 w-full rounded-md border px-3 text-sm" name="pack_qty" type="number" min="0.1" step="0.1" defaultValue={1} placeholder="จำนวนที่แกะขึ้นบาร์" />
-      <select className="h-10 w-full rounded-md border px-3 text-sm" name="shift_instance"><option value="SHIFT_1">กะแรก</option><option value="SHIFT_2">กะสอง</option>{props.enableShift3 ? <option value="SHIFT_3">กะสาม</option> : null}</select>
-      <LiveWatermarkCamera branchCode={props.branch} stage="WIP" staffName={props.actorName} taskTitle="เบิกเปิดของขึ้นบาร์" liveCameraOnly onCapture={(file, live) => void props.capture(file, live, (url) => setUrls((current) => [...current, url]))} />
-      <button className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" disabled={props.busy}>{props.busy ? "กำลังบันทึก..." : "เบิกขึ้นบาร์"}</button>
+      <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-12">
+        <label className="text-sm md:col-span-5">วัตถุดิบที่เบิกเปิดขึ้นบาร์
+          <input className="mt-1 h-10 w-full rounded-md border px-3 text-sm" value={query} placeholder="ค้นหา LEM MK CMK" onChange={(event) => setQuery(event.target.value)} />
+          <select className="mt-1 h-10 w-full rounded-md border px-3 text-sm" name="item_id">{visible.map((item) => <option key={item.id} value={item.id}>{item.short_code} {item.name_th}</option>)}</select>
+        </label>
+        <label className="text-sm md:col-span-2">จำนวน
+          <span className="mt-1 block"><FnbQtyInput value={qty} onChange={setQty} unit={selected?.count_uom || "ชิ้น"} allowDecimal={selected?.allow_decimal_count_qty === true} /></span>
+        </label>
+        <label className="text-sm md:col-span-2">กะงาน
+          <select className="mt-1 h-10 w-full rounded-md border px-3 text-sm" name="shift_instance"><option value="SHIFT_1">กะแรก</option><option value="SHIFT_2">กะสอง</option>{props.enableShift3 ? <option value="SHIFT_3">กะสาม</option> : null}</select>
+        </label>
+        <div className="space-y-2 md:col-span-3">
+          <p className="text-sm">ถ่ายรูปสด</p>
+          <LiveWatermarkCamera branchCode={props.branch} stage="WIP" staffName={props.actorName} taskTitle="เบิกเปิดของขึ้นบาร์" liveCameraOnly onCapture={(file, live) => void props.capture(file, live, (url) => setUrls((current) => [...current, url]))} />
+          <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={props.busy}>{props.busy ? "กำลังบันทึก..." : "เบิกขึ้นบาร์"}</button>
+        </div>
+      </div>
     </form>
   );
 }
@@ -236,7 +251,7 @@ function ContainerCard(props: {
         }}>
           <input className="h-10 w-full rounded-md border px-3" name="waste_qty" type="number" min="0" step="0.01" placeholder={`ของเหลือ ${props.row.recipe_uom}`} required />
           <LiveWatermarkCamera branchCode={props.branch} stage="WIP" staffName={props.actorName} taskTitle={props.row.item_label} liveCameraOnly onCapture={(file, live) => void props.capture(file, live, (url) => setUrls((current) => [...current, url]))} />
-          <button className="rounded-md bg-red-700 px-3 py-2 text-white" disabled={props.busy}>{props.busy ? "กำลังบันทึก..." : "บันทึกของเสีย"}</button>
+          <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-white" disabled={props.busy}>{props.busy ? "กำลังบันทึก..." : "บันทึกของเสีย"}</button>
         </form>
       ) : null}
     </article>

@@ -41,8 +41,8 @@ export function BranchPlaceManager({ branches }: { branches: { branch_code: stri
       <article className="space-y-2 rounded-xl border bg-white p-4">
         <h3 className="font-semibold">🧹 จุดตรวจความสะอาดแยกตามผังสาขา</h3>
         <div className="flex gap-2">
-          <button type="button" className={`rounded-full px-3 py-1 text-sm ${stage === "OPENING" ? "bg-red-700 text-white" : "bg-slate-100"}`} onClick={() => setStage("OPENING")}>จุดความสะอาดเปิดร้าน</button>
-          <button type="button" className={`rounded-full px-3 py-1 text-sm ${stage === "CLOSING" ? "bg-red-700 text-white" : "bg-slate-100"}`} onClick={() => setStage("CLOSING")}>จุดความสะอาดและล้างอุปกรณ์ปิดร้าน</button>
+          <button type="button" className={`rounded-full px-3 py-1 text-sm ${stage === "OPENING" ? "bg-[var(--fnb-brand)] text-white" : "bg-slate-100"}`} onClick={() => setStage("OPENING")}>จุดความสะอาดเปิดร้าน</button>
+          <button type="button" className={`rounded-full px-3 py-1 text-sm ${stage === "CLOSING" ? "bg-[var(--fnb-brand)] text-white" : "bg-slate-100"}`} onClick={() => setStage("CLOSING")}>จุดความสะอาดและล้างอุปกรณ์ปิดร้าน</button>
         </div>
         {spots.filter((spot) => spot.stageCode === stage).map((spot) => (
           <form key={spot.id} className="grid gap-2 md:grid-cols-3" onSubmit={(event) => {
@@ -70,7 +70,7 @@ export function BranchPlaceManager({ branches }: { branches: { branch_code: stri
         }}>
           <input className={field} name="name" placeholder="ชื่อจุดใหม่ของสาขานี้" />
           <input className={field} name="sort" type="number" placeholder="ลำดับ" defaultValue={10} />
-          <button className="rounded-md bg-red-700 px-3 py-2 text-sm text-white">เพิ่มจุด</button>
+          <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white">เพิ่มจุด</button>
         </form>
       </article>
     </section>
@@ -100,7 +100,7 @@ function ZoneEditor({ zone, branchCode, onSave }: { zone: FnbStorageZone | null;
       <select className={field} name="schedule" defaultValue={zone?.defaultCountSchedule ?? "WEEKLY_1X"}>{ZONE_SCHEDULES.map((key) => <option key={key} value={key}>{key === "DAILY_OPEN_CLOSE" ? "นับเปิดและปิดร้าน" : key === "DAILY_CLOSE" ? "นับทุกคืน" : key === "ON_DEMAND" ? "นับเมื่อเรียก" : FNB_BACKROOM_SCHEDULE_LABEL[key as keyof typeof FNB_BACKROOM_SCHEDULE_LABEL] ?? key}</option>)}</select>
       <label className="flex items-center gap-2 text-sm"><input name="gr" type="checkbox" defaultChecked={zone?.isDefaultGrTarget} />จุดรับเข้าเริ่มต้น</label>
       <div className="flex flex-wrap gap-2 text-xs md:col-span-3">{FNB_WEEKDAY_OPTIONS.map((day) => <label key={day.day}><input type="checkbox" checked={days.includes(day.day)} onChange={(event) => setDays((current) => event.target.checked ? [...current, day.day] : current.filter((value) => value !== day.day))} /> {day.label}</label>)}</div>
-      <button className="rounded-md bg-red-700 px-3 py-2 text-sm text-white">{zone ? "บันทึกจุดนี้" : "เพิ่มจุดจัดเก็บ"}</button>
+      <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white">{zone ? "บันทึกจุดนี้" : "เพิ่มจุดจัดเก็บ"}</button>
     </form>
   );
 }

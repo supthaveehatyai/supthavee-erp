@@ -85,7 +85,7 @@ export function MenuSalesPanel({
           ถ่ายหรืออัปโหลดสลิปได้ 1 ถึง 3 รูป
           <input className="mt-2 block" name="slips" type="file" accept="image/*" capture="environment" multiple />
         </label>
-        <button className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" disabled={busy}>{busy ? "กำลังอ่าน..." : "อ่านสลิปรายเมนู"}</button>
+        <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy}>{busy ? "กำลังอ่าน..." : "อ่านสลิปรายเมนู"}</button>
       </form>
       <div className="space-y-2">
         <input className="h-10 w-full rounded-md border px-3 text-sm" value={query} placeholder="ค้นหาเมนูเพื่อกรอกจำนวน" onChange={(event) => setQuery(event.target.value)} />

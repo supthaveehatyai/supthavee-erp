@@ -70,7 +70,6 @@ export function OpenShelfLifePanel() {
             <input type="hidden" name="short_code" value={row.short_code} />
             <p className="text-sm font-medium">{row.short_code} {row.name_th}</p>
             <select className={field} name="brand_code" defaultValue={row.brand_code}>
-              <option value="ALL">ทุกแบรนด์</option>
               <option value="LUCKY_CUP">Lucky Cup</option>
               <option value="CHATORN">ชาทรตะโหมด</option>
             </select>
@@ -79,7 +78,7 @@ export function OpenShelfLifePanel() {
             </select>
             <input className={field} name="open_shelf_life_value" type="number" min={0} defaultValue={row.open_shelf_life_value} placeholder="ชั่วโมงหรือวัน" />
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="require_expiry_clear_photo" defaultChecked={row.require_expiry_clear_photo} />บังคับชั่งของเหลือและถ่ายรูปสดเมื่อครบอายุ</label>
-            <button className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" disabled={pending}>{pending ? "กำลังบันทึก..." : "บันทึกกฎนี้"}</button>
+            <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={pending}>{pending ? "กำลังบันทึก..." : "บันทึกกฎนี้"}</button>
           </form>
         ))}
       </div>

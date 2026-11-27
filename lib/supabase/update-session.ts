@@ -84,8 +84,10 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
 
   if (!user && !onAuthPage) {
     const loginUrl = request.nextUrl.clone();
+    const next = `${pathname}${request.nextUrl.search}`;
     loginUrl.pathname = "/login";
-    loginUrl.searchParams.set("next", pathname);
+    loginUrl.search = "";
+    loginUrl.searchParams.set("next", next);
     return NextResponse.redirect(loginUrl);
   }
 

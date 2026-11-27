@@ -201,7 +201,7 @@ function TaskCard(props: {
           {task.input_type === "PASS_FAIL_PHOTO" ? <select className="h-10 w-full rounded-md border px-3 text-sm" name="status_value" defaultValue="DONE"><option value="DONE">ผ่าน</option><option value="ISSUE_FOUND">ไม่ผ่าน</option></select> : null}
           <input className="h-10 w-full rounded-md border px-3 text-sm" name="note_text" placeholder="หมายเหตุ" />
           <LiveWatermarkCamera branchCode={props.branch} stage={props.stage} staffName={props.actorName} taskTitle={task.title_th} liveCameraOnly={task.live_camera_only} onCapture={(file, liveCapture) => void capture(file, liveCapture)} />
-          <button className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" disabled={busy}>{busy ? "กำลังบันทึก..." : "📸 ถ่ายรูป & ส่งหัวข้อนี้"}</button>
+          <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy}>{busy ? "กำลังบันทึก..." : "📸 ถ่ายรูป & ส่งหัวข้อนี้"}</button>
         </form>
       )}
     </article>

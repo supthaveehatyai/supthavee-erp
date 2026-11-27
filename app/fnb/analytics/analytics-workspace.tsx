@@ -4,13 +4,13 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { getMenuAnalyticsAction } from "@/lib/actions/fnb-menu-sales";
 import { getWipCostAnalyticsAction } from "@/lib/actions/fnb-wip";
-import type { FnbMenuRank, FnbPromoHint, FnbWipCostRow } from "@/types/fnb";
+import type { FnbBrandCode, FnbMenuRank, FnbPromoHint, FnbWipCostRow } from "@/types/fnb";
 
 function today(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date());
 }
 
-export function AnalyticsWorkspace() {
+export function AnalyticsWorkspace({ brand }: { brand: FnbBrandCode }) {
   const [start, setStart] = useState(today().slice(0, 8) + "01");
   const [end, setEnd] = useState(today());
   const [ranks, setRanks] = useState<FnbMenuRank[]>([]);
@@ -28,14 +28,15 @@ export function AnalyticsWorkspace() {
           const [loaded, wip] = await Promise.all([getMenuAnalyticsAction(start, end), getWipCostAnalyticsAction(start, end)]);
           if (loaded.error) toast.error(loaded.error);
           else toast.success("โหลดยอดขายรายเมนูแล้ว");
-          setRanks(loaded.data.ranks);
-          setPromos(loaded.data.promos);
-          setCosts(wip.data);
+          const keep = (code: string) => brand === "LUCKY_CUP" ? code.startsWith("LC") : code.startsWith("CT");
+          setRanks(loaded.data.ranks.filter((row) => keep(row.branch_code)));
+          setPromos(loaded.data.promos.filter((row) => keep(row.branch_code)));
+          setCosts(wip.data.filter((row) => keep(row.branch_code)));
         });
       }}>
         <input className="h-10 rounded-md border px-3" type="date" value={start} onChange={(event) => setStart(event.target.value)} />
         <input className="h-10 rounded-md border px-3" type="date" value={end} onChange={(event) => setEnd(event.target.value)} />
-        <button className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" disabled={pending}>{pending ? "กำลังโหลด..." : "เปรียบเทียบช่วงวันที่"}</button>
+        <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={pending}>{pending ? "กำลังโหลด..." : "เปรียบเทียบช่วงวันที่"}</button>
       </form>
       {branches.map((branch) => {
         const rows = ranks.filter((row) => row.branch_code === branch);

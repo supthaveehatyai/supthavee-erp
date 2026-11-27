@@ -58,8 +58,11 @@ export function safeInternalPath(value: string | null | undefined): string | nul
   if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\") || raw.includes("://")) {
     return null;
   }
-  const path = raw.split("?")[0]?.split("#")[0] ?? "";
-  return path.startsWith("/") ? path : null;
+  const hashless = raw.split("#")[0] ?? "";
+  const splitAt = hashless.indexOf("?");
+  const path = splitAt === -1 ? hashless : hashless.slice(0, splitAt);
+  const query = splitAt === -1 ? "" : hashless.slice(splitAt);
+  return path.startsWith("/") ? `${path}${query}` : null;
 }
 
 export function fnbStaffHome(ctx: UserAccessContext): string {

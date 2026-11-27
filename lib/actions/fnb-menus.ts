@@ -61,7 +61,8 @@ export async function savePrepBaseAction(input: {
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
     await requireFnbModuleAccess("master_items_bom");
-    const existing = await schemaAdmin().schema("fnb").from("prep_bases").select("base_code").eq("base_code", input.base_code).maybeSingle();
+    if (input.brand_code !== "LUCKY_CUP" && input.brand_code !== "CHATORN") return result({ ok: false }, "เบสต้องสังกัดแบรนด์เดียว");
+    const existing = await schemaAdmin().schema("fnb").from("prep_bases").select("base_code").eq("base_code", input.base_code.trim().toUpperCase()).eq("brand_code", input.brand_code).maybeSingle();
     if (existing.error) return fail({ ok: false }, existing.error, "บันทึกเบสไม่สำเร็จ");
     const payload = {
       base_code: input.base_code.trim().toUpperCase(),
@@ -93,6 +94,7 @@ export async function saveMenuAction(input: {
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
     await requireFnbModuleAccess("master_items_bom");
+    if (input.brand_code !== "LUCKY_CUP" && input.brand_code !== "CHATORN") return result({ ok: false }, "เมนูต้องสังกัดแบรนด์เดียว");
     const db = schemaAdmin().schema("fnb");
     const payload = {
       brand_code: input.brand_code,
@@ -167,5 +169,68 @@ export async function copyMenuToChatornAction(menuId: string): Promise<FnbAction
     return result({ menu_code: code });
   } catch (error) {
     return caught({ menu_code: "" }, error, "คัดลอกเมนูไม่สำเร็จ");
+  }
+}
+
+export async function copyBrandStarterAction(fromBrand: string, toBrand: string): Promise<FnbActionResult<{ bases: number; menus: number }>> {
+  try {
+    const ctx = await requireFnbModuleAccess("master_items_bom");
+    if (!ctx.isSuperAdmin) return result({ bases: 0, menus: 0 }, "เฉพาะ Super Admin คัดลอกชุดข้อมูลข้ามแบรนด์ได้");
+    if ((fromBrand !== "LUCKY_CUP" && fromBrand !== "CHATORN") || (toBrand !== "LUCKY_CUP" && toBrand !== "CHATORN") || fromBrand === toBrand) {
+      return result({ bases: 0, menus: 0 }, "เลือกแบรนด์ต้นทางและปลายทางคนละแบรนด์");
+    }
+    const db = schemaAdmin().schema("fnb");
+    const [sourceBases, targetBases] = await Promise.all([
+      db.from("prep_bases").select("base_code,base_name_th,yield_qty_ml,shelf_life_hours").eq("brand_code", fromBrand).limit(50),
+      db.from("prep_bases").select("base_code").eq("brand_code", toBrand).limit(50),
+    ]);
+    if (sourceBases.error) return fail({ bases: 0, menus: 0 }, sourceBases.error, "อ่านเบสต้นทางไม่สำเร็จ");
+    const owned = new Set(asRows(targetBases.data).map((row) => text(row.base_code)));
+    let bases = 0;
+    for (const row of asRows(sourceBases.data)) {
+      if (owned.has(text(row.base_code))) continue;
+      const inserted = await db.from("prep_bases").insert({
+        base_code: text(row.base_code),
+        brand_code: toBrand,
+        base_name_th: text(row.base_name_th),
+        yield_qty_ml: num(row.yield_qty_ml),
+        shelf_life_hours: row.shelf_life_hours == null ? null : num(row.shelf_life_hours),
+        is_active: true,
+      });
+      if (inserted.error) return fail({ bases, menus: 0 }, inserted.error, "คัดลอกเบสไม่สำเร็จ");
+      bases += 1;
+    }
+    let menus = 0;
+    const fullMenus = await db.from("menus").select("id,menu_code,menu_name_th,cup_size,temperature,retail_price").eq("brand_code", fromBrand).eq("is_active", true).limit(400);
+    for (const row of asRows(fullMenus.data)) {
+      const id = crypto.randomUUID();
+      const inserted = await db.from("menus").insert({
+        id,
+        brand_code: toBrand,
+        menu_code: `${text(row.menu_code)}-${toBrand === "CHATORN" ? "CT" : "LC"}`,
+        menu_name_th: text(row.menu_name_th),
+        cup_size: text(row.cup_size) || "R",
+        temperature: text(row.temperature) || "ICE",
+        retail_price: num(row.retail_price),
+        is_active: true,
+      });
+      if (inserted.error) continue;
+      const lines = await db.from("menu_bom_lines").select("component_type,item_id,prep_base_code,usage_qty,usage_uom,note").eq("menu_id", text(row.id)).limit(40);
+      for (const line of asRows(lines.data)) {
+        await db.from("menu_bom_lines").insert({
+          menu_id: id,
+          component_type: text(line.component_type),
+          item_id: line.item_id,
+          prep_base_code: line.prep_base_code,
+          usage_qty: num(line.usage_qty),
+          usage_uom: text(line.usage_uom) || "g",
+          note: line.note,
+        });
+      }
+      menus += 1;
+    }
+    return result({ bases, menus });
+  } catch (error) {
+    return caught({ bases: 0, menus: 0 }, error, "คัดลอกชุดข้อมูลไม่สำเร็จ");
   }
 }

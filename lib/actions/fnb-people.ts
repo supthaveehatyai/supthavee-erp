@@ -50,12 +50,13 @@ function mapRole(row: Record<string, unknown>): FnbRolePermissionRow {
     isActive: row.is_active !== false,
     modulePermissions: fnbModulePermissionsFrom(row.module_permissions),
     guardrailPermissions: fnbGuardrailPermissionsFrom(row.guardrail_permissions),
+    brandCode: text(row.brand_code),
   };
 }
 
-async function readFnbRoles(): Promise<FnbRolePermissionRow[]> {
-  const listed = await schemaAdmin().schema("fnb").from("role_permissions").select("role_code, app_role_code, role_name_th, description, is_system_builtin, is_active, module_permissions, guardrail_permissions, sort_order").order("sort_order", { ascending: true });
-  return (Array.isArray(listed.data) ? listed.data as Record<string, unknown>[] : []).map(mapRole);
+async function readFnbRoles(brandCode?: string): Promise<FnbRolePermissionRow[]> {
+  const listed = await schemaAdmin().schema("fnb").from("role_permissions").select("role_code, app_role_code, role_name_th, description, is_system_builtin, is_active, module_permissions, guardrail_permissions, sort_order, brand_code").order("sort_order", { ascending: true });
+  return (Array.isArray(listed.data) ? listed.data as Record<string, unknown>[] : []).map(mapRole).filter((row) => !brandCode || row.brandCode === brandCode);
 }
 
 type FnbRpc = {
@@ -78,6 +79,7 @@ export async function upsertFnbRolePermissionAction(input: {
   roleCode: string;
   roleNameTh: string;
   description?: string;
+  brandCode: "LUCKY_CUP" | "CHATORN";
   modulePermissions: FnbModulePermissions;
   guardrailPermissions: FnbGuardrailPermissions;
 }): Promise<{ success: boolean; error?: string; roleCode?: string }> {
@@ -88,6 +90,7 @@ export async function upsertFnbRolePermissionAction(input: {
     const guards = fnbGuardrailPermissionsFrom(input.guardrailPermissions);
     const saved = await (createClient() as unknown as FnbRpc).schema("fnb").rpc("upsert_fnb_role_permission", {
       p_actor_user_id: ctx.userId,
+      p_brand_code: input.brandCode,
       p_role_code: input.roleCode,
       p_role_name_th: input.roleNameTh,
       p_description: input.description ?? input.roleNameTh,
@@ -134,10 +137,12 @@ async function usernameFor(first: string, last: string, exclude: string | null):
   return text(rpc.data).toLowerCase();
 }
 
-export async function getFnbPeoplePayloadAction(): Promise<{ data: FnbPeoplePayload | null; error: string | null }> {
+export async function getFnbPeoplePayloadAction(activeBrand?: string): Promise<{ data: FnbPeoplePayload | null; error: string | null }> {
   try {
     const ctx = await requireFnbPeopleAccess();
-    const brands = brandsOf(ctx);
+    const allowed = brandsOf(ctx);
+    const picked = activeBrand === "CHATORN" || activeBrand === "LUCKY_CUP" ? activeBrand : allowed[0] ?? "LUCKY_CUP";
+    const brands = allowed.includes(picked) || ctx.isSuperAdmin ? [picked] : allowed.slice(0, 1);
     const [branches, employees] = await Promise.all([
       schemaAdmin().schema("fnb").from("branches").select("branch_code, branch_name_th, brand_code").order("sort_order", { ascending: true }),
       schemaAdmin().schema("fnb").from("employees").select("id, emp_code, user_id, full_name_th, nickname, first_name_en, last_name_en, username, brand_code, primary_branch_code, allowed_branch_codes, hire_date, employment_type, compensation_tier, base_pay_rate, position_allowance, diligence_allowance_default, is_sso_enrolled, bank_account_no, has_system_login, employment_status, system_role").order("emp_code", { ascending: true }),
@@ -175,7 +180,7 @@ export async function getFnbPeoplePayloadAction(): Promise<{ data: FnbPeoplePayl
           systemRole: text(row.system_role) || "FNB_STORE_STAFF",
         };
       });
-    const roles = await readFnbRoles();
+    const roles = await readFnbRoles(brands[0]);
     return {
       data: {
         brands,
@@ -224,7 +229,7 @@ export async function saveFnbEmployeeAction(formData: FormData): Promise<{ succe
     if (!username) return { success: false, error: "สร้างชื่อผู้ใช้ไม่สำเร็จ" };
     const systemRole = text(formData.get("system_role")).toUpperCase() || "FNB_STORE_STAFF";
     if (!/^FNB_[A-Z0-9_]+$/.test(systemRole)) return { success: false, error: "บทบาทต้องขึ้นต้นด้วย FNB_" };
-    const roles = await readFnbRoles();
+    const roles = await readFnbRoles(brand);
     const chosen = roles.find((role) => role.roleCode === systemRole && role.isActive);
     if (roles.length > 0 && !chosen) return { success: false, error: "บทบาทนี้ยังไม่เปิดใช้งาน" };
     const tier = canSeePrivatePay(ctx) ? text(formData.get("compensation_tier")) || "GENERAL_STAFF" : "GENERAL_STAFF";

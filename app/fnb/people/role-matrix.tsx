@@ -15,7 +15,7 @@ import {
   type FnbRolePermissionRow,
 } from "@/types/fnb";
 
-export function FnbRoleMatrix({ roles, canEdit }: { roles: FnbRolePermissionRow[]; canEdit: boolean }) {
+export function FnbRoleMatrix({ roles, canEdit, brandCode }: { roles: FnbRolePermissionRow[]; canEdit: boolean; brandCode: "LUCKY_CUP" | "CHATORN" }) {
   const router = useRouter();
   const [rows, setRows] = useState(roles);
   const [saving, setSaving] = useState<string | null>(null);
@@ -28,6 +28,7 @@ export function FnbRoleMatrix({ roles, canEdit }: { roles: FnbRolePermissionRow[
       roleCode: next.roleCode,
       roleNameTh: next.roleNameTh,
       description: next.description || next.roleNameTh,
+      brandCode,
       modulePermissions: next.modulePermissions,
       guardrailPermissions: next.guardrailPermissions,
     });
@@ -75,6 +76,7 @@ export function FnbRoleMatrix({ roles, canEdit }: { roles: FnbRolePermissionRow[
       roleCode: code,
       roleNameTh: name,
       description: name,
+      brandCode,
       modulePermissions: fnbModulePermissionsFrom(null),
       guardrailPermissions: fnbGuardrailPermissionsFrom(null),
     });
@@ -100,11 +102,11 @@ export function FnbRoleMatrix({ roles, canEdit }: { roles: FnbRolePermissionRow[
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-slate-900">กลุ่มที่ 1: สวิตช์เปิด-ปิดหน้าการทำงาน</h2>
         {canEdit ? (
-          <button type="button" className="rounded-xl bg-red-700 px-3 py-2 text-sm font-semibold text-white" disabled={saving === "create"} onClick={() => setCreating((open) => !open)}>
+          <button type="button" className="rounded-xl bg-[var(--fnb-brand)] px-3 py-2 text-sm font-semibold text-white" disabled={saving === "create"} onClick={() => setCreating((open) => !open)}>
             ➕ สร้างบทบาทใหม่
           </button>
         ) : (
-          <button type="button" className="rounded-xl bg-red-700 px-3 py-2 text-sm font-semibold text-white" disabled>➕ สร้างบทบาทใหม่</button>
+          <button type="button" className="rounded-xl bg-[var(--fnb-brand)] px-3 py-2 text-sm font-semibold text-white" disabled>➕ สร้างบทบาทใหม่</button>
         )}
       </div>
       {creating && canEdit ? (
@@ -115,7 +117,7 @@ export function FnbRoleMatrix({ roles, canEdit }: { roles: FnbRolePermissionRow[
           <label className="text-sm">รหัสบทบาท
             <input className="mt-1 w-full rounded-lg border px-3 py-2" value={roleCode} onChange={(event) => setRoleCode(event.target.value)} placeholder="FNB_AREA_MANAGER" />
           </label>
-          <button className="self-end rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white" disabled={saving === "create"} type="submit">บันทึกบทบาท</button>
+          <button className="self-end rounded-lg bg-[var(--fnb-brand)] px-4 py-2 text-sm font-semibold text-white" disabled={saving === "create"} type="submit">บันทึกบทบาท</button>
         </form>
       ) : null}
       <Matrix

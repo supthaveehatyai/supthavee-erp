@@ -4,6 +4,21 @@
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
+  --fnb-brand: #dc2626;
+  --fnb-brand-hover: #b91c1c;
+  --fnb-tint: #fef2f2;
+}
+
+.fnb-lucky {
+  --fnb-brand: #dc2626;
+  --fnb-brand-hover: #b91c1c;
+  --fnb-tint: #fef2f2;
+}
+
+.fnb-chatorn {
+  --fnb-brand: #6b0f1a;
+  --fnb-brand-hover: #520b13;
+  --fnb-tint: #fdf2f4;
 }
 
 @theme inline {

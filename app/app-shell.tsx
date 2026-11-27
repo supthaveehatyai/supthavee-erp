@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { canAccessPath, canSeeNavItem, isAuthPath, isLiffPath, normalizePathname, STOCK_CARD_PATH } from "@/lib/auth/module-access";
@@ -269,12 +269,14 @@ function SidebarContent({
   isSuperAdmin,
   workspace,
   fnbModulePermissions,
+  fnbBrand = "LUCKY_CUP",
 }: {
   closeMenu: () => void;
   roleCode: string | null;
   accessibleModules: AccessibleModules | null;
   isSuperAdmin: boolean;
   workspace: WorkspaceKey;
+  fnbBrand?: "LUCKY_CUP" | "CHATORN";
   fnbModulePermissions: FnbModulePermissions;
 }) {
   const pathname = usePathname();
@@ -369,13 +371,15 @@ function SidebarContent({
               const isActive = exactOnly
                 ? pathname === itemPath
                 : pathname === itemPath || pathname.startsWith(`${itemPath}/`);
+              const href = workspace === "fnb" && item.href.startsWith("/fnb") ? `${item.href}${item.href.includes("?") ? "&" : "?"}brand=${fnbBrand}` : item.href;
+              const activeClass = workspace === "fnb" ? (fnbBrand === "CHATORN" ? "bg-white text-[#6B0F1A]" : "bg-white text-[#DC2626]") : theme.activeLinkClass;
               return (
                 <Link
                   key={item.href}
-                  href={item.href}
+                  href={href}
                   onNavigate={closeMenu}
                   className={`block rounded-lg px-3 py-2.5 text-sm transition ${
-                    isActive ? theme.activeLinkClass : "text-white/85 hover:bg-white/10 hover:text-white"
+                    isActive ? activeClass : "text-white/85 hover:bg-white/10 hover:text-white"
                   }`}
                 >
                   {item.label}
@@ -504,6 +508,7 @@ export default function AppShell({
   accessibleModules = null,
   isSuperAdmin = false,
   fnbModulePermissions = fnbModulePermissionsFrom(null),
+  assignedBrandCode = null,
 }: {
   children: React.ReactNode;
   /** จาก `user_profiles.full_name` ผ่าน Root Layout — ไม่ใช้ brand เป็น fallback */
@@ -512,8 +517,14 @@ export default function AppShell({
   accessibleModules?: AccessibleModules | null;
   isSuperAdmin?: boolean;
   fnbModulePermissions?: FnbModulePermissions;
+  assignedBrandCode?: string | null;
 }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const fnbBrand = !isSuperAdmin
+    ? (assignedBrandCode === "CHATORN" ? "CHATORN" : "LUCKY_CUP")
+    : (searchParams.get("brand") === "CHATORN" ? "CHATORN" : "LUCKY_CUP");
+  const fnbShell = fnbBrand === "CHATORN" ? "fnb-chatorn bg-[#6B0F1A]" : "fnb-lucky bg-[#DC2626]";
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const fnbDesk = !isSuperAdmin && pathname.startsWith("/fnb");
   const workspace: WorkspaceKey = isSuperAdmin ? workspaceFromPath(pathname) : fnbDesk ? "fnb" : "supthavee";
@@ -538,7 +549,7 @@ export default function AppShell({
   return (
     <AccessProvider roleCode={roleCode} accessibleModules={accessibleModules} isSuperAdmin={isSuperAdmin}>
     <div className="min-h-dvh bg-slate-50">
-      <aside className={`app-shell-sidebar fixed inset-y-0 left-0 z-40 hidden w-64 flex-col print:hidden lg:flex ${theme.shellClass}`}>
+      <aside className={`app-shell-sidebar fixed inset-y-0 left-0 z-40 hidden w-64 flex-col print:hidden lg:flex ${workspace === "fnb" ? fnbShell : theme.shellClass}`}>
         <SidebarContent
           closeMenu={() => setIsMenuOpen(false)}
           roleCode={roleCode}
@@ -546,6 +557,7 @@ export default function AppShell({
           isSuperAdmin={isSuperAdmin}
           workspace={workspace}
           fnbModulePermissions={fnbModulePermissions}
+          fnbBrand={fnbBrand}
         />
       </aside>
 
@@ -559,7 +571,7 @@ export default function AppShell({
       )}
 
       <aside
-        className={`app-shell-sidebar fixed inset-y-0 left-0 z-50 flex w-72 flex-col shadow-2xl transition-transform duration-200 print:hidden lg:hidden ${theme.shellClass} ${
+        className={`app-shell-sidebar fixed inset-y-0 left-0 z-50 flex w-72 flex-col shadow-2xl transition-transform duration-200 print:hidden lg:hidden ${workspace === "fnb" ? fnbShell : theme.shellClass} ${
           isMenuOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
@@ -570,6 +582,7 @@ export default function AppShell({
           isSuperAdmin={isSuperAdmin}
           workspace={workspace}
           fnbModulePermissions={fnbModulePermissions}
+          fnbBrand={fnbBrand}
         />
       </aside>
 
@@ -622,7 +635,7 @@ export default function AppShell({
           </div>
         </header>
 
-        <main className="app-shell-main min-h-[calc(100dvh-4rem)] p-4 md:p-7 print:min-h-0 print:p-0">
+        <main className={`app-shell-main min-h-[calc(100dvh-4rem)] p-4 md:p-7 print:min-h-0 print:p-0 ${workspace === "fnb" ? (fnbBrand === "CHATORN" ? "fnb-chatorn" : "fnb-lucky") : ""}`}>
           {children}
         </main>
       </div>

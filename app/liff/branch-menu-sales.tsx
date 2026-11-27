@@ -35,7 +35,7 @@ export function BranchMenuSales({ branches }: { branches: FnbBranchOption[] }) {
         </div>
         <button
           type="button"
-          className="rounded-lg bg-red-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          className="rounded-lg bg-[var(--fnb-brand)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
           disabled={pending || !branchCode}
           onClick={() => {
             setPending(true);

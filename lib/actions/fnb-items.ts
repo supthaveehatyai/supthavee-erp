@@ -34,6 +34,7 @@ function mapItem(row: Record<string, unknown>): FnbItemRow {
     track_front_display_daily: row.track_front_display_daily === true,
     backroom_count_schedule: text(row.backroom_count_schedule) || "WEEKLY_2X",
     backroom_count_weekdays: Array.isArray(row.backroom_count_weekdays) ? row.backroom_count_weekdays.map((day) => Number(day)).filter((day) => Number.isFinite(day)) : [],
+    allow_decimal_count_qty: row.allow_decimal_count_qty === true,
   };
 }
 
@@ -96,6 +97,7 @@ export async function saveFnbItemAction(input: {
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
     await requireFnbModuleAccess("master_items_bom");
+    if (input.brand_scope !== "LUCKY_CUP" && input.brand_scope !== "CHATORN") return result({ ok: false }, "วัตถุดิบต้องสังกัด Lucky Cup หรือชาทรตะโหมด");
     const shortCode = input.short_code.trim().toUpperCase();
     if (!shortCode) return result({ ok: false }, "กรอกรหัสย่อตามคู่มือ");
     const clash = await schemaAdmin().schema("fnb").from("items").select("id").eq("short_code", shortCode).maybeSingle();

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -82,12 +83,14 @@ export default async function RootLayout({
   return (
     <html lang="th" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className={sarabun.variable}>
+        <Suspense fallback={null}>
         <AppShell
           userDisplayName={currentUser?.displayName ?? null}
           roleCode={currentUser?.roleCode ?? null}
           accessibleModules={currentUser?.accessibleModules ?? null}
           isSuperAdmin={isSuperAdmin}
           fnbModulePermissions={access?.fnbModulePermissions}
+          assignedBrandCode={access?.assignedBrandCode}
         >
           {allowed ? (
             children
@@ -100,6 +103,7 @@ export default async function RootLayout({
             />
           )}
         </AppShell>
+        </Suspense>
         <Toaster richColors position="top-right" closeButton />
       </body>
     </html>

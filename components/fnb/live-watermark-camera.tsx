@@ -108,7 +108,7 @@ export function LiveWatermarkCamera({
   if (!liveCameraOnly && !stream) {
     return (
       <div className="space-y-2">
-        <button type="button" className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" onClick={() => void openCamera()}>เปิดกล้องสด</button>
+        <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" onClick={() => void openCamera()}>เปิดกล้องสด</button>
         <label className="block text-sm">
           หรือเลือกรูปจากเครื่อง (ระบบจะกันภาพซ้ำ)
           <input className="mt-2 block w-full" type="file" accept="image/*" onChange={(event) => {
@@ -123,7 +123,7 @@ export function LiveWatermarkCamera({
   return (
     <div className="space-y-2">
       {stream ? <video ref={videoRef} className="max-h-72 w-full rounded-lg bg-black" autoPlay playsInline muted /> : null}
-      {stream ? <button type="button" className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" disabled={busy} onClick={() => void shutter()}>{busy ? "กำลังประทับเวลา..." : "ถ่ายรูป"}</button> : <button type="button" className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" onClick={() => void openCamera()}>เปิดกล้องหลัง</button>}
+      {stream ? <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy} onClick={() => void shutter()}>{busy ? "กำลังประทับเวลา..." : "ถ่ายรูป"}</button> : <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" onClick={() => void openCamera()}>เปิดกล้องหลัง</button>}
     </div>
   );
 }

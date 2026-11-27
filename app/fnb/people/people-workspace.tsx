@@ -27,13 +27,13 @@ export function FnbPeopleWorkspace({ payload }: { payload: FnbPeoplePayload }) {
         <p className="text-sm text-slate-500">ผู้บันทึก: {payload.actorName}</p>
       </div>
       <div className="flex gap-2">
-        <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "people" ? "bg-red-700 text-white" : "bg-white"}`} onClick={() => setTab("people")}>ทะเบียนพนักงานและรหัสล็อกอิน</button>
-        <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "payroll" ? "bg-red-700 text-white" : "bg-white"}`} onClick={() => setTab("payroll")}>เตรียมเงินเดือนและชั่วโมงพาร์ทไทม์</button>
-        <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "roles" ? "bg-red-700 text-white" : "bg-white"}`} onClick={() => setTab("roles")}>🛡️ จัดการสิทธิ์ระดับบทบาท (Role Permissions)</button>
+        <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "people" ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setTab("people")}>ทะเบียนพนักงานและรหัสล็อกอิน</button>
+        <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "payroll" ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setTab("payroll")}>เตรียมเงินเดือนและชั่วโมงพาร์ทไทม์</button>
+        <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "roles" ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setTab("roles")}>🛡️ จัดการสิทธิ์ระดับบทบาท (Role Permissions)</button>
       </div>
       {tab === "people" ? <PeopleTab payload={payload} /> : null}
       {tab === "payroll" ? <PayrollTab payload={payload} /> : null}
-      {tab === "roles" ? <FnbRoleMatrix roles={payload.roles} canEdit={payload.canEditRolePermissions} /> : null}
+      {tab === "roles" ? <FnbRoleMatrix roles={payload.roles} canEdit={payload.canEditRolePermissions} brandCode={payload.brands[0] === "CHATORN" ? "CHATORN" : "LUCKY_CUP"} /> : null}
     </div>
   );
 }
@@ -48,7 +48,7 @@ function PeopleTab({ payload }: { payload: FnbPeoplePayload }) {
 
   return (
     <div className="space-y-4">
-      <button type="button" className="rounded-xl bg-red-700 px-4 py-2 text-sm font-semibold text-white" onClick={() => { setEditing(null); setOpen(true); }}>เพิ่มพนักงาน</button>
+      <button type="button" className="rounded-xl bg-[var(--fnb-brand)] px-4 py-2 text-sm font-semibold text-white" onClick={() => { setEditing(null); setOpen(true); }}>เพิ่มพนักงาน</button>
       {open ? (
         <form
           className="grid gap-3 rounded-2xl border bg-white p-4 md:grid-cols-2"
@@ -131,7 +131,7 @@ function PeopleTab({ payload }: { payload: FnbPeoplePayload }) {
           <label className="text-sm">หน้าสมุดบัญชี<input name="bank_book" type="file" accept="image/*,.pdf" className="mt-1 block text-xs" /></label>
           {!editing?.userId ? <label className="flex items-center gap-2 text-sm md:col-span-2"><input type="checkbox" name="open_login" value="true" defaultChecked />เปิดรหัสล็อกอินเข้าระบบ (PIN เริ่มต้น 555555)</label> : null}
           <div className="flex gap-2 md:col-span-2">
-            <button className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white" type="submit">บันทึก</button>
+            <button className="rounded-lg bg-[var(--fnb-brand)] px-4 py-2 text-sm font-semibold text-white" type="submit">บันทึก</button>
             <button className="rounded-lg border px-4 py-2 text-sm" type="button" onClick={() => setOpen(false)}>ปิด</button>
           </div>
         </form>
@@ -244,7 +244,7 @@ function PayrollTab({ payload }: { payload: FnbPeoplePayload }) {
             </table>
           </div>
           <div className="flex flex-wrap gap-2">
-            {!locked ? <button type="button" className="rounded-lg bg-red-700 px-3 py-2 text-sm font-semibold text-white" onClick={async () => {
+            {!locked ? <button type="button" className="rounded-lg bg-[var(--fnb-brand)] px-3 py-2 text-sm font-semibold text-white" onClick={async () => {
               const saved = await submitFnbPayrollAction({ year, month, brandCode: brand, lines });
               if (!saved.success) toast.error(saved.error ?? "ส่งร่างไม่สำเร็จ");
               else {

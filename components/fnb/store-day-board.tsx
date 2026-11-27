@@ -12,6 +12,7 @@ import {
   saveZoneCountsAction,
 } from "@/lib/actions/fnb-store-day";
 import { closeWipBatchAction, issueWipBatchAction, listWipBoardAction } from "@/lib/actions/fnb-wip";
+import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import { itemMatches } from "@/lib/fnb/item-search";
 import type { FnbBrandCode, FnbStoreDayBoard, FnbZoneCountLine } from "@/types/fnb";
 
@@ -49,6 +50,20 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
   const { board, error, reload } = useBoard(props.branch, props.workDate, props.actorSource, brand);
   const [busy, start] = useTransition();
   const [photo, setPhoto] = useState("");
+  const [equipPhoto, setEquipPhoto] = useState("");
+  const [equipError, setEquipError] = useState("");
+  const [bases, setBases] = useState<{ base_code: string; base_name_th?: string; yield_qty_ml: number }[]>([]);
+  const [lemons, setLemons] = useState<{ id: string; count_uom: string }[]>([]);
+  const [portion, setPortion] = useState<Record<string, string>>({});
+  const [lemonCount, setLemonCount] = useState("");
+  const [lemonGrams, setLemonGrams] = useState("");
+  const [prepPhoto, setPrepPhoto] = useState("");
+  useEffect(() => {
+    void listWipBoardAction({ branch_code: props.branch, work_date: props.workDate, actor_source: props.actorSource, brand_lock: props.brandLock }).then((loaded) => {
+      setBases(loaded.data?.bases ?? []);
+      setLemons((loaded.data?.items ?? []).filter((item) => item.short_code === "LEM"));
+    });
+  }, [props.branch, props.workDate, props.actorSource, props.brandLock]);
   const [qty, setQty] = useState<Record<string, string>>({});
   const [expiry, setExpiry] = useState<Record<string, string>>({});
   const front = board?.locations.find((row) => row.zoneType === "FRONT_DISPLAY");
@@ -58,16 +73,85 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
       <h2 className="text-lg font-semibold">ช่วงที่ 1 — เปิดร้าน 7 หมวด</h2>
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       <article className="space-y-2">
-        <h3 className="font-semibold">หมวด 1–3 เบส อุปกรณ์ และซอส</h3>
-        <p className="text-sm text-slate-600">ต้มเบส JT 1,950 ml · BT 2,800 ml · ML 50g+น้ำ 750ml · MMK 50g+นม 1,000ml และหั่นเลมอน ใช้ปุ่ม ⚡ ระหว่างวัน หรือแท็บต้มเบส สัดส่วน 25/50/75/100</p>
+        <h3 className="font-semibold">หมวดที่ 1: เตรียมวัตถุดิบเบสและหั่นเลมอน</h3>
+        <div className="space-y-2">
+          {bases.map((base) => (
+            <div key={base.base_code} className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-2 text-sm">
+              <p className="w-40 font-medium">{base.base_code} {base.yield_qty_ml.toFixed(0)} ml</p>
+              {["0.25", "0.5", "0.75", "1", "SKIP"].map((part) => (
+                <button key={part} type="button" className={`rounded-full px-3 py-1 ${portion[base.base_code] === part ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setPortion((current) => ({ ...current, [base.base_code]: part }))}>
+                  {part === "SKIP" ? "มีของเดิม/ยังไม่ต้ม" : `${Math.round(Number(part) * 100)}% (${Math.round(base.yield_qty_ml * Number(part))} ml)`}
+                </button>
+              ))}
+            </div>
+          ))}
+          <div className="flex flex-wrap items-end gap-3 rounded-lg bg-slate-50 p-2">
+            <label className="text-sm">หั่นเลมอน จำนวนลูก<FnbQtyInput value={lemonCount} onChange={setLemonCount} unit="ลูก" /></label>
+            <label className="text-sm">น้ำหนักเนื้อ<FnbQtyInput value={lemonGrams} onChange={setLemonGrams} unit="g" /></label>
+          </div>
+          <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle="เตรียมเบสและหั่นเลมอน" liveCameraOnly onCapture={(file, live) => void uploadShot(file, live, props.branch, props.actorSource, brand).then(setPrepPhoto).catch((reason: Error) => toast.error(reason.message))} />
+          <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy} onClick={() => start(async () => {
+            if (!prepPhoto) { toast.error("ถ่ายรูปสดหมวดที่ 1 ก่อนบันทึก"); return; }
+            if (bases.some((base) => !portion[base.base_code]) || lemonCount === "" || lemonGrams === "") { toast.error("เลือกสัดส่วนทุกเบส และกรอกเลมอนให้ครบ"); return; }
+            for (const base of bases) {
+              if (portion[base.base_code] === "SKIP") continue;
+              const body = new FormData();
+              body.set("actor_source", props.actorSource);
+              body.set("brand_lock", brand);
+              body.set("branch_code", props.branch);
+              body.set("work_date", props.workDate);
+              body.set("batch_kind", "PREP_BASE");
+              body.set("brew_portion_mode", "FULL_RECIPE");
+              body.set("prep_base_code", base.base_code);
+              body.set("pack_qty", portion[base.base_code]);
+              body.set("photo_urls", prepPhoto);
+              body.set("shift_instance", "SHIFT_1");
+              const saved = await issueWipBatchAction(body);
+              if (saved.error || !saved.data.ok) { toast.error(saved.error || saved.data.message || `ต้ม ${base.base_code} ไม่สำเร็จ`); return; }
+            }
+            const lemon = lemons[0];
+            if (lemon && Number(lemonCount) > 0) {
+              const body = new FormData();
+              body.set("actor_source", props.actorSource);
+              body.set("brand_lock", brand);
+              body.set("branch_code", props.branch);
+              body.set("work_date", props.workDate);
+              body.set("batch_kind", "OPEN_ITEM");
+              body.set("item_id", lemon.id);
+              body.set("pack_qty", lemonCount);
+              body.set("notes", `เลมอน ${lemonCount} ลูก ${lemonGrams} g`);
+              body.set("photo_urls", prepPhoto);
+              body.set("brew_portion_mode", "FULL_RECIPE");
+              body.set("shift_instance", "SHIFT_1");
+              const saved = await issueWipBatchAction(body);
+              if (saved.error || !saved.data.ok) { toast.error(saved.error || "บันทึกเลมอนไม่สำเร็จ"); return; }
+            }
+            toast.success("บันทึกหมวดที่ 1 แล้ว");
+          })}>บันทึกหมวดที่ 1</button>
+        </div>
+      </article>
+      <article className="space-y-2">
+        <h3 className="font-semibold">หมวดที่ 2: ตรวจสอบมาตรฐานอุปกรณ์</h3>
         <form className="grid gap-2 md:grid-cols-3" onSubmit={(event) => {
           event.preventDefault();
           const body = new FormData(event.currentTarget);
+          const dose = Number(body.get("grinder_dose_g"));
+          const seconds = Number(body.get("espresso_time_sec"));
+          const yieldG = Number(body.get("espresso_yield_g"));
+          const randomG = Number(body.get("syrup_random_target_g"));
+          const actualG = Number(body.get("syrup_measured_actual_g"));
+          if (!(dose > 0) || !(seconds > 0) || !(yieldG > 0) || !(randomG > 0) || !(actualG > 0) || !equipPhoto) {
+            const note = "กรอกตัวเลขทุกช่องให้มากกว่า 0 และถ่ายรูปสดก่อนบันทึก";
+            setEquipError(note);
+            toast.error(note);
+            return;
+          }
+          setEquipError("");
           body.set("branch_code", props.branch);
           body.set("work_date", props.workDate);
           body.set("actor_source", props.actorSource);
           body.set("brand_lock", brand);
-          body.set("photo_urls", photo);
+          body.set("photo_urls", equipPhoto);
           start(async () => {
             const saved = await saveEquipmentCalibrationAction(body);
             if (saved.error || !saved.data.ok) toast.error(saved.error || "บันทึกอุปกรณ์ไม่สำเร็จ");
@@ -75,15 +159,19 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
             reload();
           });
         }}>
-          <label className="text-sm">เครื่องบด (เป้า 19.8–20.0 g)<input className={field} name="grinder_dose_g" type="number" step="0.1" defaultValue={board?.calibration?.grinderDoseG ?? ""} /></label>
-          <label className="text-sm">เวลาช็อต (22–28 วิ)<input className={field} name="espresso_time_sec" type="number" step="0.1" defaultValue={board?.calibration?.espressoTimeSec ?? ""} /></label>
-          <label className="text-sm">น้ำหนักช็อต (38–40 g)<input className={field} name="espresso_yield_g" type="number" step="0.1" defaultValue={board?.calibration?.espressoYieldG ?? ""} /></label>
-          <label className="text-sm">ตัวเลขที่เครื่องน้ำเชื่อมสุ่ม (g)<input className={field} name="syrup_random_target_g" type="number" step="0.1" defaultValue={board?.calibration?.syrupRandomG ?? ""} /></label>
-          <label className="text-sm">น้ำหนักชั่งจริง (g)<input className={field} name="syrup_measured_actual_g" type="number" step="0.1" defaultValue={board?.calibration?.syrupActualG ?? ""} /></label>
+          <label className="text-sm">เครื่องบด (เป้า 19.8–20.0)<span className="mt-1 flex items-center gap-1"><input className="h-10 w-24 rounded-md border px-2 text-sm" name="grinder_dose_g" type="number" min="0.1" max="999" step="0.1" defaultValue={board?.calibration?.grinderDoseG ?? ""} /><span className="text-xs">g</span></span></label>
+          <label className="text-sm">เวลาช็อต (22–28)<span className="mt-1 flex items-center gap-1"><input className="h-10 w-24 rounded-md border px-2 text-sm" name="espresso_time_sec" type="number" min="0.1" max="999" step="0.1" defaultValue={board?.calibration?.espressoTimeSec ?? ""} /><span className="text-xs">วินาที</span></span></label>
+          <label className="text-sm">น้ำหนักช็อต (38–40)<span className="mt-1 flex items-center gap-1"><input className="h-10 w-24 rounded-md border px-2 text-sm" name="espresso_yield_g" type="number" min="0.1" max="999" step="0.1" defaultValue={board?.calibration?.espressoYieldG ?? ""} /><span className="text-xs">g</span></span></label>
+          <label className="text-sm">ตัวเลขที่เครื่องน้ำเชื่อมสุ่ม<span className="mt-1 flex items-center gap-1"><input className="h-10 w-24 rounded-md border px-2 text-sm" name="syrup_random_target_g" type="number" min="0.1" max="999" step="0.1" defaultValue={board?.calibration?.syrupRandomG ?? ""} /><span className="text-xs">g</span></span></label>
+          <label className="text-sm">น้ำหนักชั่งจริง<span className="mt-1 flex items-center gap-1"><input className="h-10 w-24 rounded-md border px-2 text-sm" name="syrup_measured_actual_g" type="number" min="0.1" max="999" step="0.1" defaultValue={board?.calibration?.syrupActualG ?? ""} /><span className="text-xs">g</span></span></label>
           <label className="flex items-center gap-2 text-sm"><input name="syrup_adjusted_ok" type="checkbox" value="true" defaultChecked={board?.calibration?.syrupAdjusted} />ปรับจูนเครื่องเรียบร้อยแล้ว</label>
-          <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle="เช็คมาตรฐานอุปกรณ์" liveCameraOnly onCapture={(file, live) => void uploadShot(file, live, props.branch, props.actorSource, brand).then(setPhoto).catch((reason: Error) => toast.error(reason.message))} />
-          <button className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" disabled={busy}>บันทึกหมวด 2</button>
+          {equipError ? <p className="text-sm text-red-700 md:col-span-3">{equipError}</p> : null}
+          <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle="เช็คมาตรฐานอุปกรณ์" liveCameraOnly onCapture={(file, live) => void uploadShot(file, live, props.branch, props.actorSource, brand).then(setEquipPhoto).catch((reason: Error) => toast.error(reason.message))} />
+          <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy}>บันทึกหมวดที่ 2</button>
         </form>
+      </article>
+      <article className="space-y-2">
+        <h3 className="font-semibold">หมวดที่ 3: ซอสและวัตถุดิบเปิดใช้หน้าบาร์</h3>
         <div className="grid gap-2 md:grid-cols-2">
           {(board?.sauces ?? []).map((sauce) => (
             <div key={sauce.code} className="rounded-lg bg-slate-50 p-3 text-sm">
@@ -110,15 +198,15 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
         </div>
       </article>
       <article className="space-y-2">
-        <h3 className="font-semibold">หมวด 4–5 ชั้นโชว์และตู้แช่หน้าร้าน</h3>
+        <h3 className="font-semibold">หมวดที่ 4–5 ชั้นโชว์และตู้แช่หน้าร้าน</h3>
         {(board?.frontOpeningLines ?? []).map((line) => (
           <div key={line.itemId} className="grid gap-2 rounded-lg bg-slate-50 p-3 md:grid-cols-4">
             <p className="text-sm font-medium md:col-span-4">{line.shortCode} {line.nameTh} {line.belowLastClose ? <span className="text-amber-700">ต่ำกว่ายอดปิดเมื่อคืน</span> : null}</p>
-            <input className={field} type="number" step="0.01" placeholder="จำนวนหน้าร้าน" value={qty[line.itemId] ?? (line.countedQty ?? "")} onChange={(event) => setQty((current) => ({ ...current, [line.itemId]: event.target.value }))} />
+            <FnbQtyInput value={String(qty[line.itemId] ?? (line.countedQty ?? ""))} onChange={(value) => setQty((current) => ({ ...current, [line.itemId]: value }))} unit={line.countUom} allowDecimal={line.allowDecimal} />
             <input className={field} type="date" value={expiry[line.itemId] ?? line.nearestExpiry ?? ""} onChange={(event) => setExpiry((current) => ({ ...current, [line.itemId]: event.target.value }))} />
           </div>
         ))}
-        <button type="button" className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" disabled={busy || !front} onClick={() => start(async () => {
+        <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy || !front} onClick={() => start(async () => {
           const lines = (board?.frontOpeningLines ?? []).filter((line) => qty[line.itemId] !== undefined && qty[line.itemId] !== "").map((line) => ({
             itemId: line.itemId, locationCode: front?.locationCode || line.locationCode, countedQty: Number(qty[line.itemId]), nearestExpiry: expiry[line.itemId] || null, openingQty: line.openingQty, replenishedQty: 0, posSoldQty: 0,
           }));
@@ -211,16 +299,16 @@ export function MiddayShortcuts(props: { branch: string; workDate: string; actor
           <select className={field} value={baseCode} onChange={(event) => setBaseCode(event.target.value)}>{bases.map((base) => <option key={base.base_code} value={base.base_code}>{base.base_code} · {base.yield_qty_ml.toFixed(0)} ml</option>)}</select>
           <div className="flex flex-wrap gap-2">
             {[0.25, 0.5, 0.75, 1].map((part) => (
-              <button key={part} type="button" className={`rounded-full px-3 py-1 text-sm ${pct === part ? "bg-red-700 text-white" : "bg-white"}`} onClick={() => setPct(part)}>{Math.round(part * 100)}% ({Math.round((selected?.yield_qty_ml ?? 0) * part)} ml)</button>
+              <button key={part} type="button" className={`rounded-full px-3 py-1 text-sm ${pct === part ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setPct(part)}>{Math.round(part * 100)}% ({Math.round((selected?.yield_qty_ml ?? 0) * part)} ml)</button>
             ))}
           </div>
-          <button type="button" className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" onClick={() => brew("PREP_BASE", { prep: baseCode, pack: pct })}>บันทึกต้มเบส {Math.round(pct * 100)}%</button>
+          <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" onClick={() => brew("PREP_BASE", { prep: baseCode, pack: pct })}>บันทึกต้มเบส {Math.round(pct * 100)}%</button>
         </div>
       ) : null}
       {open === "sauce" || open === "lemon" ? (
         <div className="space-y-2">
           <input className={field} value={query} placeholder="ค้น PF PS CW CWT LEM" onChange={(event) => setQuery(event.target.value)} />
-          <button type="button" className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" onClick={() => {
+          <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" onClick={() => {
             const item = visible[0];
             if (!item) return;
             const grams = open === "lemon" ? window.prompt("น้ำหนักเลมอนที่หั่นจริง (กรัม)", "0") : null;
@@ -261,7 +349,7 @@ function MoveForm(props: {
       <select className={field} value={fromCode} onChange={(event) => setFromCode(event.target.value)}>{props.toChoices.map((row) => <option key={row.locationCode} value={row.locationCode}>จาก {row.locationNameTh}</option>)}</select>
       <select className={field} value={toCode} onChange={(event) => setToCode(event.target.value)}>{props.toChoices.map((row) => <option key={row.locationCode} value={row.locationCode}>ไป {row.locationNameTh}</option>)}</select>
       <input className={field} type="number" step="0.01" value={qty} onChange={(event) => setQty(event.target.value)} />
-      <button type="button" className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" onClick={() => props.onSave(itemId, Number(qty) || 0, fromCode, toCode)}>บันทึกเบิกย้ายจุด</button>
+      <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" onClick={() => props.onSave(itemId, Number(qty) || 0, fromCode, toCode)}>บันทึกเบิกย้ายจุด</button>
     </div>
   );
 }
@@ -318,7 +406,7 @@ export function NightCloseCount(props: { branch: string; workDate: string; actor
               });
             } : undefined} />
           ))}
-          <button type="button" className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" disabled={busy || !front} onClick={() => front && save("CLOSING", board?.frontLines ?? [], front.locationCode)}>บันทึกยอดปิดหน้าร้าน</button>
+          <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy || !front} onClick={() => front && save("CLOSING", board?.frontLines ?? [], front.locationCode)}>บันทึกยอดปิดหน้าร้าน</button>
         </article>
       )}
       {props.warehouseOnly ? null : (
@@ -328,14 +416,14 @@ export function NightCloseCount(props: { branch: string; workDate: string; actor
             <label className="text-sm"><input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} /> แสดงรายการนอกรอบทั้งหมด</label>
           </div>
           {backLines.map((line) => <CountRow key={line.itemId} line={line} qty={qty} setQty={setQty} />)}
-          <button type="button" className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" disabled={busy || !back} onClick={() => back && save("CLOSING", backLines, back.locationCode)}>บันทึกยอดหลังร้าน</button>
+          <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy || !back} onClick={() => back && save("CLOSING", backLines, back.locationCode)}>บันทึกยอดหลังร้าน</button>
         </article>
       )}
       {board?.warehouseDue || props.warehouseOnly ? (
         <article className="space-y-2">
           <h3 className="font-semibold">โกดัง {board?.locations.find((row) => row.zoneType === "WAREHOUSE")?.locationNameTh ?? ""}</h3>
           {(board?.warehouseLines ?? []).map((line) => <CountRow key={line.itemId} line={line} qty={qty} setQty={setQty} />)}
-          <button type="button" className="rounded-md bg-red-700 px-3 py-2 text-sm text-white" disabled={busy} onClick={() => {
+          <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy} onClick={() => {
             const warehouse = board?.locations.find((row) => row.zoneType === "WAREHOUSE");
             if (warehouse) save("CYCLE_COUNT", board?.warehouseLines ?? [], warehouse.locationCode);
           }}>บันทึกยอดโกดัง</button>

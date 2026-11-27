@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo } from "react";
 import type { FnbBranchRow } from "@/types/holding";
 import type { FnbBranchKpi, FnbChangeRequestRow, FnbExpiryAlert, FnbParLevelRow, FnbWipCostRow } from "@/types/fnb";
 import { ApprovalQueue } from "@/app/fnb/approval-queue";
@@ -20,7 +20,6 @@ export function FnbHub({
   branches,
   kpis,
   schemaMessage,
-  initialTab,
   approvals,
   parAlerts,
   expiryAlerts,
@@ -35,18 +34,8 @@ export function FnbHub({
   expiryAlerts: FnbExpiryAlert[];
   wipCosts: FnbWipCostRow[];
 }) {
-  const [brand, setBrand] = useState(initialTab === "branches" ? "all" : "all");
-  const [branchCode, setBranchCode] = useState("all");
-  const visible = useMemo(() => {
-    return branches.filter((branch) => {
-      if (branchCode !== "all") return branch.branch_code === branchCode;
-      if (brand === "lucky") return /lucky/i.test(`${branch.brand_code} ${branch.brand_name ?? ""}`);
-      if (brand === "chatr") return /ชา|chatr|ct-/i.test(`${branch.brand_code} ${branch.brand_name ?? ""} ${branch.branch_code}`);
-      return true;
-    });
-  }, [branches, brand, branchCode]);
   const totals = useMemo(() => {
-    const codes = new Set(visible.map((branch) => branch.branch_code));
+    const codes = new Set(branches.map((branch) => branch.branch_code));
     return kpis.filter((row) => codes.has(row.branch_code)).reduce(
       (sum, row) => ({
         todaySales: sum.todaySales + row.todaySales,
@@ -60,7 +49,7 @@ export function FnbHub({
       }),
       { todaySales: 0, monthSales: 0, cash: 0, qr: 0, lineman: 0, grab: 0, wasteCost: 0, pendingReimburse: 0 },
     );
-  }, [kpis, visible]);
+  }, [kpis, branches]);
 
   return (
     <div className="space-y-5">
@@ -71,26 +60,6 @@ export function FnbHub({
       </div>
       {schemaMessage ? <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{schemaMessage}</div> : null}
       <ApprovalQueue requests={approvals} />
-      <div className="flex flex-wrap gap-2">
-        <FilterButton active={brand === "all" && branchCode === "all"} onClick={() => { setBrand("all"); setBranchCode("all"); }}>
-          ทุกแบรนด์รวม ({branches.length} สาขา)
-        </FilterButton>
-        <FilterButton active={brand === "lucky"} onClick={() => { setBrand("lucky"); setBranchCode("all"); }}>Lucky Cup</FilterButton>
-        <FilterButton active={brand === "chatr"} onClick={() => { setBrand("chatr"); setBranchCode("all"); }}>ชาทรตะโหมด</FilterButton>
-        <select
-          value={branchCode}
-          onChange={(event) => {
-            setBranchCode(event.target.value);
-            setBrand("all");
-          }}
-          className="h-9 rounded-full border border-red-200 bg-white px-3 text-sm"
-        >
-          <option value="all">เลือกสาขา</option>
-          {branches.map((branch) => (
-            <option key={branch.branch_code} value={branch.branch_code}>{branch.branch_code} {branch.branch_name}</option>
-          ))}
-        </select>
-      </div>
       {parAlerts.length > 0 ? (
         <article className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-900">
           <h2 className="font-semibold">🚨 วัตถุดิบและของใช้ต่ำกว่าจุดสั่งซื้อ (ต้องสั่งเพิ่มด่วน)</h2>
@@ -116,25 +85,30 @@ export function FnbHub({
         <Kpi label="ทุนของทิ้งเดือนนี้" value={baht(totals.wasteCost)} />
         <Kpi label="รอคุณจวงโอนคืน" value={baht(totals.pendingReimburse)} />
       </div>
-      <div className="grid gap-3 md:grid-cols-2">
-        {visible.map((branch) => {
-          const opening = branch.branch_code === "CT-BNP" ? branch.countdown_until ?? CT_BNP_OPENING : branch.countdown_until;
-          const days = opening ? daysUntil(opening) : null;
-          return (
-            <article key={branch.id || branch.branch_code} className="rounded-xl border border-red-100 bg-white p-5">
-              <p className="text-xs font-semibold text-red-700">{branch.branch_code}</p>
-              <h2 className="text-lg font-semibold text-slate-900">{branch.branch_name}</h2>
-              <p className="text-sm text-slate-500">{branch.brand_name ?? branch.brand_code}</p>
-              {branch.branch_code === "CT-BNP" && days != null ? (
-                <p className="mt-3 text-sm font-medium text-red-800">
-                  นับถอยหลังเปิดสาขา 26 ธ.ค. 2569 อีก {Math.max(days, 0)} วัน
-                </p>
-              ) : null}
-            </article>
-          );
-        })}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <BrandColumn title="🔴 Lucky Cup" frame="border-[#DC2626]" tint="bg-red-50" branches={branches.filter((branch) => branch.brand_code === "LUCKY_CUP")} />
+        <BrandColumn title="🍷 ชาทรตะโหมด" frame="border-[#6B0F1A]" tint="bg-[#FDF2F4]" branches={branches.filter((branch) => branch.brand_code === "CHATORN")} />
       </div>
     </div>
+  );
+}
+
+function BrandColumn({ title, frame, tint, branches }: { title: string; frame: string; tint: string; branches: FnbBranchRow[] }) {
+  return (
+    <section className={`space-y-3 rounded-2xl border-2 ${frame} ${tint} p-4`}>
+      <h2 className="text-lg font-bold">{title}</h2>
+      {branches.map((branch) => {
+        const opening = branch.branch_code === "CT-BNP" ? branch.countdown_until ?? CT_BNP_OPENING : branch.countdown_until;
+        const days = opening ? daysUntil(opening) : null;
+        return (
+          <article key={branch.id || branch.branch_code} className={`rounded-xl border bg-white p-4 ${frame}`}>
+            <p className="text-xs font-semibold">{branch.branch_code}</p>
+            <h3 className="font-semibold">{branch.branch_name}</h3>
+            {branch.branch_code === "CT-BNP" && days != null ? <p className="mt-2 text-sm">นับถอยหลังเปิดสาขา 26 ธ.ค. 2569 อีก {Math.max(days, 0)} วัน</p> : null}
+          </article>
+        );
+      })}
+    </section>
   );
 }
 
@@ -147,22 +121,3 @@ function Kpi({ label, value }: { label: string; value: string }) {
   );
 }
 
-function FilterButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-full px-3 py-1.5 text-sm ${active ? "bg-red-700 text-white" : "bg-white text-red-800 ring-1 ring-red-200"}`}
-    >
-      {children}
-    </button>
-  );
-}

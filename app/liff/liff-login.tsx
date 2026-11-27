@@ -12,7 +12,7 @@ export function LiffLogin({ brand, suspended }: { brand: FnbBrandCode; suspended
   const [pending, start] = useTransition();
   const router = useRouter();
   if (suspended) {
-    return <main className="min-h-screen bg-red-50 px-4 py-8"><p className="rounded-xl bg-red-700 px-4 py-6 text-center text-white">{FNB_LIFF_SUSPENDED_MESSAGE}</p></main>;
+    return <main className="min-h-screen bg-red-50 px-4 py-8"><p className="rounded-xl bg-[var(--fnb-brand)] px-4 py-6 text-center text-white">{FNB_LIFF_SUSPENDED_MESSAGE}</p></main>;
   }
   return (
     <main className="min-h-screen bg-red-50 px-4 py-8">
@@ -33,7 +33,7 @@ export function LiffLogin({ brand, suspended }: { brand: FnbBrandCode; suspended
         <p className="text-sm text-slate-600">ใส่รหัส LINE ที่ผู้จัดการอนุมัติแล้ว ระบบจะใช้ชื่อเล่นในทะเบียน ไม่มีการพิมพ์ชื่อเอง</p>
         {message ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{message}</p> : null}
         <input className="h-10 w-full rounded-md border px-3 text-sm" value={lineUserId} placeholder="LINE user id" onChange={(event) => setLineUserId(event.target.value)} />
-        <button className="rounded-md bg-red-700 px-4 py-2 text-sm text-white" disabled={pending}>{pending ? "กำลังตรวจสิทธิ์..." : "เข้าสู่ระบบหน้าร้าน"}</button>
+        <button className="rounded-md bg-[var(--fnb-brand)] px-4 py-2 text-sm text-white" disabled={pending}>{pending ? "กำลังตรวจสิทธิ์..." : "เข้าสู่ระบบหน้าร้าน"}</button>
       </form>
     </main>
   );

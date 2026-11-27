@@ -42,7 +42,7 @@ export function SopSettingsWorkspace({
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold">ตั้งค่าระเบียบหน้าร้านและกะสาขา</h1>
-      <Link href="/fnb/items?tab=shelf" className="inline-block rounded-md bg-red-700 px-3 py-2 text-sm text-white">อายุวัตถุดิบหลังเปิดใช้ / หลังผสม (แยกแบรนด์)</Link>
+      <Link href="/fnb/items?tab=shelf" className="inline-block rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white">อายุวัตถุดิบหลังเปิดใช้ / หลังผสม (แยกแบรนด์)</Link>
       {message ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{message}</p> : null}
       <BranchPlaceManager branches={branches.map((branch) => ({ branch_code: branch.branch_code, branch_name_th: branch.branch_name_th }))} />
       <section className="space-y-3">
@@ -66,7 +66,7 @@ export function SopSettingsWorkspace({
             <label className="flex items-center gap-2 text-sm md:col-span-4"><input type="checkbox" name="enable_shift_3" value="true" defaultChecked={branch.enable_shift_3} /> 🌙 เปิดใช้งาน กะสาม (รอบดึก/เทศกาล)</label>
             <label className="text-sm">กะสามเริ่ม<input className={field} name="shift_3_start" type="time" defaultValue={clock(branch.shift_3_start)} /></label>
             <label className="text-sm">กะสามจบ<input className={field} name="shift_3_end" type="time" defaultValue={clock(branch.shift_3_end)} /></label>
-            <button className="rounded-md bg-red-700 px-3 py-2 text-sm text-white">บันทึกสาขา</button>
+            <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white">บันทึกสาขา</button>
           </form>
         ))}
       </section>
@@ -116,7 +116,7 @@ export function SopSettingsWorkspace({
           <select className={field} name="item_id">{items.map((item) => <option key={item.id} value={item.id}>{item.short_code} {item.name_th}</option>)}</select>
           <input className={field} name="min_par_count_qty" type="number" step="0.01" placeholder="จุดเตือนขั้นต่ำ" />
           <input className={field} name="lead_time_days" type="number" placeholder="สั่งล่วงหน้า (วัน)" defaultValue={2} />
-          <button className="rounded-md bg-red-700 px-3 py-2 text-sm text-white">บันทึกจุดเตือน</button>
+          <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white">บันทึกจุดเตือน</button>
         </form>
       </section>
     </div>
@@ -150,8 +150,7 @@ function TemplateForm({
         <option value="SHIFT_HANDOVER">ส่งมอบกะ</option>
         <option value="CLOSING">ปิดร้าน</option>
       </select>
-      <select className={field} name="brand_scope" defaultValue={template?.brand_scope ?? "ALL"}>
-        <option value="ALL">ทุกแบรนด์</option>
+      <select className={field} name="brand_scope" defaultValue={template?.brand_scope === "CHATORN" ? "CHATORN" : "LUCKY_CUP"}>
         <option value="LUCKY_CUP">Lucky Cup</option>
         <option value="CHATORN">ชาทรตะโหมด</option>
       </select>
@@ -174,7 +173,7 @@ function TemplateForm({
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="live_camera_only" defaultChecked={template?.live_camera_only ?? true} /> บังคับถ่ายกล้องสดเท่านั้น</label>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="is_mandatory" defaultChecked={template?.is_mandatory ?? true} /> บังคับส่งก่อนปิดเช็คลิสต์</label>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="is_active" defaultChecked={template?.is_active ?? true} /> เปิดใช้งาน</label>
-      <button className="rounded-md bg-red-700 px-3 py-2 text-sm text-white">{template ? "บันทึกการแก้ไข" : "สร้างหัวข้อ"}</button>
+      <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white">{template ? "บันทึกการแก้ไข" : "สร้างหัวข้อ"}</button>
     </form>
   );
 }

@@ -25,11 +25,9 @@ function brandOf(value: unknown): FnbBrandCode | null {
   return brand === "LUCKY_CUP" || brand === "CHATORN" ? brand : null;
 }
 
-function keepsBrand(label: string, scope: string, brand: FnbBrandCode | null): boolean {
-  if (brand && scope !== "ALL" && scope !== brand) return false;
-  if (brand === "LUCKY_CUP" && /ชาทร|chatorn/i.test(label)) return false;
-  if (brand === "CHATORN" && /lucky\s*cup|ลัคกี้|luckycup/i.test(label)) return false;
-  return true;
+function keepsBrand(_label: string, scope: string, brand: FnbBrandCode | null): boolean {
+  if (scope !== "LUCKY_CUP" && scope !== "CHATORN") return false;
+  return !brand || scope === brand;
 }
 
 function mapBatch(row: Record<string, unknown>, label: string): FnbWipBatchRow {
@@ -194,7 +192,7 @@ export async function listWipBoardAction(input: {
     const db = schemaAdmin().schema("fnb");
     const [bases, items, batches] = await Promise.all([
       db.from("prep_bases").select("base_code, base_name_th, yield_qty_ml, brand_code, is_active").eq("is_active", true).limit(20),
-      db.from("items").select("id, short_code, alias_codes, external_code, name_th, count_uom, brand_scope").eq("is_active", true).order("short_code", { ascending: true }).limit(2000),
+      db.from("items").select("id, short_code, alias_codes, external_code, name_th, count_uom, allow_decimal_count_qty, brand_scope").eq("is_active", true).order("short_code", { ascending: true }).limit(2000),
       db.from("bar_wip_batches").select("*").eq("branch_code", input.branch_code).limit(500),
     ]);
     if (bases.error) return fail(empty, bases.error, "อ่านเบสไม่สำเร็จ");
@@ -217,6 +215,7 @@ export async function listWipBoardAction(input: {
           count_uom: text(row.count_uom),
           alias_codes: Array.isArray(row.alias_codes) ? row.alias_codes.map((code) => text(code)) : [],
           external_code: row.external_code == null ? null : text(row.external_code),
+          allow_decimal_count_qty: row.allow_decimal_count_qty === true,
         })),
       brews: rows.filter((row) => row.batch.batch_kind === "PREP_BASE" && row.work_date === input.work_date).map((row) => row.batch),
       containers: rows.filter((row) => row.batch.batch_status === "ACTIVE" && (row.batch.shelf_life_mode === "HOURS_AFTER_OPEN" || row.batch.shelf_life_mode === "DAYS_AFTER_OPEN")).map((row) => row.batch),

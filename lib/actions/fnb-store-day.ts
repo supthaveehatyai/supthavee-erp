@@ -141,7 +141,7 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
     const [zones, spots, items, counts, transfers, sales, batches, calibration, receipts] = await Promise.all([
       db.from("storage_locations").select("id,branch_code,location_code,location_name_th,zone_type,default_count_schedule,count_weekdays,is_default_gr_target,sort_order").eq("branch_code", branchCode).eq("is_active", true).order("sort_order", { ascending: true }).limit(20),
       db.from("branch_cleaning_spots").select("id,branch_code,stage_code,spot_name_th,sort_order").eq("branch_code", branchCode).eq("is_active", true).order("sort_order", { ascending: true }).limit(40),
-      db.from("items").select("id,short_code,alias_codes,name_th,item_category,track_front_display_daily,backroom_count_schedule,backroom_count_weekdays").eq("is_active", true).limit(800),
+      db.from("items").select("id,short_code,alias_codes,name_th,item_category,count_uom,allow_decimal_count_qty,track_front_display_daily,backroom_count_schedule,backroom_count_weekdays,brand_scope").eq("is_active", true).limit(800),
       db.from("zone_stock_counts").select("item_id,location_code,count_stage,count_date,counted_qty,nearest_expiry_date").eq("branch_code", branchCode).gte("count_date", shiftDate(workDate, -14)).lte("count_date", workDate).limit(4000),
       db.from("internal_zone_transfers").select("item_id,to_location_code,qty_in_count_uom").eq("branch_code", branchCode).eq("work_date", workDate).limit(500),
       db.from("daily_menu_sales_lines").select("menu_name_th,qty_sold").eq("branch_code", branchCode).eq("work_date", workDate).limit(2000),
@@ -171,7 +171,10 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
       trackFront: row.track_front_display_daily === true,
       schedule: text(row.backroom_count_schedule) || "WEEKLY_2X",
       weekdays: Array.isArray(row.backroom_count_weekdays) ? row.backroom_count_weekdays.map((day) => Number(day)) : [],
-    }));
+      countUom: text(row.count_uom) || "ชิ้น",
+      allowDecimal: row.allow_decimal_count_qty === true,
+      brand: text(row.brand_scope),
+    })).filter((item) => (brandLock !== "LUCKY_CUP" && brandLock !== "CHATORN") || item.brand === brandLock);
     const sold = new Map<string, number>();
     for (const row of asRows(sales.data)) {
       const name = text(row.menu_name_th).toLowerCase();
@@ -223,6 +226,8 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
         suggestReplenishQty: countedQty != null && countedQty > expected ? countedQty - expected : 0,
         belowLastClose: stage === "OPENING" && openingToday != null && openingToday < lastClose(locationCode, item.id),
         dueTonight: isBackroomDue(item.schedule, item.weekdays, workDate),
+        countUom: item.countUom,
+        allowDecimal: item.allowDecimal,
       };
     }
     const frontItems = catalog.filter((item) => item.trackFront || (FRONT_CATS.has(item.category) && (item.trackFront || receivedItemIds.has(item.id))));
@@ -231,12 +236,14 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
     const cal = calibration.data as Record<string, unknown> | null;
     const sauceByCode = new Map(catalog.map((item) => [item.shortCode, item]));
     const active = asRows(batches.data);
-    const sauces = Object.entries(FNB_SAUCE_OPEN_DAYS).map(([code, openDays]) => {
-      const item = sauceByCode.get(code) ?? sauceByCode.get(code === "PS" ? "PF" : code === "CWT" ? "CW" : code);
+    const sauceCodes = ["SB", "MB", "CS", "BS", "PF", "X", "CJ", "WMK", "CW", "CMK"] as const;
+    const sauces = sauceCodes.map((code) => {
+      const openDays = FNB_SAUCE_OPEN_DAYS[code];
+      const item = sauceByCode.get(code);
       const batch = item ? active.find((row) => text(row.item_id) === item.id) : null;
       return {
         code,
-        nameTh: item?.nameTh || code,
+        nameTh: code === "PF" ? `${item?.nameTh || "PF"} (เรียกสำรอง PS)` : code === "CW" ? `${item?.nameTh || "CW"} (เรียกสำรอง CWT)` : item?.nameTh || code,
         openDays,
         batchId: batch ? text(batch.id) : null,
         expiresAt: batch ? text(batch.expires_at) || null : null,
@@ -324,6 +331,12 @@ export async function saveEquipmentCalibrationAction(formData: FormData): Promis
     const dose = Number(formData.get("grinder_dose_g"));
     const seconds = Number(formData.get("espresso_time_sec"));
     const yieldG = Number(formData.get("espresso_yield_g"));
+    const syrupRandom = Number(formData.get("syrup_random_target_g"));
+    const syrupActual = Number(formData.get("syrup_measured_actual_g"));
+    const photos = text(formData.get("photo_urls")).split("|").filter(Boolean);
+    if (!(dose > 0) || !(seconds > 0) || !(yieldG > 0) || !(syrupRandom > 0) || !(syrupActual > 0) || photos.length === 0) {
+      return result({ ok: false, warning: null }, "กรอกตัวเลขอุปกรณ์ทุกช่องให้มากกว่า 0 และถ่ายรูปสดก่อนบันทึก");
+    }
     const warnings = [
       Number.isFinite(dose) && (dose < 19.8 || dose > 20) ? "เครื่องบดอยู่นอกช่วง 19.8–20.0 g" : "",
       Number.isFinite(seconds) && (seconds < 22 || seconds > 28) ? "เวลาช็อตอยู่นอก 22–28 วินาที" : "",
@@ -335,11 +348,11 @@ export async function saveEquipmentCalibrationAction(formData: FormData): Promis
       grinder_dose_g: dose,
       espresso_time_sec: seconds,
       espresso_yield_g: yieldG,
-      syrup_random_target_g: Number(formData.get("syrup_random_target_g")) || null,
-      syrup_measured_actual_g: Number(formData.get("syrup_measured_actual_g")) || null,
+      syrup_random_target_g: syrupRandom,
+      syrup_measured_actual_g: syrupActual,
       syrup_adjusted_ok: formData.get("syrup_adjusted_ok") === "true",
       staff_name: actor.name,
-      photo_urls: text(formData.get("photo_urls")).split("|").filter(Boolean),
+      photo_urls: photos,
       notes: warnings.join(" · ") || null,
     };
     const db = schemaAdmin().schema("fnb");

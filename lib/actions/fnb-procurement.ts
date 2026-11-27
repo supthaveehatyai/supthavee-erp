@@ -102,9 +102,9 @@ export async function listReceiptLinesAction(grId: string): Promise<FnbActionRes
   }
 }
 
-export async function listReceiveItemsAction(brandLock?: FnbBrandCode | null): Promise<FnbActionResult<Pick<FnbItemRow, "id" | "short_code" | "name_th" | "count_uom" | "default_purchase_uom" | "recipe_per_purchase_uom" | "shelf_life_months" | "requires_expiry_tracking" | "brand_scope" | "alias_codes" | "external_code" | "item_category">[]>> {
+export async function listReceiveItemsAction(brandLock?: FnbBrandCode | null): Promise<FnbActionResult<Pick<FnbItemRow, "id" | "short_code" | "name_th" | "count_uom" | "default_purchase_uom" | "recipe_per_purchase_uom" | "shelf_life_months" | "requires_expiry_tracking" | "brand_scope" | "alias_codes" | "external_code" | "item_category" | "allow_decimal_count_qty">[]>> {
   try {
-    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,alias_codes,external_code,name_th,count_uom,default_purchase_uom,recipe_per_purchase_uom,shelf_life_months,requires_expiry_tracking,brand_scope,item_category").eq("is_active", true).order("short_code", { ascending: true }).limit(500);
+    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,alias_codes,external_code,name_th,count_uom,default_purchase_uom,recipe_per_purchase_uom,shelf_life_months,requires_expiry_tracking,brand_scope,item_category,allow_decimal_count_qty").eq("is_active", true).order("short_code", { ascending: true }).limit(500);
     if (listed.error) return fail([], listed.error, "อ่านรายการสินค้าไม่สำเร็จ");
     return result(asRows(listed.data).map((row) => ({
       id: text(row.id),
@@ -119,12 +119,8 @@ export async function listReceiveItemsAction(brandLock?: FnbBrandCode | null): P
       alias_codes: Array.isArray(row.alias_codes) ? row.alias_codes.map((code) => text(code)) : [],
       external_code: row.external_code == null ? null : text(row.external_code),
       item_category: text(row.item_category),
-    })).filter((item) => {
-      if (!brandLock) return true;
-      if (item.brand_scope !== "ALL" && item.brand_scope !== brandLock) return false;
-      const label = `${item.short_code} ${item.name_th}`;
-      return brandLock === "LUCKY_CUP" ? !/ชาทร|chatorn/i.test(label) : !/lucky\s*cup|ลัคกี้|luckycup/i.test(label);
-    }));
+      allow_decimal_count_qty: row.allow_decimal_count_qty === true,
+    })).filter((item) => !brandLock || item.brand_scope === brandLock));
   } catch (error) {
     return caught([], error, "อ่านรายการสินค้าไม่สำเร็จ");
   }

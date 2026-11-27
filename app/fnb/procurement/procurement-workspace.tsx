@@ -11,6 +11,7 @@ import {
   submitBlindGoodsReceiptAction,
 } from "@/lib/actions/fnb-procurement";
 import { listBranchZonesAction } from "@/lib/actions/fnb-store-day";
+import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import { itemMatches } from "@/lib/fnb/item-search";
 import type { FnbBranchOption, FnbBrandCode, FnbExpiryLotRow, FnbItemRow, FnbReimbursementRow, FnbUnpackLine, FnbVendorSheetRow } from "@/types/fnb";
 
@@ -25,9 +26,11 @@ export function ProcurementWorkspace({
   showGoods = true,
   showPayout = true,
   revealCost = true,
+  brand,
 }: {
   branches: FnbBranchOption[];
-  items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom">[];
+  items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom" | "allow_decimal_count_qty" | "count_uom">[];
+  brand: FnbBrandCode;
   pending: FnbUnpackLine[];
   lots: FnbExpiryLotRow[];
   payouts: FnbReimbursementRow[];
@@ -57,8 +60,8 @@ export function ProcurementWorkspace({
         {showPayout ? <Tab active={tab === "pay"} onClick={() => setTab("pay")}>คิวโอนคืนพนักงาน</Tab> : null}
       </div>
       {tab === "scan" && showGoods ? <ScanTab branches={branches} items={items} setMessage={setMessage} /> : null}
-      {tab === "manual" && showGoods ? <ManualReceive branches={branches} items={items} brandLock={null} revealCost={revealCost} setMessage={setMessage} /> : null}
-      {tab === "lots" && showGoods ? <ExpiryPanel pending={pending} lots={lots} brandLock={null} /> : null}
+      {tab === "manual" && showGoods ? <ManualReceive branches={branches} items={items} brandLock={brand} revealCost={revealCost} setMessage={setMessage} /> : null}
+      {tab === "lots" && showGoods ? <ExpiryPanel pending={pending} lots={lots} brandLock={brand} /> : null}
       {tab === "pay" && showPayout ? <PayoutQueue payouts={payouts} setMessage={setMessage} /> : null}
     </div>
   );
@@ -164,7 +167,7 @@ export function ManualReceive({
   setMessage,
 }: {
   branches: FnbBranchOption[];
-  items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom">[];
+  items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom" | "allow_decimal_count_qty" | "count_uom">[];
   brandLock: FnbBrandCode | null;
   revealCost: boolean;
   actorSource?: "desktop" | "liff";
@@ -215,7 +218,7 @@ export function ManualReceive({
       {lines.map((line, index) => (
         <div key={index} className="grid gap-2 md:grid-cols-3">
           <select className={field} value={line.item_id} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, item_id: event.target.value } : row))}>{(visible.some((item) => item.id === line.item_id) ? visible : items.filter((item) => item.id === line.item_id).concat(visible)).map((item) => <option key={item.id} value={item.id}>{item.short_code} {item.name_th}</option>)}</select>
-          <input className={field} type="number" step="0.01" placeholder="จำนวนที่รับ" value={line.qty} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, qty: event.target.value } : row))} />
+          <FnbQtyInput value={line.qty} unit={items.find((item) => item.id === line.item_id)?.default_purchase_uom || "ชิ้น"} allowDecimal={items.find((item) => item.id === line.item_id)?.allow_decimal_count_qty === true} onChange={(value) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, qty: value } : row))} />
           <input className={field} placeholder="หน่วยรับ เช่น แกลลอน" value={line.uom} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, uom: event.target.value } : row))} />
         </div>
       ))}
@@ -350,9 +353,9 @@ function addMonths(iso: string, months: number): string {
 }
 
 function Tab({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {
-  return <button type="button" onClick={onClick} className={`rounded-full px-3 py-1.5 text-sm ${active ? "bg-red-700 text-white" : "bg-white ring-1 ring-red-200"}`}>{children}</button>;
+  return <button type="button" onClick={onClick} className={`rounded-full px-3 py-1.5 text-sm ${active ? "bg-[var(--fnb-brand)] text-white" : "bg-white ring-1 ring-red-200"}`}>{children}</button>;
 }
 
 function SaveButton({ busy, children, onClick }: { busy: boolean; children: string; onClick?: () => void }) {
-  return <button type={onClick ? "button" : "submit"} onClick={onClick} disabled={busy} className="inline-flex items-center gap-2 rounded-md bg-red-700 px-4 py-2 text-sm text-white disabled:opacity-60">{busy ? <span className="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : null}{busy ? "กำลังบันทึก..." : children}</button>;
+  return <button type={onClick ? "button" : "submit"} onClick={onClick} disabled={busy} className="inline-flex items-center gap-2 rounded-md bg-[var(--fnb-brand)] px-4 py-2 text-sm text-white disabled:opacity-60">{busy ? <span className="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : null}{busy ? "กำลังบันทึก..." : children}</button>;
 }
