@@ -148,7 +148,7 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
       db.from("zone_stock_counts").select("item_id,location_code,count_stage,count_date,counted_qty,nearest_expiry_date").eq("branch_code", branchCode).gte("count_date", shiftDate(workDate, -14)).lte("count_date", workDate).limit(4000),
       db.from("internal_zone_transfers").select("item_id,to_location_code,qty_in_count_uom").eq("branch_code", branchCode).eq("work_date", workDate).limit(500),
       db.from("daily_menu_sales_lines").select("menu_name_th,qty_sold").eq("branch_code", branchCode).eq("work_date", workDate).limit(2000),
-      db.from("bar_wip_batches").select("id,item_id,prep_base_code,expires_at,sticker_label_text,batch_status").eq("branch_code", branchCode).eq("batch_status", "ACTIVE").limit(200),
+      db.from("bar_wip_batches").select("id,item_id,prep_base_code,expires_at,sticker_label_text,batch_status,packs_deducted,pack_uom").eq("branch_code", branchCode).eq("batch_status", "ACTIVE").limit(200),
       db.from("daily_equipment_calibrations").select("grinder_dose_g,espresso_time_sec,espresso_yield_g,syrup_random_target_g,syrup_measured_actual_g,syrup_adjusted_ok").eq("branch_code", branchCode).eq("work_date", workDate).maybeSingle(),
       db.from("goods_receipts").select("id").eq("receiving_branch_code", branchCode).limit(300),
     ]);
@@ -259,14 +259,24 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
     const sauces = sauceCodes.map((code) => {
       const openDays = FNB_SAUCE_OPEN_DAYS[code];
       const item = sauceByCode.get(code);
-      const batch = item ? active.find((row) => text(row.item_id) === item.id) : null;
+      const batches = (item ? active.filter((row) => text(row.item_id) === item.id) : []).map((row) => ({
+        id: text(row.id),
+        qty: num(row.packs_deducted) || 1,
+        uom: text(row.pack_uom) || item?.countUom || "ชิ้น",
+        expiresAt: text(row.expires_at) || null,
+        sticker: text(row.sticker_label_text) || null,
+      }));
+      const soonest = batches.map((row) => row.expiresAt).filter((value): value is string => Boolean(value)).sort()[0] ?? null;
       return {
         code,
+        itemId: item?.id ?? null,
         nameTh: code === "PF" ? `${item?.nameTh || "PF"} (เรียกสำรอง PS)` : code === "CW" ? `${item?.nameTh || "CW"} (เรียกสำรอง CWT)` : item?.nameTh || code,
+        countUom: item?.countUom || "ชิ้น",
         openDays,
-        batchId: batch ? text(batch.id) : null,
-        expiresAt: batch ? text(batch.expires_at) || null : null,
-        sticker: batch ? text(batch.sticker_label_text) || null : null,
+        batchId: batches[0]?.id ?? null,
+        expiresAt: soonest,
+        sticker: batches[0]?.sticker ?? null,
+        batches,
       };
     });
     const cleaning = asRows(spots.data).map(spotOf);

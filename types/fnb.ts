@@ -590,8 +590,8 @@ export type FnbWipBatchRow = {
 };
 
 export type FnbWipBoard = {
-  bases: { base_code: string; base_name_th: string; yield_qty_ml: number }[];
-  items: { id: string; short_code: string; name_th: string; count_uom: string; alias_codes: string[]; external_code: string | null; allow_decimal_count_qty: boolean }[];
+  bases: { base_code: string; base_name_th: string; yield_qty_ml: number; sort_order: number }[];
+  items: { id: string; short_code: string; name_th: string; count_uom: string; alias_codes: string[]; external_code: string | null; allow_decimal_count_qty: boolean; item_category: string; has_open_shelf_rule: boolean }[];
   brews: FnbWipBatchRow[];
   containers: FnbWipBatchRow[];
 };
@@ -688,13 +688,24 @@ export type FnbStageConfirmation = {
   payload: Record<string, unknown>;
 };
 
+export type FnbOpenContainer = {
+  id: string;
+  qty: number;
+  uom: string;
+  expiresAt: string | null;
+  sticker: string | null;
+};
+
 export type FnbSauceWatch = {
   code: string;
+  itemId: string | null;
   nameTh: string;
+  countUom: string;
   openDays: number;
   batchId: string | null;
   expiresAt: string | null;
   sticker: string | null;
+  batches: FnbOpenContainer[];
 };
 
 export type FnbStoreDayBoard = {

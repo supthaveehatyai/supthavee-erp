@@ -1,3 +1,30 @@
+const BAR_OPEN_PRIORITY = ["SB", "MB", "CS", "BS", "PF", "X", "CJ", "WMK", "CW", "CMK", "MK", "LEM"];
+
+export function barOpenItems<T extends { short_code: string; item_category?: string; has_open_shelf_rule?: boolean }>(items: T[]): T[] {
+  const rank = new Map(BAR_OPEN_PRIORITY.map((code, index) => [code, index]));
+  return items
+    .filter((item) => item.item_category === "RAW_MATERIAL")
+    .slice()
+    .sort((left, right) => {
+      const leftPinned = left.has_open_shelf_rule === true || rank.has(left.short_code);
+      const rightPinned = right.has_open_shelf_rule === true || rank.has(right.short_code);
+      if (leftPinned !== rightPinned) return leftPinned ? -1 : 1;
+      const leftRank = rank.get(left.short_code) ?? 500;
+      const rightRank = rank.get(right.short_code) ?? 500;
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      return left.short_code.localeCompare(right.short_code);
+    });
+}
+
+export function barItemLabel(item: { short_code: string; name_th: string; count_uom?: string }): string {
+  return `${item.short_code} · ${item.name_th}${item.count_uom ? ` (${item.count_uom})` : ""}`;
+}
+
+export function prepBaseLabel(base: { base_code: string; base_name_th?: string; yield_qty_ml: number }): string {
+  const ml = base.yield_qty_ml.toLocaleString("th-TH", { maximumFractionDigits: 0 });
+  return `${base.base_code} · ${base.base_name_th || base.base_code} (เต็มสูตร ${ml} ml)`;
+}
+
 export function itemMatches(query: string, item: {
   short_code?: string | null;
   alias_codes?: string[] | null;

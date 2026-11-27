@@ -10,7 +10,7 @@ import {
   saveEquipmentCalibrationAction,
   saveZoneCountsAction,
 } from "@/lib/actions/fnb-store-day";
-import { closeWipBatchAction, issueWipBatchAction, listWipBoardAction } from "@/lib/actions/fnb-wip";
+import { issueWipBatchAction, listWipBoardAction } from "@/lib/actions/fnb-wip";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import { CashFloatConfirm } from "@/components/fnb/cash-float-confirm";
 import { CleaningSpots } from "@/components/fnb/cleaning-spots";
@@ -18,7 +18,8 @@ import { CoworkerBanner } from "@/components/fnb/coworker-banner";
 import { DisplayCabinetGrid } from "@/components/fnb/display-cabinet-grid";
 import { WriteOffButton } from "@/components/fnb/write-off-panel";
 import { confirmStageSectionAction, listStageConfirmationsAction } from "@/lib/actions/fnb-stage";
-import { itemMatches } from "@/lib/fnb/item-search";
+import { barItemLabel, barOpenItems, itemMatches, prepBaseLabel } from "@/lib/fnb/item-search";
+import { OpeningSauceCards } from "@/components/fnb/opening-sauce-cards";
 import type { FnbBrandCode, FnbStageConfirmation, FnbStoreDayBoard, FnbZoneCountLine } from "@/types/fnb";
 
 const field = "h-10 w-full rounded-md border border-slate-200 px-3 text-sm";
@@ -54,10 +55,9 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
   const brand = props.brandLock ?? "";
   const { board, error, reload } = useBoard(props.branch, props.workDate, props.actorSource, brand);
   const [busy, start] = useTransition();
-  const [photo, setPhoto] = useState("");
   const [equipPhoto, setEquipPhoto] = useState("");
   const [equipError, setEquipError] = useState("");
-  const [bases, setBases] = useState<{ base_code: string; base_name_th?: string; yield_qty_ml: number }[]>([]);
+  const [bases, setBases] = useState<{ base_code: string; base_name_th?: string; yield_qty_ml: number; sort_order?: number }[]>([]);
   const [lemons, setLemons] = useState<{ id: string; count_uom: string }[]>([]);
   const [portion, setPortion] = useState<Record<string, string>>({});
   const [lemonCount, setLemonCount] = useState("");
@@ -85,9 +85,12 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
       <article className="space-y-2">
         <h3 className="font-semibold">หมวดที่ 1: เตรียมวัตถุดิบเบสและหั่นเลมอน</h3>
         <div className="space-y-2">
-          {bases.map((base) => (
+          {[...bases].sort((left, right) => (left.sort_order ?? 0) - (right.sort_order ?? 0) || left.base_code.localeCompare(right.base_code)).map((base) => (
             <div key={base.base_code} className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-2 text-sm">
-              <p className="w-40 font-medium">{base.base_code} {base.yield_qty_ml.toFixed(0)} ml</p>
+              <div className="min-w-44">
+                <p className="font-bold">{base.base_code} · {base.base_name_th || base.base_code}</p>
+                <p className="text-xs text-slate-500">(เต็มสูตร {base.yield_qty_ml.toLocaleString("th-TH", { maximumFractionDigits: 0 })} ml)</p>
+              </div>
               {["0.25", "0.5", "0.75", "1", "SKIP"].map((part) => (
                 <button key={part} type="button" className={`rounded-full px-3 py-1 ${portion[base.base_code] === part ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setPortion((current) => ({ ...current, [base.base_code]: part }))}>
                   {part === "SKIP" ? "มีของเดิม/ยังไม่ต้ม" : `${Math.round(Number(part) * 100)}% (${Math.round(base.yield_qty_ml * Number(part))} ml)`}
@@ -189,33 +192,10 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
       </article>
       <article className="space-y-2">
         <h3 className="font-semibold">หมวดที่ 3: ซอสและวัตถุดิบเปิดใช้หน้าบาร์</h3>
-        <div className="grid gap-2 md:grid-cols-2">
-          {(board?.sauces ?? []).map((sauce) => (
-            <div key={sauce.code} className="rounded-lg bg-slate-50 p-3 text-sm">
-              <p className="font-semibold">{sauce.code} · {sauce.nameTh} · อายุเปิด {sauce.openDays} วัน</p>
-              <p>{sauce.expiresAt ? `หมดอายุ ${sauce.expiresAt}` : "ยังไม่มีขวดที่เปิดอยู่"} {sauce.sticker ? `· ${sauce.sticker}` : ""}</p>
-              {sauce.batchId ? <button type="button" className="mt-2 rounded-md border px-2 py-1" onClick={() => {
-                const body = new FormData();
-                body.set("batch_id", sauce.batchId || "");
-                body.set("close_mode", "EXPIRED_DUMPED");
-                body.set("branch_code", props.branch);
-                body.set("actor_source", props.actorSource);
-                body.set("brand_lock", brand);
-                body.set("photo_urls", photo);
-                body.set("notes", "เทซอสหมดอายุตอนเปิดร้าน");
-                start(async () => {
-                  const saved = await closeWipBatchAction(body);
-                  if (saved.error || !saved.data.ok) toast.error(saved.error || saved.data.message || "เททิ้งไม่สำเร็จ");
-                  else toast.success("เทซอสหมดอายุแล้ว");
-                  reload();
-                });
-              }}>เททิ้งขวดหมดอายุ</button> : null}
-            </div>
-          ))}
-        </div>
+        <OpeningSauceCards sauces={board?.sauces ?? []} branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={brand} staffName={props.staffName} onDone={bump} />
         <button type="button" className="rounded-md border px-3 py-2 text-sm" onClick={() => start(async () => {
           const again = confirms.some((row) => row.sectionKey === "SEC_3_SAUCE");
-          const saved = await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: "SEC_3_SAUCE", sectionTitle: "หมวด 3 ซอสและวัตถุดิบเปิดใช้", photoUrls: photo ? [photo] : [], actorSource: props.actorSource, brandLock: brand, isEdit: again, editReason: again ? "บันทึกหมวดนี้อีกครั้ง" : "" });
+          const saved = await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: "SEC_3_SAUCE", sectionTitle: "หมวด 3 ซอสและวัตถุดิบเปิดใช้", actorSource: props.actorSource, brandLock: brand, isEdit: again, editReason: again ? "บันทึกหมวดนี้อีกครั้ง" : "" });
           if (saved.error || !saved.data.ok) toast.error(saved.error || "ยืนยันหมวด 3 ไม่สำเร็จ");
           else { toast.success("ยืนยันหมวดที่ 3 แล้ว"); bump(); }
         })}>ยืนยันหมวดที่ 3</button>
@@ -250,18 +230,22 @@ export function MiddayShortcuts(props: { branch: string; workDate: string; actor
   const { board, reload } = useBoard(props.branch, props.workDate, props.actorSource, brandLock);
   const [open, setOpen] = useState<"base" | "sauce" | "lemon" | "move" | null>(null);
   const [pct, setPct] = useState(1);
-  const [bases, setBases] = useState<{ base_code: string; yield_qty_ml: number }[]>([]);
-  const [items, setItems] = useState<{ id: string; short_code: string; name_th: string; alias_codes: string[]; external_code: string | null }[]>([]);
+  const [bases, setBases] = useState<{ base_code: string; base_name_th?: string; yield_qty_ml: number; sort_order?: number }[]>([]);
+  const [items, setItems] = useState<{ id: string; short_code: string; name_th: string; count_uom?: string; alias_codes: string[]; external_code: string | null; item_category?: string; has_open_shelf_rule?: boolean }[]>([]);
   const [query, setQuery] = useState("");
-  const [baseCode, setBaseCode] = useState("BT");
+  const [sauceId, setSauceId] = useState("");
+  const [baseCode, setBaseCode] = useState("JT");
   useEffect(() => {
     void listWipBoardAction({ branch_code: props.branch, work_date: props.workDate, actor_source: props.actorSource, brand_lock: props.brand }).then((loaded) => {
       setBases(loaded.data?.bases ?? []);
       setItems(loaded.data?.items ?? []);
     });
   }, [props.branch, props.workDate, props.actorSource, props.brand]);
-  const selected = bases.find((base) => base.base_code === baseCode) ?? bases[0];
+  const orderedBases = [...bases].sort((left, right) => (left.sort_order ?? 0) - (right.sort_order ?? 0) || left.base_code.localeCompare(right.base_code));
+  const selected = orderedBases.find((base) => base.base_code === baseCode) ?? orderedBases[0];
+  const barItems = barOpenItems(items).filter((item) => itemMatches(query, item));
   const visible = items.filter((item) => itemMatches(query, item)).slice(0, 40);
+  const sauceItem = barItems.find((item) => item.id === sauceId) ?? barItems[0];
   const front = board?.locations.find((row) => row.zoneType === "FRONT_DISPLAY");
   const back = board?.locations.find((row) => row.zoneType === "BACKROOM");
   const warehouse = board?.locations.find((row) => row.zoneType === "WAREHOUSE");
@@ -296,7 +280,7 @@ export function MiddayShortcuts(props: { branch: string; workDate: string; actor
       </div>
       {open === "base" ? (
         <div className="space-y-2">
-          <select className={field} value={baseCode} onChange={(event) => setBaseCode(event.target.value)}>{bases.map((base) => <option key={base.base_code} value={base.base_code}>{base.base_code} · {base.yield_qty_ml.toFixed(0)} ml</option>)}</select>
+          <select className={field} value={selected?.base_code ?? baseCode} onChange={(event) => setBaseCode(event.target.value)}>{orderedBases.map((base) => <option key={base.base_code} value={base.base_code}>{prepBaseLabel(base)}</option>)}</select>
           <div className="flex flex-wrap gap-2">
             {[0.25, 0.5, 0.75, 1].map((part) => (
               <button key={part} type="button" className={`rounded-full px-3 py-1 text-sm ${pct === part ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setPct(part)}>{Math.round(part * 100)}% ({Math.round((selected?.yield_qty_ml ?? 0) * part)} ml)</button>
@@ -307,14 +291,15 @@ export function MiddayShortcuts(props: { branch: string; workDate: string; actor
       ) : null}
       {open === "sauce" || open === "lemon" ? (
         <div className="space-y-2">
-          <input className={field} value={query} placeholder="ค้น PF PS CW CWT LEM" onChange={(event) => setQuery(event.target.value)} />
+          <input className={field} value={query} placeholder="ค้นรหัสหรือชื่อวัตถุดิบชง" onChange={(event) => setQuery(event.target.value)} />
+          <select className={field} value={sauceItem?.id ?? ""} onChange={(event) => setSauceId(event.target.value)}>{barItems.map((item) => <option key={item.id} value={item.id}>{barItemLabel(item)}</option>)}</select>
           <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" onClick={() => {
-            const item = visible[0];
+            const item = sauceItem;
             if (!item) return;
             const grams = open === "lemon" ? window.prompt("น้ำหนักเลมอนที่หั่นจริง (กรัม)", "0") : null;
             const count = open === "lemon" ? Number(window.prompt("จำนวนลูก", "6") || 0) : 1;
             brew("OPEN_ITEM", { itemId: item.id, pack: count || 1, notes: grams ? `เลมอน ${count} ลูก ${grams} g` : "เทซอสขวดใหม่" });
-          }}>{open === "lemon" ? "บันทึกหั่นเลมอน" : `เทขวดใหม่ ${visible[0]?.short_code ?? ""}`}</button>
+          }}>{open === "lemon" ? "บันทึกหั่นเลมอน" : `เทขวดใหม่ ${sauceItem?.short_code ?? ""}`}</button>
         </div>
       ) : null}
       {open === "move" && back && front ? (

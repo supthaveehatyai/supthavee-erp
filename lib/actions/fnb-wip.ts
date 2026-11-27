@@ -190,22 +190,25 @@ export async function listWipBoardAction(input: {
     if (!actor.ok) return result(empty, actor.error);
     const brand = input.brand_lock ?? actor.actor.brandCode;
     const db = schemaAdmin().schema("fnb");
-    const [bases, items, batches] = await Promise.all([
-      db.from("prep_bases").select("base_code, base_name_th, yield_qty_ml, brand_code, is_active").eq("is_active", true).limit(20),
-      db.from("items").select("id, short_code, alias_codes, external_code, name_th, count_uom, allow_decimal_count_qty, brand_scope").eq("is_active", true).order("short_code", { ascending: true }).limit(2000),
+    const [bases, items, batches, rules] = await Promise.all([
+      db.from("prep_bases").select("base_code, base_name_th, yield_qty_ml, brand_code, is_active, sort_order").eq("is_active", true).limit(40),
+      db.from("items").select("id, short_code, alias_codes, external_code, name_th, count_uom, allow_decimal_count_qty, brand_scope, item_category").eq("is_active", true).order("short_code", { ascending: true }).limit(2000),
       db.from("bar_wip_batches").select("*").eq("branch_code", input.branch_code).limit(500),
+      db.from("item_open_shelf_life_rules").select("item_id").limit(2000),
     ]);
     if (bases.error) return fail(empty, bases.error, "อ่านเบสไม่สำเร็จ");
     const names = new Map(asRows(items.data).map((row) => [text(row.id), `${text(row.short_code)} ${text(row.name_th)}`]));
-    const baseNames = new Map(asRows(bases.data).map((row) => [text(row.base_code), text(row.base_name_th)]));
+    const brandBases = asRows(bases.data).filter((row) => keepsBrand(text(row.base_name_th), text(row.brand_code), brand));
+    const baseNames = new Map(brandBases.map((row) => [text(row.base_code), text(row.base_name_th)]));
     const rows = asRows(batches.data).map((row) => ({
       work_date: text(row.work_date),
       batch: mapBatch(row, text(row.prep_base_code) ? baseNames.get(text(row.prep_base_code)) || text(row.prep_base_code) : names.get(text(row.item_id)) || "วัตถุดิบ"),
     }));
+    const ruled = new Set(asRows(rules.data).map((row) => text(row.item_id)));
     return result({
-      bases: asRows(bases.data)
-        .filter((row) => keepsBrand(text(row.base_name_th), text(row.brand_code), brand))
-        .map((row) => ({ base_code: text(row.base_code), base_name_th: text(row.base_name_th), yield_qty_ml: num(row.yield_qty_ml) })),
+      bases: brandBases
+        .map((row) => ({ base_code: text(row.base_code), base_name_th: text(row.base_name_th), yield_qty_ml: num(row.yield_qty_ml), sort_order: num(row.sort_order) }))
+        .sort((left, right) => left.sort_order - right.sort_order || left.base_code.localeCompare(right.base_code)),
       items: asRows(items.data)
         .filter((row) => keepsBrand(`${text(row.short_code)} ${text(row.name_th)}`, text(row.brand_scope), brand))
         .map((row) => ({
@@ -216,6 +219,8 @@ export async function listWipBoardAction(input: {
           alias_codes: Array.isArray(row.alias_codes) ? row.alias_codes.map((code) => text(code)) : [],
           external_code: row.external_code == null ? null : text(row.external_code),
           allow_decimal_count_qty: row.allow_decimal_count_qty === true,
+          item_category: text(row.item_category),
+          has_open_shelf_rule: ruled.has(text(row.id)),
         })),
       brews: rows.filter((row) => row.batch.batch_kind === "PREP_BASE" && row.work_date === input.work_date).map((row) => row.batch),
       containers: rows.filter((row) => row.batch.batch_status === "ACTIVE" && (row.batch.shelf_life_mode === "HOURS_AFTER_OPEN" || row.batch.shelf_life_mode === "DAYS_AFTER_OPEN")).map((row) => row.batch),
@@ -256,6 +261,37 @@ export async function issueWipBatchAction(formData: FormData): Promise<FnbAction
     return result({ ok: true, sticker: text(body.sticker_label_text) || null, message: null });
   } catch (error) {
     return caught(blank, error, "เบิกขึ้นบาร์ไม่สำเร็จ");
+  }
+}
+
+export async function registerExistingOpenBarItemAction(formData: FormData): Promise<FnbActionResult<{ ok: boolean; sticker: string | null; message: string | null }>> {
+  const blank = { ok: false, sticker: null as string | null, message: null as string | null };
+  try {
+    const actor = await actorFrom({
+      actorSource: text(formData.get("actor_source")),
+      brandLock: text(formData.get("brand_lock")),
+      branchCode: text(formData.get("branch_code")),
+    });
+    if (!actor.ok) return result(blank, actor.error);
+    const qty = Number(formData.get("open_count_qty") ?? 0);
+    if (!(qty > 0)) return result({ ...blank, message: "กรุณาระบุจำนวนที่เปิดใช้อยู่" }, "กรุณาระบุจำนวนที่เปิดใช้อยู่");
+    const saved = await callFnbRpc("register_existing_open_bar_item", {
+      p_branch_code: text(formData.get("branch_code")),
+      p_work_date: text(formData.get("work_date")) || todayBangkok(),
+      p_item_id: text(formData.get("item_id")),
+      p_open_count_qty: Math.trunc(qty),
+      p_expiry_date: text(formData.get("expiry_date")) || null,
+      p_staff_name: actor.actor.name,
+      p_line_user_id: actor.actor.lineUserId,
+      p_photo_urls: text(formData.get("photo_urls")).split("|").filter(Boolean),
+      p_notes: text(formData.get("notes")) || null,
+    });
+    if (saved.error) return fail(blank, saved.error, "บันทึกยอดที่เปิดใช้อยู่ไม่สำเร็จ");
+    const body = saved.data && typeof saved.data === "object" ? saved.data as Record<string, unknown> : {};
+    if (body.ok === false) return result({ ...blank, message: text(body.error) }, text(body.error) || "บันทึกยอดที่เปิดใช้อยู่ไม่สำเร็จ");
+    return result({ ok: true, sticker: text(body.sticker_label_text) || null, message: null });
+  } catch (error) {
+    return caught(blank, error, "บันทึกยอดที่เปิดใช้อยู่ไม่สำเร็จ");
   }
 }
 

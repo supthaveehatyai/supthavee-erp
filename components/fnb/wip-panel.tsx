@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { LiveWatermarkCamera } from "@/components/fnb/live-watermark-camera";
 import { closeWipBatchAction, issueWipBatchAction, listWipBoardAction } from "@/lib/actions/fnb-wip";
-import { itemMatches } from "@/lib/fnb/item-search";
+import { barItemLabel, barOpenItems, itemMatches, prepBaseLabel } from "@/lib/fnb/item-search";
 import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import type { FnbBrandCode, FnbWipBatchRow, FnbWipBoard } from "@/types/fnb";
@@ -134,7 +134,7 @@ function BrewForm(props: {
         else { setOpen(false); props.onDone(saved.data.sticker || "ติดป้ายตามเวลาที่ระบบคำนวณ"); }
       });
     }}>
-      <select className="h-10 w-full rounded-md border px-3 text-sm" name="prep_base_code" value={baseCode} onChange={(event) => setBaseCode(event.target.value)}>{props.bases.map((base) => <option key={base.base_code} value={base.base_code}>{base.base_code} {base.base_name_th} · {base.yield_qty_ml.toFixed(0)} ml</option>)}</select>
+      <select className="h-10 w-full rounded-md border px-3 text-sm" name="prep_base_code" value={baseCode} onChange={(event) => setBaseCode(event.target.value)}>{[...props.bases].sort((left, right) => left.sort_order - right.sort_order || left.base_code.localeCompare(right.base_code)).map((base) => <option key={base.base_code} value={base.base_code}>{prepBaseLabel(base)}</option>)}</select>
       {portion === "FULL_RECIPE" ? <div className="flex flex-wrap gap-2">{[0.25, 0.5, 0.75, 1].map((part) => <button key={part} type="button" className={`rounded-full px-3 py-1 text-sm ${pct === part ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setPct(part)}>{Math.round(part * 100)}% ({Math.round((selected?.yield_qty_ml ?? 0) * part)} ml)</button>)}</div> : null}
       <select className="h-10 w-full rounded-md border px-3 text-sm" name="shift_instance"><option value="SHIFT_1">กะแรก</option><option value="SHIFT_2">กะสอง</option>{props.enableShift3 ? <option value="SHIFT_3">กะสาม</option> : null}</select>
       <label className="flex gap-2 text-sm"><input type="radio" checked={portion === "FULL_RECIPE"} onChange={() => setPortion("FULL_RECIPE")} />ต้มเต็มสูตรมาตรฐาน (1 ถุงเต็ม ได้น้ำเบสเต็มหม้อ)</label>
@@ -162,7 +162,7 @@ function OpenItemForm(props: {
   const [query, setQuery] = useState("");
   const [urls, setUrls] = useState<string[]>([]);
   const [qty, setQty] = useState("1");
-  const visible = props.items.filter((item) => itemMatches(query, item)).slice(0, 80);
+  const visible = barOpenItems(props.items).filter((item) => itemMatches(query, item)).slice(0, 80);
   const selected = visible.find((item) => item.id === query) ?? visible[0];
   return (
     <form className="space-y-2" onSubmit={(event) => {
@@ -184,7 +184,7 @@ function OpenItemForm(props: {
       <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-12">
         <label className="text-sm md:col-span-5">วัตถุดิบที่เบิกเปิดขึ้นบาร์
           <input className="mt-1 h-10 w-full rounded-md border px-3 text-sm" value={query} placeholder="ค้นหา LEM MK CMK" onChange={(event) => setQuery(event.target.value)} />
-          <select className="mt-1 h-10 w-full rounded-md border px-3 text-sm" name="item_id">{visible.map((item) => <option key={item.id} value={item.id}>{item.short_code} {item.name_th}</option>)}</select>
+          <select className="mt-1 h-10 w-full rounded-md border px-3 text-sm" name="item_id">{visible.map((item) => <option key={item.id} value={item.id}>{barItemLabel(item)}</option>)}</select>
         </label>
         <label className="text-sm md:col-span-2">จำนวน
           <span className="mt-1 block"><FnbQtyInput value={qty} onChange={setQty} unit={selected?.count_uom || "ชิ้น"} allowDecimal={selected?.allow_decimal_count_qty === true} /></span>
