@@ -28,6 +28,7 @@ export default async function FnbOperationsPage({ searchParams }: { searchParams
         actorName={ctx.displayActorName}
         actorSource="desktop"
         initialApprovals={approvals.data}
+        activeBrand={brand}
       />
     </div>
   );

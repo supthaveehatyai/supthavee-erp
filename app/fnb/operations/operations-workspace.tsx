@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { branchForBrand } from "@/lib/fnb/brand-branch";
 import { toast } from "sonner";
 import { ApprovalQueue } from "@/app/fnb/approval-queue";
 import { CashFloatNote } from "@/components/fnb/cash-float-note";
@@ -8,7 +9,7 @@ import { ClosingWipBanner } from "@/components/fnb/closing-wip-banner";
 import { WipPanel } from "@/components/fnb/wip-panel";
 import { MenuSalesPanel } from "@/components/fnb/menu-sales-panel";
 import { SopBoard } from "@/components/fnb/sop-board";
-import { SopPhotoBoard } from "@/components/fnb/sop-photo-board";
+import { SectionPhotoDrawer } from "@/components/fnb/section-photo-drawer";
 import { MiddayShortcuts, NightCloseCount, OpeningChecklist } from "@/components/fnb/store-day-board";
 import { saveShift3HandoverAction } from "@/lib/actions/fnb-sop";
 import {
@@ -56,6 +57,7 @@ export function OperationsWorkspace({
   actorName,
   actorSource,
   initialApprovals = [],
+  activeBrand,
 }: {
   branches: FnbBranchOption[];
   shelfItems: FnbItemRow[];
@@ -64,6 +66,7 @@ export function OperationsWorkspace({
   actorName: string;
   actorSource: "desktop" | "liff";
   initialApprovals?: FnbChangeRequestRow[];
+  activeBrand: FnbBrandCode;
 }) {
   const [tab, setTab] = useState<FnbSopStageInstance | "WIP">("OPENING");
   const [branch, setBranch] = useState(branches[0]?.branch_code ?? "");
@@ -75,7 +78,11 @@ export function OperationsWorkspace({
   const [busy, setBusy] = useState<string | null>(null);
   const [, start] = useTransition();
   const selected = branches.find((item) => item.branch_code === branch) ?? null;
-  const brand = brandLock ?? (selected?.brand_code === "CHATORN" ? "CHATORN" : "LUCKY_CUP");
+  const brand = activeBrand;
+  useEffect(() => {
+    const next = branchForBrand(branches, activeBrand, branch);
+    if (next !== branch) setBranch(next);
+  }, [activeBrand, branches, branch]);
   const heading = brand === "LUCKY_CUP" ? "ปฏิบัติการ Lucky Cup" : "ปฏิบัติการชาทรตะโหมด";
 
   useEffect(() => {
@@ -145,14 +152,14 @@ export function OperationsWorkspace({
         <TabButton active={tab === "CLOSING"} onClick={() => setTab("CLOSING")}>{`${selected?.enable_shift_3 ? "5" : "4"}. ปิดร้านและยอดขายรายเมนู (${selected?.enable_shift_3 ? "กะสาม" : "กะสอง"})`}</TabButton>
       </div>
       <MiddayShortcuts branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brandLock} staffName={staffName} brand={brand} />
-      {tab === "OPENING" ? <OpeningChecklist branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brand} staffName={staffName} /> : null}
+      {tab === "OPENING" ? <OpeningChecklist branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brand} staffName={staffName} cashFloat={selected?.standard_cash_float} /> : null}
       {tab === "SHIFT_1" || tab === "SHIFT_2" ? <ClosePanel brand={brand} brandLock={brandLock} superAdmin={superAdmin} branch={branch} branches={branches} workDate={workDate} staffName={staffName} actorSource={actorSource} day={day} busy={busy} run={run} lockShift={tab === "SHIFT_1" ? "MORNING" : "AFTERNOON"} /> : null}
       {tab === "SHIFT_3" ? <Shift3Panel brandLock={brandLock} branch={branch} workDate={workDate} actorSource={actorSource} busy={busy === "shift3"} run={run} /> : null}
       {tab === "WIP" ? <WipPanel branch={branch} workDate={workDate} brand={brand} actorSource={actorSource} actorName={staffName} enableShift3={Boolean(selected?.enable_shift_3)} /> : null}
-      {tab === "CLOSING" ? <><ClosingWipBanner branch={branch} workDate={workDate} /><WastePanel brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} shelfItems={shelfItems} day={day} busy={busy} run={run} /><MenuSalesPanel branch={branch} workDate={workDate} brand={brand} actorSource={actorSource} /><NightCloseCount branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brandLock} staffName={staffName} /></> : null}
-      {tab !== "WIP" ? <SopBoard branch={branch} workDate={workDate} stage={tab} brandLock={brandLock} actorSource={actorSource} actorName={staffName} superAdmin={superAdmin} /> : null}
+      {tab === "CLOSING" ? <><ClosingWipBanner branch={branch} workDate={workDate} /><WastePanel brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} shelfItems={shelfItems} day={day} busy={busy} run={run} /><MenuSalesPanel branch={branch} workDate={workDate} brand={brand} actorSource={actorSource} /><NightCloseCount branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brand} staffName={staffName} cashFloat={selected?.standard_cash_float} /></> : null}
+      {tab !== "WIP" && tab !== "OPENING" && tab !== "CLOSING" ? <SopBoard branch={branch} workDate={workDate} stage={tab} brandLock={brandLock} actorSource={actorSource} actorName={staffName} superAdmin={superAdmin} /> : null}
       {brandLock ? <ReimburseBox brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} busy={busy === "reimburse"} run={run} /> : null}
-      {superAdmin ? <SopPhotoBoard workDate={workDate} /> : null}
+      {superAdmin ? <SectionPhotoDrawer workDate={workDate} brand={brand} /> : null}
       {superAdmin ? <SettlementPanel shifts={day?.shifts ?? []} busy={busy === "settle"} run={run} /> : null}
     </div>
   );

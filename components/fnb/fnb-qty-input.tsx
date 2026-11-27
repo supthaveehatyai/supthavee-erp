@@ -7,6 +7,7 @@ export function FnbQtyInput({
   allowDecimal = false,
   name,
   placeholder,
+  className = "h-10 w-24",
 }: {
   value?: string;
   onChange?: (value: string) => void;
@@ -14,6 +15,7 @@ export function FnbQtyInput({
   allowDecimal?: boolean;
   name?: string;
   placeholder?: string;
+  className?: string;
 }) {
   return (
     <span className="inline-flex items-center gap-1">
@@ -26,7 +28,7 @@ export function FnbQtyInput({
         step={allowDecimal ? "0.1" : "1"}
         min={0}
         max={999}
-        className="h-10 w-24 rounded-md border border-slate-200 px-2 text-sm"
+        className={`${className} rounded-md border border-slate-200 px-2 text-sm`}
         onKeyDown={(event) => {
           if (!allowDecimal && (event.key === "." || event.key === "," || event.key === "e" || event.key === "E")) event.preventDefault();
         }}

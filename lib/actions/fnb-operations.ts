@@ -314,6 +314,9 @@ export async function listFrontBackItemsAction(brandLock?: FnbBrandCode | null):
       backroom_count_schedule: text(row.backroom_count_schedule) || "WEEKLY_2X",
       backroom_count_weekdays: Array.isArray(row.backroom_count_weekdays) ? row.backroom_count_weekdays.map((day) => Number(day)) : [],
       allow_decimal_count_qty: row.allow_decimal_count_qty === true,
+      display_shelf_life_days: row.display_shelf_life_days == null ? null : num(row.display_shelf_life_days),
+      display_sub_group: row.display_sub_group == null ? null : text(row.display_sub_group),
+      display_walk_order: num(row.display_walk_order) || 100,
     })).filter((item) => !brandLock || item.brand_scope === brandLock));
   } catch (error) {
     return caught([], error, "อ่านรายการเช็กของไม่สำเร็จ");

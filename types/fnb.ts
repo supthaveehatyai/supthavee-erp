@@ -97,6 +97,23 @@ export const FNB_WEEKDAY_OPTIONS = [
   { day: 0, label: "อาทิตย์" },
 ] as const;
 export const FNB_FRONT_DISPLAY_CATEGORIES = ["MERCHANDISE", "BAKERY_FROZEN", "ICE_CREAM"] as const;
+
+export const FNB_DISPLAY_SUB_GROUPS = [
+  { code: "CROISSANT", label: "กลุ่มครัวซองต์", cabinet: "BAKERY", walk: 10 },
+  { code: "PUFF_PIE", label: "กลุ่มพัฟและพาย", cabinet: "BAKERY", walk: 20 },
+  { code: "CAKE_MOUSSE", label: "กลุ่มเค้กบอกซ์และมูส", cabinet: "BAKERY", walk: 30 },
+  { code: "HANJUKU", label: "กลุ่มฮานจุกุชีสเค้ก", cabinet: "BAKERY", walk: 40 },
+  { code: "ICECREAM_CONE", label: "ตู้ไอศกรีมและโคนหน้าบาร์", cabinet: "ICE", walk: 50 },
+  { code: "MERCH_DISPLAY", label: "ชั้นโชว์ของพรีเมียมหน้าร้าน", cabinet: "MERCH", walk: 60 },
+  { code: "OTHER_DISPLAY", label: "รายการโชว์อื่น", cabinet: "MERCH", walk: 90 },
+] as const;
+
+export const FNB_WRITE_OFF_REASONS = [
+  { code: "EXPIRED_DISPLAY", label: "หมดอายุคาตู้โชว์หน้าร้าน" },
+  { code: "TRANSIT_BROKEN", label: "แตกหัก / บุบเสียหายจากการขนส่ง" },
+  { code: "MOLD_SPOILED", label: "ขึ้นรา / เสื่อมสภาพก่อนวันหมดอายุ" },
+  { code: "STAFF_HANDLING_DROP", label: "ตกหล่น / เสียหายระหว่างทำงานหน้าร้าน" },
+] as const;
 export const FNB_SAUCE_OPEN_DAYS: Record<string, number> = {
   SB: 2, MB: 5, CS: 6, BS: 14, PF: 4, PS: 4, X: 9, CJ: 6, WMK: 3, CW: 1, CWT: 1, CMK: 1,
 };
@@ -291,6 +308,9 @@ export type FnbItemRow = {
   backroom_count_schedule: string;
   backroom_count_weekdays: number[];
   allow_decimal_count_qty: boolean;
+  display_shelf_life_days: number | null;
+  display_sub_group: string | null;
+  display_walk_order: number;
 };
 
 export type FnbVendorPackRow = {
@@ -638,6 +658,34 @@ export type FnbZoneCountLine = {
   dueTonight: boolean;
   countUom: string;
   allowDecimal: boolean;
+  category: string;
+  displaySubGroup: string;
+  displayWalkOrder: number;
+  shelfLifeDays: number;
+  writeOffQty: number;
+};
+
+export type FnbDisplayLot = {
+  id: string;
+  itemId: string;
+  remainingQty: number;
+  displayExpiryDate: string;
+  effectiveDay1: string;
+};
+
+export type FnbStageConfirmation = {
+  id: string;
+  sectionKey: string;
+  sectionTitle: string;
+  stageCode: "OPENING" | "CLOSING";
+  statusFlag: string;
+  numericAmount: number | null;
+  expectedAmount: number | null;
+  varianceReason: string | null;
+  photoUrls: string[];
+  confirmedByName: string;
+  confirmedAt: string;
+  payload: Record<string, unknown>;
 };
 
 export type FnbSauceWatch = {
@@ -659,6 +707,7 @@ export type FnbStoreDayBoard = {
   warehouseLines: FnbZoneCountLine[];
   warehouseDue: boolean;
   sauces: FnbSauceWatch[];
+  displayLots: FnbDisplayLot[];
   calibration: {
     grinderDoseG: number | null;
     espressoTimeSec: number | null;

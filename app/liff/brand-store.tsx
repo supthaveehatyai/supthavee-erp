@@ -53,7 +53,7 @@ export function BrandStore({
         {showGoodsReceipt ? <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "lots" ? "bg-[var(--fnb-brand)] text-white" : "bg-white ring-1 ring-red-200"}`} onClick={() => setTab("lots")}>แกะล็อตหมดอายุ</button> : null}
         {showMenuSales ? <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "sales" ? "bg-[var(--fnb-brand)] text-white" : "bg-white ring-1 ring-red-200"}`} onClick={() => setTab("sales")}>ยอดขายรายเมนูสาขา</button> : null}
       </div>
-      {tab === "ops" ? <OperationsWorkspace branches={branches} shelfItems={shelfItems} brandLock={brand} superAdmin={false} actorName={actorName} actorSource="liff" /> : null}
+      {tab === "ops" ? <OperationsWorkspace branches={branches} shelfItems={shelfItems} brandLock={brand} activeBrand={brand} superAdmin={false} actorName={actorName} actorSource="liff" /> : null}
       {tab === "receive" && showGoodsReceipt ? <ManualReceive branches={branches} items={items} brandLock={brand} revealCost={false} actorSource="liff" /> : null}
       {tab === "lots" && showGoodsReceipt ? <ExpiryPanel pending={pendingLots} lots={lots} brandLock={brand} actorSource="liff" /> : null}
       {tab === "sales" && showMenuSales ? <BranchMenuSales branches={branches} /> : null}

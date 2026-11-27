@@ -2,14 +2,20 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { branchForBrand } from "@/lib/fnb/brand-branch";
 import { listBranchZonesAction, listCleaningSpotsAction, saveCleaningSpotAction, saveStorageZoneAction } from "@/lib/actions/fnb-store-day";
+import type { FnbBrandCode } from "@/types/fnb";
 import { FNB_BACKROOM_SCHEDULE_LABEL, FNB_WEEKDAY_OPTIONS, type FnbCleaningSpot, type FnbStorageZone } from "@/types/fnb";
 
 const field = "h-10 w-full rounded-md border border-slate-200 px-3 text-sm";
 const ZONE_SCHEDULES = ["DAILY_OPEN_CLOSE", "DAILY_CLOSE", "EVERY_3_DAYS", "WEEKLY_2X", "WEEKLY_1X", "ON_DEMAND"] as const;
 
-export function BranchPlaceManager({ branches }: { branches: { branch_code: string; branch_name_th: string }[] }) {
+export function BranchPlaceManager({ branches, brand }: { branches: { branch_code: string; branch_name_th: string; brand_code: string }[]; brand: FnbBrandCode }) {
   const [branch, setBranch] = useState(branches[0]?.branch_code ?? "");
+  useEffect(() => {
+    const next = branchForBrand(branches, brand, branch);
+    if (next !== branch) setBranch(next);
+  }, [brand, branches, branch]);
   const [zones, setZones] = useState<FnbStorageZone[]>([]);
   const [spots, setSpots] = useState<FnbCleaningSpot[]>([]);
   const [stage, setStage] = useState<"OPENING" | "CLOSING">("OPENING");

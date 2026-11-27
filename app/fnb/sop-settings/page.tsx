@@ -25,6 +25,7 @@ export default async function SopSettingsPage({ searchParams }: { searchParams: 
       templates={templates.data.filter((item) => item.brand_scope === brand || item.brand_scope === "ALL")}
       items={items.data.items.filter((item) => item.brand_scope === brand).map((item) => ({ id: item.id, short_code: item.short_code, name_th: item.name_th }))}
       schemaMessage={branches.error || templates.error || items.error}
+      brand={brand}
     />
     </div>
   );

@@ -1,6 +1,7 @@
 "use server";
 
 import { resolveFnbActor } from "@/lib/fnb/actor";
+import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
 import { generateWithGeminiFallback, resolveGeminiApiKey } from "@/lib/ai/gemini-client";
 import { getUserAccessContext, requireFnbModuleAccess } from "@/lib/holding/workspace-access";
@@ -139,6 +140,23 @@ export async function saveMenuSalesAction(input: {
         gross_amount: line.gross_amount,
       })));
       if (inserted.error) return fail({ ok: false }, inserted.error, "บันทึกรายการเมนูไม่สำเร็จ");
+    }
+    const bakery = await db.from("items").select("id,short_code,name_th,alias_codes,display_shelf_life_days").eq("brand_scope", brand).gt("display_shelf_life_days", 0).eq("is_active", true).limit(200);
+    const bakeryRows = asRows(bakery.data);
+    for (const line of lines) {
+      const name = line.menu_name_th.toLowerCase();
+      const item = bakeryRows.find((row) => {
+        const aliases = [text(row.short_code), text(row.name_th), ...(Array.isArray(row.alias_codes) ? row.alias_codes.map((code) => text(code)) : [])].map((code) => code.toLowerCase()).filter((code) => code.length >= 2);
+        return aliases.some((code) => name.includes(code));
+      });
+      const qty = Math.trunc(line.qty_sold);
+      if (item && qty > 0) {
+        await callFnbRpc("consume_display_chiller_lots_fefo", {
+          p_branch_code: input.branch_code,
+          p_item_id: text(item.id),
+          p_qty_sold: qty,
+        });
+      }
     }
     return result({ ok: true });
   } catch (error) {

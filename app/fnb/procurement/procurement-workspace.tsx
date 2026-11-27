@@ -12,6 +12,8 @@ import {
 } from "@/lib/actions/fnb-procurement";
 import { listBranchZonesAction } from "@/lib/actions/fnb-store-day";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
+import { VendorClaimPanel, WriteOffButton } from "@/components/fnb/write-off-panel";
+import { branchForBrand } from "@/lib/fnb/brand-branch";
 import { itemMatches } from "@/lib/fnb/item-search";
 import type { FnbBranchOption, FnbBrandCode, FnbExpiryLotRow, FnbItemRow, FnbReimbursementRow, FnbUnpackLine, FnbVendorSheetRow } from "@/types/fnb";
 
@@ -59,10 +61,12 @@ export function ProcurementWorkspace({
         {showGoods ? <Tab active={tab === "lots"} onClick={() => setTab("lots")}>แกะกล่องลงวันหมดอายุ</Tab> : null}
         {showPayout ? <Tab active={tab === "pay"} onClick={() => setTab("pay")}>คิวโอนคืนพนักงาน</Tab> : null}
       </div>
-      {tab === "scan" && showGoods ? <ScanTab branches={branches} items={items} setMessage={setMessage} /> : null}
+      {tab === "scan" && showGoods ? <ScanTab branches={branches} items={items} brand={brand} setMessage={setMessage} /> : null}
       {tab === "manual" && showGoods ? <ManualReceive branches={branches} items={items} brandLock={brand} revealCost={revealCost} setMessage={setMessage} /> : null}
       {tab === "lots" && showGoods ? <ExpiryPanel pending={pending} lots={lots} brandLock={brand} /> : null}
       {tab === "pay" && showPayout ? <PayoutQueue payouts={payouts} setMessage={setMessage} /> : null}
+      <WriteOffButton branch={branches[0]?.branch_code ?? ""} workDate={new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date())} actorSource="desktop" brand={brand} staffName="" locations={[]} />
+      <VendorClaimPanel brand={brand} />
     </div>
   );
 }
@@ -70,14 +74,20 @@ export function ProcurementWorkspace({
 function ScanTab({
   branches,
   items,
+  brand,
   setMessage,
 }: {
   branches: FnbBranchOption[];
   items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom">[];
+  brand: FnbBrandCode;
   setMessage: (message: string) => void;
 }) {
   const [rows, setRows] = useState<FnbVendorSheetRow[]>([]);
-  const [branch, setBranch] = useState(branches.find((item) => item.brand_code === "LUCKY_CUP")?.branch_code ?? branches[0]?.branch_code ?? "");
+  const [branch, setBranch] = useState(branches[0]?.branch_code ?? "");
+  useEffect(() => {
+    const next = branchForBrand(branches, brand, branch);
+    if (next !== branch) setBranch(next);
+  }, [brand, branches, branch]);
   const [vendor, setVendor] = useState("");
   const [busy, setBusy] = useState(false);
   const [, start] = useTransition();

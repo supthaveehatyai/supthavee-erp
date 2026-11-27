@@ -2,6 +2,7 @@
 
 import { resolveFnbActor } from "@/lib/fnb/actor";
 import { isBackroomDue } from "@/lib/fnb/item-search";
+import { bangkokHour } from "@/lib/fnb/stage-progress";
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
@@ -138,10 +139,12 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
     const actor = await resolveFnbActor({ actorSource, brandLock, branchCode });
     if (!actor.ok) return result(empty, actor.error);
     const db = schemaAdmin().schema("fnb");
-    const [zones, spots, items, counts, transfers, sales, batches, calibration, receipts] = await Promise.all([
+    const [zones, spots, items, lots, writeOffs, counts, transfers, sales, batches, calibration, receipts] = await Promise.all([
       db.from("storage_locations").select("id,branch_code,location_code,location_name_th,zone_type,default_count_schedule,count_weekdays,is_default_gr_target,sort_order").eq("branch_code", branchCode).eq("is_active", true).order("sort_order", { ascending: true }).limit(20),
       db.from("branch_cleaning_spots").select("id,branch_code,stage_code,spot_name_th,sort_order").eq("branch_code", branchCode).eq("is_active", true).order("sort_order", { ascending: true }).limit(40),
-      db.from("items").select("id,short_code,alias_codes,name_th,item_category,count_uom,allow_decimal_count_qty,track_front_display_daily,backroom_count_schedule,backroom_count_weekdays,brand_scope").eq("is_active", true).limit(800),
+      db.from("items").select("id,short_code,alias_codes,name_th,item_category,count_uom,allow_decimal_count_qty,track_front_display_daily,backroom_count_schedule,backroom_count_weekdays,brand_scope,display_shelf_life_days,display_sub_group,display_walk_order").eq("is_active", true).limit(800),
+      db.from("display_chiller_lots").select("id,item_id,remaining_qty,display_expiry_date,effective_day_1,lot_status").eq("branch_code", branchCode).eq("lot_status", "ACTIVE").limit(500),
+      db.from("item_write_offs").select("item_id,location_code,qty_in_count_uom").eq("branch_code", branchCode).eq("work_date", workDate).limit(500),
       db.from("zone_stock_counts").select("item_id,location_code,count_stage,count_date,counted_qty,nearest_expiry_date").eq("branch_code", branchCode).gte("count_date", shiftDate(workDate, -14)).lte("count_date", workDate).limit(4000),
       db.from("internal_zone_transfers").select("item_id,to_location_code,qty_in_count_uom").eq("branch_code", branchCode).eq("work_date", workDate).limit(500),
       db.from("daily_menu_sales_lines").select("menu_name_th,qty_sold").eq("branch_code", branchCode).eq("work_date", workDate).limit(2000),
@@ -150,6 +153,8 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
       db.from("goods_receipts").select("id").eq("receiving_branch_code", branchCode).limit(300),
     ]);
     if (zones.error) return fail(empty, zones.error, "อ่านจุดจัดเก็บไม่สำเร็จ");
+    if (lots.error) return fail(empty, lots.error, "อ่านล็อตตู้โชว์ไม่สำเร็จ");
+    if (writeOffs.error) return fail(empty, writeOffs.error, "อ่านรายการตัดของเสียไม่สำเร็จ");
     const locations = asRows(zones.data).map(zoneOf);
     const front = locations.find((row) => row.zoneType === "FRONT_DISPLAY");
     const back = locations.find((row) => row.zoneType === "BACKROOM");
@@ -174,7 +179,15 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
       countUom: text(row.count_uom) || "ชิ้น",
       allowDecimal: row.allow_decimal_count_qty === true,
       brand: text(row.brand_scope),
+      displaySubGroup: text(row.display_sub_group),
+      displayWalkOrder: num(row.display_walk_order) || 100,
+      shelfLifeDays: num(row.display_shelf_life_days),
     })).filter((item) => (brandLock !== "LUCKY_CUP" && brandLock !== "CHATORN") || item.brand === brandLock);
+    const written = new Map<string, number>();
+    for (const row of asRows(writeOffs.data)) {
+      const key = `${text(row.location_code)}|${text(row.item_id)}`;
+      written.set(key, (written.get(key) ?? 0) + num(row.qty_in_count_uom));
+    }
     const sold = new Map<string, number>();
     for (const row of asRows(sales.data)) {
       const name = text(row.menu_name_th).toLowerCase();
@@ -205,7 +218,8 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
       const opening = stage === "OPENING" ? lastClose(locationCode, item.id) : (todayCount(locationCode, item.id, "OPENING").qty ?? lastClose(locationCode, item.id));
       const replenished = moved.get(`${locationCode}|${item.id}`) ?? 0;
       const posSold = sold.get(item.id) ?? 0;
-      const expected = Math.max(0, opening + replenished - posSold);
+      const writeOffQty = written.get(`${locationCode}|${item.id}`) ?? 0;
+      const expected = Math.max(0, opening + replenished - posSold - writeOffQty);
       const counted = todayCount(locationCode, item.id, stage);
       const countedQty = counted.qty;
       const shrinkage = countedQty == null ? 0 : expected - countedQty;
@@ -228,6 +242,11 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
         dueTonight: isBackroomDue(item.schedule, item.weekdays, workDate),
         countUom: item.countUom,
         allowDecimal: item.allowDecimal,
+        category: item.category,
+        displaySubGroup: item.displaySubGroup,
+        displayWalkOrder: item.displayWalkOrder,
+        shelfLifeDays: item.shelfLifeDays,
+        writeOffQty,
       };
     }
     const frontItems = catalog.filter((item) => item.trackFront || (FRONT_CATS.has(item.category) && (item.trackFront || receivedItemIds.has(item.id))));
@@ -262,6 +281,13 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
       warehouseLines: warehouse ? catalog.filter((item) => receivedItemIds.has(item.id) || item.category === "PACKAGING" || item.category === "CLEANING_SUPPLY").slice(0, 40).map((item) => lineFor(item, warehouse.locationCode, "CLOSING")) : [],
       warehouseDue,
       sauces,
+      displayLots: asRows(lots.data).filter((row) => num(row.remaining_qty) > 0).map((row) => ({
+        id: text(row.id),
+        itemId: text(row.item_id),
+        remainingQty: num(row.remaining_qty),
+        displayExpiryDate: text(row.display_expiry_date),
+        effectiveDay1: text(row.effective_day_1),
+      })),
       calibration: cal ? {
         grinderDoseG: cal.grinder_dose_g == null ? null : num(cal.grinder_dose_g),
         espressoTimeSec: cal.espresso_time_sec == null ? null : num(cal.espresso_time_sec),
@@ -377,10 +403,11 @@ export async function replenishZoneAction(input: {
   brandLock: string;
   autoReconciled?: boolean;
   notes?: string;
-}): Promise<FnbActionResult<{ ok: boolean; transferNo: string | null }>> {
+  eveningForTomorrow?: boolean;
+}): Promise<FnbActionResult<{ ok: boolean; transferNo: string | null; expiryDate: string | null }>> {
   try {
     const actor = await actorName(input.branchCode, input.actorSource, input.brandLock);
-    if (!actor.ok) return result({ ok: false, transferNo: null }, actor.error);
+    if (!actor.ok) return result({ ok: false, transferNo: null, expiryDate: null }, actor.error);
     const saved = await callFnbRpc("record_internal_zone_replenishment", {
       p_branch_code: input.branchCode,
       p_work_date: input.workDate || todayBangkok(),
@@ -392,13 +419,14 @@ export async function replenishZoneAction(input: {
       p_is_auto_reconciled: Boolean(input.autoReconciled),
       p_photo_url: null,
       p_notes: input.notes || null,
+      p_is_evening_for_tomorrow: input.eveningForTomorrow ?? bangkokHour() >= 17,
     });
-    if (saved.error) return fail({ ok: false, transferNo: null }, saved.error, "บันทึกเบิกเติมไม่สำเร็จ");
+    if (saved.error) return fail({ ok: false, transferNo: null, expiryDate: null }, saved.error, "บันทึกเบิกเติมไม่สำเร็จ");
     const body = saved.data && typeof saved.data === "object" ? saved.data as Record<string, unknown> : {};
-    if (body.ok === false) return result({ ok: false, transferNo: null }, text(body.error) || "บันทึกเบิกเติมไม่สำเร็จ");
-    return result({ ok: true, transferNo: text(body.transfer_no) || null });
+    if (body.ok === false) return result({ ok: false, transferNo: null, expiryDate: null }, text(body.error) || "บันทึกเบิกเติมไม่สำเร็จ");
+    return result({ ok: true, transferNo: text(body.transfer_no) || null, expiryDate: text(body.display_expiry_date) || null });
   } catch (error) {
-    return caught({ ok: false, transferNo: null }, error, "บันทึกเบิกเติมไม่สำเร็จ");
+    return caught({ ok: false, transferNo: null, expiryDate: null }, error, "บันทึกเบิกเติมไม่สำเร็จ");
   }
 }
 

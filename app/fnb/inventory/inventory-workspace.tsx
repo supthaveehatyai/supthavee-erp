@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import { transferFnbStockAction } from "@/lib/actions/fnb-inventory";
 import { listBranchZonesAction, saveZoneCountsAction } from "@/lib/actions/fnb-store-day";
+import { branchForBrand } from "@/lib/fnb/brand-branch";
 import { FNB_BRAND_THEME, FNB_STOCK_SHEET_GROUPS, type FnbBranchOption, type FnbBrandCode, type FnbStockBalanceRow, type FnbStorageZone } from "@/types/fnb";
 
 const field = "h-10 w-full rounded-md border border-slate-200 px-3 text-sm";
@@ -36,6 +37,10 @@ export function InventoryWorkspace({
 }) {
   const [tab, setTab] = useState<"sheet" | "transfer">("sheet");
   const [branch, setBranch] = useState(branches[0]?.branch_code ?? "");
+  useEffect(() => {
+    const next = branchForBrand(branches, brand, branch);
+    if (next !== branch) setBranch(next);
+  }, [brand, branches, branch]);
   const [zones, setZones] = useState<FnbStorageZone[]>([]);
   const [location, setLocation] = useState("");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ RAW_MATERIAL: true });

@@ -7,14 +7,19 @@ import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
 import {
   getStoreDayBoardAction,
   replenishZoneAction,
-  saveCleaningPhotoAction,
   saveEquipmentCalibrationAction,
   saveZoneCountsAction,
 } from "@/lib/actions/fnb-store-day";
 import { closeWipBatchAction, issueWipBatchAction, listWipBoardAction } from "@/lib/actions/fnb-wip";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
+import { CashFloatConfirm } from "@/components/fnb/cash-float-confirm";
+import { CleaningSpots } from "@/components/fnb/cleaning-spots";
+import { CoworkerBanner } from "@/components/fnb/coworker-banner";
+import { DisplayCabinetGrid } from "@/components/fnb/display-cabinet-grid";
+import { WriteOffButton } from "@/components/fnb/write-off-panel";
+import { confirmStageSectionAction, listStageConfirmationsAction } from "@/lib/actions/fnb-stage";
 import { itemMatches } from "@/lib/fnb/item-search";
-import type { FnbBrandCode, FnbStoreDayBoard, FnbZoneCountLine } from "@/types/fnb";
+import type { FnbBrandCode, FnbStageConfirmation, FnbStoreDayBoard, FnbZoneCountLine } from "@/types/fnb";
 
 const field = "h-10 w-full rounded-md border border-slate-200 px-3 text-sm";
 
@@ -45,7 +50,7 @@ async function uploadShot(file: File, live: boolean, branch: string, actorSource
   return saved.data.url;
 }
 
-export function OpeningChecklist(props: { branch: string; workDate: string; actorSource: "desktop" | "liff"; brandLock: FnbBrandCode | null; staffName: string }) {
+export function OpeningChecklist(props: { branch: string; workDate: string; actorSource: "desktop" | "liff"; brandLock: FnbBrandCode | null; staffName: string; cashFloat?: number }) {
   const brand = props.brandLock ?? "";
   const { board, error, reload } = useBoard(props.branch, props.workDate, props.actorSource, brand);
   const [busy, start] = useTransition();
@@ -58,18 +63,23 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
   const [lemonCount, setLemonCount] = useState("");
   const [lemonGrams, setLemonGrams] = useState("");
   const [prepPhoto, setPrepPhoto] = useState("");
+  const [confirms, setConfirms] = useState<FnbStageConfirmation[]>([]);
+  const [confirmTick, setConfirmTick] = useState(0);
+  useEffect(() => {
+    void listStageConfirmationsAction(props.branch, props.workDate, "OPENING", props.actorSource, brand).then((loaded) => setConfirms(loaded.data));
+  }, [props.branch, props.workDate, props.actorSource, brand, confirmTick]);
+  function bump() { setConfirmTick((value) => value + 1); reload(); }
   useEffect(() => {
     void listWipBoardAction({ branch_code: props.branch, work_date: props.workDate, actor_source: props.actorSource, brand_lock: props.brandLock }).then((loaded) => {
       setBases(loaded.data?.bases ?? []);
       setLemons((loaded.data?.items ?? []).filter((item) => item.short_code === "LEM"));
     });
   }, [props.branch, props.workDate, props.actorSource, props.brandLock]);
-  const [qty, setQty] = useState<Record<string, string>>({});
-  const [expiry, setExpiry] = useState<Record<string, string>>({});
   const front = board?.locations.find((row) => row.zoneType === "FRONT_DISPLAY");
   const back = board?.locations.find((row) => row.zoneType === "BACKROOM");
   return (
     <section className="space-y-4 rounded-xl border border-red-100 bg-white p-4">
+      <CoworkerBanner branch={props.branch} workDate={props.workDate} stage="OPENING" actorSource={props.actorSource} brandLock={brand} reloadToken={confirmTick} />
       <h2 className="text-lg font-semibold">ช่วงที่ 1 — เปิดร้าน 7 หมวด</h2>
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       <article className="space-y-2">
@@ -126,7 +136,10 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
               const saved = await issueWipBatchAction(body);
               if (saved.error || !saved.data.ok) { toast.error(saved.error || "บันทึกเลมอนไม่สำเร็จ"); return; }
             }
+            const again = confirms.some((row) => row.sectionKey === "SEC_1_PREP");
+            await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: "SEC_1_PREP", sectionTitle: "หมวด 1 เตรียมเบสและหั่นเลมอน", photoUrls: prepPhoto ? [prepPhoto] : [], actorSource: props.actorSource, brandLock: brand, isEdit: again, editReason: again ? "บันทึกหมวดนี้อีกครั้ง" : "" });
             toast.success("บันทึกหมวดที่ 1 แล้ว");
+            bump();
           })}>บันทึกหมวดที่ 1</button>
         </div>
       </article>
@@ -155,8 +168,12 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
           start(async () => {
             const saved = await saveEquipmentCalibrationAction(body);
             if (saved.error || !saved.data.ok) toast.error(saved.error || "บันทึกอุปกรณ์ไม่สำเร็จ");
-            else toast.success(saved.data.warning || "บันทึกมาตรฐานอุปกรณ์แล้ว");
-            reload();
+            else {
+              const again = confirms.some((row) => row.sectionKey === "SEC_2_EQUIPMENT");
+              await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: "SEC_2_EQUIPMENT", sectionTitle: "หมวด 2 ตรวจสอบมาตรฐานอุปกรณ์", photoUrls: equipPhoto ? [equipPhoto] : [], actorSource: props.actorSource, brandLock: brand, isEdit: again, editReason: again ? "บันทึกหมวดนี้อีกครั้ง" : "" });
+              toast.success(saved.data.warning || "บันทึกมาตรฐานอุปกรณ์แล้ว");
+              bump();
+            }
           });
         }}>
           <label className="text-sm">เครื่องบด (เป้า 19.8–20.0)<span className="mt-1 flex items-center gap-1"><input className="h-10 w-24 rounded-md border px-2 text-sm" name="grinder_dose_g" type="number" min="0.1" max="999" step="0.1" defaultValue={board?.calibration?.grinderDoseG ?? ""} /><span className="text-xs">g</span></span></label>
@@ -196,53 +213,35 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
             </div>
           ))}
         </div>
+        <button type="button" className="rounded-md border px-3 py-2 text-sm" onClick={() => start(async () => {
+          const again = confirms.some((row) => row.sectionKey === "SEC_3_SAUCE");
+          const saved = await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: "SEC_3_SAUCE", sectionTitle: "หมวด 3 ซอสและวัตถุดิบเปิดใช้", photoUrls: photo ? [photo] : [], actorSource: props.actorSource, brandLock: brand, isEdit: again, editReason: again ? "บันทึกหมวดนี้อีกครั้ง" : "" });
+          if (saved.error || !saved.data.ok) toast.error(saved.error || "ยืนยันหมวด 3 ไม่สำเร็จ");
+          else { toast.success("ยืนยันหมวดที่ 3 แล้ว"); bump(); }
+        })}>ยืนยันหมวดที่ 3</button>
       </article>
       <article className="space-y-2">
-        <h3 className="font-semibold">หมวดที่ 4–5 ชั้นโชว์และตู้แช่หน้าร้าน</h3>
-        {(board?.frontOpeningLines ?? []).map((line) => (
-          <div key={line.itemId} className="grid gap-2 rounded-lg bg-slate-50 p-3 md:grid-cols-4">
-            <p className="text-sm font-medium md:col-span-4">{line.shortCode} {line.nameTh} {line.belowLastClose ? <span className="text-amber-700">ต่ำกว่ายอดปิดเมื่อคืน</span> : null}</p>
-            <FnbQtyInput value={String(qty[line.itemId] ?? (line.countedQty ?? ""))} onChange={(value) => setQty((current) => ({ ...current, [line.itemId]: value }))} unit={line.countUom} allowDecimal={line.allowDecimal} />
-            <input className={field} type="date" value={expiry[line.itemId] ?? line.nearestExpiry ?? ""} onChange={(event) => setExpiry((current) => ({ ...current, [line.itemId]: event.target.value }))} />
-          </div>
-        ))}
-        <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy || !front} onClick={() => start(async () => {
-          const lines = (board?.frontOpeningLines ?? []).filter((line) => qty[line.itemId] !== undefined && qty[line.itemId] !== "").map((line) => ({
-            itemId: line.itemId, locationCode: front?.locationCode || line.locationCode, countedQty: Number(qty[line.itemId]), nearestExpiry: expiry[line.itemId] || null, openingQty: line.openingQty, replenishedQty: 0, posSoldQty: 0,
-          }));
-          const saved = await saveZoneCountsAction({ branchCode: props.branch, workDate: props.workDate, stage: "OPENING", actorSource: props.actorSource, brandLock: brand, lines });
-          if (saved.error || !saved.data.ok) toast.error(saved.error || "บันทึกยอดเช้าไม่สำเร็จ");
-          else toast.success("บันทึกยอดชั้นโชว์ตอนเปิดร้านแล้ว");
-          reload();
-        })}>บันทึกยอดเปิดร้าน</button>
+        <h3 className="font-semibold">หมวดที่ 4–5: ตู้แช่เบเกอรี่ ตู้ไอศกรีม และชั้นโชว์ของพรีเมียม</h3>
+        <DisplayCabinetGrid
+          lines={board?.frontOpeningLines ?? []}
+          lots={board?.displayLots ?? []}
+          today={props.workDate}
+          branch={props.branch}
+          workDate={props.workDate}
+          actorSource={props.actorSource}
+          brand={brand}
+          frontCode={front?.locationCode ?? ""}
+          backCode={back?.locationCode ?? ""}
+          onDone={bump}
+        />
+        <WriteOffButton branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={props.brandLock ?? "LUCKY_CUP"} staffName={props.staffName} locations={board?.locations ?? []} onDone={bump} />
       </article>
       <article className="space-y-2">
-        <h3 className="font-semibold">หมวด 6 เงินสดตั้งต้นในเก๊ะ 1,200.00 บาท</h3>
-        <p className="text-sm text-slate-600">ถ่ายรูปเก๊ะตอนเปิดร้าน ตัวเลขเงินสดตั้งต้นใช้วงเงินทอนมาตรฐาน 1,200.00 บาทของสาขา</p>
-        <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle="เงินสดตั้งต้นในเก๊ะ 1,200 บาท" liveCameraOnly onCapture={(file, live) => void uploadShot(file, live, props.branch, props.actorSource, brand).then(() => toast.success("บันทึกรูปเงินสดตั้งต้นแล้ว")).catch((reason: Error) => toast.error(reason.message))} />
+        <h3 className="font-semibold">หมวด 6: เงินสดตั้งต้นในเก๊ะ</h3>
+        <CashFloatConfirm title="หมวด 6 เงินสดตั้งต้นในเก๊ะ" sectionKey="SEC_6_CASH_FLOAT" stage="OPENING" expected={props.cashFloat && props.cashFloat > 0 ? props.cashFloat : 1200} branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={brand} staffName={props.staffName} saved={confirms.find((row) => row.sectionKey === "SEC_6_CASH_FLOAT") ?? null} onDone={bump} />
       </article>
-      <SpotPhotos title="หมวด 7 ความสะอาดเปิดร้าน" spots={board?.openingSpots ?? []} {...props} brand={brand} stage="OPENING" />
-      {back ? null : null}
+      <CleaningSpots title="หมวด 7 ความสะอาดเปิดร้าน" stage="OPENING" spots={board?.openingSpots ?? []} confirmations={confirms} branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={brand} staffName={props.staffName} onDone={bump} />
     </section>
-  );
-}
-
-function SpotPhotos(props: { title: string; spots: { id: string; spotNameTh: string }[]; branch: string; workDate: string; actorSource: "desktop" | "liff"; brand: string; staffName: string; stage: "OPENING" | "CLOSING" }) {
-  return (
-    <article className="space-y-2">
-      <h3 className="font-semibold">{props.title}</h3>
-      {props.spots.length === 0 ? <p className="text-sm text-slate-500">สาขานี้ยังไม่มีจุดความสะอาด — เพิ่มได้ที่ตั้งค่า SOP</p> : null}
-      {props.spots.map((spot) => (
-        <div key={spot.id} className="rounded-lg bg-slate-50 p-3">
-          <p className="text-sm font-medium">{spot.spotNameTh}</p>
-          <LiveWatermarkCamera branchCode={props.branch} stage={props.stage} staffName={props.staffName} taskTitle={spot.spotNameTh} liveCameraOnly onCapture={(file, live) => void uploadShot(file, live, props.branch, props.actorSource, props.brand).then(async (url) => {
-            const saved = await saveCleaningPhotoAction({ branchCode: props.branch, workDate: props.workDate, stage: props.stage, spotId: spot.id, photoUrl: url, actorSource: props.actorSource, brandLock: props.brand });
-            if (saved.error || !saved.data.ok) toast.error(saved.error || "บันทึกรูปจุดนี้ไม่สำเร็จ");
-            else toast.success(`บันทึกรูป ${spot.spotNameTh} แล้ว`);
-          }).catch((reason: Error) => toast.error(reason.message))} />
-        </div>
-      ))}
-    </article>
   );
 }
 
@@ -293,6 +292,7 @@ export function MiddayShortcuts(props: { branch: string; workDate: string; actor
         <button type="button" className="rounded-full bg-white px-3 py-1 text-sm" onClick={() => setOpen("sauce")}>เทซอสขวดใหม่</button>
         <button type="button" className="rounded-full bg-white px-3 py-1 text-sm" onClick={() => setOpen("lemon")}>หั่นเลมอนเพิ่ม</button>
         <button type="button" className="rounded-full bg-white px-3 py-1 text-sm" onClick={() => setOpen("move")}>เบิกย้ายจุดจัดเก็บ</button>
+        <WriteOffButton branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={props.brand} staffName={props.staffName} locations={board?.locations ?? []} onDone={reload} />
       </div>
       {open === "base" ? (
         <div className="space-y-2">
@@ -354,9 +354,14 @@ function MoveForm(props: {
   );
 }
 
-export function NightCloseCount(props: { branch: string; workDate: string; actorSource: "desktop" | "liff"; brandLock: FnbBrandCode | null; staffName: string; warehouseOnly?: boolean }) {
+export function NightCloseCount(props: { branch: string; workDate: string; actorSource: "desktop" | "liff"; brandLock: FnbBrandCode | null; staffName: string; warehouseOnly?: boolean; cashFloat?: number }) {
   const brand = props.brandLock ?? "";
   const { board, error, reload } = useBoard(props.branch, props.workDate, props.actorSource, brand);
+  const [confirms, setConfirms] = useState<FnbStageConfirmation[]>([]);
+  const [confirmTick, setConfirmTick] = useState(0);
+  useEffect(() => {
+    void listStageConfirmationsAction(props.branch, props.workDate, "CLOSING", props.actorSource, brand).then((loaded) => setConfirms(loaded.data));
+  }, [props.branch, props.workDate, props.actorSource, brand, confirmTick]);
   const [showAll, setShowAll] = useState(false);
   const [qty, setQty] = useState<Record<string, string>>({});
   const [busy, start] = useTransition();
@@ -376,22 +381,28 @@ export function NightCloseCount(props: { branch: string; workDate: string; actor
       }));
       const saved = await saveZoneCountsAction({ branchCode: props.branch, workDate: props.workDate, stage, actorSource: props.actorSource, brandLock: brand, lines: payload });
       if (saved.error || !saved.data.ok) toast.error(saved.error || "บันทึกยอดนับไม่สำเร็จ");
-      else toast.success("บันทึกยอดนับแล้ว");
+      else {
+        if (stage === "CLOSING" && locationCode === front?.locationCode) {
+          await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "CLOSING", sectionKey: "SEC_3_FRONT_COUNT", sectionTitle: "หมวด 3 นับปิดหน้าร้าน", actorSource: props.actorSource, brandLock: brand });
+        }
+        toast.success("บันทึกยอดนับแล้ว");
+      }
+      setConfirmTick((value) => value + 1);
       reload();
     });
   }
   return (
     <section className="space-y-4 rounded-xl border border-red-100 bg-white p-4">
+      {props.warehouseOnly ? null : <CoworkerBanner branch={props.branch} workDate={props.workDate} stage="CLOSING" actorSource={props.actorSource} brandLock={brand} reloadToken={confirmTick} />}
       <h2 className="text-lg font-semibold">{props.warehouseOnly ? "รอบนับโกดัง" : "ช่วงที่ 4 — ปิดร้านและจับของหาย"}</h2>
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       {props.warehouseOnly ? null : (
         <article className="space-y-2">
-          <h3 className="font-semibold">หมวด 1 ยืนยันเงินสดคงเหลือติดเก๊ะ 1,200.00 บาท</h3>
-          <p className="text-sm text-slate-600">ยอดเงินสดนับจริงและวิธีฝากบันทึกในฟอร์มปิดกะ รูปนี้ยืนยันว่าเก๊ะเหลือวงเงินทอน 1,200.00 บาท</p>
-          <LiveWatermarkCamera branchCode={props.branch} stage="CLOSING" staffName={props.staffName} taskTitle="เงินสดคงเหลือในเก๊ะ 1,200 บาท" liveCameraOnly onCapture={(file, live) => void uploadShot(file, live, props.branch, props.actorSource, brand).then(() => toast.success("บันทึกรูปเงินสดปิดร้านแล้ว")).catch((reason: Error) => toast.error(reason.message))} />
+          <h3 className="font-semibold">หมวด 1 เงินสดคงเหลือติดเก๊ะปิดร้าน</h3>
+          <CashFloatConfirm title="หมวด 1 เงินสดคงเหลือติดเก๊ะปิดร้าน" sectionKey="SEC_1_CASH_FLOAT" stage="CLOSING" expected={props.cashFloat && props.cashFloat > 0 ? props.cashFloat : 1200} branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={brand} staffName={props.staffName} saved={confirms.find((row) => row.sectionKey === "SEC_1_CASH_FLOAT") ?? null} onDone={() => setConfirmTick((value) => value + 1)} />
         </article>
       )}
-      {props.warehouseOnly ? null : <SpotPhotos title="หมวด 2 ความสะอาดและล้างอุปกรณ์ปิดร้าน" spots={board?.closingSpots ?? []} branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={brand} staffName={props.staffName} stage="CLOSING" />}
+      {props.warehouseOnly ? null : <CleaningSpots title="หมวด 2 ความสะอาดและล้างอุปกรณ์ปิดร้าน" stage="CLOSING" spots={board?.closingSpots ?? []} confirmations={confirms} branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={brand} staffName={props.staffName} onDone={() => setConfirmTick((value) => value + 1)} />}
       {props.warehouseOnly ? null : (
         <article className="space-y-2">
           <h3 className="font-semibold">โซนหน้าร้าน — นับทุกคืน</h3>
@@ -430,9 +441,9 @@ export function NightCloseCount(props: { branch: string; workDate: string; actor
         </article>
       ) : <p className="text-sm text-slate-500">โกดังยังไม่ถึงรอบนับคืนนี้ — นับได้จากแท็บรอบนับในคลังสินค้า</p>}
       {props.warehouseOnly ? null : (
-        <article>
+        <article className="space-y-2">
           <h3 className="font-semibold">หมวด 4 รายการเททิ้งประจำวัน</h3>
-          <p className="text-sm text-slate-600">JT, BT, ML, MMK, LEM และซอสที่หมดอายุวันนี้ บันทึกผ่านแท็บต้มเบส/ปิดภาชนะ พร้อมรูปสด</p>
+          <WriteOffButton branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={props.brandLock ?? "LUCKY_CUP"} staffName={props.staffName} locations={board?.locations ?? []} onDone={() => { setConfirmTick((value) => value + 1); reload(); }} />
           {(board?.sauces ?? []).filter((sauce) => sauce.expiresAt && sauce.expiresAt.slice(0, 10) <= props.workDate).map((sauce) => (
             <p key={sauce.code} className="text-sm text-red-700">{sauce.code} หมดอายุวันนี้ {sauce.sticker}</p>
           ))}
@@ -451,7 +462,7 @@ function CountRow(props: { line: FnbZoneCountLine; qty: Record<string, string>; 
   return (
     <div className={`rounded-lg p-3 text-sm ${missing > 0 ? "bg-red-50" : "bg-slate-50"}`}>
       <p className="font-medium">{props.line.shortCode} {props.line.nameTh}</p>
-      <p>เปิดเช้า {props.line.openingQty} + เบิกเติม {props.line.replenishedQty} − ขาย POS {props.line.posSoldQty} = ควรเหลือ {props.line.expectedQty}</p>
+      <p>เปิดเช้า {props.line.openingQty} + เบิกเติม {props.line.replenishedQty} − ขาย POS {props.line.posSoldQty} − ตัดเสีย {props.line.writeOffQty} = ควรเหลือ {props.line.expectedQty}</p>
       {missing > 0 ? <p>🚨 ของหาย {missing} ชิ้น</p> : null}
       <input className={`${field} mt-2`} type="number" step="0.01" placeholder="ยอดนับจริง" value={props.qty[key] ?? (props.line.countedQty ?? "")} onChange={(event) => props.setQty({ ...props.qty, [key]: event.target.value })} />
       {extra > 0 && props.onRetro ? <button type="button" className="mt-2 rounded-md border px-2 py-1" onClick={() => props.onRetro?.(extra)}>➕ บันทึกเบิกเติมจากคลังหลังร้านย้อนหลัง {extra} ชิ้น</button> : null}

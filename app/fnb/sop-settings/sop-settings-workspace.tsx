@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { branchForBrand } from "@/lib/fnb/brand-branch";
 import { toast } from "sonner";
 import { listParLevelsAction, saveBranchShiftSettingsAction, saveParLevelAction, saveSopTemplateAction, toggleSopAssignmentAction } from "@/lib/actions/fnb-sop";
 import { BranchPlaceManager } from "@/components/fnb/branch-place-manager";
-import { FNB_BRANCH_CODES, FNB_SOP_INPUT_TYPES, type FnbBranchOption, type FnbParLevelRow, type FnbSopTemplate } from "@/types/fnb";
+import { FNB_BRANCH_CODES, FNB_SOP_INPUT_TYPES, type FnbBranchOption, type FnbBrandCode, type FnbParLevelRow, type FnbSopTemplate } from "@/types/fnb";
 
 const field = "h-10 w-full rounded-md border border-slate-200 px-3 text-sm";
 const STAGE_LABEL = { OPENING: "1. เปิดร้าน (กะแรก)", SHIFT_HANDOVER: "2. ส่งมอบระหว่างกะ (กะแรก / กะสอง / กะสาม)", CLOSING: "3. ปิดร้าน (กะสุดท้ายของวัน)" };
@@ -15,13 +16,19 @@ export function SopSettingsWorkspace({
   templates,
   items,
   schemaMessage,
+  brand,
 }: {
   branches: FnbBranchOption[];
   templates: FnbSopTemplate[];
   items: { id: string; short_code: string; name_th: string }[];
   schemaMessage: string | null;
+  brand: FnbBrandCode;
 }) {
-  const [parBranch, setParBranch] = useState(branches[0]?.branch_code ?? "LC-HDY");
+  const [parBranch, setParBranch] = useState(branches[0]?.branch_code ?? "");
+  useEffect(() => {
+    const next = branchForBrand(branches, brand, parBranch);
+    if (next !== parBranch) setParBranch(next);
+  }, [brand, branches, parBranch]);
   const [pars, setPars] = useState<FnbParLevelRow[]>([]);
   const [message, setMessage] = useState(schemaMessage ?? "");
   const [, start] = useTransition();
@@ -44,7 +51,7 @@ export function SopSettingsWorkspace({
       <h1 className="text-2xl font-bold">ตั้งค่าระเบียบหน้าร้านและกะสาขา</h1>
       <Link href="/fnb/items?tab=shelf" className="inline-block rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white">อายุวัตถุดิบหลังเปิดใช้ / หลังผสม (แยกแบรนด์)</Link>
       {message ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{message}</p> : null}
-      <BranchPlaceManager branches={branches.map((branch) => ({ branch_code: branch.branch_code, branch_name_th: branch.branch_name_th }))} />
+      <BranchPlaceManager brand={brand} branches={branches.map((row) => ({ branch_code: row.branch_code, branch_name_th: row.branch_name_th, brand_code: row.brand_code }))} />
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">วงเงินทอนประจำเก๊ะและเวลาเปิดปิด</h2>
         {branches.map((branch) => (

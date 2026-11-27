@@ -4,7 +4,7 @@ import { parseLuckyCupPriceWorkbook } from "@/lib/fnb/excel";
 import { asRows, caught, fail, num, result, text } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
 import { requireAnyFnbModule, requireFnbModuleAccess } from "@/lib/holding/workspace-access";
-import { FNB_FRONT_DISPLAY_CATEGORIES, type FnbActionResult, type FnbExcelPriceRow, type FnbItemRow, type FnbVendorPackRow } from "@/types/fnb";
+import { FNB_DISPLAY_SUB_GROUPS, FNB_FRONT_DISPLAY_CATEGORIES, type FnbActionResult, type FnbExcelPriceRow, type FnbItemRow, type FnbVendorPackRow } from "@/types/fnb";
 
 function mapItem(row: Record<string, unknown>): FnbItemRow {
   return {
@@ -35,6 +35,9 @@ function mapItem(row: Record<string, unknown>): FnbItemRow {
     backroom_count_schedule: text(row.backroom_count_schedule) || "WEEKLY_2X",
     backroom_count_weekdays: Array.isArray(row.backroom_count_weekdays) ? row.backroom_count_weekdays.map((day) => Number(day)).filter((day) => Number.isFinite(day)) : [],
     allow_decimal_count_qty: row.allow_decimal_count_qty === true,
+    display_shelf_life_days: row.display_shelf_life_days == null ? null : num(row.display_shelf_life_days),
+    display_sub_group: row.display_sub_group == null ? null : text(row.display_sub_group),
+    display_walk_order: num(row.display_walk_order) || 100,
   };
 }
 
@@ -94,6 +97,9 @@ export async function saveFnbItemAction(input: {
   track_front_display_daily?: boolean;
   backroom_count_schedule?: string;
   backroom_count_weekdays?: number[];
+  display_shelf_life_days?: number;
+  display_sub_group?: string;
+  display_walk_order?: number;
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
     await requireFnbModuleAccess("master_items_bom");
@@ -129,6 +135,9 @@ export async function saveFnbItemAction(input: {
       track_front_display_daily: input.id ? Boolean(input.track_front_display_daily) : autoFront || Boolean(input.track_front_display_daily),
       backroom_count_schedule: schedule,
       backroom_count_weekdays: (input.backroom_count_weekdays ?? []).map(Number).filter((day) => day >= 0 && day <= 6),
+      display_shelf_life_days: input.item_category === "BAKERY_FROZEN" ? Math.max(1, Number(input.display_shelf_life_days) || 4) : (Number(input.display_shelf_life_days) || null),
+      display_sub_group: FNB_DISPLAY_SUB_GROUPS.some((group) => group.code === input.display_sub_group) ? input.display_sub_group : null,
+      display_walk_order: Number(input.display_walk_order) || FNB_DISPLAY_SUB_GROUPS.find((group) => group.code === input.display_sub_group)?.walk || 100,
       is_active: true,
     };
     const table = schemaAdmin().schema("fnb").from("items");
