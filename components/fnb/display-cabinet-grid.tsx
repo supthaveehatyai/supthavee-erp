@@ -1,21 +1,68 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import { replenishZoneAction, saveZoneCountsAction } from "@/lib/actions/fnb-store-day";
 import { confirmStageSectionAction } from "@/lib/actions/fnb-stage";
-import { UnsavedDraftBar } from "@/components/fnb/section-confirm-card";
+import { hhmm, UnsavedDraftBar } from "@/components/fnb/section-confirm-card";
 import { crewAssist, useLiveBranch } from "@/components/fnb/shift-crew-bar";
 import { addDays, bangkokHour, shortThaiDate } from "@/lib/fnb/stage-progress";
-import { FNB_DISPLAY_SUB_GROUPS, type FnbDisplayLot, type FnbZoneCountLine } from "@/types/fnb";
+import { formatFnbQty } from "@/lib/utils/fnb-format";
+import { FNB_DISPLAY_SUB_GROUPS, type FnbDisplayLot, type FnbLiveZoneStock, type FnbStageConfirmation, type FnbZoneCountLine } from "@/types/fnb";
+
+const BAKERY_GROUPS = new Set(["CROISSANT", "PUFF_PIE", "CAKE_MOUSSE", "HANJUKU"]);
 
 function groupOf(line: FnbZoneCountLine): string {
   if (FNB_DISPLAY_SUB_GROUPS.some((group) => group.code === line.displaySubGroup)) return line.displaySubGroup;
-  if (line.category === "ICE_CREAM") return "ICECREAM_CONE";
+  if (line.category === "ICE_CREAM" || line.category === "CONE") return "ICECREAM_CONE";
   if (line.category === "MERCHANDISE") return "MERCH_DISPLAY";
   if (line.category === "BAKERY_FROZEN") return "CAKE_MOUSSE";
   return "OTHER_DISPLAY";
+}
+
+function isBakeryIce(line: FnbZoneCountLine): boolean {
+  return line.category === "BAKERY_FROZEN" || line.category === "ICE_CREAM" || line.category === "CONE" || groupOf(line) === "ICECREAM_CONE" || BAKERY_GROUPS.has(groupOf(line));
+}
+
+function isMerch(line: FnbZoneCountLine): boolean {
+  return line.category === "MERCHANDISE" || groupOf(line) === "MERCH_DISPLAY";
+}
+
+type CountItem = { key: string; name: string; qty: number; uom: string };
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? value as Record<string, unknown> : null;
+}
+
+function payloadItems(row: FnbStageConfirmation | null, catalog: FnbZoneCountLine[]): CountItem[] {
+  const raw = Array.isArray(row?.payload.items) ? row.payload.items : Array.isArray(row?.payload.lines) ? row.payload.lines : [];
+  return raw.flatMap((item) => {
+    const rec = asRecord(item);
+    if (!rec) return [];
+    const key = String(rec.itemId ?? rec.code ?? "");
+    const known = catalog.find((line) => line.itemId === key || line.shortCode === key);
+    const qty = Number(rec.qty ?? rec.countedQty ?? 0);
+    return [{
+      key: key || known?.itemId || "",
+      name: String(rec.nameTh ?? rec.name ?? known?.nameTh ?? rec.code ?? "รายการ"),
+      qty: Number.isFinite(qty) ? qty : 0,
+      uom: String(rec.uom ?? rec.countUom ?? known?.countUom ?? "ชิ้น"),
+    }];
+  });
+}
+
+function stockItems(rows: FnbLiveZoneStock[], lines: FnbZoneCountLine[]): CountItem[] {
+  const ids = new Set(lines.map((line) => line.itemId));
+  return rows.filter((row) => row.countStage === "OPENING" && ids.has(row.itemId)).map((row) => {
+    const known = lines.find((line) => line.itemId === row.itemId);
+    return {
+      key: row.itemId,
+      name: row.nameTh || known?.nameTh || row.shortCode || "รายการ",
+      qty: row.countedQty,
+      uom: row.countUom || known?.countUom || "ชิ้น",
+    };
+  });
 }
 
 function LotBadges({ lots, today }: { lots: FnbDisplayLot[]; today: string }) {
@@ -39,19 +86,24 @@ function CabinetRows(props: {
   lots: FnbDisplayLot[];
   today: string;
   qty: Record<string, string>;
-  setQty: (value: Record<string, string>) => void;
+  onQty: (itemId: string, value: string) => void;
   bakery: boolean;
   evening: boolean;
   setEvening: (value: boolean) => void;
   onReplenish: (line: FnbZoneCountLine, qty: number) => void;
 }) {
   const groups = FNB_DISPLAY_SUB_GROUPS.filter((group) => props.lines.some((line) => groupOf(line) === group.code));
+  const loose = props.lines.filter((line) => !groups.some((group) => group.code === groupOf(line)));
+  const blocks = [
+    ...groups.map((group) => ({ code: group.code, label: group.label, lines: props.lines.filter((line) => groupOf(line) === group.code) })),
+    ...(loose.length ? [{ code: "OTHER", label: "รายการอื่น", lines: loose }] : []),
+  ];
   return (
     <div className="space-y-3">
-      {groups.map((group) => (
+      {blocks.map((group) => (
         <div key={group.code}>
           <p className="text-xs font-semibold text-slate-500">{group.label}</p>
-          {props.lines.filter((line) => groupOf(line) === group.code).sort((left, right) => left.displayWalkOrder - right.displayWalkOrder).map((line) => {
+          {group.lines.sort((left, right) => left.displayWalkOrder - right.displayWalkOrder).map((line) => {
             const life = line.shelfLifeDays || 4;
             const start = props.evening ? addDays(props.today, 1) : props.today;
             const expiry = addDays(start, life - 1);
@@ -59,7 +111,7 @@ function CabinetRows(props: {
               <div key={line.itemId} className="mt-1 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-2 py-1.5 text-sm">
                 <p className="min-w-28 flex-1 font-medium">{line.nameTh}</p>
                 {props.bakery ? <LotBadges lots={props.lots.filter((lot) => lot.itemId === line.itemId)} today={props.today} /> : null}
-                <FnbQtyInput className="h-10 w-20" value={props.qty[line.itemId] ?? ""} onChange={(value) => props.setQty({ ...props.qty, [line.itemId]: value })} unit={line.countUom || "ชิ้น"} />
+                <FnbQtyInput className="h-10 w-20" value={props.qty[line.itemId] ?? ""} onChange={(value) => props.onQty(line.itemId, value)} unit={line.countUom || "ชิ้น"} />
                 {props.bakery ? (
                   <button type="button" className="rounded-md border px-2 py-1 text-xs" onClick={() => {
                     const typed = window.prompt(`จำนวนที่เบิก ${line.nameTh} เข้าตู้`, "1");
@@ -83,6 +135,27 @@ function CabinetRows(props: {
   );
 }
 
+function CountLockedCard(props: { sectionNo: number; row: FnbStageConfirmation; items: CountItem[]; onRevise?: () => void }) {
+  const [showZero, setShowZero] = useState(false);
+  const positive = props.items.filter((item) => item.qty > 0);
+  const zeros = props.items.filter((item) => item.qty <= 0);
+  return (
+    <div className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-950">
+      {positive.length > 0 ? (
+        <div className="grid gap-1 sm:grid-cols-2">
+          {positive.map((item) => <p key={item.key} className="font-semibold">{item.name}: {formatFnbQty(item.qty, item.uom, false)}</p>)}
+        </div>
+      ) : <p>ยืนยันตรวจนับแล้ว: หน้าตู้ 0 ชิ้นทุกรายการ</p>}
+      {zeros.length > 0 && positive.length > 0 ? (
+        <button type="button" className="mt-2 rounded-full bg-white px-2 py-1 text-xs" onClick={() => setShowZero((value) => !value)}>ดูรายการที่เป็น 0 ชิ้น ({zeros.length} รายการ)</button>
+      ) : null}
+      {showZero ? <p className="mt-1 text-xs">{zeros.map((item) => item.name).join(", ")}</p> : null}
+      <p className="mt-2">✅ บันทึกยืนยันหมวดที่ {props.sectionNo} แล้วโดย: {props.row.confirmedByName} · เวลา {hhmm(props.row.confirmedAt)}</p>
+      {props.onRevise ? <button type="button" className="mt-2 font-semibold underline" onClick={props.onRevise}>✏️ แก้ไขพร้อมระบุเหตุผล</button> : null}
+    </div>
+  );
+}
+
 export function DisplayCabinetGrid(props: {
   lines: FnbZoneCountLine[];
   lots: FnbDisplayLot[];
@@ -93,15 +166,43 @@ export function DisplayCabinetGrid(props: {
   brand: string;
   frontCode: string;
   backCode: string;
+  reopen?: string | null;
+  onRevise?: (sectionKey: string) => void;
   onDone: () => void;
 }) {
   const live = useLiveBranch();
+  const dirty = useRef(new Set<string>());
   const [qty, setQty] = useState<Record<string, string>>({});
   const [evening, setEvening] = useState(bangkokHour() >= 17);
-  const [busy, setBusy] = useState(false);
-  const bakery = props.lines.filter((line) => ["CROISSANT", "PUFF_PIE", "CAKE_MOUSSE", "HANJUKU"].includes(groupOf(line)) || line.category === "BAKERY_FROZEN");
-  const ice = props.lines.filter((line) => groupOf(line) === "ICECREAM_CONE" || line.category === "ICE_CREAM");
-  const merch = props.lines.filter((line) => groupOf(line) === "MERCH_DISPLAY" || line.category === "MERCHANDISE");
+  const [busyKey, setBusyKey] = useState("");
+  const confirms = (live.snapshot?.confirmations ?? []).filter((row) => row.stageCode === "OPENING");
+  const sec4 = confirms.find((row) => row.sectionKey === "SEC_4_BAKERY_ICE") ?? null;
+  const sec5 = confirms.find((row) => row.sectionKey === "SEC_5_MERCH") ?? null;
+  const ice = props.lines.filter((line) => !isMerch(line) && (line.category === "ICE_CREAM" || line.category === "CONE" || groupOf(line) === "ICECREAM_CONE"));
+  const bakery = props.lines.filter((line) => isBakeryIce(line) && !isMerch(line) && !ice.some((row) => row.itemId === line.itemId));
+  const bakeryIce = [...bakery, ...ice];
+  const merch = props.lines.filter((line) => isMerch(line));
+  useEffect(() => {
+    const rows = (live.snapshot?.zoneStockCounts ?? []).filter((row) => row.countStage === "OPENING");
+    if (rows.length === 0) return;
+    setQty((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const row of rows) {
+        if (dirty.current.has(row.itemId)) continue;
+        const shown = String(Math.round(row.countedQty));
+        if (next[row.itemId] !== shown) {
+          next[row.itemId] = shown;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [live.snapshot]);
+  function onQty(itemId: string, value: string) {
+    dirty.current.add(itemId);
+    setQty((current) => ({ ...current, [itemId]: value }));
+  }
   async function replenish(line: FnbZoneCountLine, count: number) {
     if (!props.backCode || !props.frontCode) { toast.error("ยังไม่พบจุดคลังหลังร้านหรือตู้โชว์"); return; }
     const saved = await replenishZoneAction({
@@ -120,53 +221,88 @@ export function DisplayCabinetGrid(props: {
     else toast.success(saved.data.expiryDate ? `ติดสติ๊กเกอร์หมดอายุ ${shortThaiDate(saved.data.expiryDate)}` : "เบิกเติมเข้าตู้โชว์แล้ว");
     props.onDone();
   }
+  function counted(line: FnbZoneCountLine): number {
+    const typed = qty[line.itemId];
+    if (typed !== undefined && typed !== "") return Math.trunc(Number(typed) || 0);
+    const remote = (live.snapshot?.zoneStockCounts ?? []).find((row) => row.itemId === line.itemId && row.countStage === "OPENING");
+    return remote ? Math.round(remote.countedQty) : 0;
+  }
+  async function saveSection(key: "SEC_4_BAKERY_ICE" | "SEC_5_MERCH", title: string, lines: FnbZoneCountLine[]) {
+    if (!props.frontCode) { toast.error("ยังไม่พบจุดคลังหลังร้านหรือตู้โชว์"); return; }
+    if (busyKey) return;
+    setBusyKey(key);
+    const rows = lines.map((line) => ({
+      itemId: line.itemId,
+      locationCode: props.frontCode,
+      countedQty: counted(line),
+      openingQty: line.openingQty,
+      replenishedQty: line.replenishedQty,
+      posSoldQty: line.posSoldQty,
+      nameTh: line.nameTh,
+      uom: line.countUom || "ชิ้น",
+      category: line.category,
+    }));
+    const saved = await saveZoneCountsAction({
+      branchCode: props.branch,
+      workDate: props.workDate,
+      stage: "OPENING",
+      actorSource: props.actorSource,
+      brandLock: props.brand,
+      lines: rows.map((line) => ({ itemId: line.itemId, locationCode: line.locationCode, countedQty: line.countedQty, openingQty: line.openingQty, replenishedQty: line.replenishedQty, posSoldQty: line.posSoldQty })),
+    });
+    if (saved.error || !saved.data.ok) { toast.error(saved.error || "บันทึกยอดนับไม่สำเร็จ"); setBusyKey(""); return; }
+    const confirmed = await confirmStageSectionAction({
+      branchCode: props.branch,
+      workDate: props.workDate,
+      stageCode: "OPENING",
+      sectionKey: key,
+      sectionTitle: title,
+      actorSource: props.actorSource,
+      brandLock: props.brand,
+      shiftSlot: "SHIFT_1",
+      isEdit: Boolean(key === "SEC_4_BAKERY_ICE" ? sec4 : sec5),
+      payload: { items: rows.map((line) => ({ itemId: line.itemId, nameTh: line.nameTh, qty: line.countedQty, uom: line.uom, category: line.category })) },
+      ...crewAssist(live),
+    });
+    setBusyKey("");
+    if (confirmed.error || !confirmed.data.ok) { toast.error(confirmed.error || "ยืนยันหมวดไม่สำเร็จ"); return; }
+    toast.success(key === "SEC_4_BAKERY_ICE" ? "บันทึกยืนยันหมวดที่ 4 แล้ว" : "บันทึกยืนยันหมวดที่ 5 แล้ว");
+    lines.forEach((line) => dirty.current.delete(line.itemId));
+    void live.refresh();
+    props.onDone();
+  }
+  const stock = live.snapshot?.zoneStockCounts ?? [];
+  const sec4Items = payloadItems(sec4, bakeryIce);
+  const sec5Items = payloadItems(sec5, merch);
   return (
-    <div className="space-y-3">
-      <div className="grid gap-4 lg:grid-cols-2">
-        <article className="rounded-xl border p-3">
-          <h4 className="font-semibold">🥐 ตู้แช่เบเกอรี่หน้าร้าน</h4>
-          <CabinetRows lines={bakery} lots={props.lots} today={props.today} qty={qty} setQty={setQty} bakery evening={evening} setEvening={setEvening} onReplenish={(line, count) => void replenish(line, count)} />
-        </article>
-        <div className="space-y-4">
-          <article className="rounded-xl border p-3">
+    <div className="space-y-4">
+      <article className="space-y-2 rounded-xl border p-3">
+        <h3 className="font-semibold">หมวดที่ 4: ตู้แช่เบเกอรี่และตู้ไอศกรีมหน้าร้าน</h3>
+        {sec4 && props.reopen !== "SEC_4_BAKERY_ICE" ? (
+          <CountLockedCard sectionNo={4} row={sec4} items={sec4Items.length ? sec4Items : stockItems(stock, bakeryIce)} onRevise={props.onRevise ? () => props.onRevise?.("SEC_4_BAKERY_ICE") : undefined} />
+        ) : (
+          <>
+            <h4 className="font-semibold">🥐 ตู้แช่เบเกอรี่หน้าร้าน</h4>
+            <CabinetRows lines={bakery} lots={props.lots} today={props.today} qty={qty} onQty={onQty} bakery evening={evening} setEvening={setEvening} onReplenish={(line, count) => void replenish(line, count)} />
             <h4 className="font-semibold">🍦 ตู้ไอศกรีมและโคนหน้าบาร์</h4>
-            <CabinetRows lines={ice} lots={props.lots} today={props.today} qty={qty} setQty={setQty} bakery={false} evening={evening} setEvening={setEvening} onReplenish={() => undefined} />
-          </article>
-          <article className="rounded-xl border p-3">
-            <h4 className="font-semibold">🎁 ชั้นโชว์ของพรีเมียมหน้าร้าน</h4>
-            <CabinetRows lines={merch} lots={props.lots} today={props.today} qty={qty} setQty={setQty} bakery={false} evening={evening} setEvening={setEvening} onReplenish={() => undefined} />
-          </article>
-        </div>
-      </div>
-      <button type="button" className="rounded-md bg-[#DC2626] px-3 py-2 text-sm text-white disabled:opacity-60" disabled={busy} onClick={() => {
-        if (!props.frontCode) { toast.error("ยังไม่พบจุดคลังหลังร้านหรือตู้โชว์"); return; }
-        setBusy(true);
-        void (async () => {
-          const lines = props.lines.filter((line) => qty[line.itemId] !== undefined && qty[line.itemId] !== "").map((line) => ({
-            itemId: line.itemId,
-            locationCode: props.frontCode,
-            countedQty: Math.trunc(Number(qty[line.itemId]) || 0),
-            openingQty: line.openingQty,
-            replenishedQty: line.replenishedQty,
-            posSoldQty: line.posSoldQty,
-          }));
-          const saved = await saveZoneCountsAction({ branchCode: props.branch, workDate: props.workDate, stage: "OPENING", actorSource: props.actorSource, brandLock: props.brand, lines });
-          if (saved.error || !saved.data.ok) { toast.error(saved.error || "บันทึกยอดเช้าไม่สำเร็จ"); setBusy(false); return; }
-          const assist = crewAssist(live);
-          for (const section of [
-            { key: "SEC_4_BAKERY_ICE", title: "หมวดที่ 4: ตู้แช่เบเกอรี่และตู้ไอศกรีม", lines: [...bakery, ...ice] },
-            { key: "SEC_5_MERCH", title: "หมวดที่ 5: ชั้นโชว์ของพรีเมียมหน้าร้าน", lines: merch },
-          ]) {
-            const confirmed = await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: section.key, sectionTitle: section.title, actorSource: props.actorSource, brandLock: props.brand, shiftSlot: "SHIFT_1", payload: { lines: section.lines.map((line) => ({ itemId: line.itemId, code: line.shortCode, qty: qty[line.itemId] ?? "" })) }, ...assist });
-            if (confirmed.error || !confirmed.data.ok) { toast.error(confirmed.error || "ยืนยันหมวดไม่สำเร็จ"); setBusy(false); return; }
-          }
-          toast.success("บันทึกยอดชั้นโชว์ตอนเปิดร้านแล้ว");
-          void live.refresh();
-          setBusy(false);
-          props.onDone();
-        })();
-      }}>{busy ? "กำลังบันทึก..." : "💾 บันทึกยืนยันหมวดที่ 4 และหมวดที่ 5"}</button>
-      {Object.values(qty).some((value) => value !== "") ? <UnsavedDraftBar sectionNo={4} /> : null}
+            <CabinetRows lines={ice} lots={props.lots} today={props.today} qty={qty} onQty={onQty} bakery={false} evening={evening} setEvening={setEvening} onReplenish={() => undefined} />
+            <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white disabled:opacity-60" disabled={busyKey !== ""} onClick={() => void saveSection("SEC_4_BAKERY_ICE", "หมวดที่ 4: ตู้แช่เบเกอรี่และตู้ไอศกรีมหน้าร้าน", bakeryIce)}>{busyKey === "SEC_4_BAKERY_ICE" ? "กำลังบันทึก..." : "💾 บันทึกยืนยันหมวดที่ 4 (เบเกอรี่และไอศกรีม)"}</button>
+            {bakeryIce.some((line) => dirty.current.has(line.itemId)) ? <UnsavedDraftBar sectionNo={4} /> : null}
+          </>
+        )}
+      </article>
+      <article className="space-y-2 rounded-xl border p-3">
+        <h3 className="font-semibold">หมวดที่ 5: ชั้นโชว์ของพรีเมียมหน้าร้าน</h3>
+        {sec5 && props.reopen !== "SEC_5_MERCH" ? (
+          <CountLockedCard sectionNo={5} row={sec5} items={sec5Items.length ? sec5Items : stockItems(stock, merch)} onRevise={props.onRevise ? () => props.onRevise?.("SEC_5_MERCH") : undefined} />
+        ) : (
+          <>
+            <CabinetRows lines={merch} lots={props.lots} today={props.today} qty={qty} onQty={onQty} bakery={false} evening={evening} setEvening={setEvening} onReplenish={() => undefined} />
+            <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white disabled:opacity-60" disabled={busyKey !== ""} onClick={() => void saveSection("SEC_5_MERCH", "หมวดที่ 5: ชั้นโชว์ของพรีเมียมหน้าร้าน", merch)}>{busyKey === "SEC_5_MERCH" ? "กำลังบันทึก..." : "💾 บันทึกยืนยันหมวดที่ 5 (ชั้นโชว์ของพรีเมียม)"}</button>
+            {merch.some((line) => dirty.current.has(line.itemId)) ? <UnsavedDraftBar sectionNo={5} /> : null}
+          </>
+        )}
+      </article>
     </div>
   );
 }

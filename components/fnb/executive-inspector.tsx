@@ -147,12 +147,26 @@ export function ExecutiveInspector(props: { brand: FnbBrandCode; workDate: strin
           <h2 className="font-semibold">แผงตรวจ {props.branch || "สาขา"}</h2>
           <CrewSwapButton />
         </div>
-        <div className="grid gap-2 md:grid-cols-2">
-          {(detail?.sections ?? []).map((row) => (
-            <div key={row.key} className="rounded-lg bg-slate-50 p-3 text-sm">
-              <p className="font-medium">{row.title}</p>
-              <p>{row.status === "ISSUE_REPORTED" ? "⚠️ พบจุดชำรุด" : "ยืนยันแล้ว"} · {row.staff} · {hm(row.at)} น.</p>
-            </div>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {(detail?.openingCards ?? []).map((card) => (
+            <section key={card.no} className="rounded-xl border p-3 text-sm">
+              <h3 className="font-semibold">{card.title}</h3>
+              <div className="mt-1 space-y-0.5">
+                {card.lines.map((line) => <p key={line} className={line.includes("นอกช่วง") ? "font-semibold text-red-700" : ""}>{line}</p>)}
+              </div>
+              {card.zeroNote ? <p className="mt-1 text-xs text-slate-500">{card.zeroNote}</p> : null}
+              {card.photos.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {card.photos.map((photo) => (
+                    <a key={photo.url} href={photo.url} target="_blank" rel="noreferrer" className="block w-16">
+                      <img src={photo.url} alt={photo.caption} className="h-16 w-16 rounded object-cover" />
+                      <span className="block truncate text-[10px] text-slate-500">{photo.caption}</span>
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+              <p className="mt-2 text-xs text-slate-600">{card.staff ? `${card.staff} · ${hm(card.at)} น.` : "ยังไม่บันทึก"}</p>
+            </section>
           ))}
         </div>
         <div className="grid gap-4 lg:grid-cols-2">

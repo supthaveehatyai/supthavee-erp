@@ -288,7 +288,6 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
         </>}
       </article>
       <article className="space-y-2">
-        <h3 className="font-semibold">หมวดที่ 4–5: ตู้แช่เบเกอรี่ ตู้ไอศกรีม และชั้นโชว์ของพรีเมียม</h3>
         <DisplayCabinetGrid
           lines={board?.frontOpeningLines ?? []}
           lots={board?.displayLots ?? []}
@@ -299,7 +298,9 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
           brand={brand}
           frontCode={front?.locationCode ?? ""}
           backCode={back?.locationCode ?? ""}
-          onDone={bump}
+          reopen={reopen}
+          onRevise={canRevise ? (key) => { setReviseReason(""); setReviseKey(key); } : undefined}
+          onDone={() => { setReopen(null); bump(); }}
         />
         <WriteOffButton branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={props.brandLock ?? "LUCKY_CUP"} staffName={props.staffName} locations={board?.locations ?? []} onDone={bump} />
       </article>

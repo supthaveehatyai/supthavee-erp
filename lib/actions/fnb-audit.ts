@@ -2,7 +2,7 @@
 
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text } from "@/lib/fnb/rows";
-import { sectionNumber } from "@/lib/fnb/stage-progress";
+import { bangkokWeekday, sectionNumber } from "@/lib/fnb/stage-progress";
 import { formatFnbQty, formatPrepPortionPct } from "@/lib/utils/fnb-format";
 import { schemaAdmin } from "@/lib/holding/schema-db";
 import { requireAnyFnbModule } from "@/lib/holding/workspace-access";
@@ -15,6 +15,7 @@ import type {
   FnbBrandCode,
   FnbInspectorDetail,
   FnbInspectorMatrixRow,
+  FnbInspectorOpeningCard,
   FnbQaPack,
   FnbQaSectionKey,
 } from "@/types/fnb";
@@ -71,30 +72,67 @@ export async function getMonthLockAction(brand: string, workDate: string): Promi
   }
 }
 
+function recordOf(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+function moneyLabel(value: number): string {
+  return `${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท`;
+}
+
+function countSummary(rows: { name: string; qty: number; uom: string }[]): { lines: string[]; zeroNote: string } {
+  const positive = rows.filter((row) => row.qty > 0);
+  const zeros = rows.filter((row) => row.qty <= 0);
+  if (rows.length === 0) return { lines: ["ยังไม่บันทึกยอดนับ"], zeroNote: "" };
+  if (positive.length === 0) return { lines: ["ยืนยันตรวจนับแล้ว: หน้าตู้ 0 ชิ้นทุกรายการ"], zeroNote: "" };
+  return {
+    lines: positive.map((row) => `${row.name}: ${formatFnbQty(row.qty, row.uom, false)}`),
+    zeroNote: zeros.length > 0 ? `ดูรายการที่เป็น 0 ชิ้น (${zeros.length} รายการ)` : "",
+  };
+}
+
+function openingCountRows(payload: unknown, fallback: { name: string; qty: number; uom: string }[]): { name: string; qty: number; uom: string }[] {
+  const raw = Array.isArray(recordOf(payload).items) ? recordOf(payload).items as unknown[] : [];
+  if (raw.length === 0) return fallback;
+  return raw.flatMap((item) => {
+    const rec = recordOf(item);
+    const qty = Number(rec.qty ?? 0);
+    if (!rec.nameTh && !rec.name) return [];
+    return [{ name: text(rec.nameTh || rec.name), qty: Number.isFinite(qty) ? qty : 0, uom: text(rec.uom) || "ชิ้น" }];
+  });
+}
+
 export async function getExecutiveInspectorAction(brand: string, workDate: string, branchCode: string): Promise<FnbActionResult<{ matrix: FnbInspectorMatrixRow[]; anomalies: FnbAuditAnomaly[]; detail: FnbInspectorDetail }>> {
-  const empty = { matrix: [] as FnbInspectorMatrixRow[], anomalies: [] as FnbAuditAnomaly[], detail: { sections: [], wip: [], prepRows: [], openRows: [], replenishments: [], shifts: [], photos: [] } };
+  const empty = { matrix: [] as FnbInspectorMatrixRow[], anomalies: [] as FnbAuditAnomaly[], detail: { sections: [], openingCards: [] as FnbInspectorOpeningCard[], wip: [], prepRows: [], openRows: [], replenishments: [], shifts: [], photos: [] } };
   try {
     await desk();
     const scope = brandOf(brand);
     const db = schemaAdmin().schema("fnb");
-    const [branches, confirms, batches, transfers, shifts, sales, equipment, writeOffs, counts, items, rosters, bases] = await Promise.all([
+    const [branches, confirms, batches, transfers, shifts, sales, equipment, writeOffs, counts, items, rosters, bases, cleaningLogs, cleaningSpots] = await Promise.all([
       db.from("branches").select("branch_code,branch_name_th,brand_code,branch_status,coffee_dose_min_g,coffee_dose_max_g,espresso_time_min_s,espresso_time_max_s,espresso_yield_min_g,espresso_yield_max_g").eq("brand_code", scope).neq("branch_status", "INACTIVE").limit(20),
-      db.from("daily_stage_section_confirmations").select("id,branch_code,stage_code,section_key,section_title_th,status_flag,numeric_amount,expected_amount,confirmed_by_name,confirmed_at,photo_urls").eq("work_date", workDate).limit(2000),
+      db.from("daily_stage_section_confirmations").select("id,branch_code,stage_code,section_key,section_title_th,status_flag,numeric_amount,expected_amount,confirmed_by_name,confirmed_at,photo_urls,payload_json").eq("work_date", workDate).limit(2000),
       db.from("bar_wip_batches").select("id,branch_code,batch_kind,prep_base_code,item_id,brew_portion_mode,packs_deducted,pack_uom,opened_at,opened_by_name,expires_at,sticker_label_text,open_photo_urls,batch_status,notes,is_voided_duplicate").eq("work_date", workDate).limit(1000),
       db.from("internal_zone_transfers").select("branch_code,item_id,qty_in_count_uom,created_at").eq("work_date", workDate).limit(1000),
       db.from("shift_closings").select("branch_code,shift_type,staff_name,cash_variance,created_at").eq("work_date", workDate).limit(200),
       db.from("daily_menu_sales_headers").select("branch_code,created_at").eq("work_date", workDate).limit(50),
-      db.from("daily_equipment_calibrations").select("branch_code,grinder_dose_g,espresso_time_sec,espresso_yield_g,syrup_random_target_g,syrup_measured_actual_g").eq("work_date", workDate).limit(20),
+      db.from("daily_equipment_calibrations").select("branch_code,grinder_dose_g,espresso_time_sec,espresso_yield_g,syrup_random_target_g,syrup_measured_actual_g,photo_urls").eq("work_date", workDate).limit(20),
       db.from("item_write_offs").select("id,branch_code,item_id,write_off_reason,qty_in_count_uom,photo_urls,reported_by_name,created_at").eq("work_date", workDate).limit(500),
-      db.from("zone_stock_counts").select("branch_code,item_id,shrinkage_diff_qty,count_stage").eq("count_date", workDate).limit(2000),
-      db.from("items").select("id,short_code,name_th,item_category,brand_scope").eq("brand_scope", scope).limit(2000),
+      db.from("zone_stock_counts").select("branch_code,item_id,counted_qty,shrinkage_diff_qty,count_stage,staff_name").eq("count_date", workDate).limit(2000),
+      db.from("items").select("id,short_code,name_th,item_category,count_uom,brand_scope").eq("is_active", true).limit(2000),
       db.from("shift_crew_rosters").select("branch_code,shift_slot,crew_members_json").eq("work_date", workDate).limit(40),
       db.from("prep_bases").select("base_code,base_name_th,yield_qty_ml").eq("brand_code", scope).limit(40),
+      db.from("daily_cleaning_spot_logs").select("branch_code,stage_code,spot_id,spot_name_th,photo_url,checked_by_name,checked_at").eq("work_date", workDate).limit(2000),
+      db.from("branch_cleaning_spots").select("id,branch_code,stage_code,schedule_type,schedule_weekdays,is_active").eq("is_active", true).limit(500),
     ]);
     if (branches.error) return fail(empty, branches.error, "อ่านสาขาไม่สำเร็จ");
     const branchRows = asRows(branches.data);
     const codes = new Set(branchRows.map((row) => text(row.branch_code)));
-    const itemName = new Map(asRows(items.data).map((row) => [text(row.id), `${text(row.short_code)} · ${text(row.name_th)}`]));
+    const itemRows = asRows(items.data).filter((row) => {
+      const itemBrand = text(row.brand_scope);
+      return !itemBrand || itemBrand === scope || itemBrand === "ALL";
+    });
+    const itemName = new Map(itemRows.map((row) => [text(row.id), `${text(row.short_code)} · ${text(row.name_th)}`]));
+    const itemMeta = new Map(itemRows.map((row) => [text(row.id), { name: text(row.name_th) || text(row.short_code), category: text(row.item_category), uom: text(row.count_uom) || "ชิ้น" }]));
     const displayIds = new Set(asRows(items.data).filter((row) => ["BAKERY_FROZEN", "ICE_CREAM", "MERCHANDISE"].includes(text(row.item_category))).map((row) => text(row.id)));
     const anomalies: FnbAuditAnomaly[] = [];
     const limits = new Map(branchRows.map((branch) => [text(branch.branch_code), {
@@ -215,11 +253,71 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
     for (const row of asRows(writeOffs.data).filter((item) => text(item.branch_code) === focus)) {
       urls(row.photo_urls).forEach((url) => pushPhoto({ url, staff: text(row.reported_by_name), at: text(row.created_at), caption: text(row.write_off_reason), confirmationId: null, submissionId: null }));
     }
+    const focusOpening = asRows(confirms.data).filter((row) => text(row.branch_code) === focus && text(row.stage_code) === "OPENING");
+    const sectionRow = (key: string) => focusOpening.find((row) => text(row.section_key) === key);
+    const photoCards = (row: Record<string, unknown> | undefined, caption: string) => urls(row?.photo_urls).map((url) => ({ url, caption }));
+    const band = limits.get(focus) ?? { doseMin: 19.8, doseMax: 20, timeMin: 22, timeMax: 28, yieldMin: 38, yieldMax: 40 };
+    const equip = asRows(equipment.data).find((row) => text(row.branch_code) === focus);
+    const sec1 = sectionRow("SEC_1_PREP");
+    const sec1Payload = recordOf(sec1?.payload_json);
+    const sec1Lines = (Array.isArray(sec1Payload.bases) ? sec1Payload.bases : []).flatMap((item) => {
+      const rec = recordOf(item);
+      const code = text(rec.code);
+      if (!code) return [];
+      const portion = text(rec.portion);
+      const portionLabel = portion === "SKIP" || portion === "SKIP_EXISTING" ? "มีของเดิม" : formatPrepPortionPct(Number(portion), portion);
+      const ml = num(rec.ml);
+      return [`${code} ${portionLabel}${ml > 0 ? ` · ${formatFnbQty(ml, "ml")}` : ""}`];
+    });
+    if (sec1Payload.lemons != null) sec1Lines.push(`เลมอน ${num(sec1Payload.lemons)} ลูก`);
+    const prepLines = sec1Lines.length > 0 ? sec1Lines : prepRows.map((row) => `${row.label}: ${row.portion}${row.yieldLabel ? ` · ${row.yieldLabel}` : ""}`);
+    const metric = (value: number | null, min: number, max: number, label: string, unit: string) => {
+      if (value == null) return `${label} ยังไม่กรอก`;
+      return `${label} ${value} ${unit}${value < min || value > max ? " · นอกช่วง" : ""}`;
+    };
+    const dose = equip?.grinder_dose_g == null ? null : num(equip.grinder_dose_g);
+    const seconds = equip?.espresso_time_sec == null ? null : num(equip.espresso_time_sec);
+    const shot = equip?.espresso_yield_g == null ? null : num(equip.espresso_yield_g);
+    const syrupTarget = equip?.syrup_random_target_g == null ? null : num(equip.syrup_random_target_g);
+    const syrupActual = equip?.syrup_measured_actual_g == null ? null : num(equip.syrup_measured_actual_g);
+    const sec2 = sectionRow("SEC_2_EQUIP") ?? sectionRow("SEC_2_EQUIPMENT");
+    const zoneFallback = (categories: string[]) => asRows(counts.data).filter((row) => text(row.branch_code) === focus && text(row.count_stage) === "OPENING").flatMap((row) => {
+      const meta = itemMeta.get(text(row.item_id));
+      if (!meta || !categories.includes(meta.category)) return [];
+      return [{ name: meta.name, qty: num(row.counted_qty), uom: meta.uom }];
+    });
+    const sec4 = sectionRow("SEC_4_BAKERY_ICE");
+    const sec5 = sectionRow("SEC_5_MERCH");
+    const sec4Summary = countSummary(openingCountRows(sec4?.payload_json, zoneFallback(["BAKERY_FROZEN", "ICE_CREAM", "CONE"])));
+    const sec5Summary = countSummary(openingCountRows(sec5?.payload_json, zoneFallback(["MERCHANDISE"])));
+    const sec6 = sectionRow("SEC_6_CASH_FLOAT");
+    const weekday = bangkokWeekday(workDate);
+    const openingSpots = asRows(cleaningSpots.data).filter((row) => {
+      if (text(row.branch_code) !== focus || text(row.stage_code) !== "OPENING") return false;
+      if (text(row.schedule_type) !== "WEEKLY") return true;
+      const days = Array.isArray(row.schedule_weekdays) ? row.schedule_weekdays.map((day) => Number(day)) : [];
+      return days.length === 0 || days.includes(weekday);
+    });
+    const openingLogs = asRows(cleaningLogs.data).filter((row) => text(row.branch_code) === focus && text(row.stage_code) === "OPENING" && text(row.photo_url).startsWith("http"));
+    const sec7 = sectionRow("SEC_7_CLEANING");
+    const openingCards: FnbInspectorOpeningCard[] = [
+      { no: 1, title: "หมวดที่ 1: เบสและเลมอน", staff: text(sec1?.confirmed_by_name), at: text(sec1?.confirmed_at), lines: prepLines.length ? prepLines : ["ยังไม่บันทึก"], zeroNote: "", photos: photoCards(sec1, "หมวด 1") },
+      { no: 2, title: "หมวดที่ 2: มาตรฐานอุปกรณ์", staff: text(sec2?.confirmed_by_name), at: text(sec2?.confirmed_at), lines: [metric(dose, band.doseMin, band.doseMax, "โดสกาแฟ", "g"), metric(seconds, band.timeMin, band.timeMax, "เวลาช็อต", "s"), metric(shot, band.yieldMin, band.yieldMax, "น้ำหนักช็อต", "g"), `เครื่องน้ำเชื่อมสุ่ม ${syrupTarget ?? "-"} g · ชั่งจริง ${syrupActual ?? "-"} g`], zeroNote: "", photos: [...photoCards(sec2, "หมวด 2"), ...photoCards(equip, "หมวด 2")] },
+      { no: 3, title: "หมวดที่ 3: ซอสหน้าบาร์", staff: text(sectionRow("SEC_3_SAUCE")?.confirmed_by_name), at: text(sectionRow("SEC_3_SAUCE")?.confirmed_at), lines: [`เปิดใช้อยู่ ${openRows.length} ภาชนะ`], zeroNote: "", photos: photoCards(sectionRow("SEC_3_SAUCE"), "หมวด 3") },
+      { no: 4, title: "หมวดที่ 4: ตู้แช่เบเกอรี่และไอศกรีม", staff: text(sec4?.confirmed_by_name), at: text(sec4?.confirmed_at), lines: sec4Summary.lines, zeroNote: sec4Summary.zeroNote, photos: photoCards(sec4, "หมวด 4") },
+      { no: 5, title: "หมวดที่ 5: ชั้นโชว์ของพรีเมียม", staff: text(sec5?.confirmed_by_name), at: text(sec5?.confirmed_at), lines: sec5Summary.lines, zeroNote: sec5Summary.zeroNote, photos: photoCards(sec5, "หมวด 5") },
+      { no: 6, title: "หมวดที่ 6: เงินสดในเก๊ะ", staff: text(sec6?.confirmed_by_name), at: text(sec6?.confirmed_at), lines: [sec6 ? moneyLabel(num(sec6.numeric_amount)) : "ยังไม่บันทึกเงินสด"], zeroNote: "", photos: photoCards(sec6, "หมวด 6") },
+      { no: 7, title: "หมวดที่ 7: ความสะอาดเปิดร้าน", staff: text(sec7?.confirmed_by_name) || text(openingLogs[0]?.checked_by_name), at: text(sec7?.confirmed_at) || text(openingLogs[0]?.checked_at), lines: [`ถ่ายแล้ว ${openingLogs.length} / ${openingSpots.length} จุด`], zeroNote: "", photos: openingLogs.map((row) => ({ url: text(row.photo_url), caption: text(row.spot_name_th) || "หมวด 7" })) },
+    ];
+    for (const card of openingCards) {
+      card.photos.forEach((photo) => pushPhoto({ url: photo.url, staff: card.staff, at: card.at, caption: photo.caption, confirmationId: null, submissionId: null }));
+    }
     return result({
       matrix,
       anomalies,
       detail: {
         sections,
+        openingCards,
         wip,
         prepRows,
         openRows,

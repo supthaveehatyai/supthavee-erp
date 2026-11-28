@@ -24,6 +24,8 @@ function emptySnapshot(branchCode: string, workDate: string): FnbLiveSnapshot {
     wipBatches: [],
     calibration: null,
     zoneCounts: [],
+    zoneStockCounts: [],
+    cleaningSpotLogs: [],
     displayLots: [],
     closings: [],
     waste: [],
@@ -78,7 +80,7 @@ export async function getLiveBranchShiftSnapshotAction(input: { branchCode: stri
     if (!branch) return result(blank, "ไม่พบสาขา");
     const brand = text(branch.brand_code);
     const maxSeats = Math.max(1, num(branch.max_staff_per_shift) || 2);
-    const [rosters, confirmations, bases, prepBatches, openBatches, calibration, zones, lots, closings, waste, writeOffs, menuSales, lemons, people] = await Promise.all([
+    const [rosters, confirmations, bases, prepBatches, openBatches, calibration, zones, lots, closings, waste, writeOffs, menuSales, lemons, people, cleaningLogs, catalog] = await Promise.all([
       db.from("shift_crew_rosters").select("shift_slot,max_crew_seats,crew_members_json").eq("branch_code", input.branchCode).eq("work_date", workDate).limit(4),
       db.from("daily_stage_section_confirmations").select("id,section_key,section_title_th,stage_code,status_flag,numeric_amount,expected_amount,variance_reason,photo_urls,confirmed_by_name,confirmed_at,last_edit_reason,payload_json").eq("branch_code", input.branchCode).eq("work_date", workDate).limit(400),
       db.from("prep_bases").select("base_code,base_name_th,yield_qty_ml,brand_code,sort_order,is_active").eq("brand_code", brand).eq("is_active", true).order("sort_order", { ascending: true }).limit(40),
@@ -93,8 +95,10 @@ export async function getLiveBranchShiftSnapshotAction(input: { branchCode: stri
       db.from("daily_menu_sales_headers").select("submitted_by_name,reported_total_amount").eq("branch_code", input.branchCode).eq("work_date", workDate).limit(1),
       db.from("items").select("id,short_code,brand_scope").eq("short_code", "LEM").eq("is_active", true).limit(8),
       db.from("employees").select("user_id,nickname,full_name_th,primary_branch_code,allowed_branch_codes,employment_status").eq("employment_status", "ACTIVE").limit(200),
+      db.from("daily_cleaning_spot_logs").select("id,stage_code,spot_id,spot_name_th,status_flag,photo_url,checked_by_name,checked_at").eq("branch_code", input.branchCode).eq("work_date", workDate).limit(200),
+      db.from("items").select("id,short_code,name_th,item_category,count_uom,display_sub_group,display_walk_order,brand_scope").eq("is_active", true).limit(2000),
     ]);
-    const failed = [rosters, confirmations, bases, prepBatches, openBatches, calibration, zones, lots, closings, waste, writeOffs, menuSales].find((item) => item.error);
+    const failed = [rosters, confirmations, bases, prepBatches, openBatches, calibration, zones, lots, closings, waste, writeOffs, menuSales, cleaningLogs, catalog].find((item) => item.error);
     if (failed?.error) return fail(blank, failed.error, "อ่านสถานะสาขาไม่สำเร็จ");
     const rosterRows = asRows(rosters.data);
     const slots: FnbShiftRoster[] = (["SHIFT_1", "SHIFT_2"] as const).map((slot) => {
@@ -124,6 +128,10 @@ export async function getLiveBranchShiftSnapshotAction(input: { branchCode: stri
       const codes = Array.isArray(row.allowed_branch_codes) ? row.allowed_branch_codes.map((code) => text(code)) : [];
       return text(row.primary_branch_code) === input.branchCode || codes.includes(input.branchCode);
     }).map((row) => ({ userId: text(row.user_id), name: text(row.nickname) || text(row.full_name_th) })).filter((row) => row.userId);
+    const catalogById = new Map(asRows(catalog.data).filter((row) => {
+      const scope = text(row.brand_scope);
+      return !scope || scope === brand || scope === "ALL";
+    }).map((row) => [text(row.id), row]));
     return result({
       ...blank,
       brandCode: brand,
@@ -159,6 +167,32 @@ export async function getLiveBranchShiftSnapshotAction(input: { branchCode: stri
         countedQty: num(row.counted_qty),
         countStage: text(row.count_stage),
         staffName: text(row.staff_name),
+      })),
+      zoneStockCounts: asRows(zones.data).map((row) => {
+        const item = catalogById.get(text(row.item_id));
+        return {
+          itemId: text(row.item_id),
+          locationCode: text(row.location_code),
+          countedQty: num(row.counted_qty),
+          countStage: text(row.count_stage),
+          staffName: text(row.staff_name),
+          shortCode: text(item?.short_code),
+          nameTh: text(item?.name_th),
+          itemCategory: text(item?.item_category),
+          countUom: text(item?.count_uom) || "ชิ้น",
+          displaySubGroup: text(item?.display_sub_group),
+          displayWalkOrder: num(item?.display_walk_order),
+        };
+      }),
+      cleaningSpotLogs: asRows(cleaningLogs.data).map((row) => ({
+        id: text(row.id),
+        spotId: text(row.spot_id),
+        stageCode: text(row.stage_code) === "CLOSING" ? "CLOSING" as const : "OPENING" as const,
+        spotNameTh: text(row.spot_name_th),
+        statusFlag: text(row.status_flag),
+        photoUrls: text(row.photo_url).startsWith("http") ? [text(row.photo_url)] : [],
+        checkedByName: text(row.checked_by_name),
+        checkedAt: text(row.checked_at),
       })),
       displayLots: asRows(lots.data).map((row) => ({
         itemId: text(row.item_id),

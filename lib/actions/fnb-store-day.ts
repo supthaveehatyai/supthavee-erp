@@ -180,6 +180,44 @@ export async function copyCleaningSpotsAction(input: { fromBranch: string; toBra
   }
 }
 
+export async function saveCleaningSpotLogAction(input: {
+  branchCode: string;
+  workDate: string;
+  stageCode: "OPENING" | "CLOSING";
+  spotId: string;
+  statusFlag: "PASSED" | "ISSUE_REPORTED";
+  photoUrl: string;
+  issueNote?: string;
+  actorSource: string;
+  brandLock: string;
+}): Promise<FnbActionResult<{ ok: boolean; checkedByName: string; checkedAt: string }>> {
+  const empty = { ok: false, checkedByName: "", checkedAt: "" };
+  try {
+    const actor = await actorName(input.branchCode, input.actorSource, input.brandLock);
+    if (!actor.ok) return result(empty, actor.error);
+    const locked = await fnbMonthLockMessage(input.branchCode, input.workDate, input.brandLock);
+    if (locked) return result(empty, locked);
+    if (!input.photoUrl) return result(empty, "ถ่ายรูปจุดนี้ก่อนบันทึก");
+    const saved = await callFnbRpc("upsert_cleaning_spot_log", {
+      p_branch_code: input.branchCode,
+      p_work_date: input.workDate,
+      p_stage_code: input.stageCode,
+      p_spot_id: input.spotId,
+      p_status_flag: input.statusFlag,
+      p_photo_url: input.photoUrl,
+      p_issue_note: input.issueNote || null,
+      p_staff_name: actor.name,
+      p_user_id: actor.userId,
+    });
+    if (saved.error) return fail(empty, saved.error, "บันทึกจุดความสะอาดไม่สำเร็จ");
+    const body = saved.data && typeof saved.data === "object" ? saved.data as Record<string, unknown> : {};
+    if (body.ok === false) return result(empty, text(body.error) || "บันทึกจุดความสะอาดไม่สำเร็จ");
+    return result({ ok: true, checkedByName: actor.name, checkedAt: new Date().toISOString() });
+  } catch (error) {
+    return caught(empty, error, "บันทึกจุดความสะอาดไม่สำเร็จ");
+  }
+}
+
 export async function getStoreDayBoardAction(branchCode: string, workDate: string, actorSource = "desktop", brandLock = ""): Promise<FnbActionResult<FnbStoreDayBoard | null>> {
   const empty = null;
   try {

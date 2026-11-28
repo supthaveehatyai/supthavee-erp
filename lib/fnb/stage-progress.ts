@@ -51,6 +51,11 @@ export function progressSummary(stage: "OPENING" | "CLOSING", rows: FnbStageConf
   return { done: done.size, total, badges };
 }
 
+export function bangkokWeekday(iso: string): number {
+  const date = new Date(`${iso.slice(0, 10)}T12:00:00+07:00`);
+  return Number.isNaN(date.getTime()) ? 0 : date.getUTCDay();
+}
+
 export function bangkokHour(now = new Date()): number {
   return Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", hourCycle: "h23" }).format(now));
 }

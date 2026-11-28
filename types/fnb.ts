@@ -782,8 +782,19 @@ export type FnbInspectorMatrixRow = {
 
 export type FnbAuditAnomaly = { branchCode: string; kind: string; detail: string };
 
+export type FnbInspectorOpeningCard = {
+  no: number;
+  title: string;
+  staff: string;
+  at: string;
+  lines: string[];
+  zeroNote: string;
+  photos: { url: string; caption: string }[];
+};
+
 export type FnbInspectorDetail = {
   sections: { key: string; title: string; staff: string; at: string; status: string; photos: string[] }[];
+  openingCards: FnbInspectorOpeningCard[];
   wip: { label: string; portion: string; staff: string; at: string; sticker: string; photos: string[] }[];
   prepRows: { id: string; label: string; portion: string; yieldLabel: string; staff: string; at: string }[];
   openRows: { id: string; label: string; qtyLabel: string; badge: string; expiryLabel: string; staff: string; at: string }[];
@@ -969,6 +980,31 @@ export type FnbLivePrepBase = {
   sortOrder: number;
 };
 
+export type FnbLiveZoneStock = {
+  itemId: string;
+  locationCode: string;
+  countedQty: number;
+  countStage: string;
+  staffName: string;
+  shortCode: string;
+  nameTh: string;
+  itemCategory: string;
+  countUom: string;
+  displaySubGroup: string;
+  displayWalkOrder: number;
+};
+
+export type FnbLiveCleaningLog = {
+  id: string;
+  spotId: string;
+  stageCode: "OPENING" | "CLOSING";
+  spotNameTh: string;
+  statusFlag: string;
+  photoUrls: string[];
+  checkedByName: string;
+  checkedAt: string;
+};
+
 export type FnbLiveSnapshot = {
   branchCode: string;
   workDate: string;
@@ -982,6 +1018,8 @@ export type FnbLiveSnapshot = {
   wipBatches: { id: string; batchKind: string; prepBaseCode: string; itemId: string; packsDeducted: number; openedByName: string; batchStatus: string; photoUrls: string[] }[];
   calibration: FnbStoreDayBoard["calibration"];
   zoneCounts: { itemId: string; locationCode: string; countedQty: number; countStage: string; staffName: string }[];
+  zoneStockCounts: FnbLiveZoneStock[];
+  cleaningSpotLogs: FnbLiveCleaningLog[];
   displayLots: { itemId: string; remainingQty: number; displayExpiryDate: string; placedByName: string }[];
   closings: { shiftType: string; staffName: string; netSalesIncVat: number }[];
   waste: { staffName: string; totalWasteCostThb: number }[];
