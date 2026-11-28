@@ -485,12 +485,15 @@ export type FnbExecutiveInventoryItem = {
   last_counted_at: string;
   last_counted_by: string;
   open_pack_net_recipe_qty: number;
+  display_sub_group: string;
+  unit_cost_per_count_uom: number | null;
+  active_lot_count: number;
 };
 
 export type FnbExecutiveInventory = {
   branch_code: string;
   branch_name_th: string;
-  locations: { location_code: string; location_name_th: string }[];
+  locations: { location_code: string; location_name_th: string; short_label: string }[];
   items: FnbExecutiveInventoryItem[];
   stock_value_thb: number | null;
 };
@@ -766,6 +769,7 @@ export type FnbStorageZone = {
   countWeekdays: number[];
   isDefaultGrTarget: boolean;
   sortOrder: number;
+  shortLabel: string;
 };
 
 export type FnbCleaningSpot = {

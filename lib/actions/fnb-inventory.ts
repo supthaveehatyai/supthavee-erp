@@ -206,10 +206,10 @@ export async function submitBlindCountAction(input: {
   }
 }
 
-export async function listBrandCountItemsAction(brand: string): Promise<FnbActionResult<{ id: string; short_code: string; name_th: string; item_category: string; count_uom: string; allow_decimal_count_qty: boolean; recipe_per_count_uom: number; recipe_uom: string; is_catch_weight_produce: boolean; piece_uom_label: string; avg_gross_grams_per_piece: number; prep_yield_pct: number; default_date_stamp_mode: string; shelf_life_value: number; shelf_life_unit: string; tare_weight_g: number; specific_gravity: number; image_urls: string[]; image_captions: string[] }[]>> {
+export async function listBrandCountItemsAction(brand: string): Promise<FnbActionResult<{ id: string; short_code: string; name_th: string; item_category: string; display_sub_group: string; count_uom: string; allow_decimal_count_qty: boolean; recipe_per_count_uom: number; recipe_uom: string; is_catch_weight_produce: boolean; piece_uom_label: string; avg_gross_grams_per_piece: number; prep_yield_pct: number; default_date_stamp_mode: string; shelf_life_value: number; shelf_life_unit: string; tare_weight_g: number; specific_gravity: number; image_urls: string[]; image_captions: string[] }[]>> {
   try {
     await requireFnbModuleAccess("branch_inventory_transfer");
-    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,name_th,item_category,count_uom,recipe_uom,allow_decimal_count_qty,recipe_per_count_uom,brand_scope,is_active,is_catch_weight_produce,piece_uom_label,avg_gross_grams_per_piece,prep_yield_pct,default_date_stamp_mode,shelf_life_value,shelf_life_unit,shelf_life_months,tare_weight_g,specific_gravity,image_urls,image_captions").eq("is_active", true).eq("brand_scope", brand).order("short_code", { ascending: true }).limit(800);
+    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,name_th,item_category,display_sub_group,count_uom,recipe_uom,allow_decimal_count_qty,recipe_per_count_uom,brand_scope,is_active,is_catch_weight_produce,piece_uom_label,avg_gross_grams_per_piece,prep_yield_pct,default_date_stamp_mode,shelf_life_value,shelf_life_unit,shelf_life_months,tare_weight_g,specific_gravity,image_urls,image_captions").eq("is_active", true).eq("brand_scope", brand).order("short_code", { ascending: true }).limit(800);
     if (listed.error) return fail([], listed.error, "อ่านสินค้าแบรนด์ไม่สำเร็จ");
     return result(asRows(listed.data).map((row) => ({
       id: text(row.id),
@@ -231,6 +231,7 @@ export async function listBrandCountItemsAction(brand: string): Promise<FnbActio
       specific_gravity: num(row.specific_gravity) || 1,
       image_urls: Array.isArray(row.image_urls) ? row.image_urls.map((url) => text(url)).filter(Boolean) : [],
       image_captions: Array.isArray(row.image_captions) ? row.image_captions.map((caption) => text(caption)) : [],
+      display_sub_group: text(row.display_sub_group),
     })));
   } catch (error) {
     return caught([], error, "อ่านสินค้าแบรนด์ไม่สำเร็จ");
@@ -258,6 +259,7 @@ function mapCountItem(row: Record<string, unknown>) {
     specific_gravity: num(row.specific_gravity) || 1,
     image_urls: Array.isArray(row.image_urls) ? row.image_urls.map((url) => text(url)).filter(Boolean) : [],
     image_captions: Array.isArray(row.image_captions) ? row.image_captions.map((caption) => text(caption)) : [],
+    display_sub_group: text(row.display_sub_group),
   };
 }
 
@@ -267,7 +269,7 @@ export async function listStoreCountItemsAction(branchCode: string) {
     if (!access.ok) return result([] as ReturnType<typeof mapCountItem>[], access.error);
     const branch = await schemaAdmin().schema("fnb").from("branches").select("brand_code").eq("branch_code", branchCode).maybeSingle();
     const brand = text((branch.data as { brand_code?: string } | null)?.brand_code);
-    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,name_th,item_category,count_uom,recipe_uom,allow_decimal_count_qty,recipe_per_count_uom,brand_scope,is_active,is_catch_weight_produce,piece_uom_label,avg_gross_grams_per_piece,prep_yield_pct,default_date_stamp_mode,shelf_life_value,shelf_life_unit,shelf_life_months,tare_weight_g,specific_gravity,image_urls,image_captions").eq("is_active", true).eq("brand_scope", brand).order("short_code", { ascending: true }).limit(800);
+    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,name_th,item_category,display_sub_group,count_uom,recipe_uom,allow_decimal_count_qty,recipe_per_count_uom,brand_scope,is_active,is_catch_weight_produce,piece_uom_label,avg_gross_grams_per_piece,prep_yield_pct,default_date_stamp_mode,shelf_life_value,shelf_life_unit,shelf_life_months,tare_weight_g,specific_gravity,image_urls,image_captions").eq("is_active", true).eq("brand_scope", brand).order("short_code", { ascending: true }).limit(800);
     if (listed.error) return fail([], listed.error, "อ่านสินค้าแบรนด์ไม่สำเร็จ");
     return result(asRows(listed.data).map(mapCountItem));
   } catch (error) {
@@ -395,9 +397,14 @@ export async function getExecutiveInventoryOverviewAction(branchCode: string): P
     const body = saved.data && typeof saved.data === "object" ? saved.data as Record<string, unknown> : {};
     if (body.ok !== true) return result(null, text(body.error) || "อ่านภาพรวมสต็อกไม่สำเร็จ");
     const canView = access.ctx.isSuperAdmin || access.ctx.fnbGuardrailPermissions.can_view_cost_price;
+    const zoneRows = await schemaAdmin().schema("fnb").from("storage_locations").select("location_code,location_name_th,short_label,sort_order").eq("branch_code", branchCode).eq("is_active", true).order("sort_order", { ascending: true }).limit(40);
+    const zoneShort = new Map(asRows(zoneRows.error ? [] : zoneRows.data).map((row) => [text(row.location_code), text(row.short_label)]));
+    const subgroupRows = await schemaAdmin().schema("fnb").from("items").select("id,display_sub_group").eq("is_active", true).limit(800);
+    const subgroups = new Map(asRows(subgroupRows.data).map((row) => [text(row.id), text(row.display_sub_group)]));
     const locations = (Array.isArray(body.locations) ? body.locations : []).map((row) => {
       const rec = row && typeof row === "object" ? row as Record<string, unknown> : {};
-      return { location_code: text(rec.location_code), location_name_th: text(rec.location_name_th) };
+      const code = text(rec.location_code);
+      return { location_code: code, location_name_th: text(rec.location_name_th), short_label: text(rec.short_label) || zoneShort.get(code) || "" };
     });
     const items: FnbExecutiveInventoryItem[] = (Array.isArray(body.items) ? body.items : []).map((row) => {
       const rec = row && typeof row === "object" ? row as Record<string, unknown> : {};
@@ -429,6 +436,9 @@ export async function getExecutiveInventoryOverviewAction(branchCode: string): P
         last_counted_at: text(rec.last_counted_at),
         last_counted_by: text(rec.last_counted_by),
         open_pack_net_recipe_qty: num(rec.open_pack_net_recipe_qty),
+        display_sub_group: text(rec.display_sub_group) || subgroups.get(text(rec.item_id)) || "",
+        unit_cost_per_count_uom: canView ? num(rec.unit_cost_per_count_uom) || num(rec.unit_cost) || (num(rec.total_count_qty) ? Math.round((num(rec.total_stock_value_thb) / num(rec.total_count_qty)) * 100) / 100 : 0) : null,
+        active_lot_count: num(rec.active_lot_count) || lots.length,
       };
     });
     const stockValue = canView ? items.reduce((sum, item) => sum + (item.total_stock_value_thb ?? 0), 0) : null;

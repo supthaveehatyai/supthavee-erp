@@ -2,10 +2,19 @@
 
 import { useState } from "react";
 
-export function ItemSlideShowPreview(props: { title: string; urls: string[]; captions: string[] }) {
+export function ItemSlideShowPreview(props: { title: string; urls: string[]; captions: string[]; compact?: boolean }) {
   const [index, setIndex] = useState(0);
   const urls = props.urls.filter(Boolean);
-  if (urls.length === 0) return <p className="text-xs text-slate-400">ยังไม่มีรูปตัวอย่าง</p>;
+  if (urls.length === 0) return props.compact ? null : <p className="text-xs text-slate-400">ยังไม่มีรูปตัวอย่าง</p>;
+  if (props.compact) {
+    const current = urls[Math.min(index, urls.length - 1)];
+    return (
+      <button type="button" className="block h-8 w-8 overflow-hidden rounded-md" onClick={() => setIndex((value) => (value + 1) % urls.length)}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={current} alt={props.title} className="h-8 w-8 object-cover" />
+      </button>
+    );
+  }
   const current = urls[Math.min(index, urls.length - 1)];
   const caption = props.captions[Math.min(index, urls.length - 1)] || "";
   return (

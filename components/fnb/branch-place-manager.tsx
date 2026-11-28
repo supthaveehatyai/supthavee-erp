@@ -141,7 +141,7 @@ export function StorageZoneBoard({ branch }: { branch: string }) {
         <button type="button" className="rounded-md border px-2 py-1 text-sm" onClick={() => setAdding((value) => !value)}>+ เพิ่มจุดจัดเก็บใหม่ในสาขานี้</button>
       </div>
       <table className="w-full text-left text-sm">
-        <thead><tr className="text-xs text-slate-500"><th className="py-1">รหัสจุด</th><th>ชื่อจุดจัดเก็บ</th><th>ประเภทโซน</th><th>รอบการตรวจนับ</th><th>ระบุวันนับ</th><th>จุดรับของหลัก</th><th /></tr></thead>
+        <thead><tr className="text-xs text-slate-500"><th className="py-1">รหัสจุด</th><th>ชื่อจุดจัดเก็บ</th><th>ชื่อย่อ</th><th>ประเภทโซน</th><th>รอบการตรวจนับ</th><th>ระบุวันนับ</th><th>จุดรับของหลัก</th><th /></tr></thead>
         <tbody>
           {zones.map((zone) => <ZoneRow key={zone.id} zone={zone} branch={branch} onDone={reload} />)}
           {adding ? <ZoneRow zone={null} branch={branch} onDone={() => { setAdding(false); reload(); }} /> : null}
@@ -154,6 +154,7 @@ export function StorageZoneBoard({ branch }: { branch: string }) {
 function ZoneRow({ zone, branch, onDone }: { zone: FnbStorageZone | null; branch: string; onDone: () => void }) {
   const [code, setCode] = useState(zone?.locationCode ?? "");
   const [name, setName] = useState(zone?.locationNameTh ?? "");
+  const [shortLabel, setShortLabel] = useState(zone?.shortLabel ?? "");
   const [zoneType, setZoneType] = useState(zone?.zoneType || "BACKROOM");
   const [schedule, setSchedule] = useState(zone?.defaultCountSchedule || "DAILY_OPEN_CLOSE");
   const [days, setDays] = useState<number[]>(zone?.countWeekdays ?? []);
@@ -164,6 +165,7 @@ function ZoneRow({ zone, branch, onDone }: { zone: FnbStorageZone | null; branch
     <tr className="border-t">
       <td className="py-1 pr-2"><input className={`${input} w-32`} value={code} onChange={(event) => setCode(event.target.value)} placeholder="รหัสจุด" /></td>
       <td className="pr-2"><input className={`${input} w-full`} value={name} onChange={(event) => setName(event.target.value)} placeholder="ชื่อจุดจัดเก็บ" /></td>
+      <td className="pr-2"><input className={`${input} w-24`} value={shortLabel} onChange={(event) => setShortLabel(event.target.value)} placeholder="ตู้หน้า" /></td>
       <td><select className={`${input} w-36`} value={zoneType} onChange={(event) => setZoneType(event.target.value)}>{ZONE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
       <td><select className={`${input} w-44`} value={schedule} onChange={(event) => setSchedule(event.target.value)}>{SCHEDULES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
       <td>
@@ -171,7 +173,7 @@ function ZoneRow({ zone, branch, onDone }: { zone: FnbStorageZone | null; branch
       </td>
       <td className="text-center"><input type="checkbox" checked={gr} onChange={(event) => setGr(event.target.checked)} /></td>
       <td><button type="button" className="rounded-md bg-[var(--fnb-brand)] px-2 py-1 text-xs text-white" disabled={busy} onClick={() => start(async () => {
-        const saved = await saveStorageZoneAction({ id: zone?.id, branchCode: branch, locationCode: code, locationNameTh: name, zoneType, defaultCountSchedule: schedule, countWeekdays: weekly ? days : [], isDefaultGrTarget: gr });
+        const saved = await saveStorageZoneAction({ id: zone?.id, branchCode: branch, locationCode: code, locationNameTh: name, shortLabel, zoneType, defaultCountSchedule: schedule, countWeekdays: weekly ? days : [], isDefaultGrTarget: gr });
         if (saved.error || !saved.data.ok) toast.error(saved.error || "บันทึกจุดจัดเก็บไม่สำเร็จ");
         else { toast.success("บันทึกจุดจัดเก็บแล้ว"); onDone(); }
       })}>{busy ? "..." : "บันทึก"}</button></td>

@@ -45,6 +45,47 @@ export function produceProfile(item: {
   };
 }
 
+function bangkokParts(input: string | Date): { year: number; month: number; day: number; hour: number; minute: number } | null {
+  const date = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const pick = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  const year = pick("year");
+  const month = pick("month");
+  const day = pick("day");
+  if (!year || !month || !day) return null;
+  return { year, month, day, hour: pick("hour") || 0, minute: pick("minute") || 0 };
+}
+
+export function formatShortDateTH(input: string | Date | null | undefined): string {
+  if (input == null || input === "") return "—";
+  if (typeof input === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.trim())) {
+    const [year, month, day] = input.trim().split("-").map(Number);
+    const yy = String((year + 543) % 100).padStart(2, "0");
+    return `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}/${yy}`;
+  }
+  const parts = bangkokParts(input);
+  if (!parts) return "—";
+  const yy = String((parts.year + 543) % 100).padStart(2, "0");
+  return `${String(parts.day).padStart(2, "0")}/${String(parts.month).padStart(2, "0")}/${yy}`;
+}
+
+export function formatTimeHHMM(input: string | Date | null | undefined): string {
+  if (input == null || input === "") return "—";
+  if (typeof input === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.trim())) return "—";
+  const parts = bangkokParts(input);
+  if (!parts) return "—";
+  return `${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`;
+}
+
 export function formatPrepPortionPct(packsDeducted: number, brewPortionMode?: string): string {
   const mode = (brewPortionMode || "").trim().toUpperCase();
   if (mode === "PCT_25") return "25%";

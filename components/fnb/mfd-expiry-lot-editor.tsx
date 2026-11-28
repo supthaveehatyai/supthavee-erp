@@ -1,11 +1,11 @@
 "use client";
 
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
+import { formatShortDateTH } from "@/lib/utils/fnb-format";
 import {
   calcExpiryDateFromMfg,
   dateStampMode,
   daysUntilDate,
-  formatThaiDate,
   parseChinese8DigitDate,
   shelfLifeUnit,
   type DateStampMode,
@@ -48,7 +48,7 @@ function ExpiryBadge({ iso }: { iso: string | null }) {
   const left = daysUntilDate(iso);
   const tone = left == null ? "bg-slate-100 text-slate-700" : left < 0 ? "bg-red-100 text-red-800" : left <= 14 ? "bg-amber-100 text-amber-950" : "bg-emerald-50 text-emerald-900";
   const note = left == null ? "" : left < 0 ? " · ❌ หมดอายุแล้ว!" : left <= 14 ? " · 🚨 ใกล้หมดอายุ! รีบใช้ก่อน FEFO" : ` · เหลืออีก ${left} วัน`;
-  return <p className={`rounded-md px-2 py-1 text-sm ${tone}`}>➡️ หมดอายุ: {formatThaiDate(iso)}{note}</p>;
+  return <p className={`rounded-md px-2 py-1 text-sm ${tone}`}>➡️ หมดอายุ: {formatShortDateTH(iso)}{note}</p>;
 }
 
 export function MfdExpiryLotEditor(props: {

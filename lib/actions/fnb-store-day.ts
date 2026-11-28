@@ -31,6 +31,7 @@ function zoneOf(row: Record<string, unknown>): FnbStorageZone {
     countWeekdays: Array.isArray(row.count_weekdays) ? row.count_weekdays.map((day) => Number(day)) : [],
     isDefaultGrTarget: row.is_default_gr_target === true,
     sortOrder: num(row.sort_order),
+    shortLabel: text(row.short_label),
   };
 }
 
@@ -57,7 +58,12 @@ async function actorName(branch: string, actorSource: string, brandLock: string)
 export async function listBranchZonesAction(branchCode?: string): Promise<FnbActionResult<FnbStorageZone[]>> {
   try {
     await requireAnyFnbModule(["goods_receipt_expiry", "sop_shift_settings", "branch_inventory_transfer", "store_portal"]);
-    const listed = await schemaAdmin().schema("fnb").from("storage_locations").select("id,branch_code,location_code,location_name_th,zone_type,default_count_schedule,count_weekdays,is_default_gr_target,sort_order,is_active").eq("is_active", true).order("sort_order", { ascending: true }).limit(200);
+    const withShort = "id,branch_code,location_code,location_name_th,zone_type,default_count_schedule,count_weekdays,is_default_gr_target,sort_order,is_active,short_label";
+    const baseColumns = "id,branch_code,location_code,location_name_th,zone_type,default_count_schedule,count_weekdays,is_default_gr_target,sort_order,is_active";
+    let listed = await schemaAdmin().schema("fnb").from("storage_locations").select(withShort).eq("is_active", true).order("sort_order", { ascending: true }).limit(200);
+    if (listed.error && (listed.error.message || "").includes("short_label")) {
+      listed = await schemaAdmin().schema("fnb").from("storage_locations").select(baseColumns).eq("is_active", true).order("sort_order", { ascending: true }).limit(200);
+    }
     if (listed.error) return fail([], listed.error, "อ่านจุดจัดเก็บไม่สำเร็จ");
     const rows = asRows(listed.data).map(zoneOf).filter((row) => !branchCode || row.branchCode === branchCode);
     return result(rows);
@@ -75,6 +81,7 @@ export async function saveStorageZoneAction(input: {
   defaultCountSchedule: string;
   countWeekdays: number[];
   isDefaultGrTarget: boolean;
+  shortLabel?: string;
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
     const ctx = await requireFnbModuleAccess("sop_shift_settings");
@@ -88,10 +95,17 @@ export async function saveStorageZoneAction(input: {
       count_weekdays: input.countWeekdays,
       is_default_gr_target: input.isDefaultGrTarget,
       is_active: true,
+      short_label: (input.shortLabel || "").trim() || null,
     };
-    const saved = input.id
-      ? await schemaAdmin().schema("fnb").from("storage_locations").update(payload).eq("id", input.id)
-      : await schemaAdmin().schema("fnb").from("storage_locations").insert(payload);
+    const write = async (body: Record<string, unknown>) => input.id
+      ? schemaAdmin().schema("fnb").from("storage_locations").update(body).eq("id", input.id)
+      : schemaAdmin().schema("fnb").from("storage_locations").insert(body);
+    let saved = await write(payload);
+    if (saved.error && (saved.error.message || "").includes("short_label")) {
+      const rest: Record<string, unknown> = { ...payload };
+      delete rest.short_label;
+      saved = await write(rest);
+    }
     if (saved.error) return fail({ ok: false }, saved.error, "บันทึกจุดจัดเก็บไม่สำเร็จ");
     return result({ ok: true });
   } catch (error) {
