@@ -153,6 +153,7 @@ export type FnbBranchOption = {
   shift_2_end: string | null;
   shift_3_start: string | null;
   shift_3_end: string | null;
+  max_staff_per_shift: number;
 };
 
 export type FnbBrandCode = "LUCKY_CUP" | "CHATORN";
@@ -685,6 +686,7 @@ export type FnbStageConfirmation = {
   photoUrls: string[];
   confirmedByName: string;
   confirmedAt: string;
+  lastEditReason: string | null;
   payload: Record<string, unknown>;
 };
 
@@ -932,4 +934,45 @@ export const FNB_BUILTIN_ROLE_DEFAULTS: Record<string, { modules: unknown; guard
     modules: { people_payroll: true, goods_receipt_expiry: true, hq_tax_reimburse: true, master_items_bom: true, tax_accounting_reports: true },
     guards: { can_view_cost_price: true, enforce_blind_count: false, can_approve_financial_edits: false },
   },
+};
+
+export type FnbCrewMember = {
+  userId: string;
+  staffName: string;
+  role: string;
+  checkedInAt: string;
+};
+
+export type FnbShiftRoster = {
+  shiftSlot: "SHIFT_1" | "SHIFT_2";
+  maxSeats: number;
+  members: FnbCrewMember[];
+};
+
+export type FnbLivePrepBase = {
+  baseCode: string;
+  baseNameTh: string;
+  yieldQtyMl: number;
+  sortOrder: number;
+};
+
+export type FnbLiveSnapshot = {
+  branchCode: string;
+  workDate: string;
+  brandCode: string;
+  maxStaffPerShift: number;
+  viewer: { userId: string; name: string; isSupervisor: boolean; workspaceRole: string };
+  rosters: FnbShiftRoster[];
+  confirmations: FnbStageConfirmation[];
+  prepBases: FnbLivePrepBase[];
+  lemonItemId: string;
+  wipBatches: { id: string; batchKind: string; prepBaseCode: string; itemId: string; packsDeducted: number; openedByName: string; batchStatus: string; photoUrls: string[] }[];
+  calibration: FnbStoreDayBoard["calibration"];
+  zoneCounts: { itemId: string; locationCode: string; countedQty: number; countStage: string; staffName: string }[];
+  displayLots: { itemId: string; remainingQty: number; displayExpiryDate: string; placedByName: string }[];
+  closings: { shiftType: string; staffName: string; netSalesIncVat: number }[];
+  waste: { staffName: string; totalWasteCostThb: number }[];
+  writeOffs: { itemId: string; reason: string; qty: number; staffName: string; photoUrls: string[] }[];
+  menuSales: { submittedByName: string; reportedTotalAmount: number } | null;
+  staffOptions: { userId: string; name: string }[];
 };

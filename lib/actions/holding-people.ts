@@ -34,7 +34,7 @@ export async function getHoldingPeopleHubAction(): Promise<{ data: HoldingPeople
       schemaAdmin().schema("holding").from("user_workspace_grants").select("user_id, username, staff_nickname, workspace_role, primary_workspace, assigned_brand_code, allowed_branch_codes, is_hr_manager, hr_allowed_workspaces, hr_allowed_entity_ids, hr_allowed_brand_codes, hr_can_prepare_payroll, hr_can_view_exec_private_pay, must_change_pin, last_login_at, is_active, is_super_admin"),
       schemaAdmin().from("user_profiles").select("id, email, full_name, is_active"),
       schemaAdmin().schema("holding").from("legal_entities").select("id, entity_name_th").order("entity_name_th", { ascending: true }),
-      schemaAdmin().schema("fnb").from("employees").select("emp_code, user_id, username"),
+      schemaAdmin().schema("fnb").from("employees").select("emp_code, user_id, username, employment_status").eq("employment_status", "ACTIVE"),
       schemaAdmin().schema("holding").from("iam_hr_audit_logs").select("id, created_at, actor_name, action_type, target_name, workspace_key").order("created_at", { ascending: false }).limit(80),
     ]);
     const peopleById = new Map((Array.isArray(profiles.data) ? profiles.data as Record<string, unknown>[] : []).map((row) => [text(row.id), row]));

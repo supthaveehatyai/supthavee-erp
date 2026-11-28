@@ -238,7 +238,7 @@ export async function listExpiryWorkspaceAction(brandLock?: FnbBrandCode | null)
     if (lines.error) return fail({ pending: [], lots: [] }, lines.error, "อ่านรายการรอแกะกล่องไม่สำเร็จ");
     const receiptById = new Map(asRows(receipts.data).map((row) => [text(row.id), row]));
     const itemById = new Map(asRows(items.data).map((row) => [text(row.id), row]));
-    const branches = await db.from("branches").select("branch_code,brand_code").limit(20);
+    const branches = await db.from("branches").select("branch_code,brand_code,branch_status").neq("branch_status", "INACTIVE").limit(20);
     const brandByBranch = new Map(asRows(branches.data).map((row) => [text(row.branch_code), text(row.brand_code)]));
     const allowed = (branchCode: string, label: string) => {
       if (!brandLock) return true;

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { branchForBrand } from "@/lib/fnb/brand-branch";
 import { BranchPills, fnbBranchStorageKey, useStoredBranch } from "@/components/fnb/branch-pills";
+import { CrewLockedFieldset, LiveBranchProvider } from "@/components/fnb/shift-crew-bar";
 import { toast } from "sonner";
 import { ApprovalQueue } from "@/app/fnb/approval-queue";
 import { CashFloatNote } from "@/components/fnb/cash-float-note";
@@ -96,11 +97,14 @@ export function OperationsWorkspace({
     if (!next) return;
     setBranch(next);
     localStorage.setItem(storageKey, next);
+    if (actorSource === "desktop") {
+      router.push(`/fnb/operations?brand=${activeBrand}&branch=${next}`);
+      return;
+    }
     const params = new URLSearchParams(window.location.search);
-    if (params.get("branch") === next) return;
     params.set("branch", next);
-    router.replace(`${pathname}?${params.toString()}`);
-  }, [activeBrand, branches, pathname, router, storageKey]);
+    router.push(`${pathname}?${params.toString()}`);
+  }, [activeBrand, actorSource, branches, pathname, router, storageKey]);
   useStoredBranch(storageKey, branches, pickBranch);
   const seenBranch = useRef(initialBranch);
   useEffect(() => {
@@ -120,6 +124,7 @@ export function OperationsWorkspace({
     return () => { delete document.documentElement.dataset.fnbAssisted; };
   }, [actorSource, superAdmin, viewMode]);
   const heading = brand === "LUCKY_CUP" ? "ปฏิบัติการ Lucky Cup" : "ปฏิบัติการชาทรตะโหมด";
+  const shiftSlot = tab === "CLOSING" || tab === "SHIFT_2" || tab === "SHIFT_3" ? "SHIFT_2" : "SHIFT_1";
 
   useEffect(() => {
     const block = (event: DragEvent) => event.preventDefault();
@@ -190,14 +195,15 @@ export function OperationsWorkspace({
       {message ? <p className={`rounded-lg px-3 py-2 text-sm ${message.includes("รออนุมัติ") ? "bg-amber-50 text-amber-900" : message.includes("เรียบร้อย") || message.includes("แล้ว") ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`}>{message}</p> : null}
       {superAdmin ? <ApprovalQueue requests={approvals} onDone={() => { void listPendingShiftApprovalsAction().then((listed) => setApprovals(listed.data)); }} /> : null}
       {actorSource === "desktop" ? <BranchPills branches={branches} active={branch} onPick={pickBranch} /> : null}
-      <div className="grid gap-3 rounded-xl border border-red-100 bg-white p-4 md:grid-cols-3">
-        <select className={field} value={branch} disabled={branches.length <= 1} onChange={(event) => pickBranch(event.target.value)}>
-          {branches.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code} {item.branch_name_th}</option>)}
-        </select>
+      <div className="grid gap-3 rounded-xl border border-red-100 bg-white p-4 md:grid-cols-2">
         <p className="flex h-10 items-center rounded-md bg-red-50 px-3 text-sm text-red-900">ผู้ปฏิบัติงาน: {staffName || "บัญชีที่ล็อกอิน"}</p>
-        <input className={field} type="date" value={workDate} onChange={(event) => setWorkDate(event.target.value)} />
+        <label className="flex h-10 items-center gap-2 text-sm text-slate-800">
+          <span className="shrink-0 font-medium">วันที่ตรวจสอบ</span>
+          <input className={field} type="date" value={workDate} onChange={(event) => setWorkDate(event.target.value)} />
+        </label>
       </div>
-      {superAdmin && viewMode === "EXECUTIVE_INSPECTOR" ? <ExecutiveInspector brand={brand} workDate={workDate} branch={branch} onPickBranch={pickBranch} /> : <fieldset disabled={monthLocked} className="min-w-0 space-y-4 border-0 p-0 disabled:opacity-70">
+      <LiveBranchProvider key={`${branch}|${workDate}`} branch={branch} workDate={workDate} shiftSlot={shiftSlot}>
+      {superAdmin && viewMode === "EXECUTIVE_INSPECTOR" ? <ExecutiveInspector brand={brand} workDate={workDate} branch={branch} onPickBranch={pickBranch} /> : <CrewLockedFieldset monthLocked={monthLocked}>
       <div className="flex flex-wrap gap-2">
         <TabButton active={tab === "OPENING"} onClick={() => setTab("OPENING")}>1. เปิดร้าน (กะแรก)</TabButton>
         <TabButton active={tab === "WIP"} onClick={() => setTab("WIP")}>ต้มเบสเพิ่มและเบิกเปิดของขึ้นบาร์</TabButton>
@@ -216,7 +222,8 @@ export function OperationsWorkspace({
       {brandLock ? <ReimburseBox brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} busy={busy === "reimburse"} run={run} /> : null}
       {superAdmin ? <SectionPhotoDrawer workDate={workDate} brand={brand} /> : null}
       {superAdmin ? <SettlementPanel shifts={day?.shifts ?? []} busy={busy === "settle"} run={run} /> : null}
-      </fieldset>}
+      </CrewLockedFieldset>}
+      </LiveBranchProvider>
     </div>
   );
 }

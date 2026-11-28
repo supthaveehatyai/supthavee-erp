@@ -181,6 +181,7 @@ export async function saveBranchShiftSettingsAction(formData: FormData): Promise
       enable_shift_3: formData.get("enable_shift_3") === "true",
       shift_3_start: text(formData.get("shift_3_start")) || null,
       shift_3_end: text(formData.get("shift_3_end")) || null,
+      max_staff_per_shift: Math.max(1, Math.trunc(Number(formData.get("max_staff_per_shift")) || 2)),
       updated_at: new Date().toISOString(),
     }).eq("branch_code", branch);
     if (updated.error) return fail({ ok: false }, updated.error, "บันทึกกะสาขาไม่สำเร็จ");

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { LiveWatermarkCamera } from "@/components/fnb/live-watermark-camera";
 import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
 import { confirmStageSectionAction } from "@/lib/actions/fnb-stage";
+import { useLiveBranch } from "@/components/fnb/shift-crew-bar";
 import { bangkokClock } from "@/lib/fnb/stage-progress";
 import type { FnbStageConfirmation } from "@/types/fnb";
 
@@ -37,6 +38,7 @@ export function CashFloatConfirm(props: {
   saved: FnbStageConfirmation | null;
   onDone: () => void;
 }) {
+  const live = useLiveBranch();
   const [editing, setEditing] = useState(false);
   const [counted, setCounted] = useState(props.saved?.numericAmount != null ? String(props.saved.numericAmount) : String(props.expected));
   const [photo, setPhoto] = useState(props.saved?.photoUrls[0] ?? "");
@@ -81,7 +83,10 @@ export function CashFloatConfirm(props: {
           brandLock: props.brand,
           isEdit: editing,
           editReason: editing ? reason : "",
+          assistReason: live.snapshot?.viewer.isSupervisor ? live.assistReason : "",
+          shiftSlot: props.stage === "CLOSING" ? "SHIFT_2" : "SHIFT_1",
         }).then((saved) => {
+          if (!saved.error && saved.data.ok) void live.refresh();
           if (saved.error || !saved.data.ok) toast.error(saved.error || "ยืนยันเงินในเก๊ะไม่สำเร็จ");
           else { toast.success("ยืนยันการนับเงินในเก๊ะแล้ว"); setEditing(false); props.onDone(); }
         });

@@ -463,7 +463,8 @@ export async function listFnbBranchesAction(): Promise<HoldingActionResult<FnbBr
     const listed = await schemaAdmin()
       .schema("fnb")
       .from("branches")
-      .select("*")
+      .select("branch_code, branch_name_th, brand_code, branch_status, target_open_date, sort_order")
+      .neq("branch_status", "INACTIVE")
       .order("sort_order", { ascending: true })
       .limit(50);
     if (listed.error) {

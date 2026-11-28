@@ -7,6 +7,7 @@ type QueryError = { code?: string; message?: string } | null;
 
 type FilterBuilder = Promise<{ data: unknown; error: QueryError }> & {
   eq: (column: string, value: string | boolean | number | null) => FilterBuilder;
+  neq: (column: string, value: string | boolean | number | null) => FilterBuilder;
   gt: (column: string, value: string | number) => FilterBuilder;
   gte: (column: string, value: string | number) => FilterBuilder;
   lte: (column: string, value: string | number) => FilterBuilder;

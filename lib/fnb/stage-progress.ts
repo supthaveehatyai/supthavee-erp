@@ -4,6 +4,11 @@ const OPENING_SECTIONS = [1, 2, 3, 4, 5, 6, 7];
 const CLOSING_SECTIONS = [1, 2, 3, 4];
 
 export function sectionNumber(stage: "OPENING" | "CLOSING", sectionKey: string): number | null {
+  if (sectionKey.includes("_SPOT_")) return null;
+  if (sectionKey.startsWith("CLOSE_")) {
+    const closeNo = Number(sectionKey.split("_")[1]);
+    return closeNo >= 1 && closeNo <= 4 ? closeNo : null;
+  }
   if (stage === "OPENING") {
     if (sectionKey.startsWith("SEC_7")) return 7;
     const match = sectionKey.match(/^SEC_(\d+)/);

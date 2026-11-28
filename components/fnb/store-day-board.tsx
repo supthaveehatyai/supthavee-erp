@@ -18,6 +18,8 @@ import { CoworkerBanner } from "@/components/fnb/coworker-banner";
 import { DisplayCabinetGrid } from "@/components/fnb/display-cabinet-grid";
 import { WriteOffButton } from "@/components/fnb/write-off-panel";
 import { confirmStageSectionAction, listStageConfirmationsAction } from "@/lib/actions/fnb-stage";
+import { findSection, LockedSectionCard, UnsavedDraftBar } from "@/components/fnb/section-confirm-card";
+import { useLiveBranch } from "@/components/fnb/shift-crew-bar";
 import { barItemLabel, barOpenItems, itemMatches, prepBaseLabel } from "@/lib/fnb/item-search";
 import { OpeningSauceCards } from "@/components/fnb/opening-sauce-cards";
 import type { FnbBrandCode, FnbStageConfirmation, FnbStoreDayBoard, FnbZoneCountLine } from "@/types/fnb";
@@ -51,8 +53,24 @@ async function uploadShot(file: File, live: boolean, branch: string, actorSource
   return saved.data.url;
 }
 
+function prepSummary(row: FnbStageConfirmation) {
+  const bases = Array.isArray(row.payload.bases) ? row.payload.bases : [];
+  const parts = bases.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const rec = item as Record<string, unknown>;
+    const code = String(rec.code ?? "");
+    if (rec.portion === "SKIP") return [`${code} มีของเดิม`];
+    const pct = Math.round(Number(rec.portion) * 100);
+    return [`${code} ${pct}% (${Number(rec.ml) || 0} ml)`];
+  });
+  const lemons = Number(row.payload.lemons);
+  if (Number.isFinite(lemons)) parts.push(lemons > 0 ? `เลมอน ${lemons} ลูก` : "เลมอน มีของเดิม/ยังไม่หั่น");
+  return parts.join(", ") || row.sectionTitle;
+}
+
 export function OpeningChecklist(props: { branch: string; workDate: string; actorSource: "desktop" | "liff"; brandLock: FnbBrandCode | null; staffName: string; cashFloat?: number }) {
   const brand = props.brandLock ?? "";
+  const live = useLiveBranch();
   const { board, error, reload } = useBoard(props.branch, props.workDate, props.actorSource, brand);
   const [busy, start] = useTransition();
   const [equipPhoto, setEquipPhoto] = useState("");
@@ -75,6 +93,15 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
       setLemons((loaded.data?.items ?? []).filter((item) => item.short_code === "LEM"));
     });
   }, [props.branch, props.workDate, props.actorSource, props.brandLock]);
+  const openingConfirms = live.snapshot ? live.snapshot.confirmations.filter((row) => row.stageCode === "OPENING") : confirms;
+  const shownBases = live.snapshot?.prepBases.length ? live.snapshot.prepBases.map((base) => ({ base_code: base.baseCode, base_name_th: base.baseNameTh, yield_qty_ml: base.yieldQtyMl, sort_order: base.sortOrder })) : bases;
+  const prepSaved = findSection(openingConfirms, ["SEC_1_PREP"]);
+  const equipSaved = findSection(openingConfirms, ["SEC_2_EQUIP", "SEC_2_EQUIPMENT"]);
+  const sauceSaved = findSection(openingConfirms, ["SEC_3_SAUCE"]);
+  const prepDirty = !prepSaved && (Object.keys(portion).length > 0 || lemonCount !== "" || lemonGrams !== "");
+  function assist() {
+    return live.snapshot?.viewer.isSupervisor ? { assistReason: live.assistReason, isEdit: true as const } : {};
+  }
   const front = board?.locations.find((row) => row.zoneType === "FRONT_DISPLAY");
   const back = board?.locations.find((row) => row.zoneType === "BACKROOM");
   return (
@@ -84,8 +111,8 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       <article className="space-y-2">
         <h3 className="font-semibold">หมวดที่ 1: เตรียมวัตถุดิบเบสและหั่นเลมอน</h3>
-        <div className="space-y-2">
-          {[...bases].sort((left, right) => (left.sort_order ?? 0) - (right.sort_order ?? 0) || left.base_code.localeCompare(right.base_code)).map((base) => (
+        {prepSaved ? <LockedSectionCard row={prepSaved} summary={prepSummary(prepSaved)} /> : <div className="space-y-2">
+          {[...shownBases].sort((left, right) => (left.sort_order ?? 0) - (right.sort_order ?? 0) || left.base_code.localeCompare(right.base_code)).map((base) => (
             <div key={base.base_code} className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-2 text-sm">
               <div className="min-w-44">
                 <p className="font-bold">{base.base_code} · {base.base_name_th || base.base_code}</p>
@@ -105,8 +132,9 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
           <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle="เตรียมเบสและหั่นเลมอน" liveCameraOnly onCapture={(file, live) => void uploadShot(file, live, props.branch, props.actorSource, brand).then(setPrepPhoto).catch((reason: Error) => toast.error(reason.message))} />
           <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy} onClick={() => start(async () => {
             if (!prepPhoto) { toast.error("ถ่ายรูปสดหมวดที่ 1 ก่อนบันทึก"); return; }
-            if (bases.some((base) => !portion[base.base_code]) || lemonCount === "" || lemonGrams === "") { toast.error("เลือกสัดส่วนทุกเบส และกรอกเลมอนให้ครบ"); return; }
-            for (const base of bases) {
+            if (shownBases.some((base) => !portion[base.base_code]) || lemonCount === "") { toast.error("เลือกสัดส่วนทุกเบส และระบุจำนวนเลมอน (ใส่ 0 ได้ถ้ามีของเดิม/ยังไม่หั่น)"); return; }
+            if (Number(lemonCount) > 0 && lemonGrams === "") { toast.error("กรอกน้ำหนักเลมอนเมื่อหั่นมากกว่า 0 ลูก"); return; }
+            for (const base of shownBases) {
               if (portion[base.base_code] === "SKIP") continue;
               const body = new FormData();
               body.set("actor_source", props.actorSource);
@@ -122,7 +150,7 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
               const saved = await issueWipBatchAction(body);
               if (saved.error || !saved.data.ok) { toast.error(saved.error || saved.data.message || `ต้ม ${base.base_code} ไม่สำเร็จ`); return; }
             }
-            const lemon = lemons[0];
+            const lemon = lemons[0] ?? (live.snapshot?.lemonItemId ? { id: live.snapshot.lemonItemId, count_uom: "ลูก" } : undefined);
             if (lemon && Number(lemonCount) > 0) {
               const body = new FormData();
               body.set("actor_source", props.actorSource);
@@ -139,16 +167,22 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
               const saved = await issueWipBatchAction(body);
               if (saved.error || !saved.data.ok) { toast.error(saved.error || "บันทึกเลมอนไม่สำเร็จ"); return; }
             }
-            const again = confirms.some((row) => row.sectionKey === "SEC_1_PREP");
-            await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: "SEC_1_PREP", sectionTitle: "หมวด 1 เตรียมเบสและหั่นเลมอน", photoUrls: prepPhoto ? [prepPhoto] : [], actorSource: props.actorSource, brandLock: brand, isEdit: again, editReason: again ? "บันทึกหมวดนี้อีกครั้ง" : "" });
+            const confirmed = await confirmStageSectionAction({
+              branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: "SEC_1_PREP", sectionTitle: "หมวดที่ 1: เตรียมวัตถุดิบเบสและหั่นเลมอน",
+              photoUrls: prepPhoto ? [prepPhoto] : [], actorSource: props.actorSource, brandLock: brand, shiftSlot: "SHIFT_1", ...assist(),
+              payload: { bases: shownBases.map((base) => ({ code: base.base_code, portion: portion[base.base_code], ml: portion[base.base_code] === "SKIP" ? 0 : Math.round(base.yield_qty_ml * Number(portion[base.base_code])) })), lemons: Number(lemonCount) || 0, lemonGrams: Number(lemonGrams) || 0 },
+            });
+            if (confirmed.error || !confirmed.data.ok) { toast.error(confirmed.error || "ยืนยันหมวดที่ 1 ไม่สำเร็จ"); return; }
             toast.success("บันทึกหมวดที่ 1 แล้ว");
+            void live.refresh();
             bump();
-          })}>บันทึกหมวดที่ 1</button>
-        </div>
+          })}>💾 บันทึกยืนยันหมวดที่ 1</button>
+          {prepDirty ? <UnsavedDraftBar sectionNo={1} /> : null}
+        </div>}
       </article>
       <article className="space-y-2">
         <h3 className="font-semibold">หมวดที่ 2: ตรวจสอบมาตรฐานอุปกรณ์</h3>
-        <form className="grid gap-2 md:grid-cols-3" onSubmit={(event) => {
+        {equipSaved ? <LockedSectionCard row={equipSaved} summary={`บด ${live.snapshot?.calibration?.grinderDoseG ?? "-"} g · ช็อต ${live.snapshot?.calibration?.espressoTimeSec ?? "-"} วิ · น้ำหนัก ${live.snapshot?.calibration?.espressoYieldG ?? "-"} g`} /> : <form className="grid gap-2 md:grid-cols-3" onSubmit={(event) => {
           event.preventDefault();
           const body = new FormData(event.currentTarget);
           const dose = Number(body.get("grinder_dose_g"));
@@ -172,9 +206,9 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
             const saved = await saveEquipmentCalibrationAction(body);
             if (saved.error || !saved.data.ok) toast.error(saved.error || "บันทึกอุปกรณ์ไม่สำเร็จ");
             else {
-              const again = confirms.some((row) => row.sectionKey === "SEC_2_EQUIPMENT");
-              await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: "SEC_2_EQUIPMENT", sectionTitle: "หมวด 2 ตรวจสอบมาตรฐานอุปกรณ์", photoUrls: equipPhoto ? [equipPhoto] : [], actorSource: props.actorSource, brandLock: brand, isEdit: again, editReason: again ? "บันทึกหมวดนี้อีกครั้ง" : "" });
+              await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: "SEC_2_EQUIP", sectionTitle: "หมวดที่ 2: ตรวจสอบมาตรฐานอุปกรณ์", photoUrls: equipPhoto ? [equipPhoto] : [], actorSource: props.actorSource, brandLock: brand, shiftSlot: "SHIFT_1", payload: { grinderDoseG: dose, espressoTimeSec: seconds, espressoYieldG: yieldG, syrupRandomG: randomG, syrupActualG: actualG }, ...assist() });
               toast.success(saved.data.warning || "บันทึกมาตรฐานอุปกรณ์แล้ว");
+              void live.refresh();
               bump();
             }
           });
@@ -187,18 +221,19 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
           <label className="flex items-center gap-2 text-sm"><input name="syrup_adjusted_ok" type="checkbox" value="true" defaultChecked={board?.calibration?.syrupAdjusted} />ปรับจูนเครื่องเรียบร้อยแล้ว</label>
           {equipError ? <p className="text-sm text-red-700 md:col-span-3">{equipError}</p> : null}
           <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle="เช็คมาตรฐานอุปกรณ์" liveCameraOnly onCapture={(file, live) => void uploadShot(file, live, props.branch, props.actorSource, brand).then(setEquipPhoto).catch((reason: Error) => toast.error(reason.message))} />
-          <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy}>บันทึกหมวดที่ 2</button>
-        </form>
+          <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy}>💾 บันทึกยืนยันหมวดที่ 2</button>
+        </form>}
       </article>
       <article className="space-y-2">
         <h3 className="font-semibold">หมวดที่ 3: ซอสและวัตถุดิบเปิดใช้หน้าบาร์</h3>
+        {sauceSaved ? <LockedSectionCard row={sauceSaved} summary="ยืนยันซอสและวัตถุดิบเปิดใช้หน้าบาร์แล้ว" /> : <>
         <OpeningSauceCards sauces={board?.sauces ?? []} branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={brand} staffName={props.staffName} onDone={bump} />
-        <button type="button" className="rounded-md border px-3 py-2 text-sm" onClick={() => start(async () => {
-          const again = confirms.some((row) => row.sectionKey === "SEC_3_SAUCE");
-          const saved = await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: "SEC_3_SAUCE", sectionTitle: "หมวด 3 ซอสและวัตถุดิบเปิดใช้", actorSource: props.actorSource, brandLock: brand, isEdit: again, editReason: again ? "บันทึกหมวดนี้อีกครั้ง" : "" });
+        <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" onClick={() => start(async () => {
+          const saved = await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: "SEC_3_SAUCE", sectionTitle: "หมวดที่ 3: ซอสและวัตถุดิบเปิดใช้หน้าบาร์", actorSource: props.actorSource, brandLock: brand, shiftSlot: "SHIFT_1", payload: { sauces: (board?.sauces ?? []).map((sauce) => ({ code: sauce.code, name: sauce.nameTh, expiresAt: sauce.expiresAt })) }, ...assist() });
           if (saved.error || !saved.data.ok) toast.error(saved.error || "ยืนยันหมวด 3 ไม่สำเร็จ");
-          else { toast.success("ยืนยันหมวดที่ 3 แล้ว"); bump(); }
-        })}>ยืนยันหมวดที่ 3</button>
+          else { toast.success("ยืนยันหมวดที่ 3 แล้ว"); void live.refresh(); bump(); }
+        })}>💾 บันทึกยืนยันหมวดที่ 3</button>
+        </>}
       </article>
       <article className="space-y-2">
         <h3 className="font-semibold">หมวดที่ 4–5: ตู้แช่เบเกอรี่ ตู้ไอศกรีม และชั้นโชว์ของพรีเมียม</h3>
@@ -217,10 +252,10 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
         <WriteOffButton branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={props.brandLock ?? "LUCKY_CUP"} staffName={props.staffName} locations={board?.locations ?? []} onDone={bump} />
       </article>
       <article className="space-y-2">
-        <h3 className="font-semibold">หมวด 6: เงินสดตั้งต้นในเก๊ะ</h3>
-        <CashFloatConfirm title="หมวด 6 เงินสดตั้งต้นในเก๊ะ" sectionKey="SEC_6_CASH_FLOAT" stage="OPENING" expected={props.cashFloat && props.cashFloat > 0 ? props.cashFloat : 1200} branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={brand} staffName={props.staffName} saved={confirms.find((row) => row.sectionKey === "SEC_6_CASH_FLOAT") ?? null} onDone={bump} />
+        <h3 className="font-semibold">หมวดที่ 6: เงินสดตั้งต้นในเก๊ะ</h3>
+        <CashFloatConfirm title={`หมวดที่ 6: เงินสดตั้งต้นในเก๊ะ ${(props.cashFloat && props.cashFloat > 0 ? props.cashFloat : 1200).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท`} sectionKey="SEC_6_CASH_FLOAT" stage="OPENING" expected={props.cashFloat && props.cashFloat > 0 ? props.cashFloat : 1200} branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={brand} staffName={props.staffName} saved={confirms.find((row) => row.sectionKey === "SEC_6_CASH_FLOAT") ?? null} onDone={bump} />
       </article>
-      <CleaningSpots title="หมวด 7 ความสะอาดเปิดร้าน" stage="OPENING" spots={board?.openingSpots ?? []} confirmations={confirms} branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={brand} staffName={props.staffName} onDone={bump} />
+      <CleaningSpots title="หมวดที่ 7: ความสะอาดเปิดร้าน" stage="OPENING" spots={board?.openingSpots ?? []} confirmations={confirms} branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={brand} staffName={props.staffName} onDone={bump} />
     </section>
   );
 }
@@ -340,6 +375,7 @@ function MoveForm(props: {
 }
 
 export function NightCloseCount(props: { branch: string; workDate: string; actorSource: "desktop" | "liff"; brandLock: FnbBrandCode | null; staffName: string; warehouseOnly?: boolean; cashFloat?: number }) {
+  const live = useLiveBranch();
   const brand = props.brandLock ?? "";
   const { board, error, reload } = useBoard(props.branch, props.workDate, props.actorSource, brand);
   const [confirms, setConfirms] = useState<FnbStageConfirmation[]>([]);
@@ -367,10 +403,17 @@ export function NightCloseCount(props: { branch: string; workDate: string; actor
       const saved = await saveZoneCountsAction({ branchCode: props.branch, workDate: props.workDate, stage, actorSource: props.actorSource, brandLock: brand, lines: payload });
       if (saved.error || !saved.data.ok) toast.error(saved.error || "บันทึกยอดนับไม่สำเร็จ");
       else {
+        const assist = live.snapshot?.viewer.isSupervisor ? { assistReason: live.assistReason, isEdit: true as const } : {};
         if (stage === "CLOSING" && locationCode === front?.locationCode) {
-          await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "CLOSING", sectionKey: "SEC_3_FRONT_COUNT", sectionTitle: "หมวด 3 นับปิดหน้าร้าน", actorSource: props.actorSource, brandLock: brand });
+          const confirmed = await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "CLOSING", sectionKey: "CLOSE_3_FRONT", sectionTitle: "หมวดที่ 3 ปิดร้าน: นับของหน้าร้าน", actorSource: props.actorSource, brandLock: brand, shiftSlot: "SHIFT_2", payload: { lines: payload }, ...assist });
+          if (confirmed.error || !confirmed.data.ok) { toast.error(confirmed.error || "ยืนยันหมวดที่ 3 ไม่สำเร็จ"); return; }
+        }
+        if (stage === "CLOSING" && locationCode !== front?.locationCode) {
+          const confirmed = await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "CLOSING", sectionKey: "CLOSE_4_BACKROOM", sectionTitle: "หมวดที่ 4 ปิดร้าน: นับหลังร้านและของเสีย", actorSource: props.actorSource, brandLock: brand, shiftSlot: "SHIFT_2", payload: { lines: payload }, ...assist });
+          if (confirmed.error || !confirmed.data.ok) { toast.error(confirmed.error || "ยืนยันหมวดที่ 4 ไม่สำเร็จ"); return; }
         }
         toast.success("บันทึกยอดนับแล้ว");
+        void live.refresh();
       }
       setConfirmTick((value) => value + 1);
       reload();
@@ -381,10 +424,11 @@ export function NightCloseCount(props: { branch: string; workDate: string; actor
       {props.warehouseOnly ? null : <CoworkerBanner branch={props.branch} workDate={props.workDate} stage="CLOSING" actorSource={props.actorSource} brandLock={brand} reloadToken={confirmTick} />}
       <h2 className="text-lg font-semibold">{props.warehouseOnly ? "รอบนับโกดัง" : "ช่วงที่ 4 — ปิดร้านและจับของหาย"}</h2>
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {Object.values(qty).some((value) => value !== "") ? <UnsavedDraftBar sectionNo={3} /> : null}
       {props.warehouseOnly ? null : (
         <article className="space-y-2">
-          <h3 className="font-semibold">หมวด 1 เงินสดคงเหลือติดเก๊ะปิดร้าน</h3>
-          <CashFloatConfirm title="หมวด 1 เงินสดคงเหลือติดเก๊ะปิดร้าน" sectionKey="SEC_1_CASH_FLOAT" stage="CLOSING" expected={props.cashFloat && props.cashFloat > 0 ? props.cashFloat : 1200} branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={brand} staffName={props.staffName} saved={confirms.find((row) => row.sectionKey === "SEC_1_CASH_FLOAT") ?? null} onDone={() => setConfirmTick((value) => value + 1)} />
+          <h3 className="font-semibold">หมวดที่ 1 ปิดร้าน: เงินสดคงเหลือติดเก๊ะ</h3>
+          <CashFloatConfirm title="หมวดที่ 1 ปิดร้าน: เงินสดคงเหลือติดเก๊ะ" sectionKey="CLOSE_1_CASH" stage="CLOSING" expected={props.cashFloat && props.cashFloat > 0 ? props.cashFloat : 1200} branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={brand} staffName={props.staffName} saved={confirms.find((row) => row.sectionKey === "CLOSE_1_CASH" || row.sectionKey === "SEC_1_CASH_FLOAT") ?? null} onDone={() => setConfirmTick((value) => value + 1)} />
         </article>
       )}
       {props.warehouseOnly ? null : <CleaningSpots title="หมวด 2 ความสะอาดและล้างอุปกรณ์ปิดร้าน" stage="CLOSING" spots={board?.closingSpots ?? []} confirmations={confirms} branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={brand} staffName={props.staffName} onDone={() => setConfirmTick((value) => value + 1)} />}

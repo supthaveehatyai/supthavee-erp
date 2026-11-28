@@ -70,6 +70,7 @@ export function SopSettingsWorkspace({
             <label className="text-sm">กะแรกจบ<input className={field} name="shift_1_end" type="time" defaultValue={clock(branch.shift_1_end)} /></label>
             <label className="text-sm">กะสองเริ่ม<input className={field} name="shift_2_start" type="time" defaultValue={clock(branch.shift_2_start)} /></label>
             <label className="text-sm">กะสองจบ<input className={field} name="shift_2_end" type="time" defaultValue={clock(branch.shift_2_end)} /></label>
+            <label className="text-sm">จำนวนพนักงานสูงสุดต่อกะ<input className={field} name="max_staff_per_shift" type="number" min="1" max="6" step="1" defaultValue={branch.max_staff_per_shift || 2} /></label>
             <label className="flex items-center gap-2 text-sm md:col-span-4"><input type="checkbox" name="enable_shift_3" value="true" defaultChecked={branch.enable_shift_3} /> 🌙 เปิดใช้งาน กะสาม (รอบดึก/เทศกาล)</label>
             <label className="text-sm">กะสามเริ่ม<input className={field} name="shift_3_start" type="time" defaultValue={clock(branch.shift_3_start)} /></label>
             <label className="text-sm">กะสามจบ<input className={field} name="shift_3_end" type="time" defaultValue={clock(branch.shift_3_end)} /></label>

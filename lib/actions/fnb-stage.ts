@@ -5,7 +5,7 @@ import { fnbMonthLockMessage } from "@/lib/fnb/period-lock";
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
-import { requireAnyFnbModule } from "@/lib/holding/workspace-access";
+import { requireAnyFnbModule, requireFnbStoreOperationAccess } from "@/lib/holding/workspace-access";
 import type { FnbActionResult, FnbBrandCode, FnbStageConfirmation } from "@/types/fnb";
 
 function rpcBody(data: unknown): Record<string, unknown> {
@@ -28,12 +28,37 @@ export async function confirmStageSectionAction(input: {
   brandLock: string;
   isEdit?: boolean;
   editReason?: string;
+  assistReason?: string;
+  shiftSlot?: "SHIFT_1" | "SHIFT_2";
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
     const actor = await resolveFnbActor({ actorSource: input.actorSource, brandLock: input.brandLock, branchCode: input.branchCode });
     if (!actor.ok) return result({ ok: false }, actor.error);
+    const gate = await requireFnbStoreOperationAccess(input.branchCode);
+    if (!gate.ok) return result({ ok: false }, gate.error);
+    const supervisor = gate.ctx.isSuperAdmin || gate.ctx.workspaceRole === "FNB_BRANCH_MANAGER";
+    const reason = (input.assistReason || input.editReason || "").trim();
+    if (supervisor && reason.length < 4) return result({ ok: false }, "ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 4 ตัวอักษร)");
     const locked = await fnbMonthLockMessage(input.branchCode, input.workDate, input.brandLock);
     if (locked) return result({ ok: false }, locked);
+    if (!supervisor && gate.userId) {
+      const slot = input.shiftSlot ?? (input.stageCode === "CLOSING" ? "SHIFT_2" : "SHIFT_1");
+      const seated = await callFnbRpc("check_in_shift_crew_seat", {
+        p_branch_code: input.branchCode,
+        p_work_date: input.workDate,
+        p_shift_slot: slot,
+        p_user_id: gate.userId,
+        p_staff_name: actor.actor.name,
+        p_workspace_role: gate.ctx.workspaceRole || "FNB_STORE_STAFF",
+      });
+      const seatBody = rpcBody(seated.data);
+      if (seated.error) return fail({ ok: false }, seated.error, "ลงชื่อเข้ากะไม่สำเร็จ");
+      if (seatBody.ok === false) return result({ ok: false }, text(seatBody.error) || "กะนี้มีผู้ปฏิบัติงานครบแล้ว");
+    }
+    const payload = {
+      ...(input.payload ?? {}),
+      ...(supervisor ? { override_by_name: actor.actor.name, override_reason: reason } : {}),
+    };
     const saved = await callFnbRpc("confirm_stage_section_atomic", {
       p_branch_code: input.branchCode,
       p_work_date: input.workDate,
@@ -45,11 +70,12 @@ export async function confirmStageSectionAction(input: {
       p_expected_amount: input.expectedAmount ?? null,
       p_variance_reason: input.varianceReason || null,
       p_photo_urls: input.photoUrls ?? [],
-      p_payload_json: input.payload ?? {},
+      p_payload_json: payload,
       p_staff_name: actor.actor.name,
       p_user_id: actor.actor.userId,
-      p_is_edit: Boolean(input.isEdit),
-      p_edit_reason: input.editReason || null,
+      p_is_edit: supervisor || Boolean(input.isEdit),
+      p_edit_reason: supervisor ? reason : (input.editReason || null),
+      p_is_supervisor: supervisor,
     });
     if (saved.error) return fail({ ok: false }, saved.error, "ยืนยันหมวดไม่สำเร็จ");
     const body = rpcBody(saved.data);
@@ -71,7 +97,7 @@ export async function listStageConfirmationsAction(
     const actor = await resolveFnbActor({ actorSource, brandLock, branchCode });
     if (!actor.ok) return result([], actor.error);
     const listed = await schemaAdmin().schema("fnb").from("daily_stage_section_confirmations")
-      .select("id,section_key,section_title_th,stage_code,status_flag,numeric_amount,expected_amount,variance_reason,photo_urls,confirmed_by_name,confirmed_at,payload_json")
+      .select("id,section_key,section_title_th,stage_code,status_flag,numeric_amount,expected_amount,variance_reason,photo_urls,confirmed_by_name,confirmed_at,last_edit_reason,payload_json")
       .eq("branch_code", branchCode)
       .eq("work_date", workDate)
       .eq("stage_code", stageCode)
@@ -90,6 +116,7 @@ export async function listStageConfirmationsAction(
       photoUrls: Array.isArray(row.photo_urls) ? row.photo_urls.map((url) => text(url)).filter(Boolean) : [],
       confirmedByName: text(row.confirmed_by_name),
       confirmedAt: text(row.confirmed_at),
+      lastEditReason: row.last_edit_reason == null ? null : text(row.last_edit_reason),
       payload: row.payload_json && typeof row.payload_json === "object" ? row.payload_json as Record<string, unknown> : {},
     })));
   } catch (error) {
@@ -100,7 +127,7 @@ export async function listStageConfirmationsAction(
 export async function listBrandStagePhotosAction(workDate: string, brand: FnbBrandCode): Promise<FnbActionResult<{ branchCode: string; sectionTitle: string; staff: string; at: string; urls: string[] }[]>> {
   try {
     await requireAnyFnbModule(["sop_shift_settings", "all_branch_analytics", "store_portal"]);
-    const branches = await schemaAdmin().schema("fnb").from("branches").select("branch_code").eq("brand_code", brand).limit(20);
+    const branches = await schemaAdmin().schema("fnb").from("branches").select("branch_code,branch_status").eq("brand_code", brand).neq("branch_status", "INACTIVE").limit(20);
     const codes = asRows(branches.data).map((row) => text(row.branch_code));
     if (codes.length === 0) return result([]);
     const listed = await schemaAdmin().schema("fnb").from("daily_stage_section_confirmations")

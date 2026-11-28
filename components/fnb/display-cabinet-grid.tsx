@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import { replenishZoneAction, saveZoneCountsAction } from "@/lib/actions/fnb-store-day";
 import { confirmStageSectionAction } from "@/lib/actions/fnb-stage";
+import { UnsavedDraftBar } from "@/components/fnb/section-confirm-card";
+import { useLiveBranch } from "@/components/fnb/shift-crew-bar";
 import { addDays, bangkokHour, shortThaiDate } from "@/lib/fnb/stage-progress";
 import { FNB_DISPLAY_SUB_GROUPS, type FnbDisplayLot, type FnbZoneCountLine } from "@/types/fnb";
 
@@ -93,6 +95,7 @@ export function DisplayCabinetGrid(props: {
   backCode: string;
   onDone: () => void;
 }) {
+  const live = useLiveBranch();
   const [qty, setQty] = useState<Record<string, string>>({});
   const [evening, setEvening] = useState(bangkokHour() >= 17);
   const [busy, setBusy] = useState(false);
@@ -148,15 +151,21 @@ export function DisplayCabinetGrid(props: {
           }));
           const saved = await saveZoneCountsAction({ branchCode: props.branch, workDate: props.workDate, stage: "OPENING", actorSource: props.actorSource, brandLock: props.brand, lines });
           if (saved.error || !saved.data.ok) { toast.error(saved.error || "บันทึกยอดเช้าไม่สำเร็จ"); setBusy(false); return; }
-          for (const section of [{ key: "SEC_4_BAKERY", title: "หมวด 4 ตู้แช่เบเกอรี่" }, { key: "SEC_5_ICE_MERCH", title: "หมวด 5 ไอศกรีมและของพรีเมียม" }]) {
-            const first = await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: section.key, sectionTitle: section.title, actorSource: props.actorSource, brandLock: props.brand });
-            if (!first.data.ok) await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: section.key, sectionTitle: section.title, actorSource: props.actorSource, brandLock: props.brand, isEdit: true, editReason: "บันทึกยอดอีกครั้ง" });
+          const assist = live.snapshot?.viewer.isSupervisor ? { assistReason: live.assistReason, isEdit: true as const } : {};
+          for (const section of [
+            { key: "SEC_4_BAKERY_ICE", title: "หมวดที่ 4: ตู้แช่เบเกอรี่และตู้ไอศกรีม", lines: [...bakery, ...ice] },
+            { key: "SEC_5_MERCH", title: "หมวดที่ 5: ชั้นโชว์ของพรีเมียมหน้าร้าน", lines: merch },
+          ]) {
+            const confirmed = await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: section.key, sectionTitle: section.title, actorSource: props.actorSource, brandLock: props.brand, shiftSlot: "SHIFT_1", payload: { lines: section.lines.map((line) => ({ itemId: line.itemId, code: line.shortCode, qty: qty[line.itemId] ?? "" })) }, ...assist });
+            if (confirmed.error || !confirmed.data.ok) { toast.error(confirmed.error || "ยืนยันหมวดไม่สำเร็จ"); setBusy(false); return; }
           }
           toast.success("บันทึกยอดชั้นโชว์ตอนเปิดร้านแล้ว");
+          void live.refresh();
           setBusy(false);
           props.onDone();
         })();
-      }}>บันทึกยอดเปิดร้านหมวด 4–5</button>
+      }}>💾 บันทึกยืนยันหมวดที่ 4 และหมวดที่ 5</button>
+      {Object.values(qty).some((value) => value !== "") ? <UnsavedDraftBar sectionNo={4} /> : null}
     </div>
   );
 }

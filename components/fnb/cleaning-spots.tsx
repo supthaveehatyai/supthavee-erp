@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { LiveWatermarkCamera } from "@/components/fnb/live-watermark-camera";
 import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
 import { confirmStageSectionAction } from "@/lib/actions/fnb-stage";
+import { useLiveBranch } from "@/components/fnb/shift-crew-bar";
 import { bangkokClock } from "@/lib/fnb/stage-progress";
 import type { FnbStageConfirmation } from "@/types/fnb";
 
@@ -32,6 +33,7 @@ export function CleaningSpots(props: {
   staffName: string;
   onDone: () => void;
 }) {
+  const live = useLiveBranch();
   const [status, setStatus] = useState<Record<string, "PASSED" | "ISSUE_REPORTED">>({});
   const prefix = props.stage === "OPENING" ? "SEC_7_SPOT_" : "SEC_2_SPOT_";
   return (
@@ -50,7 +52,8 @@ export function CleaningSpots(props: {
             </div>
             {saved?.photoUrls[0] ? <a href={saved.photoUrls[0]} target="_blank" rel="noreferrer"><img src={saved.photoUrls[0]} alt="" className="mt-2 h-16 w-16 rounded object-cover" /></a> : null}
             {saved ? <p className="mt-1 text-xs">ตรวจโดย: {saved.confirmedByName} · {bangkokClock(saved.confirmedAt)}</p> : null}
-            <LiveWatermarkCamera branchCode={props.branch} stage={props.stage} staffName={props.staffName} taskTitle={spot.spotNameTh} liveCameraOnly onCapture={(file, live) => void uploadShot(file, live, props.branch, props.actorSource, props.brand).then(async (url) => {
+            <LiveWatermarkCamera branchCode={props.branch} stage={props.stage} staffName={props.staffName} taskTitle={spot.spotNameTh} liveCameraOnly onCapture={(file, liveShot) => void uploadShot(file, liveShot, props.branch, props.actorSource, props.brand).then(async (url) => {
+              const assist: { assistReason?: string; isEdit?: boolean } = live.snapshot?.viewer.isSupervisor ? { assistReason: live.assistReason, isEdit: true } : {};
               const savedSpot = await confirmStageSectionAction({
                 branchCode: props.branch,
                 workDate: props.workDate,
@@ -62,8 +65,10 @@ export function CleaningSpots(props: {
                 payload: { spotId: spot.id },
                 actorSource: props.actorSource,
                 brandLock: props.brand,
-                isEdit: Boolean(saved),
+                isEdit: Boolean(saved) || assist.isEdit,
                 editReason: saved ? "ถ่ายรูปจุดนี้อีกครั้ง" : "",
+                assistReason: assist.assistReason,
+                shiftSlot: props.stage === "CLOSING" ? "SHIFT_2" : "SHIFT_1",
               });
               if (savedSpot.error || !savedSpot.data.ok) { toast.error(savedSpot.error || "บันทึกจุดนี้ไม่สำเร็จ"); return; }
               const done = props.spots.every((item) => item.id === spot.id || props.confirmations.some((row) => row.sectionKey === `${prefix}${item.id}`));
@@ -72,12 +77,13 @@ export function CleaningSpots(props: {
                   branchCode: props.branch,
                   workDate: props.workDate,
                   stageCode: props.stage,
-                  sectionKey: props.stage === "OPENING" ? "SEC_7_CLEANING" : "SEC_2_CLEANING",
-                  sectionTitle: props.title,
+                  sectionKey: props.stage === "OPENING" ? "SEC_7_CLEANING" : "CLOSE_2_CLEANING",
+                  sectionTitle: props.stage === "OPENING" ? "หมวดที่ 7: ความสะอาดเปิดร้าน" : "หมวดที่ 2 ปิดร้าน: ความสะอาด",
                   actorSource: props.actorSource,
                   brandLock: props.brand,
-                  isEdit: props.confirmations.some((row) => row.sectionKey.endsWith("CLEANING")),
-                  editReason: "อัปเดตจุดความสะอาด",
+                  shiftSlot: props.stage === "CLOSING" ? "SHIFT_2" : "SHIFT_1",
+                  payload: { spots: props.spots.map((item) => ({ id: item.id, name: item.spotNameTh, done: item.id === spot.id || props.confirmations.some((row) => row.sectionKey === `${prefix}${item.id}`) })) },
+                  ...assist,
                 });
               }
               toast.success(`บันทึก ${spot.spotNameTh} แล้ว`);

@@ -144,8 +144,8 @@ export async function getFnbPeoplePayloadAction(activeBrand?: string): Promise<{
     const picked = activeBrand === "CHATORN" || activeBrand === "LUCKY_CUP" ? activeBrand : allowed[0] ?? "LUCKY_CUP";
     const brands = allowed.includes(picked) || ctx.isSuperAdmin ? [picked] : allowed.slice(0, 1);
     const [branches, employees] = await Promise.all([
-      schemaAdmin().schema("fnb").from("branches").select("branch_code, branch_name_th, brand_code").order("sort_order", { ascending: true }),
-      schemaAdmin().schema("fnb").from("employees").select("id, emp_code, user_id, full_name_th, nickname, first_name_en, last_name_en, username, brand_code, primary_branch_code, allowed_branch_codes, hire_date, employment_type, compensation_tier, base_pay_rate, position_allowance, diligence_allowance_default, is_sso_enrolled, bank_account_no, has_system_login, employment_status, system_role").order("emp_code", { ascending: true }),
+      schemaAdmin().schema("fnb").from("branches").select("branch_code, branch_name_th, brand_code, branch_status").neq("branch_status", "INACTIVE").order("sort_order", { ascending: true }),
+      schemaAdmin().schema("fnb").from("employees").select("id, emp_code, user_id, full_name_th, nickname, first_name_en, last_name_en, username, brand_code, primary_branch_code, allowed_branch_codes, hire_date, employment_type, compensation_tier, base_pay_rate, position_allowance, diligence_allowance_default, is_sso_enrolled, bank_account_no, has_system_login, employment_status, system_role").eq("employment_status", "ACTIVE").order("emp_code", { ascending: true }),
     ]);
     const seePrivate = canSeePrivatePay(ctx);
     const cards: FnbEmployeeCard[] = (Array.isArray(employees.data) ? employees.data as Record<string, unknown>[] : [])

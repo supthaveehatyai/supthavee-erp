@@ -62,7 +62,7 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
     const scope = brandOf(brand);
     const db = schemaAdmin().schema("fnb");
     const [branches, confirms, batches, transfers, shifts, sales, equipment, writeOffs, counts, items] = await Promise.all([
-      db.from("branches").select("branch_code,branch_name_th,brand_code").eq("brand_code", scope).eq("is_active", true).limit(20),
+      db.from("branches").select("branch_code,branch_name_th,brand_code,branch_status").eq("brand_code", scope).neq("branch_status", "INACTIVE").limit(20),
       db.from("daily_stage_section_confirmations").select("id,branch_code,stage_code,section_key,section_title_th,status_flag,numeric_amount,expected_amount,confirmed_by_name,confirmed_at,photo_urls").eq("work_date", workDate).limit(2000),
       db.from("bar_wip_batches").select("id,branch_code,batch_kind,prep_base_code,item_id,brew_portion_mode,opened_at,opened_by_name,expires_at,sticker_label_text,open_photo_urls,batch_status").eq("work_date", workDate).limit(1000),
       db.from("internal_zone_transfers").select("branch_code,item_id,qty_in_count_uom,created_at").eq("work_date", workDate).limit(1000),
@@ -167,7 +167,7 @@ export async function flagInspectionRetakeAction(confirmationId: string): Promis
   try {
     const ctx = await desk();
     if (!ctx.isSuperAdmin) return result({ ok: false }, "เฉพาะ Super Admin สั่งถ่ายซ่อมได้");
-    const updated = await schemaAdmin().schema("fnb").from("daily_stage_section_confirmations").update({ last_edit_reason: "สั่งถ่ายซ่อม", updated_at: new Date().toISOString() }).eq("id", confirmationId);
+    const updated = await schemaAdmin().schema("fnb").from("daily_stage_section_confirmations").update({ last_edit_reason: "สั่งถ่ายซ่อม" }).eq("id", confirmationId);
     if (updated.error) return fail({ ok: false }, updated.error, "สั่งถ่ายซ่อมไม่สำเร็จ");
     return result({ ok: true });
   } catch (error) {
@@ -192,7 +192,7 @@ export async function getAuditSummaryAction(brand: string, startDate: string, en
     await desk();
     const scope = brandOf(brand);
     const db = schemaAdmin().schema("fnb");
-    const branches = await db.from("branches").select("branch_code").eq("brand_code", scope).limit(20);
+    const branches = await db.from("branches").select("branch_code,branch_status").eq("brand_code", scope).neq("branch_status", "INACTIVE").limit(20);
     const codes = new Set(asRows(branches.data).map((row) => text(row.branch_code)));
     const [confirms, shifts, waste, writeOffs, counts] = await Promise.all([
       db.from("daily_stage_section_confirmations").select("branch_code,work_date,stage_code,section_key,confirmed_at").gte("work_date", startDate).lte("work_date", endDate).limit(8000),
@@ -344,7 +344,7 @@ export async function getAuditProfileAction(brand: string): Promise<FnbActionRes
     const [profile, spots, branches] = await Promise.all([
       db.from("audit_export_profiles").select("profile_code,profile_name_th,included_sections,selected_cleaning_spot_ids,custom_extra_topics,report_header_title,signoff_titles").eq("brand_code", scope).eq("profile_code", "QA_STANDARD").limit(1),
       db.from("branch_cleaning_spots").select("id,branch_code,spot_name_th,is_active").eq("is_active", true).limit(200),
-      db.from("branches").select("branch_code,brand_code").eq("brand_code", scope).limit(20),
+      db.from("branches").select("branch_code,brand_code,branch_status").eq("brand_code", scope).neq("branch_status", "INACTIVE").limit(20),
     ]);
     const codes = new Set(asRows(branches.data).map((row) => text(row.branch_code)));
     const row = asRows(profile.data)[0] ?? {};
@@ -487,7 +487,7 @@ export async function listMonthBackupAction(brand: string, year: number, month: 
     const end = new Date(year, month, 0);
     const endDate = `${year}-${String(month).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
     const db = schemaAdmin().schema("fnb");
-    const branches = await db.from("branches").select("branch_code").eq("brand_code", scope).limit(20);
+    const branches = await db.from("branches").select("branch_code,branch_status").eq("brand_code", scope).neq("branch_status", "INACTIVE").limit(20);
     const codes = new Set(asRows(branches.data).map((row) => text(row.branch_code)));
     const [confirms, equipment, shifts] = await Promise.all([
       db.from("daily_stage_section_confirmations").select("branch_code,work_date,stage_code,section_title_th,status_flag,confirmed_by_name,confirmed_at,photo_urls").gte("work_date", start).lte("work_date", endDate).limit(5000),
