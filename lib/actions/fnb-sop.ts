@@ -182,6 +182,12 @@ export async function saveBranchShiftSettingsAction(formData: FormData): Promise
       shift_3_start: text(formData.get("shift_3_start")) || null,
       shift_3_end: text(formData.get("shift_3_end")) || null,
       max_staff_per_shift: Math.max(1, Math.trunc(Number(formData.get("max_staff_per_shift")) || 2)),
+      coffee_dose_min_g: Number(formData.get("coffee_dose_min_g")) || 19.8,
+      coffee_dose_max_g: Number(formData.get("coffee_dose_max_g")) || 20,
+      espresso_time_min_s: Number(formData.get("espresso_time_min_s")) || 22,
+      espresso_time_max_s: Number(formData.get("espresso_time_max_s")) || 28,
+      espresso_yield_min_g: Number(formData.get("espresso_yield_min_g")) || 38,
+      espresso_yield_max_g: Number(formData.get("espresso_yield_max_g")) || 40,
       updated_at: new Date().toISOString(),
     }).eq("branch_code", branch);
     if (updated.error) return fail({ ok: false }, updated.error, "บันทึกกะสาขาไม่สำเร็จ");
@@ -211,6 +217,7 @@ export async function listParLevelsAction(branchCode: string): Promise<FnbAction
         name_th: text(item?.name_th),
         min_par_count_qty: num(row.min_par_count_qty),
         lead_time_days: num(row.lead_time_days),
+        alert_enabled: row.alert_enabled !== false,
         is_below_par: row.is_below_par === true,
         last_observed_count_qty: row.last_observed_count_qty == null ? null : num(row.last_observed_count_qty),
       };
@@ -231,7 +238,7 @@ export async function saveParLevelAction(formData: FormData): Promise<FnbActionR
       item_id: itemId,
       min_par_count_qty: Number(formData.get("min_par_count_qty") ?? 0) || 0,
       lead_time_days: Number(formData.get("lead_time_days") ?? 2) || 0,
-      alert_enabled: true,
+      alert_enabled: formData.get("alert_enabled") !== "false",
       updated_at: new Date().toISOString(),
     };
     const existing = await db.from("branch_item_par_levels").select("item_id").eq("branch_code", branchCode).eq("item_id", itemId).maybeSingle();
@@ -242,6 +249,19 @@ export async function saveParLevelAction(formData: FormData): Promise<FnbActionR
     return result({ ok: true });
   } catch (error) {
     return caught({ ok: false }, error, "บันทึกจุดเตือนไม่สำเร็จ");
+  }
+}
+
+export async function saveDisplayShelfDaysAction(itemId: string, days: number): Promise<FnbActionResult<{ ok: boolean }>> {
+  try {
+    await requireFnbModuleAccess("sop_shift_settings");
+    const updated = await schemaAdmin().schema("fnb").from("items").update({
+      display_shelf_life_days: Math.max(1, Math.trunc(days) || 1),
+    }).eq("id", itemId);
+    if (updated.error) return fail({ ok: false }, updated.error, "บันทึกอายุเบเกอรี่ไม่สำเร็จ");
+    return result({ ok: true });
+  } catch (error) {
+    return caught({ ok: false }, error, "บันทึกอายุเบเกอรี่ไม่สำเร็จ");
   }
 }
 
@@ -571,6 +591,7 @@ export async function listEarlyWarningsAction(): Promise<FnbActionResult<{ par: 
           name_th: text(item?.name_th),
           min_par_count_qty: num(row.min_par_count_qty),
           lead_time_days: num(row.lead_time_days),
+          alert_enabled: row.alert_enabled !== false,
           is_below_par: true,
           last_observed_count_qty: row.last_observed_count_qty == null ? null : num(row.last_observed_count_qty),
         };

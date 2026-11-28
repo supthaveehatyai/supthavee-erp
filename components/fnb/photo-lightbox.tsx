@@ -19,6 +19,7 @@ export function PhotoLightbox({ photos }: { photos: FnbAuditPhoto[] }) {
           <button key={`${item.url}-${photoIndex}`} type="button" className="overflow-hidden rounded-md border" onClick={() => { setIndex(photoIndex); setZoom(1); }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={item.url} alt={item.caption} className="h-20 w-full object-cover" />
+            <span className="block truncate px-1 py-1 text-[10px] text-slate-700">{item.caption}</span>
           </button>
         ))}
       </div>

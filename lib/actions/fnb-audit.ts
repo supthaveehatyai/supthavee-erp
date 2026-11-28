@@ -3,6 +3,7 @@
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text } from "@/lib/fnb/rows";
 import { sectionNumber } from "@/lib/fnb/stage-progress";
+import { formatFnbQty, formatPrepPortionPct } from "@/lib/utils/fnb-format";
 import { schemaAdmin } from "@/lib/holding/schema-db";
 import { requireAnyFnbModule } from "@/lib/holding/workspace-access";
 import type {
@@ -38,6 +39,12 @@ function urls(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => text(item)).filter((item) => item.startsWith("http")) : [];
 }
 
+function dayLabel(iso: string): string {
+  const [year, month, day] = iso.slice(0, 10).split("-");
+  if (!year || !month || !day) return iso;
+  return `${Number(day)}/${Number(month)}/${year}`;
+}
+
 function clock(iso: string): string {
   if (!iso) return "";
   const date = new Date(iso);
@@ -65,15 +72,15 @@ export async function getMonthLockAction(brand: string, workDate: string): Promi
 }
 
 export async function getExecutiveInspectorAction(brand: string, workDate: string, branchCode: string): Promise<FnbActionResult<{ matrix: FnbInspectorMatrixRow[]; anomalies: FnbAuditAnomaly[]; detail: FnbInspectorDetail }>> {
-  const empty = { matrix: [] as FnbInspectorMatrixRow[], anomalies: [] as FnbAuditAnomaly[], detail: { sections: [], wip: [], replenishments: [], shifts: [], photos: [] } };
+  const empty = { matrix: [] as FnbInspectorMatrixRow[], anomalies: [] as FnbAuditAnomaly[], detail: { sections: [], wip: [], prepRows: [], openRows: [], replenishments: [], shifts: [], photos: [] } };
   try {
     await desk();
     const scope = brandOf(brand);
     const db = schemaAdmin().schema("fnb");
-    const [branches, confirms, batches, transfers, shifts, sales, equipment, writeOffs, counts, items, rosters] = await Promise.all([
-      db.from("branches").select("branch_code,branch_name_th,brand_code,branch_status").eq("brand_code", scope).neq("branch_status", "INACTIVE").limit(20),
+    const [branches, confirms, batches, transfers, shifts, sales, equipment, writeOffs, counts, items, rosters, bases] = await Promise.all([
+      db.from("branches").select("branch_code,branch_name_th,brand_code,branch_status,coffee_dose_min_g,coffee_dose_max_g,espresso_time_min_s,espresso_time_max_s,espresso_yield_min_g,espresso_yield_max_g").eq("brand_code", scope).neq("branch_status", "INACTIVE").limit(20),
       db.from("daily_stage_section_confirmations").select("id,branch_code,stage_code,section_key,section_title_th,status_flag,numeric_amount,expected_amount,confirmed_by_name,confirmed_at,photo_urls").eq("work_date", workDate).limit(2000),
-      db.from("bar_wip_batches").select("id,branch_code,batch_kind,prep_base_code,item_id,brew_portion_mode,opened_at,opened_by_name,expires_at,sticker_label_text,open_photo_urls,batch_status").eq("work_date", workDate).limit(1000),
+      db.from("bar_wip_batches").select("id,branch_code,batch_kind,prep_base_code,item_id,brew_portion_mode,packs_deducted,pack_uom,opened_at,opened_by_name,expires_at,sticker_label_text,open_photo_urls,batch_status,notes,is_voided_duplicate").eq("work_date", workDate).limit(1000),
       db.from("internal_zone_transfers").select("branch_code,item_id,qty_in_count_uom,created_at").eq("work_date", workDate).limit(1000),
       db.from("shift_closings").select("branch_code,shift_type,staff_name,cash_variance,created_at").eq("work_date", workDate).limit(200),
       db.from("daily_menu_sales_headers").select("branch_code,created_at").eq("work_date", workDate).limit(50),
@@ -82,23 +89,33 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
       db.from("zone_stock_counts").select("branch_code,item_id,shrinkage_diff_qty,count_stage").eq("count_date", workDate).limit(2000),
       db.from("items").select("id,short_code,name_th,item_category,brand_scope").eq("brand_scope", scope).limit(2000),
       db.from("shift_crew_rosters").select("branch_code,shift_slot,crew_members_json").eq("work_date", workDate).limit(40),
+      db.from("prep_bases").select("base_code,base_name_th,yield_qty_ml").eq("brand_code", scope).limit(40),
     ]);
     if (branches.error) return fail(empty, branches.error, "อ่านสาขาไม่สำเร็จ");
     const branchRows = asRows(branches.data);
     const codes = new Set(branchRows.map((row) => text(row.branch_code)));
-    const itemName = new Map(asRows(items.data).map((row) => [text(row.id), `${text(row.short_code)} ${text(row.name_th)}`]));
+    const itemName = new Map(asRows(items.data).map((row) => [text(row.id), `${text(row.short_code)} · ${text(row.name_th)}`]));
     const displayIds = new Set(asRows(items.data).filter((row) => ["BAKERY_FROZEN", "ICE_CREAM", "MERCHANDISE"].includes(text(row.item_category))).map((row) => text(row.id)));
     const anomalies: FnbAuditAnomaly[] = [];
+    const limits = new Map(branchRows.map((branch) => [text(branch.branch_code), {
+      doseMin: num(branch.coffee_dose_min_g) || 19.8,
+      doseMax: num(branch.coffee_dose_max_g) || 20,
+      timeMin: num(branch.espresso_time_min_s) || 22,
+      timeMax: num(branch.espresso_time_max_s) || 28,
+      yieldMin: num(branch.espresso_yield_min_g) || 38,
+      yieldMax: num(branch.espresso_yield_max_g) || 40,
+    }]));
     for (const row of asRows(equipment.data).filter((item) => codes.has(text(item.branch_code)))) {
       const code = text(row.branch_code);
+      const band = limits.get(code) ?? { doseMin: 19.8, doseMax: 20, timeMin: 22, timeMax: 28, yieldMin: 38, yieldMax: 40 };
       const dose = row.grinder_dose_g == null ? null : num(row.grinder_dose_g);
       const seconds = row.espresso_time_sec == null ? null : num(row.espresso_time_sec);
       const shot = row.espresso_yield_g == null ? null : num(row.espresso_yield_g);
       const target = row.syrup_random_target_g == null ? null : num(row.syrup_random_target_g);
       const actual = row.syrup_measured_actual_g == null ? null : num(row.syrup_measured_actual_g);
-      if (dose != null && (dose < 19.8 || dose > 20)) anomalies.push({ branchCode: code, kind: "อุปกรณ์", detail: `โดสกาแฟนอก 19.8–20g (${dose} g)` });
-      if (seconds != null && (seconds < 22 || seconds > 28)) anomalies.push({ branchCode: code, kind: "อุปกรณ์", detail: `ช็อตนอก 22–28 วินาที (${seconds} s)` });
-      if (shot != null && (shot < 38 || shot > 40)) anomalies.push({ branchCode: code, kind: "อุปกรณ์", detail: `น้ำหนักช็อตนอก 38–40g (${shot} g)` });
+      if (dose != null && (dose < band.doseMin || dose > band.doseMax)) anomalies.push({ branchCode: code, kind: "อุปกรณ์", detail: `โดสกาแฟนอก ${band.doseMin}–${band.doseMax}g (${dose} g)` });
+      if (seconds != null && (seconds < band.timeMin || seconds > band.timeMax)) anomalies.push({ branchCode: code, kind: "อุปกรณ์", detail: `ช็อตนอก ${band.timeMin}–${band.timeMax} วินาที (${seconds} s)` });
+      if (shot != null && (shot < band.yieldMin || shot > band.yieldMax)) anomalies.push({ branchCode: code, kind: "อุปกรณ์", detail: `น้ำหนักช็อตนอก ${band.yieldMin}–${band.yieldMax}g (${shot} g)` });
       if (target != null && actual != null && Math.abs(actual - target) > 1) anomalies.push({ branchCode: code, kind: "อุปกรณ์", detail: `เครื่องน้ำเชื่อมคลาดเคลื่อน เป้า ${target} g จริง ${actual} g` });
     }
     for (const row of asRows(shifts.data).filter((item) => codes.has(text(item.branch_code)))) {
@@ -119,7 +136,7 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
       const opening = asRows(confirms.data).filter((row) => text(row.branch_code) === code && text(row.stage_code) === "OPENING");
       const done = new Set(opening.map((row) => sectionNumber("OPENING", text(row.section_key))).filter((value): value is number => value != null));
       const finished = opening.map((row) => text(row.confirmed_at)).filter(Boolean).sort().at(-1) ?? null;
-      const wip = asRows(batches.data).filter((row) => text(row.branch_code) === code && text(row.batch_kind) === "PREP_BASE");
+      const wip = asRows(batches.data).filter((row) => text(row.branch_code) === code && text(row.batch_kind) === "PREP_BASE" && row.is_voided_duplicate !== true);
       const moved = asRows(transfers.data).filter((row) => text(row.branch_code) === code);
       const shiftRows = asRows(shifts.data).filter((row) => text(row.branch_code) === code);
       const first = shiftRows.find((row) => text(row.shift_type) === "MORNING");
@@ -146,18 +163,57 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
     });
     const focus = codes.has(branchCode) ? branchCode : text(branchRows[0]?.branch_code);
     const photos: FnbAuditPhoto[] = [];
+    const seenPhotos = new Set<string>();
+    function pushPhoto(photo: FnbAuditPhoto) {
+      if (!photo.url || seenPhotos.has(photo.url)) return;
+      seenPhotos.add(photo.url);
+      photos.push(photo);
+    }
+    const baseName = new Map(asRows(bases.data).map((row) => [text(row.base_code), { name: text(row.base_name_th), yieldMl: num(row.yield_qty_ml) }]));
     const sections = asRows(confirms.data).filter((row) => text(row.branch_code) === focus).map((row) => {
       const shot = urls(row.photo_urls);
-      shot.forEach((url) => photos.push({ url, staff: text(row.confirmed_by_name), at: text(row.confirmed_at), caption: text(row.section_title_th), confirmationId: text(row.id), submissionId: null }));
+      const sectionNo = sectionNumber(text(row.stage_code) === "CLOSING" ? "CLOSING" : "OPENING", text(row.section_key));
+      const caption = `${sectionNo ? `หมวด ${sectionNo}` : text(row.section_title_th)} · ${clock(text(row.confirmed_at))} น.`;
+      shot.forEach((url) => pushPhoto({ url, staff: text(row.confirmed_by_name), at: text(row.confirmed_at), caption, confirmationId: text(row.id), submissionId: null }));
       return { key: text(row.section_key), title: text(row.section_title_th), staff: text(row.confirmed_by_name), at: text(row.confirmed_at), status: text(row.status_flag), photos: shot };
     });
-    const wip = asRows(batches.data).filter((row) => text(row.branch_code) === focus).map((row) => {
+    const focusBatches = asRows(batches.data).filter((row) => text(row.branch_code) === focus && row.is_voided_duplicate !== true);
+    const wip = focusBatches.map((row) => {
       const shot = urls(row.open_photo_urls);
-      shot.forEach((url) => photos.push({ url, staff: text(row.opened_by_name), at: text(row.opened_at), caption: text(row.prep_base_code) || itemName.get(text(row.item_id)) || "ขึ้นบาร์", confirmationId: null, submissionId: null }));
-      return { label: text(row.prep_base_code) || itemName.get(text(row.item_id)) || "ขึ้นบาร์", portion: text(row.brew_portion_mode), staff: text(row.opened_by_name), at: text(row.opened_at), sticker: text(row.sticker_label_text), photos: shot };
+      const label = text(row.prep_base_code) || itemName.get(text(row.item_id)) || "รายการ";
+      shot.forEach((url) => pushPhoto({ url, staff: text(row.opened_by_name), at: text(row.opened_at), caption: `${label} · ${clock(text(row.opened_at))} น.`, confirmationId: null, submissionId: null }));
+      return { label, portion: formatPrepPortionPct(num(row.packs_deducted), text(row.brew_portion_mode)), staff: text(row.opened_by_name), at: text(row.opened_at), sticker: text(row.sticker_label_text), photos: shot };
+    });
+    const prepRows = focusBatches.filter((row) => text(row.batch_kind) === "PREP_BASE").map((row) => {
+      const code = text(row.prep_base_code);
+      const base = baseName.get(code);
+      const packs = num(row.packs_deducted);
+      const yieldMl = base && packs > 0 && packs <= 1 ? base.yieldMl * packs : base?.yieldMl || 0;
+      return {
+        id: text(row.id),
+        label: `${code}${base?.name ? ` · ${base.name}` : ""}`,
+        portion: formatPrepPortionPct(packs, text(row.brew_portion_mode)),
+        yieldLabel: yieldMl > 0 ? formatFnbQty(yieldMl, "ml") : "",
+        staff: text(row.opened_by_name),
+        at: text(row.opened_at),
+      };
+    });
+    const openRows = focusBatches.filter((row) => text(row.batch_kind) === "OPEN_ITEM").map((row) => {
+      const note = text(row.notes);
+      const expiry = text(row.expires_at);
+      const sticker = text(row.sticker_label_text);
+      return {
+        id: text(row.id),
+        label: itemName.get(text(row.item_id)) || text(row.prep_base_code) || "วัตถุดิบ",
+        qtyLabel: formatFnbQty(num(row.packs_deducted) || 1, text(row.pack_uom) || "ชิ้น", false),
+        badge: note.includes("เปิดใช้") ? "เปิดใช้อยู่" : "เบิกใหม่",
+        expiryLabel: expiry ? dayLabel(expiry) : (sticker || "เคลียร์สิ้นวัน"),
+        staff: text(row.opened_by_name),
+        at: text(row.opened_at),
+      };
     });
     for (const row of asRows(writeOffs.data).filter((item) => text(item.branch_code) === focus)) {
-      urls(row.photo_urls).forEach((url) => photos.push({ url, staff: text(row.reported_by_name), at: text(row.created_at), caption: text(row.write_off_reason), confirmationId: null, submissionId: null }));
+      urls(row.photo_urls).forEach((url) => pushPhoto({ url, staff: text(row.reported_by_name), at: text(row.created_at), caption: text(row.write_off_reason), confirmationId: null, submissionId: null }));
     }
     return result({
       matrix,
@@ -165,6 +221,8 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
       detail: {
         sections,
         wip,
+        prepRows,
+        openRows,
         replenishments: asRows(transfers.data).filter((row) => text(row.branch_code) === focus).map((row) => ({ item: itemName.get(text(row.item_id)) || "สินค้า", qty: num(row.qty_in_count_uom), at: text(row.created_at) })),
         shifts: asRows(shifts.data).filter((row) => text(row.branch_code) === focus).map((row) => ({ shift: text(row.shift_type), staff: text(row.staff_name), variance: num(row.cash_variance) })),
         photos,
@@ -172,6 +230,18 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
     });
   } catch (error) {
     return caught(empty, error, "อ่านภาพรวมสาขาไม่สำเร็จ");
+  }
+}
+
+export async function voidDuplicateWipBatchAction(batchId: string): Promise<FnbActionResult<{ ok: boolean }>> {
+  try {
+    const ctx = await desk();
+    if (!ctx.isSuperAdmin) return result({ ok: false }, "เฉพาะ Super Admin ซ่อนรายการกดซ้ำได้");
+    const updated = await schemaAdmin().schema("fnb").from("bar_wip_batches").update({ is_voided_duplicate: true }).eq("id", batchId);
+    if (updated.error) return fail({ ok: false }, updated.error, "ซ่อนรายการกดซ้ำไม่สำเร็จ");
+    return result({ ok: true });
+  } catch (error) {
+    return caught({ ok: false }, error, "ซ่อนรายการกดซ้ำไม่สำเร็จ");
   }
 }
 

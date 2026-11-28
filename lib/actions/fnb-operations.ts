@@ -73,7 +73,7 @@ async function filesOf(formData: FormData, field: string): Promise<File[]> {
 
 export async function listFnbBranchOptionsAction(brandLock?: FnbBrandCode | null): Promise<FnbActionResult<FnbBranchOption[]>> {
   try {
-    const listed = await schemaAdmin().schema("fnb").from("branches").select("branch_code, branch_name_th, brand_code, legal_entity_id, vat_branch_code, branch_status, target_open_date, standard_cash_float, enable_shift_3, opening_time, closing_time, opening_deadline_time, shift_1_start, shift_1_end, shift_2_start, shift_2_end, shift_3_start, shift_3_end, max_staff_per_shift").neq("branch_status", "INACTIVE").order("sort_order", { ascending: true }).limit(20);
+    const listed = await schemaAdmin().schema("fnb").from("branches").select("branch_code, branch_name_th, brand_code, legal_entity_id, vat_branch_code, branch_status, target_open_date, standard_cash_float, enable_shift_3, opening_time, closing_time, opening_deadline_time, shift_1_start, shift_1_end, shift_2_start, shift_2_end, shift_3_start, shift_3_end, max_staff_per_shift, coffee_dose_min_g, coffee_dose_max_g, espresso_time_min_s, espresso_time_max_s, espresso_yield_min_g, espresso_yield_max_g").neq("branch_status", "INACTIVE").order("sort_order", { ascending: true }).limit(20);
     if (listed.error) return fail([], listed.error, "อ่านสาขาไม่สำเร็จ");
     return result(asRows(listed.data).map((row) => ({
       branch_code: text(row.branch_code),
@@ -95,6 +95,12 @@ export async function listFnbBranchOptionsAction(brandLock?: FnbBrandCode | null
       shift_3_start: row.shift_3_start == null ? null : text(row.shift_3_start),
       shift_3_end: row.shift_3_end == null ? null : text(row.shift_3_end),
       max_staff_per_shift: Math.max(1, num(row.max_staff_per_shift) || 2),
+      coffee_dose_min_g: row.coffee_dose_min_g == null ? null : num(row.coffee_dose_min_g),
+      coffee_dose_max_g: row.coffee_dose_max_g == null ? null : num(row.coffee_dose_max_g),
+      espresso_time_min_s: row.espresso_time_min_s == null ? null : num(row.espresso_time_min_s),
+      espresso_time_max_s: row.espresso_time_max_s == null ? null : num(row.espresso_time_max_s),
+      espresso_yield_min_g: row.espresso_yield_min_g == null ? null : num(row.espresso_yield_min_g),
+      espresso_yield_max_g: row.espresso_yield_max_g == null ? null : num(row.espresso_yield_max_g),
     })).filter((branch) => !brandLock || branch.brand_code === brandLock));
   } catch (error) {
     return caught([], error, "อ่านสาขาไม่สำเร็จ");

@@ -53,6 +53,7 @@ export function LiveBranchProvider(props: {
   workDate: string;
   shiftSlot: "SHIFT_1" | "SHIFT_2";
   pinSlot?: "SHIFT_1" | "SHIFT_2" | null;
+  showCrewChrome?: boolean;
   children: React.ReactNode;
 }) {
   const [snapshot, setSnapshot] = useState<FnbLiveSnapshot | null>(null);
@@ -100,7 +101,7 @@ export function LiveBranchProvider(props: {
   }), [assistArmed, assistReason, inputsLocked, lockMessage, refresh, seatSlot, snapshot]);
   return (
     <LiveBranchContext.Provider value={value}>
-      <ShiftCrewChrome viewSlot={props.pinSlot || viewSlot} setViewSlot={setViewSlot} askAssist={askAssist} setAskAssist={setAskAssist} pinned={Boolean(props.pinSlot)} />
+      {props.showCrewChrome === false ? null : <ShiftCrewChrome viewSlot={props.pinSlot || viewSlot} setViewSlot={setViewSlot} askAssist={askAssist} setAskAssist={setAskAssist} pinned={Boolean(props.pinSlot)} />}
       {props.children}
     </LiveBranchContext.Provider>
   );

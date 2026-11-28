@@ -68,10 +68,12 @@ function SauceCard(props: {
   const [expiry, setExpiry] = useState(addDays(props.workDate, props.sauce.openDays || 1));
   const [photo, setPhoto] = useState("");
   const [sticker, setSticker] = useState("");
+  const [pending, setPending] = useState(false);
   const unit = props.sauce.countUom || "ชิ้น";
   const preview = thaiDate(addDays(props.workDate, props.sauce.openDays || 1));
 
   function closeBatch(batchId: string, mode: "CONSUMED_EMPTY" | "EXPIRED_DUMPED") {
+    if (pending) return;
     if (mode === "EXPIRED_DUMPED" && !photo) {
       toast.error("ถ่ายรูปสดของที่เททิ้งก่อนบันทึก");
       return;
@@ -85,7 +87,9 @@ function SauceCard(props: {
     body.set("waste_qty", mode === "EXPIRED_DUMPED" ? waste || "0" : "0");
     body.set("photo_urls", photo);
     body.set("notes", mode === "EXPIRED_DUMPED" ? "ครบอายุเททิ้งตอนเปิดร้าน" : "ใช้หมดเกลี้ยงตอนเปิดร้าน");
+    setPending(true);
     void closeWipBatchAction(body).then((saved) => {
+      setPending(false);
       if (saved.error || !saved.data.ok) toast.error(saved.error || saved.data.message || "ปิดภาชนะไม่สำเร็จ");
       else {
         toast.success(mode === "EXPIRED_DUMPED" ? "บันทึกเททิ้งแล้ว" : "ใช้หมดเกลี้ยงแล้ว");
@@ -97,6 +101,7 @@ function SauceCard(props: {
   }
 
   function saveExisting() {
+    if (pending) return;
     if (!props.sauce.itemId) {
       toast.error("ไม่พบรหัสวัตถุดิบนี้ในแบรนด์");
       return;
@@ -115,7 +120,9 @@ function SauceCard(props: {
     body.set("open_count_qty", String(qty));
     body.set("expiry_date", expiry);
     body.set("notes", "ระบุขวดที่เปิดใช้อยู่แล้วหน้าบาร์");
+    setPending(true);
     void registerExistingOpenBarItemAction(body).then((saved) => {
+      setPending(false);
       if (saved.error || !saved.data.ok) toast.error(saved.error || saved.data.message || "บันทึกไม่สำเร็จ");
       else {
         toast.success(saved.data.sticker || "บันทึกยอดที่เปิดใช้อยู่แล้ว");
@@ -126,6 +133,7 @@ function SauceCard(props: {
   }
 
   function issueFresh() {
+    if (pending) return;
     if (!props.sauce.itemId) {
       toast.error("ไม่พบรหัสวัตถุดิบนี้ในแบรนด์");
       return;
@@ -151,7 +159,9 @@ function SauceCard(props: {
     body.set("brew_portion_mode", "FULL_RECIPE");
     body.set("shift_instance", "SHIFT_1");
     body.set("notes", "เบิกคลังเทขวดใหม่ตอนเปิดร้าน");
+    setPending(true);
     void issueWipBatchAction(body).then((saved) => {
+      setPending(false);
       if (saved.error || !saved.data.ok) toast.error(saved.error || saved.data.message || "เบิกเทใหม่ไม่สำเร็จ");
       else {
         const label = saved.data.sticker || `หมดอายุ ${preview}`;
@@ -186,7 +196,7 @@ function SauceCard(props: {
                   <span className="mt-1 block"><FnbQtyInput className="h-10 w-20" value={waste} onChange={setWaste} unit={batch.uom} allowDecimal /></span>
                 </label>
                 <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle={`${props.sauce.code} เททิ้ง`} liveCameraOnly onCapture={(file, live) => void uploadShot(file, live, props.branch, props.actorSource, props.brand).then(setPhoto).catch((reason: Error) => toast.error(reason.message))} />
-                <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-2 py-1 text-xs text-white" onClick={() => closeBatch(batch.id, "EXPIRED_DUMPED")}>บันทึกเททิ้ง</button>
+                <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-2 py-1 text-xs text-white disabled:opacity-60" disabled={pending} onClick={() => closeBatch(batch.id, "EXPIRED_DUMPED")}>{pending ? "กำลังบันทึก..." : "บันทึกเททิ้ง"}</button>
               </div>
             ) : null}
           </div>
@@ -204,7 +214,7 @@ function SauceCard(props: {
           <label className="block text-xs">วันหมดอายุตามป้ายข้างขวด
             <input className="mt-1 h-10 rounded-md border px-2 text-sm" type="date" value={expiry} onChange={(event) => setExpiry(event.target.value)} />
           </label>
-          <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-1 text-xs text-white" onClick={saveExisting}>บันทึก</button>
+          <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-1 text-xs text-white disabled:opacity-60" disabled={pending} onClick={saveExisting}>{pending ? "กำลังบันทึก..." : "บันทึก"}</button>
         </div>
       ) : null}
       {panel === "fresh" ? (
@@ -215,7 +225,7 @@ function SauceCard(props: {
           <p className="text-xs text-slate-600">ป้ายหมดอายุที่จะเขียน: {preview}</p>
           {sticker ? <p className="text-xs font-medium">เขียนป้าย: {sticker}</p> : null}
           <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle={`${props.sauce.code} ถ่ายรูปขวดติดป้าย`} liveCameraOnly onCapture={(file, live) => void uploadShot(file, live, props.branch, props.actorSource, props.brand).then(setPhoto).catch((reason: Error) => toast.error(reason.message))} />
-          <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-1 text-xs text-white" onClick={issueFresh}>ยืนยันเบิกเทใหม่</button>
+          <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-1 text-xs text-white disabled:opacity-60" disabled={pending} onClick={issueFresh}>{pending ? "กำลังบันทึก..." : "ยืนยันเบิกเทใหม่"}</button>
         </div>
       ) : null}
     </article>

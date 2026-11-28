@@ -2,111 +2,179 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { branchForBrand } from "@/lib/fnb/brand-branch";
-import { listBranchZonesAction, listCleaningSpotsAction, saveCleaningSpotAction, saveStorageZoneAction } from "@/lib/actions/fnb-store-day";
-import type { FnbBrandCode } from "@/types/fnb";
-import { FNB_BACKROOM_SCHEDULE_LABEL, FNB_WEEKDAY_OPTIONS, type FnbCleaningSpot, type FnbStorageZone } from "@/types/fnb";
+import { copyCleaningSpotsAction, listBranchZonesAction, listCleaningSpotsAction, saveCleaningSpotAction, saveStorageZoneAction } from "@/lib/actions/fnb-store-day";
+import type { FnbCleaningSpot, FnbStorageZone } from "@/types/fnb";
 
-const field = "h-10 w-full rounded-md border border-slate-200 px-3 text-sm";
-const ZONE_SCHEDULES = ["DAILY_OPEN_CLOSE", "DAILY_CLOSE", "EVERY_3_DAYS", "WEEKLY_2X", "WEEKLY_1X", "ON_DEMAND"] as const;
+const input = "h-9 rounded-md border border-slate-200 px-2 text-sm";
+const DAYS = [
+  { day: 1, label: "จ" },
+  { day: 2, label: "อ" },
+  { day: 3, label: "พ" },
+  { day: 4, label: "พฤ" },
+  { day: 5, label: "ศ" },
+  { day: 6, label: "ส" },
+  { day: 0, label: "อา" },
+];
+const ZONE_OPTIONS = [
+  ["FRONT_DISPLAY", "หน้าร้าน"],
+  ["BACKROOM", "คลังหลังร้าน"],
+  ["WAREHOUSE", "โกดัง"],
+] as const;
+const SCHEDULES = [
+  ["DAILY_OPEN_CLOSE", "นับเปิดและปิดร้าน"],
+  ["EVERY_3_DAYS", "นับทุก 3 วัน"],
+  ["WEEKLY_2X", "สัปดาห์ละ 2 ครั้ง"],
+  ["WEEKLY_1X", "สัปดาห์ละ 1 ครั้ง"],
+  ["ON_DEMAND", "นับเมื่อเรียก"],
+] as const;
 
-export function BranchPlaceManager({ branches, brand }: { branches: { branch_code: string; branch_name_th: string; brand_code: string }[]; brand: FnbBrandCode }) {
-  const [branch, setBranch] = useState(branches[0]?.branch_code ?? "");
-  useEffect(() => {
-    const next = branchForBrand(branches, brand, branch);
-    if (next !== branch) setBranch(next);
-  }, [brand, branches, branch]);
-  const [zones, setZones] = useState<FnbStorageZone[]>([]);
-  const [spots, setSpots] = useState<FnbCleaningSpot[]>([]);
+export function CleaningSpotBoard({ branch, siblingBranches }: { branch: string; siblingBranches: { branch_code: string; branch_name_th: string }[] }) {
   const [stage, setStage] = useState<"OPENING" | "CLOSING">("OPENING");
+  const [spots, setSpots] = useState<FnbCleaningSpot[]>([]);
+  const [source, setSource] = useState("");
   const [, start] = useTransition();
-  function reload(code = branch) {
-    void listBranchZonesAction(code).then((loaded) => setZones(loaded.data));
-    void listCleaningSpotsAction(code).then((loaded) => setSpots(loaded.data));
+  function reload() {
+    void listCleaningSpotsAction(branch).then((loaded) => setSpots(loaded.data));
   }
-  useEffect(() => { reload(branch); }, [branch]);
+  useEffect(() => { reload(); }, [branch]);
+  const rows = spots.filter((spot) => spot.stageCode === stage);
+  const others = siblingBranches.filter((item) => item.branch_code !== branch);
   return (
-    <section className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-semibold">จุดจัดเก็บและความสะอาดรายสาขา</h2>
-        <select className={field} value={branch} onChange={(event) => setBranch(event.target.value)}>{branches.map((row) => <option key={row.branch_code} value={row.branch_code}>{row.branch_code} {row.branch_name_th}</option>)}</select>
-      </div>
-      <article className="space-y-2 rounded-xl border bg-white p-4">
-        <h3 className="font-semibold">🏢 สถานที่จัดเก็บสินค้าประจำสาขา (Storage Zones)</h3>
-        {zones.map((zone) => <ZoneEditor key={zone.id} zone={zone} onSave={(input) => start(async () => {
-          const saved = await saveStorageZoneAction(input);
-          if (saved.error || !saved.data.ok) toast.error(saved.error || "บันทึกจุดจัดเก็บไม่สำเร็จ");
-          else { toast.success("บันทึกจุดจัดเก็บแล้ว"); reload(); }
-        })} />)}
-        <ZoneEditor zone={null} branchCode={branch} onSave={(input) => start(async () => {
-          const saved = await saveStorageZoneAction(input);
-          if (saved.error || !saved.data.ok) toast.error(saved.error || "เพิ่มจุดจัดเก็บไม่สำเร็จ");
-          else { toast.success("เพิ่มจุดจัดเก็บแล้ว"); reload(); }
-        })} />
-      </article>
-      <article className="space-y-2 rounded-xl border bg-white p-4">
-        <h3 className="font-semibold">🧹 จุดตรวจความสะอาดแยกตามผังสาขา</h3>
+    <section className="space-y-3 rounded-xl border bg-white p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-2">
-          <button type="button" className={`rounded-full px-3 py-1 text-sm ${stage === "OPENING" ? "bg-[var(--fnb-brand)] text-white" : "bg-slate-100"}`} onClick={() => setStage("OPENING")}>จุดความสะอาดเปิดร้าน</button>
-          <button type="button" className={`rounded-full px-3 py-1 text-sm ${stage === "CLOSING" ? "bg-[var(--fnb-brand)] text-white" : "bg-slate-100"}`} onClick={() => setStage("CLOSING")}>จุดความสะอาดและล้างอุปกรณ์ปิดร้าน</button>
+          <button type="button" className={`rounded-full px-3 py-1 text-sm ${stage === "OPENING" ? "bg-[var(--fnb-brand)] text-white" : "bg-slate-100"}`} onClick={() => setStage("OPENING")}>☀️ เปิดร้าน ({spots.filter((spot) => spot.stageCode === "OPENING").length} จุด)</button>
+          <button type="button" className={`rounded-full px-3 py-1 text-sm ${stage === "CLOSING" ? "bg-[var(--fnb-brand)] text-white" : "bg-slate-100"}`} onClick={() => setStage("CLOSING")}>🌙 ปิดร้าน & ล้างอุปกรณ์ ({spots.filter((spot) => spot.stageCode === "CLOSING").length} จุด)</button>
         </div>
-        {spots.filter((spot) => spot.stageCode === stage).map((spot) => (
-          <form key={spot.id} className="grid gap-2 md:grid-cols-3" onSubmit={(event) => {
-            event.preventDefault();
-            const body = new FormData(event.currentTarget);
-            start(async () => {
-              const saved = await saveCleaningSpotAction({ id: spot.id, branchCode: branch, stageCode: stage, spotNameTh: String(body.get("name") ?? ""), sortOrder: Number(body.get("sort") ?? spot.sortOrder) });
-              if (saved.error || !saved.data.ok) toast.error(saved.error || "บันทึกจุดไม่สำเร็จ");
-              else { toast.success("บันทึกจุดความสะอาดแล้ว"); reload(); }
-            });
-          }}>
-            <input className={field} name="name" defaultValue={spot.spotNameTh} />
-            <input className={field} name="sort" type="number" defaultValue={spot.sortOrder} />
-            <button className="rounded-md border px-3 py-2 text-sm">บันทึกชื่อจุด</button>
-          </form>
-        ))}
-        <form className="grid gap-2 md:grid-cols-3" onSubmit={(event) => {
-          event.preventDefault();
-          const body = new FormData(event.currentTarget);
-          start(async () => {
-            const saved = await saveCleaningSpotAction({ branchCode: branch, stageCode: stage, spotNameTh: String(body.get("name") ?? ""), sortOrder: Number(body.get("sort") ?? 10) });
-            if (saved.error || !saved.data.ok) toast.error(saved.error || "เพิ่มจุดไม่สำเร็จ");
-            else { toast.success("เพิ่มจุดความสะอาดแล้ว"); event.currentTarget.reset(); reload(); }
-          });
-        }}>
-          <input className={field} name="name" placeholder="ชื่อจุดใหม่ของสาขานี้" />
-          <input className={field} name="sort" type="number" placeholder="ลำดับ" defaultValue={10} />
-          <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white">เพิ่มจุด</button>
-        </form>
-      </article>
+        <div className="flex items-center gap-2">
+          <select className={input} value={source} onChange={(event) => setSource(event.target.value)}>
+            <option value="">เลือกสาขาต้นทาง</option>
+            {others.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code}</option>)}
+          </select>
+          <button type="button" className="rounded-md border px-2 py-1 text-xs" onClick={() => start(async () => {
+            if (!source) { toast.error("เลือกสาขาต้นทางในแบรนด์เดียวกัน"); return; }
+            const saved = await copyCleaningSpotsAction({ fromBranch: source, toBranch: branch, stageCode: stage });
+            if (saved.error || !saved.data.ok) toast.error(saved.error || "คัดลอกไม่สำเร็จ");
+            else { toast.success("คัดลอกจุดตรวจแล้ว"); reload(); }
+          })}>📋 คัดลอกจุดตรวจจากอีกสาขา (แบรนด์เดียวกัน)</button>
+        </div>
+      </div>
+      <table className="w-full text-left text-sm">
+        <thead><tr className="text-xs text-slate-500"><th className="w-16 py-1">#</th><th>ชื่อจุดตรวจความสะอาด / อุปกรณ์</th><th className="w-56">ความถี่</th><th className="w-16">เปิดใช้</th><th className="w-24" /></tr></thead>
+        <tbody>
+          {rows.map((spot) => <SpotRow key={spot.id} spot={spot} branch={branch} stage={stage} onDone={reload} />)}
+        </tbody>
+      </table>
+      <SpotCreate branch={branch} stage={stage} onDone={reload} />
     </section>
   );
 }
 
-function ZoneEditor({ zone, branchCode, onSave }: { zone: FnbStorageZone | null; branchCode?: string; onSave: (input: { id?: string; branchCode: string; locationCode: string; locationNameTh: string; zoneType: string; defaultCountSchedule: string; countWeekdays: number[]; isDefaultGrTarget: boolean }) => void }) {
-  const [days, setDays] = useState<number[]>(zone?.countWeekdays ?? []);
+function SpotRow({ spot, branch, stage, onDone }: { spot: FnbCleaningSpot; branch: string; stage: "OPENING" | "CLOSING"; onDone: () => void }) {
+  const [name, setName] = useState(spot.spotNameTh);
+  const [sort, setSort] = useState(String(spot.sortOrder));
+  const [weekly, setWeekly] = useState(spot.scheduleType === "WEEKLY");
+  const [days, setDays] = useState<number[]>(spot.weekdays);
+  const [active, setActive] = useState(true);
+  const [busy, start] = useTransition();
+  function save(isActive = active) {
+    start(async () => {
+      const saved = await saveCleaningSpotAction({ id: spot.id, branchCode: branch, stageCode: stage, spotNameTh: name, sortOrder: Number(sort) || spot.sortOrder, scheduleType: weekly ? "WEEKLY" : "DAILY", weekdays: days, isActive });
+      if (saved.error || !saved.data.ok) toast.error(saved.error || "บันทึกจุดไม่สำเร็จ");
+      else { toast.success(isActive ? "บันทึกจุดตรวจแล้ว" : "ปิดจุดตรวจแล้ว"); onDone(); }
+    });
+  }
   return (
-    <form className="grid gap-2 rounded-lg bg-slate-50 p-3 md:grid-cols-3" onSubmit={(event) => {
+    <tr className="border-t">
+      <td className="py-1"><input className={`${input} w-14`} value={sort} onChange={(event) => setSort(event.target.value)} /></td>
+      <td className="pr-2"><input className={`${input} w-full`} value={name} onChange={(event) => setName(event.target.value)} /></td>
+      <td>
+        <div className="flex flex-wrap items-center gap-1">
+          <button type="button" className={`rounded-full px-2 py-0.5 text-xs ${weekly ? "bg-slate-100" : "bg-[var(--fnb-brand)] text-white"}`} onClick={() => setWeekly(false)}>ทุกวัน</button>
+          <button type="button" className={`rounded-full px-2 py-0.5 text-xs ${weekly ? "bg-[var(--fnb-brand)] text-white" : "bg-slate-100"}`} onClick={() => setWeekly(true)}>รายสัปดาห์</button>
+          {weekly ? DAYS.map((day) => (
+            <button key={day.day} type="button" className={`rounded-full px-1.5 py-0.5 text-xs ${days.includes(day.day) ? "bg-slate-900 text-white" : "bg-slate-100"}`} onClick={() => setDays((current) => current.includes(day.day) ? current.filter((value) => value !== day.day) : [...current, day.day])}>{day.label}</button>
+          )) : null}
+        </div>
+      </td>
+      <td><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /></td>
+      <td className="space-x-1 text-right">
+        <button type="button" className="rounded-md border px-2 py-1 text-xs" disabled={busy} onClick={() => save(true)}>บันทึก</button>
+        <button type="button" className="rounded-md border px-2 py-1 text-xs" disabled={busy} onClick={() => save(false)}>🗑️</button>
+      </td>
+    </tr>
+  );
+}
+
+function SpotCreate({ branch, stage, onDone }: { branch: string; stage: "OPENING" | "CLOSING"; onDone: () => void }) {
+  const [name, setName] = useState("");
+  const [sort, setSort] = useState("10");
+  const [busy, start] = useTransition();
+  return (
+    <form className="flex flex-wrap items-center gap-2" onSubmit={(event) => {
       event.preventDefault();
-      const body = new FormData(event.currentTarget);
-      onSave({
-        id: zone?.id,
-        branchCode: zone?.branchCode || branchCode || "",
-        locationCode: String(body.get("code") ?? ""),
-        locationNameTh: String(body.get("name") ?? ""),
-        zoneType: String(body.get("zone") ?? "BACKROOM"),
-        defaultCountSchedule: String(body.get("schedule") ?? "ON_DEMAND"),
-        countWeekdays: days,
-        isDefaultGrTarget: body.get("gr") === "on",
+      if (!name.trim() || busy) return;
+      start(async () => {
+        const saved = await saveCleaningSpotAction({ branchCode: branch, stageCode: stage, spotNameTh: name, sortOrder: Number(sort) || 10, scheduleType: "DAILY", weekdays: [] });
+        if (saved.error || !saved.data.ok) toast.error(saved.error || "เพิ่มจุดไม่สำเร็จ");
+        else { toast.success("เพิ่มจุดตรวจแล้ว"); setName(""); onDone(); }
       });
     }}>
-      <input className={field} name="code" defaultValue={zone?.locationCode ?? ""} placeholder="รหัสจุด เช่น LC-HDY-WH" required />
-      <input className={field} name="name" defaultValue={zone?.locationNameTh ?? ""} placeholder="ชื่อจุดจัดเก็บ" required />
-      <select className={field} name="zone" defaultValue={zone?.zoneType ?? "BACKROOM"}><option value="FRONT_DISPLAY">หน้าร้าน</option><option value="BACKROOM">คลังหลังร้าน</option><option value="WAREHOUSE">โกดัง</option></select>
-      <select className={field} name="schedule" defaultValue={zone?.defaultCountSchedule ?? "WEEKLY_1X"}>{ZONE_SCHEDULES.map((key) => <option key={key} value={key}>{key === "DAILY_OPEN_CLOSE" ? "นับเปิดและปิดร้าน" : key === "DAILY_CLOSE" ? "นับทุกคืน" : key === "ON_DEMAND" ? "นับเมื่อเรียก" : FNB_BACKROOM_SCHEDULE_LABEL[key as keyof typeof FNB_BACKROOM_SCHEDULE_LABEL] ?? key}</option>)}</select>
-      <label className="flex items-center gap-2 text-sm"><input name="gr" type="checkbox" defaultChecked={zone?.isDefaultGrTarget} />จุดรับเข้าเริ่มต้น</label>
-      <div className="flex flex-wrap gap-2 text-xs md:col-span-3">{FNB_WEEKDAY_OPTIONS.map((day) => <label key={day.day}><input type="checkbox" checked={days.includes(day.day)} onChange={(event) => setDays((current) => event.target.checked ? [...current, day.day] : current.filter((value) => value !== day.day))} /> {day.label}</label>)}</div>
-      <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white">{zone ? "บันทึกจุดนี้" : "เพิ่มจุดจัดเก็บ"}</button>
+      <input className={`${input} w-16`} value={sort} onChange={(event) => setSort(event.target.value)} />
+      <input className={`${input} min-w-64 flex-1`} value={name} onChange={(event) => setName(event.target.value)} placeholder="+ เพิ่มจุดตรวจใหม่" />
+      <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-1 text-sm text-white" disabled={busy}>{busy ? "กำลังบันทึก..." : "+ เพิ่มจุดตรวจใหม่"}</button>
     </form>
+  );
+}
+
+export function StorageZoneBoard({ branch }: { branch: string }) {
+  const [zones, setZones] = useState<FnbStorageZone[]>([]);
+  const [adding, setAdding] = useState(false);
+  function reload() {
+    void listBranchZonesAction(branch).then((loaded) => setZones(loaded.data));
+  }
+  useEffect(() => { reload(); }, [branch]);
+  return (
+    <section className="space-y-3 rounded-xl border bg-white p-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold">จุดจัดเก็บสินค้าในสาขานี้</h3>
+        <button type="button" className="rounded-md border px-2 py-1 text-sm" onClick={() => setAdding((value) => !value)}>+ เพิ่มจุดจัดเก็บใหม่ในสาขานี้</button>
+      </div>
+      <table className="w-full text-left text-sm">
+        <thead><tr className="text-xs text-slate-500"><th className="py-1">รหัสจุด</th><th>ชื่อจุดจัดเก็บ</th><th>ประเภทโซน</th><th>รอบการตรวจนับ</th><th>ระบุวันนับ</th><th>จุดรับของหลัก</th><th /></tr></thead>
+        <tbody>
+          {zones.map((zone) => <ZoneRow key={zone.id} zone={zone} branch={branch} onDone={reload} />)}
+          {adding ? <ZoneRow zone={null} branch={branch} onDone={() => { setAdding(false); reload(); }} /> : null}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function ZoneRow({ zone, branch, onDone }: { zone: FnbStorageZone | null; branch: string; onDone: () => void }) {
+  const [code, setCode] = useState(zone?.locationCode ?? "");
+  const [name, setName] = useState(zone?.locationNameTh ?? "");
+  const [zoneType, setZoneType] = useState(zone?.zoneType || "BACKROOM");
+  const [schedule, setSchedule] = useState(zone?.defaultCountSchedule || "DAILY_OPEN_CLOSE");
+  const [days, setDays] = useState<number[]>(zone?.countWeekdays ?? []);
+  const [gr, setGr] = useState(zone?.isDefaultGrTarget ?? false);
+  const [busy, start] = useTransition();
+  const weekly = schedule === "WEEKLY_1X" || schedule === "WEEKLY_2X";
+  return (
+    <tr className="border-t">
+      <td className="py-1 pr-2"><input className={`${input} w-32`} value={code} onChange={(event) => setCode(event.target.value)} placeholder="รหัสจุด" /></td>
+      <td className="pr-2"><input className={`${input} w-full`} value={name} onChange={(event) => setName(event.target.value)} placeholder="ชื่อจุดจัดเก็บ" /></td>
+      <td><select className={`${input} w-36`} value={zoneType} onChange={(event) => setZoneType(event.target.value)}>{ZONE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
+      <td><select className={`${input} w-44`} value={schedule} onChange={(event) => setSchedule(event.target.value)}>{SCHEDULES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
+      <td>
+        {weekly ? <div className="flex gap-1">{DAYS.map((day) => <button key={day.day} type="button" className={`rounded-full px-1.5 py-0.5 text-xs ${days.includes(day.day) ? "bg-slate-900 text-white" : "bg-slate-100"}`} onClick={() => setDays((current) => current.includes(day.day) ? current.filter((value) => value !== day.day) : [...current, day.day])}>{day.label}</button>)}</div> : <span className="text-slate-400">—</span>}
+      </td>
+      <td className="text-center"><input type="checkbox" checked={gr} onChange={(event) => setGr(event.target.checked)} /></td>
+      <td><button type="button" className="rounded-md bg-[var(--fnb-brand)] px-2 py-1 text-xs text-white" disabled={busy} onClick={() => start(async () => {
+        const saved = await saveStorageZoneAction({ id: zone?.id, branchCode: branch, locationCode: code, locationNameTh: name, zoneType, defaultCountSchedule: schedule, countWeekdays: weekly ? days : [], isDefaultGrTarget: gr });
+        if (saved.error || !saved.data.ok) toast.error(saved.error || "บันทึกจุดจัดเก็บไม่สำเร็จ");
+        else { toast.success("บันทึกจุดจัดเก็บแล้ว"); onDone(); }
+      })}>{busy ? "..." : "บันทึก"}</button></td>
+    </tr>
   );
 }

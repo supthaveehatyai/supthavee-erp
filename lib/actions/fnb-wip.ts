@@ -4,7 +4,7 @@ import { resolveFnbActor } from "@/lib/fnb/actor";
 import { fnbMonthLockMessage } from "@/lib/fnb/period-lock";
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
-import { requireFnbModuleAccess } from "@/lib/holding/workspace-access";
+import { requireAnyFnbModule, requireFnbModuleAccess } from "@/lib/holding/workspace-access";
 import { schemaAdmin } from "@/lib/holding/schema-db";
 import type {
   FnbActionResult,
@@ -64,7 +64,7 @@ async function actorFrom(input: { actorSource: string | null; brandLock: string 
 export async function listOpenShelfRulesAction(): Promise<FnbActionResult<{ locked: FnbOpenShelfRule[]; rules: FnbOpenShelfRule[] }>> {
   const empty = { locked: [] as FnbOpenShelfRule[], rules: [] as FnbOpenShelfRule[] };
   try {
-    await requireFnbModuleAccess("master_items_bom");
+    await requireAnyFnbModule(["master_items_bom", "sop_shift_settings"]);
     const db = schemaAdmin().schema("fnb");
     const [items, rules, bases] = await Promise.all([
       db.from("items").select("id, short_code, name_th, brand_scope").eq("is_active", true).order("short_code", { ascending: true }).limit(2000),
@@ -147,7 +147,7 @@ export async function listOpenShelfRulesAction(): Promise<FnbActionResult<{ lock
 
 export async function saveOpenShelfRuleAction(formData: FormData): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
-    await requireFnbModuleAccess("master_items_bom");
+    await requireAnyFnbModule(["master_items_bom", "sop_shift_settings"]);
     const itemId = text(formData.get("item_id"));
     const code = text(formData.get("short_code")).toUpperCase();
     if (!itemId) return result({ ok: false }, "ไม่พบวัตถุดิบ");

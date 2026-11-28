@@ -43,6 +43,8 @@ function spotOf(row: Record<string, unknown>): FnbCleaningSpot {
     spotNameTh: text(row.spot_name_th),
     sortOrder: num(row.sort_order),
     photoUrl: null,
+    scheduleType: text(row.schedule_type) === "WEEKLY" ? "WEEKLY" : "DAILY",
+    weekdays: Array.isArray(row.schedule_weekdays) ? row.schedule_weekdays.map((day) => Number(day)).filter((day) => Number.isFinite(day)) : [],
   };
 }
 
@@ -99,7 +101,7 @@ export async function saveStorageZoneAction(input: {
 
 export async function listCleaningSpotsAction(branchCode: string): Promise<FnbActionResult<FnbCleaningSpot[]>> {
   try {
-    const listed = await schemaAdmin().schema("fnb").from("branch_cleaning_spots").select("id,branch_code,stage_code,spot_name_th,sort_order,is_active").eq("branch_code", branchCode).eq("is_active", true).order("sort_order", { ascending: true }).limit(80);
+    const listed = await schemaAdmin().schema("fnb").from("branch_cleaning_spots").select("id,branch_code,stage_code,spot_name_th,sort_order,is_active,schedule_type,schedule_weekdays").eq("branch_code", branchCode).eq("is_active", true).order("sort_order", { ascending: true }).limit(80);
     if (listed.error) return fail([], listed.error, "อ่านจุดความสะอาดไม่สำเร็จ");
     return result(asRows(listed.data).map(spotOf));
   } catch (error) {
@@ -113,17 +115,24 @@ export async function saveCleaningSpotAction(input: {
   stageCode: "OPENING" | "CLOSING";
   spotNameTh: string;
   sortOrder: number;
+  scheduleType?: "DAILY" | "WEEKLY";
+  weekdays?: number[];
+  isActive?: boolean;
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
     const ctx = await requireFnbModuleAccess("sop_shift_settings");
     if (!ctx.isSuperAdmin) return result({ ok: false }, "เฉพาะ Super Admin แก้ไขจุดความสะอาดได้");
-    const payload = {
+    const payload: Record<string, unknown> = {
       branch_code: input.branchCode,
       stage_code: input.stageCode,
       spot_name_th: input.spotNameTh.trim(),
       sort_order: Number(input.sortOrder) || 10,
-      is_active: true,
+      is_active: input.isActive !== false,
     };
+    if (input.scheduleType) {
+      payload.schedule_type = input.scheduleType === "WEEKLY" ? "WEEKLY" : "DAILY";
+      payload.schedule_weekdays = input.scheduleType === "WEEKLY" ? input.weekdays ?? [] : [];
+    }
     const saved = input.id
       ? await schemaAdmin().schema("fnb").from("branch_cleaning_spots").update(payload).eq("id", input.id)
       : await schemaAdmin().schema("fnb").from("branch_cleaning_spots").insert(payload);
@@ -131,6 +140,43 @@ export async function saveCleaningSpotAction(input: {
     return result({ ok: true });
   } catch (error) {
     return caught({ ok: false }, error, "บันทึกจุดความสะอาดไม่สำเร็จ");
+  }
+}
+
+export async function copyCleaningSpotsAction(input: { fromBranch: string; toBranch: string; stageCode: "OPENING" | "CLOSING" }): Promise<FnbActionResult<{ ok: boolean }>> {
+  try {
+    const ctx = await requireFnbModuleAccess("sop_shift_settings");
+    if (!ctx.isSuperAdmin) return result({ ok: false }, "เฉพาะ Super Admin คัดลอกจุดตรวจได้");
+    if (input.fromBranch === input.toBranch) return result({ ok: false }, "เลือกสาขาต้นทางคนละสาขากับสาขาปัจจุบัน");
+    const db = schemaAdmin().schema("fnb");
+    const [fromBranch, toBranch] = await Promise.all([
+      db.from("branches").select("brand_code").eq("branch_code", input.fromBranch).maybeSingle(),
+      db.from("branches").select("brand_code").eq("branch_code", input.toBranch).maybeSingle(),
+    ]);
+    if (fromBranch.error) return fail({ ok: false }, fromBranch.error, "อ่านสาขาไม่สำเร็จ");
+    if (toBranch.error) return fail({ ok: false }, toBranch.error, "อ่านสาขาไม่สำเร็จ");
+    const fromBrand = text(fromBranch.data && typeof fromBranch.data === "object" ? (fromBranch.data as Record<string, unknown>).brand_code : "");
+    const toBrand = text(toBranch.data && typeof toBranch.data === "object" ? (toBranch.data as Record<string, unknown>).brand_code : "");
+    if (!fromBrand || fromBrand !== toBrand) return result({ ok: false }, "คัดลอกได้เฉพาะสาขาในแบรนด์เดียวกัน");
+    const listed = await db.from("branch_cleaning_spots").select("spot_name_th,sort_order,schedule_type,schedule_weekdays,branch_code,stage_code,is_active").eq("stage_code", input.stageCode).eq("is_active", true).limit(200);
+    if (listed.error) return fail({ ok: false }, listed.error, "อ่านจุดตรวจไม่สำเร็จ");
+    const all = asRows(listed.data);
+    const existing = new Set(all.filter((row) => text(row.branch_code) === input.toBranch).map((row) => text(row.spot_name_th)));
+    const fresh = all.filter((row) => text(row.branch_code) === input.fromBranch && !existing.has(text(row.spot_name_th)));
+    if (fresh.length === 0) return result({ ok: true });
+    const inserted = await db.from("branch_cleaning_spots").insert(fresh.map((row) => ({
+      branch_code: input.toBranch,
+      stage_code: input.stageCode,
+      spot_name_th: text(row.spot_name_th),
+      sort_order: num(row.sort_order) || 10,
+      schedule_type: text(row.schedule_type) === "WEEKLY" ? "WEEKLY" : "DAILY",
+      schedule_weekdays: Array.isArray(row.schedule_weekdays) ? row.schedule_weekdays : [],
+      is_active: true,
+    })));
+    if (inserted.error) return fail({ ok: false }, inserted.error, "คัดลอกจุดตรวจไม่สำเร็จ");
+    return result({ ok: true });
+  } catch (error) {
+    return caught({ ok: false }, error, "คัดลอกจุดตรวจไม่สำเร็จ");
   }
 }
 

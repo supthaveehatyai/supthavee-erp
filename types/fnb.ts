@@ -154,6 +154,12 @@ export type FnbBranchOption = {
   shift_3_start: string | null;
   shift_3_end: string | null;
   max_staff_per_shift: number;
+  coffee_dose_min_g?: number | null;
+  coffee_dose_max_g?: number | null;
+  espresso_time_min_s?: number | null;
+  espresso_time_max_s?: number | null;
+  espresso_yield_min_g?: number | null;
+  espresso_yield_max_g?: number | null;
 };
 
 export type FnbBrandCode = "LUCKY_CUP" | "CHATORN";
@@ -501,6 +507,7 @@ export type FnbParLevelRow = {
   name_th: string;
   min_par_count_qty: number;
   lead_time_days: number;
+  alert_enabled: boolean;
   is_below_par: boolean;
   last_observed_count_qty: number | null;
 };
@@ -639,6 +646,8 @@ export type FnbCleaningSpot = {
   spotNameTh: string;
   sortOrder: number;
   photoUrl: string | null;
+  scheduleType: "DAILY" | "WEEKLY";
+  weekdays: number[];
 };
 
 export type FnbZoneCountLine = {
@@ -776,6 +785,8 @@ export type FnbAuditAnomaly = { branchCode: string; kind: string; detail: string
 export type FnbInspectorDetail = {
   sections: { key: string; title: string; staff: string; at: string; status: string; photos: string[] }[];
   wip: { label: string; portion: string; staff: string; at: string; sticker: string; photos: string[] }[];
+  prepRows: { id: string; label: string; portion: string; yieldLabel: string; staff: string; at: string }[];
+  openRows: { id: string; label: string; qtyLabel: string; badge: string; expiryLabel: string; staff: string; at: string }[];
   replenishments: { item: string; qty: number; at: string }[];
   shifts: { shift: string; staff: string; variance: number }[];
   photos: FnbAuditPhoto[];

@@ -212,7 +212,7 @@ export function OperationsWorkspace({
           <input className={field} type="date" value={workDate} onChange={(event) => setWorkDate(event.target.value)} />
         </label>
       </div>
-      <LiveBranchProvider key={`${branch}|${workDate}`} branch={branch} workDate={workDate} shiftSlot={shiftSlot} pinSlot={sessionShift}>
+      <LiveBranchProvider key={`${branch}|${workDate}`} branch={branch} workDate={workDate} shiftSlot={shiftSlot} pinSlot={sessionShift} showCrewChrome={!(superAdmin && viewMode === "EXECUTIVE_INSPECTOR")}>
       {superAdmin && viewMode === "EXECUTIVE_INSPECTOR" ? <ExecutiveInspector brand={brand} workDate={workDate} branch={branch} onPickBranch={pickBranch} /> : <CrewLockedFieldset monthLocked={monthLocked}>
       <div className="flex flex-wrap gap-2">
         <TabButton active={tab === "OPENING"} onClick={() => setTab("OPENING")}>1. เปิดร้าน (กะแรก)</TabButton>
