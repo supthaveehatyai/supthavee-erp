@@ -55,6 +55,12 @@ export async function submitShiftClosingAndMenuSalesAction(input: FnbShiftHandov
     if (saved.error) return result({ ok: false, createdMenus: 0 }, saved.error.message || "บันทึกส่งยอดกะไม่สำเร็จ");
     const body = rpcBody(saved.data);
     if (body.ok !== true) return result({ ok: false, createdMenus: 0 }, text(body.error) || "บันทึกส่งยอดกะไม่สำเร็จ");
+    await schemaAdmin().schema("fnb").from("shift_closings").update({
+      report_attachments_json: {
+        lineman: input.linemanScreenUrls ?? [],
+        grab: input.grabScreenUrls ?? [],
+      },
+    }).eq("branch_code", input.branchCode).eq("work_date", input.workDate).eq("shift_type", input.shiftType);
     return result({ ok: true, createdMenus: num(body.auto_created_new_menus) });
   } catch (error) {
     return caught({ ok: false, createdMenus: 0 }, error, "บันทึกส่งยอดกะไม่สำเร็จ");

@@ -107,26 +107,28 @@ function openingCountRows(payload: unknown, fallback: { id: string; name: string
 }
 
 export async function getExecutiveInspectorAction(brand: string, workDate: string, branchCode: string): Promise<FnbActionResult<{ matrix: FnbInspectorMatrixRow[]; anomalies: FnbAuditAnomaly[]; detail: FnbInspectorDetail }>> {
-  const empty = { matrix: [] as FnbInspectorMatrixRow[], anomalies: [] as FnbAuditAnomaly[], detail: { sections: [], openingCards: [] as FnbInspectorOpeningCard[], wip: [], prepRows: [], openRows: [], replenishments: [], shifts: [], photos: [] } };
+  const empty = { matrix: [] as FnbInspectorMatrixRow[], anomalies: [] as FnbAuditAnomaly[], detail: { sections: [], openingCards: [] as FnbInspectorOpeningCard[], wip: [], prepRows: [], openRows: [], replenishments: [], writeOffs: [], shiftCards: [], menus: [], closingCash: null, closingSpots: [], shrinkage: [], wasteLogs: [], shifts: [], photos: [] } };
   try {
     await desk();
     const scope = brandOf(brand);
     const db = schemaAdmin().schema("fnb");
-    const [branches, confirms, batches, transfers, shifts, sales, equipment, writeOffs, counts, items, rosters, bases, cleaningLogs, cleaningSpots] = await Promise.all([
+    const [branches, confirms, batches, transfers, shifts, sales, equipment, writeOffs, counts, items, rosters, bases, cleaningLogs, cleaningSpots, menuSales, wasteLogs] = await Promise.all([
       db.from("branches").select("branch_code,branch_name_th,brand_code,branch_status,coffee_dose_min_g,coffee_dose_max_g,espresso_time_min_s,espresso_time_max_s,espresso_yield_min_g,espresso_yield_max_g").eq("brand_code", scope).neq("branch_status", "INACTIVE").limit(20),
       db.from("daily_stage_section_confirmations").select("id,branch_code,stage_code,section_key,section_title_th,status_flag,numeric_amount,expected_amount,confirmed_by_name,confirmed_at,photo_urls,payload_json").eq("work_date", workDate).limit(2000),
       db.from("bar_wip_batches").select("id,branch_code,batch_kind,prep_base_code,item_id,brew_portion_mode,packs_deducted,pack_uom,opened_at,opened_by_name,expires_at,sticker_label_text,open_photo_urls,batch_status,notes,is_voided_duplicate,sliced_piece_count,actual_usable_qty,is_estimated_net_weight").eq("work_date", workDate).limit(1000),
-      db.from("internal_zone_transfers").select("branch_code,item_id,qty_in_count_uom,created_at").eq("work_date", workDate).limit(1000),
-      db.from("shift_closings").select("branch_code,shift_type,staff_name,cash_variance,created_at").eq("work_date", workDate).limit(200),
+      db.from("internal_zone_transfers").select("branch_code,item_id,qty_in_count_uom,created_at,staff_name,photo_url,from_location_code,to_location_code").eq("work_date", workDate).limit(1000),
+      db.from("shift_closings").select("branch_code,shift_type,staff_name,cash_variance,created_at,order_count,net_sales_inc_vat,cash_pos_amount,qr_amount,kshop_app_amount,lineman_gross_amount,lineman_app_amount,grab_gross_amount,grab_gp_amount,grab_net_payout_amount,webapp_amount,opening_float_amount,drawer_total_cash_counted,cash_handover_to_next_shift,handover_status,handover_accepted_by_name,handover_accepted_at,deposit_channel,seven_eleven_deposit_amount,seven_eleven_fee_thb,seven_eleven_slip_url,total_cash_for_eod_deposit,slip_image_urls,menu_slip_image_urls,app_screen_image_urls,handover_ack_photo_url,report_attachments_json").eq("work_date", workDate).limit(200),
       db.from("daily_menu_sales_headers").select("branch_code,created_at").eq("work_date", workDate).limit(50),
       db.from("daily_equipment_calibrations").select("branch_code,grinder_dose_g,espresso_time_sec,espresso_yield_g,syrup_random_target_g,syrup_measured_actual_g,photo_urls").eq("work_date", workDate).limit(20),
       db.from("item_write_offs").select("id,branch_code,item_id,write_off_reason,qty_in_count_uom,photo_urls,reported_by_name,created_at").eq("work_date", workDate).limit(500),
-      db.from("zone_stock_counts").select("branch_code,item_id,counted_qty,shrinkage_diff_qty,count_stage,staff_name").eq("count_date", workDate).limit(2000),
+      db.from("zone_stock_counts").select("branch_code,item_id,counted_qty,shrinkage_diff_qty,count_stage,staff_name,opening_qty_ref,replenished_in_qty,pos_sold_qty,waste_qty,expected_qty").eq("count_date", workDate).limit(2000),
       db.from("items").select("id,short_code,name_th,item_category,count_uom,brand_scope").eq("is_active", true).limit(2000),
       db.from("shift_crew_rosters").select("branch_code,shift_slot,crew_members_json").eq("work_date", workDate).limit(40),
       db.from("prep_bases").select("base_code,base_name_th,yield_qty_ml").eq("brand_code", scope).limit(40),
       db.from("daily_cleaning_spot_logs").select("branch_code,stage_code,spot_id,spot_name_th,photo_url,checked_by_name,checked_at").eq("work_date", workDate).limit(2000),
       db.from("branch_cleaning_spots").select("id,branch_code,stage_code,schedule_type,schedule_weekdays,is_active").eq("is_active", true).limit(500),
+      db.from("shift_menu_sales").select("branch_code,shift_type,raw_menu_name,cup_size,qty_sold,sales_amount").eq("work_date", workDate).limit(2000),
+      db.from("daily_waste_logs").select("branch_code,staff_name,total_waste_cost_thb,notes,photo_urls,yield_adjusted_loss_thb").eq("work_date", workDate).limit(40),
     ]);
     if (branches.error) return fail(empty, branches.error, "อ่านสาขาไม่สำเร็จ");
     const branchRows = asRows(branches.data);
@@ -231,13 +233,19 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
       const base = baseName.get(code);
       const packs = num(row.packs_deducted);
       const yieldMl = base && packs > 0 && packs <= 1 ? base.yieldMl * packs : base?.yieldMl || 0;
+      const opened = text(row.opened_at);
+      const hour = opened ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", hourCycle: "h23" }).format(new Date(opened)) : "";
+      const slot = text(row.shift_instance);
+      const morningBrew = slot === "SHIFT_1" || slot === "OPENING" || (hour !== "" && hour < "11");
       return {
         id: text(row.id),
         label: `${code}${base?.name ? ` · ${base.name}` : ""}`,
         portion: formatPrepPortionPct(packs, text(row.brew_portion_mode)),
         yieldLabel: yieldMl > 0 ? formatFnbQty(yieldMl, "ml") : "",
         staff: text(row.opened_by_name),
-        at: text(row.opened_at),
+        at: opened,
+        badge: morningBrew ? "เปิดร้านเช้า" : "ต้มเพิ่มระหว่างวัน",
+        photos: urls(row.open_photo_urls),
       };
     });
     const openRows = focusBatches.filter((row) => text(row.batch_kind) === "OPEN_ITEM").map((row) => {
@@ -254,6 +262,7 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
         expiryLabel: expiry ? dayLabel(expiry) : (sticker || "เคลียร์สิ้นวัน"),
         staff: text(row.opened_by_name),
         at: text(row.opened_at),
+        photos: urls(row.open_photo_urls),
       };
     });
     for (const row of asRows(writeOffs.data).filter((item) => text(item.branch_code) === focus)) {
@@ -325,10 +334,11 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
     }
     urls(sec7?.photo_urls).forEach((url) => { if (!sec7Photos.has(url)) sec7Photos.set(url, "หมวด 7"); });
     const sec7Total = Math.max(openingSpots.length, sec7PayloadSpots.length, sec7Photos.size);
+    const sauceLines = openRows.length > 0 ? openRows.map((row) => `${row.label} · ${row.qtyLabel} · ${row.expiryLabel}`) : ["ยังไม่มีภาชนะเปิดใช้"];
     const openingCards: FnbInspectorOpeningCard[] = [
-      { no: 1, title: "หมวดที่ 1: เบสและเลมอน", staff: text(sec1?.confirmed_by_name), at: text(sec1?.confirmed_at), lines: prepLines.length ? prepLines : ["ยังไม่บันทึก"], zeroNote: "", photos: photoCards(sec1, "หมวด 1") },
-      { no: 2, title: "หมวดที่ 2: มาตรฐานอุปกรณ์", staff: text(sec2?.confirmed_by_name), at: text(sec2?.confirmed_at), lines: [metric(dose, band.doseMin, band.doseMax, "โดสกาแฟ", "g"), metric(seconds, band.timeMin, band.timeMax, "เวลาช็อต", "s"), metric(shot, band.yieldMin, band.yieldMax, "น้ำหนักช็อต", "g"), `เครื่องน้ำเชื่อมสุ่ม ${syrupTarget ?? "-"} g · ชั่งจริง ${syrupActual ?? "-"} g`], zeroNote: "", photos: [...photoCards(sec2, "หมวด 2"), ...photoCards(equip, "หมวด 2")] },
-      { no: 3, title: "หมวดที่ 3: ซอสหน้าบาร์", staff: text(sectionRow("SEC_3_SAUCE")?.confirmed_by_name), at: text(sectionRow("SEC_3_SAUCE")?.confirmed_at), lines: [`เปิดใช้อยู่ ${openRows.length} ภาชนะ`], zeroNote: "", photos: photoCards(sectionRow("SEC_3_SAUCE"), "หมวด 3") },
+      { no: 1, title: "หมวดที่ 1: เตรียมวัตถุดิบเบสและหั่นเลมอน", staff: text(sec1?.confirmed_by_name), at: text(sec1?.confirmed_at), lines: prepLines.length ? prepLines : ["ยังไม่บันทึก"], zeroNote: "", photos: photoCards(sec1, "หมวด 1") },
+      { no: 2, title: "หมวดที่ 2: มาตรฐานอุปกรณ์", staff: text(sec2?.confirmed_by_name), at: text(sec2?.confirmed_at), lines: [metric(dose, band.doseMin, band.doseMax, "โดส", "g"), metric(seconds, band.timeMin, band.timeMax, "เวลาช็อต", "s"), metric(shot, band.yieldMin, band.yieldMax, "น้ำหนักช็อต", "g"), `เครื่องน้ำเชื่อม ${syrupTarget ?? "-"} g · ชั่งจริง ${syrupActual ?? "-"} g`], zeroNote: "", photos: [...photoCards(sec2, "หมวด 2"), ...photoCards(equip, "หมวด 2")] },
+      { no: 3, title: "หมวดที่ 3: ซอสและวัตถุดิบเปิดใช้หน้าบาร์", staff: text(sectionRow("SEC_3_SAUCE")?.confirmed_by_name), at: text(sectionRow("SEC_3_SAUCE")?.confirmed_at), lines: sauceLines, zeroNote: "", photos: photoCards(sectionRow("SEC_3_SAUCE"), "หมวด 3") },
       { no: 4, title: "หมวดที่ 4: ตู้แช่เบเกอรี่และไอศกรีม", staff: text(sec4?.confirmed_by_name), at: text(sec4?.confirmed_at), lines: sec4Summary.lines, zeroNote: sec4Summary.zeroNote, photos: photoCards(sec4, "หมวด 4") },
       { no: 5, title: "หมวดที่ 5: ชั้นโชว์ของพรีเมียม", staff: text(sec5?.confirmed_by_name), at: text(sec5?.confirmed_at), lines: sec5Summary.lines, zeroNote: sec5Summary.zeroNote, photos: photoCards(sec5, "หมวด 5") },
       { no: 6, title: "หมวดที่ 6: เงินสดในเก๊ะ", staff: text(sec6?.confirmed_by_name), at: text(sec6?.confirmed_at), lines: [sec6 ? moneyLabel(num(sec6.numeric_amount)) : "ยังไม่บันทึกเงินสด"], zeroNote: "", photos: photoCards(sec6, "หมวด 6") },
@@ -337,6 +347,120 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
     for (const card of openingCards) {
       card.photos.forEach((photo) => pushPhoto({ url: photo.url, staff: card.staff, at: card.at, caption: photo.caption, confirmationId: null, submissionId: null }));
     }
+    const focusShifts = asRows(shifts.data).filter((row) => text(row.branch_code) === focus);
+    const shiftCards = focusShifts.flatMap((row) => {
+      const shift = text(row.shift_type);
+      if (shift !== "MORNING" && shift !== "AFTERNOON") return [];
+      const attachments = recordOf(row.report_attachments_json);
+      const linemanShots = urls(attachments.lineman);
+      const grabShots = urls(attachments.grab);
+      const photos: { group: string; url: string }[] = [];
+      urls(row.slip_image_urls).forEach((url) => photos.push({ group: "สลิปยอดขาย POS", url }));
+      urls(row.menu_slip_image_urls).forEach((url) => photos.push({ group: "สลิปรายเมนู POS", url }));
+      if (linemanShots.length > 0 || grabShots.length > 0) {
+        linemanShots.forEach((url) => photos.push({ group: "หน้าจอ LineMan", url }));
+        grabShots.forEach((url) => photos.push({ group: "หน้าจอ Grab / K SHOP", url }));
+      } else {
+        urls(row.app_screen_image_urls).forEach((url) => photos.push({ group: "หน้าจอ LineMan / Grab / K SHOP", url }));
+      }
+      const ack = text(row.handover_ack_photo_url);
+      if (ack.startsWith("http")) photos.push({ group: "รูปตรวจรับเงินสด", url: ack });
+      return [{
+        shift: shift as "MORNING" | "AFTERNOON",
+        staff: text(row.staff_name),
+        at: text(row.created_at),
+        orderCount: num(row.order_count),
+        netSales: num(row.net_sales_inc_vat),
+        cash: num(row.cash_pos_amount),
+        qr: num(row.qr_amount),
+        kshop: num(row.kshop_app_amount),
+        lineman: num(row.lineman_gross_amount),
+        linemanApp: num(row.lineman_app_amount),
+        grab: num(row.grab_gross_amount),
+        grabGp: num(row.grab_gp_amount),
+        grabNet: num(row.grab_net_payout_amount),
+        webapp: num(row.webapp_amount),
+        openingFloat: num(row.opening_float_amount) || 1200,
+        drawerCounted: num(row.drawer_total_cash_counted),
+        cashHandover: num(row.cash_handover_to_next_shift),
+        cashVariance: num(row.cash_variance),
+        handoverStatus: text(row.handover_status),
+        handoverAcceptedByName: text(row.handover_accepted_by_name),
+        handoverAcceptedAt: text(row.handover_accepted_at),
+        depositChannel: text(row.deposit_channel),
+        sevenAmount: num(row.seven_eleven_deposit_amount),
+        sevenFee: num(row.seven_eleven_fee_thb),
+        sevenSlipUrl: text(row.seven_eleven_slip_url),
+        eodDeposit: num(row.total_cash_for_eod_deposit),
+        photos,
+      }];
+    });
+    const focusWriteOffs = asRows(writeOffs.data).filter((row) => text(row.branch_code) === focus).map((row) => ({
+      id: text(row.id),
+      item: itemName.get(text(row.item_id)) || "รายการ",
+      reason: text(row.write_off_reason),
+      qty: num(row.qty_in_count_uom),
+      staff: text(row.reported_by_name),
+      at: text(row.created_at),
+      photos: urls(row.photo_urls),
+    }));
+    const closingConfirms = asRows(confirms.data).filter((row) => text(row.branch_code) === focus && text(row.stage_code) === "CLOSING");
+    const cashRow = closingConfirms.find((row) => ["CLOSE_1_CASH", "CLOSE_1_CASH_FLOAT", "SEC_1_CASH_FLOAT"].includes(text(row.section_key)));
+    const closingCash = cashRow ? {
+      amount: num(cashRow.numeric_amount),
+      expected: num(cashRow.expected_amount) || 1200,
+      staff: text(cashRow.confirmed_by_name),
+      at: text(cashRow.confirmed_at),
+      photos: urls(cashRow.photo_urls).map((url) => ({ url, caption: "เงินสดติดเก๊ะปิดร้าน" })),
+    } : null;
+    const closingSpots = asRows(cleaningLogs.data).filter((row) => text(row.branch_code) === focus && text(row.stage_code) === "CLOSING").map((row) => ({
+      name: text(row.spot_name_th) || "จุดความสะอาดปิดร้าน",
+      url: text(row.photo_url),
+      staff: text(row.checked_by_name),
+      at: text(row.checked_at),
+    })).filter((row) => row.url.startsWith("http"));
+    const displayCats = new Set(["BAKERY_FROZEN", "ICE_CREAM", "MERCHANDISE", "CONE"]);
+    const shrinkMap = new Map<string, { item: string; uom: string; opening: number; replenished: number; sold: number; wasted: number; counted: number; hasCount: boolean; fromSheet: boolean }>();
+    function shrinkRow(itemId: string) {
+      const meta = itemMeta.get(itemId);
+      if (!meta || !displayCats.has(meta.category)) return null;
+      const current = shrinkMap.get(itemId) ?? { item: meta.name, uom: meta.uom, opening: 0, replenished: 0, sold: 0, wasted: 0, counted: 0, hasCount: false, fromSheet: false };
+      shrinkMap.set(itemId, current);
+      return current;
+    }
+    for (const row of asRows(counts.data).filter((item) => text(item.branch_code) === focus)) {
+      const bucket = shrinkRow(text(row.item_id));
+      if (!bucket) continue;
+      const stage = text(row.count_stage);
+      if (stage === "OPENING") bucket.opening += num(row.counted_qty);
+      if (stage === "CLOSING") {
+        bucket.counted += num(row.counted_qty);
+        bucket.hasCount = true;
+        bucket.replenished += num(row.replenished_in_qty);
+        bucket.sold += num(row.pos_sold_qty);
+        bucket.wasted += num(row.waste_qty);
+        if (num(row.replenished_in_qty) > 0 || num(row.waste_qty) > 0) bucket.fromSheet = true;
+      }
+    }
+    for (const row of asRows(transfers.data).filter((item) => text(item.branch_code) === focus)) {
+      const bucket = shrinkRow(text(row.item_id));
+      if (bucket && !bucket.fromSheet) bucket.replenished += num(row.qty_in_count_uom);
+    }
+    for (const row of focusWriteOffs) {
+      const source = asRows(writeOffs.data).find((item) => text(item.id) === row.id);
+      const bucket = source ? shrinkRow(text(source.item_id)) : null;
+      if (bucket && !bucket.fromSheet) bucket.wasted += row.qty;
+    }
+    const shrinkage = [...shrinkMap.values()].map((row) => {
+      const expected = row.opening + row.replenished - row.sold - row.wasted;
+      return { ...row, expected, counted: row.hasCount ? row.counted : null, missing: row.hasCount && row.counted + 0.001 < expected };
+    });
+    const wasteRows = asRows(wasteLogs.data).filter((row) => text(row.branch_code) === focus).map((row) => ({
+      staff: text(row.staff_name),
+      cost: num(row.yield_adjusted_loss_thb) || num(row.total_waste_cost_thb),
+      notes: text(row.notes),
+      photos: urls(row.photo_urls),
+    }));
     return result({
       matrix,
       anomalies,
@@ -346,8 +470,27 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
         wip,
         prepRows,
         openRows,
-        replenishments: asRows(transfers.data).filter((row) => text(row.branch_code) === focus).map((row) => ({ item: itemName.get(text(row.item_id)) || "สินค้า", qty: num(row.qty_in_count_uom), at: text(row.created_at) })),
-        shifts: asRows(shifts.data).filter((row) => text(row.branch_code) === focus).map((row) => ({ shift: text(row.shift_type), staff: text(row.staff_name), variance: num(row.cash_variance) })),
+        replenishments: asRows(transfers.data).filter((row) => text(row.branch_code) === focus).map((row) => ({
+          item: itemName.get(text(row.item_id)) || "สินค้า",
+          qty: num(row.qty_in_count_uom),
+          at: text(row.created_at),
+          staff: text(row.staff_name),
+          photo: text(row.photo_url),
+        })),
+        writeOffs: focusWriteOffs,
+        shiftCards,
+        menus: asRows(menuSales.data).filter((row) => text(row.branch_code) === focus).map((row) => ({
+          shift: text(row.shift_type),
+          name: text(row.raw_menu_name),
+          size: text(row.cup_size) || "R",
+          qty: num(row.qty_sold),
+          amount: num(row.sales_amount),
+        })),
+        closingCash,
+        closingSpots,
+        shrinkage,
+        wasteLogs: wasteRows,
+        shifts: focusShifts.map((row) => ({ shift: text(row.shift_type), staff: text(row.staff_name), variance: num(row.cash_variance) })),
         photos,
       },
     });

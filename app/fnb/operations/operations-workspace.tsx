@@ -201,15 +201,25 @@ export function OperationsWorkspace({
       {message ? <p className={`rounded-lg px-3 py-2 text-sm ${message.includes("รออนุมัติ") ? "bg-amber-50 text-amber-900" : message.includes("เรียบร้อย") || message.includes("แล้ว") ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`}>{message}</p> : null}
       {superAdmin ? <ApprovalQueue requests={approvals} onDone={() => { void listPendingShiftApprovalsAction().then((listed) => setApprovals(listed.data)); }} /> : null}
       {actorSource === "desktop" ? <BranchPills branches={branches} active={branch} onPick={pickBranch} /> : null}
-      <div className="grid gap-3 rounded-xl border border-red-100 bg-white p-4 md:grid-cols-2">
-        <p className="flex h-10 items-center rounded-md bg-red-50 px-3 text-sm text-red-900">ผู้ปฏิบัติงาน: {staffName || "บัญชีที่ล็อกอิน"}</p>
-        <label className="flex h-10 items-center gap-2 text-sm text-slate-800">
+      {superAdmin && viewMode === "EXECUTIVE_INSPECTOR" ? (
+        <label className="flex h-10 max-w-sm items-center gap-2 text-sm text-slate-800">
           <span className="shrink-0 font-medium">วันที่ตรวจสอบ</span>
           <input className={field} type="date" value={workDate} onChange={(event) => setWorkDate(event.target.value)} />
         </label>
-      </div>
+      ) : (
+        <div className="grid gap-3 rounded-xl border border-red-100 bg-white p-4 md:grid-cols-2">
+          <p className="flex h-10 items-center rounded-md bg-red-50 px-3 text-sm text-red-900">ผู้ปฏิบัติงาน: {staffName || "บัญชีที่ล็อกอิน"}</p>
+          <label className="flex h-10 items-center gap-2 text-sm text-slate-800">
+            <span className="shrink-0 font-medium">วันที่ตรวจสอบ</span>
+            <input className={field} type="date" value={workDate} onChange={(event) => setWorkDate(event.target.value)} />
+          </label>
+        </div>
+      )}
       <LiveBranchProvider key={`${branch}|${workDate}`} branch={branch} workDate={workDate} shiftSlot={shiftSlot} pinSlot={sessionShift} showCrewChrome={!(superAdmin && viewMode === "EXECUTIVE_INSPECTOR")}>
-      <DualShiftRoster interactive={!(superAdmin && viewMode === "EXECUTIVE_INSPECTOR")} />
+      {superAdmin && viewMode === "EXECUTIVE_INSPECTOR" ? (
+        <ExecutiveInspector brand={brand} workDate={workDate} branch={branch} stage={tab} onStage={setTab} onPickBranch={pickBranch} roster={<DualShiftRoster interactive={false} />} />
+      ) : <CrewLockedFieldset monthLocked={monthLocked}>
+      <DualShiftRoster interactive />
       <div className="flex flex-wrap gap-2">
         <TabButton active={tab === "OPENING"} onClick={() => setTab("OPENING")}>1. เปิดร้าน</TabButton>
         <TabButton active={tab === "WIP"} onClick={() => setTab("WIP")}>🫖 ต้มเบสเพิ่ม & เบิกเปิดของขึ้นบาร์</TabButton>
@@ -217,7 +227,6 @@ export function OperationsWorkspace({
         <TabButton active={tab === "SHIFT_2"} onClick={() => setTab("SHIFT_2")}>3. รับเงินกะเช้า & ปิดยอดกะสอง (รวบฝาก 7-11)</TabButton>
         <TabButton active={tab === "CLOSING"} onClick={() => setTab("CLOSING")}>4. ปิดร้าน & เช็คของหาย</TabButton>
       </div>
-      {superAdmin && viewMode === "EXECUTIVE_INSPECTOR" ? <ExecutiveInspector brand={brand} workDate={workDate} branch={branch} stage={tab} onPickBranch={pickBranch} /> : <CrewLockedFieldset monthLocked={monthLocked}>
       <MiddayShortcuts branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brandLock} staffName={staffName} brand={brand} />
       {tab === "OPENING" ? <OpeningChecklist branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brand} staffName={staffName} cashFloat={selected?.standard_cash_float} /> : null}
       {tab === "SHIFT_1" ? <MorningHandoverPanel branch={branch} workDate={workDate} brand={brand} brandLock={brandLock} actorSource={actorSource} cashFloat={selected?.standard_cash_float ?? 1200} /> : null}

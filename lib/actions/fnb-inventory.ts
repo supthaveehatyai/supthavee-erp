@@ -6,7 +6,7 @@ import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb
 import { schemaAdmin } from "@/lib/holding/schema-db";
 import { requireFnbModuleAccess, requireFnbStoreOperationAccess } from "@/lib/holding/workspace-access";
 import type { UserAccessContext } from "@/types/holding";
-import type { FnbActionResult, FnbStockBalanceRow, FnbStockCard, FnbStockCardMovement } from "@/types/fnb";
+import type { FnbActionResult, FnbExecutiveInventory, FnbExecutiveInventoryItem, FnbStockBalanceRow, FnbStockCard, FnbStockCardLot, FnbStockCardMovement } from "@/types/fnb";
 
 function branchAllowed(ctx: UserAccessContext, branchCode: string): boolean {
   if (ctx.isSuperAdmin) return true;
@@ -350,21 +350,96 @@ export async function getFnbItemStockCardAction(input: {
         in_count_qty: num(rec.in_count_qty),
         out_count_qty: num(rec.out_count_qty),
         balance_count_qty: num(rec.balance_count_qty),
+        in_recipe_qty: num(rec.in_recipe_qty),
+        out_recipe_qty: num(rec.out_recipe_qty),
+        balance_recipe_qty: num(rec.balance_recipe_qty),
       };
       return movement;
     });
+    const lotRows = await schemaAdmin().schema("fnb").from("inventory_expiry_lots").select("location_code,entry_mode,mfg_date,expiry_date,lot_qty_in_count_uom,count_uom").eq("branch_code", input.branch_code).eq("item_id", input.item_id).gt("lot_qty_in_count_uom", 0).order("expiry_date", { ascending: true }).limit(40);
+    const expiryLots: FnbStockCardLot[] = asRows(lotRows.data).filter((row) => !input.location_code || input.location_code === "ALL" || text(row.location_code) === input.location_code).map((row) => ({
+      location_code: text(row.location_code),
+      entry_mode: text(row.entry_mode),
+      mfg_date: text(row.mfg_date),
+      expiry_date: text(row.expiry_date),
+      qty: num(row.lot_qty_in_count_uom),
+      uom: text(row.count_uom),
+    }));
     return result({
       ok: true,
       short_code: text(body.short_code),
       name_th: text(body.name_th),
       count_uom: text(body.count_uom),
+      recipe_uom: text(body.recipe_uom),
+      recipe_per_count_uom: num(body.recipe_per_count_uom) || 1,
       from_date: text(body.from_date),
       to_date: text(body.to_date),
       brought_forward_count_qty: num(body.brought_forward_count_qty),
+      brought_forward_recipe_qty: num(body.brought_forward_recipe_qty),
       closing_count_qty: num(body.closing_count_qty),
+      closing_recipe_qty: num(body.closing_recipe_qty),
       movements,
+      expiry_lots: expiryLots,
     });
   } catch (error) {
     return caught(null, error, "อ่านบัตรสต็อกไม่สำเร็จ");
+  }
+}
+
+export async function getExecutiveInventoryOverviewAction(branchCode: string): Promise<FnbActionResult<FnbExecutiveInventory | null>> {
+  try {
+    const access = await requireFnbStoreOperationAccess(branchCode);
+    if (!access.ok) return result(null, access.error);
+    const saved = await callFnbRpc("get_executive_inventory_overview", { p_branch_code: branchCode });
+    if (saved.error) return fail(null, saved.error, "อ่านภาพรวมสต็อกไม่สำเร็จ");
+    const body = saved.data && typeof saved.data === "object" ? saved.data as Record<string, unknown> : {};
+    if (body.ok !== true) return result(null, text(body.error) || "อ่านภาพรวมสต็อกไม่สำเร็จ");
+    const canView = access.ctx.isSuperAdmin || access.ctx.fnbGuardrailPermissions.can_view_cost_price;
+    const locations = (Array.isArray(body.locations) ? body.locations : []).map((row) => {
+      const rec = row && typeof row === "object" ? row as Record<string, unknown> : {};
+      return { location_code: text(rec.location_code), location_name_th: text(rec.location_name_th) };
+    });
+    const items: FnbExecutiveInventoryItem[] = (Array.isArray(body.items) ? body.items : []).map((row) => {
+      const rec = row && typeof row === "object" ? row as Record<string, unknown> : {};
+      const per = num(rec.recipe_per_count_uom) || 1;
+      const recipeByLocation = rec.by_location_recipe_qty && typeof rec.by_location_recipe_qty === "object" ? rec.by_location_recipe_qty as Record<string, unknown> : {};
+      const byLocation: Record<string, number> = {};
+      for (const [code, qty] of Object.entries(recipeByLocation)) byLocation[code] = Math.round((num(qty) / per) * 100) / 100;
+      const lots = (Array.isArray(rec.expiry_lots) ? rec.expiry_lots : []).map((lot) => {
+        const item = lot && typeof lot === "object" ? lot as Record<string, unknown> : {};
+        return { location_code: text(item.location_code), mfg_date: text(item.mfg_date), expiry_date: text(item.expiry_date), qty: num(item.qty), uom: text(item.uom) };
+      });
+      return {
+        item_id: text(rec.item_id),
+        short_code: text(rec.short_code),
+        name_th: text(rec.name_th),
+        item_category: text(rec.item_category),
+        image_urls: Array.isArray(rec.image_urls) ? rec.image_urls.map((url) => text(url)).filter(Boolean) : [],
+        image_captions: Array.isArray(rec.image_captions) ? rec.image_captions.map((caption) => text(caption)) : [],
+        recipe_uom: text(rec.recipe_uom) || "g",
+        count_uom: text(rec.count_uom) || "ชิ้น",
+        recipe_per_count_uom: per,
+        reorder_point_count_qty: num(rec.reorder_point_count_qty),
+        total_recipe_qty: num(rec.total_recipe_qty),
+        total_count_qty: num(rec.total_count_qty),
+        by_location_count_qty: byLocation,
+        total_stock_value_thb: canView ? num(rec.total_stock_value_thb) : null,
+        nearest_expiry_date: text(rec.nearest_expiry_date),
+        expiry_lots: lots,
+        last_counted_at: text(rec.last_counted_at),
+        last_counted_by: text(rec.last_counted_by),
+        open_pack_net_recipe_qty: num(rec.open_pack_net_recipe_qty),
+      };
+    });
+    const stockValue = canView ? items.reduce((sum, item) => sum + (item.total_stock_value_thb ?? 0), 0) : null;
+    return result({
+      branch_code: text(body.branch_code),
+      branch_name_th: text(body.branch_name_th),
+      locations,
+      items,
+      stock_value_thb: stockValue,
+    });
+  } catch (error) {
+    return caught(null, error, "อ่านภาพรวมสต็อกไม่สำเร็จ");
   }
 }

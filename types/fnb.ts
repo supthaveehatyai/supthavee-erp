@@ -426,6 +426,18 @@ export type FnbStockCardMovement = {
   in_count_qty: number;
   out_count_qty: number;
   balance_count_qty: number;
+  in_recipe_qty: number;
+  out_recipe_qty: number;
+  balance_recipe_qty: number;
+};
+
+export type FnbStockCardLot = {
+  location_code: string;
+  entry_mode: string;
+  mfg_date: string;
+  expiry_date: string;
+  qty: number;
+  uom: string;
 };
 
 export type FnbStockCard = {
@@ -433,11 +445,54 @@ export type FnbStockCard = {
   short_code: string;
   name_th: string;
   count_uom: string;
+  recipe_uom: string;
+  recipe_per_count_uom: number;
   from_date: string;
   to_date: string;
   brought_forward_count_qty: number;
+  brought_forward_recipe_qty: number;
   closing_count_qty: number;
+  closing_recipe_qty: number;
   movements: FnbStockCardMovement[];
+  expiry_lots: FnbStockCardLot[];
+};
+
+export type FnbExecutiveExpiryLot = {
+  location_code: string;
+  mfg_date: string;
+  expiry_date: string;
+  qty: number;
+  uom: string;
+};
+
+export type FnbExecutiveInventoryItem = {
+  item_id: string;
+  short_code: string;
+  name_th: string;
+  item_category: string;
+  image_urls: string[];
+  image_captions: string[];
+  recipe_uom: string;
+  count_uom: string;
+  recipe_per_count_uom: number;
+  reorder_point_count_qty: number;
+  total_recipe_qty: number;
+  total_count_qty: number;
+  by_location_count_qty: Record<string, number>;
+  total_stock_value_thb: number | null;
+  nearest_expiry_date: string;
+  expiry_lots: FnbExecutiveExpiryLot[];
+  last_counted_at: string;
+  last_counted_by: string;
+  open_pack_net_recipe_qty: number;
+};
+
+export type FnbExecutiveInventory = {
+  branch_code: string;
+  branch_name_th: string;
+  locations: { location_code: string; location_name_th: string }[];
+  items: FnbExecutiveInventoryItem[];
+  stock_value_thb: number | null;
 };
 
 export type FnbBranchKpi = {
@@ -869,13 +924,66 @@ export type FnbInspectorOpeningCard = {
   photos: { url: string; caption: string }[];
 };
 
+export type FnbInspectorReportPhoto = { group: string; url: string };
+
+export type FnbInspectorShiftCard = {
+  shift: "MORNING" | "AFTERNOON";
+  staff: string;
+  at: string;
+  orderCount: number;
+  netSales: number;
+  cash: number;
+  qr: number;
+  kshop: number;
+  lineman: number;
+  linemanApp: number;
+  grab: number;
+  grabGp: number;
+  grabNet: number;
+  webapp: number;
+  openingFloat: number;
+  drawerCounted: number;
+  cashHandover: number;
+  cashVariance: number;
+  handoverStatus: string;
+  handoverAcceptedByName: string;
+  handoverAcceptedAt: string;
+  depositChannel: string;
+  sevenAmount: number;
+  sevenFee: number;
+  sevenSlipUrl: string;
+  eodDeposit: number;
+  photos: FnbInspectorReportPhoto[];
+};
+
+export type FnbInspectorMenuLine = { shift: string; name: string; size: string; qty: number; amount: number };
+
+export type FnbInspectorShrinkRow = {
+  item: string;
+  uom: string;
+  opening: number;
+  replenished: number;
+  sold: number;
+  wasted: number;
+  expected: number;
+  counted: number | null;
+  missing: boolean;
+};
+
 export type FnbInspectorDetail = {
   sections: { key: string; title: string; staff: string; at: string; status: string; photos: string[] }[];
   openingCards: FnbInspectorOpeningCard[];
   wip: { label: string; portion: string; staff: string; at: string; sticker: string; photos: string[] }[];
-  prepRows: { id: string; label: string; portion: string; yieldLabel: string; staff: string; at: string }[];
-  openRows: { id: string; label: string; qtyLabel: string; badge: string; expiryLabel: string; staff: string; at: string }[];
-  replenishments: { item: string; qty: number; at: string }[];
+  prepRows: { id: string; label: string; portion: string; yieldLabel: string; staff: string; at: string; badge: string; photos: string[] }[];
+  openRows: { id: string; label: string; qtyLabel: string; badge: string; expiryLabel: string; staff: string; at: string; photos: string[] }[];
+  replenishments: { item: string; qty: number; at: string; staff: string; photo: string }[];
+  writeOffs: { id: string; item: string; reason: string; qty: number; staff: string; at: string; photos: string[] }[];
+  shiftCards: FnbInspectorShiftCard[];
+  menus: FnbInspectorMenuLine[];
+  closingCash: { amount: number; expected: number; staff: string; at: string; photos: { url: string; caption: string }[] } | null;
+  closingSpots: { name: string; url: string; staff: string; at: string }[];
+  shrinkage: FnbInspectorShrinkRow[];
+  wasteLogs: { staff: string; cost: number; notes: string; photos: string[] }[];
   shifts: { shift: string; staff: string; variance: number }[];
   photos: FnbAuditPhoto[];
 };
@@ -1142,6 +1250,8 @@ export type FnbShiftHandoverInput = {
   posSlipUrls: string[];
   menuSlipUrls: string[];
   appScreenUrls: string[];
+  linemanScreenUrls?: string[];
+  grabScreenUrls?: string[];
   menuLines: { raw_menu_name: string; cup_size: string; qty_sold: number; sales_amount: number; pos_category_name: string }[];
   note: string;
   overrideReason: string;

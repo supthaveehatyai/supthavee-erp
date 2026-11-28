@@ -169,11 +169,13 @@ export function MorningHandoverPanel(props: { branch: string; workDate: string; 
   const [kshop, setKshop] = useState(0);
   const [linemanApp, setLinemanApp] = useState(0);
   const [grabNet, setGrabNet] = useState(0);
+  const [grabGp, setGrabGp] = useState(0);
   const [notes, setNotes] = useState<Record<number, number>>({});
   const [lines, setLines] = useState<FnbPosMenuSlipLine[]>([]);
   const [posUrls, setPosUrls] = useState<string[]>([]);
   const [menuUrls, setMenuUrls] = useState<string[]>([]);
-  const [appUrls, setAppUrls] = useState<string[]>([]);
+  const [linemanUrls, setLinemanUrls] = useState<string[]>([]);
+  const [grabUrls, setGrabUrls] = useState<string[]>([]);
   const [busy, setBusy] = useState("");
   const hydrated = useRef(false);
   const morning = live.snapshot?.closings.find((row) => row.shiftType === "MORNING");
@@ -282,14 +284,16 @@ export function MorningHandoverPanel(props: { branch: string; workDate: string; 
       breakdown: FNB_NOTE_VALUES.map((face) => ({ face, qty: notes[face] ?? 0 })),
       kshopApp: kshop,
       linemanApp,
-      grabGp: 0,
+      grabGp,
       grabNet,
       depositChannel: "HOLD_FOR_AFTERNOON",
       sevenAmount: 0,
       sevenSlipUrl: "",
       posSlipUrls: posUrls,
       menuSlipUrls: menuUrls,
-      appScreenUrls: appUrls,
+      appScreenUrls: [...linemanUrls, ...grabUrls],
+      linemanScreenUrls: linemanUrls,
+      grabScreenUrls: grabUrls,
       menuLines: lines.map((line) => ({ raw_menu_name: line.rawMenuName, cup_size: line.cupSize, qty_sold: line.qtySold, sales_amount: line.salesAmount, pos_category_name: line.posCategoryName })),
       note: "",
       overrideReason: "",
@@ -310,10 +314,11 @@ export function MorningHandoverPanel(props: { branch: string; workDate: string; 
     <section className="space-y-3 rounded-xl border border-amber-200 bg-white p-4">
       <h2 className="font-semibold">2. ส่งเงินกะแรก (สรุปส่งมอบให้กะบ่าย)</h2>
       <p className="text-sm text-slate-600">กะเช้าส่งยอดเงินในเก๊ะให้กะบ่ายตรวจ กะเช้าไม่ไปฝาก 7-Eleven ตอนเที่ยง</p>
-      <div className="grid gap-3 md:grid-cols-3">
-        <SlipCapture label="รูปสลิป POS รายงานยอดขายตามช่วงเวลา" action={`🤖 ดึงยอด 5 ช่องทางด้วย AI${busy === "pos" ? " ..." : ""}`} onFile={(file) => { void readFinancial(file); }} />
-        <SlipCapture label="รูปสลิป POS รายงานยอดขายสินค้า (สินค้าและหมวดหมู่)" action={`🤖 ถอดรายการเมนู + จำนวนแก้วช่วงเช้าด้วย AI${busy === "menu" ? " ..." : ""}`} onFile={(file) => { void readMenus(file); }} />
-        <SlipCapture label="รูปหน้าจอแอป K SHOP / LineMan / Grab" action="แนบรูปหน้าจอแอป" onFile={(file) => { void storeSlip(props.branch, file).then((url) => setAppUrls((current) => [...current, url])).catch((error: Error) => toast.error(error.message)); }} />
+      <div className="grid gap-3 md:grid-cols-4">
+        <SlipCapture label="สลิป POS" action={`🤖 ดึงยอด 5 ช่องทางด้วย AI${busy === "pos" ? " ..." : ""}`} onFile={(file) => { void readFinancial(file); }} />
+        <SlipCapture label="สลิปเมนู POS" action={`🤖 ถอดรายการเมนู + จำนวนแก้วช่วงเช้าด้วย AI${busy === "menu" ? " ..." : ""}`} onFile={(file) => { void readMenus(file); }} />
+        <SlipCapture label="รายงาน LineMan" action={linemanUrls.length ? `แนบแล้ว ${linemanUrls.length} รูป` : "แนบรายงาน LineMan"} onFile={(file) => { void storeSlip(props.branch, file).then((url) => setLinemanUrls((current) => [...current, url])).catch((error: Error) => toast.error(error.message)); }} />
+        <SlipCapture label="รายงาน Grab / K SHOP" action={grabUrls.length ? `แนบแล้ว ${grabUrls.length} รูป` : "แนบรายงาน Grab / K SHOP"} onFile={(file) => { void storeSlip(props.branch, file).then((url) => setGrabUrls((current) => [...current, url])).catch((error: Error) => toast.error(error.message)); }} />
       </div>
       <ChannelBoxes cash={cash} qr={qr} lineman={lineman} grab={grab} webapp={webapp} onCash={setCash} onQr={setQr} onLineman={setLineman} onGrab={setGrab} onWebapp={setWebapp} />
       <details className="rounded-lg bg-slate-50 p-3 text-sm">
@@ -322,6 +327,7 @@ export function MorningHandoverPanel(props: { branch: string; workDate: string; 
           <label>ยอดหน้าแอป K SHOP<input className={field} type="number" step="0.01" value={kshop || ""} onChange={(event) => setKshop(Number(event.target.value) || 0)} /></label>
           <label>LineMan สุทธิ<input className={field} type="number" step="0.01" value={linemanApp || ""} onChange={(event) => setLinemanApp(Number(event.target.value) || 0)} /></label>
           <label>Grab สุทธิ<input className={field} type="number" step="0.01" value={grabNet || ""} onChange={(event) => setGrabNet(Number(event.target.value) || 0)} /></label>
+          <label>หัก GP Grab<input className={field} type="number" step="0.01" value={grabGp || ""} onChange={(event) => setGrabGp(Number(event.target.value) || 0)} /></label>
         </div>
       </details>
       <NoteCounter notes={notes} onChange={setNotes} />
@@ -368,9 +374,11 @@ export function AfternoonHandoverPanel(props: { branch: string; workDate: string
   const [orders, setOrders] = useState(0);
   const [notes, setNotes] = useState<Record<number, number>>({});
   const [lines, setLines] = useState<FnbPosMenuSlipLine[]>([]);
+  const [grabGp, setGrabGp] = useState(0);
   const [posUrls, setPosUrls] = useState<string[]>([]);
   const [menuUrls, setMenuUrls] = useState<string[]>([]);
-  const [appUrls, setAppUrls] = useState<string[]>([]);
+  const [linemanUrls, setLinemanUrls] = useState<string[]>([]);
+  const [grabUrls, setGrabUrls] = useState<string[]>([]);
   const [deposit, setDeposit] = useState<"SEVEN_ELEVEN_EOD" | "BANK_DIRECT" | "SAFE_OVERNIGHT">("SEVEN_ELEVEN_EOD");
   const [sevenUrl, setSevenUrl] = useState("");
   const [busy, setBusy] = useState("");
@@ -479,14 +487,16 @@ export function AfternoonHandoverPanel(props: { branch: string; workDate: string
       breakdown: FNB_NOTE_VALUES.map((face) => ({ face, qty: notes[face] ?? 0 })),
       kshopApp: 0,
       linemanApp: 0,
-      grabGp: 0,
+      grabGp,
       grabNet: 0,
       depositChannel: deposit,
       sevenAmount: deposit === "SEVEN_ELEVEN_EOD" ? depositTarget : 0,
       sevenSlipUrl: sevenUrl,
       posSlipUrls: posUrls,
       menuSlipUrls: menuUrls,
-      appScreenUrls: appUrls,
+      appScreenUrls: [...linemanUrls, ...grabUrls],
+      linemanScreenUrls: linemanUrls,
+      grabScreenUrls: grabUrls,
       menuLines: lines.map((line) => ({ raw_menu_name: line.rawMenuName, cup_size: line.cupSize, qty_sold: line.qtySold, sales_amount: line.salesAmount, pos_category_name: line.posCategoryName })),
       note: "",
       overrideReason: "",
@@ -531,10 +541,11 @@ export function AfternoonHandoverPanel(props: { branch: string; workDate: string
           <input type="checkbox" checked={menuCumulative} onChange={(event) => setMenuCumulative(event.target.checked)} />
           สลิปเมนูสะสมทั้งวัน → คำนวณแก้วกะบ่าย = รวมทั้งวัน − กะเช้า อัตโนมัติ
         </label>
-        <div className="grid gap-3 md:grid-cols-3">
-          <SlipCapture label="รูปสลิป POS รายงานยอดขายตามช่วงเวลา" action="🤖 ดึงยอด 5 ช่องทางด้วย AI" onFile={(file) => { void readFinancial(file); }} />
-          <SlipCapture label="รูปสลิป POS รายงานยอดขายสินค้า (สินค้าและหมวดหมู่)" action="🤖 ถอดรายการเมนู + จำนวนแก้วด้วย AI" onFile={(file) => { void readMenus(file); }} />
-          <SlipCapture label="รูปหน้าจอแอป K SHOP / LineMan / Grab" action="แนบรูปหน้าจอแอป" onFile={(file) => { void storeSlip(props.branch, file).then((url) => setAppUrls((current) => [...current, url])).catch((error: Error) => toast.error(error.message)); }} />
+        <div className="grid gap-3 md:grid-cols-4">
+          <SlipCapture label="สลิป POS" action="🤖 ดึงยอด 5 ช่องทางด้วย AI" onFile={(file) => { void readFinancial(file); }} />
+          <SlipCapture label="สลิปเมนู POS" action="🤖 ถอดรายการเมนู + จำนวนแก้วด้วย AI" onFile={(file) => { void readMenus(file); }} />
+          <SlipCapture label="รายงาน LineMan" action={linemanUrls.length ? `แนบแล้ว ${linemanUrls.length} รูป` : "แนบรายงาน LineMan"} onFile={(file) => { void storeSlip(props.branch, file).then((url) => setLinemanUrls((current) => [...current, url])).catch((error: Error) => toast.error(error.message)); }} />
+          <SlipCapture label="รายงาน Grab / K SHOP" action={grabUrls.length ? `แนบแล้ว ${grabUrls.length} รูป` : "แนบรายงาน Grab / K SHOP"} onFile={(file) => { void storeSlip(props.branch, file).then((url) => setGrabUrls((current) => [...current, url])).catch((error: Error) => toast.error(error.message)); }} />
         </div>
         {categoryWarning ? <p className="rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-950">{CATEGORY_WARNING}</p> : null}
         <ChannelBoxes cash={cash} qr={qr} lineman={lineman} grab={grab} webapp={webapp} onCash={setCash} onQr={setQr} onLineman={setLineman} onGrab={setGrab} onWebapp={setWebapp} />
