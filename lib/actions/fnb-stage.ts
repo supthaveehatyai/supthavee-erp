@@ -38,14 +38,18 @@ export async function confirmStageSectionAction(input: {
     if (!gate.ok) return result({ ok: false }, gate.error);
     const manager = gate.ctx.workspaceRole === "FNB_BRANCH_MANAGER";
     const assistReason = (input.assistReason || "").trim();
-    const override = assistReason.length >= 4 && (gate.ctx.isSuperAdmin || manager);
-    if (gate.ctx.isSuperAdmin && !override) return result({ ok: false }, "ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 4 ตัวอักษร)");
-    if ((gate.ctx.isSuperAdmin || manager) && assistReason.length > 0 && assistReason.length < 4) {
-      return result({ ok: false }, "ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 4 ตัวอักษร)");
+    const override = assistReason.length >= 3 && (gate.ctx.isSuperAdmin || manager);
+    if (gate.ctx.isSuperAdmin && !override) return result({ ok: false }, "ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 3 ตัวอักษร)");
+    if ((gate.ctx.isSuperAdmin || manager) && assistReason.length > 0 && assistReason.length < 3) {
+      return result({ ok: false }, "ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 3 ตัวอักษร)");
     }
     const locked = await fnbMonthLockMessage(input.branchCode, input.workDate, input.brandLock);
     if (locked) return result({ ok: false }, locked);
-    if (!override && gate.userId) {
+    const seatedRows = gate.userId
+      ? await schemaAdmin().schema("fnb").from("shift_crew_rosters").select("crew_members_json").eq("branch_code", input.branchCode).eq("work_date", input.workDate).limit(4)
+      : null;
+    const alreadySeated = asRows(seatedRows?.data).some((row) => Array.isArray(row.crew_members_json) && row.crew_members_json.some((member) => text((member as Record<string, unknown>).user_id) === gate.userId));
+    if (!override && gate.userId && !alreadySeated) {
       const slot = input.shiftSlot ?? (input.stageCode === "CLOSING" ? "SHIFT_2" : "SHIFT_1");
       const seated = await callFnbRpc("check_in_shift_crew_seat", {
         p_branch_code: input.branchCode,

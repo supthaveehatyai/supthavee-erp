@@ -80,26 +80,30 @@ function moneyLabel(value: number): string {
   return `${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท`;
 }
 
-function countSummary(rows: { name: string; qty: number; uom: string }[]): { lines: string[]; zeroNote: string } {
+function countSummary(rows: { name: string; qty: number; uom: string }[], confirmed: boolean): { lines: string[]; zeroNote: string } {
   const positive = rows.filter((row) => row.qty > 0);
   const zeros = rows.filter((row) => row.qty <= 0);
-  if (rows.length === 0) return { lines: ["ยังไม่บันทึกยอดนับ"], zeroNote: "" };
-  if (positive.length === 0) return { lines: ["ยืนยันตรวจนับแล้ว: หน้าตู้ 0 ชิ้นทุกรายการ"], zeroNote: "" };
+  if (positive.length === 0) return { lines: [confirmed || rows.length > 0 ? "ยืนยันตรวจนับแล้ว: หน้าตู้ 0 ชิ้นทุกรายการ" : "ยังไม่บันทึกยอดนับ"], zeroNote: "" };
   return {
     lines: positive.map((row) => `${row.name}: ${formatFnbQty(row.qty, row.uom, false)}`),
-    zeroNote: zeros.length > 0 ? `ดูรายการที่เป็น 0 ชิ้น (${zeros.length} รายการ)` : "",
+    zeroNote: `(มีของหน้าตู้ ${positive.length} รายการ · 0 ชิ้น ${zeros.length} รายการ)`,
   };
 }
 
-function openingCountRows(payload: unknown, fallback: { name: string; qty: number; uom: string }[]): { name: string; qty: number; uom: string }[] {
+function openingCountRows(payload: unknown, fallback: { id: string; name: string; qty: number; uom: string }[]): { name: string; qty: number; uom: string }[] {
   const raw = Array.isArray(recordOf(payload).items) ? recordOf(payload).items as unknown[] : [];
-  if (raw.length === 0) return fallback;
-  return raw.flatMap((item) => {
+  const parsed = raw.flatMap((item) => {
     const rec = recordOf(item);
-    const qty = Number(rec.qty ?? 0);
-    if (!rec.nameTh && !rec.name) return [];
-    return [{ name: text(rec.nameTh || rec.name), qty: Number.isFinite(qty) ? qty : 0, uom: text(rec.uom) || "ชิ้น" }];
+    const id = text(rec.item_id || rec.itemId);
+    const name = text(rec.name_th || rec.nameTh || rec.name);
+    const qty = Number(rec.counted_qty ?? rec.countedQty ?? rec.qty ?? 0);
+    if (!id && !name) return [];
+    return [{ id, name: name || id, qty: Number.isFinite(qty) ? qty : 0, uom: text(rec.count_uom || rec.uom) || "ชิ้น" }];
   });
+  if (parsed.length === 0) return fallback;
+  const merged = new Map(fallback.map((row) => [row.id, row]));
+  for (const row of parsed) merged.set(row.id || row.name, row);
+  return [...merged.values()];
 }
 
 export async function getExecutiveInspectorAction(brand: string, workDate: string, branchCode: string): Promise<FnbActionResult<{ matrix: FnbInspectorMatrixRow[]; anomalies: FnbAuditAnomaly[]; detail: FnbInspectorDetail }>> {
@@ -243,7 +247,7 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
       return {
         id: text(row.id),
         label: itemName.get(text(row.item_id)) || text(row.prep_base_code) || "วัตถุดิบ",
-        qtyLabel: formatFnbQty(num(row.packs_deducted) || 1, text(row.pack_uom) || "ชิ้น", false),
+        qtyLabel: note.match(/(\d+)\s*ลูก/) ? `${Number(note.match(/(\d+)\s*ลูก/)?.[1] || 0)} ลูก` : formatFnbQty(num(row.packs_deducted) || 1, text(row.pack_uom) || "ชิ้น", false),
         badge: note.includes("เปิดใช้") ? "เปิดใช้อยู่" : "เบิกใหม่",
         expiryLabel: expiry ? dayLabel(expiry) : (sticker || "เคลียร์สิ้นวัน"),
         staff: text(row.opened_by_name),
@@ -284,12 +288,12 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
     const zoneFallback = (categories: string[]) => asRows(counts.data).filter((row) => text(row.branch_code) === focus && text(row.count_stage) === "OPENING").flatMap((row) => {
       const meta = itemMeta.get(text(row.item_id));
       if (!meta || !categories.includes(meta.category)) return [];
-      return [{ name: meta.name, qty: num(row.counted_qty), uom: meta.uom }];
+      return [{ id: text(row.item_id), name: meta.name, qty: num(row.counted_qty), uom: meta.uom }];
     });
     const sec4 = sectionRow("SEC_4_BAKERY_ICE");
     const sec5 = sectionRow("SEC_5_MERCH");
-    const sec4Summary = countSummary(openingCountRows(sec4?.payload_json, zoneFallback(["BAKERY_FROZEN", "ICE_CREAM", "CONE"])));
-    const sec5Summary = countSummary(openingCountRows(sec5?.payload_json, zoneFallback(["MERCHANDISE"])));
+    const sec4Summary = countSummary(openingCountRows(sec4?.payload_json, zoneFallback(["BAKERY_FROZEN", "ICE_CREAM", "CONE"])), Boolean(sec4));
+    const sec5Summary = countSummary(openingCountRows(sec5?.payload_json, zoneFallback(["MERCHANDISE"])), Boolean(sec5));
     const sec6 = sectionRow("SEC_6_CASH_FLOAT");
     const weekday = bangkokWeekday(workDate);
     const openingSpots = asRows(cleaningSpots.data).filter((row) => {
@@ -300,6 +304,16 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
     });
     const openingLogs = asRows(cleaningLogs.data).filter((row) => text(row.branch_code) === focus && text(row.stage_code) === "OPENING" && text(row.photo_url).startsWith("http"));
     const sec7 = sectionRow("SEC_7_CLEANING");
+    const sec7PayloadSpots = Array.isArray(recordOf(sec7?.payload_json).spots) ? recordOf(sec7?.payload_json).spots as unknown[] : [];
+    const sec7Photos = new Map<string, string>();
+    for (const row of openingLogs) sec7Photos.set(text(row.photo_url), text(row.spot_name_th) || "หมวด 7");
+    for (const item of sec7PayloadSpots) {
+      const rec = recordOf(item);
+      const photo = text(rec.photoUrl || rec.photo_url);
+      if (photo.startsWith("http")) sec7Photos.set(photo, text(rec.name || rec.spot_name_th) || "หมวด 7");
+    }
+    urls(sec7?.photo_urls).forEach((url) => { if (!sec7Photos.has(url)) sec7Photos.set(url, "หมวด 7"); });
+    const sec7Total = Math.max(openingSpots.length, sec7PayloadSpots.length, sec7Photos.size);
     const openingCards: FnbInspectorOpeningCard[] = [
       { no: 1, title: "หมวดที่ 1: เบสและเลมอน", staff: text(sec1?.confirmed_by_name), at: text(sec1?.confirmed_at), lines: prepLines.length ? prepLines : ["ยังไม่บันทึก"], zeroNote: "", photos: photoCards(sec1, "หมวด 1") },
       { no: 2, title: "หมวดที่ 2: มาตรฐานอุปกรณ์", staff: text(sec2?.confirmed_by_name), at: text(sec2?.confirmed_at), lines: [metric(dose, band.doseMin, band.doseMax, "โดสกาแฟ", "g"), metric(seconds, band.timeMin, band.timeMax, "เวลาช็อต", "s"), metric(shot, band.yieldMin, band.yieldMax, "น้ำหนักช็อต", "g"), `เครื่องน้ำเชื่อมสุ่ม ${syrupTarget ?? "-"} g · ชั่งจริง ${syrupActual ?? "-"} g`], zeroNote: "", photos: [...photoCards(sec2, "หมวด 2"), ...photoCards(equip, "หมวด 2")] },
@@ -307,7 +321,7 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
       { no: 4, title: "หมวดที่ 4: ตู้แช่เบเกอรี่และไอศกรีม", staff: text(sec4?.confirmed_by_name), at: text(sec4?.confirmed_at), lines: sec4Summary.lines, zeroNote: sec4Summary.zeroNote, photos: photoCards(sec4, "หมวด 4") },
       { no: 5, title: "หมวดที่ 5: ชั้นโชว์ของพรีเมียม", staff: text(sec5?.confirmed_by_name), at: text(sec5?.confirmed_at), lines: sec5Summary.lines, zeroNote: sec5Summary.zeroNote, photos: photoCards(sec5, "หมวด 5") },
       { no: 6, title: "หมวดที่ 6: เงินสดในเก๊ะ", staff: text(sec6?.confirmed_by_name), at: text(sec6?.confirmed_at), lines: [sec6 ? moneyLabel(num(sec6.numeric_amount)) : "ยังไม่บันทึกเงินสด"], zeroNote: "", photos: photoCards(sec6, "หมวด 6") },
-      { no: 7, title: "หมวดที่ 7: ความสะอาดเปิดร้าน", staff: text(sec7?.confirmed_by_name) || text(openingLogs[0]?.checked_by_name), at: text(sec7?.confirmed_at) || text(openingLogs[0]?.checked_at), lines: [`ถ่ายแล้ว ${openingLogs.length} / ${openingSpots.length} จุด`], zeroNote: "", photos: openingLogs.map((row) => ({ url: text(row.photo_url), caption: text(row.spot_name_th) || "หมวด 7" })) },
+      { no: 7, title: "หมวดที่ 7: ความสะอาดเปิดร้าน", staff: text(sec7?.confirmed_by_name) || text(openingLogs[0]?.checked_by_name), at: text(sec7?.confirmed_at) || text(openingLogs[0]?.checked_at), lines: [sec7 ? `ยืนยันแล้ว ${sec7Photos.size} / ${sec7Total} จุด` : `ถ่ายแล้ว ${openingLogs.length} / ${openingSpots.length} จุด`], zeroNote: "", photos: [...sec7Photos.entries()].map(([url, caption]) => ({ url, caption })) },
     ];
     for (const card of openingCards) {
       card.photos.forEach((photo) => pushPhoto({ url: photo.url, staff: card.staff, at: card.at, caption: photo.caption, confirmationId: null, submissionId: null }));

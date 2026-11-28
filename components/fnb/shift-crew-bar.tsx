@@ -18,9 +18,10 @@ type LiveValue = {
   lockMessage: string;
 };
 
-export function crewAssist(live: LiveValue): { assistReason?: string; isEdit?: true } {
-  if (!live.assistArmed || live.assistReason.trim().length < 4) return {};
-  return { assistReason: live.assistReason.trim(), isEdit: true };
+export function crewAssist(live: LiveValue): { assistReason?: string; isEdit?: true; editReason?: string } {
+  if (!live.assistArmed || live.assistReason.trim().length < 3) return {};
+  const reason = live.assistReason.trim();
+  return { assistReason: reason, isEdit: true, editReason: reason };
 }
 
 const LiveBranchContext = createContext<LiveValue | null>(null);
@@ -91,7 +92,7 @@ export function LiveBranchProvider(props: {
     assistArmed,
     setAssistReason,
     armAssist: (reason: string) => {
-      if (reason.trim().length < 4) return false;
+      if (reason.trim().length < 3) return false;
       setAssistReason(reason.trim());
       setAssistArmed(true);
       return true;
@@ -164,12 +165,12 @@ function ShiftCrewChrome(props: {
       ) : null}
       {props.askAssist ? (
         <div className="space-y-2 rounded-lg bg-amber-50 p-3">
-          <label className="block text-sm">เหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 4 ตัวอักษร)
+          <label className="block text-sm">เหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 3 ตัวอักษร)
             <input className="mt-1 h-10 w-full rounded-md border px-2" value={live.assistReason} onChange={(event) => live.setAssistReason(event.target.value)} />
           </label>
           <button type="button" className="rounded-md bg-amber-900 px-3 py-2 text-sm text-white" onClick={() => {
-            if (live.assistReason.trim().length < 4) { toast.error("ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 4 ตัวอักษร)"); return; }
-            if (!live.armAssist(live.assistReason)) { toast.error("ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 4 ตัวอักษร)"); return; }
+            if (live.assistReason.trim().length < 3) { toast.error("ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 3 ตัวอักษร)"); return; }
+            if (!live.armAssist(live.assistReason)) { toast.error("ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 3 ตัวอักษร)"); return; }
             props.setAskAssist(false);
             toast.success("เปิดโหมดช่วยเหลือแล้ว บันทึกหมวดได้ตามเหตุผลนี้");
           }}>ยืนยันเหตุผลและเริ่มช่วยเหลือ</button>

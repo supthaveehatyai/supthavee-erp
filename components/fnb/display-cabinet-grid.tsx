@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
-import { replenishZoneAction, saveZoneCountsAction } from "@/lib/actions/fnb-store-day";
-import { confirmStageSectionAction } from "@/lib/actions/fnb-stage";
+import { replenishZoneAction, saveDisplaySectionCountsAction } from "@/lib/actions/fnb-store-day";
 import { hhmm, UnsavedDraftBar } from "@/components/fnb/section-confirm-card";
 import { crewAssist, useLiveBranch } from "@/components/fnb/shift-crew-bar";
 import { addDays, bangkokHour, shortThaiDate } from "@/lib/fnb/stage-progress";
@@ -40,14 +39,14 @@ function payloadItems(row: FnbStageConfirmation | null, catalog: FnbZoneCountLin
   return raw.flatMap((item) => {
     const rec = asRecord(item);
     if (!rec) return [];
-    const key = String(rec.itemId ?? rec.code ?? "");
+    const key = String(rec.item_id ?? rec.itemId ?? rec.code ?? "");
     const known = catalog.find((line) => line.itemId === key || line.shortCode === key);
-    const qty = Number(rec.qty ?? rec.countedQty ?? 0);
+    const qty = Number(rec.counted_qty ?? rec.countedQty ?? rec.qty ?? 0);
     return [{
       key: key || known?.itemId || "",
-      name: String(rec.nameTh ?? rec.name ?? known?.nameTh ?? rec.code ?? "รายการ"),
+      name: String(rec.name_th ?? rec.nameTh ?? rec.name ?? known?.nameTh ?? rec.code ?? "รายการ"),
       qty: Number.isFinite(qty) ? qty : 0,
-      uom: String(rec.uom ?? rec.countUom ?? known?.countUom ?? "ชิ้น"),
+      uom: String(rec.count_uom ?? rec.uom ?? rec.countUom ?? known?.countUom ?? "ชิ้น"),
     }];
   });
 }
@@ -142,9 +141,12 @@ function CountLockedCard(props: { sectionNo: number; row: FnbStageConfirmation; 
   return (
     <div className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-950">
       {positive.length > 0 ? (
-        <div className="grid gap-1 sm:grid-cols-2">
-          {positive.map((item) => <p key={item.key} className="font-semibold">{item.name}: {formatFnbQty(item.qty, item.uom, false)}</p>)}
-        </div>
+        <>
+          <div className="grid gap-1 sm:grid-cols-2">
+            {positive.map((item) => <p key={item.key} className="rounded-full bg-white px-2 py-1 font-semibold">{item.name}: {formatFnbQty(item.qty, item.uom, false)}</p>)}
+          </div>
+          <p className="mt-2 text-xs">(มีของหน้าตู้ {positive.length} รายการ · 0 ชิ้น {zeros.length} รายการ)</p>
+        </>
       ) : <p>ยืนยันตรวจนับแล้ว: หน้าตู้ 0 ชิ้นทุกรายการ</p>}
       {zeros.length > 0 && positive.length > 0 ? (
         <button type="button" className="mt-2 rounded-full bg-white px-2 py-1 text-xs" onClick={() => setShowZero((value) => !value)}>ดูรายการที่เป็น 0 ชิ้น ({zeros.length} รายการ)</button>
@@ -183,22 +185,27 @@ export function DisplayCabinetGrid(props: {
   const bakeryIce = [...bakery, ...ice];
   const merch = props.lines.filter((line) => isMerch(line));
   useEffect(() => {
+    const saved = new Map<string, string>();
+    for (const row of [sec4, sec5]) {
+      for (const item of payloadItems(row, props.lines)) {
+        if (item.key) saved.set(item.key, String(Math.round(item.qty)));
+      }
+    }
     const rows = (live.snapshot?.zoneStockCounts ?? []).filter((row) => row.countStage === "OPENING");
-    if (rows.length === 0) return;
+    if (rows.length === 0 && saved.size === 0) return;
     setQty((current) => {
       let changed = false;
       const next = { ...current };
-      for (const row of rows) {
-        if (dirty.current.has(row.itemId)) continue;
-        const shown = String(Math.round(row.countedQty));
-        if (next[row.itemId] !== shown) {
-          next[row.itemId] = shown;
-          changed = true;
-        }
-      }
+      const apply = (itemId: string, shown: string) => {
+        if (!itemId || dirty.current.has(itemId) || next[itemId] === shown) return;
+        next[itemId] = shown;
+        changed = true;
+      };
+      for (const row of rows) apply(row.itemId, String(Math.round(row.countedQty)));
+      for (const [itemId, shown] of saved) apply(itemId, shown);
       return changed ? next : current;
     });
-  }, [live.snapshot]);
+  }, [live.snapshot, sec4, sec5, props.lines]);
   function onQty(itemId: string, value: string) {
     dirty.current.add(itemId);
     setQty((current) => ({ ...current, [itemId]: value }));
@@ -242,38 +249,39 @@ export function DisplayCabinetGrid(props: {
       uom: line.countUom || "ชิ้น",
       category: line.category,
     }));
-    const saved = await saveZoneCountsAction({
-      branchCode: props.branch,
-      workDate: props.workDate,
-      stage: "OPENING",
-      actorSource: props.actorSource,
-      brandLock: props.brand,
-      lines: rows.map((line) => ({ itemId: line.itemId, locationCode: line.locationCode, countedQty: line.countedQty, openingQty: line.openingQty, replenishedQty: line.replenishedQty, posSoldQty: line.posSoldQty })),
-    });
-    if (saved.error || !saved.data.ok) { toast.error(saved.error || "บันทึกยอดนับไม่สำเร็จ"); setBusyKey(""); return; }
-    const confirmed = await confirmStageSectionAction({
+    const existing = key === "SEC_4_BAKERY_ICE" ? sec4 : sec5;
+    const assist = crewAssist(live);
+    const saved = await saveDisplaySectionCountsAction({
       branchCode: props.branch,
       workDate: props.workDate,
       stageCode: "OPENING",
       sectionKey: key,
       sectionTitle: title,
+      items: rows.map((line) => ({ itemId: line.itemId, countedQty: line.countedQty })),
       actorSource: props.actorSource,
       brandLock: props.brand,
-      shiftSlot: "SHIFT_1",
-      isEdit: Boolean(key === "SEC_4_BAKERY_ICE" ? sec4 : sec5),
-      payload: { items: rows.map((line) => ({ itemId: line.itemId, nameTh: line.nameTh, qty: line.countedQty, uom: line.uom, category: line.category })) },
-      ...crewAssist(live),
+      isEdit: Boolean(existing),
+      editReason: assist.editReason || "",
     });
     setBusyKey("");
-    if (confirmed.error || !confirmed.data.ok) { toast.error(confirmed.error || "ยืนยันหมวดไม่สำเร็จ"); return; }
+    if (saved.error || saved.data.ok !== true) { toast.error(saved.error || "บันทึกยอดนับไม่สำเร็จ"); return; }
     toast.success(key === "SEC_4_BAKERY_ICE" ? "บันทึกยืนยันหมวดที่ 4 แล้ว" : "บันทึกยืนยันหมวดที่ 5 แล้ว");
     lines.forEach((line) => dirty.current.delete(line.itemId));
     void live.refresh();
     props.onDone();
   }
   const stock = live.snapshot?.zoneStockCounts ?? [];
-  const sec4Items = payloadItems(sec4, bakeryIce);
-  const sec5Items = payloadItems(sec5, merch);
+  function shownItems(row: FnbStageConfirmation | null, lines: FnbZoneCountLine[]): CountItem[] {
+    const payload = payloadItems(row, lines);
+    const remote = stockItems(stock, lines);
+    if (!row) return remote;
+    const merged = new Map<string, CountItem>();
+    for (const item of remote) merged.set(item.key, item);
+    for (const item of payload) merged.set(item.key || item.name, item);
+    return merged.size > 0 ? [...merged.values()] : payload;
+  }
+  const sec4Items = shownItems(sec4, bakeryIce);
+  const sec5Items = shownItems(sec5, merch);
   return (
     <div className="space-y-4">
       <article className="space-y-2 rounded-xl border p-3">

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { branchForBrand } from "@/lib/fnb/brand-branch";
+import { progressSummary } from "@/lib/fnb/stage-progress";
 import { BranchPills, fnbBranchStorageKey, useStoredBranch } from "@/components/fnb/branch-pills";
 import { CrewLockedFieldset, LiveBranchProvider, useLiveBranch } from "@/components/fnb/shift-crew-bar";
 import { toast } from "sonner";
@@ -128,9 +129,6 @@ export function OperationsWorkspace({
   const heading = brand === "LUCKY_CUP" ? "ปฏิบัติการ Lucky Cup" : "ปฏิบัติการชาทรตะโหมด";
   const sessionShift = actorSource === "liff" ? lockedShift : null;
   const shiftSlot = tab === "CLOSING" || tab === "SHIFT_2" || tab === "SHIFT_3" ? "SHIFT_2" : "SHIFT_1";
-  const tabEditable = !sessionShift || superAdmin || (sessionShift === "SHIFT_1"
-    ? tab === "OPENING" || tab === "WIP" || tab === "SHIFT_1"
-    : tab === "WIP" || tab === "SHIFT_2" || tab === "SHIFT_3" || tab === "CLOSING");
   useEffect(() => {
     if (sessionShift === "SHIFT_2") setTab("WIP");
     if (sessionShift === "SHIFT_1") setTab("OPENING");
@@ -222,8 +220,7 @@ export function OperationsWorkspace({
         {selected?.enable_shift_3 ? <TabButton active={tab === "SHIFT_3"} onClick={() => setTab("SHIFT_3")}>4. ส่งเงินกะสาม</TabButton> : null}
         <TabButton active={tab === "CLOSING"} onClick={() => setTab("CLOSING")}>{`${selected?.enable_shift_3 ? "5" : "4"}. ปิดร้านและยอดขายรายเมนู (${selected?.enable_shift_3 ? "กะสาม" : "กะสอง"})`}</TabButton>
       </div>
-      <fieldset disabled={!tabEditable} className="min-w-0 space-y-4 border-0 p-0 disabled:opacity-80">
-      {sessionShift && !tabEditable ? <OverlapBanner sessionShift={sessionShift} /> : null}
+      <OpeningShiftField sessionShift={sessionShift} superAdmin={superAdmin} tab={tab}>
       <MiddayShortcuts branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brandLock} staffName={staffName} brand={brand} />
       {tab === "OPENING" ? <OpeningChecklist branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brand} staffName={staffName} cashFloat={selected?.standard_cash_float} /> : null}
       {tab === "SHIFT_1" || tab === "SHIFT_2" ? <ClosePanel brand={brand} brandLock={brandLock} superAdmin={superAdmin} branch={branch} branches={branches} workDate={workDate} staffName={staffName} actorSource={actorSource} day={day} busy={busy} run={run} lockShift={tab === "SHIFT_1" ? "MORNING" : "AFTERNOON"} onBranch={pickBranch} /> : null}
@@ -234,7 +231,7 @@ export function OperationsWorkspace({
       {brandLock ? <ReimburseBox brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} busy={busy === "reimburse"} run={run} /> : null}
       {superAdmin ? <SectionPhotoDrawer workDate={workDate} brand={brand} /> : null}
       {superAdmin ? <SettlementPanel shifts={day?.shifts ?? []} busy={busy === "settle"} run={run} /> : null}
-      </fieldset>
+      </OpeningShiftField>
       </CrewLockedFieldset>}
       </LiveBranchProvider>
     </div>
@@ -696,6 +693,21 @@ function PhotoDrop({ name, label, camera, onFile }: { name: string; label: strin
 
 function SaveButton({ busy, children }: { busy: boolean; children: string }) {
   return <button className="inline-flex items-center gap-2 rounded-md bg-[var(--fnb-brand)] px-4 py-2 text-sm text-white disabled:opacity-60" disabled={busy}>{busy ? <span className="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : null}{busy ? "กำลังบันทึก..." : children}</button>;
+}
+
+function OpeningShiftField(props: { sessionShift: "SHIFT_1" | "SHIFT_2" | null; superAdmin: boolean; tab: string; children: ReactNode }) {
+  const live = useLiveBranch();
+  const openingDone = progressSummary("OPENING", (live.snapshot?.confirmations ?? []).filter((row) => row.stageCode === "OPENING")).done;
+  const unfinishedOpening = openingDone < 7;
+  const tabEditable = !props.sessionShift || props.superAdmin || (props.sessionShift === "SHIFT_1"
+    ? props.tab === "OPENING" || props.tab === "WIP" || props.tab === "SHIFT_1"
+    : props.tab === "WIP" || props.tab === "SHIFT_2" || props.tab === "SHIFT_3" || props.tab === "CLOSING" || (props.tab === "OPENING" && unfinishedOpening));
+  return (
+    <fieldset disabled={!tabEditable} className="min-w-0 space-y-4 border-0 p-0 disabled:opacity-80">
+      {props.sessionShift && !tabEditable ? <OverlapBanner sessionShift={props.sessionShift} /> : null}
+      {props.children}
+    </fieldset>
+  );
 }
 
 function OverlapBanner({ sessionShift }: { sessionShift: "SHIFT_1" | "SHIFT_2" }) {

@@ -55,7 +55,9 @@ export function CleaningSpots(props: {
   const due = props.spots.filter((spot) => dueToday(spot, props.workDate));
   const logs = (live.snapshot?.cleaningSpotLogs ?? []).filter((row) => row.stageCode === props.stage);
   const savedSection = (live.snapshot?.confirmations ?? props.confirmations).find((row) => row.sectionKey === sectionKey) ?? null;
-  const canRevise = live.snapshot?.viewer.isSuperAdmin === true || live.snapshot?.viewer.workspaceRole === "FNB_BRANCH_MANAGER";
+  const viewerId = live.snapshot?.viewer.userId ?? "";
+  const inCrew = (live.snapshot?.rosters ?? []).some((roster) => roster.members.some((member) => member.userId === viewerId));
+  const canRevise = live.snapshot?.viewer.isSuperAdmin === true || live.snapshot?.viewer.workspaceRole === "FNB_BRANCH_MANAGER" || inCrew;
   function logOf(spotId: string): FnbLiveCleaningLog | null {
     return local[spotId] ?? logs.find((row) => row.spotId === spotId) ?? null;
   }
@@ -191,9 +193,9 @@ export function CleaningSpots(props: {
       {locked && canRevise ? <button type="button" className="font-semibold underline" onClick={() => setAskReason(true)}>✏️ แก้ไขพร้อมระบุเหตุผล</button> : null}
       {askReason ? (
         <div className="grid gap-2 rounded-xl border p-3">
-          <input className="h-10 rounded-md border px-2 text-sm" value={reason} placeholder="เหตุผลอย่างน้อย 4 ตัวอักษร" onChange={(event) => setReason(event.target.value)} />
+          <input className="h-10 rounded-md border px-2 text-sm" value={reason} placeholder="เหตุผลอย่างน้อย 3 ตัวอักษร" onChange={(event) => setReason(event.target.value)} />
           <button type="button" className="rounded-md bg-slate-900 px-3 py-2 text-sm text-white" onClick={() => {
-            if (!live.armAssist(reason)) { toast.error("ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 4 ตัวอักษร)"); return; }
+            if (!live.armAssist(reason)) { toast.error("ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 3 ตัวอักษร)"); return; }
             setEditing(true);
             setAskReason(false);
           }}>ยืนยันและแก้ไขหมวดนี้</button>

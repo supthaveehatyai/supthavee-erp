@@ -7,7 +7,7 @@ import { bangkokHour } from "@/lib/fnb/stage-progress";
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
-import { requireAnyFnbModule, requireFnbModuleAccess } from "@/lib/holding/workspace-access";
+import { requireAnyFnbModule, requireFnbModuleAccess, requireFnbStoreOperationAccess } from "@/lib/holding/workspace-access";
 import {
   FNB_FRONT_DISPLAY_CATEGORIES,
   FNB_SAUCE_OPEN_DAYS,
@@ -440,6 +440,53 @@ export async function saveZoneCountsAction(input: {
       const saved = id ? await db.from("zone_stock_counts").update(payload).eq("id", id) : await db.from("zone_stock_counts").insert(payload);
       if (saved.error) return fail({ ok: false }, saved.error, "บันทึกยอดนับไม่สำเร็จ");
     }
+    return result({ ok: true });
+  } catch (error) {
+    return caught({ ok: false }, error, "บันทึกยอดนับไม่สำเร็จ");
+  }
+}
+
+export async function saveDisplaySectionCountsAction(input: {
+  branchCode: string;
+  workDate: string;
+  stageCode: "OPENING" | "CLOSING";
+  sectionKey: string;
+  sectionTitle: string;
+  items: { itemId: string; countedQty: number }[];
+  actorSource: string;
+  brandLock: string;
+  isEdit?: boolean;
+  editReason?: string;
+}): Promise<FnbActionResult<{ ok: boolean }>> {
+  try {
+    const actor = await actorName(input.branchCode, input.actorSource, input.brandLock);
+    if (!actor.ok) return result({ ok: false }, actor.error);
+    const gate = await requireFnbStoreOperationAccess(input.branchCode);
+    if (!gate.ok) return result({ ok: false }, gate.error);
+    const locked = await fnbMonthLockMessage(input.branchCode, input.workDate, input.brandLock);
+    if (locked) return result({ ok: false }, locked);
+    const reason = (input.editReason || "").trim();
+    const manager = gate.ctx.workspaceRole === "FNB_BRANCH_MANAGER";
+    const supervisor = (gate.ctx.isSuperAdmin || manager) && reason.length >= 3;
+    if (gate.ctx.isSuperAdmin && reason.length < 3) return result({ ok: false }, "ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 3 ตัวอักษร)");
+    if (input.isEdit && reason.length < 3) return result({ ok: false }, "ระบุเหตุผลการแก้ไขอย่างน้อย 3 ตัวอักษร");
+    if (input.items.length === 0) return result({ ok: false }, "ไม่พบรายการสินค้าที่จะบันทึกยอดนับ");
+    const saved = await callFnbRpc("save_display_section_counts_atomic", {
+      p_branch_code: input.branchCode,
+      p_work_date: input.workDate,
+      p_stage_code: input.stageCode,
+      p_section_key: input.sectionKey,
+      p_section_title_th: input.sectionTitle,
+      p_items_json: input.items.map((item) => ({ item_id: item.itemId, counted_qty: item.countedQty })),
+      p_staff_name: actor.name,
+      p_user_id: actor.userId,
+      p_is_edit: Boolean(input.isEdit),
+      p_edit_reason: reason || null,
+      p_is_supervisor: supervisor,
+    });
+    if (saved.error) return fail({ ok: false }, saved.error, "บันทึกยอดนับไม่สำเร็จ");
+    const body = saved.data && typeof saved.data === "object" ? saved.data as Record<string, unknown> : {};
+    if (body.ok !== true) return result({ ok: false }, text(body.error) || "บันทึกยอดนับไม่สำเร็จ");
     return result({ ok: true });
   } catch (error) {
     return caught({ ok: false }, error, "บันทึกยอดนับไม่สำเร็จ");

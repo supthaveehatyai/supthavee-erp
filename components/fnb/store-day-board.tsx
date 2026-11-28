@@ -7,6 +7,7 @@ import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
 import {
   getStoreDayBoardAction,
   replenishZoneAction,
+  saveDisplaySectionCountsAction,
   saveEquipmentCalibrationAction,
   saveZoneCountsAction,
 } from "@/lib/actions/fnb-store-day";
@@ -122,7 +123,9 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
   function assist() {
     return crewAssist(live);
   }
-  const canRevise = live.snapshot?.viewer.isSuperAdmin === true || live.snapshot?.viewer.workspaceRole === "FNB_BRANCH_MANAGER";
+  const viewerId = live.snapshot?.viewer.userId ?? "";
+  const inCrew = (live.snapshot?.rosters ?? []).some((roster) => roster.members.some((member) => member.userId === viewerId));
+  const canRevise = live.snapshot?.viewer.isSuperAdmin === true || live.snapshot?.viewer.workspaceRole === "FNB_BRANCH_MANAGER" || inCrew;
   useEffect(() => {
     if (reopen !== "SEC_1_PREP") { prefilled.current = false; return; }
     if (prefilled.current || !prepSaved) return;
@@ -201,8 +204,11 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
               const saved = await issueWipBatchAction(body);
               if (saved.error || !saved.data.ok) { toast.error(saved.error || saved.data.message || `ต้ม ${base.base_code} ไม่สำเร็จ`); return; }
             }
-            const lemon = lemons[0] ?? (live.snapshot?.lemonItemId ? { id: live.snapshot.lemonItemId, count_uom: "ลูก" } : undefined);
-            if (lemon && Number(lemonCount) > 0) {
+            const lemon = lemons[0] ?? (live.snapshot?.lemonItemId ? { id: live.snapshot.lemonItemId, count_uom: "กก." } : undefined);
+            const lemonPieces = Math.trunc(Number(lemonCount) || 0);
+            const lemonGramsValue = Number(lemonGrams) || 0;
+            if (lemon && lemonPieces > 0) {
+              const packQtyKg = lemonGramsValue > 0 ? lemonGramsValue / 1000 : lemonPieces * 0.1;
               const body = new FormData();
               body.set("actor_source", props.actorSource);
               body.set("brand_lock", brand);
@@ -210,8 +216,8 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
               body.set("work_date", props.workDate);
               body.set("batch_kind", "OPEN_ITEM");
               body.set("item_id", lemon.id);
-              body.set("pack_qty", lemonCount);
-              body.set("notes", `เลมอน ${lemonCount} ลูก ${lemonGrams} g`);
+              body.set("pack_qty", String(packQtyKg));
+              body.set("notes", `หั่นเลมอน ${lemonPieces} ลูก${lemonGramsValue > 0 ? ` (${lemonGramsValue} g)` : ""}`);
               body.set("photo_urls", prepPhoto);
               body.set("brew_portion_mode", "FULL_RECIPE");
               body.set("shift_instance", "SHIFT_1");
@@ -313,11 +319,11 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center">
           <div className="w-full max-w-md space-y-3 rounded-2xl bg-white p-4">
             <h3 className="text-lg font-bold">เหตุผลการเข้าช่วยเหลือ/แก้ไข</h3>
-            <input className="h-11 w-full rounded-md border px-3" value={reviseReason} onChange={(event) => setReviseReason(event.target.value)} placeholder="อย่างน้อย 4 ตัวอักษร" />
+            <input className="h-11 w-full rounded-md border px-3" value={reviseReason} onChange={(event) => setReviseReason(event.target.value)} placeholder="อย่างน้อย 3 ตัวอักษร" />
             <div className="grid grid-cols-2 gap-2">
               <button type="button" className="rounded-xl border px-3 py-3 text-sm" onClick={() => setReviseKey(null)}>ย้อนกลับ</button>
               <button type="button" className="rounded-xl bg-[#DC2626] px-3 py-3 text-sm font-bold text-white" onClick={() => {
-                if (!live.armAssist(reviseReason)) { toast.error("ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 4 ตัวอักษร)"); return; }
+                if (!live.armAssist(reviseReason)) { toast.error("ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 3 ตัวอักษร)"); return; }
                 setReopen(reviseKey);
                 setReviseKey(null);
               }}>ยืนยันและแก้ไขหมวดนี้</button>
@@ -400,9 +406,14 @@ export function MiddayShortcuts(props: { branch: string; workDate: string; actor
           <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" onClick={() => {
             const item = sauceItem;
             if (!item) return;
-            const grams = open === "lemon" ? window.prompt("น้ำหนักเลมอนที่หั่นจริง (กรัม)", "0") : null;
-            const count = open === "lemon" ? Number(window.prompt("จำนวนลูก", "6") || 0) : 1;
-            brew("OPEN_ITEM", { itemId: item.id, pack: count || 1, notes: grams ? `เลมอน ${count} ลูก ${grams} g` : "เทซอสขวดใหม่" });
+            if (open === "lemon") {
+              const grams = Number(window.prompt("น้ำหนักเลมอนที่หั่นจริง (กรัม)", "0") || 0);
+              const pieces = Math.trunc(Number(window.prompt("จำนวนลูก", "6") || 0));
+              const packQtyKg = grams > 0 ? grams / 1000 : pieces * 0.1;
+              brew("OPEN_ITEM", { itemId: item.id, pack: packQtyKg || 0.1, notes: `หั่นเลมอน ${pieces} ลูก${grams > 0 ? ` (${grams} g)` : ""}` });
+              return;
+            }
+            brew("OPEN_ITEM", { itemId: item.id, pack: 1, notes: "เทซอสขวดใหม่" });
           }}>{open === "lemon" ? "บันทึกหั่นเลมอน" : `เทขวดใหม่ ${sauceItem?.short_code ?? ""}`}</button>
         </div>
       ) : null}
@@ -469,14 +480,30 @@ export function NightCloseCount(props: { branch: string; workDate: string; actor
         replenishedQty: line.replenishedQty,
         posSoldQty: line.posSoldQty,
       }));
+      const assist = crewAssist(live);
+      if (stage === "CLOSING" && locationCode === front?.locationCode) {
+        const saved = await saveDisplaySectionCountsAction({
+          branchCode: props.branch,
+          workDate: props.workDate,
+          stageCode: "CLOSING",
+          sectionKey: "CLOSE_3_FRONT",
+          sectionTitle: "หมวดที่ 3 ปิดร้าน: นับของหน้าร้าน",
+          items: payload.map((line) => ({ itemId: line.itemId, countedQty: line.countedQty })),
+          actorSource: props.actorSource,
+          brandLock: brand,
+          isEdit: confirms.some((row) => row.sectionKey === "CLOSE_3_FRONT"),
+          editReason: assist.editReason || (confirms.some((row) => row.sectionKey === "CLOSE_3_FRONT") ? "นับปิดร้านรอบนี้" : ""),
+        });
+        if (saved.error || saved.data.ok !== true) { toast.error(saved.error || "บันทึกยอดนับไม่สำเร็จ"); return; }
+        toast.success("บันทึกยอดนับแล้ว");
+        void live.refresh();
+        setConfirmTick((value) => value + 1);
+        reload();
+        return;
+      }
       const saved = await saveZoneCountsAction({ branchCode: props.branch, workDate: props.workDate, stage, actorSource: props.actorSource, brandLock: brand, lines: payload });
       if (saved.error || !saved.data.ok) toast.error(saved.error || "บันทึกยอดนับไม่สำเร็จ");
       else {
-        const assist = crewAssist(live);
-        if (stage === "CLOSING" && locationCode === front?.locationCode) {
-          const confirmed = await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "CLOSING", sectionKey: "CLOSE_3_FRONT", sectionTitle: "หมวดที่ 3 ปิดร้าน: นับของหน้าร้าน", actorSource: props.actorSource, brandLock: brand, shiftSlot: "SHIFT_2", payload: { lines: payload }, ...assist });
-          if (confirmed.error || !confirmed.data.ok) { toast.error(confirmed.error || "ยืนยันหมวดที่ 3 ไม่สำเร็จ"); return; }
-        }
         if (stage === "CLOSING" && locationCode !== front?.locationCode) {
           const confirmed = await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "CLOSING", sectionKey: "CLOSE_4_BACKROOM", sectionTitle: "หมวดที่ 4 ปิดร้าน: นับหลังร้านและของเสีย", actorSource: props.actorSource, brandLock: brand, shiftSlot: "SHIFT_2", payload: { lines: payload }, ...assist });
           if (confirmed.error || !confirmed.data.ok) { toast.error(confirmed.error || "ยืนยันหมวดที่ 4 ไม่สำเร็จ"); return; }
