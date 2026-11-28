@@ -4,12 +4,16 @@ import { useCallback, useEffect, useRef, useMemo, useState, useTransition } from
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
+import * as XLSX from "xlsx";
 import { BranchPills, fnbBranchStorageKey, useStoredBranch } from "@/components/fnb/branch-pills";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
-import { transferFnbStockAction } from "@/lib/actions/fnb-inventory";
-import { listBranchZonesAction, saveZoneCountsAction } from "@/lib/actions/fnb-store-day";
+import { ItemSlideShowPreview } from "@/components/fnb/item-slide-show";
+import { emptyExpiryLot, MfdExpiryLotEditor, resolvedExpiry, type ExpiryLotDraft } from "@/components/fnb/mfd-expiry-lot-editor";
+import { getFnbItemStockCardAction, saveSingleInventoryItemCountAction, transferFnbStockAction } from "@/lib/actions/fnb-inventory";
+import { listBranchZonesAction } from "@/lib/actions/fnb-store-day";
 import { branchForBrand } from "@/lib/fnb/brand-branch";
-import { FNB_BRAND_THEME, FNB_STOCK_SHEET_GROUPS, type FnbBranchOption, type FnbBrandCode, type FnbStockBalanceRow, type FnbStorageZone } from "@/types/fnb";
+import { hidesOpenPackWeight, openPackNetQty } from "@/lib/utils/fnb-expiry";
+import { FNB_BRAND_THEME, FNB_STOCK_SHEET_GROUPS, type FnbBranchOption, type FnbBrandCode, type FnbStockBalanceRow, type FnbStockCard, type FnbStorageZone } from "@/types/fnb";
 
 const field = "h-10 w-full rounded-md border border-slate-200 px-3 text-sm";
 
@@ -21,9 +25,17 @@ type CountItem = {
   count_uom: string;
   allow_decimal_count_qty: boolean;
   recipe_per_count_uom: number;
+  recipe_uom?: string;
   is_catch_weight_produce?: boolean;
   piece_uom_label?: string;
   avg_gross_grams_per_piece?: number;
+  default_date_stamp_mode?: string;
+  shelf_life_value?: number;
+  shelf_life_unit?: string;
+  tare_weight_g?: number;
+  specific_gravity?: number;
+  image_urls?: string[];
+  image_captions?: string[];
 };
 
 export function InventoryWorkspace({
@@ -46,7 +58,10 @@ export function InventoryWorkspace({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [tab, setTab] = useState<"sheet" | "transfer">("sheet");
+  const [tab, setTab] = useState<"count" | "card" | "transfer">("count");
+  const [view, setView] = useState<"table" | "focus">("table");
+  const [pin, setPin] = useState("");
+  const [focusIndex, setFocusIndex] = useState(0);
   const [branch, setBranch] = useState(() => branchForBrand(branches, brand, initialBranch || branches[0]?.branch_code || ""));
   const storageKey = fnbBranchStorageKey(brand, actorName);
   const pickBranch = useCallback((code: string) => {
@@ -77,7 +92,9 @@ export function InventoryWorkspace({
   const [packs, setPacks] = useState<Record<string, string>>({});
   const [carton, setCarton] = useState<Record<string, boolean>>({});
   const [openGrams, setOpenGrams] = useState<Record<string, string>>({});
-  const [expiry, setExpiry] = useState<Record<string, string>>({});
+  const [lots, setLots] = useState<Record<string, ExpiryLotDraft[]>>({});
+  const [savedRow, setSavedRow] = useState<Record<string, string>>({});
+  const [cardItem, setCardItem] = useState("");
   const [message, setMessage] = useState("");
   const [pending, start] = useTransition();
   const tone = brand === "CHATORN" ? "fnb-chatorn" : "fnb-lucky";
@@ -103,82 +120,123 @@ export function InventoryWorkspace({
     });
   }, [branch]);
   const workDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date());
+  const pinned = useMemo(() => {
+    const query = pin.trim().toLowerCase();
+    if (!query) return items;
+    return items.filter((item) => `${item.short_code} ${item.name_th}`.toLowerCase().includes(query));
+  }, [items, pin]);
+  const focusItem = pinned[Math.min(focusIndex, Math.max(pinned.length - 1, 0))];
+  function lotsFor(item: CountItem): ExpiryLotDraft[] {
+    return lots[item.id] ?? [emptyExpiryLot({ mode: item.default_date_stamp_mode, shelfLifeValue: item.shelf_life_value, shelfLifeUnit: item.shelf_life_unit })];
+  }
+  function saveOne(item: CountItem, andNext = false) {
+    start(async () => {
+      const fruit = item.is_catch_weight_produce === true;
+      const sealed = fruit || !item.allow_decimal_count_qty ? Math.trunc(Number(packs[item.id]) || 0) : Number(packs[item.id]) || 0;
+      const saved = await saveSingleInventoryItemCountAction({
+        branch_code: branch,
+        location_code: location,
+        count_date: workDate,
+        item_id: item.id,
+        sealed_pack_qty: sealed,
+        open_pack_gross_weight_g: hidesOpenPackWeight(item.item_category) ? 0 : Number(openGrams[item.id]) || 0,
+        expiry_lots: lotsFor(item).map((lot) => ({
+          entry_mode: lot.entry_mode,
+          mfg_date: lot.mfg_date,
+          shelf_life_value: Number(lot.shelf_life_value) || 0,
+          shelf_life_unit: lot.shelf_life_unit,
+          expiry_date: resolvedExpiry(lot) || "",
+          qty: Number(lot.qty) || 0,
+        })),
+      });
+      if (saved.error || !saved.data.ok) { toast.error(saved.error || "บันทึกรายการนี้ไม่สำเร็จ"); return; }
+      const clock = new Intl.DateTimeFormat("th-TH", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit" }).format(new Date(saved.data.saved_at || Date.now()));
+      setSavedRow((current) => ({ ...current, [item.id]: `✅ บันทึกแล้ว · ${saved.data.saved_by || actorName} ${clock} น.` }));
+      toast.success(`บันทึก ${item.short_code} แล้ว`);
+      if (andNext) setFocusIndex((value) => Math.min(value + 1, Math.max(pinned.length - 1, 0)));
+    });
+  }
   return (
     <div className={`space-y-4 ${tone}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-bold text-slate-900">สต็อก {FNB_BRAND_THEME[brand].label}</h1>
         <Link href={`/fnb/sop-settings?brand=${brand}`} className="text-sm text-[var(--fnb-brand)]">ตั้งจุดจัดเก็บและความสะอาด</Link>
       </div>
-      <div className="flex gap-2">
-        <button type="button" className={`rounded-full px-3 py-1 text-sm ${tab === "sheet" ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setTab("sheet")}>📋 ใบตรวจนับสต็อกกึ่งแบบฟอร์ม</button>
-        <button type="button" className={`rounded-full px-3 py-1 text-sm ${tab === "transfer" ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setTab("transfer")}>🔄 โอนสินค้าระหว่างสาขา</button>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={`rounded-full px-3 py-1 text-sm ${tab === "count" ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setTab("count")}>📋 ตรวจนับสต็อกแยกจุดจัดเก็บ</button>
+        <button type="button" className={`rounded-full px-3 py-1 text-sm ${tab === "card" ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setTab("card")}>📊 บัตรสต็อก (Stock Card)</button>
+        <button type="button" className={`rounded-full px-3 py-1 text-sm ${tab === "transfer" ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setTab("transfer")}>🔄 โอนสินค้าระหว่างสาขา (เฉพาะแบรนด์เดียวกัน)</button>
       </div>
       {message ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{message}</p> : null}
       <BranchPills branches={sameBrand} active={branch} onPick={pickBranch} />
-      {tab === "sheet" ? (
+      {tab === "card" ? <StockCardPanel branch={branch} location={location} zones={zones} items={items} itemId={cardItem} setItemId={setCardItem} /> : null}
+      {tab === "count" ? (
         <section className="space-y-3">
           <select className={field} value={branch} disabled={sameBrand.length <= 1} onChange={(event) => pickBranch(event.target.value)}>
             {sameBrand.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code} {item.branch_name_th}</option>)}
           </select>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className={`rounded-full px-3 py-1 text-sm ${view === "focus" ? "bg-[var(--fnb-brand)] text-white" : "bg-white ring-1 ring-slate-200"}`} onClick={() => setView("focus")}>🎯 โหมดนับทีละ 1 รายการ</button>
+            <button type="button" className={`rounded-full px-3 py-1 text-sm ${view === "table" ? "bg-[var(--fnb-brand)] text-white" : "bg-white ring-1 ring-slate-200"}`} onClick={() => setView("table")}>📑 โหมดตารางแยกหมวด</button>
+            <input className="h-10 w-64 rounded-md border px-3 text-sm" value={pin} placeholder="🔍 กรองเจาะจง 1 รายการ" onChange={(event) => { setPin(event.target.value); setFocusIndex(0); }} />
+          </div>
           <div className="flex flex-wrap gap-2">
             {zones.map((zone, index) => (
               <button key={zone.locationCode} type="button" className={`rounded-full px-3 py-1 text-sm ${location === zone.locationCode ? "bg-[var(--fnb-brand)] text-white" : "bg-white ring-1 ring-slate-200"}`} onClick={() => setLocation(zone.locationCode)}>{index + 1}. {zone.locationNameTh}</button>
             ))}
           </div>
-          {FNB_STOCK_SHEET_GROUPS.map((group) => {
-            const rows = items.filter((item) => item.item_category === group.key);
+          {view === "focus" && focusItem ? (
+            <article className={`space-y-3 rounded-xl border bg-white p-4 ${savedRow[focusItem.id] ? "border-emerald-400" : ""}`}>
+              <p className="font-semibold">{focusIndex + 1}/{pinned.length} · {focusItem.short_code} {focusItem.name_th}</p>
+              <ItemSlideShowPreview title={focusItem.name_th} urls={focusItem.image_urls ?? []} captions={focusItem.image_captions ?? []} />
+              <CountFields item={focusItem} packs={packs} setPacks={setPacks} openGrams={openGrams} setOpenGrams={setOpenGrams} lots={lotsFor(focusItem)} setLots={(next) => setLots((current) => ({ ...current, [focusItem.id]: next }))} showOpen={!hidesOpenPackWeight(focusItem.item_category)} carton={carton[focusItem.id] === true} setCarton={(value) => setCarton((current) => ({ ...current, [focusItem.id]: value }))} />
+              {savedRow[focusItem.id] ? <p className="text-sm text-emerald-800">{savedRow[focusItem.id]}</p> : null}
+              <div className="flex gap-2">
+                <button type="button" className="rounded-md border px-3 py-2 text-sm" onClick={() => setFocusIndex((value) => Math.max(value - 1, 0))}>ก่อนหน้า</button>
+                <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={pending} onClick={() => saveOne(focusItem, true)}>💾 บันทึก & ไปตัวถัดไป ➡️</button>
+              </div>
+            </article>
+          ) : null}
+          {view === "table" ? FNB_STOCK_SHEET_GROUPS.map((group) => {
+            const rows = pinned.filter((item) => item.item_category === group.key);
             if (rows.length === 0) return null;
             const open = openGroups[group.key] !== false && (openGroups[group.key] === true || group.key === "RAW_MATERIAL");
+            const showOpen = !hidesOpenPackWeight(group.key);
             return (
               <article key={group.key} className="rounded-xl border bg-white">
                 <button type="button" className="flex w-full items-center justify-between px-4 py-3 text-left font-semibold" onClick={() => setOpenGroups((current) => ({ ...current, [group.key]: !open }))}>{group.label}<span>{open ? "ซ่อน" : "เปิด"}</span></button>
                 {open ? (
-                  <div className="overflow-auto">
-                    <table className="min-w-full text-sm">
-                      <thead className="bg-[var(--fnb-tint)] text-left"><tr><th className="p-2">รหัส</th><th className="p-2">ชื่อรายการ</th>{blindCount ? null : <th className="p-2">ยอดระบบ</th>}<th className="p-2">จำนวนแพ็ค/หน่วยเต็ม</th>{group.key === "RAW_MATERIAL" ? <th className="p-2">น้ำหนักแพ็คที่เปิดค้าง (g)</th> : null}<th className="p-2">วันหมดอายุใกล้สุด</th></tr></thead>
-                      <tbody>
-                        {rows.map((row) => {
-                          const fruit = row.is_catch_weight_produce === true;
-                          const unit = fruit ? (row.piece_uom_label || "ลูก") : row.count_uom;
-                          const system = fruit ? `${Math.round(pieceOnHand.get(row.id) ?? 0)} ${unit}` : `${((onHand.get(row.id) ?? 0) / (row.recipe_per_count_uom || 1)).toFixed(0)} ${row.count_uom}`;
-                          return (
-                          <tr key={row.id} className="border-t">
-                            <td className="p-2">{row.short_code}</td>
-                            <td className="p-2">{row.name_th}</td>
-                            {blindCount ? null : <td className="p-2">{system}</td>}
-                            <td className="p-2">
-                              {fruit ? <label className="mb-1 flex items-center gap-1 text-xs"><input type="checkbox" checked={carton[row.id] === true} onChange={(event) => setCarton((current) => ({ ...current, [row.id]: event.target.checked }))} /> นับลังปิดเป็น กก.</label> : null}
-                              {fruit && carton[row.id] ? <FnbQtyInput allowDecimal unit="กก." onChange={(value) => setPacks((current) => ({ ...current, [row.id]: String(Math.round(((Number(value) || 0) * 1000) / (row.avg_gross_grams_per_piece || 110))) }))} /> : <FnbQtyInput value={packs[row.id] ?? ""} onChange={(value) => setPacks((current) => ({ ...current, [row.id]: value }))} unit={unit} allowDecimal={fruit ? false : row.allow_decimal_count_qty} />}
-                              {fruit && carton[row.id] && packs[row.id] ? <p className="text-xs">คิดเป็น {packs[row.id]} {unit}</p> : null}
-                            </td>
-                            {group.key === "RAW_MATERIAL" ? <td className="p-2">{fruit ? <span className="text-xs text-slate-500">นับเป็น {unit}</span> : <FnbQtyInput value={openGrams[row.id] ?? ""} onChange={(value) => setOpenGrams((current) => ({ ...current, [row.id]: value }))} unit="g" allowDecimal />}</td> : null}
-                            <td className="p-2"><input className="h-10 w-36 rounded-md border px-2 text-sm" type="date" value={expiry[row.id] ?? ""} onChange={(event) => setExpiry((current) => ({ ...current, [row.id]: event.target.value }))} /></td>
-                          </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                  <div className="space-y-3 p-3">
+                    {rows.map((row) => {
+                      const fruit = row.is_catch_weight_produce === true;
+                      const unit = fruit ? (row.piece_uom_label || "ลูก") : row.count_uom;
+                      const system = fruit ? `${Math.round(pieceOnHand.get(row.id) ?? 0)} ${unit}` : `${((onHand.get(row.id) ?? 0) / (row.recipe_per_count_uom || 1)).toFixed(0)} ${row.count_uom}`;
+                      return (
+                        <div key={row.id} className={`space-y-2 rounded-lg border p-3 ${savedRow[row.id] ? "border-emerald-400 bg-emerald-50" : "border-slate-100"}`}>
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="font-semibold">{row.short_code} · {row.name_th}</p>
+                              {blindCount ? null : <p className="text-xs text-slate-500">ยอดระบบ {system}</p>}
+                              {savedRow[row.id] ? <p className="text-sm text-emerald-800">{savedRow[row.id]}</p> : null}
+                            </div>
+                            <ItemSlideShowPreview title={row.name_th} urls={row.image_urls ?? []} captions={row.image_captions ?? []} />
+                          </div>
+                          <CountFields item={row} packs={packs} setPacks={setPacks} openGrams={openGrams} setOpenGrams={setOpenGrams} lots={lotsFor(row)} setLots={(next) => setLots((current) => ({ ...current, [row.id]: next }))} showOpen={showOpen} carton={carton[row.id] === true} setCarton={(value) => setCarton((current) => ({ ...current, [row.id]: value }))} />
+                          <div className="flex gap-2">
+                            <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={pending || !location} onClick={() => saveOne(row)}>💾 บันทึก</button>
+                            <button type="button" className="rounded-md border px-3 py-2 text-sm" onClick={() => { setCardItem(row.id); setTab("card"); }}>📊 ดูบัตรสต็อก</button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : null}
               </article>
             );
-          })}
-          <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-4 py-2 text-sm text-white" disabled={pending || !location} onClick={() => start(async () => {
-            const lines = items.filter((item) => packs[item.id] !== undefined && packs[item.id] !== "").map((item) => ({
-              itemId: item.id,
-              locationCode: location,
-              countedQty: item.is_catch_weight_produce || !item.allow_decimal_count_qty ? Math.trunc(Number(packs[item.id]) || 0) : Number(packs[item.id]),
-              nearestExpiry: expiry[item.id] || null,
-              openingQty: 0,
-              replenishedQty: 0,
-              posSoldQty: 0,
-            }));
-            const saved = await saveZoneCountsAction({ branchCode: branch, workDate, stage: "CYCLE_COUNT", actorSource: "desktop", brandLock: brand, lines });
-            if (saved.error || !saved.data.ok) { toast.error(saved.error || "บันทึกใบนับไม่สำเร็จ"); setMessage(saved.error || "บันทึกใบนับไม่สำเร็จ"); }
-            else { toast.success("บันทึกใบตรวจนับจุดจัดเก็บนี้แล้ว"); setMessage("บันทึกใบตรวจนับจุดจัดเก็บนี้แล้ว"); }
-          })}>💾 บันทึกใบตรวจนับจุดจัดเก็บนี้</button>
+          }) : null}
         </section>
-      ) : (
+      ) : null}
+      {tab === "transfer" ? (
         <form className="grid gap-2 rounded-xl border bg-white p-4 md:grid-cols-2" onSubmit={(event) => {
           event.preventDefault();
           const form = new FormData(event.currentTarget);
@@ -205,7 +263,120 @@ export function InventoryWorkspace({
           <label className="text-sm">จำนวน<FnbQtyInput name="qty" unit={items[0]?.count_uom} /></label>
           <button className="rounded-md bg-[var(--fnb-brand)] px-4 py-2 text-sm text-white" disabled={pending}>บันทึกโอน</button>
         </form>
-      )}
+      ) : null}
     </div>
+  );
+}
+
+function CountFields(props: {
+  item: CountItem;
+  packs: Record<string, string>;
+  setPacks: (value: Record<string, string>) => void;
+  openGrams: Record<string, string>;
+  setOpenGrams: (value: Record<string, string>) => void;
+  lots: ExpiryLotDraft[];
+  setLots: (lots: ExpiryLotDraft[]) => void;
+  showOpen: boolean;
+  carton: boolean;
+  setCarton: (value: boolean) => void;
+}) {
+  const fruit = props.item.is_catch_weight_produce === true;
+  const unit = fruit ? (props.item.piece_uom_label || "ลูก") : props.item.count_uom;
+  const gross = Number(props.openGrams[props.item.id]) || 0;
+  const net = openPackNetQty(gross, props.item.tare_weight_g || 0, props.item.specific_gravity || 1, props.item.recipe_uom || "g");
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="text-sm">จำนวนแพ็คเต็ม
+          <span className="mt-1 block">
+            {fruit && props.carton ? <FnbQtyInput allowDecimal unit="กก." onChange={(value) => props.setPacks({ ...props.packs, [props.item.id]: String(Math.round(((Number(value) || 0) * 1000) / (props.item.avg_gross_grams_per_piece || 110))) })} /> : <FnbQtyInput value={props.packs[props.item.id] ?? ""} onChange={(value) => props.setPacks({ ...props.packs, [props.item.id]: value })} unit={unit} allowDecimal={fruit ? false : props.item.allow_decimal_count_qty} />}
+          </span>
+        </label>
+        {fruit ? <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={props.carton} onChange={(event) => props.setCarton(event.target.checked)} /> นับลังปิดเป็น กก.</label> : null}
+        {props.showOpen ? (
+          <label className="text-sm">น้ำหนักแพ็คเปิดค้าง (g)
+            <span className="mt-1 block"><FnbQtyInput allowDecimal unit="g" value={props.openGrams[props.item.id] ?? ""} onChange={(value) => props.setOpenGrams({ ...props.openGrams, [props.item.id]: value })} /></span>
+            {gross > 0 ? <span className="text-xs text-slate-500">สุทธิหลังหักภาชนะ ~{net} {props.item.recipe_uom || "g"}</span> : null}
+          </label>
+        ) : null}
+      </div>
+      <MfdExpiryLotEditor
+        lots={props.lots}
+        onChange={props.setLots}
+        countUom={unit}
+        allowDecimal={props.item.allow_decimal_count_qty}
+        expectedQty={Number(props.packs[props.item.id]) || 0}
+        defaults={{ mode: props.item.default_date_stamp_mode, shelfLifeValue: props.item.shelf_life_value, shelfLifeUnit: props.item.shelf_life_unit }}
+      />
+    </div>
+  );
+}
+
+function StockCardPanel(props: {
+  branch: string;
+  location: string;
+  zones: FnbStorageZone[];
+  items: CountItem[];
+  itemId: string;
+  setItemId: (id: string) => void;
+}) {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date());
+  const [from, setFrom] = useState(today);
+  const [to, setTo] = useState(today);
+  const [zone, setZone] = useState(props.location || "ALL");
+  const [card, setCard] = useState<FnbStockCard | null>(null);
+  const [pending, start] = useTransition();
+  const item = props.items.find((row) => row.id === props.itemId) ?? props.items[0];
+  return (
+    <section className="space-y-3 rounded-xl border bg-white p-4">
+      <h2 className="font-semibold">📊 บัตรสต็อก (F&B Stock Card)</h2>
+      <div className="grid gap-2 md:grid-cols-5">
+        <select className={field} value={item?.id ?? ""} onChange={(event) => props.setItemId(event.target.value)}>{props.items.map((row) => <option key={row.id} value={row.id}>{row.short_code} {row.name_th}</option>)}</select>
+        <select className={field} value={zone} onChange={(event) => setZone(event.target.value)}>
+          <option value="ALL">ทุกจุดจัดเก็บ</option>
+          {props.zones.map((row) => <option key={row.locationCode} value={row.locationCode}>{row.locationNameTh}</option>)}
+        </select>
+        <input className={field} type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
+        <input className={field} type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+        <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={pending || !item} onClick={() => start(async () => {
+          if (!item) return;
+          const loaded = await getFnbItemStockCardAction({ branch_code: props.branch, item_id: item.id, location_code: zone, from_date: from, to_date: to });
+          if (loaded.error) toast.error(loaded.error);
+          setCard(loaded.data);
+        })}>ดูความเคลื่อนไหว</button>
+      </div>
+      {card ? (
+        <>
+          <p className="text-sm">{card.short_code} {card.name_th} · ยอดยกมา {card.brought_forward_count_qty} {card.count_uom} · คงเหลือ {card.closing_count_qty} {card.count_uom}</p>
+          <button type="button" className="rounded-md border px-3 py-1 text-sm" onClick={() => {
+            const sheet = XLSX.utils.json_to_sheet([
+              { วันเวลา: "ยอดยกมา", จุดจัดเก็บ: "", ผู้บันทึก: "", ประเภท: "", รับเข้า: "", จ่ายออก: "", คงเหลือ: card.brought_forward_count_qty },
+              ...card.movements.map((row) => ({ วันเวลา: row.tx_datetime_th, จุดจัดเก็บ: row.location_name_th, ผู้บันทึก: row.actor_name, ประเภท: row.tx_type, รับเข้า: row.in_count_qty, จ่ายออก: row.out_count_qty, คงเหลือ: row.balance_count_qty, หมายเหตุ: row.notes })),
+            ]);
+            const book = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(book, sheet, "StockCard");
+            XLSX.writeFile(book, `fnb-stock-card-${card.short_code}.xlsx`);
+          }}>ดาวน์โหลด .xlsx</button>
+          <div className="overflow-auto">
+            <table className="min-w-full text-sm">
+              <thead><tr className="text-left"><th className="p-2">วัน-เวลา</th><th>จุดจัดเก็บ</th><th>ผู้บันทึก</th><th>รับเข้า</th><th>จ่ายออก</th><th>คงเหลือ</th></tr></thead>
+              <tbody>
+                <tr><td className="p-2">ยอดยกมา</td><td /><td /><td /><td /><td>{card.brought_forward_count_qty} {card.count_uom}</td></tr>
+                {card.movements.map((row) => (
+                  <tr key={row.id} className="border-t">
+                    <td className="p-2">{row.tx_datetime_th}</td>
+                    <td>{row.location_name_th}</td>
+                    <td>{row.actor_name}</td>
+                    <td>{row.in_count_qty || ""}</td>
+                    <td>{row.out_count_qty || ""}</td>
+                    <td>{row.balance_count_qty} {card.count_uom}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
+    </section>
   );
 }

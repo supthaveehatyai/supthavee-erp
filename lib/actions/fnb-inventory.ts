@@ -1,11 +1,12 @@
 "use server";
 
 import { resolveFnbActor } from "@/lib/fnb/actor";
+import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
-import { requireFnbModuleAccess } from "@/lib/holding/workspace-access";
+import { requireFnbModuleAccess, requireFnbStoreOperationAccess } from "@/lib/holding/workspace-access";
 import type { UserAccessContext } from "@/types/holding";
-import type { FnbActionResult, FnbStockBalanceRow } from "@/types/fnb";
+import type { FnbActionResult, FnbStockBalanceRow, FnbStockCard, FnbStockCardMovement } from "@/types/fnb";
 
 function branchAllowed(ctx: UserAccessContext, branchCode: string): boolean {
   if (ctx.isSuperAdmin) return true;
@@ -205,10 +206,10 @@ export async function submitBlindCountAction(input: {
   }
 }
 
-export async function listBrandCountItemsAction(brand: string): Promise<FnbActionResult<{ id: string; short_code: string; name_th: string; item_category: string; count_uom: string; allow_decimal_count_qty: boolean; recipe_per_count_uom: number; is_catch_weight_produce: boolean; piece_uom_label: string; avg_gross_grams_per_piece: number; prep_yield_pct: number }[]>> {
+export async function listBrandCountItemsAction(brand: string): Promise<FnbActionResult<{ id: string; short_code: string; name_th: string; item_category: string; count_uom: string; allow_decimal_count_qty: boolean; recipe_per_count_uom: number; recipe_uom: string; is_catch_weight_produce: boolean; piece_uom_label: string; avg_gross_grams_per_piece: number; prep_yield_pct: number; default_date_stamp_mode: string; shelf_life_value: number; shelf_life_unit: string; tare_weight_g: number; specific_gravity: number; image_urls: string[]; image_captions: string[] }[]>> {
   try {
     await requireFnbModuleAccess("branch_inventory_transfer");
-    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,name_th,item_category,count_uom,allow_decimal_count_qty,recipe_per_count_uom,brand_scope,is_active,is_catch_weight_produce,piece_uom_label,avg_gross_grams_per_piece,prep_yield_pct").eq("is_active", true).eq("brand_scope", brand).order("short_code", { ascending: true }).limit(800);
+    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,name_th,item_category,count_uom,recipe_uom,allow_decimal_count_qty,recipe_per_count_uom,brand_scope,is_active,is_catch_weight_produce,piece_uom_label,avg_gross_grams_per_piece,prep_yield_pct,default_date_stamp_mode,shelf_life_value,shelf_life_unit,shelf_life_months,tare_weight_g,specific_gravity,image_urls,image_captions").eq("is_active", true).eq("brand_scope", brand).order("short_code", { ascending: true }).limit(800);
     if (listed.error) return fail([], listed.error, "อ่านสินค้าแบรนด์ไม่สำเร็จ");
     return result(asRows(listed.data).map((row) => ({
       id: text(row.id),
@@ -218,12 +219,152 @@ export async function listBrandCountItemsAction(brand: string): Promise<FnbActio
       count_uom: text(row.count_uom) || "ชิ้น",
       allow_decimal_count_qty: row.allow_decimal_count_qty === true,
       recipe_per_count_uom: num(row.recipe_per_count_uom) || 1,
+      recipe_uom: text(row.recipe_uom) || "g",
       is_catch_weight_produce: row.is_catch_weight_produce === true,
       piece_uom_label: text(row.piece_uom_label) || "ลูก",
       avg_gross_grams_per_piece: num(row.avg_gross_grams_per_piece) || 110,
       prep_yield_pct: num(row.prep_yield_pct) || 80,
+      default_date_stamp_mode: text(row.default_date_stamp_mode) || "MFD",
+      shelf_life_value: num(row.shelf_life_value) || num(row.shelf_life_months) || 12,
+      shelf_life_unit: text(row.shelf_life_unit) || "MONTHS",
+      tare_weight_g: num(row.tare_weight_g),
+      specific_gravity: num(row.specific_gravity) || 1,
+      image_urls: Array.isArray(row.image_urls) ? row.image_urls.map((url) => text(url)).filter(Boolean) : [],
+      image_captions: Array.isArray(row.image_captions) ? row.image_captions.map((caption) => text(caption)) : [],
     })));
   } catch (error) {
     return caught([], error, "อ่านสินค้าแบรนด์ไม่สำเร็จ");
+  }
+}
+
+function mapCountItem(row: Record<string, unknown>) {
+  return {
+    id: text(row.id),
+    short_code: text(row.short_code),
+    name_th: text(row.name_th),
+    item_category: text(row.item_category),
+    count_uom: text(row.count_uom) || "ชิ้น",
+    allow_decimal_count_qty: row.allow_decimal_count_qty === true,
+    recipe_per_count_uom: num(row.recipe_per_count_uom) || 1,
+    recipe_uom: text(row.recipe_uom) || "g",
+    is_catch_weight_produce: row.is_catch_weight_produce === true,
+    piece_uom_label: text(row.piece_uom_label) || "ลูก",
+    avg_gross_grams_per_piece: num(row.avg_gross_grams_per_piece) || 110,
+    prep_yield_pct: num(row.prep_yield_pct) || 80,
+    default_date_stamp_mode: text(row.default_date_stamp_mode) || "MFD",
+    shelf_life_value: num(row.shelf_life_value) || num(row.shelf_life_months) || 12,
+    shelf_life_unit: text(row.shelf_life_unit) || "MONTHS",
+    tare_weight_g: num(row.tare_weight_g),
+    specific_gravity: num(row.specific_gravity) || 1,
+    image_urls: Array.isArray(row.image_urls) ? row.image_urls.map((url) => text(url)).filter(Boolean) : [],
+    image_captions: Array.isArray(row.image_captions) ? row.image_captions.map((caption) => text(caption)) : [],
+  };
+}
+
+export async function listStoreCountItemsAction(branchCode: string) {
+  try {
+    const access = await requireFnbStoreOperationAccess(branchCode);
+    if (!access.ok) return result([] as ReturnType<typeof mapCountItem>[], access.error);
+    const branch = await schemaAdmin().schema("fnb").from("branches").select("brand_code").eq("branch_code", branchCode).maybeSingle();
+    const brand = text((branch.data as { brand_code?: string } | null)?.brand_code);
+    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,name_th,item_category,count_uom,recipe_uom,allow_decimal_count_qty,recipe_per_count_uom,brand_scope,is_active,is_catch_weight_produce,piece_uom_label,avg_gross_grams_per_piece,prep_yield_pct,default_date_stamp_mode,shelf_life_value,shelf_life_unit,shelf_life_months,tare_weight_g,specific_gravity,image_urls,image_captions").eq("is_active", true).eq("brand_scope", brand).order("short_code", { ascending: true }).limit(800);
+    if (listed.error) return fail([], listed.error, "อ่านสินค้าแบรนด์ไม่สำเร็จ");
+    return result(asRows(listed.data).map(mapCountItem));
+  } catch (error) {
+    return caught([], error, "อ่านสินค้าแบรนด์ไม่สำเร็จ");
+  }
+}
+
+export async function saveSingleInventoryItemCountAction(input: {
+  branch_code: string;
+  location_code: string;
+  count_date: string;
+  item_id: string;
+  sealed_pack_qty: number;
+  open_pack_gross_weight_g: number;
+  expiry_lots: { entry_mode: string; mfg_date: string; shelf_life_value: number; shelf_life_unit: string; expiry_date: string; qty: number }[];
+  notes?: string;
+}): Promise<FnbActionResult<{ ok: boolean; saved_by: string; saved_at: string }>> {
+  const blank = { ok: false, saved_by: "", saved_at: "" };
+  try {
+    const access = await requireFnbStoreOperationAccess(input.branch_code);
+    if (!access.ok) return result(blank, access.error);
+    const saved = await callFnbRpc("save_single_inventory_item_count_atomic", {
+      p_branch_code: input.branch_code,
+      p_location_code: input.location_code,
+      p_count_date: input.count_date || todayBangkok(),
+      p_item_id: input.item_id,
+      p_sealed_pack_qty: Number(input.sealed_pack_qty) || 0,
+      p_open_pack_gross_weight_g: Number(input.open_pack_gross_weight_g) || 0,
+      p_expiry_lots_json: input.expiry_lots.filter((lot) => Number(lot.qty) > 0).map((lot) => ({
+        entry_mode: lot.entry_mode,
+        mfg_date: lot.mfg_date || null,
+        shelf_life_value: Number(lot.shelf_life_value) || null,
+        shelf_life_unit: lot.shelf_life_unit,
+        expiry_date: lot.expiry_date || null,
+        qty: Number(lot.qty) || 0,
+      })),
+      p_staff_name: access.displayActorName,
+      p_user_id: access.userId,
+      p_post_stock_adjustment: true,
+      p_notes: input.notes || null,
+    });
+    if (saved.error) return fail(blank, saved.error, "บันทึกรายการนับไม่สำเร็จ");
+    const body = saved.data && typeof saved.data === "object" ? saved.data as Record<string, unknown> : {};
+    if (body.ok !== true) return result(blank, text(body.error) || "บันทึกรายการนับไม่สำเร็จ");
+    return result({ ok: true, saved_by: text(body.saved_by) || access.displayActorName, saved_at: text(body.saved_at) });
+  } catch (error) {
+    return caught(blank, error, "บันทึกรายการนับไม่สำเร็จ");
+  }
+}
+
+export async function getFnbItemStockCardAction(input: {
+  branch_code: string;
+  item_id: string;
+  location_code: string;
+  from_date: string;
+  to_date: string;
+}): Promise<FnbActionResult<FnbStockCard | null>> {
+  try {
+    const access = await requireFnbStoreOperationAccess(input.branch_code);
+    if (!access.ok) return result(null, access.error);
+    const saved = await callFnbRpc("get_fnb_item_stock_card", {
+      p_branch_code: input.branch_code,
+      p_item_id: input.item_id,
+      p_location_code: input.location_code || "ALL",
+      p_from_date: input.from_date || null,
+      p_to_date: input.to_date || null,
+    });
+    if (saved.error) return fail(null, saved.error, "อ่านบัตรสต็อกไม่สำเร็จ");
+    const body = saved.data && typeof saved.data === "object" ? saved.data as Record<string, unknown> : {};
+    if (body.ok !== true) return result(null, text(body.error) || "อ่านบัตรสต็อกไม่สำเร็จ");
+    const movements = (Array.isArray(body.movements) ? body.movements : []).map((row) => {
+      const rec = row && typeof row === "object" ? row as Record<string, unknown> : {};
+      const movement: FnbStockCardMovement = {
+        id: text(rec.id),
+        tx_datetime_th: text(rec.tx_datetime_th),
+        location_name_th: text(rec.location_name_th),
+        actor_name: text(rec.actor_name),
+        tx_type: text(rec.tx_type),
+        notes: text(rec.notes),
+        in_count_qty: num(rec.in_count_qty),
+        out_count_qty: num(rec.out_count_qty),
+        balance_count_qty: num(rec.balance_count_qty),
+      };
+      return movement;
+    });
+    return result({
+      ok: true,
+      short_code: text(body.short_code),
+      name_th: text(body.name_th),
+      count_uom: text(body.count_uom),
+      from_date: text(body.from_date),
+      to_date: text(body.to_date),
+      brought_forward_count_qty: num(body.brought_forward_count_qty),
+      closing_count_qty: num(body.closing_count_qty),
+      movements,
+    });
+  } catch (error) {
+    return caught(null, error, "อ่านบัตรสต็อกไม่สำเร็จ");
   }
 }

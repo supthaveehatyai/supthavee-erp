@@ -1,6 +1,7 @@
 "use server";
 
 import { parseLuckyCupPriceWorkbook } from "@/lib/fnb/excel";
+import { shelfLifeLabel, shelfLifeUnit, dateStampMode } from "@/lib/utils/fnb-expiry";
 import { asRows, caught, fail, num, result, text } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
 import { requireAnyFnbModule, requireFnbModuleAccess } from "@/lib/holding/workspace-access";
@@ -42,6 +43,13 @@ function mapItem(row: Record<string, unknown>): FnbItemRow {
     piece_uom_label: text(row.piece_uom_label) || "ลูก",
     avg_gross_grams_per_piece: num(row.avg_gross_grams_per_piece) || 110,
     prep_yield_pct: num(row.prep_yield_pct) || 80,
+    default_date_stamp_mode: text(row.default_date_stamp_mode) || "MFD",
+    shelf_life_value: num(row.shelf_life_value) || num(row.shelf_life_months) || 0,
+    shelf_life_unit: text(row.shelf_life_unit) || "MONTHS",
+    shelf_life_text: text(row.shelf_life_text),
+    usage_tolerance_pct: num(row.usage_tolerance_pct) || 5,
+    image_urls: Array.isArray(row.image_urls) ? row.image_urls.map((url) => text(url)).filter(Boolean) : [],
+    image_captions: Array.isArray(row.image_captions) ? row.image_captions.map((caption) => text(caption)) : [],
   };
 }
 
@@ -108,6 +116,14 @@ export async function saveFnbItemAction(input: {
   piece_uom_label?: string;
   avg_gross_grams_per_piece?: number;
   prep_yield_pct?: number;
+  default_date_stamp_mode?: string;
+  shelf_life_value?: number;
+  shelf_life_unit?: string;
+  usage_tolerance_pct?: number;
+  specific_gravity?: number;
+  tare_weight_g?: number;
+  image_urls?: string[];
+  image_captions?: string[];
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
     await requireFnbModuleAccess("master_items_bom");
@@ -121,6 +137,8 @@ export async function saveFnbItemAction(input: {
     const schedule = ["DAILY", "EVERY_3_DAYS", "WEEKLY_2X", "WEEKLY_1X", "MONTHLY_ONLY"].includes(String(input.backroom_count_schedule))
       ? String(input.backroom_count_schedule)
       : "WEEKLY_2X";
+    const lifeUnit = shelfLifeUnit(input.shelf_life_unit);
+    const lifeValue = Math.max(0, Math.trunc(Number(input.shelf_life_value) || Number(input.shelf_life_months) || 0));
     const autoFront = (FNB_FRONT_DISPLAY_CATEGORIES as readonly string[]).includes(input.item_category);
     const payload = {
       short_code: shortCode,
@@ -137,7 +155,16 @@ export async function saveFnbItemAction(input: {
       default_vat_mode: input.default_vat_mode,
       is_front_back_checked: Boolean(input.is_front_back_checked),
       front_back_group: input.is_front_back_checked ? input.front_back_group || null : null,
-      shelf_life_months: Number(input.shelf_life_months) || null,
+      shelf_life_months: lifeUnit === "MONTHS" ? lifeValue || null : lifeUnit === "YEARS" ? lifeValue * 12 || null : null,
+      shelf_life_value: lifeValue || null,
+      shelf_life_unit: lifeUnit,
+      shelf_life_text: lifeValue > 0 ? shelfLifeLabel(lifeValue, lifeUnit) : null,
+      default_date_stamp_mode: dateStampMode(input.default_date_stamp_mode),
+      usage_tolerance_pct: Number(input.usage_tolerance_pct) >= 0 ? Number(input.usage_tolerance_pct) : 5,
+      specific_gravity: Number(input.specific_gravity) > 0 ? Number(input.specific_gravity) : 1,
+      tare_weight_g: Number(input.tare_weight_g) || 0,
+      image_urls: (input.image_urls ?? []).map((url) => url.trim()).filter(Boolean),
+      image_captions: input.image_captions ?? [],
       requires_expiry_tracking: Boolean(input.requires_expiry_tracking),
       alias_codes: aliases,
       track_front_display_daily: input.id ? Boolean(input.track_front_display_daily) : autoFront || Boolean(input.track_front_display_daily),
@@ -155,7 +182,7 @@ export async function saveFnbItemAction(input: {
     const table = schemaAdmin().schema("fnb").from("items");
     const saved = input.id
       ? await table.update(payload).eq("id", input.id)
-      : await table.insert({ ...payload, specific_gravity: 1, tare_weight_g: 0, moving_avg_cost_per_recipe_unit: 0 });
+      : await table.insert({ ...payload, moving_avg_cost_per_recipe_unit: 0 });
     if (saved.error) return fail({ ok: false }, saved.error, "บันทึกวัตถุดิบไม่สำเร็จ");
     return result({ ok: true });
   } catch (error) {
@@ -200,6 +227,26 @@ export async function saveFnbVendorPackAction(input: {
     return result({ ok: true });
   } catch (error) {
     return caught({ ok: false }, error, "บันทึกแหล่งซื้อไม่สำเร็จ");
+  }
+}
+
+export async function uploadFnbItemPhotoAction(formData: FormData): Promise<FnbActionResult<{ url: string }>> {
+  try {
+    await requireFnbModuleAccess("master_items_bom");
+    const file = formData.get("file");
+    if (!(file instanceof File) || file.size === 0) return result({ url: "" }, "ไม่พบรูปตัวอย่าง");
+    const brand = text(formData.get("brand_code")).replace(/[^A-Za-z0-9]/g, "") || "BRAND";
+    const code = text(formData.get("short_code")).replace(/[^A-Za-z0-9]/g, "").slice(0, 24) || "ITEM";
+    const index = Math.max(0, Math.trunc(Number(formData.get("index")) || 0));
+    const path = `items/${brand}/${code}-${Date.now()}-${index}.webp`;
+    const uploaded = await schemaAdmin().storage.from("fnb_operations").upload(path, Buffer.from(await file.arrayBuffer()), {
+      contentType: "image/webp",
+      upsert: false,
+    });
+    if (uploaded.error) return result({ url: "" }, uploaded.error.message || "อัปโหลดรูปไม่สำเร็จ");
+    return result({ url: schemaAdmin().storage.from("fnb_operations").getPublicUrl(path).data.publicUrl });
+  } catch (error) {
+    return caught({ url: "" }, error, "อัปโหลดรูปไม่สำเร็จ");
   }
 }
 

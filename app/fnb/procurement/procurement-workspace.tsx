@@ -15,6 +15,7 @@ import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import { VendorClaimPanel, WriteOffButton } from "@/components/fnb/write-off-panel";
 import { branchForBrand } from "@/lib/fnb/brand-branch";
 import { itemMatches } from "@/lib/fnb/item-search";
+import { emptyExpiryLot, MfdExpiryLotEditor, resolvedExpiry, type ExpiryLotDraft } from "@/components/fnb/mfd-expiry-lot-editor";
 import { produceProfile } from "@/lib/utils/fnb-format";
 import type { FnbBranchOption, FnbBrandCode, FnbExpiryLotRow, FnbItemRow, FnbReimbursementRow, FnbUnpackLine, FnbVendorSheetRow } from "@/types/fnb";
 
@@ -32,7 +33,7 @@ export function ProcurementWorkspace({
   brand,
 }: {
   branches: FnbBranchOption[];
-  items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom" | "allow_decimal_count_qty" | "count_uom" | "is_catch_weight_produce" | "piece_uom_label" | "avg_gross_grams_per_piece" | "prep_yield_pct">[];
+  items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom" | "allow_decimal_count_qty" | "count_uom" | "is_catch_weight_produce" | "piece_uom_label" | "avg_gross_grams_per_piece" | "prep_yield_pct" | "requires_expiry_tracking" | "default_date_stamp_mode" | "shelf_life_value" | "shelf_life_unit">[];
   brand: FnbBrandCode;
   pending: FnbUnpackLine[];
   lots: FnbExpiryLotRow[];
@@ -179,14 +180,14 @@ export function ManualReceive({
   branchCode = "",
 }: {
   branches: FnbBranchOption[];
-  items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom" | "allow_decimal_count_qty" | "count_uom" | "is_catch_weight_produce" | "piece_uom_label" | "avg_gross_grams_per_piece" | "prep_yield_pct">[];
+  items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom" | "allow_decimal_count_qty" | "count_uom" | "is_catch_weight_produce" | "piece_uom_label" | "avg_gross_grams_per_piece" | "prep_yield_pct" | "requires_expiry_tracking" | "default_date_stamp_mode" | "shelf_life_value" | "shelf_life_unit">[];
   brandLock: FnbBrandCode | null;
   revealCost: boolean;
   actorSource?: "desktop" | "liff";
   setMessage?: (message: string) => void;
   branchCode?: string;
 }) {
-  const blankLine = { item_id: items[0]?.id ?? "", qty: "", uom: items[0]?.default_purchase_uom ?? "", mode: "WEIGHT" as "WEIGHT" | "PIECE", pieces: "", grams: "", gramUnit: "kg" as "g" | "kg" };
+  const blankLine = { item_id: items[0]?.id ?? "", qty: "", uom: items[0]?.default_purchase_uom ?? "", mode: "WEIGHT" as "WEIGHT" | "PIECE", pieces: "", grams: "", gramUnit: "kg" as "g" | "kg", lots: [] as ExpiryLotDraft[] };
   const [lines, setLines] = useState([blankLine]);
   const [receiveBranch, setReceiveBranch] = useState(branchCode || branches[0]?.branch_code || "");
   const [query, setQuery] = useState("");
@@ -237,6 +238,14 @@ export function ManualReceive({
           receive_mode: profile.enabled ? line.mode : "",
           actual_piece_count: profile.enabled ? Math.trunc(Number(line.pieces) || 0) : 0,
           weight_grams: profile.enabled ? typedGrams : 0,
+          expiry_lots: line.lots.map((lot) => ({
+            entry_mode: lot.entry_mode,
+            mfg_date: lot.mfg_date,
+            shelf_life_value: Number(lot.shelf_life_value) || 0,
+            shelf_life_unit: lot.shelf_life_unit,
+            expiry_date: resolvedExpiry(lot) || lot.expiry_date,
+            qty: Number(lot.qty) || 0,
+          })),
         };
       })));
       setBusy(true);
@@ -299,6 +308,16 @@ export function ManualReceive({
                 <input className={field} placeholder="หน่วยรับ เช่น แกลลอน" value={line.uom} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, uom: event.target.value } : row))} />
               </div>
             )}
+            {item?.requires_expiry_tracking ? (
+              <MfdExpiryLotEditor
+                lots={line.lots}
+                countUom={profile.enabled && line.mode === "PIECE" ? profile.label : (line.uom || item.count_uom || "ชิ้น")}
+                allowDecimal={item.allow_decimal_count_qty}
+                expectedQty={profile.enabled && line.mode === "PIECE" ? pieceCount : Number(line.qty) || 0}
+                defaults={{ mode: item.default_date_stamp_mode, shelfLifeValue: item.shelf_life_value, shelfLifeUnit: item.shelf_life_unit }}
+                onChange={(lots) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, lots } : row))}
+              />
+            ) : null}
           </div>
         );
       })}

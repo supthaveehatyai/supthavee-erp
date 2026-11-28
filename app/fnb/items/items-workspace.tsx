@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { OpenShelfLifePanel } from "@/components/fnb/open-shelf-life-panel";
-import { commitFnbPriceExcelAction, previewFnbPriceExcelAction, saveFnbItemAction, saveFnbVendorPackAction } from "@/lib/actions/fnb-items";
+import { commitFnbPriceExcelAction, previewFnbPriceExcelAction, saveFnbItemAction, saveFnbVendorPackAction, uploadFnbItemPhotoAction } from "@/lib/actions/fnb-items";
+import { dateStampMode, shelfLifeLabel, shelfLifeUnit } from "@/lib/utils/fnb-expiry";
 import { itemMatches } from "@/lib/fnb/item-search";
 import { produceProfile } from "@/lib/utils/fnb-format";
 import { FNB_BACKROOM_SCHEDULE_LABEL, FNB_BACKROOM_SCHEDULES, FNB_CATEGORY_LABEL, FNB_DISPLAY_SUB_GROUPS, FNB_FRONT_GROUPS, FNB_ITEM_CATEGORIES, FNB_RECIPE_UOMS, FNB_VAT_MODES, FNB_WEEKDAY_OPTIONS, type FnbExcelPriceRow, type FnbItemRow, type FnbVendorPackRow } from "@/types/fnb";
@@ -56,7 +57,7 @@ export function ItemsWorkspace({ items, packs, initialTab = "items", brand }: { 
           {visible.map((row) => (
             <button key={row.id} type="button" onClick={() => setSelected(row.id)} className={`block w-full rounded-lg border p-3 text-left ${row.id === selected ? "border-red-700 bg-red-50" : "border-slate-200 bg-white"}`}>
               <p className="font-semibold">{row.short_code}{row.alias_codes?.length ? ` / ${row.alias_codes.join(" ")}` : ""} · {row.name_th}{row.is_catch_weight_produce ? " · 🍋 นับคู่" : ""}</p>
-              <p className="text-xs text-slate-500">{row.brand_scope} · อายุตู้โชว์ {row.display_shelf_life_days ?? "-"} วัน · {FNB_DISPLAY_SUB_GROUPS.find((group) => group.code === row.display_sub_group)?.label ?? "ยังไม่จัดกลุ่มโชว์"} · ลำดับ {row.display_walk_order ?? 100}</p>
+              <p className="text-xs text-slate-500">{row.brand_scope} · อายุยังไม่เปิดซอง {row.shelf_life_text || shelfLifeLabel(row.shelf_life_value, row.shelf_life_unit)} · คลาดเคลื่อน ±{row.usage_tolerance_pct}% · อายุตู้โชว์ {row.display_shelf_life_days ?? "-"} วัน</p>
             </button>
           ))}
         </div>
@@ -119,8 +120,39 @@ function ItemForm({
   start: (callback: () => void) => void;
   setMessage: (message: string) => void;
 }) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [photos, setPhotos] = useState(() => (item?.image_urls ?? []).map((url, index) => ({ url, caption: item?.image_captions[index] ?? "" })));
+  const [lifeValue, setLifeValue] = useState(String(item?.shelf_life_value || item?.shelf_life_months || 12));
+  const [lifeUnit, setLifeUnit] = useState(shelfLifeUnit(item?.shelf_life_unit));
+  useEffect(() => {
+    setPhotos((item?.image_urls ?? []).map((url, index) => ({ url, caption: item?.image_captions[index] ?? "" })));
+    setLifeValue(String(item?.shelf_life_value || item?.shelf_life_months || 12));
+    setLifeUnit(shelfLifeUnit(item?.shelf_life_unit));
+  }, [item]);
+  useEffect(() => {
+    const block = (event: DragEvent) => { event.preventDefault(); };
+    window.addEventListener("dragover", block);
+    window.addEventListener("drop", block);
+    return () => {
+      window.removeEventListener("dragover", block);
+      window.removeEventListener("drop", block);
+    };
+  }, []);
+  async function uploadPhotos(files: File[]) {
+    const code = String(new FormData(formRef.current ?? undefined).get("short_code") ?? item?.short_code ?? "ITEM");
+    for (const [index, file] of files.entries()) {
+      const body = new FormData();
+      body.set("file", file);
+      body.set("brand_code", brand);
+      body.set("short_code", code);
+      body.set("index", String(photos.length + index));
+      const saved = await uploadFnbItemPhotoAction(body);
+      if (saved.error || !saved.data.url) { toast.error(saved.error || "อัปโหลดรูปไม่สำเร็จ"); return; }
+      setPhotos((current) => [...current, { url: saved.data.url, caption: "" }]);
+    }
+  }
   return (
-    <form key={item?.id ?? "new"} className="grid gap-2 rounded-xl border bg-white p-4 md:grid-cols-2" onSubmit={(event) => {
+    <form ref={formRef} key={item?.id ?? "new"} className="grid gap-2 rounded-xl border bg-white p-4 md:grid-cols-2" onSubmit={(event) => {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       start(async () => {
@@ -153,6 +185,14 @@ function ItemForm({
           piece_uom_label: String(form.get("piece_uom_label") ?? "ลูก"),
           avg_gross_grams_per_piece: Number(form.get("avg_gross_grams_per_piece") ?? 110),
           prep_yield_pct: Number(form.get("prep_yield_pct") ?? 80),
+          default_date_stamp_mode: String(form.get("default_date_stamp_mode") ?? "MFD"),
+          shelf_life_value: Number(form.get("shelf_life_value") ?? 0),
+          shelf_life_unit: String(form.get("shelf_life_unit") ?? "MONTHS"),
+          usage_tolerance_pct: Number(form.get("usage_tolerance_pct") ?? 5),
+          specific_gravity: Number(form.get("specific_gravity") ?? 1),
+          tare_weight_g: Number(form.get("tare_weight_g") ?? 0),
+          image_urls: photos.map((photo) => photo.url),
+          image_captions: photos.map((photo) => photo.caption),
         });
         if (saved.error) toast.error(saved.error);
         else toast.success("บันทึกวัตถุดิบแล้ว");
@@ -172,7 +212,47 @@ function ItemForm({
       <input className={field} name="recipe_per_purchase_uom" type="number" step="0.0001" defaultValue={item?.recipe_per_purchase_uom ?? 1} />
       <input className={field} name="reference_purchase_price" type="number" step="0.01" defaultValue={item?.reference_purchase_price ?? 0} />
       <select className={field} name="default_vat_mode" defaultValue={item?.default_vat_mode ?? "EX_VAT"}>{FNB_VAT_MODES.map((mode) => <option key={mode}>{mode}</option>)}</select>
-      <label className="text-sm">อายุเก็บรักษา (เดือน นับจากวันผลิต) เช่น 9, 12, 18 เดือน<input className={field} name="shelf_life_months" type="number" defaultValue={item?.shelf_life_months ?? ""} /></label>
+      <div className="space-y-2 rounded-lg border border-slate-200 p-3 md:col-span-2">
+        <p className="text-sm font-medium">รูปแบบฉลากวันที่ข้างลัง/ซองเริ่มต้น</p>
+        <select className={field} name="default_date_stamp_mode" defaultValue={dateStampMode(item?.default_date_stamp_mode)}>
+          <option value="MFD">🏭 พิมพ์วันผลิต MFD + อายุ (สินค้าจีน)</option>
+          <option value="EXP">📅 พิมพ์วันหมดอายุ EXP ตรง (สินค้าไทย)</option>
+        </select>
+        <div className="grid gap-2 md:grid-cols-3">
+          <label className="text-sm">อายุเก็บรักษามาตรฐานยังไม่เปิดซอง
+            <input className={field} name="shelf_life_value" type="number" min={0} step={1} value={lifeValue} onChange={(event) => setLifeValue(event.target.value)} />
+          </label>
+          <label className="text-sm">หน่วย
+            <select className={field} name="shelf_life_unit" value={lifeUnit} onChange={(event) => setLifeUnit(shelfLifeUnit(event.target.value))}>
+              <option value="DAYS">วัน (DAYS)</option>
+              <option value="MONTHS">เดือน (MONTHS)</option>
+              <option value="YEARS">ปี (YEARS)</option>
+            </select>
+          </label>
+          <p className="self-end text-sm">ข้อความอายุ: {shelfLifeLabel(Number(lifeValue) || 0, lifeUnit)}</p>
+        </div>
+        <div className="grid gap-2 md:grid-cols-3">
+          <label className="text-sm">กรอบค่าคลาดเคลื่อนการใช้วัตถุดิบที่ยอมรับได้ (±%)<input className={field} name="usage_tolerance_pct" type="number" min={0} step="0.1" defaultValue={item?.usage_tolerance_pct ?? 5} /></label>
+          <label className="text-sm">น้ำหนักภาชนะเปล่า Tare Weight (g)<input className={field} name="tare_weight_g" type="number" min={0} step="0.01" defaultValue={item?.tare_weight_g ?? 0} /></label>
+          <label className="text-sm">ความถ่วงจำเพาะ Specific Gravity<input className={field} name="specific_gravity" type="number" min={0.1} step="0.001" defaultValue={item?.specific_gravity ?? 1} /></label>
+        </div>
+      </div>
+      <div
+        className="space-y-2 rounded-lg border border-dashed p-3 md:col-span-2"
+        onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }}
+        onDrop={(event) => { event.preventDefault(); event.stopPropagation(); void uploadPhotos([...event.dataTransfer.files]); }}
+      >
+        <p className="text-sm font-medium">🖼️ รูปภาพตัวอย่าง Slide Show (อัปโหลดได้หลายรูปพร้อมคำอธิบายใต้ภาพ)</p>
+        <input className="text-sm" type="file" accept="image/*" multiple onChange={(event) => { if (event.target.files) void uploadPhotos([...event.target.files]); }} />
+        {photos.map((photo, index) => (
+          <div key={photo.url} className="flex items-center gap-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={photo.url} alt={photo.caption || "ตัวอย่างสินค้า"} className="h-16 w-16 rounded object-cover" />
+            <input className={field} value={photo.caption} placeholder="คำอธิบายใต้ภาพ" onChange={(event) => setPhotos((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, caption: event.target.value } : row))} />
+            <button type="button" className="text-sm text-red-700" onClick={() => setPhotos((current) => current.filter((_, rowIndex) => rowIndex !== index))}>ลบ</button>
+          </div>
+        ))}
+      </div>
       <label className="text-sm md:col-span-2">อายุวางขายในตู้โชว์หน้าร้านหลังนำออกจากช่องแข็ง (วัน)<input className={field} name="display_shelf_life_days" type="number" min="0" step="1" defaultValue={item?.display_shelf_life_days ?? (item?.item_category === "BAKERY_FROZEN" ? 4 : "")} placeholder="เบเกอรี่ค่าเริ่มต้น 4 วัน" /></label>
       <label className="text-sm">กลุ่มตำแหน่งวางโชว์<select className={field} name="display_sub_group" defaultValue={item?.display_sub_group ?? ""}><option value="">ไม่จัดกลุ่มโชว์</option>{FNB_DISPLAY_SUB_GROUPS.map((group) => <option key={group.code} value={group.code}>{group.walk / 10}. {group.label}</option>)}</select></label>
       <label className="text-sm">ลำดับเดินนับ<input className={field} name="display_walk_order" type="number" min="1" step="1" defaultValue={item?.display_walk_order ?? 100} /></label>

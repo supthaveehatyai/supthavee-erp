@@ -322,6 +322,13 @@ export type FnbItemRow = {
   piece_uom_label: string;
   avg_gross_grams_per_piece: number;
   prep_yield_pct: number;
+  default_date_stamp_mode: string;
+  shelf_life_value: number;
+  shelf_life_unit: string;
+  shelf_life_text: string;
+  usage_tolerance_pct: number;
+  image_urls: string[];
+  image_captions: string[];
 };
 
 export type FnbVendorPackRow = {
@@ -357,9 +364,11 @@ export type FnbMenuRow = {
   cup_size: string;
   temperature: string;
   retail_price: number;
+  menu_category: string;
   is_active: boolean;
   is_bom_pending: boolean;
   is_auto_discovered: boolean;
+  theoretical_cost_thb: number | null;
 };
 
 export type FnbMenuBomLineRow = {
@@ -371,6 +380,64 @@ export type FnbMenuBomLineRow = {
   usage_qty: number;
   usage_uom: string;
   note: string | null;
+  line_tolerance_pct: number;
+  is_user_customized: boolean;
+  is_packaging: boolean;
+};
+
+export type FnbBomCatalogItem = {
+  id: string;
+  short_code: string;
+  name_th: string;
+  recipe_uom: string;
+  count_uom: string;
+  unit_cost: number;
+};
+
+export type FnbPrepBaseCost = {
+  base_code: string;
+  cost_per_ml: number;
+};
+
+export type FnbBomVarianceRow = {
+  item_id: string;
+  short_code: string;
+  name_th: string;
+  count_uom: string;
+  tolerance_pct: number;
+  theoretical_recipe_qty: number;
+  theoretical_cost_thb: number | null;
+  actual_used_recipe_qty: number;
+  actual_cost_thb: number | null;
+  variance_pct: number;
+  is_over_tolerance: boolean;
+  on_hand_count_qty: number;
+  forecast_need_count_qty: number;
+  recommended_order_count_qty: number;
+};
+
+export type FnbStockCardMovement = {
+  id: string;
+  tx_datetime_th: string;
+  location_name_th: string;
+  actor_name: string;
+  tx_type: string;
+  notes: string;
+  in_count_qty: number;
+  out_count_qty: number;
+  balance_count_qty: number;
+};
+
+export type FnbStockCard = {
+  ok: boolean;
+  short_code: string;
+  name_th: string;
+  count_uom: string;
+  from_date: string;
+  to_date: string;
+  brought_forward_count_qty: number;
+  closing_count_qty: number;
+  movements: FnbStockCardMovement[];
 };
 
 export type FnbBranchKpi = {

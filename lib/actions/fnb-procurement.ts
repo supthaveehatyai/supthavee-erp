@@ -8,6 +8,7 @@ import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb
 import { schemaAdmin } from "@/lib/holding/schema-db";
 import { getUserAccessContext, requireFnbProcurementOffice, requireFnbTaxDesk } from "@/lib/holding/workspace-access";
 import { requireSessionUserId } from "@/lib/auth/current-user";
+import { calcExpiryDateFromMfg, dateStampMode, parseChinese8DigitDate, shelfLifeUnit } from "@/lib/utils/fnb-expiry";
 import { FNB_FRONT_DISPLAY_CATEGORIES, type FnbActionResult, type FnbBrandCode, type FnbExpiryLotRow, type FnbGoodsReceiptLineRow, type FnbGoodsReceiptRow, type FnbItemRow, type FnbReimbursementRow, type FnbUnpackLine, type FnbVendorSheetPreview } from "@/types/fnb";
 
 function asciiBranch(code: string): string {
@@ -102,9 +103,9 @@ export async function listReceiptLinesAction(grId: string): Promise<FnbActionRes
   }
 }
 
-export async function listReceiveItemsAction(brandLock?: FnbBrandCode | null): Promise<FnbActionResult<Pick<FnbItemRow, "id" | "short_code" | "name_th" | "count_uom" | "default_purchase_uom" | "recipe_per_purchase_uom" | "shelf_life_months" | "requires_expiry_tracking" | "brand_scope" | "alias_codes" | "external_code" | "item_category" | "allow_decimal_count_qty" | "is_catch_weight_produce" | "piece_uom_label" | "avg_gross_grams_per_piece" | "prep_yield_pct">[]>> {
+export async function listReceiveItemsAction(brandLock?: FnbBrandCode | null): Promise<FnbActionResult<Pick<FnbItemRow, "id" | "short_code" | "name_th" | "count_uom" | "default_purchase_uom" | "recipe_per_purchase_uom" | "shelf_life_months" | "requires_expiry_tracking" | "brand_scope" | "alias_codes" | "external_code" | "item_category" | "allow_decimal_count_qty" | "is_catch_weight_produce" | "piece_uom_label" | "avg_gross_grams_per_piece" | "prep_yield_pct" | "default_date_stamp_mode" | "shelf_life_value" | "shelf_life_unit">[]>> {
   try {
-    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,alias_codes,external_code,name_th,count_uom,default_purchase_uom,recipe_per_purchase_uom,shelf_life_months,requires_expiry_tracking,brand_scope,item_category,allow_decimal_count_qty,is_catch_weight_produce,piece_uom_label,avg_gross_grams_per_piece,prep_yield_pct").eq("is_active", true).order("short_code", { ascending: true }).limit(500);
+    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,alias_codes,external_code,name_th,count_uom,default_purchase_uom,recipe_per_purchase_uom,shelf_life_months,requires_expiry_tracking,brand_scope,item_category,allow_decimal_count_qty,is_catch_weight_produce,piece_uom_label,avg_gross_grams_per_piece,prep_yield_pct,default_date_stamp_mode,shelf_life_value,shelf_life_unit").eq("is_active", true).order("short_code", { ascending: true }).limit(500);
     if (listed.error) return fail([], listed.error, "อ่านรายการสินค้าไม่สำเร็จ");
     return result(asRows(listed.data).map((row) => ({
       id: text(row.id),
@@ -124,6 +125,9 @@ export async function listReceiveItemsAction(brandLock?: FnbBrandCode | null): P
       piece_uom_label: text(row.piece_uom_label) || "ลูก",
       avg_gross_grams_per_piece: num(row.avg_gross_grams_per_piece) || 110,
       prep_yield_pct: num(row.prep_yield_pct) || 80,
+      default_date_stamp_mode: text(row.default_date_stamp_mode) || "MFD",
+      shelf_life_value: num(row.shelf_life_value) || num(row.shelf_life_months) || 12,
+      shelf_life_unit: text(row.shelf_life_unit) || "MONTHS",
     })).filter((item) => !brandLock || item.brand_scope === brandLock));
   } catch (error) {
     return caught([], error, "อ่านรายการสินค้าไม่สำเร็จ");
@@ -142,6 +146,7 @@ type ReceiptLine = {
   receive_mode?: string;
   actual_piece_count?: number;
   weight_grams?: number;
+  expiry_lots?: { entry_mode?: string; mfg_date?: string; shelf_life_value?: number; shelf_life_unit?: string; expiry_date?: string; qty?: number }[];
 };
 
 async function prepareCatchWeightLines(lines: ReceiptLine[]): Promise<{ lines: ReceiptLine[]; stamps: { item_id: string; pieces: number; grams: number; avg: number }[]; error: string | null }> {
@@ -225,6 +230,73 @@ async function stampCatchWeightReceipt(grNo: string, stamps: { item_id: string; 
   return null;
 }
 
+async function stampReceiptExpiryLots(grNo: string, branch: string, location: string, staff: string, workDate: string, lines: ReceiptLine[]) {
+  const db = schemaAdmin().schema("fnb");
+  const header = await db.from("goods_receipts").select("id").eq("gr_no", grNo).maybeSingle();
+  const grId = text((header.data as { id?: string } | null)?.id);
+  const grLines = grId ? asRows((await db.from("goods_receipt_lines").select("id,item_id").eq("gr_id", grId).order("id", { ascending: true }).limit(200)).data) : [];
+  const used = new Set<string>();
+  for (const line of lines) {
+    const lots = (line.expiry_lots ?? []).flatMap((lot) => {
+      const qty = Number(lot.qty) || 0;
+      if (qty <= 0) return [];
+      const mode = dateStampMode(lot.entry_mode);
+      const unit = shelfLifeUnit(lot.shelf_life_unit);
+      const mfg = parseChinese8DigitDate(lot.mfg_date || "") || "";
+      const expiry = mode === "MFD"
+        ? calcExpiryDateFromMfg(mfg, Number(lot.shelf_life_value) || 0, unit)
+        : parseChinese8DigitDate(lot.expiry_date || "");
+      if (!expiry) return [];
+      return [{ mode, mfg, unit, value: Math.trunc(Number(lot.shelf_life_value) || 0), expiry, qty }];
+    });
+    if (lots.length === 0) continue;
+    const grLine = grLines.find((row) => text(row.item_id) === line.item_id && !used.has(text(row.id)));
+    if (grLine) {
+      used.add(text(grLine.id));
+      const first = lots[0];
+      await db.from("goods_receipt_lines").update({
+        date_stamp_mode: first.mode,
+        mfg_date: first.mfg || null,
+        shelf_life_value: first.value || null,
+        shelf_life_unit: first.unit,
+        expiry_date: first.expiry,
+      }).eq("id", text(grLine.id));
+    }
+    for (const lot of lots) {
+      const existing = await db.from("inventory_expiry_lots").select("id,lot_qty_in_count_uom").eq("location_code", location).eq("item_id", line.item_id).eq("expiry_date", lot.expiry).maybeSingle();
+      const found = existing.data as { id?: string; lot_qty_in_count_uom?: number } | null;
+      if (found?.id) {
+        await db.from("inventory_expiry_lots").update({
+          lot_qty_in_count_uom: num(found.lot_qty_in_count_uom) + lot.qty,
+          entry_mode: lot.mode,
+          mfg_date: lot.mfg || null,
+          shelf_life_value: lot.value || null,
+          shelf_life_unit: lot.unit,
+          recorded_by_name: staff,
+          last_counted_date: workDate,
+          updated_at: new Date().toISOString(),
+        }).eq("id", found.id);
+      } else {
+        await db.from("inventory_expiry_lots").insert({
+          branch_code: branch,
+          location_code: location,
+          item_id: line.item_id,
+          entry_mode: lot.mode,
+          mfg_date: lot.mfg || null,
+          shelf_life_value: lot.value || null,
+          shelf_life_unit: lot.unit,
+          expiry_date: lot.expiry,
+          lot_qty_in_count_uom: lot.qty,
+          count_uom: line.received_uom || "ชิ้น",
+          last_counted_date: workDate,
+          recorded_by_name: staff,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+}
+
 export async function submitBlindGoodsReceiptAction(formData: FormData): Promise<FnbActionResult<{ gr_no: string; line_count: number }>> {
   try {
     const actor = await resolveFnbActor({
@@ -290,6 +362,7 @@ export async function submitBlindGoodsReceiptAction(formData: FormData): Promise
     const target = text(formData.get("target_location_code"));
     if (grNo && target) {
       await schemaAdmin().schema("fnb").from("goods_receipts").update({ target_location_code: target }).eq("gr_no", grNo);
+      await stampReceiptExpiryLots(grNo, branch, target, text(formData.get("staff_name")) || "พนักงาน", text(formData.get("received_date")) || todayBangkok(), prepared.lines);
     }
     const frontCats = new Set<string>(FNB_FRONT_DISPLAY_CATEGORIES);
     for (const line of safeLines) {

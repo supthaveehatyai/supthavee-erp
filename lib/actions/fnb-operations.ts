@@ -333,6 +333,13 @@ export async function listFrontBackItemsAction(brandLock?: FnbBrandCode | null):
       piece_uom_label: text(row.piece_uom_label) || "ลูก",
       avg_gross_grams_per_piece: num(row.avg_gross_grams_per_piece) || 110,
       prep_yield_pct: num(row.prep_yield_pct) || 80,
+      default_date_stamp_mode: text(row.default_date_stamp_mode) || "MFD",
+      shelf_life_value: num(row.shelf_life_value) || num(row.shelf_life_months) || 0,
+      shelf_life_unit: text(row.shelf_life_unit) || "MONTHS",
+      shelf_life_text: text(row.shelf_life_text),
+      usage_tolerance_pct: num(row.usage_tolerance_pct) || 5,
+      image_urls: Array.isArray(row.image_urls) ? row.image_urls.map((url) => text(url)).filter(Boolean) : [],
+      image_captions: Array.isArray(row.image_captions) ? row.image_captions.map((caption) => text(caption)) : [],
     })).filter((item) => !brandLock || item.brand_scope === brandLock));
   } catch (error) {
     return caught([], error, "อ่านรายการเช็กของไม่สำเร็จ");
