@@ -117,7 +117,7 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
       db.from("daily_stage_section_confirmations").select("id,branch_code,stage_code,section_key,section_title_th,status_flag,numeric_amount,expected_amount,confirmed_by_name,confirmed_at,photo_urls,payload_json").eq("work_date", workDate).limit(2000),
       db.from("bar_wip_batches").select("id,branch_code,batch_kind,prep_base_code,item_id,brew_portion_mode,packs_deducted,pack_uom,opened_at,opened_by_name,expires_at,sticker_label_text,open_photo_urls,batch_status,notes,is_voided_duplicate,sliced_piece_count,actual_usable_qty,is_estimated_net_weight,source_ref_type,voided_at,voided_by_name,void_reason,stock_reversed_summary").eq("work_date", workDate).limit(1000),
       db.from("internal_zone_transfers").select("branch_code,item_id,qty_in_count_uom,created_at,staff_name,photo_url,from_location_code,to_location_code").eq("work_date", workDate).limit(1000),
-      db.from("shift_closings").select("branch_code,shift_type,staff_name,closed_by_name,cash_variance,created_at,order_count,gross_sales,net_sales_inc_vat,cash_pos_amount,qr_amount,kshop_app_amount,lineman_gross_amount,lineman_app_amount,grab_gross_amount,grab_gp_amount,grab_net_payout_amount,webapp_amount,opening_float_amount,drawer_total_cash_counted,cash_handover_to_next_shift,handover_status,handover_accepted_by_name,handover_accepted_at,handover_counted_drawer_cash,handover_ack_note,deposit_channel,seven_eleven_deposit_amount,seven_eleven_fee_thb,seven_eleven_slip_url,total_cash_for_eod_deposit,slip_image_urls,menu_slip_image_urls,app_screen_image_urls,handover_ack_photo_url,report_attachments_json,pos_promo_coupon_discount,delivery_price_diff_discount,pos_store_manual_discount").eq("work_date", workDate).limit(200),
+      db.from("shift_closings").select("branch_code,shift_type,staff_name,closed_by_name,status,cash_variance,created_at,order_count,gross_sales,net_sales_inc_vat,cash_pos_amount,qr_amount,kshop_app_amount,lineman_gross_amount,lineman_app_amount,grab_gross_amount,grab_gp_amount,grab_net_payout_amount,webapp_amount,opening_float_amount,drawer_total_cash_counted,cash_handover_to_next_shift,handover_status,handover_accepted_by_name,handover_accepted_at,handover_counted_drawer_cash,handover_ack_note,deposit_channel,seven_eleven_deposit_amount,seven_eleven_fee_thb,seven_eleven_slip_url,total_cash_for_eod_deposit,slip_image_urls,menu_slip_image_urls,app_screen_image_urls,handover_ack_photo_url,report_attachments_json,pos_promo_coupon_discount,delivery_price_diff_discount,pos_store_manual_discount").eq("work_date", workDate).limit(200),
       db.from("daily_menu_sales_headers").select("branch_code,created_at").eq("work_date", workDate).limit(50),
       db.from("daily_equipment_calibrations").select("branch_code,grinder_dose_g,espresso_time_sec,espresso_yield_g,syrup_random_target_g,syrup_measured_actual_g,photo_urls").eq("work_date", workDate).limit(20),
       db.from("item_write_offs").select("id,branch_code,item_id,write_off_reason,qty_in_count_uom,photo_urls,reported_by_name,created_at,shift_type,total_loss_cost_thb").eq("work_date", workDate).limit(500),
@@ -251,7 +251,17 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
         photos: urls(row.open_photo_urls),
       };
     });
-    const openRows = focusBatches.filter((row) => text(row.batch_kind) === "OPEN_ITEM").map((row) => {
+    const openSeen = new Map<string, Record<string, unknown>>();
+    for (const row of focusBatches) {
+      if (text(row.batch_kind) !== "OPEN_ITEM") continue;
+      if (row.is_voided_duplicate === true || text(row.voided_at)) continue;
+      const batchStatus = text(row.batch_status).toUpperCase();
+      if (batchStatus === "VOID" || batchStatus === "VOIDED") continue;
+      const key = text(row.item_id) || text(row.id);
+      const prev = openSeen.get(key);
+      if (!prev || text(row.opened_at) > text(prev.opened_at)) openSeen.set(key, row);
+    }
+    const openRows = [...openSeen.values()].map((row) => {
       const note = text(row.notes);
       const expiry = text(row.expires_at);
       const sticker = text(row.sticker_label_text);
@@ -373,6 +383,7 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
         shift: shift as "MORNING" | "AFTERNOON",
         staff: text(row.staff_name),
         closedByName: text(row.closed_by_name) || text(row.staff_name),
+        closingStatus: text(row.status) || "SUBMITTED",
         at: text(row.created_at),
         orderCount: num(row.order_count),
         grossSales: num(row.gross_sales),

@@ -934,6 +934,7 @@ export type FnbInspectorShiftCard = {
   shift: "MORNING" | "AFTERNOON";
   staff: string;
   closedByName: string;
+  closingStatus: string;
   at: string;
   orderCount: number;
   grossSales: number;
@@ -1411,7 +1412,7 @@ export type FnbLiveSnapshot = {
   displayLots: { itemId: string; remainingQty: number; displayExpiryDate: string; placedByName: string }[];
   closings: FnbLiveShiftClosing[];
   shiftMenuSales: FnbLiveShiftMenuSale[];
-  waste: { staffName: string; totalWasteCostThb: number }[];
+  waste: { staffName: string; totalWasteCostThb: number; itemCode: string; qty: number; uom: string; photoUrl: string }[];
   writeOffs: { itemId: string; reason: string; qty: number; staffName: string; photoUrls: string[] }[];
   menuSales: { submittedByName: string; reportedTotalAmount: number } | null;
   staffOptions: { userId: string; name: string }[];

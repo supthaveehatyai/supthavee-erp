@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import { replenishZoneAction, saveDisplaySectionCountsAction } from "@/lib/actions/fnb-store-day";
+import { postFnbInstantSave } from "@/lib/fnb/instant-client";
 import { hhmm, UnsavedDraftBar } from "@/components/fnb/section-confirm-card";
 import { crewAssist, useLiveBranch } from "@/components/fnb/shift-crew-bar";
 import { addDays, bangkokHour, shortThaiDate } from "@/lib/fnb/stage-progress";
@@ -85,6 +86,7 @@ function CabinetRows(props: {
   lots: FnbDisplayLot[];
   today: string;
   qty: Record<string, string>;
+  marks?: Record<string, string>;
   onQty: (itemId: string, value: string) => void;
   bakery: boolean;
   evening: boolean;
@@ -111,6 +113,7 @@ function CabinetRows(props: {
                 <p className="min-w-28 flex-1 font-medium">{line.nameTh}</p>
                 {props.bakery ? <LotBadges lots={props.lots.filter((lot) => lot.itemId === line.itemId)} today={props.today} /> : null}
                 <FnbQtyInput className="h-10 w-20" value={props.qty[line.itemId] ?? ""} onChange={(value) => props.onQty(line.itemId, value)} unit={line.countUom || "ชิ้น"} />
+                {props.marks?.[line.itemId] ? <span className="text-xs text-emerald-700">{props.marks[line.itemId]}</span> : null}
                 {props.bakery ? (
                   <button type="button" className="rounded-md border px-2 py-1 text-xs" onClick={() => {
                     const typed = window.prompt(`จำนวนที่เบิก ${line.nameTh} เข้าตู้`, "1");
@@ -206,9 +209,29 @@ export function DisplayCabinetGrid(props: {
       return changed ? next : current;
     });
   }, [live.snapshot, sec4, sec5, props.lines]);
+  const saveTimer = useRef<Record<string, number>>({});
+  const [marks, setMarks] = useState<Record<string, string>>({});
   function onQty(itemId: string, value: string) {
     dirty.current.add(itemId);
     setQty((current) => ({ ...current, [itemId]: value }));
+    setMarks((current) => ({ ...current, [itemId]: "⏳" }));
+    window.clearTimeout(saveTimer.current[itemId]);
+    saveTimer.current[itemId] = window.setTimeout(() => {
+      const line = props.lines.find((row) => row.itemId === itemId);
+      void postFnbInstantSave({
+        action: "DISPLAY_ITEM_COUNT",
+        branchCode: props.branch,
+        workDate: props.workDate,
+        stageCode: "OPENING",
+        sectionKey: line && (line.category === "MERCHANDISE") ? "SEC_5_MERCH" : "SEC_4_BAKERY_ICE",
+        itemId,
+        locationCode: props.frontCode,
+        countedQty: Math.trunc(Number(value) || 0),
+      }).then((saved) => {
+        setMarks((current) => ({ ...current, [itemId]: saved.ok ? "☁️ บันทึกแล้ว" : "" }));
+        if (!saved.ok) toast.error(saved.error || "บันทึกยอดนับไม่สำเร็จ");
+      });
+    }, 700);
   }
   async function replenish(line: FnbZoneCountLine, count: number) {
     if (!props.backCode || !props.frontCode) { toast.error("ยังไม่พบจุดคลังหลังร้านหรือตู้โชว์"); return; }
@@ -291,9 +314,9 @@ export function DisplayCabinetGrid(props: {
         ) : (
           <>
             <h4 className="font-semibold">🥐 ตู้แช่เบเกอรี่หน้าร้าน</h4>
-            <CabinetRows lines={bakery} lots={props.lots} today={props.today} qty={qty} onQty={onQty} bakery evening={evening} setEvening={setEvening} onReplenish={(line, count) => void replenish(line, count)} />
+            <CabinetRows lines={bakery} lots={props.lots} today={props.today} qty={qty} onQty={onQty} marks={marks} bakery evening={evening} setEvening={setEvening} onReplenish={(line, count) => void replenish(line, count)} />
             <h4 className="font-semibold">🍦 ตู้ไอศกรีมและโคนหน้าบาร์</h4>
-            <CabinetRows lines={ice} lots={props.lots} today={props.today} qty={qty} onQty={onQty} bakery={false} evening={evening} setEvening={setEvening} onReplenish={() => undefined} />
+            <CabinetRows lines={ice} lots={props.lots} today={props.today} qty={qty} onQty={onQty} marks={marks} bakery={false} evening={evening} setEvening={setEvening} onReplenish={() => undefined} />
             <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white disabled:opacity-60" disabled={busyKey !== ""} onClick={() => void saveSection("SEC_4_BAKERY_ICE", "หมวดที่ 4: ตู้แช่เบเกอรี่และตู้ไอศกรีมหน้าร้าน", bakeryIce)}>{busyKey === "SEC_4_BAKERY_ICE" ? "กำลังบันทึก..." : "💾 บันทึกยืนยันหมวดที่ 4 (เบเกอรี่และไอศกรีม)"}</button>
             {bakeryIce.some((line) => dirty.current.has(line.itemId)) ? <UnsavedDraftBar sectionNo={4} /> : null}
           </>
@@ -305,7 +328,7 @@ export function DisplayCabinetGrid(props: {
           <CountLockedCard sectionNo={5} row={sec5} items={sec5Items.length ? sec5Items : stockItems(stock, merch)} onRevise={props.onRevise ? () => props.onRevise?.("SEC_5_MERCH") : undefined} />
         ) : (
           <>
-            <CabinetRows lines={merch} lots={props.lots} today={props.today} qty={qty} onQty={onQty} bakery={false} evening={evening} setEvening={setEvening} onReplenish={() => undefined} />
+            <CabinetRows lines={merch} lots={props.lots} today={props.today} qty={qty} onQty={onQty} marks={marks} bakery={false} evening={evening} setEvening={setEvening} onReplenish={() => undefined} />
             <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white disabled:opacity-60" disabled={busyKey !== ""} onClick={() => void saveSection("SEC_5_MERCH", "หมวดที่ 5: ชั้นโชว์ของพรีเมียมหน้าร้าน", merch)}>{busyKey === "SEC_5_MERCH" ? "กำลังบันทึก..." : "💾 บันทึกยืนยันหมวดที่ 5 (ชั้นโชว์ของพรีเมียม)"}</button>
             {merch.some((line) => dirty.current.has(line.itemId)) ? <UnsavedDraftBar sectionNo={5} /> : null}
           </>

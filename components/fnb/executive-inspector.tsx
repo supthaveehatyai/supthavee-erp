@@ -213,6 +213,7 @@ function ChannelGrid({ card, title }: { card: FnbInspectorShiftCard; title: stri
   return (
     <section className="rounded-xl border p-3">
       <h3 className="font-semibold">{title}</h3>
+      <p className="text-sm">{card.closingStatus === "DRAFT" ? "📝 กำลังกรอกร่าง/แนบสลิป" : "🟢 ส่งยอดแล้ว"}</p>
       <p className="mt-1 text-sm">ยอดขายรวมก่อนลด {baht(card.grossSales)} · สุทธิ {baht(card.netSales)} · จำนวนออเดอร์ {card.orderCount.toLocaleString("th-TH")}</p>
       <p className="text-xs text-slate-600">🎟️ ส่วนลดคูปอง / โปรโมชั่นสมาชิก {baht(card.promoDiscount)} · 🛵 ส่วนต่างราคาเดลิเวอรี {baht(card.deliveryDiscount)} · 🏷️ ส่วนลดหน้าร้านอื่นๆ {baht(card.storeDiscount)}</p>
       <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">

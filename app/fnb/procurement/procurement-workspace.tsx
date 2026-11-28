@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   depleteExpiryLotAction,
@@ -16,6 +16,7 @@ import { VendorClaimPanel, WriteOffButton } from "@/components/fnb/write-off-pan
 import { branchForBrand } from "@/lib/fnb/brand-branch";
 import { itemMatches } from "@/lib/fnb/item-search";
 import { emptyExpiryLot, MfdExpiryLotEditor, resolvedExpiry, type ExpiryLotDraft } from "@/components/fnb/mfd-expiry-lot-editor";
+import { clearSectionDraft, readSectionDraft, writeSectionDraft } from "@/lib/fnb/instant-client";
 import { produceProfile } from "@/lib/utils/fnb-format";
 import type { FnbBranchOption, FnbBrandCode, FnbExpiryLotRow, FnbItemRow, FnbReimbursementRow, FnbUnpackLine, FnbVendorSheetRow } from "@/types/fnb";
 
@@ -194,8 +195,27 @@ export function ManualReceive({
   const [zones, setZones] = useState<{ locationCode: string; locationNameTh: string; isDefaultGrTarget: boolean }[]>([]);
   const [location, setLocation] = useState("");
   const [busy, setBusy] = useState(false);
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [, start] = useTransition();
+  const draftDay = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date());
+  const skipDraftWrite = useRef(true);
   const visible = items.filter((item) => itemMatches(query, item));
+  useEffect(() => {
+    if (!receiveBranch) return;
+    const draft = readSectionDraft(receiveBranch, draftDay, "GOODS_RECEIPT");
+    if (draft.photos) setPhotoUrls(draft.photos.split("|").filter(Boolean));
+    if (draft.lines) {
+      try {
+        const parsed = JSON.parse(draft.lines) as typeof lines;
+        if (Array.isArray(parsed) && parsed.length > 0) setLines(parsed);
+      } catch { /* keep the blank line */ }
+    }
+  }, [receiveBranch, draftDay]);
+  useEffect(() => {
+    if (!receiveBranch) return;
+    if (skipDraftWrite.current) { skipDraftWrite.current = false; return; }
+    writeSectionDraft(receiveBranch, draftDay, "GOODS_RECEIPT", { photos: photoUrls.join("|"), lines: JSON.stringify(lines) });
+  }, [receiveBranch, draftDay, photoUrls, lines]);
   useEffect(() => {
     if (branchCode && branches.some((item) => item.branch_code === branchCode)) setReceiveBranch(branchCode);
   }, [branchCode, branches]);
@@ -253,7 +273,7 @@ export function ManualReceive({
         const saved = await submitBlindGoodsReceiptAction(form);
         setBusy(false);
         if (saved.error) { toast.error(saved.error); setMessage?.(saved.error); }
-        else { toast.success(`รับของ ${saved.data.gr_no} เข้าคลังแล้ว`); setMessage?.(`รับของ ${saved.data.gr_no} แล้ว`); }
+        else { clearSectionDraft(receiveBranch, draftDay, "GOODS_RECEIPT"); toast.success(`รับของ ${saved.data.gr_no} เข้าคลังแล้ว`); setMessage?.(`รับของ ${saved.data.gr_no} แล้ว`); }
       });
     }}>
       <h2 className="font-semibold">รับวัตถุดิบเข้าด่วน</h2>
@@ -322,7 +342,20 @@ export function ManualReceive({
         );
       })}
       <button type="button" className="text-sm text-red-700" onClick={() => setLines((current) => [...current, { ...blankLine, item_id: items[0]?.id ?? "", uom: items[0]?.default_purchase_uom ?? "" }])}>เพิ่มรายการ</button>
-      <label className="block rounded-lg border border-dashed p-3 text-sm" onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); }}>รูปของที่มาส่ง<input className="mt-2 block" name="photos" type="file" accept="image/*" capture="environment" multiple /></label>
+      <label className="block rounded-lg border border-dashed p-3 text-sm" onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); }}>รูปของที่มาส่ง<input className="mt-2 block" name="photos" type="file" accept="image/*" capture="environment" multiple onChange={(event) => {
+        const files = [...(event.target.files ?? [])];
+        event.target.value = "";
+        for (const file of files) {
+          const body = new FormData();
+          body.set("file", file);
+          body.set("branchCode", receiveBranch);
+          void fetch("/api/fnb/upload-photo", { method: "POST", body }).then((response) => response.json()).then((data: { publicUrl?: string }) => {
+            if (data.publicUrl) setPhotoUrls((current) => [...current, data.publicUrl!]);
+          });
+        }
+      }} /></label>
+      <input type="hidden" name="photo_urls" value={photoUrls.join("|")} />
+      {photoUrls.length > 0 ? <p className="text-xs text-emerald-800">☁️ บันทึกรูปรับของไว้แล้ว {photoUrls.length} รูป</p> : null}
       <SaveButton busy={busy}>บันทึกรับของ</SaveButton>
     </form>
   );

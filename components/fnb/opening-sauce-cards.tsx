@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { LiveWatermarkCamera } from "@/components/fnb/live-watermark-camera";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import { closeWipBatchAction, issueWipBatchAction, registerExistingOpenBarItemAction } from "@/lib/actions/fnb-wip";
-import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
 import { addDays } from "@/lib/fnb/stage-progress";
 import type { FnbSauceWatch } from "@/types/fnb";
 
@@ -19,18 +18,6 @@ function expired(iso: string | null, today: string): boolean {
   if (!iso) return false;
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date(iso));
   return day < today || new Date(iso).getTime() <= Date.now();
-}
-
-async function uploadShot(file: File, live: boolean, branch: string, actorSource: string, brand: string): Promise<string> {
-  const body = new FormData();
-  body.set("file", file);
-  body.set("live_capture", String(live));
-  body.set("branch_code", branch);
-  body.set("actor_source", actorSource);
-  body.set("brand_lock", brand);
-  const saved = await uploadFnbEvidenceAction(body);
-  if (saved.error || !saved.data.url) throw new Error(saved.error || "อัปโหลดรูปไม่สำเร็จ");
-  return saved.data.url;
 }
 
 export function OpeningSauceCards(props: {
@@ -195,7 +182,7 @@ function SauceCard(props: {
                 <label className="text-xs">น้ำหนักของเหลือ
                   <span className="mt-1 block"><FnbQtyInput className="h-10 w-20" value={waste} onChange={setWaste} unit={batch.uom} allowDecimal /></span>
                 </label>
-                <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle={`${props.sauce.code} เททิ้ง`} liveCameraOnly onCapture={(file, live) => void uploadShot(file, live, props.branch, props.actorSource, props.brand).then(setPhoto).catch((reason: Error) => toast.error(reason.message))} />
+                <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle={`${props.sauce.code} เททิ้ง`} liveCameraOnly onUploaded={setPhoto} />
                 <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-2 py-1 text-xs text-white disabled:opacity-60" disabled={pending} onClick={() => closeBatch(batch.id, "EXPIRED_DUMPED")}>{pending ? "กำลังบันทึก..." : "บันทึกเททิ้ง"}</button>
               </div>
             ) : null}
@@ -224,7 +211,7 @@ function SauceCard(props: {
           </label>
           <p className="text-xs text-slate-600">ป้ายหมดอายุที่จะเขียน: {preview}</p>
           {sticker ? <p className="text-xs font-medium">เขียนป้าย: {sticker}</p> : null}
-          <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle={`${props.sauce.code} ถ่ายรูปขวดติดป้าย`} liveCameraOnly onCapture={(file, live) => void uploadShot(file, live, props.branch, props.actorSource, props.brand).then(setPhoto).catch((reason: Error) => toast.error(reason.message))} />
+          <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle={`${props.sauce.code} ถ่ายรูปขวดติดป้าย`} liveCameraOnly onUploaded={setPhoto} />
           <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-1 text-xs text-white disabled:opacity-60" disabled={pending} onClick={issueFresh}>{pending ? "กำลังบันทึก..." : "ยืนยันเบิกเทใหม่"}</button>
         </div>
       ) : null}

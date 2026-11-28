@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { LiveWatermarkCamera } from "@/components/fnb/live-watermark-camera";
-import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
+import { postFnbInstantSave, readSectionDraft, writeSectionDraft } from "@/lib/fnb/instant-client";
 import {
   getStoreDayBoardAction,
   replenishZoneAction,
@@ -45,18 +45,6 @@ function useBoard(branch: string, workDate: string, actorSource: string, brandLo
     return () => { active = false; };
   }, [branch, workDate, actorSource, brandLock]);
   return { board, error, reload: () => void getStoreDayBoardAction(branch, workDate, actorSource, brandLock).then((loaded) => { setBoard(loaded.data); setError(loaded.error ?? ""); }) };
-}
-
-async function uploadShot(file: File, live: boolean, branch: string, actorSource: string, brandLock: string): Promise<string> {
-  const body = new FormData();
-  body.set("file", file);
-  body.set("live_capture", String(live));
-  body.set("branch_code", branch);
-  body.set("actor_source", actorSource);
-  body.set("brand_lock", brandLock);
-  const saved = await uploadFnbEvidenceAction(body);
-  if (saved.error || !saved.data.url) throw new Error(saved.error || "อัปโหลดรูปไม่สำเร็จ");
-  return saved.data.url;
 }
 
 function prepSummary(row: FnbStageConfirmation) {
@@ -210,7 +198,7 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
             );
           })}
           <div ref={cameraRef} className={photoMissing ? "rounded-xl ring-2 ring-red-600" : ""}>
-            <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle="เตรียมเบสและหั่นเลมอน" liveCameraOnly onCapture={(file, liveShot) => void uploadShot(file, liveShot, props.branch, props.actorSource, brand).then((url) => { setPhotoMissing(false); setPrepPhoto(url); }).catch((reason: Error) => toast.error(reason.message))} />
+            <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle="เตรียมเบสและหั่นเลมอน" liveCameraOnly onUploaded={(url) => { setPhotoMissing(false); setPrepPhoto(url); writeSectionDraft(props.branch, props.workDate, "SEC_1_PREP", { photo: url }); }} />
           </div>
           <button type="button" className="rounded-md bg-[#DC2626] px-3 py-2 text-sm text-white disabled:opacity-60" disabled={busy} onClick={() => start(async () => {
             const missing = shownBases.find((base) => !portionOf(base.base_code));
@@ -324,13 +312,13 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
           <label className="text-sm">น้ำหนักชั่งจริง<span className="mt-1 flex items-center gap-1"><input className="h-10 w-24 rounded-md border px-2 text-sm" name="syrup_measured_actual_g" type="number" min="0.1" max="999" step="0.1" defaultValue={board?.calibration?.syrupActualG ?? ""} /><span className="text-xs">g</span></span></label>
           <label className="flex items-center gap-2 text-sm"><input name="syrup_adjusted_ok" type="checkbox" value="true" defaultChecked={board?.calibration?.syrupAdjusted} />ปรับจูนเครื่องเรียบร้อยแล้ว</label>
           {equipError ? <p className="text-sm text-red-700 md:col-span-3">{equipError}</p> : null}
-          <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle="เช็คมาตรฐานอุปกรณ์" liveCameraOnly onCapture={(file, live) => void uploadShot(file, live, props.branch, props.actorSource, brand).then(setEquipPhoto).catch((reason: Error) => toast.error(reason.message))} />
+          <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle="เช็คมาตรฐานอุปกรณ์" liveCameraOnly onUploaded={(url) => { setEquipPhoto(url); writeSectionDraft(props.branch, props.workDate, "SEC_2_EQUIP", { photo: url }); }} />
           <button className="rounded-md bg-[#DC2626] px-3 py-2 text-sm text-white disabled:opacity-60" disabled={busy}>{busy ? "กำลังบันทึก..." : "💾 บันทึกยืนยันหมวดที่ 2"}</button>
         </form>}
       </article>
       <article className="space-y-2">
         <h3 className="font-semibold">หมวดที่ 3: ซอสและวัตถุดิบเปิดใช้หน้าบาร์</h3>
-        {sauceSaved && reopen !== "SEC_3_SAUCE" ? <LockedSectionCard row={sauceSaved} summary="ยืนยันซอสและวัตถุดิบเปิดใช้หน้าบาร์แล้ว" onRevise={canRevise ? () => { setReviseReason(""); setReviseKey("SEC_3_SAUCE"); } : undefined} /> : <>
+        {sauceSaved && reopen !== "SEC_3_SAUCE" ? <LockedSectionCard row={sauceSaved} summary={openBarSummary(live.snapshot?.wipBatches ?? [])} onRevise={canRevise ? () => { setReviseReason(""); setReviseKey("SEC_3_SAUCE"); } : undefined} /> : <>
         <OpeningSauceCards sauces={board?.sauces ?? []} branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={brand} staffName={props.staffName} onDone={bump} />
         <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" onClick={() => start(async () => {
           const saved = await confirmStageSectionAction({ branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: "SEC_3_SAUCE", sectionTitle: "หมวดที่ 3: ซอสและวัตถุดิบเปิดใช้หน้าบาร์", actorSource: props.actorSource, brandLock: brand, shiftSlot: "SHIFT_1", payload: { sauces: (board?.sauces ?? []).map((sauce) => ({ code: sauce.code, name: sauce.nameTh, expiresAt: sauce.expiresAt })) }, ...assist() });
@@ -472,7 +460,6 @@ export function MiddayShortcuts(props: { branch: string; workDate: string; actor
           brand={props.brand}
           staffName={props.staffName}
           shiftInstance={live.shiftSlot || "SHIFT_1"}
-          upload={(file, live) => uploadShot(file, live, props.branch, props.actorSource, props.brand)}
           onSaved={reload}
         />
       ) : null}
@@ -602,7 +589,7 @@ export function NightCloseCount(props: { branch: string; workDate: string; actor
         <article className="space-y-2">
           <h3 className="font-semibold">โซนหน้าร้าน — นับทุกคืน</h3>
           {(board?.frontLines ?? []).map((line) => (
-            <CountRow key={line.itemId} line={line} qty={qty} setQty={setQty} onRetro={back && front ? (gap) => {
+            <CountRow key={line.itemId} line={line} qty={qty} setQty={setQty} instant={{ branch: props.branch, workDate: props.workDate, stage: "CLOSING" }} onRetro={back && front ? (gap) => {
               void replenishZoneAction({
                 branchCode: props.branch, workDate: props.workDate, fromLocationCode: back.locationCode, toLocationCode: front.locationCode, itemId: line.itemId, qty: gap, actorSource: props.actorSource, brandLock: brand, autoReconciled: true, notes: "บันทึกเบิกเติมย้อนหลังจากยอดนับปิดร้าน",
               }).then((saved) => {
@@ -621,14 +608,14 @@ export function NightCloseCount(props: { branch: string; workDate: string; actor
             <h3 className="font-semibold">คลังหลังร้านและวัสดุสิ้นเปลืองที่ถึงรอบคืนนี้</h3>
             <label className="text-sm"><input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} /> แสดงรายการนอกรอบทั้งหมด</label>
           </div>
-          {backLines.map((line) => <CountRow key={line.itemId} line={line} qty={qty} setQty={setQty} />)}
+          {backLines.map((line) => <CountRow key={line.itemId} line={line} qty={qty} setQty={setQty} instant={{ branch: props.branch, workDate: props.workDate, stage: "CLOSING" }} />)}
           <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy || !back} onClick={() => back && save("CLOSING", backLines, back.locationCode)}>บันทึกยอดหลังร้าน</button>
         </article>
       )}
       {board?.warehouseDue || props.warehouseOnly ? (
         <article className="space-y-2">
           <h3 className="font-semibold">โกดัง {board?.locations.find((row) => row.zoneType === "WAREHOUSE")?.locationNameTh ?? ""}</h3>
-          {(board?.warehouseLines ?? []).map((line) => <CountRow key={line.itemId} line={line} qty={qty} setQty={setQty} />)}
+          {(board?.warehouseLines ?? []).map((line) => <CountRow key={line.itemId} line={line} qty={qty} setQty={setQty} instant={{ branch: props.branch, workDate: props.workDate, stage: "CLOSING" }} />)}
           <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy} onClick={() => {
             const warehouse = board?.locations.find((row) => row.zoneType === "WAREHOUSE");
             if (warehouse) save("CYCLE_COUNT", board?.warehouseLines ?? [], warehouse.locationCode);
@@ -637,7 +624,8 @@ export function NightCloseCount(props: { branch: string; workDate: string; actor
       ) : <p className="text-sm text-slate-500">โกดังยังไม่ถึงรอบนับคืนนี้ — นับได้จากแท็บรอบนับในคลังสินค้า</p>}
       {props.warehouseOnly ? null : (
         <article className="space-y-2">
-          <h3 className="font-semibold">หมวด 4 รายการเททิ้งประจำวัน</h3>
+          <h3 className="font-semibold">หมวดปิดร้านที่ 4: ชั่งเททิ้งเบส JT, BT, MMK, ML และเลมอน LEM</h3>
+          <BaseWasteList branch={props.branch} workDate={props.workDate} staffName={props.staffName} />
           <ProduceWasteForm branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={props.brandLock ?? "LUCKY_CUP"} staffName={props.staffName} />
           <WriteOffButton branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={props.brandLock ?? "LUCKY_CUP"} staffName={props.staffName} locations={board?.locations ?? []} onDone={() => { setConfirmTick((value) => value + 1); reload(); }} />
           {(board?.sauces ?? []).filter((sauce) => sauce.expiresAt && sauce.expiresAt.slice(0, 10) <= props.workDate).map((sauce) => (
@@ -649,8 +637,27 @@ export function NightCloseCount(props: { branch: string; workDate: string; actor
   );
 }
 
-function CountRow(props: { line: FnbZoneCountLine; qty: Record<string, string>; setQty: (value: Record<string, string>) => void; onRetro?: (qty: number) => void }) {
+function CountRow(props: { line: FnbZoneCountLine; qty: Record<string, string>; setQty: (value: Record<string, string>) => void; onRetro?: (qty: number) => void; instant?: { branch: string; workDate: string; stage: "OPENING" | "CLOSING" } }) {
   const key = `${props.line.locationCode}|${props.line.itemId}`;
+  const timer = useRef(0);
+  const [mark, setMark] = useState("");
+  function remember(value: string) {
+    props.setQty({ ...props.qty, [key]: value });
+    if (!props.instant) return;
+    setMark("⏳");
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      void postFnbInstantSave({
+        action: "DISPLAY_ITEM_COUNT",
+        branchCode: props.instant?.branch,
+        workDate: props.instant?.workDate,
+        stageCode: props.instant?.stage,
+        itemId: props.line.itemId,
+        locationCode: props.line.locationCode,
+        countedQty: Number(value) || 0,
+      }).then((saved) => setMark(saved.ok ? "☁️ บันทึกแล้ว" : ""));
+    }, 700);
+  }
   const [carton, setCarton] = useState(false);
   const typed = props.qty[key];
   const counted = typed === undefined || typed === "" ? props.line.countedQty : Number(typed);
@@ -669,15 +676,82 @@ function CountRow(props: { line: FnbZoneCountLine; qty: Record<string, string>; 
           {carton ? (
             <FnbQtyInput allowDecimal unit="กก." onChange={(value) => {
               const pieces = Math.round(((Number(value) || 0) * 1000) / (props.line.avgGrossGrams || 110));
-              props.setQty({ ...props.qty, [key]: String(pieces) });
+              remember(String(pieces));
             }} />
           ) : (
-            <FnbQtyInput value={props.qty[key] ?? (props.line.countedQty == null ? "" : String(props.line.countedQty))} unit={unit} onChange={(value) => props.setQty({ ...props.qty, [key]: value })} />
+            <FnbQtyInput value={props.qty[key] ?? (props.line.countedQty == null ? "" : String(props.line.countedQty))} unit={unit} onChange={remember} />
           )}
           {carton && props.qty[key] ? <p>คิดเป็น {props.qty[key]} {unit}</p> : null}
         </div>
-      ) : <input className={`${field} mt-2`} type="number" step={props.line.allowDecimal ? "0.01" : "1"} placeholder="ยอดนับจริง" value={props.qty[key] ?? (props.line.countedQty ?? "")} onChange={(event) => props.setQty({ ...props.qty, [key]: event.target.value })} />}
+      ) : <span className="mt-2 flex items-center gap-2"><input className={field} type="number" step={props.line.allowDecimal ? "0.01" : "1"} placeholder="ยอดนับจริง" value={props.qty[key] ?? (props.line.countedQty ?? "")} onChange={(event) => remember(event.target.value)} onBlur={(event) => remember(event.target.value)} />{mark ? <span className="text-xs text-emerald-700">{mark}</span> : null}</span>}
       {extra > 0 && props.onRetro ? <button type="button" className="mt-2 rounded-md border px-2 py-1" onClick={() => props.onRetro?.(extra)}>➕ บันทึกเบิกเติมจากคลังหลังร้านย้อนหลัง {extra} {unit}</button> : null}
+    </div>
+  );
+}
+
+const NIGHT_WASTE = [
+  { code: "JT", uom: "ml" },
+  { code: "BT", uom: "ml" },
+  { code: "MMK", uom: "ml" },
+  { code: "ML", uom: "ml" },
+  { code: "LEM", uom: "g" },
+] as const;
+
+function openBarSummary(batches: { batchKind: string; batchStatus: string; prepBaseCode: string; itemId: string; packsDeducted: number }[]): string {
+  const seen = new Set<string>();
+  const lines = batches.filter((row) => {
+    if (row.batchKind !== "OPEN_ITEM") return false;
+    const status = row.batchStatus.toUpperCase();
+    if (status === "VOID" || status === "VOIDED") return false;
+    const key = row.itemId || row.prepBaseCode;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (lines.length === 0) return "ยังไม่มีภาชนะเปิดใช้ที่ยังไม่ถูกยกเลิก";
+  return lines.map((row) => `${row.prepBaseCode || row.itemId} · ${row.packsDeducted}`).join(" · ");
+}
+
+function BaseWasteList(props: { branch: string; workDate: string; staffName: string }) {
+  const live = useLiveBranch();
+  return (
+    <div className="space-y-2">
+      {NIGHT_WASTE.map((item) => <BaseWasteRow key={item.code} {...item} {...props} savedQty={(live.snapshot?.waste ?? []).find((row) => row.itemCode === item.code)?.qty ?? 0} savedPhoto={(live.snapshot?.waste ?? []).find((row) => row.itemCode === item.code)?.photoUrl ?? ""} />)}
+    </div>
+  );
+}
+
+function BaseWasteRow(props: { code: string; uom: string; branch: string; workDate: string; staffName: string; savedQty: number; savedPhoto: string }) {
+  const draft = readSectionDraft(props.branch, props.workDate, `WASTE_${props.code}`);
+  const [qty, setQty] = useState(props.savedQty > 0 ? String(props.savedQty) : draft.qty || "");
+  const [photo, setPhoto] = useState(props.savedPhoto || draft.photo || "");
+  const [saved, setSaved] = useState(props.savedQty > 0 || draft.saved === "1");
+  const [busy, setBusy] = useState(false);
+  async function commit(nextQty = qty, nextPhoto = photo) {
+    const amount = Number(nextQty);
+    if (!(amount > 0) || !nextPhoto) return;
+    setBusy(true);
+    const result = await postFnbInstantSave({
+      action: "SINGLE_WASTE_ITEM",
+      branchCode: props.branch,
+      workDate: props.workDate,
+      itemCode: props.code,
+      qty: amount,
+      uom: props.uom,
+      photoUrl: nextPhoto,
+    });
+    setBusy(false);
+    if (!result.ok) { toast.error(result.error || "บันทึกเททิ้งไม่สำเร็จ"); return; }
+    writeSectionDraft(props.branch, props.workDate, `WASTE_${props.code}`, { qty: nextQty, photo: nextPhoto, saved: "1" });
+    setSaved(true);
+  }
+  return (
+    <div className={`space-y-2 rounded-lg border p-3 ${saved ? "border-emerald-500 bg-emerald-50" : "bg-white"}`}>
+      <p className="font-semibold">{props.code}</p>
+      <FnbQtyInput allowDecimal value={qty} unit={props.uom} onChange={(value) => { setQty(value); setSaved(false); if (photo) void commit(value, photo); }} />
+      <LiveWatermarkCamera branchCode={props.branch} stage="CLOSING" staffName={props.staffName} taskTitle={`เททิ้ง ${props.code}`} liveCameraOnly onUploaded={(url) => { setPhoto(url); void commit(qty, url); }} />
+      <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy} onClick={() => { void commit(); }}>{busy ? "กำลังบันทึก..." : "💾 บันทึกรายการนี้"}</button>
+      {saved ? <p className="text-sm font-semibold text-emerald-800">☁️ บันทึกเททิ้ง {qty} {props.uom} แล้ว</p> : null}
     </div>
   );
 }

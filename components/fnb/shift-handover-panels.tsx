@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import { ShiftIncidentBlock } from "@/components/fnb/shift-incident-block";
-import { extractFnbPosSlipOcrAction, listBranchMenusForSalesAction, uploadFnbPosSlipAction } from "@/lib/actions/fnb-pos-ocr";
+import { extractFnbPosSlipOcrAction, listBranchMenusForSalesAction } from "@/lib/actions/fnb-pos-ocr";
 import { acknowledgeMorningCashHandoverAction, submitShiftClosingAndMenuSalesAction } from "@/lib/actions/fnb-shift-handover";
 import { useLiveBranch } from "@/components/fnb/shift-crew-bar";
+import { postFnbInstantSave, readSectionDraft, writeSectionDraft } from "@/lib/fnb/instant-client";
 import { bangkokClock } from "@/lib/fnb/stage-progress";
 import { drawerCustody } from "@/lib/utils/fnb-cash";
 import { FNB_NOTE_VALUES, type FnbBrandCode, type FnbPosMenuSlipLine, type FnbShiftHandoverInput } from "@/types/fnb";
@@ -24,11 +25,18 @@ function countedOf(notes: Record<number, number>): number {
 
 async function storeSlip(branch: string, file: File): Promise<string> {
   const body = new FormData();
-  body.set("branch_code", branch);
+  body.set("branchCode", branch);
   body.set("file", file);
-  const uploaded = await uploadFnbPosSlipAction(body);
-  if (uploaded.error || !uploaded.data.url) throw new Error(uploaded.error || "อัปโหลดสลิปไม่สำเร็จ");
-  return uploaded.data.url;
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 12_000);
+  try {
+    const response = await fetch("/api/fnb/upload-photo", { method: "POST", body, signal: controller.signal });
+    const data = await response.json().catch(() => ({})) as { ok?: boolean; publicUrl?: string; error?: string };
+    if (!response.ok || !data.publicUrl) throw new Error(data.error || "อัปโหลดสลิปไม่สำเร็จ");
+    return data.publicUrl;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 function SlipCapture(props: { label: string; action: string; onFile: (file: File) => void }) {
@@ -240,6 +248,23 @@ export function MorningHandoverPanel(props: { branch: string; workDate: string; 
       })));
     }
   }, [live.snapshot?.shiftMenuSales, morning]);
+  const [draftBadge, setDraftBadge] = useState(false);
+  const draftArmed = useRef(false);
+  useEffect(() => {
+    if (draftArmed.current || !live.snapshot) return;
+    draftArmed.current = true;
+    const raw = readSectionDraft(props.branch, props.workDate, "SHIFT_MORNING").json;
+    if (raw) setDraftBadge(true);
+  }, [live.snapshot, props.branch, props.workDate]);
+  useEffect(() => {
+    if (!draftArmed.current) return;
+    const draft = { cash, qr, lineman, grab, webapp, gross, orders, posUrls, menuUrls, linemanUrls, grabUrls };
+    const timer = window.setTimeout(() => {
+      writeSectionDraft(props.branch, props.workDate, "SHIFT_MORNING", { json: JSON.stringify(draft) });
+      void postFnbInstantSave({ action: "SHIFT_CLOSING_DRAFT", branchCode: props.branch, workDate: props.workDate, shiftType: "MORNING", draft });
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [cash, qr, lineman, grab, webapp, gross, orders, posUrls, menuUrls, linemanUrls, grabUrls, props.branch, props.workDate]);
 
   async function readFinancial(file: File) {
     setBusy("pos");
@@ -349,6 +374,7 @@ export function MorningHandoverPanel(props: { branch: string; workDate: string; 
   return (
     <section className="space-y-3 rounded-xl border border-amber-200 bg-white p-4">
       <h2 className="font-semibold">2. ส่งเงินกะแรก (สรุปส่งมอบให้กะบ่าย)</h2>
+      {draftBadge ? <p className="text-sm font-medium text-emerald-800">☁️ โหลดข้อมูลร่างและรูปสลิปที่บันทึกอัตโนมัติไว้แล้ว</p> : null}
       <p className="text-sm text-slate-600">กะเช้าส่งยอดเงินในเก๊ะให้กะบ่ายตรวจ กะเช้าไม่ไปฝาก 7-Eleven ตอนเที่ยง</p>
       <div className="grid gap-3 md:grid-cols-4">
         <SlipCapture label="📸 ถ่ายสลิป POS รายงานยอดขายตามช่วงเวลา" action={`🤖 ดึงยอดขาย 5 ช่องทาง & ส่วนลดด้วย AI${busy === "pos" ? " ..." : ""}`} onFile={(file) => { void readFinancial(file); }} />
@@ -434,6 +460,22 @@ export function AfternoonHandoverPanel(props: { branch: string; workDate: string
   const [deposit, setDeposit] = useState<"SEVEN_ELEVEN_EOD" | "BANK_DIRECT" | "SAFE_OVERNIGHT">("SEVEN_ELEVEN_EOD");
   const [sevenUrl, setSevenUrl] = useState("");
   const [busy, setBusy] = useState("");
+  const [draftBadge, setDraftBadge] = useState(false);
+  const draftArmed = useRef(false);
+  useEffect(() => {
+    if (draftArmed.current || !live.snapshot) return;
+    draftArmed.current = true;
+    if (readSectionDraft(props.branch, props.workDate, "SHIFT_AFTERNOON").json) setDraftBadge(true);
+  }, [live.snapshot, props.branch, props.workDate]);
+  useEffect(() => {
+    if (!draftArmed.current) return;
+    const draft = { cash, qr, lineman, grab, webapp, gross, orders, posUrls, menuUrls, linemanUrls, grabUrls, sevenUrl };
+    const timer = window.setTimeout(() => {
+      writeSectionDraft(props.branch, props.workDate, "SHIFT_AFTERNOON", { json: JSON.stringify(draft) });
+      void postFnbInstantSave({ action: "SHIFT_CLOSING_DRAFT", branchCode: props.branch, workDate: props.workDate, shiftType: "AFTERNOON", draft });
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [cash, qr, lineman, grab, webapp, gross, orders, posUrls, menuUrls, linemanUrls, grabUrls, sevenUrl, props.branch, props.workDate]);
   const drawer = countedOf(notes) || counted;
   const morningSalesCash = morning?.cashCountedAmount ?? 0;
   const afternoonSalesCash = Math.max(0, drawer - float - morningSalesCash);
@@ -593,6 +635,7 @@ export function AfternoonHandoverPanel(props: { branch: string; workDate: string
       </article>
       <article className="space-y-3 rounded-xl border bg-white p-4">
         <h2 className="font-semibold">ปิดยอดกะบ่าย และรวบฝาก 7-Eleven ครั้งเดียวหลังปิดร้าน</h2>
+        {draftBadge ? <p className="text-sm font-medium text-emerald-800">☁️ โหลดข้อมูลร่างและรูปสลิปที่บันทึกอัตโนมัติไว้แล้ว</p> : null}
         <div className="flex flex-wrap gap-2">
           <button type="button" className={`rounded-full px-3 py-1 text-sm ${mode === "SHIFT_ONLY" ? "bg-slate-900 text-white" : "bg-slate-100"}`} onClick={() => setMode("SHIFT_ONLY")}>สลิปเฉพาะช่วงบ่าย (ตั้งเวลาเริ่มหลังกะเช้า)</button>
           <button type="button" className={`rounded-full px-3 py-1 text-sm ${mode === "CUMULATIVE_FULL_DAY" ? "bg-slate-900 text-white" : "bg-slate-100"}`} onClick={() => setMode("CUMULATIVE_FULL_DAY")}>สลิปสะสมรวมทั้งวัน (00:00–ปิดร้าน) — หักยอดกะเช้าออกให้อัตโนมัติ!</button>

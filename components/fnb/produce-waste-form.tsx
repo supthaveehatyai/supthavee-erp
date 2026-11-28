@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { LiveWatermarkCamera } from "@/components/fnb/live-watermark-camera";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import { previewProduceWasteAction, saveProduceWasteSummaryAction } from "@/lib/actions/fnb-produce";
-import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
 import { listWipBoardAction } from "@/lib/actions/fnb-wip";
 import { produceProfile } from "@/lib/utils/fnb-format";
 import type { FnbBrandCode } from "@/types/fnb";
@@ -57,18 +56,7 @@ export function ProduceWasteForm(props: {
           </div>
         );
       })}
-      <LiveWatermarkCamera branchCode={props.branch} stage="CLOSING" staffName={props.staffName} taskTitle="เททิ้งเนื้อผลไม้หั่น" liveCameraOnly onCapture={(file, live) => {
-        const body = new FormData();
-        body.set("file", file);
-        body.set("live_capture", String(live));
-        body.set("branch_code", props.branch);
-        body.set("actor_source", props.actorSource);
-        body.set("brand_lock", props.brand);
-        void uploadFnbEvidenceAction(body).then((saved) => {
-          if (saved.error || !saved.data.url) toast.error(saved.error || "อัปโหลดรูปไม่สำเร็จ");
-          else setPhoto(saved.data.url);
-        });
-      }} />
+      <LiveWatermarkCamera branchCode={props.branch} stage="CLOSING" staffName={props.staffName} taskTitle="เททิ้งเนื้อผลไม้หั่น" liveCameraOnly onUploaded={setPhoto} />
       <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white disabled:opacity-60" disabled={busy} onClick={() => {
         setBusy(true);
         void saveProduceWasteSummaryAction({

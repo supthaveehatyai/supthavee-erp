@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { LiveWatermarkCamera } from "@/components/fnb/live-watermark-camera";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
-import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
 import { listVendorClaimsAction, recordItemWriteOffAction, settleVendorClaimAction } from "@/lib/actions/fnb-stage";
 import { listBranchZonesAction } from "@/lib/actions/fnb-store-day";
 import { listWipBoardAction } from "@/lib/actions/fnb-wip";
@@ -111,18 +110,7 @@ function WriteOffForm(props: {
       {reason === "MOLD_SPOILED" ? <label className="text-sm">วันหมดอายุที่พิมพ์บนซอง<input className={field} type="date" value={expiry} onChange={(event) => setExpiry(event.target.value)} /></label> : null}
       {reason === "TRANSIT_BROKEN" || reason === "MOLD_SPOILED" ? <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={claim} onChange={(event) => setClaim(event.target.checked)} />📌 ตั้งเรื่องเคลมซัพพลายเออร์/ขนส่ง (รอรับของชดเชยหรือใบลดหนี้)</label> : null}
       <input className={field} value={notes} placeholder="หมายเหตุ" onChange={(event) => setNotes(event.target.value)} />
-      <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle="หลักฐานของเสีย" liveCameraOnly onCapture={(file, live) => {
-        const body = new FormData();
-        body.set("file", file);
-        body.set("live_capture", String(live));
-        body.set("branch_code", props.branch);
-        body.set("actor_source", props.actorSource);
-        body.set("brand_lock", props.brand);
-        void uploadFnbEvidenceAction(body).then((saved) => {
-          if (saved.error || !saved.data.url) toast.error(saved.error || "อัปโหลดรูปไม่สำเร็จ");
-          else setPhoto(saved.data.url);
-        });
-      }} />
+      <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle="หลักฐานของเสีย" liveCameraOnly onUploaded={setPhoto} />
       <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white">บันทึกตัดของเสีย</button>
     </form>
   );

@@ -3,25 +3,12 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { LiveWatermarkCamera } from "@/components/fnb/live-watermark-camera";
-import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
-import { saveCleaningSpotLogAction } from "@/lib/actions/fnb-store-day";
 import { confirmStageSectionAction } from "@/lib/actions/fnb-stage";
+import { postFnbInstantSave } from "@/lib/fnb/instant-client";
 import { hhmm } from "@/components/fnb/section-confirm-card";
 import { crewAssist, useLiveBranch } from "@/components/fnb/shift-crew-bar";
 import { bangkokWeekday } from "@/lib/fnb/stage-progress";
 import type { FnbCleaningSpot, FnbLiveCleaningLog, FnbStageConfirmation } from "@/types/fnb";
-
-async function uploadShot(file: File, live: boolean, branch: string, actorSource: string, brand: string): Promise<string> {
-  const body = new FormData();
-  body.set("file", file);
-  body.set("live_capture", String(live));
-  body.set("branch_code", branch);
-  body.set("actor_source", actorSource);
-  body.set("brand_lock", brand);
-  const saved = await uploadFnbEvidenceAction(body);
-  if (saved.error || !saved.data.url) throw new Error(saved.error || "อัปโหลดรูปไม่สำเร็จ");
-  return saved.data.url;
-}
 
 function dueToday(spot: FnbCleaningSpot, workDate: string): boolean {
   if (spot.scheduleType !== "WEEKLY") return true;
@@ -29,7 +16,7 @@ function dueToday(spot: FnbCleaningSpot, workDate: string): boolean {
   return spot.weekdays.includes(bangkokWeekday(workDate));
 }
 
-export function CleaningSpots(props: {
+export function AtomicCleaningChecklist(props: {
   title: string;
   stage: "OPENING" | "CLOSING";
   spots: FnbCleaningSpot[];
@@ -48,6 +35,7 @@ export function CleaningSpots(props: {
   const [local, setLocal] = useState<Record<string, FnbLiveCleaningLog>>({});
   const [missingId, setMissingId] = useState("");
   const [savingId, setSavingId] = useState("");
+  const [spotState, setSpotState] = useState<Record<string, "UPLOADING" | "SAVED">>({});
   const [pending, setPending] = useState(false);
   const [editing, setEditing] = useState(false);
   const [reason, setReason] = useState("");
@@ -75,18 +63,19 @@ export function CleaningSpots(props: {
   async function persist(spot: FnbCleaningSpot, flag: "PASSED" | "ISSUE_REPORTED", photoUrl: string) {
     if (!photoUrl) { setSavingId(""); return; }
     setSavingId(spot.id);
-    const saved = await saveCleaningSpotLogAction({
+    setSpotState((current) => ({ ...current, [spot.id]: "UPLOADING" }));
+    const saved = await postFnbInstantSave({
+      action: "CLEANING_SPOT",
       branchCode: props.branch,
       workDate: props.workDate,
       stageCode: props.stage,
       spotId: spot.id,
       statusFlag: flag,
       photoUrl,
-      actorSource: props.actorSource,
-      brandLock: props.brand,
     });
     setSavingId("");
-    if (saved.error || !saved.data.ok) { toast.error(saved.error || "บันทึกจุดนี้ไม่สำเร็จ"); return; }
+    if (!saved.ok) { setSpotState((current) => { const next = { ...current }; delete next[spot.id]; return next; }); toast.error(saved.error || "บันทึกจุดนี้ไม่สำเร็จ"); return; }
+    setSpotState((current) => ({ ...current, [spot.id]: "SAVED" }));
     setLocal((current) => ({
       ...current,
       [spot.id]: {
@@ -96,14 +85,16 @@ export function CleaningSpots(props: {
         spotNameTh: spot.spotNameTh,
         statusFlag: flag,
         photoUrls: [photoUrl],
-        checkedByName: saved.data.checkedByName || props.staffName,
-        checkedAt: saved.data.checkedAt,
+        checkedByName: saved.staffName || props.staffName,
+        checkedAt: saved.checkedAt || new Date().toISOString(),
       },
     }));
     setMissingId("");
     toast.success(`บันทึก ${spot.spotNameTh} แล้ว`);
     void live.refresh();
     props.onDone();
+    const complete = due.every((item) => item.id === spot.id ? Boolean(photoUrl) : Boolean(photoOf(item)));
+    if (complete && !savedSection) void confirmSection();
   }
   async function confirmSection() {
     if (pending) return;
@@ -165,19 +156,16 @@ export function CleaningSpots(props: {
             const photo = photoOf(spot);
             const flag = flagOf(spot);
             return (
-              <div key={spot.id} id={`clean-${spot.id}`} className={`rounded-lg p-3 text-sm ${missingId === spot.id ? "bg-red-50 ring-2 ring-red-600" : saved || photo ? "bg-emerald-50" : "bg-slate-50"}`}>
+              <div key={spot.id} id={`clean-${spot.id}`} className={`rounded-lg border p-3 text-sm ${missingId === spot.id ? "border-red-600 bg-red-50 ring-2 ring-red-600" : saved || photo ? "border-emerald-500 bg-emerald-50" : "border-transparent bg-slate-50"}`}>
                 <p className="font-medium">{spot.spotNameTh}</p>
                 <div className="mt-1 flex flex-wrap gap-2">
-                  <button type="button" className={`rounded-full px-2 py-1 ${flag === "PASSED" ? "bg-emerald-700 text-white" : "bg-white"}`} onClick={() => { setStatus((current) => ({ ...current, [spot.id]: "PASSED" })); if (photo) void persist(spot, "PASSED", photo); }}>✅ สะอาดพร้อมเปิด</button>
+                  <button type="button" className={`rounded-full px-2 py-1 ${flag === "PASSED" ? "bg-emerald-700 text-white" : "bg-white"}`} onClick={() => { setStatus((current) => ({ ...current, [spot.id]: "PASSED" })); if (photo) void persist(spot, "PASSED", photo); }}>{props.stage === "CLOSING" ? "✓ ล้าง/ทำความสะอาดเรียบร้อย" : "✅ สะอาดพร้อมเปิด"}</button>
                   <button type="button" className={`rounded-full px-2 py-1 ${flag === "ISSUE_REPORTED" ? "bg-amber-600 text-white" : "bg-white"}`} onClick={() => { setStatus((current) => ({ ...current, [spot.id]: "ISSUE_REPORTED" })); if (photo) void persist(spot, "ISSUE_REPORTED", photo); }}>⚠️ พบจุดชำรุด/แจ้งซ่อม</button>
                 </div>
                 {photo ? <a href={photo} target="_blank" rel="noreferrer"><img src={photo} alt="" className="mt-2 h-16 w-16 rounded object-cover" /></a> : null}
+                {spotState[spot.id] === "UPLOADING" ? <p className="mt-1 text-xs">⏳ กำลังบันทึกรูปจุดนี้...</p> : null}
                 {saved ? <p className="mt-1 text-xs text-emerald-800">☁️ บันทึกจุดนี้เข้าระบบแล้ว · โดย {saved.checkedByName} ({hhmm(saved.checkedAt)})</p> : null}
-                <LiveWatermarkCamera branchCode={props.branch} stage={props.stage} staffName={props.staffName} taskTitle={spot.spotNameTh} liveCameraOnly onCapture={(file, liveShot) => {
-                  if (savingId) return;
-                  setSavingId(spot.id);
-                  void uploadShot(file, liveShot, props.branch, props.actorSource, props.brand).then((url) => persist(spot, flag, url)).catch((error: Error) => { setSavingId(""); toast.error(error.message); });
-                }} />
+                <LiveWatermarkCamera branchCode={props.branch} stage={props.stage} staffName={props.staffName} taskTitle={spot.spotNameTh} liveCameraOnly onUploaded={(url) => { void persist(spot, flag, url); }} />
               </div>
             );
           })}
@@ -186,7 +174,8 @@ export function CleaningSpots(props: {
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
               <div className="h-2 rounded-full bg-emerald-600" style={{ width: `${due.length ? Math.round((doneCount / due.length) * 100) : 0}%` }} />
             </div>
-            <button type="button" className="mt-3 rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" disabled={pending || savingId !== ""} onClick={() => void confirmSection()}>{pending ? "กำลังบันทึก..." : buttonLabel}</button>
+            {due.length > 0 && doneCount === due.length ? <p className="mt-2 rounded-lg bg-emerald-100 px-3 py-2 text-sm font-semibold text-emerald-900">🎉 บันทึกรูปความสะอาดครบ {due.length}/{due.length} จุด และยืนยันหมวดให้อัตโนมัติเรียบร้อยแล้ว!</p> : null}
+            <button type="button" className="mt-3 rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" disabled={pending} onClick={() => void confirmSection()}>{pending ? "กำลังบันทึก..." : buttonLabel}</button>
           </div>
         </>
       )}
@@ -204,6 +193,8 @@ export function CleaningSpots(props: {
     </article>
   );
 }
+
+export const CleaningSpots = AtomicCleaningChecklist;
 
 function LockedCleaning(props: { row: FnbStageConfirmation; spots: FnbCleaningSpot[]; logs: FnbLiveCleaningLog[] }) {
   const raw = Array.isArray(props.row.payload.spots) ? props.row.payload.spots : [];

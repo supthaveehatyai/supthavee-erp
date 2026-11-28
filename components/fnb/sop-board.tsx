@@ -3,7 +3,8 @@
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { LiveWatermarkCamera } from "@/components/fnb/live-watermark-camera";
-import { getSopBoardAction, lockSopStageAction, requestSopRetakeAction, submitSopTaskAction, uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
+import { writeSectionDraft } from "@/lib/fnb/instant-client";
+import { getSopBoardAction, lockSopStageAction, requestSopRetakeAction, submitSopTaskAction } from "@/lib/actions/fnb-sop";
 import type { FnbBrandCode, FnbSopBoard, FnbSopStageInstance } from "@/types/fnb";
 
 export function SopBoard({
@@ -122,32 +123,10 @@ function TaskCard(props: {
   onError: (note: string) => void;
 }) {
   const [urls, setUrls] = useState<string[]>([]);
-  const [hashes, setHashes] = useState<string[]>([]);
   const [live, setLive] = useState(false);
   const [busy, setBusy] = useState(false);
   const { task } = props;
   const done = Boolean(task.submission) && task.submission?.manager_review_status !== "RETAKE_REQUIRED";
-
-  async function capture(file: File, liveCapture: boolean) {
-    const body = new FormData();
-    body.set("actor_source", props.actorSource);
-    body.set("brand_lock", props.brandLock ?? "");
-    body.set("branch_code", props.branch);
-    body.set("work_date", props.workDate);
-    body.set("stage_instance", props.stage);
-    body.set("live_capture", liveCapture ? "true" : "false");
-    body.set("file", file);
-    setBusy(true);
-    const uploaded = await uploadFnbEvidenceAction(body);
-    setBusy(false);
-    if (uploaded.error || !uploaded.data.url) {
-      props.onError(uploaded.error || "อัปโหลดรูปไม่สำเร็จ");
-      return;
-    }
-    setUrls((current) => [...current, uploaded.data.url]);
-    setHashes((current) => [...current, uploaded.data.hash]);
-    setLive(liveCapture);
-  }
 
   return (
     <article className="space-y-2 rounded-xl border bg-white p-4">
@@ -188,7 +167,7 @@ function TaskCard(props: {
           body.set("stage_instance", props.stage);
           body.set("template_id", task.id);
           body.set("photo_urls", urls.join("|"));
-          body.set("photo_hashes", hashes.join("|"));
+          body.set("photo_hashes", "");
           body.set("live_capture", live ? "true" : "false");
           setBusy(true);
           void submitSopTaskAction(body).then((saved) => {
@@ -200,7 +179,7 @@ function TaskCard(props: {
           {task.input_type !== "PHOTO_ONLY" && task.input_type !== "PASS_FAIL_PHOTO" ? <input className="h-10 w-full rounded-md border px-3 text-sm" name="numeric_value" type="number" step="0.01" placeholder="ตัวเลขที่ต้องส่ง" /> : null}
           {task.input_type === "PASS_FAIL_PHOTO" ? <select className="h-10 w-full rounded-md border px-3 text-sm" name="status_value" defaultValue="DONE"><option value="DONE">ผ่าน</option><option value="ISSUE_FOUND">ไม่ผ่าน</option></select> : null}
           <input className="h-10 w-full rounded-md border px-3 text-sm" name="note_text" placeholder="หมายเหตุ" />
-          <LiveWatermarkCamera branchCode={props.branch} stage={props.stage} staffName={props.actorName} taskTitle={task.title_th} liveCameraOnly={task.live_camera_only} onCapture={(file, liveCapture) => void capture(file, liveCapture)} />
+          <LiveWatermarkCamera branchCode={props.branch} stage={props.stage} staffName={props.actorName} taskTitle={task.title_th} liveCameraOnly={task.live_camera_only} onUploaded={(url) => { setUrls((current) => [...current, url]); setLive(true); writeSectionDraft(props.branch, props.workDate, task.id, { photo: url }); }} />
           <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy}>{busy ? "กำลังบันทึก..." : "📸 ถ่ายรูป & ส่งหัวข้อนี้"}</button>
         </form>
       )}

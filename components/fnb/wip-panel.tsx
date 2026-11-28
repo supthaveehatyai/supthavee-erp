@@ -8,7 +8,6 @@ import { closeWipBatchAction, issueWipBatchAction, listWipBoardAction } from "@/
 import { produceProfile } from "@/lib/utils/fnb-format";
 import { ProduceSliceFields } from "@/components/fnb/produce-slice-form";
 import { barItemLabel, barOpenItems, itemMatches, prepBaseLabel } from "@/lib/fnb/item-search";
-import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import type { FnbBrandCode, FnbWipBatchRow, FnbWipBoard } from "@/types/fnb";
 
@@ -53,25 +52,6 @@ export function WipPanel({
 
   useEffect(() => { reload(); }, [branch, workDate, brand, actorSource]);
 
-  async function capture(file: File, live: boolean, target: (url: string) => void) {
-    const body = new FormData();
-    body.set("actor_source", actorSource);
-    body.set("brand_lock", brand);
-    body.set("branch_code", branch);
-    body.set("work_date", workDate);
-    body.set("stage_instance", "WIP");
-    body.set("live_capture", live ? "true" : "false");
-    body.set("file", file);
-    setBusy(true);
-    const uploaded = await uploadFnbEvidenceAction(body);
-    setBusy(false);
-    if (uploaded.error || !uploaded.data.url) {
-      toast.error(uploaded.error || "อัปโหลดรูปไม่สำเร็จ");
-      return;
-    }
-    target(uploaded.data.url);
-  }
-
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-bold">ต้มเบสเพิ่มและเบิกเปิดของขึ้นบาร์</h2>
@@ -83,16 +63,16 @@ export function WipPanel({
         {(board?.brews ?? []).length === 0 ? <p className="text-sm text-slate-500">ยังไม่มีรอบต้มของวันนี้</p> : board?.brews.map((row, index) => (
           <p key={row.id} className="text-sm">รอบที่ {index + 1} ({clock(row.opened_at)} น.): {row.item_label} {row.actual_usable_qty.toFixed(0)} {row.recipe_uom} · {row.brew_portion_mode === "HALF_LIQUID_FULL_PACK" ? "ครึ่งหม้อ" : "เต็มหม้อ"} · {row.opened_by_name}</p>
         ))}
-        <BrewForm brand={brand} actorSource={actorSource} branch={branch} workDate={workDate} actorName={actorName} enableShift3={enableShift3} bases={board?.bases ?? []} busy={busy} capture={capture} onDone={(label) => { setSticker(label); toast.success(`🏷️ เขียนป้ายติดภาชนะ: ${label}`); reload(); }} onError={(note) => { toast.error(note); setMessage(note); }} />
+        <BrewForm brand={brand} actorSource={actorSource} branch={branch} workDate={workDate} actorName={actorName} enableShift3={enableShift3} bases={board?.bases ?? []} busy={busy} onDone={(label) => { setSticker(label); toast.success(`🏷️ เขียนป้ายติดภาชนะ: ${label}`); reload(); }} onError={(note) => { toast.error(note); setMessage(note); }} />
       </section>
       <section className="space-y-2 rounded-xl border bg-white p-4">
         <h3 className="font-semibold">เบิกแกะกล่อง กระป๋อง หรือหั่นเลมอนขึ้นบาร์</h3>
-        <OpenItemForm brand={brand} actorSource={actorSource} branch={branch} workDate={workDate} actorName={actorName} enableShift3={enableShift3} items={board?.items ?? []} busy={busy} capture={capture} onDone={(label) => { setSticker(label); toast.success(`🏷️ ป้ายวันหมดอายุหลังเปิด: ${label}`); reload(); }} onError={(note) => { toast.error(note); setMessage(note); }} />
+        <OpenItemForm brand={brand} actorSource={actorSource} branch={branch} workDate={workDate} actorName={actorName} enableShift3={enableShift3} items={board?.items ?? []} busy={busy} onDone={(label) => { setSticker(label); toast.success(`🏷️ ป้ายวันหมดอายุหลังเปิด: ${label}`); reload(); }} onError={(note) => { toast.error(note); setMessage(note); }} />
       </section>
       <section className="space-y-3 rounded-xl border bg-white p-4">
         <h3 className="font-semibold">ขวดและกระป๋องที่เปิดค้างหน้าบาร์</h3>
         {(board?.containers ?? []).slice().sort((left, right) => left.expires_at.localeCompare(right.expires_at)).map((row) => (
-          <ContainerCard key={row.id} row={row} brand={brand} actorSource={actorSource} branch={branch} workDate={workDate} actorName={actorName} busy={busy} start={start} capture={capture} onDone={(note) => { toast.success(note); setMessage(note); reload(); }} onError={(note) => { toast.error(note); setMessage(note); }} />
+          <ContainerCard key={row.id} row={row} brand={brand} actorSource={actorSource} branch={branch} workDate={workDate} actorName={actorName} busy={busy} start={start} onDone={(note) => { toast.success(note); setMessage(note); reload(); }} onError={(note) => { toast.error(note); setMessage(note); }} />
         ))}
         {(board?.containers ?? []).length === 0 ? <p className="text-sm text-slate-500">ไม่มีภาชนะหลายวันที่ยังเปิดอยู่</p> : null}
       </section>
@@ -109,7 +89,6 @@ function BrewForm(props: {
   enableShift3: boolean;
   bases: FnbWipBoard["bases"];
   busy: boolean;
-  capture: (file: File, live: boolean, target: (url: string) => void) => Promise<void>;
   onDone: (label: string) => void;
   onError: (note: string) => void;
 }) {
@@ -143,7 +122,7 @@ function BrewForm(props: {
       <label className="flex gap-2 text-sm"><input type="radio" checked={portion === "FULL_RECIPE"} onChange={() => setPortion("FULL_RECIPE")} />ต้มเต็มสูตรมาตรฐาน (1 ถุงเต็ม ได้น้ำเบสเต็มหม้อ)</label>
       <label className="flex gap-2 text-sm"><input type="radio" checked={portion === "HALF_LIQUID_FULL_PACK"} onChange={() => setPortion("HALF_LIQUID_FULL_PACK")} />ต้มครึ่งสูตรช่วงเย็นใกล้ปิดร้าน (ได้น้ำเบสครึ่งหม้อ — ระบบตัดสต็อกเต็ม 1 ถุงตามมาตรฐานแฟรนไชส์)</label>
       {portion === "HALF_LIQUID_FULL_PACK" ? <p className="text-sm text-amber-900">เหมาะสำหรับช่วงเย็น เช่น 16:00 น. ก่อนร้านปิด 20:00 น. เพื่อลดน้ำชาเหลือทิ้ง โดยระบบยังคงตัดสต็อกใบชาเต็ม 1 ถุงตามเกณฑ์แฟรนไชส์</p> : null}
-      <LiveWatermarkCamera branchCode={props.branch} stage="WIP" staffName={props.actorName} taskTitle="ต้มเบสเพิ่ม" liveCameraOnly onCapture={(file, live) => void props.capture(file, live, (url) => setUrls((current) => [...current, url]))} />
+      <LiveWatermarkCamera branchCode={props.branch} stage="WIP" staffName={props.actorName} taskTitle="ต้มเบสเพิ่ม" liveCameraOnly onUploaded={(url) => setUrls((current) => [...current, url])} />
       <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={props.busy}>{props.busy ? "กำลังบันทึก..." : "บันทึกต้มเบสเพิ่ม"}</button>
     </form>
   );
@@ -158,7 +137,6 @@ function OpenItemForm(props: {
   enableShift3: boolean;
   items: FnbWipBoard["items"];
   busy: boolean;
-  capture: (file: File, live: boolean, target: (url: string) => void) => Promise<void>;
   onDone: (label: string) => void;
   onError: (note: string) => void;
 }) {
@@ -219,7 +197,7 @@ function OpenItemForm(props: {
         </label>
         <div className="space-y-2 md:col-span-3">
           <p className="text-sm">ถ่ายรูปสด</p>
-          <LiveWatermarkCamera branchCode={props.branch} stage="WIP" staffName={props.actorName} taskTitle="เบิกเปิดของขึ้นบาร์" liveCameraOnly onCapture={(file, live) => void props.capture(file, live, (url) => setUrls((current) => [...current, url]))} />
+          <LiveWatermarkCamera branchCode={props.branch} stage="WIP" staffName={props.actorName} taskTitle="เบิกเปิดของขึ้นบาร์" liveCameraOnly onUploaded={(url) => setUrls((current) => [...current, url])} />
           <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={props.busy}>{props.busy ? "กำลังบันทึก..." : profile.enabled ? `💾 บันทึกหั่น${selected?.name_th ?? "ผลไม้สด"}` : "เบิกขึ้นบาร์"}</button>
         </div>
       </div>
@@ -236,7 +214,6 @@ function ContainerCard(props: {
   actorName: string;
   busy: boolean;
   start: (task: () => void) => void;
-  capture: (file: File, live: boolean, target: (url: string) => void) => Promise<void>;
   onDone: (note: string) => void;
   onError: (note: string) => void;
 }) {
@@ -275,7 +252,7 @@ function ContainerCard(props: {
           close("EXPIRED_DUMPED", Number(new FormData(event.currentTarget).get("waste_qty") ?? 0));
         }}>
           <input className="h-10 w-full rounded-md border px-3" name="waste_qty" type="number" min="0" step="0.01" placeholder={`ของเหลือ ${props.row.recipe_uom}`} required />
-          <LiveWatermarkCamera branchCode={props.branch} stage="WIP" staffName={props.actorName} taskTitle={props.row.item_label} liveCameraOnly onCapture={(file, live) => void props.capture(file, live, (url) => setUrls((current) => [...current, url]))} />
+          <LiveWatermarkCamera branchCode={props.branch} stage="WIP" staffName={props.actorName} taskTitle={props.row.item_label} liveCameraOnly onUploaded={(url) => setUrls((current) => [...current, url])} />
           <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-white" disabled={props.busy}>{props.busy ? "กำลังบันทึก..." : "บันทึกของเสีย"}</button>
         </form>
       ) : null}

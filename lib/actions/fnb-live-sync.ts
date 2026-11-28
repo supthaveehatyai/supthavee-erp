@@ -85,14 +85,14 @@ export async function getLiveBranchShiftSnapshotAction(input: { branchCode: stri
       db.from("shift_crew_rosters").select("shift_slot,max_crew_seats,crew_members_json").eq("branch_code", input.branchCode).eq("work_date", workDate).limit(4),
       db.from("daily_stage_section_confirmations").select("id,section_key,section_title_th,stage_code,status_flag,numeric_amount,expected_amount,variance_reason,photo_urls,confirmed_by_name,confirmed_at,last_edit_reason,payload_json").eq("branch_code", input.branchCode).eq("work_date", workDate).limit(400),
       db.from("prep_bases").select("base_code,base_name_th,yield_qty_ml,brand_code,sort_order,is_active").eq("brand_code", brand).eq("is_active", true).order("sort_order", { ascending: true }).limit(40),
-      db.from("bar_wip_batches").select("id,batch_kind,prep_base_code,item_id,packs_deducted,opened_by_name,batch_status,open_photo_urls,work_date").eq("branch_code", input.branchCode).eq("work_date", workDate).limit(300),
-      db.from("bar_wip_batches").select("id,batch_kind,prep_base_code,item_id,packs_deducted,opened_by_name,batch_status,open_photo_urls,work_date").eq("branch_code", input.branchCode).eq("batch_status", "ACTIVE").limit(200),
+      db.from("bar_wip_batches").select("id,batch_kind,prep_base_code,item_id,packs_deducted,opened_by_name,batch_status,open_photo_urls,work_date,is_voided_duplicate,voided_at").eq("branch_code", input.branchCode).eq("work_date", workDate).limit(300),
+      db.from("bar_wip_batches").select("id,batch_kind,prep_base_code,item_id,packs_deducted,opened_by_name,batch_status,open_photo_urls,work_date,is_voided_duplicate,voided_at").eq("branch_code", input.branchCode).eq("batch_status", "ACTIVE").limit(200),
       db.from("daily_equipment_calibrations").select("grinder_dose_g,espresso_time_sec,espresso_yield_g,syrup_random_target_g,syrup_measured_actual_g,syrup_adjusted_ok").eq("branch_code", input.branchCode).eq("work_date", workDate).maybeSingle(),
       db.from("zone_stock_counts").select("item_id,location_code,counted_qty,count_stage,staff_name").eq("branch_code", input.branchCode).eq("count_date", workDate).limit(500),
       db.from("display_chiller_lots").select("item_id,remaining_qty,display_expiry_date,placed_by_name,lot_status").eq("branch_code", input.branchCode).limit(200),
       db.from("shift_closings").select("shift_type,staff_name,net_sales_inc_vat,order_count,gross_sales,discount_total,cash_pos_amount,cash_counted_amount,qr_amount,lineman_gross_amount,grab_gross_amount,webapp_amount,drawer_total_cash_counted,cash_handover_to_next_shift,handover_status,handover_accepted_by_name,handover_accepted_at,handover_counted_drawer_cash,opening_float_amount,morning_cash_brought_forward,total_cash_for_eod_deposit,deposit_channel,seven_eleven_deposit_amount,seven_eleven_fee_thb,seven_eleven_slip_url,pos_slip_mode,kshop_app_amount,lineman_app_amount,grab_net_payout_amount").eq("branch_code", input.branchCode).eq("work_date", workDate).limit(6),
       db.from("shift_menu_sales").select("shift_type,menu_id,raw_menu_name,cup_size,qty_sold,sales_amount,cumulative_slip_qty,cumulative_slip_amount,pos_category_name,was_auto_created_menu").eq("branch_code", input.branchCode).eq("work_date", workDate).limit(800),
-      db.from("daily_waste_logs").select("staff_name,total_waste_cost_thb").eq("branch_code", input.branchCode).eq("work_date", workDate).limit(5),
+      db.from("daily_waste_logs").select("*").eq("branch_code", input.branchCode).eq("work_date", workDate).limit(40),
       db.from("item_write_offs").select("item_id,write_off_reason,qty_in_count_uom,reported_by_name,photo_urls").eq("branch_code", input.branchCode).eq("work_date", workDate).limit(200),
       db.from("daily_menu_sales_headers").select("submitted_by_name,reported_total_amount").eq("branch_code", input.branchCode).eq("work_date", workDate).limit(1),
       db.from("items").select("id,short_code,brand_scope").eq("short_code", "LEM").eq("is_active", true).limit(8),
@@ -113,7 +113,7 @@ export async function getLiveBranchShiftSnapshotAction(input: { branchCode: stri
       if (!id || seen.has(id)) return false;
       seen.add(id);
       return true;
-    }).map((row) => ({
+    }).filter((row) => row.is_voided_duplicate !== true && !text(row.voided_at) && !["VOID", "VOIDED"].includes(text(row.batch_status).toUpperCase())).map((row) => ({
       id: text(row.id),
       batchKind: text(row.batch_kind),
       prepBaseCode: text(row.prep_base_code),
@@ -245,7 +245,14 @@ export async function getLiveBranchShiftSnapshotAction(input: { branchCode: stri
         categoryName: text(row.pos_category_name),
         wasAutoCreated: row.was_auto_created_menu === true,
       })),
-      waste: asRows(waste.data).map((row) => ({ staffName: text(row.staff_name), totalWasteCostThb: num(row.total_waste_cost_thb) })),
+      waste: asRows(waste.data).map((row) => ({
+        staffName: text(row.staff_name),
+        totalWasteCostThb: num(row.total_waste_cost_thb),
+        itemCode: text(row.item_code),
+        qty: num(row.qty),
+        uom: text(row.uom),
+        photoUrl: text(row.photo_url),
+      })),
       writeOffs: asRows(writeOffs.data).map((row) => ({
         itemId: text(row.item_id),
         reason: text(row.write_off_reason),

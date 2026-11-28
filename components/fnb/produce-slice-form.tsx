@@ -42,7 +42,6 @@ export function ProduceSliceForm(props: {
   brand: string;
   staffName: string;
   shiftInstance: string;
-  upload: (file: File, live: boolean) => Promise<string>;
   onSaved: () => void;
 }) {
   const fruits = props.items.filter((item) => item.is_catch_weight_produce === true);
@@ -62,7 +61,7 @@ export function ProduceSliceForm(props: {
         </select>
       </label>
       <ProduceSliceFields label={profile.label} usablePerPiece={profile.usablePerPiece} pieces={pieces} grams={grams} onPieces={setPieces} onGrams={setGrams} />
-      <LiveWatermarkCamera branchCode={props.branch} stage="WIP" staffName={props.staffName} taskTitle={`หั่น${item.name_th}`} liveCameraOnly onCapture={(file, live) => void props.upload(file, live).then(setPhoto).catch((reason: Error) => toast.error(reason.message))} />
+      <LiveWatermarkCamera branchCode={props.branch} stage="WIP" staffName={props.staffName} taskTitle={`หั่น${item.name_th}`} liveCameraOnly onUploaded={setPhoto} />
       <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white disabled:opacity-60" disabled={busy} onClick={() => {
         setBusy(true);
         void issueCatchWeightProduceSliceAction({

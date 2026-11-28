@@ -333,9 +333,12 @@ export async function submitBlindGoodsReceiptAction(formData: FormData): Promise
       line_vat_mode: line.line_vat_mode,
     }));
     const safeLines = reveal ? lines : lines.map((line) => ({ ...line, unit_price: 0 }));
-    const photos = await Promise.all(
-      formData.getAll("photos").filter((entry): entry is File => entry instanceof File && entry.size > 0).map((file) => storeFile(branch, "gr", file)),
-    );
+    const photos = [
+      ...await Promise.all(
+        formData.getAll("photos").filter((entry): entry is File => entry instanceof File && entry.size > 0).map((file) => storeFile(branch, "gr", file)),
+      ),
+      ...text(formData.get("photo_urls")).split("|").filter((url) => url.startsWith("http")),
+    ];
     const saved = await callFnbRpc("save_fnb_goods_receipt_transaction", {
       p_receiving_branch_code: branch,
       p_tax_invoice_branch_code: text(formData.get("tax_invoice_branch_code")) || text(branchData.vat_branch_code) || null,
