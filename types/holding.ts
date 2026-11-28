@@ -314,6 +314,20 @@ export type LiffRegistrationRow = {
   created_at: string;
 };
 
+export type HoldingBackupLogRow = {
+  id: string;
+  backupScope: string;
+  brandCode: string;
+  periodYear: number | null;
+  periodMonth: number | null;
+  fileName: string;
+  includedPhotos: boolean;
+  rowCounts: Record<string, number>;
+  triggeredByName: string;
+  notes: string;
+  createdAt: string;
+};
+
 export type HoldingActionResult<T> = {
   data: T;
   error: string | null;

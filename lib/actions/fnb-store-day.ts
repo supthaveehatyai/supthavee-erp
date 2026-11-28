@@ -1,6 +1,7 @@
 "use server";
 
 import { resolveFnbActor } from "@/lib/fnb/actor";
+import { fnbMonthLockMessage } from "@/lib/fnb/period-lock";
 import { isBackroomDue } from "@/lib/fnb/item-search";
 import { bangkokHour } from "@/lib/fnb/stage-progress";
 import { callFnbRpc } from "@/lib/fnb/rpc";
@@ -329,6 +330,8 @@ export async function saveZoneCountsAction(input: {
   try {
     const actor = await actorName(input.branchCode, input.actorSource, input.brandLock);
     if (!actor.ok) return result({ ok: false }, actor.error);
+    const locked = await fnbMonthLockMessage(input.branchCode, input.workDate, input.brandLock);
+    if (locked) return result({ ok: false }, locked);
     const db = schemaAdmin().schema("fnb");
     for (const line of input.lines) {
       const expected = line.openingQty + line.replenishedQty - line.posSoldQty;
@@ -364,6 +367,8 @@ export async function saveEquipmentCalibrationAction(formData: FormData): Promis
     const branch = text(formData.get("branch_code"));
     const actor = await actorName(branch, text(formData.get("actor_source")), text(formData.get("brand_lock")));
     if (!actor.ok) return result({ ok: false, warning: null }, actor.error);
+    const locked = await fnbMonthLockMessage(branch, text(formData.get("work_date")) || todayBangkok(), text(formData.get("brand_lock")));
+    if (locked) return result({ ok: false, warning: null }, locked);
     const dose = Number(formData.get("grinder_dose_g"));
     const seconds = Number(formData.get("espresso_time_sec"));
     const yieldG = Number(formData.get("espresso_yield_g"));
@@ -418,6 +423,8 @@ export async function replenishZoneAction(input: {
   try {
     const actor = await actorName(input.branchCode, input.actorSource, input.brandLock);
     if (!actor.ok) return result({ ok: false, transferNo: null, expiryDate: null }, actor.error);
+    const locked = await fnbMonthLockMessage(input.branchCode, input.workDate, input.brandLock);
+    if (locked) return result({ ok: false, transferNo: null, expiryDate: null }, locked);
     const saved = await callFnbRpc("record_internal_zone_replenishment", {
       p_branch_code: input.branchCode,
       p_work_date: input.workDate || todayBangkok(),

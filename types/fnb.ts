@@ -729,6 +729,87 @@ export type FnbStoreDayBoard = {
   } | null;
 };
 
+export const FNB_QA_SECTIONS = [
+  { key: "grinder_and_syrup_calibration", label: "ข้อมูลจูนเครื่องบดกาแฟ & เครื่องจ่ายน้ำเชื่อมอัตโนมัติ", defaultOn: true },
+  { key: "espresso_shot_calibration", label: "ข้อมูลเช็คช็อตกาแฟ (โดส / เวลาสกัด / น้ำกาแฟ)", defaultOn: true },
+  { key: "open_sauce_bar_expiry", label: "บันทึกป้ายวันหมดอายุซอสและวัตถุดิบเปิดใช้หน้าบาร์", defaultOn: true },
+  { key: "backroom_fefo_expiry_lots", label: "ตารางล็อตวันหมดอายุวัตถุดิบคลังหลังร้าน (FEFO)", defaultOn: true },
+  { key: "cleaning_spot_photos", label: "รูปถ่ายความสะอาดตามจุดพร้อมเวลาและผู้ตรวจ", defaultOn: true },
+  { key: "prep_base_wip_logs", label: "บันทึกการต้มเบสเตรียมขาย WIP", defaultOn: false },
+  { key: "bakery_display_waves", label: "ล็อตวันหมดอายุตู้โชว์เบเกอรี่", defaultOn: false },
+  { key: "expired_destruction_photos", label: "บันทึกการทำลายสินค้าหมดอายุ", defaultOn: false },
+] as const;
+
+export type FnbQaSectionKey = (typeof FNB_QA_SECTIONS)[number]["key"];
+
+export type FnbAuditPhoto = {
+  url: string;
+  staff: string;
+  at: string;
+  caption: string;
+  confirmationId: string | null;
+  submissionId: string | null;
+};
+
+export type FnbInspectorMatrixRow = {
+  branchCode: string;
+  branchName: string;
+  openingDone: number;
+  openingFinishedAt: string | null;
+  staffNames: string[];
+  wipCount: number;
+  wipAt: string | null;
+  shift1Staff: string | null;
+  shift1At: string | null;
+  shift2Staff: string | null;
+  shift2At: string | null;
+  closingDone: boolean;
+  closingAt: string | null;
+};
+
+export type FnbAuditAnomaly = { branchCode: string; kind: string; detail: string };
+
+export type FnbInspectorDetail = {
+  sections: { key: string; title: string; staff: string; at: string; status: string; photos: string[] }[];
+  wip: { label: string; portion: string; staff: string; at: string; sticker: string; photos: string[] }[];
+  replenishments: { item: string; qty: number; at: string }[];
+  shifts: { shift: string; staff: string; variance: number }[];
+  photos: FnbAuditPhoto[];
+};
+
+export type FnbAuditPeriodRow = {
+  year: number;
+  month: number;
+  isLocked: boolean;
+  lockedByName: string;
+  lockedAt: string | null;
+  lastBackupAt: string | null;
+};
+
+export type FnbAuditProfile = {
+  profileCode: string;
+  profileName: string;
+  sections: Record<string, boolean>;
+  spotIds: string[];
+  extraTopics: string[];
+  headerTitle: string;
+  signoffTitles: string[];
+  spots: { id: string; branchCode: string; name: string }[];
+};
+
+export type FnbQaPack = {
+  headerTitle: string;
+  signoffTitles: string[];
+  extraTopics: string[];
+  equipment: { branchCode: string; workDate: string; doseG: number | null; shotSec: number | null; shotG: number | null; syrupTargetG: number | null; syrupActualG: number | null }[];
+  sauces: { branchCode: string; label: string; openedAt: string; expiresAt: string; sticker: string }[];
+  lots: { branchCode: string; item: string; qty: number; uom: string; expiry: string }[];
+  cleaning: { branchCode: string; spot: string; staff: string; at: string; status: string; photos: string[] }[];
+  wip: { branchCode: string; label: string; portion: string; staff: string; at: string; photos: string[] }[];
+  displayLots: { branchCode: string; item: string; qty: number; expiry: string }[];
+  destructions: { branchCode: string; item: string; reason: string; qty: number; destroyed: boolean; photos: string[] }[];
+};
+
 export type FnbPosImportPreview = {
   file_name: string;
   valid_order_count: number;

@@ -10,7 +10,9 @@ import { WipPanel } from "@/components/fnb/wip-panel";
 import { MenuSalesPanel } from "@/components/fnb/menu-sales-panel";
 import { SopBoard } from "@/components/fnb/sop-board";
 import { SectionPhotoDrawer } from "@/components/fnb/section-photo-drawer";
+import { ExecutiveInspector } from "@/components/fnb/executive-inspector";
 import { MiddayShortcuts, NightCloseCount, OpeningChecklist } from "@/components/fnb/store-day-board";
+import { getMonthLockAction } from "@/lib/actions/fnb-audit";
 import { saveShift3HandoverAction } from "@/lib/actions/fnb-sop";
 import {
   commitPosExcelAction,
@@ -76,6 +78,9 @@ export function OperationsWorkspace({
   const [day, setDay] = useState<FnbDayState | null>(null);
   const [approvals, setApprovals] = useState(initialApprovals);
   const [busy, setBusy] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"EXECUTIVE_INSPECTOR" | "STAFF_ASSIST">("EXECUTIVE_INSPECTOR");
+  const [monthLocked, setMonthLocked] = useState(false);
+  const [lockLabel, setLockLabel] = useState("");
   const [, start] = useTransition();
   const selected = branches.find((item) => item.branch_code === branch) ?? null;
   const brand = activeBrand;
@@ -94,6 +99,14 @@ export function OperationsWorkspace({
       window.removeEventListener("drop", block);
     };
   }, []);
+
+  useEffect(() => {
+    if (!workDate) return;
+    void getMonthLockAction(brand, workDate).then((loaded) => {
+      setMonthLocked(loaded.data.locked);
+      setLockLabel(loaded.data.label);
+    });
+  }, [brand, workDate]);
 
   useEffect(() => {
     if (!branch) return;
@@ -129,11 +142,20 @@ export function OperationsWorkspace({
 
   return (
     <div className="space-y-4">
-      <div>
-        <p className="text-xs font-semibold text-red-700">{brandLock ? "LIFF" : "ผู้จัดการ"}</p>
-        <h1 className="text-2xl font-bold text-slate-900">{heading}</h1>
-        {brandLock ? null : <p className="text-sm text-slate-500">มือถือพนักงานของสาขานี้ใช้ {brand === "LUCKY_CUP" ? "/liff/luckycup" : "/liff/chatorn"}</p>}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold text-red-700">{brandLock ? "LIFF" : "ผู้จัดการ"}</p>
+          <h1 className="text-2xl font-bold text-slate-900">{heading}</h1>
+          {brandLock ? null : <p className="text-sm text-slate-500">มือถือพนักงานของสาขานี้ใช้ {brand === "LUCKY_CUP" ? "/liff/luckycup" : "/liff/chatorn"}</p>}
+        </div>
+        {superAdmin ? (
+          <button type="button" className="rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-sm" onClick={() => setViewMode((mode) => mode === "EXECUTIVE_INSPECTOR" ? "STAFF_ASSIST" : "EXECUTIVE_INSPECTOR")}>
+            {viewMode === "EXECUTIVE_INSPECTOR" ? "✍️ เข้าโหมดกรอกข้อมูลแทนพนักงาน" : "กลับสู่โหมดผู้บริหาร Read-Only"}
+          </button>
+        ) : null}
       </div>
+      {monthLocked ? <p className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white">{lockLabel || "🔒 งวดเดือนนี้ถูกล็อกปิดงวดแล้ว (อ่านอย่างเดียว)"}</p> : null}
+      {superAdmin && viewMode === "STAFF_ASSIST" ? <p className="rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-950">กำลังอยู่ในโหมดคีย์ข้อมูลแทนพนักงาน — กลับสู่โหมดผู้บริหาร Read-Only</p> : null}
       {message ? <p className={`rounded-lg px-3 py-2 text-sm ${message.includes("รออนุมัติ") ? "bg-amber-50 text-amber-900" : message.includes("เรียบร้อย") || message.includes("แล้ว") ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`}>{message}</p> : null}
       {superAdmin ? <ApprovalQueue requests={approvals} onDone={() => { void listPendingShiftApprovalsAction().then((listed) => setApprovals(listed.data)); }} /> : null}
       <div className="grid gap-3 rounded-xl border border-red-100 bg-white p-4 md:grid-cols-3">
@@ -143,6 +165,7 @@ export function OperationsWorkspace({
         <p className="flex h-10 items-center rounded-md bg-red-50 px-3 text-sm text-red-900">ผู้ปฏิบัติงาน: {staffName || "บัญชีที่ล็อกอิน"}</p>
         <input className={field} type="date" value={workDate} onChange={(event) => setWorkDate(event.target.value)} />
       </div>
+      {superAdmin && viewMode === "EXECUTIVE_INSPECTOR" ? <ExecutiveInspector brand={brand} workDate={workDate} branch={branch} onPickBranch={setBranch} /> : <fieldset disabled={monthLocked} className="min-w-0 space-y-4 border-0 p-0 disabled:opacity-70">
       <div className="flex flex-wrap gap-2">
         <TabButton active={tab === "OPENING"} onClick={() => setTab("OPENING")}>1. เปิดร้าน (กะแรก)</TabButton>
         <TabButton active={tab === "WIP"} onClick={() => setTab("WIP")}>ต้มเบสเพิ่มและเบิกเปิดของขึ้นบาร์</TabButton>
@@ -161,6 +184,7 @@ export function OperationsWorkspace({
       {brandLock ? <ReimburseBox brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} busy={busy === "reimburse"} run={run} /> : null}
       {superAdmin ? <SectionPhotoDrawer workDate={workDate} brand={brand} /> : null}
       {superAdmin ? <SettlementPanel shifts={day?.shifts ?? []} busy={busy === "settle"} run={run} /> : null}
+      </fieldset>}
     </div>
   );
 }

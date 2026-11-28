@@ -1,6 +1,7 @@
 "use server";
 
 import { resolveFnbActor } from "@/lib/fnb/actor";
+import { fnbMonthLockMessage } from "@/lib/fnb/period-lock";
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
 import { requireFnbModuleAccess } from "@/lib/holding/workspace-access";
@@ -239,6 +240,8 @@ export async function issueWipBatchAction(formData: FormData): Promise<FnbAction
       branchCode: text(formData.get("branch_code")),
     });
     if (!actor.ok) return result(blank, actor.error);
+    const locked = await fnbMonthLockMessage(text(formData.get("branch_code")), text(formData.get("work_date")) || todayBangkok(), text(formData.get("brand_lock")));
+    if (locked) return result({ ...blank, message: locked }, locked);
     const saved = await callFnbRpc("issue_bar_wip_batch", {
       p_branch_code: text(formData.get("branch_code")),
       p_work_date: text(formData.get("work_date")) || todayBangkok(),
@@ -273,6 +276,8 @@ export async function registerExistingOpenBarItemAction(formData: FormData): Pro
       branchCode: text(formData.get("branch_code")),
     });
     if (!actor.ok) return result(blank, actor.error);
+    const locked = await fnbMonthLockMessage(text(formData.get("branch_code")), text(formData.get("work_date")) || todayBangkok(), text(formData.get("brand_lock")));
+    if (locked) return result({ ...blank, message: locked }, locked);
     const qty = Number(formData.get("open_count_qty") ?? 0);
     if (!(qty > 0)) return result({ ...blank, message: "กรุณาระบุจำนวนที่เปิดใช้อยู่" }, "กรุณาระบุจำนวนที่เปิดใช้อยู่");
     const saved = await callFnbRpc("register_existing_open_bar_item", {
@@ -304,6 +309,8 @@ export async function closeWipBatchAction(formData: FormData): Promise<FnbAction
       branchCode: text(formData.get("branch_code")),
     });
     if (!actor.ok) return result(blank, actor.error);
+    const locked = await fnbMonthLockMessage(text(formData.get("branch_code")), todayBangkok(), text(formData.get("brand_lock")));
+    if (locked) return result({ ...blank, message: locked }, locked);
     const mode = text(formData.get("close_mode"));
     const photos = text(formData.get("photo_urls")).split("|").filter(Boolean);
     if (mode === "EXPIRED_DUMPED") {

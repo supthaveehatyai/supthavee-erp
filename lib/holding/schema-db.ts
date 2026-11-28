@@ -11,6 +11,7 @@ type FilterBuilder = Promise<{ data: unknown; error: QueryError }> & {
   gte: (column: string, value: string | number) => FilterBuilder;
   lte: (column: string, value: string | number) => FilterBuilder;
   order: (column: string, options?: { ascending?: boolean }) => FilterBuilder;
+  range: (from: number, to: number) => FilterBuilder;
   limit: (count: number) => FilterBuilder;
   maybeSingle: () => Promise<{ data: unknown; error: QueryError }>;
 };

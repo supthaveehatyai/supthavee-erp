@@ -1,6 +1,7 @@
 "use server";
 
 import { resolveFnbActor } from "@/lib/fnb/actor";
+import { fnbMonthLockMessage } from "@/lib/fnb/period-lock";
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text } from "@/lib/fnb/rows";
 import { schemaAdmin } from "@/lib/holding/schema-db";
@@ -31,6 +32,8 @@ export async function confirmStageSectionAction(input: {
   try {
     const actor = await resolveFnbActor({ actorSource: input.actorSource, brandLock: input.brandLock, branchCode: input.branchCode });
     if (!actor.ok) return result({ ok: false }, actor.error);
+    const locked = await fnbMonthLockMessage(input.branchCode, input.workDate, input.brandLock);
+    if (locked) return result({ ok: false }, locked);
     const saved = await callFnbRpc("confirm_stage_section_atomic", {
       p_branch_code: input.branchCode,
       p_work_date: input.workDate,
@@ -136,6 +139,8 @@ export async function recordItemWriteOffAction(input: {
   try {
     const actor = await resolveFnbActor({ actorSource: input.actorSource, brandLock: input.brandLock, branchCode: input.branchCode });
     if (!actor.ok) return result({ ok: false, writeOffNo: "" }, actor.error);
+    const locked = await fnbMonthLockMessage(input.branchCode, input.workDate, input.brandLock);
+    if (locked) return result({ ok: false, writeOffNo: "" }, locked);
     const saved = await callFnbRpc("record_item_write_off", {
       p_branch_code: input.branchCode,
       p_location_code: input.locationCode,

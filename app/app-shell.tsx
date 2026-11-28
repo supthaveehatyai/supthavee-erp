@@ -46,6 +46,7 @@ const WORKSPACE_NAV: Record<Exclude<WorkspaceKey, "supthavee">, NavigationItem[]
     { label: "ปฏิบัติการหน้าร้าน 3 ช่วงเวลา", href: "/fnb/operations" },
     { label: "ตั้งค่าระเบียบหน้าร้าน & กะสาขา", href: "/fnb/sop-settings" },
     { label: "วิเคราะห์เมนูขายดี & จัดโปรรายสาขา", href: "/fnb/analytics" },
+    { label: "🛡️ ตรวจสอบย้อนหลัง & ปิดงวดเดือน", href: "/fnb/audit" },
     { label: "รับของเข้า & ชนบิลภาษี (คุณจวง)", href: "/fnb/procurement" },
     { label: "วัตถุดิบ หลายแหล่งซื้อ & นำเข้าราคา", href: "/fnb/items" },
     { label: "เมนู สูตรชง & เบสเตรียมขาย (BOM)", href: "/fnb/menus" },
@@ -66,6 +67,7 @@ const WORKSPACE_NAV: Record<Exclude<WorkspaceKey, "supthavee">, NavigationItem[]
   ],
   holding: [
     { label: "ภาพรวมโฮลดิ้ง", href: "/holding" },
+    { label: "💾 สำรองข้อมูลทั้งเครือ (5 Schemas Backup)", href: "/holding/backup" },
     { label: "บุคลากร & สิทธิ์ทั้งเครือ (IAM & HR Hub)", href: "/holding/people" },
     { label: "คลังเอกสารบริษัท PDF/ภาพ", href: "/holding/vault" },
     { label: "ทะเบียนนิติบุคคล", href: "/holding/entities" },

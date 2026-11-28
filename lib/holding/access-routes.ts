@@ -49,7 +49,9 @@ export function fnbPermissionForPath(pathname: string): FnbModulePermissionKey |
 }
 
 export function allowsFnbHref(href: string, perms: FnbModulePermissions): boolean {
-  const key = fnbPermissionForPath(href.split("?")[0] ?? href);
+  const path = href.split("?")[0] ?? href;
+  if (path.startsWith("/fnb/audit")) return perms.all_branch_analytics || perms.tax_accounting_reports;
+  const key = fnbPermissionForPath(path);
   return key ? allowsFnbModule(perms, key) : false;
 }
 
@@ -160,9 +162,13 @@ export function accessRedirect(pathname: string, ctx: UserAccessContext): string
   if ((fnbPath || liffPath) && !hasWorkspace(ctx, "fnb")) return "/forbidden";
 
   if ((fnbPath || liffPath) && !path.startsWith("/liff/register")) {
-    const needed = fnbPermissionForPath(path);
     const perms = ctx.fnbModulePermissions ?? fnbModulePermissionsFrom(null);
-    if (!needed || !allowsFnbModule(perms, needed)) return home;
+    if (path.startsWith("/fnb/audit")) {
+      if (!perms.all_branch_analytics && !perms.tax_accounting_reports) return home;
+    } else {
+      const needed = fnbPermissionForPath(path);
+      if (!needed || !allowsFnbModule(perms, needed)) return home;
+    }
   }
 
   if (path.startsWith("/liff/luckycup") && ctx.assignedBrandCode === "CHATORN") return "/liff/chatorn";

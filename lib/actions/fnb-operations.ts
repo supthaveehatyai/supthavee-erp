@@ -2,6 +2,7 @@
 
 import { generateWithGeminiFallback, resolveGeminiApiKey } from "@/lib/ai/gemini-client";
 import { resolveFnbActor } from "@/lib/fnb/actor";
+import { fnbMonthLockMessage } from "@/lib/fnb/period-lock";
 import { parseLuckyCupPosWorkbook } from "@/lib/fnb/excel";
 import { callFnbRpc } from "@/lib/fnb/rpc";
 import { asRows, caught, fail, num, result, text, todayBangkok } from "@/lib/fnb/rows";
@@ -188,6 +189,8 @@ export async function recordShiftClosingAction(formData: FormData): Promise<FnbA
     const branch = text(formData.get("branch_code"));
     const denied = await assertBranchBrand(branch, brandLockOf(formData.get("brand_lock")));
     if (denied) return result({ ok: false, mode: null, request_no: null, message: denied }, denied);
+    const locked = await fnbMonthLockMessage(branch, text(formData.get("work_date")) || todayBangkok(), text(formData.get("brand_lock")));
+    if (locked) return result({ ok: false, mode: null, request_no: null, message: locked }, locked);
     const slips = await Promise.all((await filesOf(formData, "slips")).map((file) => storeFnbFile(branch, "slip", file)));
     const evidence = await Promise.all((await filesOf(formData, "evidence")).map((file) => storeFnbFile(branch, "edit", file)));
     const sevenFiles = await filesOf(formData, "seven_slip");
@@ -263,6 +266,8 @@ export async function recordNightWasteAction(formData: FormData): Promise<FnbAct
     const branch = text(formData.get("branch_code"));
     const denied = await assertBranchBrand(branch, brandLockOf(formData.get("brand_lock")));
     if (denied) return result({ ok: false, mode: null, request_no: null, message: denied, detail: null }, denied);
+    const locked = await fnbMonthLockMessage(branch, text(formData.get("work_date")) || todayBangkok(), text(formData.get("brand_lock")));
+    if (locked) return result({ ok: false, mode: null, request_no: null, message: locked, detail: null }, locked);
     const photos = await Promise.all((await filesOf(formData, "photos")).map((file) => storeFnbFile(branch, "waste", file)));
     const entries = text(formData.get("waste_entries_json"));
     const saved = await callFnbRpc("record_night_waste_and_reverse_bom", {

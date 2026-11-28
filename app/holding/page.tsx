@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 
 const CARDS = [
   { href: "/holding/people", title: "บุคลากรและสิทธิ์ทั้งเครือ", detail: "IAM, HR ประจำบริษัท และบัญชีคุณจวง" },
+  { href: "/holding/backup", title: "สำรองข้อมูลทั้งเครือ", detail: "ชุดอ่านอย่างเดียว 5 สคีมา และรายการไฟล์" },
   { href: "/holding/vault", title: "คลังเอกสารบริษัท", detail: "PDF และรูปในถังส่วนตัว พร้อมลิงก์ 1 ชั่วโมง" },
   { href: "/holding/entities", title: "ทะเบียนนิติบุคคล", detail: "ทรัพย์ทวี จัสมิน พลัส ลิ่มวรวิวัฒน์ และครอบครัว" },
   { href: "/holding/bank-accounts", title: "สมุดบัญชีและ QR", detail: "บัญชีรับเงินของทุกธุรกิจ" },
