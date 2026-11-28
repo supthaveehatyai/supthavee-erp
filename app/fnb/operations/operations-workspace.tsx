@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { branchForBrand } from "@/lib/fnb/brand-branch";
 import { BranchPills, fnbBranchStorageKey, useStoredBranch } from "@/components/fnb/branch-pills";
-import { CrewLockedFieldset, LiveBranchProvider } from "@/components/fnb/shift-crew-bar";
+import { CrewLockedFieldset, LiveBranchProvider, useLiveBranch } from "@/components/fnb/shift-crew-bar";
 import { toast } from "sonner";
 import { ApprovalQueue } from "@/app/fnb/approval-queue";
 import { CashFloatNote } from "@/components/fnb/cash-float-note";
@@ -64,6 +64,7 @@ export function OperationsWorkspace({
   initialApprovals = [],
   activeBrand,
   initialBranch = "",
+  lockedShift = null,
 }: {
   branches: FnbBranchOption[];
   shelfItems: FnbItemRow[];
@@ -74,10 +75,11 @@ export function OperationsWorkspace({
   initialApprovals?: FnbChangeRequestRow[];
   activeBrand: FnbBrandCode;
   initialBranch?: string;
+  lockedShift?: "SHIFT_1" | "SHIFT_2" | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [tab, setTab] = useState<FnbSopStageInstance | "WIP">("OPENING");
+  const [tab, setTab] = useState<FnbSopStageInstance | "WIP">(lockedShift === "SHIFT_2" ? "WIP" : "OPENING");
   const [branch, setBranch] = useState(() => branchForBrand(branches, activeBrand, initialBranch || branches[0]?.branch_code || ""));
   const [workDate, setWorkDate] = useState(today());
   const staffName = actorName;
@@ -105,7 +107,7 @@ export function OperationsWorkspace({
     params.set("branch", next);
     router.push(`${pathname}?${params.toString()}`);
   }, [activeBrand, actorSource, branches, pathname, router, storageKey]);
-  useStoredBranch(storageKey, branches, pickBranch);
+  useStoredBranch(lockedShift ? "" : storageKey, branches, pickBranch);
   const seenBranch = useRef(initialBranch);
   useEffect(() => {
     if (initialBranch === seenBranch.current) return;
@@ -124,7 +126,15 @@ export function OperationsWorkspace({
     return () => { delete document.documentElement.dataset.fnbAssisted; };
   }, [actorSource, superAdmin, viewMode]);
   const heading = brand === "LUCKY_CUP" ? "ปฏิบัติการ Lucky Cup" : "ปฏิบัติการชาทรตะโหมด";
+  const sessionShift = actorSource === "liff" ? lockedShift : null;
   const shiftSlot = tab === "CLOSING" || tab === "SHIFT_2" || tab === "SHIFT_3" ? "SHIFT_2" : "SHIFT_1";
+  const tabEditable = !sessionShift || superAdmin || (sessionShift === "SHIFT_1"
+    ? tab === "OPENING" || tab === "WIP" || tab === "SHIFT_1"
+    : tab === "WIP" || tab === "SHIFT_2" || tab === "SHIFT_3" || tab === "CLOSING");
+  useEffect(() => {
+    if (sessionShift === "SHIFT_2") setTab("WIP");
+    if (sessionShift === "SHIFT_1") setTab("OPENING");
+  }, [sessionShift]);
 
   useEffect(() => {
     const block = (event: DragEvent) => event.preventDefault();
@@ -202,7 +212,7 @@ export function OperationsWorkspace({
           <input className={field} type="date" value={workDate} onChange={(event) => setWorkDate(event.target.value)} />
         </label>
       </div>
-      <LiveBranchProvider key={`${branch}|${workDate}`} branch={branch} workDate={workDate} shiftSlot={shiftSlot}>
+      <LiveBranchProvider key={`${branch}|${workDate}`} branch={branch} workDate={workDate} shiftSlot={shiftSlot} pinSlot={sessionShift}>
       {superAdmin && viewMode === "EXECUTIVE_INSPECTOR" ? <ExecutiveInspector brand={brand} workDate={workDate} branch={branch} onPickBranch={pickBranch} /> : <CrewLockedFieldset monthLocked={monthLocked}>
       <div className="flex flex-wrap gap-2">
         <TabButton active={tab === "OPENING"} onClick={() => setTab("OPENING")}>1. เปิดร้าน (กะแรก)</TabButton>
@@ -212,6 +222,8 @@ export function OperationsWorkspace({
         {selected?.enable_shift_3 ? <TabButton active={tab === "SHIFT_3"} onClick={() => setTab("SHIFT_3")}>4. ส่งเงินกะสาม</TabButton> : null}
         <TabButton active={tab === "CLOSING"} onClick={() => setTab("CLOSING")}>{`${selected?.enable_shift_3 ? "5" : "4"}. ปิดร้านและยอดขายรายเมนู (${selected?.enable_shift_3 ? "กะสาม" : "กะสอง"})`}</TabButton>
       </div>
+      <fieldset disabled={!tabEditable} className="min-w-0 space-y-4 border-0 p-0 disabled:opacity-80">
+      {sessionShift && !tabEditable ? <OverlapBanner sessionShift={sessionShift} /> : null}
       <MiddayShortcuts branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brandLock} staffName={staffName} brand={brand} />
       {tab === "OPENING" ? <OpeningChecklist branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brand} staffName={staffName} cashFloat={selected?.standard_cash_float} /> : null}
       {tab === "SHIFT_1" || tab === "SHIFT_2" ? <ClosePanel brand={brand} brandLock={brandLock} superAdmin={superAdmin} branch={branch} branches={branches} workDate={workDate} staffName={staffName} actorSource={actorSource} day={day} busy={busy} run={run} lockShift={tab === "SHIFT_1" ? "MORNING" : "AFTERNOON"} onBranch={pickBranch} /> : null}
@@ -222,6 +234,7 @@ export function OperationsWorkspace({
       {brandLock ? <ReimburseBox brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} busy={busy === "reimburse"} run={run} /> : null}
       {superAdmin ? <SectionPhotoDrawer workDate={workDate} brand={brand} /> : null}
       {superAdmin ? <SettlementPanel shifts={day?.shifts ?? []} busy={busy === "settle"} run={run} /> : null}
+      </fieldset>
       </CrewLockedFieldset>}
       </LiveBranchProvider>
     </div>
@@ -683,6 +696,16 @@ function PhotoDrop({ name, label, camera, onFile }: { name: string; label: strin
 
 function SaveButton({ busy, children }: { busy: boolean; children: string }) {
   return <button className="inline-flex items-center gap-2 rounded-md bg-[var(--fnb-brand)] px-4 py-2 text-sm text-white disabled:opacity-60" disabled={busy}>{busy ? <span className="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : null}{busy ? "กำลังบันทึก..." : children}</button>;
+}
+
+function OverlapBanner({ sessionShift }: { sessionShift: "SHIFT_1" | "SHIFT_2" }) {
+  const live = useLiveBranch();
+  const morning = live.snapshot?.rosters.find((roster) => roster.shiftSlot === "SHIFT_1")?.members.map((member) => member.staffName).filter(Boolean).join(", ") || "";
+  const afternoon = live.snapshot?.rosters.find((roster) => roster.shiftSlot === "SHIFT_2")?.members.map((member) => member.staffName).filter(Boolean).join(", ") || "";
+  const text = sessionShift === "SHIFT_1"
+    ? `🔒 ส่วนนี้สำหรับทีมกะบ่าย (${afternoon || "รอกะบ่ายลงชื่อ"}) — ล็อกป้องกันการคีย์ข้อมูลสลับกะช่วงเวลาซ้อนกัน`
+    : `🔒 บันทึกของทีมกะเช้า: ${morning || "กะเช้า"} — เปิดดูอ้างอิงได้แต่ล็อกไม่ให้แก้ไขทับ`;
+  return <p className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white">{text}</p>;
 }
 
 function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {

@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { LiveWatermarkCamera } from "@/components/fnb/live-watermark-camera";
 import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
 import { confirmStageSectionAction } from "@/lib/actions/fnb-stage";
-import { useLiveBranch } from "@/components/fnb/shift-crew-bar";
+import { crewAssist, useLiveBranch } from "@/components/fnb/shift-crew-bar";
 import { bangkokClock } from "@/lib/fnb/stage-progress";
 import type { FnbStageConfirmation } from "@/types/fnb";
 
@@ -53,7 +53,7 @@ export function CleaningSpots(props: {
             {saved?.photoUrls[0] ? <a href={saved.photoUrls[0]} target="_blank" rel="noreferrer"><img src={saved.photoUrls[0]} alt="" className="mt-2 h-16 w-16 rounded object-cover" /></a> : null}
             {saved ? <p className="mt-1 text-xs">ตรวจโดย: {saved.confirmedByName} · {bangkokClock(saved.confirmedAt)}</p> : null}
             <LiveWatermarkCamera branchCode={props.branch} stage={props.stage} staffName={props.staffName} taskTitle={spot.spotNameTh} liveCameraOnly onCapture={(file, liveShot) => void uploadShot(file, liveShot, props.branch, props.actorSource, props.brand).then(async (url) => {
-              const assist: { assistReason?: string; isEdit?: boolean } = live.snapshot?.viewer.isSupervisor ? { assistReason: live.assistReason, isEdit: true } : {};
+              const assist: { assistReason?: string; isEdit?: boolean } = crewAssist(live);
               const savedSpot = await confirmStageSectionAction({
                 branchCode: props.branch,
                 workDate: props.workDate,

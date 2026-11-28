@@ -1,13 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { signOut } from "@/lib/actions/auth.actions";
 import { BranchMenuSales } from "@/app/liff/branch-menu-sales";
 import { OperationsWorkspace } from "@/app/fnb/operations/operations-workspace";
 import { ExpiryPanel, ManualReceive } from "@/app/fnb/procurement/procurement-workspace";
-import { BranchPills, fnbBranchStorageKey, useStoredBranch } from "@/components/fnb/branch-pills";
+import { LiffShiftSession } from "@/components/fnb/shift-start-gate";
 import type { FnbBranchOption, FnbBrandCode, FnbExpiryLotRow, FnbItemRow, FnbUnpackLine } from "@/types/fnb";
 
 export function BrandStore({
@@ -20,6 +19,7 @@ export function BrandStore({
   lots,
   schemaMessage,
   actorName,
+  userId,
   branchLabel,
   initialBranch,
   showGoodsReceipt = true,
@@ -34,30 +34,13 @@ export function BrandStore({
   lots: FnbExpiryLotRow[];
   schemaMessage: string | null;
   actorName: string;
+  userId: string;
   branchLabel: string;
   initialBranch: string;
   showGoodsReceipt?: boolean;
   showMenuSales?: boolean;
 }) {
-  const router = useRouter();
-  const pathname = usePathname();
   const [tab, setTab] = useState<"ops" | "receive" | "lots" | "sales">("ops");
-  const [branch, setBranch] = useState(initialBranch || branches[0]?.branch_code || "");
-  const storageKey = fnbBranchStorageKey(brand, actorName);
-  const pickBranch = useCallback((code: string) => {
-    if (!branches.some((item) => item.branch_code === code)) return;
-    setBranch(code);
-    localStorage.setItem(storageKey, code);
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("branch") === code) return;
-    params.set("branch", code);
-    router.replace(`${pathname}?${params.toString()}`);
-  }, [branches, pathname, router, storageKey]);
-  useStoredBranch(storageKey, branches, pickBranch);
-  useEffect(() => {
-    if (!initialBranch || !new URLSearchParams(window.location.search).get("branch")) return;
-    if (branches.some((item) => item.branch_code === initialBranch)) setBranch(initialBranch);
-  }, [branches, initialBranch]);
   return (
     <main className={`min-h-screen px-3 py-4 ${brand === "CHATORN" ? "fnb-chatorn bg-[#FDF2F4]" : "fnb-lucky bg-red-50"}`}>
       <LineBrowserTip />
@@ -70,20 +53,25 @@ export function BrandStore({
           </div>
           <button type="button" className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white" onClick={() => { void signOut(); }}>ออกจากระบบ</button>
         </div>
-        <BranchPills branches={branches} active={branch} onPick={pickBranch} />
       </header>
       <p className="sr-only">{title}</p>
       {schemaMessage ? <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{schemaMessage}</p> : null}
-      <div className="mb-4 flex flex-wrap gap-2">
-        <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "ops" ? "bg-[var(--fnb-brand)] text-white" : "bg-white ring-1 ring-red-200"}`} onClick={() => setTab("ops")}>ปฏิบัติการร้าน</button>
-        {showGoodsReceipt ? <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "receive" ? "bg-[var(--fnb-brand)] text-white" : "bg-white ring-1 ring-red-200"}`} onClick={() => setTab("receive")}>รับของเข้า</button> : null}
-        {showGoodsReceipt ? <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "lots" ? "bg-[var(--fnb-brand)] text-white" : "bg-white ring-1 ring-red-200"}`} onClick={() => setTab("lots")}>แกะล็อตหมดอายุ</button> : null}
-        {showMenuSales ? <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "sales" ? "bg-[var(--fnb-brand)] text-white" : "bg-white ring-1 ring-red-200"}`} onClick={() => setTab("sales")}>ยอดขายรายเมนูสาขา</button> : null}
-      </div>
-      {tab === "ops" ? <OperationsWorkspace branches={branches} shelfItems={shelfItems} brandLock={brand} activeBrand={brand} superAdmin={false} actorName={actorName} actorSource="liff" initialBranch={branch} /> : null}
-      {tab === "receive" && showGoodsReceipt ? <ManualReceive branches={branches} items={items} brandLock={brand} revealCost={false} actorSource="liff" branchCode={branch} /> : null}
-      {tab === "lots" && showGoodsReceipt ? <ExpiryPanel pending={pendingLots} lots={lots} brandLock={brand} actorSource="liff" /> : null}
-      {tab === "sales" && showMenuSales ? <BranchMenuSales branches={branches} branchCode={branch} /> : null}
+      <LiffShiftSession userId={userId} actorName={actorName} branches={branches} brand={brand} preferredBranch={initialBranch}>
+        {(lock) => (
+          <>
+            <div className="mb-4 flex flex-wrap gap-2">
+              <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "ops" ? "bg-[var(--fnb-brand)] text-white" : "bg-white ring-1 ring-red-200"}`} onClick={() => setTab("ops")}>ปฏิบัติการร้าน</button>
+              {showGoodsReceipt ? <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "receive" ? "bg-[var(--fnb-brand)] text-white" : "bg-white ring-1 ring-red-200"}`} onClick={() => setTab("receive")}>รับของเข้า</button> : null}
+              {showGoodsReceipt ? <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "lots" ? "bg-[var(--fnb-brand)] text-white" : "bg-white ring-1 ring-red-200"}`} onClick={() => setTab("lots")}>แกะล็อตหมดอายุ</button> : null}
+              {showMenuSales ? <button type="button" className={`rounded-full px-3 py-1.5 text-sm ${tab === "sales" ? "bg-[var(--fnb-brand)] text-white" : "bg-white ring-1 ring-red-200"}`} onClick={() => setTab("sales")}>ยอดขายรายเมนูสาขา</button> : null}
+            </div>
+            {tab === "ops" ? <OperationsWorkspace branches={branches} shelfItems={shelfItems} brandLock={brand} activeBrand={brand} superAdmin={false} actorName={actorName} actorSource="liff" initialBranch={lock.branchCode} lockedShift={lock.shiftSlot} /> : null}
+            {tab === "receive" && showGoodsReceipt ? <ManualReceive branches={branches} items={items} brandLock={brand} revealCost={false} actorSource="liff" branchCode={lock.branchCode} /> : null}
+            {tab === "lots" && showGoodsReceipt ? <ExpiryPanel pending={pendingLots} lots={lots} brandLock={brand} actorSource="liff" /> : null}
+            {tab === "sales" && showMenuSales ? <BranchMenuSales branches={branches} branchCode={lock.branchCode} /> : null}
+          </>
+        )}
+      </LiffShiftSession>
     </main>
   );
 }

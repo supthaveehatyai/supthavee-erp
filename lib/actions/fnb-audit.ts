@@ -25,6 +25,15 @@ function brandOf(value: string): FnbBrandCode {
   return value === "CHATORN" ? "CHATORN" : "LUCKY_CUP";
 }
 
+function crewNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const name = text((item as Record<string, unknown>).staff_name);
+    return name ? [name] : [];
+  });
+}
+
 function urls(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => text(item)).filter((item) => item.startsWith("http")) : [];
 }
@@ -61,7 +70,7 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
     await desk();
     const scope = brandOf(brand);
     const db = schemaAdmin().schema("fnb");
-    const [branches, confirms, batches, transfers, shifts, sales, equipment, writeOffs, counts, items] = await Promise.all([
+    const [branches, confirms, batches, transfers, shifts, sales, equipment, writeOffs, counts, items, rosters] = await Promise.all([
       db.from("branches").select("branch_code,branch_name_th,brand_code,branch_status").eq("brand_code", scope).neq("branch_status", "INACTIVE").limit(20),
       db.from("daily_stage_section_confirmations").select("id,branch_code,stage_code,section_key,section_title_th,status_flag,numeric_amount,expected_amount,confirmed_by_name,confirmed_at,photo_urls").eq("work_date", workDate).limit(2000),
       db.from("bar_wip_batches").select("id,branch_code,batch_kind,prep_base_code,item_id,brew_portion_mode,opened_at,opened_by_name,expires_at,sticker_label_text,open_photo_urls,batch_status").eq("work_date", workDate).limit(1000),
@@ -72,6 +81,7 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
       db.from("item_write_offs").select("id,branch_code,item_id,write_off_reason,qty_in_count_uom,photo_urls,reported_by_name,created_at").eq("work_date", workDate).limit(500),
       db.from("zone_stock_counts").select("branch_code,item_id,shrinkage_diff_qty,count_stage").eq("count_date", workDate).limit(2000),
       db.from("items").select("id,short_code,name_th,item_category,brand_scope").eq("brand_scope", scope).limit(2000),
+      db.from("shift_crew_rosters").select("branch_code,shift_slot,crew_members_json").eq("work_date", workDate).limit(40),
     ]);
     if (branches.error) return fail(empty, branches.error, "อ่านสาขาไม่สำเร็จ");
     const branchRows = asRows(branches.data);
@@ -122,6 +132,8 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
         openingDone: done.size,
         openingFinishedAt: finished,
         staffNames: [...new Set(opening.map((row) => text(row.confirmed_by_name)).filter(Boolean))],
+        shift1Crew: crewNames(asRows(rosters.data).find((row) => text(row.branch_code) === code && text(row.shift_slot) === "SHIFT_1")?.crew_members_json),
+        shift2Crew: crewNames(asRows(rosters.data).find((row) => text(row.branch_code) === code && text(row.shift_slot) === "SHIFT_2")?.crew_members_json),
         wipCount: wip.length + moved.length,
         wipAt: text(wip[0]?.opened_at) || text(moved[0]?.created_at) || null,
         shift1Staff: first ? text(first.staff_name) : null,

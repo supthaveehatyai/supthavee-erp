@@ -43,7 +43,7 @@ export function useStoredBranch(
 ) {
   const once = useRef(false);
   useEffect(() => {
-    if (once.current || branches.length === 0) return;
+    if (!storageKey || once.current || branches.length === 0) return;
     once.current = true;
     if (new URLSearchParams(window.location.search).get("branch")) return;
     const saved = localStorage.getItem(storageKey);

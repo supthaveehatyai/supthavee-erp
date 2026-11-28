@@ -20,7 +20,7 @@ export function UnsavedDraftBar({ sectionNo }: { sectionNo: number }) {
   );
 }
 
-export function LockedSectionCard({ row, summary }: { row: FnbStageConfirmation; summary: string }) {
+export function LockedSectionCard({ row, summary, onRevise }: { row: FnbStageConfirmation; summary: string; onRevise?: () => void }) {
   const overrideName = typeof row.payload.override_by_name === "string" ? row.payload.override_by_name : "";
   const overrideReason = typeof row.payload.override_reason === "string" ? row.payload.override_reason : row.lastEditReason || "";
   return (
@@ -39,6 +39,7 @@ export function LockedSectionCard({ row, summary }: { row: FnbStageConfirmation;
       ) : null}
       <p className="mt-2">✅ บันทึกยืนยันแล้วโดย: {row.confirmedByName} · {hhmm(row.confirmedAt)}</p>
       {overrideName ? <p>🛠️ ช่วยเหลือ/แก้ไขโดย: {overrideName} (เหตุผล: {overrideReason})</p> : null}
+      {onRevise ? <button type="button" className="mt-2 font-semibold underline" onClick={onRevise}>✏️ แก้ไขข้อมูลหมวดนี้ (ระบุเหตุผล)</button> : null}
     </div>
   );
 }

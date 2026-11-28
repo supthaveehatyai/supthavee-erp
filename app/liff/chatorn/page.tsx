@@ -37,6 +37,7 @@ export default async function ChatornLiffPage({ searchParams }: { searchParams: 
       lots={expiry.data.lots}
       schemaMessage={visible.length === 0 ? "บัญชียังไม่ถูกกำหนดสาขา" : branches.error || shelf.error || items.error || expiry.error}
       actorName={ctx.displayActorName}
+      userId={ctx.userId}
       branchLabel={branchLabel}
       initialBranch={listedBranch(visible, requestedBranch)}
       showGoodsReceipt={ctx.isSuperAdmin || ctx.fnbModulePermissions.goods_receipt_expiry}

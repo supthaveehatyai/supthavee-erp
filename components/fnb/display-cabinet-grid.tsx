@@ -6,7 +6,7 @@ import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import { replenishZoneAction, saveZoneCountsAction } from "@/lib/actions/fnb-store-day";
 import { confirmStageSectionAction } from "@/lib/actions/fnb-stage";
 import { UnsavedDraftBar } from "@/components/fnb/section-confirm-card";
-import { useLiveBranch } from "@/components/fnb/shift-crew-bar";
+import { crewAssist, useLiveBranch } from "@/components/fnb/shift-crew-bar";
 import { addDays, bangkokHour, shortThaiDate } from "@/lib/fnb/stage-progress";
 import { FNB_DISPLAY_SUB_GROUPS, type FnbDisplayLot, type FnbZoneCountLine } from "@/types/fnb";
 
@@ -138,7 +138,8 @@ export function DisplayCabinetGrid(props: {
           </article>
         </div>
       </div>
-      <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={busy || !props.frontCode} onClick={() => {
+      <button type="button" className="rounded-md bg-[#DC2626] px-3 py-2 text-sm text-white disabled:opacity-60" disabled={busy} onClick={() => {
+        if (!props.frontCode) { toast.error("ยังไม่พบจุดคลังหลังร้านหรือตู้โชว์"); return; }
         setBusy(true);
         void (async () => {
           const lines = props.lines.filter((line) => qty[line.itemId] !== undefined && qty[line.itemId] !== "").map((line) => ({
@@ -151,7 +152,7 @@ export function DisplayCabinetGrid(props: {
           }));
           const saved = await saveZoneCountsAction({ branchCode: props.branch, workDate: props.workDate, stage: "OPENING", actorSource: props.actorSource, brandLock: props.brand, lines });
           if (saved.error || !saved.data.ok) { toast.error(saved.error || "บันทึกยอดเช้าไม่สำเร็จ"); setBusy(false); return; }
-          const assist = live.snapshot?.viewer.isSupervisor ? { assistReason: live.assistReason, isEdit: true as const } : {};
+          const assist = crewAssist(live);
           for (const section of [
             { key: "SEC_4_BAKERY_ICE", title: "หมวดที่ 4: ตู้แช่เบเกอรี่และตู้ไอศกรีม", lines: [...bakery, ...ice] },
             { key: "SEC_5_MERCH", title: "หมวดที่ 5: ชั้นโชว์ของพรีเมียมหน้าร้าน", lines: merch },
@@ -164,7 +165,7 @@ export function DisplayCabinetGrid(props: {
           setBusy(false);
           props.onDone();
         })();
-      }}>💾 บันทึกยืนยันหมวดที่ 4 และหมวดที่ 5</button>
+      }}>{busy ? "กำลังบันทึก..." : "💾 บันทึกยืนยันหมวดที่ 4 และหมวดที่ 5"}</button>
       {Object.values(qty).some((value) => value !== "") ? <UnsavedDraftBar sectionNo={4} /> : null}
     </div>
   );

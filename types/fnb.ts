@@ -759,6 +759,8 @@ export type FnbInspectorMatrixRow = {
   openingDone: number;
   openingFinishedAt: string | null;
   staffNames: string[];
+  shift1Crew: string[];
+  shift2Crew: string[];
   wipCount: number;
   wipAt: string | null;
   shift1Staff: string | null;
@@ -961,7 +963,7 @@ export type FnbLiveSnapshot = {
   workDate: string;
   brandCode: string;
   maxStaffPerShift: number;
-  viewer: { userId: string; name: string; isSupervisor: boolean; workspaceRole: string };
+  viewer: { userId: string; name: string; isSupervisor: boolean; isSuperAdmin: boolean; workspaceRole: string };
   rosters: FnbShiftRoster[];
   confirmations: FnbStageConfirmation[];
   prepBases: FnbLivePrepBase[];

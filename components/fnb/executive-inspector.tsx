@@ -67,11 +67,11 @@ export function ExecutiveInspector(props: { brand: FnbBrandCode; workDate: strin
           <tbody>
             {matrix.map((row) => (
               <tr key={row.branchCode} className={`cursor-pointer border-t ${row.branchCode === props.branch ? "bg-amber-50" : ""}`} onClick={() => props.onPickBranch(row.branchCode)}>
-                <td className="px-3 py-2 font-semibold">{row.branchCode}<div className="text-xs font-normal text-slate-500">{row.staffNames.join(", ")}</div></td>
+                <td className="px-3 py-2 font-semibold">{row.branchCode}<div className="text-xs font-normal text-slate-600">☀️ กะเช้า: {row.shift1Crew.join(", ") || "ยังไม่ลงชื่อ"}</div><div className="text-xs font-normal text-slate-600">🌤️ กะบ่าย: {row.shift2Crew.join(", ") || "ยังไม่ลงชื่อ"}</div></td>
                 <td className="px-3 py-2">{openingLabel(row.openingDone, row.openingFinishedAt, props.workDate)}</td>
                 <td className="px-3 py-2">{simpleLabel(row.wipCount > 0, row.wipAt, "⚪ ยังไม่เริ่ม", `🟢 มีบันทึก ${row.wipCount} รายการ`)}</td>
-                <td className="px-3 py-2">{simpleLabel(Boolean(row.shift1Staff), row.shift1At, "⚪ ยังไม่เริ่ม", `🟢 ${row.shift1Staff}`)}</td>
-                <td className="px-3 py-2">{simpleLabel(Boolean(row.shift2Staff), row.shift2At, "⚪ ยังไม่เริ่ม", `🟢 ${row.shift2Staff}`)}</td>
+                <td className="px-3 py-2">{simpleLabel(Boolean(row.shift1Staff), row.shift1At, "⚪ ยังไม่เริ่ม", `🟢 ${row.shift1Staff}`)}<div className="text-xs">☀️ กะเช้า: {row.shift1Crew.join(", ") || "ยังไม่ลงชื่อ"}</div></td>
+                <td className="px-3 py-2">{simpleLabel(Boolean(row.shift2Staff), row.shift2At, "⚪ ยังไม่เริ่ม", `🟢 ${row.shift2Staff}`)}<div className="text-xs">🌤️ กะบ่าย: {row.shift2Crew.join(", ") || "ยังไม่ลงชื่อ"}</div></td>
                 <td className="px-3 py-2">{simpleLabel(row.closingDone, row.closingAt, "⚪ ยังไม่เริ่ม", "🟢 ปิดร้านแล้ว")}</td>
               </tr>
             ))}

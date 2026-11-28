@@ -36,12 +36,16 @@ export async function confirmStageSectionAction(input: {
     if (!actor.ok) return result({ ok: false }, actor.error);
     const gate = await requireFnbStoreOperationAccess(input.branchCode);
     if (!gate.ok) return result({ ok: false }, gate.error);
-    const supervisor = gate.ctx.isSuperAdmin || gate.ctx.workspaceRole === "FNB_BRANCH_MANAGER";
-    const reason = (input.assistReason || input.editReason || "").trim();
-    if (supervisor && reason.length < 4) return result({ ok: false }, "ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 4 ตัวอักษร)");
+    const manager = gate.ctx.workspaceRole === "FNB_BRANCH_MANAGER";
+    const assistReason = (input.assistReason || "").trim();
+    const override = assistReason.length >= 4 && (gate.ctx.isSuperAdmin || manager);
+    if (gate.ctx.isSuperAdmin && !override) return result({ ok: false }, "ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 4 ตัวอักษร)");
+    if ((gate.ctx.isSuperAdmin || manager) && assistReason.length > 0 && assistReason.length < 4) {
+      return result({ ok: false }, "ระบุเหตุผลการเข้าช่วยเหลือ/แก้ไข (อย่างน้อย 4 ตัวอักษร)");
+    }
     const locked = await fnbMonthLockMessage(input.branchCode, input.workDate, input.brandLock);
     if (locked) return result({ ok: false }, locked);
-    if (!supervisor && gate.userId) {
+    if (!override && gate.userId) {
       const slot = input.shiftSlot ?? (input.stageCode === "CLOSING" ? "SHIFT_2" : "SHIFT_1");
       const seated = await callFnbRpc("check_in_shift_crew_seat", {
         p_branch_code: input.branchCode,
@@ -57,7 +61,7 @@ export async function confirmStageSectionAction(input: {
     }
     const payload = {
       ...(input.payload ?? {}),
-      ...(supervisor ? { override_by_name: actor.actor.name, override_reason: reason } : {}),
+      ...(override ? { override_by_name: actor.actor.name, override_reason: assistReason } : {}),
     };
     const saved = await callFnbRpc("confirm_stage_section_atomic", {
       p_branch_code: input.branchCode,
@@ -73,9 +77,9 @@ export async function confirmStageSectionAction(input: {
       p_payload_json: payload,
       p_staff_name: actor.actor.name,
       p_user_id: actor.actor.userId,
-      p_is_edit: supervisor || Boolean(input.isEdit),
-      p_edit_reason: supervisor ? reason : (input.editReason || null),
-      p_is_supervisor: supervisor,
+      p_is_edit: override || Boolean(input.isEdit),
+      p_edit_reason: override ? assistReason : (input.editReason || null),
+      p_is_supervisor: override,
     });
     if (saved.error) return fail({ ok: false }, saved.error, "ยืนยันหมวดไม่สำเร็จ");
     const body = rpcBody(saved.data);

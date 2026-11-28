@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { LiveWatermarkCamera } from "@/components/fnb/live-watermark-camera";
 import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
 import { confirmStageSectionAction } from "@/lib/actions/fnb-stage";
-import { useLiveBranch } from "@/components/fnb/shift-crew-bar";
+import { crewAssist, useLiveBranch } from "@/components/fnb/shift-crew-bar";
 import { bangkokClock } from "@/lib/fnb/stage-progress";
 import type { FnbStageConfirmation } from "@/types/fnb";
 
@@ -83,7 +83,7 @@ export function CashFloatConfirm(props: {
           brandLock: props.brand,
           isEdit: editing,
           editReason: editing ? reason : "",
-          assistReason: live.snapshot?.viewer.isSupervisor ? live.assistReason : "",
+          assistReason: crewAssist(live).assistReason,
           shiftSlot: props.stage === "CLOSING" ? "SHIFT_2" : "SHIFT_1",
         }).then((saved) => {
           if (!saved.error && saved.data.ok) void live.refresh();

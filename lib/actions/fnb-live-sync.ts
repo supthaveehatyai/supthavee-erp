@@ -13,7 +13,7 @@ function emptySnapshot(branchCode: string, workDate: string): FnbLiveSnapshot {
     workDate,
     brandCode: "",
     maxStaffPerShift: 2,
-    viewer: { userId: "", name: "", isSupervisor: false, workspaceRole: "" },
+    viewer: { userId: "", name: "", isSupervisor: false, isSuperAdmin: false, workspaceRole: "" },
     rosters: [
       { shiftSlot: "SHIFT_1", maxSeats: 2, members: [] },
       { shiftSlot: "SHIFT_2", maxSeats: 2, members: [] },
@@ -132,6 +132,7 @@ export async function getLiveBranchShiftSnapshotAction(input: { branchCode: stri
         userId: gate.userId,
         name: gate.displayActorName,
         isSupervisor: gate.ctx.isSuperAdmin || gate.ctx.workspaceRole === "FNB_BRANCH_MANAGER",
+        isSuperAdmin: gate.ctx.isSuperAdmin,
         workspaceRole: gate.ctx.workspaceRole,
       },
       rosters: slots,
@@ -187,8 +188,8 @@ export async function checkInShiftCrewAction(input: { branchCode: string; workDa
   try {
     const gate = await requireFnbStoreOperationAccess(input.branchCode);
     if (!gate.ok) return result({ ok: false }, gate.error);
-    if (gate.ctx.isSuperAdmin || gate.ctx.workspaceRole === "FNB_BRANCH_MANAGER") {
-      return result({ ok: false }, "ผู้จัดการและผู้บริหารไม่ใช้ที่นั่งพนักงาน — ใช้โหมดช่วยเหลือพร้อมระบุเหตุผล");
+    if (gate.ctx.isSuperAdmin) {
+      return result({ ok: false }, "ผู้บริหารไม่ใช้ที่นั่งพนักงาน — ใช้โหมดช่วยเหลือพร้อมระบุเหตุผล");
     }
     const saved = await callFnbRpc("check_in_shift_crew_seat", {
       p_branch_code: input.branchCode,
@@ -240,5 +241,30 @@ export async function swapShiftCrewSeatAction(input: {
     return result({ ok: true });
   } catch (error) {
     return caught({ ok: false }, error, "เปลี่ยนตัวผู้ปฏิบัติงานไม่สำเร็จ");
+  }
+}
+
+export async function leaveUnusedShiftCrewSeatAction(input: {
+  branchCode: string;
+  workDate: string;
+  shiftSlot: "SHIFT_1" | "SHIFT_2";
+}): Promise<FnbActionResult<{ ok: boolean }>> {
+  noStore();
+  try {
+    const gate = await requireFnbStoreOperationAccess(input.branchCode);
+    if (!gate.ok) return result({ ok: false }, gate.error);
+    const saved = await callFnbRpc("leave_unused_shift_crew_seat", {
+      p_branch_code: input.branchCode,
+      p_work_date: input.workDate,
+      p_shift_slot: input.shiftSlot,
+      p_user_id: gate.userId,
+      p_staff_name: gate.displayActorName,
+    });
+    if (saved.error) return fail({ ok: false }, saved.error, "ออกจากกะไม่สำเร็จ");
+    const body = saved.data && typeof saved.data === "object" ? saved.data as Record<string, unknown> : {};
+    if (body.ok === false) return result({ ok: false }, text(body.error) || "ออกจากกะไม่สำเร็จ");
+    return result({ ok: true });
+  } catch (error) {
+    return caught({ ok: false }, error, "ออกจากกะไม่สำเร็จ");
   }
 }
