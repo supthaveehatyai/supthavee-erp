@@ -27,7 +27,7 @@ export async function submitShiftClosingAndMenuSalesAction(input: FnbShiftHandov
       p_menu_slip_is_cumulative: input.menuSlipIsCumulative,
       p_order_count: Math.round(input.orderCount) || 0,
       p_gross_sales: input.grossSales,
-      p_discount_total: input.discountTotal,
+      p_discount_total: input.discountTotal || (input.promoCouponDiscount ?? 0) + (input.deliveryDiscount ?? 0) + (input.storeManualDiscount ?? 0),
       p_cash_pos_input: input.cashPos,
       p_qr_input: input.qr,
       p_lineman_input: input.lineman,
@@ -60,6 +60,11 @@ export async function submitShiftClosingAndMenuSalesAction(input: FnbShiftHandov
         lineman: input.linemanScreenUrls ?? [],
         grab: input.grabScreenUrls ?? [],
       },
+      pos_promo_coupon_discount: input.promoCouponDiscount ?? 0,
+      delivery_price_diff_discount: input.deliveryDiscount ?? 0,
+      pos_store_manual_discount: input.storeManualDiscount ?? 0,
+      no_shift_waste_confirmed: input.noShiftWasteConfirmed === true,
+      closed_by_name: gate.displayActorName,
     }).eq("branch_code", input.branchCode).eq("work_date", input.workDate).eq("shift_type", input.shiftType);
     return result({ ok: true, createdMenus: num(body.auto_created_new_menus) });
   } catch (error) {

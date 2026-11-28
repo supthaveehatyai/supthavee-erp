@@ -217,7 +217,7 @@ export function OperationsWorkspace({
       )}
       <LiveBranchProvider key={`${branch}|${workDate}`} branch={branch} workDate={workDate} shiftSlot={shiftSlot} pinSlot={sessionShift} showCrewChrome={!(superAdmin && viewMode === "EXECUTIVE_INSPECTOR")}>
       {superAdmin && viewMode === "EXECUTIVE_INSPECTOR" ? (
-        <ExecutiveInspector brand={brand} workDate={workDate} branch={branch} stage={tab} onStage={setTab} onPickBranch={pickBranch} roster={<DualShiftRoster interactive={false} />} />
+        <ExecutiveInspector brand={brand} workDate={workDate} branch={branch} stage={tab} onStage={setTab} onPickBranch={pickBranch} actorName={staffName} roster={<DualShiftRoster interactive={false} />} />
       ) : <CrewLockedFieldset monthLocked={monthLocked}>
       <DualShiftRoster interactive />
       <div className="flex flex-wrap gap-2">

@@ -107,28 +107,29 @@ function openingCountRows(payload: unknown, fallback: { id: string; name: string
 }
 
 export async function getExecutiveInspectorAction(brand: string, workDate: string, branchCode: string): Promise<FnbActionResult<{ matrix: FnbInspectorMatrixRow[]; anomalies: FnbAuditAnomaly[]; detail: FnbInspectorDetail }>> {
-  const empty = { matrix: [] as FnbInspectorMatrixRow[], anomalies: [] as FnbAuditAnomaly[], detail: { sections: [], openingCards: [] as FnbInspectorOpeningCard[], wip: [], prepRows: [], openRows: [], replenishments: [], writeOffs: [], shiftCards: [], menus: [], closingCash: null, closingSpots: [], shrinkage: [], wasteLogs: [], shifts: [], photos: [] } };
+  const empty = { matrix: [] as FnbInspectorMatrixRow[], anomalies: [] as FnbAuditAnomaly[], detail: { sections: [], openingCards: [] as FnbInspectorOpeningCard[], wip: [], prepRows: [], openRows: [], replenishments: [], writeOffs: [], voidedWip: [], remakes: [], shiftCards: [], menus: [], closingCash: null, closingSpots: [], closingSpotTotal: 0, closingSpotDone: 0, shrinkage: [], wasteLogs: [], shifts: [], photos: [] } };
   try {
     await desk();
     const scope = brandOf(brand);
     const db = schemaAdmin().schema("fnb");
-    const [branches, confirms, batches, transfers, shifts, sales, equipment, writeOffs, counts, items, rosters, bases, cleaningLogs, cleaningSpots, menuSales, wasteLogs] = await Promise.all([
+    const [branches, confirms, batches, transfers, shifts, sales, equipment, writeOffs, counts, items, rosters, bases, cleaningLogs, cleaningSpots, menuSales, wasteLogs, remakeLogs] = await Promise.all([
       db.from("branches").select("branch_code,branch_name_th,brand_code,branch_status,coffee_dose_min_g,coffee_dose_max_g,espresso_time_min_s,espresso_time_max_s,espresso_yield_min_g,espresso_yield_max_g").eq("brand_code", scope).neq("branch_status", "INACTIVE").limit(20),
       db.from("daily_stage_section_confirmations").select("id,branch_code,stage_code,section_key,section_title_th,status_flag,numeric_amount,expected_amount,confirmed_by_name,confirmed_at,photo_urls,payload_json").eq("work_date", workDate).limit(2000),
-      db.from("bar_wip_batches").select("id,branch_code,batch_kind,prep_base_code,item_id,brew_portion_mode,packs_deducted,pack_uom,opened_at,opened_by_name,expires_at,sticker_label_text,open_photo_urls,batch_status,notes,is_voided_duplicate,sliced_piece_count,actual_usable_qty,is_estimated_net_weight").eq("work_date", workDate).limit(1000),
+      db.from("bar_wip_batches").select("id,branch_code,batch_kind,prep_base_code,item_id,brew_portion_mode,packs_deducted,pack_uom,opened_at,opened_by_name,expires_at,sticker_label_text,open_photo_urls,batch_status,notes,is_voided_duplicate,sliced_piece_count,actual_usable_qty,is_estimated_net_weight,source_ref_type,voided_at,voided_by_name,void_reason,stock_reversed_summary").eq("work_date", workDate).limit(1000),
       db.from("internal_zone_transfers").select("branch_code,item_id,qty_in_count_uom,created_at,staff_name,photo_url,from_location_code,to_location_code").eq("work_date", workDate).limit(1000),
-      db.from("shift_closings").select("branch_code,shift_type,staff_name,cash_variance,created_at,order_count,net_sales_inc_vat,cash_pos_amount,qr_amount,kshop_app_amount,lineman_gross_amount,lineman_app_amount,grab_gross_amount,grab_gp_amount,grab_net_payout_amount,webapp_amount,opening_float_amount,drawer_total_cash_counted,cash_handover_to_next_shift,handover_status,handover_accepted_by_name,handover_accepted_at,deposit_channel,seven_eleven_deposit_amount,seven_eleven_fee_thb,seven_eleven_slip_url,total_cash_for_eod_deposit,slip_image_urls,menu_slip_image_urls,app_screen_image_urls,handover_ack_photo_url,report_attachments_json").eq("work_date", workDate).limit(200),
+      db.from("shift_closings").select("branch_code,shift_type,staff_name,closed_by_name,cash_variance,created_at,order_count,gross_sales,net_sales_inc_vat,cash_pos_amount,qr_amount,kshop_app_amount,lineman_gross_amount,lineman_app_amount,grab_gross_amount,grab_gp_amount,grab_net_payout_amount,webapp_amount,opening_float_amount,drawer_total_cash_counted,cash_handover_to_next_shift,handover_status,handover_accepted_by_name,handover_accepted_at,handover_counted_drawer_cash,handover_ack_note,deposit_channel,seven_eleven_deposit_amount,seven_eleven_fee_thb,seven_eleven_slip_url,total_cash_for_eod_deposit,slip_image_urls,menu_slip_image_urls,app_screen_image_urls,handover_ack_photo_url,report_attachments_json,pos_promo_coupon_discount,delivery_price_diff_discount,pos_store_manual_discount").eq("work_date", workDate).limit(200),
       db.from("daily_menu_sales_headers").select("branch_code,created_at").eq("work_date", workDate).limit(50),
       db.from("daily_equipment_calibrations").select("branch_code,grinder_dose_g,espresso_time_sec,espresso_yield_g,syrup_random_target_g,syrup_measured_actual_g,photo_urls").eq("work_date", workDate).limit(20),
-      db.from("item_write_offs").select("id,branch_code,item_id,write_off_reason,qty_in_count_uom,photo_urls,reported_by_name,created_at").eq("work_date", workDate).limit(500),
+      db.from("item_write_offs").select("id,branch_code,item_id,write_off_reason,qty_in_count_uom,photo_urls,reported_by_name,created_at,shift_type,total_loss_cost_thb").eq("work_date", workDate).limit(500),
       db.from("zone_stock_counts").select("branch_code,item_id,counted_qty,shrinkage_diff_qty,count_stage,staff_name,opening_qty_ref,replenished_in_qty,pos_sold_qty,waste_qty,expected_qty").eq("count_date", workDate).limit(2000),
-      db.from("items").select("id,short_code,name_th,item_category,count_uom,brand_scope").eq("is_active", true).limit(2000),
+      db.from("items").select("id,short_code,name_th,item_category,count_uom,brand_scope,display_walk_order,display_sub_group").eq("is_active", true).limit(2000),
       db.from("shift_crew_rosters").select("branch_code,shift_slot,crew_members_json").eq("work_date", workDate).limit(40),
       db.from("prep_bases").select("base_code,base_name_th,yield_qty_ml").eq("brand_code", scope).limit(40),
       db.from("daily_cleaning_spot_logs").select("branch_code,stage_code,spot_id,spot_name_th,photo_url,checked_by_name,checked_at").eq("work_date", workDate).limit(2000),
       db.from("branch_cleaning_spots").select("id,branch_code,stage_code,schedule_type,schedule_weekdays,is_active").eq("is_active", true).limit(500),
       db.from("shift_menu_sales").select("branch_code,shift_type,raw_menu_name,cup_size,qty_sold,sales_amount").eq("work_date", workDate).limit(2000),
       db.from("daily_waste_logs").select("branch_code,staff_name,total_waste_cost_thb,notes,photo_urls,yield_adjusted_loss_thb").eq("work_date", workDate).limit(40),
+      db.from("shift_drink_remake_logs").select("id,branch_code,shift_type,menu_name_th,qty_cups,mistake_category,mistake_staff_name,total_bom_loss_thb,bom_deducted_summary_json,photo_urls,created_at").eq("work_date", workDate).limit(400),
     ]);
     if (branches.error) return fail(empty, branches.error, "อ่านสาขาไม่สำเร็จ");
     const branchRows = asRows(branches.data);
@@ -138,7 +139,7 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
       return !itemBrand || itemBrand === scope || itemBrand === "ALL";
     });
     const itemName = new Map(itemRows.map((row) => [text(row.id), `${text(row.short_code)} · ${text(row.name_th)}`]));
-    const itemMeta = new Map(itemRows.map((row) => [text(row.id), { name: text(row.name_th) || text(row.short_code), category: text(row.item_category), uom: text(row.count_uom) || "ชิ้น" }]));
+    const itemMeta = new Map(itemRows.map((row) => [text(row.id), { name: text(row.name_th) || text(row.short_code), category: text(row.item_category), uom: text(row.count_uom) || "ชิ้น", walk: num(row.display_walk_order), subgroup: text(row.display_sub_group) }]));
     const displayIds = new Set(asRows(items.data).filter((row) => ["BAKERY_FROZEN", "ICE_CREAM", "MERCHANDISE"].includes(text(row.item_category))).map((row) => text(row.id)));
     const anomalies: FnbAuditAnomaly[] = [];
     const limits = new Map(branchRows.map((branch) => [text(branch.branch_code), {
@@ -242,6 +243,8 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
         label: `${code}${base?.name ? ` · ${base.name}` : ""}`,
         portion: formatPrepPortionPct(packs, text(row.brew_portion_mode)),
         yieldLabel: yieldMl > 0 ? formatFnbQty(yieldMl, "ml") : "",
+        qtyLabel: formatFnbQty(packs, text(row.pack_uom) || "ชุด", false),
+        sourceRefType: text(row.source_ref_type),
         staff: text(row.opened_by_name),
         at: opened,
         badge: morningBrew ? "เปิดร้านเช้า" : "ต้มเพิ่มระหว่างวัน",
@@ -260,6 +263,7 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
           : note.match(/(\d+)\s*ลูก/) ? `${Number(note.match(/(\d+)\s*ลูก/)?.[1] || 0)} ลูก` : formatFnbQty(num(row.packs_deducted) || 1, text(row.pack_uom) || "ชิ้น", false),
         badge: note.includes("เปิดใช้") ? "เปิดใช้อยู่" : "เบิกใหม่",
         expiryLabel: expiry ? dayLabel(expiry) : (sticker || "เคลียร์สิ้นวัน"),
+        sourceRefType: text(row.source_ref_type),
         staff: text(row.opened_by_name),
         at: text(row.opened_at),
         photos: urls(row.open_photo_urls),
@@ -368,8 +372,13 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
       return [{
         shift: shift as "MORNING" | "AFTERNOON",
         staff: text(row.staff_name),
+        closedByName: text(row.closed_by_name) || text(row.staff_name),
         at: text(row.created_at),
         orderCount: num(row.order_count),
+        grossSales: num(row.gross_sales),
+        promoDiscount: num(row.pos_promo_coupon_discount),
+        deliveryDiscount: num(row.delivery_price_diff_discount),
+        storeDiscount: num(row.pos_store_manual_discount),
         netSales: num(row.net_sales_inc_vat),
         cash: num(row.cash_pos_amount),
         qr: num(row.qr_amount),
@@ -387,6 +396,8 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
         handoverStatus: text(row.handover_status),
         handoverAcceptedByName: text(row.handover_accepted_by_name),
         handoverAcceptedAt: text(row.handover_accepted_at),
+        handoverCounted: num(row.handover_counted_drawer_cash),
+        handoverAckNote: text(row.handover_ack_note),
         depositChannel: text(row.deposit_channel),
         sevenAmount: num(row.seven_eleven_deposit_amount),
         sevenFee: num(row.seven_eleven_fee_thb),
@@ -400,6 +411,8 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
       item: itemName.get(text(row.item_id)) || "รายการ",
       reason: text(row.write_off_reason),
       qty: num(row.qty_in_count_uom),
+      shift: text(row.shift_type),
+      cost: num(row.total_loss_cost_thb),
       staff: text(row.reported_by_name),
       at: text(row.created_at),
       photos: urls(row.photo_urls),
@@ -420,11 +433,16 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
       at: text(row.checked_at),
     })).filter((row) => row.url.startsWith("http"));
     const displayCats = new Set(["BAKERY_FROZEN", "ICE_CREAM", "MERCHANDISE", "CONE"]);
-    const shrinkMap = new Map<string, { item: string; uom: string; opening: number; replenished: number; sold: number; wasted: number; counted: number; hasCount: boolean; fromSheet: boolean }>();
+    const shrinkMap = new Map<string, { item: string; uom: string; group: "BAKERY" | "ICE" | "MERCH"; walkOrder: number; opening: number; replenished: number; sold: number; wasted: number; counted: number; hasCount: boolean; fromSheet: boolean }>();
+    function shrinkGroup(category: string, subgroup: string): "BAKERY" | "ICE" | "MERCH" {
+      if (category === "ICE_CREAM" || category === "CONE" || subgroup.includes("ไอศกรีม") || subgroup.includes("โคน")) return "ICE";
+      if (category === "MERCHANDISE") return "MERCH";
+      return "BAKERY";
+    }
     function shrinkRow(itemId: string) {
       const meta = itemMeta.get(itemId);
       if (!meta || !displayCats.has(meta.category)) return null;
-      const current = shrinkMap.get(itemId) ?? { item: meta.name, uom: meta.uom, opening: 0, replenished: 0, sold: 0, wasted: 0, counted: 0, hasCount: false, fromSheet: false };
+      const current = shrinkMap.get(itemId) ?? { item: meta.name, uom: meta.uom, group: shrinkGroup(meta.category, meta.subgroup), walkOrder: meta.walk, opening: 0, replenished: 0, sold: 0, wasted: 0, counted: 0, hasCount: false, fromSheet: false };
       shrinkMap.set(itemId, current);
       return current;
     }
@@ -453,7 +471,37 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
     }
     const shrinkage = [...shrinkMap.values()].map((row) => {
       const expected = row.opening + row.replenished - row.sold - row.wasted;
-      return { ...row, expected, counted: row.hasCount ? row.counted : null, missing: row.hasCount && row.counted + 0.001 < expected };
+      return { item: row.item, uom: row.uom, group: row.group, walkOrder: row.walkOrder, opening: row.opening, replenished: row.replenished, sold: row.sold, wasted: row.wasted, expected, counted: row.hasCount ? row.counted : null, missing: row.hasCount && row.counted + 0.001 < expected };
+    }).sort((left, right) => left.group.localeCompare(right.group) || left.walkOrder - right.walkOrder || left.item.localeCompare(right.item, "th"));
+    const closingSpotTotal = asRows(cleaningSpots.data).filter((row) => text(row.branch_code) === focus && text(row.stage_code) === "CLOSING").length;
+    const closingSpotDone = asRows(cleaningLogs.data).filter((row) => text(row.branch_code) === focus && text(row.stage_code) === "CLOSING").length;
+    const voidedWip = asRows(batches.data).filter((row) => text(row.branch_code) === focus && row.is_voided_duplicate === true).map((row) => ({
+      id: text(row.id),
+      label: text(row.prep_base_code) || itemName.get(text(row.item_id)) || "รายการ",
+      qtyLabel: formatFnbQty(num(row.packs_deducted) || num(row.sliced_piece_count) || 1, text(row.pack_uom) || "ชิ้น", false),
+      stockSummary: typeof row.stock_reversed_summary === "string" && text(row.stock_reversed_summary) ? text(row.stock_reversed_summary) : (row.stock_reversed_summary ? JSON.stringify(row.stock_reversed_summary) : "ยกเลิกสถานะหน้าบาร์"),
+      reason: text(row.void_reason),
+      staff: text(row.voided_by_name),
+      at: text(row.voided_at),
+    }));
+    const remakes = asRows(remakeLogs.data).filter((row) => text(row.branch_code) === focus).map((row) => {
+      const lines = Array.isArray(row.bom_deducted_summary_json) ? row.bom_deducted_summary_json : [];
+      const summary = lines.map((item) => {
+        const rec = recordOf(item);
+        return `${text(rec.code)} ${num(rec.qty)} ${text(rec.uom)}`.trim();
+      }).filter(Boolean).join(", ");
+      return {
+        id: text(row.id),
+        shift: text(row.shift_type),
+        menu: text(row.menu_name_th),
+        qty: num(row.qty_cups),
+        category: text(row.mistake_category),
+        staff: text(row.mistake_staff_name),
+        cost: num(row.total_bom_loss_thb),
+        summary,
+        photos: urls(row.photo_urls),
+        at: text(row.created_at),
+      };
     });
     const wasteRows = asRows(wasteLogs.data).filter((row) => text(row.branch_code) === focus).map((row) => ({
       staff: text(row.staff_name),
@@ -478,6 +526,8 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
           photo: text(row.photo_url),
         })),
         writeOffs: focusWriteOffs,
+        voidedWip,
+        remakes,
         shiftCards,
         menus: asRows(menuSales.data).filter((row) => text(row.branch_code) === focus).map((row) => ({
           shift: text(row.shift_type),
@@ -488,6 +538,8 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
         })),
         closingCash,
         closingSpots,
+        closingSpotTotal,
+        closingSpotDone,
         shrinkage,
         wasteLogs: wasteRows,
         shifts: focusShifts.map((row) => ({ shift: text(row.shift_type), staff: text(row.staff_name), variance: num(row.cash_variance) })),
@@ -499,15 +551,24 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
   }
 }
 
-export async function voidDuplicateWipBatchAction(batchId: string): Promise<FnbActionResult<{ ok: boolean }>> {
+export async function voidBarWipBatchAction(input: { batchId: string; reason: string }): Promise<FnbActionResult<{ ok: boolean; summary: string }>> {
+  const blank = { ok: false, summary: "" };
   try {
     const ctx = await desk();
-    if (!ctx.isSuperAdmin) return result({ ok: false }, "เฉพาะ Super Admin ซ่อนรายการกดซ้ำได้");
-    const updated = await schemaAdmin().schema("fnb").from("bar_wip_batches").update({ is_voided_duplicate: true }).eq("id", batchId);
-    if (updated.error) return fail({ ok: false }, updated.error, "ซ่อนรายการกดซ้ำไม่สำเร็จ");
-    return result({ ok: true });
+    const reason = input.reason.trim();
+    if (reason.length < 4) return result(blank, "ระบุเหตุผลการยกเลิกอย่างน้อย 4 ตัวอักษร");
+    const saved = await callFnbRpc("void_bar_wip_batch_with_reversal", {
+      p_batch_id: input.batchId,
+      p_void_reason: reason,
+      p_actor_name: ctx.displayActorName,
+      p_actor_user_id: ctx.userId,
+    });
+    if (saved.error) return fail(blank, saved.error, "ยกเลิกรายการไม่สำเร็จ");
+    const body = saved.data && typeof saved.data === "object" ? saved.data as Record<string, unknown> : {};
+    if (body.ok !== true) return result(blank, text(body.error) || "ยกเลิกรายการไม่สำเร็จ");
+    return result({ ok: true, summary: text(body.stock_reversed_summary) });
   } catch (error) {
-    return caught({ ok: false }, error, "ซ่อนรายการกดซ้ำไม่สำเร็จ");
+    return caught(blank, error, "ยกเลิกรายการไม่สำเร็จ");
   }
 }
 

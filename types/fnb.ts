@@ -929,8 +929,13 @@ export type FnbInspectorReportPhoto = { group: string; url: string };
 export type FnbInspectorShiftCard = {
   shift: "MORNING" | "AFTERNOON";
   staff: string;
+  closedByName: string;
   at: string;
   orderCount: number;
+  grossSales: number;
+  promoDiscount: number;
+  deliveryDiscount: number;
+  storeDiscount: number;
   netSales: number;
   cash: number;
   qr: number;
@@ -948,6 +953,8 @@ export type FnbInspectorShiftCard = {
   handoverStatus: string;
   handoverAcceptedByName: string;
   handoverAcceptedAt: string;
+  handoverCounted: number;
+  handoverAckNote: string;
   depositChannel: string;
   sevenAmount: number;
   sevenFee: number;
@@ -961,6 +968,8 @@ export type FnbInspectorMenuLine = { shift: string; name: string; size: string; 
 export type FnbInspectorShrinkRow = {
   item: string;
   uom: string;
+  group: "BAKERY" | "ICE" | "MERCH";
+  walkOrder: number;
   opening: number;
   replenished: number;
   sold: number;
@@ -970,18 +979,50 @@ export type FnbInspectorShrinkRow = {
   missing: boolean;
 };
 
+export type FnbInspectorVoidRow = {
+  id: string;
+  label: string;
+  qtyLabel: string;
+  stockSummary: string;
+  reason: string;
+  staff: string;
+  at: string;
+};
+
+export type FnbShiftIncidentView = {
+  remakes: { id: string; shift: string; menu: string; qty: number; category: string; staff: string; cost: number; summary: string; photos: string[] }[];
+  writeOffs: { id: string; shift: string; item: string; reason: string; qty: number; cost: number; staff: string; photos: string[] }[];
+};
+
+export type FnbInspectorRemake = {
+  id: string;
+  shift: string;
+  menu: string;
+  qty: number;
+  category: string;
+  staff: string;
+  cost: number;
+  summary: string;
+  photos: string[];
+  at: string;
+};
+
 export type FnbInspectorDetail = {
   sections: { key: string; title: string; staff: string; at: string; status: string; photos: string[] }[];
   openingCards: FnbInspectorOpeningCard[];
   wip: { label: string; portion: string; staff: string; at: string; sticker: string; photos: string[] }[];
-  prepRows: { id: string; label: string; portion: string; yieldLabel: string; staff: string; at: string; badge: string; photos: string[] }[];
-  openRows: { id: string; label: string; qtyLabel: string; badge: string; expiryLabel: string; staff: string; at: string; photos: string[] }[];
+  prepRows: { id: string; label: string; portion: string; yieldLabel: string; qtyLabel: string; sourceRefType: string; staff: string; at: string; badge: string; photos: string[] }[];
+  openRows: { id: string; label: string; qtyLabel: string; badge: string; expiryLabel: string; sourceRefType: string; staff: string; at: string; photos: string[] }[];
   replenishments: { item: string; qty: number; at: string; staff: string; photo: string }[];
-  writeOffs: { id: string; item: string; reason: string; qty: number; staff: string; at: string; photos: string[] }[];
+  writeOffs: { id: string; item: string; reason: string; qty: number; shift: string; cost: number; staff: string; at: string; photos: string[] }[];
+  voidedWip: FnbInspectorVoidRow[];
+  remakes: FnbInspectorRemake[];
   shiftCards: FnbInspectorShiftCard[];
   menus: FnbInspectorMenuLine[];
   closingCash: { amount: number; expected: number; staff: string; at: string; photos: { url: string; caption: string }[] } | null;
   closingSpots: { name: string; url: string; staff: string; at: string }[];
+  closingSpotTotal: number;
+  closingSpotDone: number;
   shrinkage: FnbInspectorShrinkRow[];
   wasteLogs: { staff: string; cost: number; notes: string; photos: string[] }[];
   shifts: { shift: string; staff: string; variance: number }[];
@@ -1197,6 +1238,9 @@ export type FnbPosFinancialSlip = {
   orderCount: number;
   grossSales: number;
   discountTotal: number;
+  promoCouponDiscount: number;
+  deliveryPriceDiffDiscount: number;
+  storeManualDiscount: number;
   cashAmount: number;
   thaiQrAmount: number;
   linemanAmount: number;
@@ -1252,6 +1296,10 @@ export type FnbShiftHandoverInput = {
   appScreenUrls: string[];
   linemanScreenUrls?: string[];
   grabScreenUrls?: string[];
+  promoCouponDiscount?: number;
+  deliveryDiscount?: number;
+  storeManualDiscount?: number;
+  noShiftWasteConfirmed?: boolean;
   menuLines: { raw_menu_name: string; cup_size: string; qty_sold: number; sales_amount: number; pos_category_name: string }[];
   note: string;
   overrideReason: string;

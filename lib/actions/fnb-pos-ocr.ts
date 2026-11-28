@@ -9,9 +9,10 @@ import type { FnbActionResult, FnbPosFinancialSlip, FnbPosMenuSlipLine, FnbPosSl
 
 const FINANCIAL_PROMPT = [
   "อ่านสลิปความร้อน Lucky Cup รายงานยอดขายตามช่วงเวลา หรือรายงานยอดขาย แล้วตอบ JSON เท่านั้น",
-  "คีย์: windowStart, windowEnd, isFullDayCumulative, orderCount, grossSales, discountTotal, cashAmount, thaiQrAmount, linemanAmount, grabfoodAmount, webAppAmount",
+  "คีย์: windowStart, windowEnd, isFullDayCumulative, orderCount, grossSales, discountTotal, promoCouponDiscount, deliveryPriceDiffDiscount, storeManualDiscount, cashAmount, thaiQrAmount, linemanAmount, grabfoodAmount, webAppAmount",
   "จับคู่ป้าย: 1. Cash=cashAmount, 2. THAI QR=thaiQrAmount, 3. LINEMAN=linemanAmount, 4. GRABFOOD=grabfoodAmount, 5. Web & App=webAppAmount",
   "จำนวนออเดอร์รวม=orderCount, ยอดขายรวม(หักบิลยกเลิก)=grossSales, ยอดรวมส่วนลดทั้งหมด=discountTotal",
+  "ส่วนลดคูปองหรือโปรโมชั่นสมาชิก=promoCouponDiscount, ส่วนต่างราคาเดลิเวอรี=deliveryPriceDiffDiscount, ส่วนลดหน้าร้านอื่นๆ=storeManualDiscount",
   "เวลาเริ่มต้น=windowStart, เวลาสิ้นสุด=windowEnd",
   "ตั้ง isFullDayCumulative=true เมื่อเวลาเริ่มต้นขึ้นต้นด้วย 00:00:00 หรือหัวสลิปคือรายงานยอดขายแบบสะสมทั้งวัน",
   "ไม่พบตัวเลขให้ใส่ 0 และข้อความว่าง",
@@ -64,7 +65,7 @@ function isSubtotalRow(name: string): boolean {
 
 function cupSizeOf(value: string, name: string): string {
   const size = value.trim().toUpperCase();
-  if (size === "R" || size === "L" || size === "SINGLE" || size === "16A") return size === "16A" ? "L" : size;
+  if (size === "R" || size === "L" || size === "SINGLE" || size === "16A" || size === "-") return size === "-" ? "SINGLE" : size;
   if (name.includes("(L)") || name.includes(" ใหญ่")) return "L";
   if (name.includes("(R)")) return "R";
   return "SINGLE";
@@ -161,6 +162,9 @@ export async function extractFnbPosSlipOcrAction(input: {
         orderCount: num(body.orderCount),
         grossSales: num(body.grossSales),
         discountTotal: num(body.discountTotal),
+        promoCouponDiscount: num(body.promoCouponDiscount),
+        deliveryPriceDiffDiscount: num(body.deliveryPriceDiffDiscount),
+        storeManualDiscount: num(body.storeManualDiscount),
         cashAmount: num(body.cashAmount),
         thaiQrAmount: num(body.thaiQrAmount),
         linemanAmount: num(body.linemanAmount),

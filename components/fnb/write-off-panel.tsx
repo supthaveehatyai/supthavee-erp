@@ -19,10 +19,12 @@ export function WriteOffButton(props: {
   brand: FnbBrandCode;
   staffName: string;
   locations: { locationCode: string; locationNameTh: string }[];
+  shiftType?: "MORNING" | "AFTERNOON";
+  label?: string;
   onDone?: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  if (!open) return <button type="button" className="rounded-md border border-red-300 bg-white px-3 py-2 text-sm" onClick={() => setOpen(true)}>🗑️ แจ้งตัดของเสีย / ขนส่งแตกหัก / ขึ้นรา / หมดอายุ</button>;
+  if (!open) return <button type="button" className="rounded-md border border-red-300 bg-white px-3 py-2 text-sm" onClick={() => setOpen(true)}>{props.label || "🗑️ แจ้งตัดของเสีย / ขนส่งแตกหัก / ขึ้นรา / หมดอายุ"}</button>;
   return <WriteOffForm {...props} onClose={() => setOpen(false)} />;
 }
 
@@ -33,6 +35,7 @@ function WriteOffForm(props: {
   brand: FnbBrandCode;
   staffName: string;
   locations: { locationCode: string; locationNameTh: string }[];
+  shiftType?: "MORNING" | "AFTERNOON";
   onDone?: () => void;
   onClose: () => void;
 }) {
@@ -83,6 +86,7 @@ function WriteOffForm(props: {
         vendorClaimable: claim,
         photoUrls: [photo],
         notes,
+        shiftType: props.shiftType,
         actorSource: props.actorSource,
         brandLock: props.brand,
       }).then((saved) => {

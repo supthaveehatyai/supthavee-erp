@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useLiveBranch } from "@/components/fnb/shift-crew-bar";
-import { getExecutiveInspectorAction, voidDuplicateWipBatchAction } from "@/lib/actions/fnb-audit";
+import { VoidBarBatchButton } from "@/components/fnb/void-bar-batch-modal";
+import { mistakeLabel } from "@/components/fnb/shift-incident-block";
+import { getExecutiveInspectorAction } from "@/lib/actions/fnb-audit";
+import { drawerCustody } from "@/lib/utils/fnb-cash";
 import { swapShiftCrewSeatAction } from "@/lib/actions/fnb-live-sync";
 import { bangkokHour } from "@/lib/fnb/stage-progress";
 import type { FnbBrandCode, FnbInspectorDetail, FnbInspectorMatrixRow, FnbInspectorShiftCard, FnbSopStageInstance } from "@/types/fnb";
@@ -12,7 +15,7 @@ function hm(iso: string | null): string {
   if (!iso) return "";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date);
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(date);
 }
 
 function today(): string {
@@ -125,6 +128,7 @@ export function ExecutiveInspector(props: {
   onStage: (stage: FnbSopStageInstance | "WIP") => void;
   onPickBranch: (code: string) => void;
   roster: ReactNode;
+  actorName: string;
 }) {
   const [matrix, setMatrix] = useState<FnbInspectorMatrixRow[]>([]);
   const [detail, setDetail] = useState<FnbInspectorDetail | null>(null);
@@ -192,7 +196,7 @@ export function ExecutiveInspector(props: {
             <button key={item.id} type="button" className={`rounded-full px-3 py-1.5 text-sm ${props.stage === item.id ? "bg-[var(--fnb-brand)] text-white" : "bg-white ring-1 ring-slate-200"}`} onClick={() => props.onStage(item.id)}>{item.label}</button>
           ))}
         </div>
-        <InspectorStage stage={props.stage} detail={detail} onTick={() => setTick((value) => value + 1)} />
+        <InspectorStage stage={props.stage} detail={detail} actorName={props.actorName} onTick={() => setTick((value) => value + 1)} />
       </article>
     </section>
   );
@@ -209,7 +213,8 @@ function ChannelGrid({ card, title }: { card: FnbInspectorShiftCard; title: stri
   return (
     <section className="rounded-xl border p-3">
       <h3 className="font-semibold">{title}</h3>
-      <p className="mt-1 text-sm">ยอดขายสุทธิรวม {baht(card.netSales)} · จำนวนออเดอร์ {card.orderCount.toLocaleString("th-TH")}</p>
+      <p className="mt-1 text-sm">ยอดขายรวมก่อนลด {baht(card.grossSales)} · สุทธิ {baht(card.netSales)} · จำนวนออเดอร์ {card.orderCount.toLocaleString("th-TH")}</p>
+      <p className="text-xs text-slate-600">🎟️ ส่วนลดคูปอง / โปรโมชั่นสมาชิก {baht(card.promoDiscount)} · 🛵 ส่วนต่างราคาเดลิเวอรี {baht(card.deliveryDiscount)} · 🏷️ ส่วนลดหน้าร้านอื่นๆ {baht(card.storeDiscount)}</p>
       <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
         {boxes.map(([label, value, note]) => (
           <div key={label} className="rounded-lg bg-slate-50 p-2 text-sm">
@@ -247,7 +252,56 @@ function MenuList({ rows }: { rows: FnbInspectorDetail["menus"] }) {
   );
 }
 
-function InspectorStage(props: { stage: FnbSopStageInstance | "WIP"; detail: FnbInspectorDetail | null; onTick: () => void }) {
+function CustodyCard(props: { morning: FnbInspectorShiftCard; shift1: string; shift2: string }) {
+  const morning = props.morning;
+  const held = drawerCustody(morning.openingFloat, morning.drawerCounted, morning.cashHandover);
+  const accepted = morning.handoverStatus === "ACCEPTED_BY_AFTERNOON" || morning.handoverStatus === "DISPUTED_VARIANCE";
+  const pending = morning.handoverStatus === "PENDING_AFTERNOON_ACK" || !accepted;
+  const diff = morning.handoverCounted - held.total;
+  return (
+    <section className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm">
+      <h3 className="font-semibold">โซ่ความรับผิดชอบเงินสดระหว่างกะ</h3>
+      <div className="mt-2 grid gap-3 lg:grid-cols-2">
+        <div className="rounded-lg bg-white p-3">
+          <p className="font-semibold">📤 ผู้สรุปและส่งมอบเงินสดกะเช้า</p>
+          <p>ผู้ส่งยอดกะเช้า: 👤 {morning.closedByName || morning.staff || "-"} (ทีมกะเช้า: {props.shift1 || "-"}) · เวลาส่ง: {hm(morning.at)} น.</p>
+          <p>เงินทอนตั้งต้นติดเก๊ะ: {baht(held.float)} + ขายสดกะเช้าตาม POS: {baht(morning.cash)} = ควรมีเงินสดรวมในเก๊ะ: {baht(held.float + morning.cash)}</p>
+          <p className="font-semibold">รวมเงินสดในเก๊ะที่กะเช้านับส่งจริง: {baht(held.total)}</p>
+          <p>แบ่งเป็น เงินทอนติดเก๊ะ {baht(held.float)} + เงินสดขายส่งต่อกะบ่าย {baht(held.sales)} · ส่วนต่าง {baht(morning.cashVariance)}</p>
+        </div>
+        <div className="rounded-lg bg-white p-3">
+          <p className="font-semibold">📥 ผู้ตรวจนับและกดรับยอดเงินสดกะบ่าย</p>
+          {accepted ? (
+            <>
+              <p>ผู้รับยอดกะบ่าย: 👤 {morning.handoverAcceptedByName || "-"} (ทีมกะบ่าย: {props.shift2 || "-"}) · เวลารับยอด: {hm(morning.handoverAcceptedAt)} น.</p>
+              <p>ยอดเงินรวมในเก๊ะที่กะบ่ายนับรับจริง: {baht(morning.handoverCounted)}</p>
+              {Math.abs(diff) < 0.009 ? <p>🟢 ครบตรงกัน 0.00 ฿</p> : <p className="font-semibold text-red-700">🔴 เงินไม่ตรง {baht(diff)} · หมายเหตุ: {morning.handoverAckNote || "-"}</p>}
+            </>
+          ) : pending ? <p className="rounded bg-amber-100 px-2 py-1">⏳ รอทีมกะบ่าย ({props.shift2 || "-"}) ตรวจนับเงินในเก๊ะและกดรับยอด</p> : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function IncidentCard(props: { detail: FnbInspectorDetail | null; shift: "MORNING" | "AFTERNOON" }) {
+  const label = props.shift === "MORNING" ? "กะเช้า" : "กะบ่าย";
+  const remakes = (props.detail?.remakes ?? []).filter((row) => row.shift === props.shift);
+  const offs = (props.detail?.writeOffs ?? []).filter((row) => row.shift === props.shift);
+  return (
+    <section className="rounded-xl border border-red-200 bg-red-50/50 p-3 text-sm">
+      <h3 className="font-semibold">⚠️ รายการทำเมนูผิด / ชงใหม่ และของเสียหายประจำ{label}</h3>
+      {remakes.length + offs.length === 0 ? <p className="text-slate-600">ไม่มีรายการของ{label}</p> : null}
+      {remakes.map((row) => <p key={row.id}>{row.menu} · {row.qty} แก้ว · {mistakeLabel(row.category)} · {row.staff} <span className="rounded border border-red-200 bg-red-50 px-1 font-semibold text-red-600">-{row.cost.toFixed(2)} ฿</span> {row.summary}</p>)}
+      {offs.map((row) => <p key={row.id}>{row.item} · {row.reason} · {row.qty} · {row.staff} <span className="rounded border border-red-200 bg-red-50 px-1 font-semibold text-red-600">-{row.cost.toFixed(2)} ฿</span></p>)}
+    </section>
+  );
+}
+
+function InspectorStage(props: { stage: FnbSopStageInstance | "WIP"; detail: FnbInspectorDetail | null; actorName: string; onTick: () => void }) {
+  const live = useLiveBranch();
+  const shift1 = (live.snapshot?.rosters ?? []).find((row) => row.shiftSlot === "SHIFT_1")?.members.map((member) => member.staffName).filter(Boolean).join(", ") || "";
+  const shift2 = (live.snapshot?.rosters ?? []).find((row) => row.shiftSlot === "SHIFT_2")?.members.map((member) => member.staffName).filter(Boolean).join(", ") || "";
   const detail = props.detail;
   const morning = detail?.shiftCards.find((row) => row.shift === "MORNING") ?? null;
   const afternoon = detail?.shiftCards.find((row) => row.shift === "AFTERNOON") ?? null;
@@ -256,34 +310,34 @@ function InspectorStage(props: { stage: FnbSopStageInstance | "WIP"; detail: Fnb
       <div className="space-y-3">
         <div className="grid gap-4 lg:grid-cols-2">
           <section className="rounded-xl border p-3">
-            <h3 className="mb-2 text-sm font-semibold">🫖 ต้มเบสวันนี้</h3>
+            <h3 className="mb-2 text-sm font-semibold">🫖 เบสที่ต้มวันนี้</h3>
             {(detail?.prepRows.length ?? 0) === 0 ? <p className="text-xs text-slate-500">ยังไม่มีเบสที่ต้มวันนี้</p> : (
               <ul className="space-y-2 text-sm">
                 {detail?.prepRows.map((row) => (
-                  <li key={row.id} className="border-t pt-2">
-                    <p>{row.label} <span className="rounded-full bg-[#DC2626] px-2 py-0.5 text-xs font-bold text-white">{row.portion}</span> {row.yieldLabel}</p>
-                    <p className="text-xs text-slate-600">{row.badge} · {row.staff} · {hm(row.at)} น.</p>
-                    <ZoomThumbs photos={row.photos.map((url) => ({ url, caption: row.label, staff: row.staff, at: row.at }))} />
+                  <li key={row.id} className="flex items-start justify-between gap-2 border-t pt-2">
+                    <div>
+                      <p>{row.label} <span className="rounded-full bg-[#DC2626] px-2 py-0.5 text-xs font-bold text-white">{row.portion}</span> {row.yieldLabel}</p>
+                      <p className="text-xs text-slate-600">{row.badge} · {row.qtyLabel} · {row.staff} · {hm(row.at)} น.</p>
+                      <ZoomThumbs photos={row.photos.map((url) => ({ url, caption: row.label, staff: row.staff, at: row.at }))} />
+                    </div>
+                    <VoidBarBatchButton batchId={row.id} label={row.label} qtyLabel={row.qtyLabel} staff={row.staff} at={hm(row.at)} sourceRefType={row.sourceRefType} actorName={props.actorName} onDone={props.onTick} />
                   </li>
                 ))}
               </ul>
             )}
           </section>
           <section className="rounded-xl border p-3">
-            <h3 className="mb-2 text-sm font-semibold">🥫 ซอส นม และผลไม้สดหน้าบาร์</h3>
+            <h3 className="mb-2 text-sm font-semibold">🥫 ซอสและวัตถุดิบหน้าบาร์</h3>
             {(detail?.openRows.length ?? 0) === 0 ? <p className="text-xs text-slate-500">ยังไม่มีซอสหรือวัตถุดิบเปิดใช้</p> : (
               <ul className="space-y-2 text-sm">
                 {detail?.openRows.map((row) => (
-                  <li key={row.id} className="border-t pt-2">
-                    <p className="font-semibold">{row.label} · {row.qtyLabel}</p>
-                    <p className="text-xs text-slate-600">{row.badge} · หมดอายุ {row.expiryLabel} · {row.staff} · {hm(row.at)} น.</p>
-                    <ZoomThumbs photos={row.photos.map((url) => ({ url, caption: row.label, staff: row.staff, at: row.at }))} />
-                    <button type="button" className="text-xs text-slate-500" onClick={() => {
-                      void voidDuplicateWipBatchAction(row.id).then((saved) => {
-                        if (saved.error || !saved.data.ok) toast.error(saved.error || "ซ่อนรายการไม่สำเร็จ");
-                        else { toast.success("ซ่อนรายการกดซ้ำแล้ว"); props.onTick(); }
-                      });
-                    }}>ซ่อนรายการกดซ้ำ</button>
+                  <li key={row.id} className="flex items-start justify-between gap-2 border-t pt-2">
+                    <div>
+                      <p className="font-semibold">{row.label} · {row.qtyLabel}</p>
+                      <p className="text-xs text-slate-600">{row.badge} · หมดอายุ {row.expiryLabel} · {row.staff} · {hm(row.at)} น.</p>
+                      <ZoomThumbs photos={row.photos.map((url) => ({ url, caption: row.label, staff: row.staff, at: row.at }))} />
+                    </div>
+                    <VoidBarBatchButton batchId={row.id} label={row.label} qtyLabel={row.qtyLabel} staff={row.staff} at={hm(row.at)} sourceRefType={row.sourceRefType} actorName={props.actorName} onDone={props.onTick} />
                   </li>
                 ))}
               </ul>
@@ -307,22 +361,26 @@ function InspectorStage(props: { stage: FnbSopStageInstance | "WIP"; detail: Fnb
             ))}
           </section>
         </div>
+        {(detail?.voidedWip.length ?? 0) > 0 ? (
+          <details className="rounded-xl border border-rose-200 bg-rose-50/60 p-3 text-sm">
+            <summary className="cursor-pointer font-semibold">🕵️ ประวัติรายการที่ถูกยกเลิก/คืนสต็อกวันนี้ ({detail?.voidedWip.length})</summary>
+            <div className="mt-2 space-y-2">
+              {detail?.voidedWip.map((row) => (
+                <p key={row.id}>{row.label} · {row.qtyLabel} | {row.stockSummary || "-"} | {row.reason} | ยกเลิกโดย: {row.staff} · {hm(row.at)} น.</p>
+              ))}
+            </div>
+          </details>
+        ) : null}
       </div>
     );
   }
   if (props.stage === "SHIFT_1") {
     if (!morning) return <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">⏳ ทีมกะเช้ายังไม่ได้ส่งสรุปยอดปิดกะแรก</p>;
-    const expected = morning.openingFloat + morning.cash;
-    const accepted = morning.handoverStatus === "ACCEPTED_BY_AFTERNOON";
     return (
       <div className="space-y-3">
         <ChannelGrid card={morning} title="📊 สรุปยอดขายกะเช้าครบ 5 ช่องทาง" />
-        <section className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm">
-          <h3 className="font-semibold">🤝 การส่งมอบเงินสดในเก๊ะให้กะบ่าย (รวบฝาก 7-11 หลังปิดร้าน)</h3>
-          <p className="mt-1">เงินทอนตั้งต้น ({baht(morning.openingFloat)}) + ขายสดกะเช้า ({baht(morning.cash)}) = ควรมีในเก๊ะ {baht(expected)}</p>
-          <p>นับเงินในเก๊ะจริง: {baht(morning.drawerCounted)} · เงินสดขายส่งต่อกะบ่าย: {baht(morning.cashHandover)} · ส่วนต่าง: {baht(morning.cashVariance)}</p>
-          <p className="mt-1 font-semibold">{accepted ? `✅ กะบ่ายตรวจรับยอดแล้วโดย ${morning.handoverAcceptedByName} · เวลา ${hm(morning.handoverAcceptedAt)} น.` : "⏳ รอกะบ่ายตรวจนับกดรับ"}</p>
-        </section>
+        <CustodyCard morning={morning} shift1={shift1} shift2={shift2} />
+        <IncidentCard detail={detail} shift="MORNING" />
         <section className="rounded-xl border p-3">
           <h3 className="font-semibold">🧾 รายงานการขายแนบจาก POS, LineMan, Grab / K SHOP (เฉพาะกะเช้า)</h3>
           <ReportGroups photos={morning.photos} />
@@ -335,7 +393,6 @@ function InspectorStage(props: { stage: FnbSopStageInstance | "WIP"; detail: Fnb
     );
   }
   if (props.stage === "SHIFT_2" || props.stage === "SHIFT_3") {
-    const accepted = morning?.handoverStatus === "ACCEPTED_BY_AFTERNOON";
     const combined = morning && afternoon ? {
       ...afternoon,
       orderCount: morning.orderCount + afternoon.orderCount,
@@ -352,10 +409,8 @@ function InspectorStage(props: { stage: FnbSopStageInstance | "WIP"; detail: Fnb
     } : null;
     return (
       <div className="space-y-3">
-        <section className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm">
-          <h3 className="font-semibold">🤝 ยอดเงินสดยกมาจากกะเช้า</h3>
-          {morning ? <p>{accepted ? `✅ กะบ่ายตรวจรับยอดแล้วโดย ${morning.handoverAcceptedByName} · ${hm(morning.handoverAcceptedAt)} น.` : "⏳ รอกะบ่ายตรวจนับกดรับ"} · ส่งต่อ {baht(morning.cashHandover)}</p> : <p>⏳ ทีมกะเช้ายังไม่ได้ส่งสรุปยอดปิดกะแรก</p>}
-        </section>
+        {morning ? <CustodyCard morning={morning} shift1={shift1} shift2={shift2} /> : <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm">⏳ ทีมกะเช้ายังไม่ได้ส่งสรุปยอดปิดกะแรก</p>}
+        <IncidentCard detail={detail} shift="AFTERNOON" />
         {afternoon ? <ChannelGrid card={afternoon} title="📊 สรุปยอดขายกะบ่ายครบ 5 ช่องทาง" /> : <p className="rounded-xl border p-3 text-sm">⏳ กะบ่ายยังไม่ได้ปิดยอด</p>}
         {combined ? <ChannelGrid card={combined} title="ยอดรวมทั้งวัน เช้า+บ่าย" /> : null}
         <section className="rounded-xl border p-3 text-sm">
@@ -389,7 +444,7 @@ function InspectorStage(props: { stage: FnbSopStageInstance | "WIP"; detail: Fnb
           ) : <p className="text-slate-500">ยังไม่ยืนยันเงินสดติดเก๊ะปิดร้าน</p>}
         </section>
         <section className="rounded-xl border p-3 text-sm">
-          <h3 className="font-semibold">หมวดปิดร้านที่ 2: ความสะอาดและล้างอุปกรณ์ปิดร้าน ({detail?.closingSpots.length ?? 0} จุด)</h3>
+          <h3 className="font-semibold">ความสะอาดและล้างอุปกรณ์ปิดร้าน (ถ่ายแล้ว {detail?.closingSpotDone ?? 0} / {detail?.closingSpotTotal ?? 0} จุด)</h3>
           {(detail?.closingSpots.length ?? 0) === 0 ? <p className="text-slate-500">ยังไม่มีรูปความสะอาดปิดร้าน</p> : (
             <ZoomThumbs photos={(detail?.closingSpots ?? []).map((spot) => ({ url: spot.url, caption: spot.name, staff: spot.staff, at: spot.at }))} />
           )}
@@ -398,20 +453,36 @@ function InspectorStage(props: { stage: FnbSopStageInstance | "WIP"; detail: Fnb
           <h3 className="font-semibold">หมวดปิดร้านที่ 3: ตารางเช็คสต็อกและของหายหน้าร้าน (Shrinkage Reconciliation)</h3>
           {(detail?.shrinkage.length ?? 0) === 0 ? <p className="text-slate-500">ยังไม่มีรายการโชว์ใหเทียบยอด</p> : (
             <div className="overflow-auto">
-              <table className="min-w-full text-left text-xs">
-                <thead><tr><th className="py-1">รายการ</th><th>เปิดร้าน</th><th>เบิกเติม</th><th>ขาย</th><th>ตัดเสีย</th><th>ควรเหลือ</th><th>นับจริง</th></tr></thead>
+              <table className="min-w-full border-collapse text-left text-xs">
+                <thead><tr className="border-b"><th className="py-1">รายการ</th><th>เปิดร้าน</th><th>เบิกเติม</th><th>ขาย</th><th>ตัดเสีย</th><th>ควรเหลือ</th><th>นับจริง</th><th>ส่วนต่าง / สถานะ</th></tr></thead>
                 <tbody>
-                  {(detail?.shrinkage ?? []).map((row) => (
-                    <tr key={row.item} className={`border-t ${row.missing ? "bg-red-50 text-red-800" : ""}`}>
-                      <td className="py-1">{row.item}</td>
-                      <td>{row.opening}</td>
-                      <td>{row.replenished}</td>
-                      <td>{row.sold}</td>
-                      <td>{row.wasted}</td>
-                      <td>{row.expected} {row.uom}</td>
-                      <td>{row.counted == null ? "ยังไม่นับ" : `${row.counted} ${row.uom}`}</td>
-                    </tr>
-                  ))}
+                  {(["BAKERY", "ICE", "MERCH"] as const).map((group) => {
+                    const rows = (detail?.shrinkage ?? []).filter((row) => row.group === group);
+                    if (rows.length === 0) return null;
+                    const title = group === "BAKERY" ? "🥐 ตู้แช่เบเกอรี่หน้าร้าน" : group === "ICE" ? "🍦 ตู้ไอศกรีมและโคน" : "🎁 ชั้นโชว์ของพรีเมียม";
+                    return (
+                      <Fragment key={group}>
+                        <tr><td colSpan={8} className="bg-slate-100 px-2 py-1 font-semibold">{title}</td></tr>
+                        {rows.map((row, index) => {
+                          const short = row.counted != null && row.counted < row.expected;
+                          const over = row.counted != null && row.counted > row.expected;
+                          const tone = short ? "!bg-red-50/95 border-l-4 border-l-red-600 text-red-950" : over ? "!bg-amber-50/90 border-l-4 border-l-amber-500" : index % 2 === 0 ? "bg-white" : "bg-slate-50/90";
+                          return (
+                            <tr key={row.item} className={`border-t border-slate-200 hover:bg-slate-100/70 ${tone}`}>
+                              <td className="border border-slate-100 px-1 py-1">{row.item}</td>
+                              <td className="border border-slate-100 px-1">{row.opening}</td>
+                              <td className="border border-slate-100 px-1">{row.replenished}</td>
+                              <td className="border border-slate-100 px-1">{row.sold}</td>
+                              <td className="border border-slate-100 px-1">{row.wasted > 0 ? <span className="rounded bg-red-50 px-1.5 font-semibold text-red-600">{row.wasted}</span> : row.wasted}</td>
+                              <td className="border border-slate-100 px-1">{row.expected} {row.uom}</td>
+                              <td className="border border-slate-100 px-1">{row.counted == null ? "ยังไม่นับ" : `${row.counted} ${row.uom}`}</td>
+                              <td className="border border-slate-100 px-1">{short ? <span className="font-semibold text-red-700">🔴 ขาด -{row.expected - (row.counted ?? 0)} {row.uom}</span> : over ? <span className="font-semibold text-amber-700">🟠 เกิน +{(row.counted ?? 0) - row.expected} {row.uom}</span> : row.counted != null ? <span className="font-semibold text-emerald-700">🟢 ครบตรง</span> : "-"}</td>
+                            </tr>
+                          );
+                        })}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -419,9 +490,9 @@ function InspectorStage(props: { stage: FnbSopStageInstance | "WIP"; detail: Fnb
         </section>
         <section className="rounded-xl border p-3 text-sm">
           <h3 className="font-semibold">หมวดปิดร้านที่ 4: บันทึกเททิ้งเบสและเลมอนสดท้ายวัน (EOD Waste)</h3>
-          {(detail?.wasteLogs.length ?? 0) === 0 ? <p className="text-slate-500">ยังไม่มีบันทึกของเสียท้ายวัน</p> : detail?.wasteLogs.map((row) => (
-            <div key={`${row.staff}-${row.cost}`} className="border-t py-2">
-              <p>{row.staff} · มูลค่าเสียหาย {baht(row.cost)}</p>
+          {(detail?.wasteLogs.length ?? 0) === 0 ? <p className="text-slate-500">ยังไม่มีบันทึกของเสียท้ายวัน</p> : detail?.wasteLogs.map((row, index) => (
+            <div key={`${row.staff}-${row.cost}-${index}`} className={`border-t py-2 ${index % 2 === 0 ? "bg-white" : "bg-slate-50/90"}`}>
+              <p>{row.staff} · มูลค่าเสียหาย <span className="rounded border border-red-200 bg-red-50 px-1.5 font-semibold text-red-600">{baht(row.cost)}</span></p>
               {row.notes ? <p className="whitespace-pre-wrap text-slate-600">{row.notes}</p> : null}
               <ZoomThumbs photos={row.photos.map((url) => ({ url, caption: "ของเสียท้ายวัน", staff: row.staff }))} />
             </div>

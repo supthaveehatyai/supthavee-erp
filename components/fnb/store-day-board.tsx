@@ -21,6 +21,7 @@ import { CashFloatConfirm } from "@/components/fnb/cash-float-confirm";
 import { CleaningSpots } from "@/components/fnb/cleaning-spots";
 import { CoworkerBanner } from "@/components/fnb/coworker-banner";
 import { DisplayCabinetGrid } from "@/components/fnb/display-cabinet-grid";
+import { ShiftDrinkRemakeModal } from "@/components/fnb/shift-incident-block";
 import { WriteOffButton } from "@/components/fnb/write-off-panel";
 import { confirmStageSectionAction, listStageConfirmationsAction } from "@/lib/actions/fnb-stage";
 import { findSection, LockedSectionCard, UnsavedDraftBar } from "@/components/fnb/section-confirm-card";
@@ -380,6 +381,22 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
   );
 }
 
+function lockedShift(): "MORNING" | "AFTERNOON" {
+  const hour = Number(new Intl.DateTimeFormat("en-GB", { hour: "2-digit", hourCycle: "h23", timeZone: "Asia/Bangkok" }).format(new Date()));
+  return hour >= 14 ? "AFTERNOON" : "MORNING";
+}
+
+function RemakeShortcut(props: { branch: string; workDate: string; actorSource: "desktop" | "liff"; brand: FnbBrandCode; staffName: string }) {
+  const [open, setOpen] = useState(false);
+  const shift = lockedShift();
+  return (
+    <>
+      <button type="button" className="rounded-md border border-red-300 bg-white px-3 py-2 text-sm" onClick={() => setOpen(true)}>🥤 แจ้งทำเมนูผิด / ชงใหม่</button>
+      <ShiftDrinkRemakeModal open={open} onClose={() => setOpen(false)} branch={props.branch} workDate={props.workDate} brand={props.brand} actorSource={props.actorSource} staffName={props.staffName} shiftType={shift} onDone={() => setOpen(false)} />
+    </>
+  );
+}
+
 export function MiddayShortcuts(props: { branch: string; workDate: string; actorSource: "desktop" | "liff"; brandLock: FnbBrandCode | null; staffName: string; brand: FnbBrandCode }) {
   const brandLock = props.brandLock ?? "";
   const { board, reload } = useBoard(props.branch, props.workDate, props.actorSource, brandLock);
@@ -432,7 +449,8 @@ export function MiddayShortcuts(props: { branch: string; workDate: string; actor
         <button type="button" className="rounded-full bg-white px-3 py-1 text-sm" onClick={() => setOpen("sauce")}>เทซอสขวดใหม่</button>
         <button type="button" className="rounded-full bg-white px-3 py-1 text-sm" onClick={() => setOpen("lemon")}>🍋 หั่นเลมอนเพิ่ม / หั่นผลไม้สด</button>
         <button type="button" className="rounded-full bg-white px-3 py-1 text-sm" onClick={() => setOpen("move")}>เบิกย้ายจุดจัดเก็บ</button>
-        <WriteOffButton branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={props.brand} staffName={props.staffName} locations={board?.locations ?? []} onDone={reload} />
+        <WriteOffButton branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={props.brand} staffName={props.staffName} locations={board?.locations ?? []} shiftType={lockedShift()} onDone={reload} />
+        <RemakeShortcut branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={props.brand} staffName={props.staffName} />
       </div>
       {open === "base" ? (
         <div className="space-y-2">
@@ -640,10 +658,11 @@ function CountRow(props: { line: FnbZoneCountLine; qty: Record<string, string>; 
   const extra = counted == null || Number.isNaN(counted) ? 0 : counted - props.line.expectedQty;
   const unit = props.line.isCatchWeight ? (props.line.pieceLabel || "ลูก") : "ชิ้น";
   return (
-    <div className={`rounded-lg p-3 text-sm ${missing > 0 ? "bg-red-50" : "bg-slate-50"}`}>
+    <div className={`rounded-lg border-l-4 p-3 text-sm odd:bg-white even:bg-slate-50 ${missing > 0 ? "!bg-red-50/95 border-l-red-600 text-red-950" : extra > 0 ? "!bg-amber-50/90 border-l-amber-500" : "border-l-emerald-500"}`}>
       <p className="font-medium">{props.line.shortCode} {props.line.nameTh}</p>
       {props.line.isCatchWeight ? <p>ควรเหลือ {props.line.expectedQty} {unit}</p> : <p>เปิดเช้า {props.line.openingQty} + เบิกเติม {props.line.replenishedQty} − ขาย POS {props.line.posSoldQty} − ตัดเสีย {props.line.writeOffQty} = ควรเหลือ {props.line.expectedQty}</p>}
-      {missing > 0 ? <p>🚨 ของหาย {missing} {unit}</p> : null}
+      {props.line.writeOffQty > 0 ? <p className="font-semibold text-red-600">ตัดเสีย {props.line.writeOffQty}</p> : null}
+      {missing > 0 ? <p className="font-semibold text-red-600">🔴 ขาด -{missing} {unit}</p> : extra > 0 ? <p className="font-semibold text-amber-700">🟠 เกิน +{extra} {unit}</p> : counted != null ? <p className="font-semibold text-emerald-700">🟢 ครบตรง</p> : null}
       {props.line.isCatchWeight ? (
         <div className="mt-2 space-y-2">
           <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={carton} onChange={(event) => setCarton(event.target.checked)} /> นับลังปิดเป็น กก.</label>

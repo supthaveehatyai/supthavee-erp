@@ -168,6 +168,7 @@ export async function recordItemWriteOffAction(input: {
   vendorClaimable?: boolean;
   photoUrls: string[];
   notes?: string;
+  shiftType?: "MORNING" | "AFTERNOON";
   actorSource: string;
   brandLock: string;
 }): Promise<FnbActionResult<{ ok: boolean; writeOffNo: string }>> {
@@ -195,7 +196,11 @@ export async function recordItemWriteOffAction(input: {
     if (saved.error) return fail({ ok: false, writeOffNo: "" }, saved.error, "บันทึกตัดของเสียไม่สำเร็จ");
     const body = rpcBody(saved.data);
     if (body.ok === false) return result({ ok: false, writeOffNo: "" }, text(body.error) || "บันทึกตัดของเสียไม่สำเร็จ");
-    return result({ ok: true, writeOffNo: text(body.write_off_no) });
+    const writeOffNo = text(body.write_off_no);
+    if (input.shiftType && writeOffNo) {
+      await schemaAdmin().schema("fnb").from("item_write_offs").update({ shift_type: input.shiftType }).eq("write_off_no", writeOffNo);
+    }
+    return result({ ok: true, writeOffNo });
   } catch (error) {
     return caught({ ok: false, writeOffNo: "" }, error, "บันทึกตัดของเสียไม่สำเร็จ");
   }
