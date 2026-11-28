@@ -2,14 +2,16 @@ import { Suspense } from "react";
 import { FnbBrandBar } from "@/components/fnb/fnb-brand-bar";
 import { listFnbBranchOptionsAction, listFrontBackItemsAction, listPendingShiftApprovalsAction } from "@/lib/actions/fnb-operations";
 import { resolveActiveBrand, fnbToneClass } from "@/lib/fnb/active-brand";
+import { listedBranch } from "@/lib/fnb/brand-branch";
 import { requireFnbDeskAccess } from "@/lib/holding/workspace-access";
 import { OperationsWorkspace } from "@/app/fnb/operations/operations-workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function FnbOperationsPage({ searchParams }: { searchParams: Promise<{ brand?: string }> }) {
+export default async function FnbOperationsPage({ searchParams }: { searchParams: Promise<{ brand?: string; branch?: string }> }) {
   const ctx = await requireFnbDeskAccess();
   const params = await searchParams;
+  const requestedBranch = params.branch;
   const brand = resolveActiveBrand(ctx.isSuperAdmin, ctx.assignedBrandCode, params.brand);
   const [branches, shelf, approvals] = await Promise.all([
     listFnbBranchOptionsAction(),
@@ -29,6 +31,7 @@ export default async function FnbOperationsPage({ searchParams }: { searchParams
         actorSource="desktop"
         initialApprovals={approvals.data}
         activeBrand={brand}
+        initialBranch={listedBranch(visible, requestedBranch)}
       />
     </div>
   );

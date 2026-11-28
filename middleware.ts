@@ -10,19 +10,24 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isAuthPath, isPublicLineWebhookPath } from "@/lib/auth/module-access";
 import { updateSession } from "@/lib/supabase/update-session";
 
+function allowCamera(response: NextResponse) {
+  response.headers.set("Permissions-Policy", "camera=(self)");
+  return response;
+}
+
 export async function middleware(request: NextRequest) {
   if (
     request.nextUrl.pathname.startsWith("/api/line") ||
     request.nextUrl.pathname.startsWith("/api/fnb/server-time") ||
     isPublicLineWebhookPath(request.nextUrl.pathname)
   ) {
-    return NextResponse.next();
+    return allowCamera(NextResponse.next());
   }
 
   if (request.nextUrl.pathname === "/liff/register" || request.nextUrl.pathname.startsWith("/liff/register/")) {
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set("x-pathname", request.nextUrl.pathname);
-    return NextResponse.next({ request: { headers: requestHeaders } });
+    return allowCamera(NextResponse.next({ request: { headers: requestHeaders } }));
   }
 
   const { pathname } = request.nextUrl;
@@ -30,16 +35,16 @@ export async function middleware(request: NextRequest) {
   if (isAuthPath(pathname)) {
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set("x-pathname", pathname);
-    return NextResponse.next({
+    return allowCamera(NextResponse.next({
       request: { headers: requestHeaders },
-    });
+    }));
   }
 
   if (isPrefetchWithSession(request)) {
-    return NextResponse.next();
+    return allowCamera(NextResponse.next());
   }
 
-  return updateSession(request);
+  return allowCamera(await updateSession(request));
 }
 
 function isPrefetchWithSession(request: NextRequest): boolean {

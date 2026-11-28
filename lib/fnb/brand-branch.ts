@@ -1,5 +1,10 @@
 import type { FnbBrandCode } from "@/types/fnb";
 
+export function listedBranch(branches: { branch_code: string }[], requested: string | undefined): string {
+  if (requested && branches.some((item) => item.branch_code === requested)) return requested;
+  return branches[0]?.branch_code ?? "";
+}
+
 export function preferredBranchCode(brand: FnbBrandCode): string {
   return brand === "CHATORN" ? "CT-KLN" : "LC-HDY";
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getScopedBranchMenuSalesAction } from "@/lib/actions/fnb-menu-sales";
 import type { FnbBranchOption, FnbScopedMenuSales } from "@/types/fnb";
 
@@ -14,19 +14,22 @@ function daysAgo(days: number) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(date);
 }
 
-export function BranchMenuSales({ branches }: { branches: FnbBranchOption[] }) {
-  const [branchCode, setBranchCode] = useState(branches[0]?.branch_code ?? "");
+export function BranchMenuSales({ branches, branchCode: activeBranch = "" }: { branches: FnbBranchOption[]; branchCode?: string }) {
+  const [branchCode, setBranchCode] = useState(activeBranch || branches[0]?.branch_code || "");
   const [dateFrom, setDateFrom] = useState(daysAgo(6));
   const [dateTo, setDateTo] = useState(today());
   const [report, setReport] = useState<FnbScopedMenuSales | null>(null);
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
+  useEffect(() => {
+    if (activeBranch && branches.some((item) => item.branch_code === activeBranch)) setBranchCode(activeBranch);
+  }, [activeBranch, branches]);
 
   return (
     <section className="space-y-3 rounded-2xl bg-white p-3 shadow-sm">
       <h2 className="font-semibold text-slate-900">ยอดขายรายเมนูสาขา</h2>
       <div className="grid gap-2">
-        <select className="h-10 rounded-lg border px-3 text-sm" value={branchCode} onChange={(event) => setBranchCode(event.target.value)}>
+        <select className="h-10 rounded-lg border px-3 text-sm" value={branchCode} disabled={branches.length <= 1} onChange={(event) => setBranchCode(event.target.value)}>
           {branches.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code} {item.branch_name_th}</option>)}
         </select>
         <div className="grid grid-cols-2 gap-2">

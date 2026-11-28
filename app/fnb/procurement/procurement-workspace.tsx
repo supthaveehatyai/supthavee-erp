@@ -175,6 +175,7 @@ export function ManualReceive({
   revealCost,
   actorSource = "desktop",
   setMessage,
+  branchCode = "",
 }: {
   branches: FnbBranchOption[];
   items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom" | "allow_decimal_count_qty" | "count_uom">[];
@@ -182,8 +183,10 @@ export function ManualReceive({
   revealCost: boolean;
   actorSource?: "desktop" | "liff";
   setMessage?: (message: string) => void;
+  branchCode?: string;
 }) {
   const [lines, setLines] = useState([{ item_id: items[0]?.id ?? "", qty: "", uom: items[0]?.default_purchase_uom ?? "" }]);
+  const [receiveBranch, setReceiveBranch] = useState(branchCode || branches[0]?.branch_code || "");
   const [query, setQuery] = useState("");
   const [zones, setZones] = useState<{ locationCode: string; locationNameTh: string; isDefaultGrTarget: boolean }[]>([]);
   const [location, setLocation] = useState("");
@@ -191,14 +194,17 @@ export function ManualReceive({
   const [, start] = useTransition();
   const visible = items.filter((item) => itemMatches(query, item));
   useEffect(() => {
-    const branch = branches[0]?.branch_code;
+    if (branchCode && branches.some((item) => item.branch_code === branchCode)) setReceiveBranch(branchCode);
+  }, [branchCode, branches]);
+  useEffect(() => {
+    const branch = receiveBranch || branches[0]?.branch_code;
     if (!branch) return;
     void listBranchZonesAction(branch).then((loaded) => {
       const next = loaded.data.map((row) => ({ locationCode: row.locationCode, locationNameTh: row.locationNameTh, isDefaultGrTarget: row.isDefaultGrTarget }));
       setZones(next);
       setLocation(next.find((row) => row.isDefaultGrTarget)?.locationCode ?? next[0]?.locationCode ?? "");
     });
-  }, [branches]);
+  }, [branches, receiveBranch]);
   return (
     <form className="space-y-3 rounded-xl border bg-white p-4" onSubmit={(event) => {
       event.preventDefault();
@@ -220,7 +226,7 @@ export function ManualReceive({
     }}>
       <h2 className="font-semibold">รับวัตถุดิบเข้าด่วน</h2>
       <div className="grid gap-2 md:grid-cols-2">
-        <select className={field} name="receiving_branch_code" onChange={(event) => { void listBranchZonesAction(event.target.value).then((loaded) => { const next = loaded.data.map((row) => ({ locationCode: row.locationCode, locationNameTh: row.locationNameTh, isDefaultGrTarget: row.isDefaultGrTarget })); setZones(next); setLocation(next.find((row) => row.isDefaultGrTarget)?.locationCode ?? next[0]?.locationCode ?? ""); }); }}>{branches.map((branch) => <option key={branch.branch_code} value={branch.branch_code}>{branch.branch_code} {branch.branch_name_th}</option>)}</select>
+        <select className={field} name="receiving_branch_code" value={receiveBranch} disabled={branches.length <= 1} onChange={(event) => setReceiveBranch(event.target.value)}>{branches.map((branch) => <option key={branch.branch_code} value={branch.branch_code}>{branch.branch_code} {branch.branch_name_th}</option>)}</select>
         <select className={field} name="target_location_code" value={location} onChange={(event) => setLocation(event.target.value)}>{zones.map((zone) => <option key={zone.locationCode} value={zone.locationCode}>รับเข้าเก็บที่ {zone.locationNameTh}</option>)}</select>
         <input className={`${field} md:col-span-2`} value={query} placeholder="ค้นรหัสย่อ รหัสเรียก หรือชื่อสินค้า" onChange={(event) => setQuery(event.target.value)} />
         <input className={field} name="vendor_name" placeholder="ผู้ขาย" />

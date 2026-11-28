@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { BranchPills, fnbBranchStorageKey, useStoredBranch } from "@/components/fnb/branch-pills";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import { transferFnbStockAction } from "@/lib/actions/fnb-inventory";
 import { listBranchZonesAction, saveZoneCountsAction } from "@/lib/actions/fnb-store-day";
@@ -27,6 +29,8 @@ export function InventoryWorkspace({
   balances,
   items,
   blindCount = false,
+  initialBranch = "",
+  actorName = "",
 }: {
   brand: FnbBrandCode;
   branches: FnbBranchOption[];
@@ -34,9 +38,32 @@ export function InventoryWorkspace({
   items: CountItem[];
   blindCount?: boolean;
   showCost?: boolean;
+  initialBranch?: string;
+  actorName?: string;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [tab, setTab] = useState<"sheet" | "transfer">("sheet");
-  const [branch, setBranch] = useState(branches[0]?.branch_code ?? "");
+  const [branch, setBranch] = useState(() => branchForBrand(branches, brand, initialBranch || branches[0]?.branch_code || ""));
+  const storageKey = fnbBranchStorageKey(brand, actorName);
+  const pickBranch = useCallback((code: string) => {
+    const next = branchForBrand(branches, brand, code);
+    if (!next) return;
+    setBranch(next);
+    localStorage.setItem(storageKey, next);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("branch") === next) return;
+    params.set("branch", next);
+    router.replace(`${pathname}?${params.toString()}`);
+  }, [brand, branches, pathname, router, storageKey]);
+  useStoredBranch(storageKey, branches, pickBranch);
+  const seenBranch = useRef(initialBranch);
+  useEffect(() => {
+    if (initialBranch === seenBranch.current) return;
+    seenBranch.current = initialBranch;
+    const next = branchForBrand(branches, brand, initialBranch);
+    if (next) setBranch(next);
+  }, [brand, branches, initialBranch]);
   useEffect(() => {
     const next = branchForBrand(branches, brand, branch);
     if (next !== branch) setBranch(next);
@@ -76,9 +103,10 @@ export function InventoryWorkspace({
         <button type="button" className={`rounded-full px-3 py-1 text-sm ${tab === "transfer" ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setTab("transfer")}>🔄 โอนสินค้าระหว่างสาขา</button>
       </div>
       {message ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{message}</p> : null}
+      <BranchPills branches={sameBrand} active={branch} onPick={pickBranch} />
       {tab === "sheet" ? (
         <section className="space-y-3">
-          <select className={field} value={branch} onChange={(event) => setBranch(event.target.value)}>
+          <select className={field} value={branch} disabled={sameBrand.length <= 1} onChange={(event) => pickBranch(event.target.value)}>
             {sameBrand.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code} {item.branch_name_th}</option>)}
           </select>
           <div className="flex flex-wrap gap-2">
@@ -151,7 +179,7 @@ export function InventoryWorkspace({
         }}>
           <h2 className="font-semibold md:col-span-2">โอนสินค้าระหว่างสาขา (เฉพาะแบรนด์เดียวกันเท่านั้น)</h2>
           <p className="rounded-lg bg-[var(--fnb-tint)] px-3 py-2 text-sm md:col-span-2">🔒 ล็อกโอนเฉพาะภายในแบรนด์ {FNB_BRAND_THEME[brand].label} เท่านั้น</p>
-          <label className="text-sm">จากสาขา<select className={field} value={branch} onChange={(event) => setBranch(event.target.value)}>{sameBrand.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code}</option>)}</select></label>
+          <label className="text-sm">จากสาขา<select className={field} value={branch} disabled={sameBrand.length <= 1} onChange={(event) => pickBranch(event.target.value)}>{sameBrand.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code}</option>)}</select></label>
           <label className="text-sm">ไปสาขา<select className={field} name="to_branch_code">{sameBrand.filter((item) => item.branch_code !== branch).map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code}</option>)}</select></label>
           <label className="text-sm">สินค้า<select className={field} name="item_id">{items.map((item) => <option key={item.id} value={item.id}>{item.short_code} {item.name_th}</option>)}</select></label>
           <label className="text-sm">จำนวน<FnbQtyInput name="qty" unit={items[0]?.count_uom} /></label>

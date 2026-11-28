@@ -1,12 +1,15 @@
 import { redirect } from "next/navigation";
 import { listFnbBranchOptionsAction, listFrontBackItemsAction } from "@/lib/actions/fnb-operations";
 import { listExpiryWorkspaceAction, listReceiveItemsAction } from "@/lib/actions/fnb-procurement";
+import { listedBranch } from "@/lib/fnb/brand-branch";
 import { requireWorkspacePageAccess } from "@/lib/holding/workspace-access";
 import { BrandStore } from "@/app/liff/brand-store";
 
 export const dynamic = "force-dynamic";
 
-export default async function ChatornLiffPage() {
+export default async function ChatornLiffPage({ searchParams }: { searchParams: Promise<{ branch?: string }> }) {
+  const params = await searchParams;
+  const requestedBranch = params.branch;
   const ctx = await requireWorkspacePageAccess("fnb");
   if (!ctx.isSuperAdmin && ctx.assignedBrandCode !== "CHATORN") {
     redirect(ctx.assignedBrandCode === "LUCKY_CUP" ? "/liff/luckycup" : "/forbidden");
@@ -35,6 +38,7 @@ export default async function ChatornLiffPage() {
       schemaMessage={visible.length === 0 ? "บัญชียังไม่ถูกกำหนดสาขา" : branches.error || shelf.error || items.error || expiry.error}
       actorName={ctx.displayActorName}
       branchLabel={branchLabel}
+      initialBranch={listedBranch(visible, requestedBranch)}
       showGoodsReceipt={ctx.isSuperAdmin || ctx.fnbModulePermissions.goods_receipt_expiry}
       showMenuSales={ctx.isSuperAdmin || ctx.fnbModulePermissions.own_branch_menu_sales}
     />

@@ -14,8 +14,16 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: {
       // Expense OCR FormData (compressed image) — avoid 413 on Vercel
-      bodySizeLimit: "5mb",
+      bodySizeLimit: "10mb",
     },
+  },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [{ key: "Permissions-Policy", value: "camera=(self)" }],
+      },
+    ];
   },
   images: {
     remotePatterns: [

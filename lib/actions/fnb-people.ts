@@ -245,7 +245,7 @@ export async function saveFnbEmployeeAction(formData: FormData): Promise<{ succe
       username,
       brand_code: brand,
       primary_branch_code: primary,
-      allowed_branch_codes: allowed,
+      allowed_branch_codes: Array.from(new Set([...allowed, primary])),
       legal_entity_id: entityId,
       hire_date: text(formData.get("hire_date")) || new Date().toISOString().slice(0, 10),
       employment_type: employmentType,
@@ -286,13 +286,18 @@ export async function saveFnbEmployeeAction(formData: FormData): Promise<{ succe
     }
     await storePrivateFile(employeeId, "idcard", formData.get("id_card"));
     await storePrivateFile(employeeId, "bankbook", formData.get("bank_book"));
-    const linkedUser = text(formData.get("user_id"));
+    let linkedUser = text(formData.get("user_id"));
+    if (!linkedUser && existingId) {
+      const currentUser = await schemaAdmin().schema("fnb").from("employees").select("user_id").eq("id", existingId).maybeSingle();
+      linkedUser = text((currentUser.data as { user_id?: string } | null)?.user_id);
+    }
+    const branchCodes = Array.from(new Set([...allowed, primary]));
     if (linkedUser) {
-      await schemaAdmin().schema("holding").from("user_workspace_grants").update({ workspace_role: systemRole }).eq("user_id", linkedUser);
+      await syncWorkspaceGrant(linkedUser, username, nickname, brand, systemRole, branchCodes);
       await createClient().from("user_profiles").update({ role_code: chosen?.appRoleCode || systemRole.toLowerCase(), updated_at: new Date().toISOString() }).eq("id", linkedUser);
     }
     if (formData.get("open_login") === "true") {
-      const opened = await ensureLogin(ctx, employeeId, username, fullName, nickname, brand, primary, allowed, text(payload.hire_date), systemRole, chosen?.appRoleCode || systemRole.toLowerCase());
+      const opened = await ensureLogin(ctx, employeeId, username, fullName, nickname, brand, primary, branchCodes, text(payload.hire_date), systemRole, chosen?.appRoleCode || systemRole.toLowerCase());
       if (!opened.success) return opened;
     }
     await audit(ctx, "EMPLOYEE_SAVED", fullName, { employeeId, username, brand });
@@ -302,6 +307,34 @@ export async function saveFnbEmployeeAction(formData: FormData): Promise<{ succe
     if (isRedirectError(err)) throw err;
     return { success: false, error: err instanceof Error ? err.message : "บันทึกพนักงานไม่สำเร็จ" };
   }
+}
+
+async function syncWorkspaceGrant(userId: string, username: string, nickname: string, brand: string, role: string, branches: string[]) {
+  const codes = Array.from(new Set(branches.filter(Boolean)));
+  const patch = {
+    allowed_branch_codes: codes,
+    assigned_brand_code: brand,
+    staff_nickname: nickname,
+    workspace_role: role,
+  };
+  const existing = await schemaAdmin().schema("holding").from("user_workspace_grants").select("user_id").eq("user_id", userId).maybeSingle();
+  if (existing.data) {
+    await schemaAdmin().schema("holding").from("user_workspace_grants").update(patch).eq("user_id", userId);
+    return;
+  }
+  await schemaAdmin().schema("holding").from("user_workspace_grants").insert({
+    user_id: userId,
+    username,
+    must_change_pin: false,
+    is_super_admin: false,
+    primary_workspace: "fnb",
+    allowed_workspaces: ["fnb"],
+    is_active: true,
+    can_view_fnb_reports: false,
+    can_view_cost_price: false,
+    hr_can_view_exec_private_pay: false,
+    ...patch,
+  });
 }
 
 async function storePrivateFile(employeeId: string, kind: "idcard" | "bankbook", value: FormDataEntryValue | null) {
@@ -367,7 +400,7 @@ async function ensureLogin(
     workspace_role: systemRole,
     allowed_workspaces: ["fnb"],
     assigned_brand_code: brand,
-    allowed_branch_codes: allowed,
+    allowed_branch_codes: Array.from(new Set([...allowed, primary])),
     staff_nickname: nickname,
     start_work_date: hireDate,
     is_active: true,

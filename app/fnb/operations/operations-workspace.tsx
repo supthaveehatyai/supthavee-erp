@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { branchForBrand } from "@/lib/fnb/brand-branch";
+import { BranchPills, fnbBranchStorageKey, useStoredBranch } from "@/components/fnb/branch-pills";
 import { toast } from "sonner";
 import { ApprovalQueue } from "@/app/fnb/approval-queue";
 import { CashFloatNote } from "@/components/fnb/cash-float-note";
@@ -60,6 +62,7 @@ export function OperationsWorkspace({
   actorSource,
   initialApprovals = [],
   activeBrand,
+  initialBranch = "",
 }: {
   branches: FnbBranchOption[];
   shelfItems: FnbItemRow[];
@@ -69,9 +72,12 @@ export function OperationsWorkspace({
   actorSource: "desktop" | "liff";
   initialApprovals?: FnbChangeRequestRow[];
   activeBrand: FnbBrandCode;
+  initialBranch?: string;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [tab, setTab] = useState<FnbSopStageInstance | "WIP">("OPENING");
-  const [branch, setBranch] = useState(branches[0]?.branch_code ?? "");
+  const [branch, setBranch] = useState(() => branchForBrand(branches, activeBrand, initialBranch || branches[0]?.branch_code || ""));
   const [workDate, setWorkDate] = useState(today());
   const staffName = actorName;
   const [message, setMessage] = useState("");
@@ -84,10 +90,35 @@ export function OperationsWorkspace({
   const [, start] = useTransition();
   const selected = branches.find((item) => item.branch_code === branch) ?? null;
   const brand = activeBrand;
+  const storageKey = fnbBranchStorageKey(activeBrand, actorName);
+  const pickBranch = useCallback((code: string) => {
+    const next = branchForBrand(branches, activeBrand, code);
+    if (!next) return;
+    setBranch(next);
+    localStorage.setItem(storageKey, next);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("branch") === next) return;
+    params.set("branch", next);
+    router.replace(`${pathname}?${params.toString()}`);
+  }, [activeBrand, branches, pathname, router, storageKey]);
+  useStoredBranch(storageKey, branches, pickBranch);
+  const seenBranch = useRef(initialBranch);
+  useEffect(() => {
+    if (initialBranch === seenBranch.current) return;
+    seenBranch.current = initialBranch;
+    const next = branchForBrand(branches, activeBrand, initialBranch);
+    if (next) setBranch(next);
+  }, [activeBrand, branches, initialBranch]);
   useEffect(() => {
     const next = branchForBrand(branches, activeBrand, branch);
     if (next !== branch) setBranch(next);
   }, [activeBrand, branches, branch]);
+  useEffect(() => {
+    const assisted = superAdmin && actorSource === "desktop" && viewMode === "STAFF_ASSIST";
+    if (assisted) document.documentElement.dataset.fnbAssisted = "1";
+    else delete document.documentElement.dataset.fnbAssisted;
+    return () => { delete document.documentElement.dataset.fnbAssisted; };
+  }, [actorSource, superAdmin, viewMode]);
   const heading = brand === "LUCKY_CUP" ? "ปฏิบัติการ Lucky Cup" : "ปฏิบัติการชาทรตะโหมด";
 
   useEffect(() => {
@@ -158,14 +189,15 @@ export function OperationsWorkspace({
       {superAdmin && viewMode === "STAFF_ASSIST" ? <p className="rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-950">กำลังอยู่ในโหมดคีย์ข้อมูลแทนพนักงาน — กลับสู่โหมดผู้บริหาร Read-Only</p> : null}
       {message ? <p className={`rounded-lg px-3 py-2 text-sm ${message.includes("รออนุมัติ") ? "bg-amber-50 text-amber-900" : message.includes("เรียบร้อย") || message.includes("แล้ว") ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`}>{message}</p> : null}
       {superAdmin ? <ApprovalQueue requests={approvals} onDone={() => { void listPendingShiftApprovalsAction().then((listed) => setApprovals(listed.data)); }} /> : null}
+      {actorSource === "desktop" ? <BranchPills branches={branches} active={branch} onPick={pickBranch} /> : null}
       <div className="grid gap-3 rounded-xl border border-red-100 bg-white p-4 md:grid-cols-3">
-        <select className={field} value={branch} disabled={branches.length <= 1} onChange={(event) => setBranch(event.target.value)}>
+        <select className={field} value={branch} disabled={branches.length <= 1} onChange={(event) => pickBranch(event.target.value)}>
           {branches.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code} {item.branch_name_th}</option>)}
         </select>
         <p className="flex h-10 items-center rounded-md bg-red-50 px-3 text-sm text-red-900">ผู้ปฏิบัติงาน: {staffName || "บัญชีที่ล็อกอิน"}</p>
         <input className={field} type="date" value={workDate} onChange={(event) => setWorkDate(event.target.value)} />
       </div>
-      {superAdmin && viewMode === "EXECUTIVE_INSPECTOR" ? <ExecutiveInspector brand={brand} workDate={workDate} branch={branch} onPickBranch={setBranch} /> : <fieldset disabled={monthLocked} className="min-w-0 space-y-4 border-0 p-0 disabled:opacity-70">
+      {superAdmin && viewMode === "EXECUTIVE_INSPECTOR" ? <ExecutiveInspector brand={brand} workDate={workDate} branch={branch} onPickBranch={pickBranch} /> : <fieldset disabled={monthLocked} className="min-w-0 space-y-4 border-0 p-0 disabled:opacity-70">
       <div className="flex flex-wrap gap-2">
         <TabButton active={tab === "OPENING"} onClick={() => setTab("OPENING")}>1. เปิดร้าน (กะแรก)</TabButton>
         <TabButton active={tab === "WIP"} onClick={() => setTab("WIP")}>ต้มเบสเพิ่มและเบิกเปิดของขึ้นบาร์</TabButton>
@@ -176,7 +208,7 @@ export function OperationsWorkspace({
       </div>
       <MiddayShortcuts branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brandLock} staffName={staffName} brand={brand} />
       {tab === "OPENING" ? <OpeningChecklist branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brand} staffName={staffName} cashFloat={selected?.standard_cash_float} /> : null}
-      {tab === "SHIFT_1" || tab === "SHIFT_2" ? <ClosePanel brand={brand} brandLock={brandLock} superAdmin={superAdmin} branch={branch} branches={branches} workDate={workDate} staffName={staffName} actorSource={actorSource} day={day} busy={busy} run={run} lockShift={tab === "SHIFT_1" ? "MORNING" : "AFTERNOON"} /> : null}
+      {tab === "SHIFT_1" || tab === "SHIFT_2" ? <ClosePanel brand={brand} brandLock={brandLock} superAdmin={superAdmin} branch={branch} branches={branches} workDate={workDate} staffName={staffName} actorSource={actorSource} day={day} busy={busy} run={run} lockShift={tab === "SHIFT_1" ? "MORNING" : "AFTERNOON"} onBranch={pickBranch} /> : null}
       {tab === "SHIFT_3" ? <Shift3Panel brandLock={brandLock} branch={branch} workDate={workDate} actorSource={actorSource} busy={busy === "shift3"} run={run} /> : null}
       {tab === "WIP" ? <WipPanel branch={branch} workDate={workDate} brand={brand} actorSource={actorSource} actorName={staffName} enableShift3={Boolean(selected?.enable_shift_3)} /> : null}
       {tab === "CLOSING" ? <><ClosingWipBanner branch={branch} workDate={workDate} /><WastePanel brand={brand} brandLock={brandLock} branch={branch} workDate={workDate} staffName={staffName} actorSource={actorSource} shelfItems={shelfItems} day={day} busy={busy} run={run} /><MenuSalesPanel branch={branch} workDate={workDate} brand={brand} actorSource={actorSource} /><NightCloseCount branch={branch} workDate={workDate} actorSource={actorSource} brandLock={brand} staffName={staffName} cashFloat={selected?.standard_cash_float} /></> : null}
@@ -202,6 +234,7 @@ function ClosePanel(props: {
   busy: string | null;
   run: (key: string, task: () => Promise<{ error: string | null; data: FnbSubmitResult }>, success: string) => void;
   lockShift?: "MORNING" | "AFTERNOON";
+  onBranch: (code: string) => void;
 }) {
   const morning = props.day?.shifts.find((shift) => shift.shift_type === "MORNING") ?? null;
   const afternoon = props.day?.shifts.find((shift) => shift.shift_type === "AFTERNOON") ?? null;
@@ -223,7 +256,7 @@ function ClosePanel(props: {
       )}
       {pending ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">รออนุมัติแก้ไขตัวเลขการเงิน ({pending.request_no})</p> : null}
       <ShiftForm {...props} shiftType={activeShift} current={current} />
-      {props.brand === "LUCKY_CUP" && props.superAdmin ? <PosExcelBox branches={props.branches.filter((item) => item.brand_code === "LUCKY_CUP")} /> : null}
+      {props.brand === "LUCKY_CUP" && props.superAdmin ? <PosExcelBox branches={props.branches.filter((item) => item.brand_code === "LUCKY_CUP")} branch={props.branch} onBranch={props.onBranch} /> : null}
     </section>
   );
 }
@@ -557,15 +590,14 @@ function SettlementPanel({
   );
 }
 
-function PosExcelBox({ branches }: { branches: FnbBranchOption[] }) {
+function PosExcelBox({ branches, branch, onBranch }: { branches: FnbBranchOption[]; branch: string; onBranch: (code: string) => void }) {
   const [preview, setPreview] = useState<FnbPosImportPreview | null>(null);
-  const [branch, setBranch] = useState(branches[0]?.branch_code ?? "");
   const [busy, setBusy] = useState(false);
   const [, start] = useTransition();
   return (
     <section className="space-y-3 rounded-xl border bg-white p-4" onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const file = event.dataTransfer.files?.[0]; if (file) read(file); }}>
       <h2 className="font-semibold">นำเข้า Excel POS</h2>
-      <select className={field} value={branch} disabled={branches.length <= 1} onChange={(event) => setBranch(event.target.value)}>{branches.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code}</option>)}</select>
+      <select className={field} value={branch} disabled={branches.length <= 1} onChange={(event) => onBranch(event.target.value)}>{branches.map((item) => <option key={item.branch_code} value={item.branch_code}>{item.branch_code}</option>)}</select>
       <input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) read(file); }} />
       {preview ? <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-4 py-2 text-sm text-white" disabled={busy} onClick={() => {
         setBusy(true);
