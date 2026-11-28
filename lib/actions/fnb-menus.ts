@@ -35,6 +35,8 @@ export async function listFnbMenusAction(): Promise<FnbActionResult<{ bases: Fnb
         temperature: text(row.temperature),
         retail_price: num(row.retail_price),
         is_active: row.is_active !== false,
+        is_bom_pending: row.is_bom_pending === true,
+        is_auto_discovered: row.is_auto_discovered === true,
       })),
       lines: asRows(lines.data).map((row) => ({
         id: text(row.id),

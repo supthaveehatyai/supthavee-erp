@@ -354,6 +354,8 @@ export type FnbMenuRow = {
   temperature: string;
   retail_price: number;
   is_active: boolean;
+  is_bom_pending: boolean;
+  is_auto_discovered: boolean;
 };
 
 export type FnbMenuBomLineRow = {
@@ -1005,6 +1007,155 @@ export type FnbLiveCleaningLog = {
   checkedAt: string;
 };
 
+export type FnbPosFinancialSlip = {
+  windowStart: string;
+  windowEnd: string;
+  isFullDayCumulative: boolean;
+  orderCount: number;
+  grossSales: number;
+  discountTotal: number;
+  cashAmount: number;
+  thaiQrAmount: number;
+  linemanAmount: number;
+  grabfoodAmount: number;
+  webAppAmount: number;
+};
+
+export type FnbPosMenuSlipLine = {
+  rawMenuName: string;
+  cupSize: string;
+  qtySold: number;
+  salesAmount: number;
+  posCategoryName: string;
+  menuId: string | null;
+  matchedName: string;
+  isNewMenu: boolean;
+};
+
+export type FnbPosSlipExtract = {
+  slipKind: "FINANCIAL_SUMMARY" | "MENU_SALES";
+  financial: FnbPosFinancialSlip | null;
+  lines: FnbPosMenuSlipLine[];
+  totalQtyReported: number;
+  totalAmountReported: number;
+  isCategoryOnlyWarning: boolean;
+};
+
+export type FnbShiftHandoverInput = {
+  branchCode: string;
+  workDate: string;
+  shiftType: "MORNING" | "AFTERNOON";
+  posSlipMode: "SHIFT_ONLY" | "CUMULATIVE_FULL_DAY";
+  menuSlipIsCumulative: boolean;
+  orderCount: number;
+  grossSales: number;
+  discountTotal: number;
+  cashPos: number;
+  qr: number;
+  lineman: number;
+  grab: number;
+  webapp: number;
+  drawerTotal: number;
+  breakdown: { face: number; qty: number }[];
+  kshopApp: number;
+  linemanApp: number;
+  grabGp: number;
+  grabNet: number;
+  depositChannel: string;
+  sevenAmount: number;
+  sevenSlipUrl: string;
+  posSlipUrls: string[];
+  menuSlipUrls: string[];
+  appScreenUrls: string[];
+  menuLines: { raw_menu_name: string; cup_size: string; qty_sold: number; sales_amount: number; pos_category_name: string }[];
+  note: string;
+  overrideReason: string;
+  actorSource: string;
+  brandLock: FnbBrandCode | null;
+};
+
+export type FnbCashHandoverAckInput = {
+  branchCode: string;
+  workDate: string;
+  countedDrawerCash: number;
+  photoUrl: string;
+  note: string;
+  actorSource: string;
+  brandLock: FnbBrandCode | null;
+};
+
+export type FnbLiveShiftClosing = {
+  shiftType: string;
+  staffName: string;
+  netSalesIncVat: number;
+  orderCount: number;
+  grossSales: number;
+  discountTotal: number;
+  cashPosAmount: number;
+  cashCountedAmount: number;
+  qrAmount: number;
+  linemanAmount: number;
+  grabAmount: number;
+  webappAmount: number;
+  drawerTotal: number;
+  cashHandover: number;
+  handoverStatus: string;
+  handoverAcceptedByName: string;
+  handoverAcceptedAt: string;
+  handoverCounted: number;
+  openingFloat: number;
+  morningCashForward: number;
+  eodDeposit: number;
+  depositChannel: string;
+  sevenAmount: number;
+  sevenFee: number;
+  sevenSlipUrl: string;
+  posSlipMode: string;
+  kshopAmount: number;
+  linemanAppAmount: number;
+  grabNet: number;
+};
+
+export type FnbLiveShiftMenuSale = {
+  shiftType: string;
+  menuId: string;
+  rawMenuName: string;
+  cupSize: string;
+  qtySold: number;
+  salesAmount: number;
+  cumulativeQty: number | null;
+  cumulativeAmount: number | null;
+  categoryName: string;
+  wasAutoCreated: boolean;
+};
+
+export type FnbShiftBehaviorMenu = {
+  name: string;
+  category: string;
+  cupSize: string;
+  morningQty: number;
+  afternoonQty: number;
+  totalQty: number;
+  peak: "MORNING" | "AFTERNOON" | "TIE";
+};
+
+export type FnbShiftBehavior = {
+  branchCode: string;
+  morningSales: number;
+  afternoonSales: number;
+  morningOrders: number;
+  afternoonOrders: number;
+  morningCups: number;
+  afternoonCups: number;
+  morningStore: number;
+  afternoonStore: number;
+  morningDelivery: number;
+  afternoonDelivery: number;
+  morningApp: number;
+  afternoonApp: number;
+  menus: FnbShiftBehaviorMenu[];
+};
+
 export type FnbLiveSnapshot = {
   branchCode: string;
   workDate: string;
@@ -1021,7 +1172,8 @@ export type FnbLiveSnapshot = {
   zoneStockCounts: FnbLiveZoneStock[];
   cleaningSpotLogs: FnbLiveCleaningLog[];
   displayLots: { itemId: string; remainingQty: number; displayExpiryDate: string; placedByName: string }[];
-  closings: { shiftType: string; staffName: string; netSalesIncVat: number }[];
+  closings: FnbLiveShiftClosing[];
+  shiftMenuSales: FnbLiveShiftMenuSale[];
   waste: { staffName: string; totalWasteCostThb: number }[];
   writeOffs: { itemId: string; reason: string; qty: number; staffName: string; photoUrls: string[] }[];
   menuSales: { submittedByName: string; reportedTotalAmount: number } | null;

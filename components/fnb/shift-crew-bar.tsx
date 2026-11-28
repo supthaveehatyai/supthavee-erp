@@ -3,7 +3,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { checkInShiftCrewAction, getLiveBranchShiftSnapshotAction, swapShiftCrewSeatAction } from "@/lib/actions/fnb-live-sync";
-import { hhmm } from "@/components/fnb/section-confirm-card";
 import type { FnbLiveSnapshot } from "@/types/fnb";
 
 type LiveValue = {
@@ -28,8 +27,8 @@ const LiveBranchContext = createContext<LiveValue | null>(null);
 
 export function CrewLockedFieldset({ monthLocked, children }: { monthLocked: boolean; children: React.ReactNode }) {
   const live = useLiveBranch();
+  const inCrew = Boolean(live.snapshot?.rosters.some((item) => item.members.some((member) => member.userId === live.snapshot?.viewer.userId)));
   const roster = live.snapshot?.rosters.find((item) => item.shiftSlot === live.shiftSlot);
-  const inCrew = Boolean(roster?.members.some((member) => member.userId === live.snapshot?.viewer.userId));
   const fullForMe = Boolean(roster && roster.members.length >= roster.maxSeats && !inCrew);
   const superAdminWaiting = live.snapshot?.viewer.isSuperAdmin === true && !inCrew && !live.assistArmed;
   return <fieldset disabled={monthLocked || (fullForMe && !live.assistArmed) || superAdminWaiting} className="min-w-0 space-y-4 border-0 p-0 disabled:opacity-70">{children}</fieldset>;
@@ -125,28 +124,11 @@ function ShiftCrewChrome(props: {
   const [nextId, setNextId] = useState("");
   const [swapReason, setSwapReason] = useState("");
   const [swapOpen, setSwapOpen] = useState(false);
-  const seats = [0, 1].slice(0, Math.max(2, Math.min(max, 2)));
   return (
     <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-semibold">👥 ผู้ปฏิบัติงานประจำกะ — ล็อกสูงสุด {max} คน/กะ</h2>
         <button type="button" className="rounded-md bg-slate-900 px-3 py-1 text-sm text-white" onClick={() => { void live.refresh(); }}>🔄 ซิงก์ข้อมูลเพื่อนร่วมกะ</button>
-      </div>
-      {props.pinned ? null : (
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className={`rounded-full px-3 py-1 text-sm ${props.viewSlot === "SHIFT_1" ? "bg-[var(--fnb-brand)] text-white" : "bg-slate-100"}`} onClick={() => props.setViewSlot("SHIFT_1")}>กะเช้า (เปิดร้าน & กะแรก — สูงสุด {max} คน)</button>
-          <button type="button" className={`rounded-full px-3 py-1 text-sm ${props.viewSlot === "SHIFT_2" ? "bg-[var(--fnb-brand)] text-white" : "bg-slate-100"}`} onClick={() => props.setViewSlot("SHIFT_2")}>กะบ่าย (กะสอง & ปิดร้าน — สูงสุด {max} คน)</button>
-        </div>
-      )}
-      <div className="flex flex-wrap gap-2">
-        {seats.map((index) => {
-          const member = members[index];
-          return (
-            <p key={index} className="rounded-full bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-200">
-              {member ? `[ ${index + 1}. 👤 ${member.staffName}${member.checkedInAt ? ` · ${hhmm(member.checkedInAt)}` : ""} ]` : `[ ${index + 1}. ⚪ ว่าง — กดลงชื่อเข้ากะ ]`}
-            </p>
-          );
-        })}
       </div>
       {viewer && !viewer.isSuperAdmin && !inCrew && members.length < max ? (
         <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm font-semibold text-white" onClick={() => {

@@ -87,7 +87,7 @@ function simpleLabel(done: boolean, at: string | null, empty: string, doneText: 
   return `${doneText}${clock ? ` · ${clock} น.` : ""}`;
 }
 
-export function ExecutiveInspector(props: { brand: FnbBrandCode; workDate: string; branch: string; onPickBranch: (code: string) => void }) {
+export function ExecutiveInspector(props: { brand: FnbBrandCode; workDate: string; branch: string; stage: string; onPickBranch: (code: string) => void }) {
   const [matrix, setMatrix] = useState<FnbInspectorMatrixRow[]>([]);
   const [detail, setDetail] = useState<FnbInspectorDetail | null>(null);
   const [anomalies, setAnomalies] = useState<{ branchCode: string; kind: string; detail: string }[]>([]);
@@ -113,11 +113,11 @@ export function ExecutiveInspector(props: { brand: FnbBrandCode; workDate: strin
           <thead className={props.brand === "CHATORN" ? "bg-[#6B0F1A] text-white" : "bg-[#DC2626] text-white"}>
             <tr>
               <th className="px-3 py-2">สาขา</th>
-              <th className="px-3 py-2">เปิดร้าน (7 หมวด)</th>
-              <th className="px-3 py-2">ต้มเบส/เติมบาร์ระหว่างวัน</th>
-              <th className="px-3 py-2">ส่งเงินกะแรก</th>
-              <th className="px-3 py-2">ส่งเงินกะสอง</th>
-              <th className="px-3 py-2">ปิดร้าน & สลิปรายเมนู</th>
+              <th className="px-3 py-2">เปิดร้าน</th>
+              <th className="px-3 py-2">ต้มเบส/บาร์</th>
+              <th className="px-3 py-2">ส่งยอดกะเช้า</th>
+              <th className="px-3 py-2">ปิดยอดกะบ่าย</th>
+              <th className="px-3 py-2">ปิดร้าน</th>
             </tr>
           </thead>
           <tbody>
@@ -147,8 +147,123 @@ export function ExecutiveInspector(props: { brand: FnbBrandCode; workDate: strin
           <h2 className="font-semibold">แผงตรวจ {props.branch || "สาขา"}</h2>
           <CrewSwapButton />
         </div>
+        <InspectorStage stage={props.stage} detail={detail} onTick={() => setTick((value) => value + 1)} />
+        <PhotoLightbox photos={detail?.photos ?? []} />
+      </article>
+    </section>
+  );
+}
+
+function InspectorStage(props: { stage: string; detail: FnbInspectorDetail | null; onTick: () => void }) {
+  const live = useLiveBranch();
+  const morning = live.snapshot?.closings.find((row) => row.shiftType === "MORNING");
+  const afternoon = live.snapshot?.closings.find((row) => row.shiftType === "AFTERNOON");
+  const morningMenus = (live.snapshot?.shiftMenuSales ?? []).filter((row) => row.shiftType === "MORNING");
+  const afternoonMenus = (live.snapshot?.shiftMenuSales ?? []).filter((row) => row.shiftType === "AFTERNOON");
+  if (props.stage === "WIP") {
+    return (
+      <div className="grid gap-4 lg:grid-cols-2">
+        <BatchCard title="🫖 เบสที่ต้มวันนี้" empty="ยังไม่มีเบสที่ต้มวันนี้" hasRows={(props.detail?.prepRows.length ?? 0) > 0}>
+          <table className="w-full text-left text-xs">
+            <thead><tr className="text-slate-500"><th className="py-1">เบส</th><th>สัดส่วน</th><th>ปริมาณที่ได้</th><th>ผู้ทำ & เวลา</th></tr></thead>
+            <tbody>
+              {(props.detail?.prepRows ?? []).map((row) => (
+                <tr key={row.id} className="border-t">
+                  <td className="py-1 pr-2">{row.label}</td>
+                  <td><span className="rounded-full bg-[#DC2626] px-2 py-0.5 font-bold text-white">{row.portion}</span></td>
+                  <td className="px-2">{row.yieldLabel}</td>
+                  <td>{row.staff} · {hm(row.at)} น.</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </BatchCard>
+        <BatchCard title="🥫 ซอสและวัตถุดิบหน้าบาร์" empty="ยังไม่มีซอสหรือวัตถุดิบเปิดใช้" hasRows={(props.detail?.openRows.length ?? 0) > 0}>
+          <table className="w-full text-left text-xs">
+            <thead><tr className="text-slate-500"><th className="py-1">วัตถุดิบ</th><th>จำนวน</th><th>กำหนดหมดอายุ</th><th>ผู้ทำ & เวลา</th><th /></tr></thead>
+            <tbody>
+              {(props.detail?.openRows ?? []).map((row) => (
+                <tr key={row.id} className="border-t">
+                  <td className="py-1 pr-2">{row.label}</td>
+                  <td className="font-bold">{row.qtyLabel} <span className="font-normal text-slate-500">{row.badge}</span></td>
+                  <td className="px-2">{row.expiryLabel}</td>
+                  <td>{row.staff} · {hm(row.at)} น.</td>
+                  <td><button type="button" className="rounded px-1 text-slate-500" title="ซ่อนรายการกดซ้ำ" onClick={() => {
+                    void voidDuplicateWipBatchAction(row.id).then((saved) => {
+                      if (saved.error || !saved.data.ok) toast.error(saved.error || "ซ่อนรายการไม่สำเร็จ");
+                      else { toast.success("ซ่อนรายการกดซ้ำแล้ว"); props.onTick(); }
+                    });
+                  }}>×</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </BatchCard>
+      </div>
+    );
+  }
+  if (props.stage === "SHIFT_1") {
+    return (
+      <article className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm">
+        <h3 className="font-semibold">ส่งยอดกะเช้า + สถานะกะบ่ายกดรับเงิน</h3>
+        {morning ? (
+          <>
+            <p>ผู้ส่ง: {morning.staffName} · เงินสด POS {morning.cashPosAmount.toLocaleString("th-TH")} · เงินในเก๊ะ {morning.drawerTotal.toLocaleString("th-TH")} · ส่งต่อ {morning.cashHandover.toLocaleString("th-TH")}</p>
+            <p>สถานะรับยอด: {morning.handoverStatus === "ACCEPTED_BY_AFTERNOON" ? `กะบ่ายรับยอดแล้ว · ${morning.handoverAcceptedByName} ${hm(morning.handoverAcceptedAt)} น.` : "รอกะบ่ายกดรับ"}</p>
+          </>
+        ) : <p>ยังไม่ส่งยอดกะเช้า</p>}
+      </article>
+    );
+  }
+  if (props.stage === "SHIFT_2" || props.stage === "SHIFT_3") {
+    return (
+      <article className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm">
+        <h3 className="font-semibold">ปิดยอดกะบ่าย & สลิป 7-11</h3>
+        {afternoon ? (
+          <>
+            <p>ผู้ปิด: {afternoon.staffName} · ยอดสุทธิ {afternoon.netSalesIncVat.toLocaleString("th-TH")} · ช่องฝาก {afternoon.depositChannel || "-"} · ฝาก 7-11 {afternoon.sevenAmount.toLocaleString("th-TH")} · ค่าธรรมเนียม {afternoon.sevenFee.toLocaleString("th-TH")}</p>
+            {afternoon.sevenSlipUrl ? <a className="text-sky-800 underline" href={afternoon.sevenSlipUrl} target="_blank" rel="noreferrer">เปิดสลิป 7-Eleven</a> : <p>ยังไม่มีสลิป 7-Eleven</p>}
+          </>
+        ) : <p>ยังไม่ปิดยอดกะบ่าย</p>}
+      </article>
+    );
+  }
+  if (props.stage === "CLOSING") {
+    const names = new Map<string, { morning: number; afternoon: number }>();
+    for (const row of morningMenus) {
+      const key = `${row.rawMenuName} ${row.cupSize}`;
+      const current = names.get(key) ?? { morning: 0, afternoon: 0 };
+      current.morning += row.qtySold;
+      names.set(key, current);
+    }
+    for (const row of afternoonMenus) {
+      const key = `${row.rawMenuName} ${row.cupSize}`;
+      const current = names.get(key) ?? { morning: 0, afternoon: 0 };
+      current.afternoon += row.qtySold;
+      names.set(key, current);
+    }
+    return (
+      <div className="space-y-3">
         <div className="grid gap-3 lg:grid-cols-2">
-          {(detail?.openingCards ?? []).map((card) => (
+          {(props.detail?.openingCards ?? []).filter((card) => card.no >= 4).map((card) => (
+            <section key={card.no} className="rounded-xl border p-3 text-sm">
+              <h3 className="font-semibold">{card.title}</h3>
+              {card.lines.map((line) => <p key={line}>{line}</p>)}
+            </section>
+          ))}
+        </div>
+        <article className="rounded-xl border p-3 text-sm">
+          <h3 className="font-semibold">สรุปแก้วขายเช้า vs บ่าย</h3>
+          {[...names.entries()].length === 0 ? <p>ยังไม่มีรายการเมนูแยกกะ</p> : [...names.entries()].map(([name, qty]) => (
+            <p key={name}>{name} · ☀️ {qty.morning} · 🌤️ {qty.afternoon} · รวม {qty.morning + qty.afternoon}</p>
+          ))}
+        </article>
+      </div>
+    );
+  }
+  return (
+    <div className="grid gap-3 lg:grid-cols-2">
+      {(props.detail?.openingCards ?? []).map((card) => (
             <section key={card.no} className="rounded-xl border p-3 text-sm">
               <h3 className="font-semibold">{card.title}</h3>
               <div className="mt-1 space-y-0.5">
@@ -168,47 +283,6 @@ export function ExecutiveInspector(props: { brand: FnbBrandCode; workDate: strin
               <p className="mt-2 text-xs text-slate-600">{card.staff ? `${card.staff} · ${hm(card.at)} น.` : "ยังไม่บันทึก"}</p>
             </section>
           ))}
-        </div>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <BatchCard title="🫖 เบสที่ต้มวันนี้" empty="ยังไม่มีเบสที่ต้มวันนี้" hasRows={(detail?.prepRows.length ?? 0) > 0}>
-            <table className="w-full text-left text-xs">
-              <thead><tr className="text-slate-500"><th className="py-1">เบส</th><th>สัดส่วน</th><th>ปริมาณที่ได้</th><th>ผู้ทำ & เวลา</th></tr></thead>
-              <tbody>
-                {(detail?.prepRows ?? []).map((row) => (
-                  <tr key={row.id} className="border-t">
-                    <td className="py-1 pr-2">{row.label}</td>
-                    <td><span className="rounded-full bg-[#DC2626] px-2 py-0.5 font-bold text-white">{row.portion}</span></td>
-                    <td className="px-2">{row.yieldLabel}</td>
-                    <td>{row.staff} · {hm(row.at)} น.</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </BatchCard>
-          <BatchCard title="🥫 ซอสและวัตถุดิบหน้าบาร์" empty="ยังไม่มีซอสหรือวัตถุดิบเปิดใช้" hasRows={(detail?.openRows.length ?? 0) > 0}>
-            <table className="w-full text-left text-xs">
-              <thead><tr className="text-slate-500"><th className="py-1">วัตถุดิบ</th><th>จำนวน</th><th>กำหนดหมดอายุ</th><th>ผู้ทำ & เวลา</th><th /></tr></thead>
-              <tbody>
-                {(detail?.openRows ?? []).map((row) => (
-                  <tr key={row.id} className="border-t">
-                    <td className="py-1 pr-2">{row.label}</td>
-                    <td className="font-bold">{row.qtyLabel} <span className="font-normal text-slate-500">{row.badge}</span></td>
-                    <td className="px-2">{row.expiryLabel}</td>
-                    <td>{row.staff} · {hm(row.at)} น.</td>
-                    <td><button type="button" className="rounded px-1 text-slate-500" title="ซ่อนรายการกดซ้ำ" onClick={() => {
-                      void voidDuplicateWipBatchAction(row.id).then((saved) => {
-                        if (saved.error || !saved.data.ok) toast.error(saved.error || "ซ่อนรายการไม่สำเร็จ");
-                        else { toast.success("ซ่อนรายการกดซ้ำแล้ว"); setTick((value) => value + 1); }
-                      });
-                    }}>×</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </BatchCard>
-        </div>
-        <PhotoLightbox photos={detail?.photos ?? []} />
-      </article>
-    </section>
+    </div>
   );
 }

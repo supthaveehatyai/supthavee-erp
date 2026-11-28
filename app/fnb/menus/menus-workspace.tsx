@@ -21,12 +21,16 @@ export function MenusWorkspace({
 }) {
   const [message, setMessage] = useState("");
   const [pending, start] = useTransition();
+  const [pendingOnly, setPendingOnly] = useState(false);
   const visible = menus.filter((menu) => menu.brand_code === brand);
+  const pendingCount = visible.filter((menu) => menu.is_bom_pending).length;
+  const shown = pendingOnly ? visible.filter((menu) => menu.is_bom_pending) : visible;
   const visibleBases = bases.filter((base) => base.brand_code === brand);
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-slate-900">เมนู สูตรชง และเบส</h1>
       <div className="flex flex-wrap gap-2">
+        <button type="button" className={`rounded-full px-3 py-1 text-xs ${pendingOnly ? "bg-amber-500 text-white" : "bg-amber-100 text-amber-950"}`} onClick={() => setPendingOnly((value) => !value)}>🆕 เมนูใหม่จากสลิป POS รอผูกสูตร ({pendingCount})</button>
         {FNB_SCOOP_HINTS.map((hint) => <span key={hint} className="rounded-full bg-red-50 px-3 py-1 text-xs text-red-800">{hint}</span>)}
       </div>
       {message ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{message}</p> : null}
@@ -91,11 +95,11 @@ export function MenusWorkspace({
         <button className="rounded-md bg-[var(--fnb-brand)] px-4 py-2 text-sm text-white" disabled={pending}>บันทึกเมนู</button>
       </form>
       <div className="space-y-2">
-        {visible.map((menu) => (
+        {shown.map((menu) => (
           <article key={menu.id} className="rounded-lg border bg-white p-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="font-semibold">{menu.menu_code} · {menu.menu_name_th}</p>
+                <p className="font-semibold">{menu.menu_code} · {menu.menu_name_th}{menu.is_bom_pending ? " · 🆕 รอผูกสูตร" : ""}</p>
                 <p className="text-xs text-slate-500">{menu.cup_size} {menu.temperature} · {menu.retail_price.toFixed(2)}</p>
               </div>
               {menu.brand_code === "LUCKY_CUP" ? (
