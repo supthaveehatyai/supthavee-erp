@@ -11,7 +11,11 @@ import {
   saveEquipmentCalibrationAction,
   saveZoneCountsAction,
 } from "@/lib/actions/fnb-store-day";
+import { issueCatchWeightProduceSliceAction } from "@/lib/actions/fnb-produce";
 import { issueWipBatchAction, listWipBoardAction } from "@/lib/actions/fnb-wip";
+import { ProduceSliceFields, ProduceSliceForm } from "@/components/fnb/produce-slice-form";
+import { ProduceWasteForm } from "@/components/fnb/produce-waste-form";
+import { produceProfile } from "@/lib/utils/fnb-format";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import { CashFloatConfirm } from "@/components/fnb/cash-float-confirm";
 import { CleaningSpots } from "@/components/fnb/cleaning-spots";
@@ -64,8 +68,18 @@ function prepSummary(row: FnbStageConfirmation) {
     const pct = Math.round(Number(rec.portion) * 100);
     return [`${code} ${pct}% (${Number(rec.ml) || 0} ml)`];
   });
-  const lemons = Number(row.payload.lemons);
-  if (Number.isFinite(lemons)) parts.push(lemons > 0 ? `เลมอน ${lemons} ลูก` : "เลมอน มีของเดิม/ยังไม่หั่น");
+  const produce = Array.isArray(row.payload.produce) ? row.payload.produce : [];
+  if (produce.length > 0) {
+    for (const item of produce) {
+      if (!item || typeof item !== "object") continue;
+      const rec = item as Record<string, unknown>;
+      const pieces = Number(rec.pieces) || 0;
+      if (pieces > 0) parts.push(`${String(rec.name || "ผลไม้")} ${pieces} ${String(rec.label || "ลูก")}`);
+    }
+  } else {
+    const lemons = Number(row.payload.lemons);
+    if (Number.isFinite(lemons)) parts.push(lemons > 0 ? `เลมอน ${lemons} ลูก` : "เลมอน มีของเดิม/ยังไม่หั่น");
+  }
   return parts.join(", ") || row.sectionTitle;
 }
 
@@ -77,10 +91,9 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
   const [equipPhoto, setEquipPhoto] = useState("");
   const [equipError, setEquipError] = useState("");
   const [bases, setBases] = useState<{ base_code: string; base_name_th?: string; yield_qty_ml: number; sort_order?: number }[]>([]);
-  const [lemons, setLemons] = useState<{ id: string; count_uom: string }[]>([]);
+  const [fruits, setFruits] = useState<{ id: string; short_code: string; name_th: string; is_catch_weight_produce?: boolean; piece_uom_label?: string; avg_gross_grams_per_piece?: number; prep_yield_pct?: number }[]>([]);
   const [portion, setPortion] = useState<Record<string, string>>({});
-  const [lemonCount, setLemonCount] = useState("0");
-  const [lemonGrams, setLemonGrams] = useState("0");
+  const [slices, setSlices] = useState<Record<string, { pieces: string; grams: string }>>({});
   const [prepPhoto, setPrepPhoto] = useState("");
   const [missingBase, setMissingBase] = useState("");
   const [photoMissing, setPhotoMissing] = useState(false);
@@ -99,7 +112,7 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
   useEffect(() => {
     void listWipBoardAction({ branch_code: props.branch, work_date: props.workDate, actor_source: props.actorSource, brand_lock: props.brandLock }).then((loaded) => {
       setBases(loaded.data?.bases ?? []);
-      setLemons((loaded.data?.items ?? []).filter((item) => item.short_code === "LEM"));
+      setFruits((loaded.data?.items ?? []).filter((item) => item.is_catch_weight_produce === true));
     });
   }, [props.branch, props.workDate, props.actorSource, props.brandLock]);
   const openingConfirms = live.snapshot ? live.snapshot.confirmations.filter((row) => row.stageCode === "OPENING") : confirms;
@@ -109,8 +122,10 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
   const sauceSaved = findSection(openingConfirms, ["SEC_3_SAUCE"]);
   const prepDirty = !prepSaved && (
     shownBases.some((base) => Boolean(portion[base.base_code]) && !(base.base_code === "CCF" && portion[base.base_code] === "SKIP_EXISTING"))
-    || (lemonCount !== "" && lemonCount !== "0")
-    || (lemonGrams !== "" && lemonGrams !== "0")
+    || fruits.some((item) => {
+      const row = slices[item.id];
+      return Boolean(row && row.pieces !== "" && row.pieces !== "0");
+    })
     || Boolean(prepPhoto)
   );
   function portionOf(code: string): string {
@@ -139,8 +154,19 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
       if (code) next[code] = String(rec.portion ?? "");
     }
     setPortion(next);
-    setLemonCount(String(prepSaved.payload.lemons ?? "0"));
-    setLemonGrams(String(prepSaved.payload.lemonGrams ?? "0"));
+    const savedProduce = Array.isArray(prepSaved.payload.produce) ? prepSaved.payload.produce : [];
+    const nextSlices: Record<string, { pieces: string; grams: string }> = {};
+    for (const item of savedProduce) {
+      if (!item || typeof item !== "object") continue;
+      const rec = item as Record<string, unknown>;
+      const id = String(rec.id ?? "");
+      if (id) nextSlices[id] = { pieces: String(rec.pieces ?? "0"), grams: Number(rec.grams) > 0 ? String(rec.grams) : "" };
+    }
+    if (Object.keys(nextSlices).length === 0 && prepSaved.payload.lemons != null) {
+      const first = fruits[0];
+      if (first) nextSlices[first.id] = { pieces: String(prepSaved.payload.lemons ?? "0"), grams: Number(prepSaved.payload.lemonGrams) > 0 ? String(prepSaved.payload.lemonGrams) : "" };
+    }
+    setSlices(nextSlices);
   }, [prepSaved, reopen]);
   const front = board?.locations.find((row) => row.zoneType === "FRONT_DISPLAY");
   const back = board?.locations.find((row) => row.zoneType === "BACKROOM");
@@ -165,10 +191,23 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
               ))}
             </div>
           ))}
-          <div className="flex flex-wrap items-end gap-3 rounded-lg bg-slate-50 p-2">
-            <label className="text-sm">หั่นเลมอน จำนวนลูก<FnbQtyInput value={lemonCount} onChange={setLemonCount} unit="ลูก" /></label>
-            <label className="text-sm">น้ำหนักเนื้อ<FnbQtyInput value={lemonGrams} onChange={setLemonGrams} unit="g" /></label>
-          </div>
+          {fruits.map((item) => {
+            const profile = produceProfile(item);
+            const row = slices[item.id] ?? { pieces: "0", grams: "" };
+            return (
+              <div key={item.id} className="rounded-lg bg-slate-50 p-2">
+                <p className="mb-1 text-sm font-semibold">{item.short_code} · {item.name_th}</p>
+                <ProduceSliceFields
+                  label={profile.label}
+                  usablePerPiece={profile.usablePerPiece}
+                  pieces={row.pieces}
+                  grams={row.grams}
+                  onPieces={(value) => setSlices((current) => ({ ...current, [item.id]: { pieces: value, grams: current[item.id]?.grams ?? "" } }))}
+                  onGrams={(value) => setSlices((current) => ({ ...current, [item.id]: { pieces: current[item.id]?.pieces ?? "0", grams: value } }))}
+                />
+              </div>
+            );
+          })}
           <div ref={cameraRef} className={photoMissing ? "rounded-xl ring-2 ring-red-600" : ""}>
             <LiveWatermarkCamera branchCode={props.branch} stage="OPENING" staffName={props.staffName} taskTitle="เตรียมเบสและหั่นเลมอน" liveCameraOnly onCapture={(file, liveShot) => void uploadShot(file, liveShot, props.branch, props.actorSource, brand).then((url) => { setPhotoMissing(false); setPrepPhoto(url); }).catch((reason: Error) => toast.error(reason.message))} />
           </div>
@@ -186,7 +225,6 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
               toast.error("กรุณาถ่ายรูปสดวัตถุดิบเบส 1 ใบก่อนกดบันทึกหมวดที่ 1");
               return;
             }
-            if (Number(lemonCount) > 0 && lemonGrams === "") { toast.error("กรอกน้ำหนักเลมอนเมื่อหั่นมากกว่า 0 ลูก"); return; }
             for (const base of shownBases) {
               const chosen = portionOf(base.base_code);
               if (isSkip(chosen)) continue;
@@ -204,30 +242,37 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
               const saved = await issueWipBatchAction(body);
               if (saved.error || !saved.data.ok) { toast.error(saved.error || saved.data.message || `ต้ม ${base.base_code} ไม่สำเร็จ`); return; }
             }
-            const lemon = lemons[0] ?? (live.snapshot?.lemonItemId ? { id: live.snapshot.lemonItemId, count_uom: "กก." } : undefined);
-            const lemonPieces = Math.trunc(Number(lemonCount) || 0);
-            const lemonGramsValue = Number(lemonGrams) || 0;
-            if (lemon && lemonPieces > 0) {
-              const packQtyKg = lemonGramsValue > 0 ? lemonGramsValue / 1000 : lemonPieces * 0.1;
-              const body = new FormData();
-              body.set("actor_source", props.actorSource);
-              body.set("brand_lock", brand);
-              body.set("branch_code", props.branch);
-              body.set("work_date", props.workDate);
-              body.set("batch_kind", "OPEN_ITEM");
-              body.set("item_id", lemon.id);
-              body.set("pack_qty", String(packQtyKg));
-              body.set("notes", `หั่นเลมอน ${lemonPieces} ลูก${lemonGramsValue > 0 ? ` (${lemonGramsValue} g)` : ""}`);
-              body.set("photo_urls", prepPhoto);
-              body.set("brew_portion_mode", "FULL_RECIPE");
-              body.set("shift_instance", "SHIFT_1");
-              const saved = await issueWipBatchAction(body);
-              if (saved.error || !saved.data.ok) { toast.error(saved.error || "บันทึกเลมอนไม่สำเร็จ"); return; }
+            const sliced = fruits.flatMap((item) => {
+              const profile = produceProfile(item);
+              const row = slices[item.id];
+              const pieces = Math.trunc(Number(row?.pieces) || 0);
+              const grams = row?.grams === "" || row?.grams == null ? 0 : Number(row.grams) || 0;
+              return pieces > 0 ? [{ item, profile, pieces, grams }] : [];
+            });
+            for (const row of sliced) {
+              const saved = await issueCatchWeightProduceSliceAction({
+                branch_code: props.branch,
+                work_date: props.workDate,
+                shift_instance: "SHIFT_1",
+                item_id: row.item.id,
+                piece_count: row.pieces,
+                actual_sliced_grams: row.grams > 0 ? row.grams : null,
+                photo_urls: prepPhoto ? [prepPhoto] : [],
+                notes: `หั่น${row.item.name_th} ${row.pieces} ${row.profile.label}`,
+                actor_source: props.actorSource,
+                brand_lock: brand,
+              });
+              if (saved.error || !saved.data.ok) { toast.error(saved.error || saved.data.message || `บันทึกหั่น${row.item.name_th}ไม่สำเร็จ`); return; }
             }
             const confirmed = await confirmStageSectionAction({
               branchCode: props.branch, workDate: props.workDate, stageCode: "OPENING", sectionKey: "SEC_1_PREP", sectionTitle: "หมวดที่ 1: เตรียมวัตถุดิบเบสและหั่นเลมอน",
               photoUrls: prepPhoto ? [prepPhoto] : [], actorSource: props.actorSource, brandLock: brand, shiftSlot: "SHIFT_1", ...assist(),
-              payload: { bases: shownBases.map((base) => ({ code: base.base_code, portion: portionOf(base.base_code), ml: isSkip(portionOf(base.base_code)) ? 0 : Math.round(base.yield_qty_ml * Number(portionOf(base.base_code))) })), lemons: Number(lemonCount) || 0, lemonGrams: Number(lemonGrams) || 0 },
+              payload: {
+                bases: shownBases.map((base) => ({ code: base.base_code, portion: portionOf(base.base_code), ml: isSkip(portionOf(base.base_code)) ? 0 : Math.round(base.yield_qty_ml * Number(portionOf(base.base_code))) })),
+                lemons: sliced[0]?.pieces ?? 0,
+                lemonGrams: sliced[0]?.grams ?? 0,
+                produce: sliced.map((row) => ({ id: row.item.id, name: row.item.name_th, pieces: row.pieces, grams: row.grams, label: row.profile.label, usable: row.grams > 0 ? row.grams : row.pieces * row.profile.usablePerPiece, estimated: row.grams <= 0 })),
+              },
             });
             if (confirmed.error || !confirmed.data.ok) { toast.error(confirmed.error || "ยืนยันหมวดที่ 1 ไม่สำเร็จ"); return; }
             toast.success("บันทึกหมวดที่ 1 แล้ว");
@@ -338,10 +383,11 @@ export function OpeningChecklist(props: { branch: string; workDate: string; acto
 export function MiddayShortcuts(props: { branch: string; workDate: string; actorSource: "desktop" | "liff"; brandLock: FnbBrandCode | null; staffName: string; brand: FnbBrandCode }) {
   const brandLock = props.brandLock ?? "";
   const { board, reload } = useBoard(props.branch, props.workDate, props.actorSource, brandLock);
+  const live = useLiveBranch();
   const [open, setOpen] = useState<"base" | "sauce" | "lemon" | "move" | null>(null);
   const [pct, setPct] = useState(1);
   const [bases, setBases] = useState<{ base_code: string; base_name_th?: string; yield_qty_ml: number; sort_order?: number }[]>([]);
-  const [items, setItems] = useState<{ id: string; short_code: string; name_th: string; count_uom?: string; alias_codes: string[]; external_code: string | null; item_category?: string; has_open_shelf_rule?: boolean }[]>([]);
+  const [items, setItems] = useState<{ id: string; short_code: string; name_th: string; count_uom?: string; alias_codes: string[]; external_code: string | null; item_category?: string; has_open_shelf_rule?: boolean; is_catch_weight_produce?: boolean; piece_uom_label?: string; avg_gross_grams_per_piece?: number; prep_yield_pct?: number }[]>([]);
   const [query, setQuery] = useState("");
   const [sauceId, setSauceId] = useState("");
   const [baseCode, setBaseCode] = useState("JT");
@@ -384,7 +430,7 @@ export function MiddayShortcuts(props: { branch: string; workDate: string; actor
       <div className="flex flex-wrap gap-2">
         <button type="button" className="rounded-full bg-white px-3 py-1 text-sm" onClick={() => setOpen("base")}>ต้มเบสเพิ่ม</button>
         <button type="button" className="rounded-full bg-white px-3 py-1 text-sm" onClick={() => setOpen("sauce")}>เทซอสขวดใหม่</button>
-        <button type="button" className="rounded-full bg-white px-3 py-1 text-sm" onClick={() => setOpen("lemon")}>หั่นเลมอนเพิ่ม</button>
+        <button type="button" className="rounded-full bg-white px-3 py-1 text-sm" onClick={() => setOpen("lemon")}>🍋 หั่นเลมอนเพิ่ม / หั่นผลไม้สด</button>
         <button type="button" className="rounded-full bg-white px-3 py-1 text-sm" onClick={() => setOpen("move")}>เบิกย้ายจุดจัดเก็บ</button>
         <WriteOffButton branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={props.brand} staffName={props.staffName} locations={board?.locations ?? []} onDone={reload} />
       </div>
@@ -399,22 +445,28 @@ export function MiddayShortcuts(props: { branch: string; workDate: string; actor
           <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" onClick={() => brew("PREP_BASE", { prep: baseCode, pack: pct })}>บันทึกต้มเบส {Math.round(pct * 100)}%</button>
         </div>
       ) : null}
-      {open === "sauce" || open === "lemon" ? (
+      {open === "lemon" ? (
+        <ProduceSliceForm
+          items={items}
+          branch={props.branch}
+          workDate={props.workDate}
+          actorSource={props.actorSource}
+          brand={props.brand}
+          staffName={props.staffName}
+          shiftInstance={live.shiftSlot || "SHIFT_1"}
+          upload={(file, live) => uploadShot(file, live, props.branch, props.actorSource, props.brand)}
+          onSaved={reload}
+        />
+      ) : null}
+      {open === "sauce" ? (
         <div className="space-y-2">
           <input className={field} value={query} placeholder="ค้นรหัสหรือชื่อวัตถุดิบชง" onChange={(event) => setQuery(event.target.value)} />
           <select className={field} value={sauceItem?.id ?? ""} onChange={(event) => setSauceId(event.target.value)}>{barItems.map((item) => <option key={item.id} value={item.id}>{barItemLabel(item)}</option>)}</select>
           <button type="button" className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" onClick={() => {
             const item = sauceItem;
             if (!item) return;
-            if (open === "lemon") {
-              const grams = Number(window.prompt("น้ำหนักเลมอนที่หั่นจริง (กรัม)", "0") || 0);
-              const pieces = Math.trunc(Number(window.prompt("จำนวนลูก", "6") || 0));
-              const packQtyKg = grams > 0 ? grams / 1000 : pieces * 0.1;
-              brew("OPEN_ITEM", { itemId: item.id, pack: packQtyKg || 0.1, notes: `หั่นเลมอน ${pieces} ลูก${grams > 0 ? ` (${grams} g)` : ""}` });
-              return;
-            }
             brew("OPEN_ITEM", { itemId: item.id, pack: 1, notes: "เทซอสขวดใหม่" });
-          }}>{open === "lemon" ? "บันทึกหั่นเลมอน" : `เทขวดใหม่ ${sauceItem?.short_code ?? ""}`}</button>
+          }}>{`เทขวดใหม่ ${sauceItem?.short_code ?? ""}`}</button>
         </div>
       ) : null}
       {open === "move" && back && front ? (
@@ -568,6 +620,7 @@ export function NightCloseCount(props: { branch: string; workDate: string; actor
       {props.warehouseOnly ? null : (
         <article className="space-y-2">
           <h3 className="font-semibold">หมวด 4 รายการเททิ้งประจำวัน</h3>
+          <ProduceWasteForm branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={props.brandLock ?? "LUCKY_CUP"} staffName={props.staffName} />
           <WriteOffButton branch={props.branch} workDate={props.workDate} actorSource={props.actorSource} brand={props.brandLock ?? "LUCKY_CUP"} staffName={props.staffName} locations={board?.locations ?? []} onDone={() => { setConfirmTick((value) => value + 1); reload(); }} />
           {(board?.sauces ?? []).filter((sauce) => sauce.expiresAt && sauce.expiresAt.slice(0, 10) <= props.workDate).map((sauce) => (
             <p key={sauce.code} className="text-sm text-red-700">{sauce.code} หมดอายุวันนี้ {sauce.sticker}</p>
@@ -580,17 +633,32 @@ export function NightCloseCount(props: { branch: string; workDate: string; actor
 
 function CountRow(props: { line: FnbZoneCountLine; qty: Record<string, string>; setQty: (value: Record<string, string>) => void; onRetro?: (qty: number) => void }) {
   const key = `${props.line.locationCode}|${props.line.itemId}`;
+  const [carton, setCarton] = useState(false);
   const typed = props.qty[key];
   const counted = typed === undefined || typed === "" ? props.line.countedQty : Number(typed);
   const missing = counted == null || Number.isNaN(counted) ? 0 : props.line.expectedQty - counted;
   const extra = counted == null || Number.isNaN(counted) ? 0 : counted - props.line.expectedQty;
+  const unit = props.line.isCatchWeight ? (props.line.pieceLabel || "ลูก") : "ชิ้น";
   return (
     <div className={`rounded-lg p-3 text-sm ${missing > 0 ? "bg-red-50" : "bg-slate-50"}`}>
       <p className="font-medium">{props.line.shortCode} {props.line.nameTh}</p>
-      <p>เปิดเช้า {props.line.openingQty} + เบิกเติม {props.line.replenishedQty} − ขาย POS {props.line.posSoldQty} − ตัดเสีย {props.line.writeOffQty} = ควรเหลือ {props.line.expectedQty}</p>
-      {missing > 0 ? <p>🚨 ของหาย {missing} ชิ้น</p> : null}
-      <input className={`${field} mt-2`} type="number" step="0.01" placeholder="ยอดนับจริง" value={props.qty[key] ?? (props.line.countedQty ?? "")} onChange={(event) => props.setQty({ ...props.qty, [key]: event.target.value })} />
-      {extra > 0 && props.onRetro ? <button type="button" className="mt-2 rounded-md border px-2 py-1" onClick={() => props.onRetro?.(extra)}>➕ บันทึกเบิกเติมจากคลังหลังร้านย้อนหลัง {extra} ชิ้น</button> : null}
+      {props.line.isCatchWeight ? <p>ควรเหลือ {props.line.expectedQty} {unit}</p> : <p>เปิดเช้า {props.line.openingQty} + เบิกเติม {props.line.replenishedQty} − ขาย POS {props.line.posSoldQty} − ตัดเสีย {props.line.writeOffQty} = ควรเหลือ {props.line.expectedQty}</p>}
+      {missing > 0 ? <p>🚨 ของหาย {missing} {unit}</p> : null}
+      {props.line.isCatchWeight ? (
+        <div className="mt-2 space-y-2">
+          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={carton} onChange={(event) => setCarton(event.target.checked)} /> นับลังปิดเป็น กก.</label>
+          {carton ? (
+            <FnbQtyInput allowDecimal unit="กก." onChange={(value) => {
+              const pieces = Math.round(((Number(value) || 0) * 1000) / (props.line.avgGrossGrams || 110));
+              props.setQty({ ...props.qty, [key]: String(pieces) });
+            }} />
+          ) : (
+            <FnbQtyInput value={props.qty[key] ?? (props.line.countedQty == null ? "" : String(props.line.countedQty))} unit={unit} onChange={(value) => props.setQty({ ...props.qty, [key]: value })} />
+          )}
+          {carton && props.qty[key] ? <p>คิดเป็น {props.qty[key]} {unit}</p> : null}
+        </div>
+      ) : <input className={`${field} mt-2`} type="number" step={props.line.allowDecimal ? "0.01" : "1"} placeholder="ยอดนับจริง" value={props.qty[key] ?? (props.line.countedQty ?? "")} onChange={(event) => props.setQty({ ...props.qty, [key]: event.target.value })} />}
+      {extra > 0 && props.onRetro ? <button type="button" className="mt-2 rounded-md border px-2 py-1" onClick={() => props.onRetro?.(extra)}>➕ บันทึกเบิกเติมจากคลังหลังร้านย้อนหลัง {extra} {unit}</button> : null}
     </div>
   );
 }

@@ -102,9 +102,9 @@ export async function listReceiptLinesAction(grId: string): Promise<FnbActionRes
   }
 }
 
-export async function listReceiveItemsAction(brandLock?: FnbBrandCode | null): Promise<FnbActionResult<Pick<FnbItemRow, "id" | "short_code" | "name_th" | "count_uom" | "default_purchase_uom" | "recipe_per_purchase_uom" | "shelf_life_months" | "requires_expiry_tracking" | "brand_scope" | "alias_codes" | "external_code" | "item_category" | "allow_decimal_count_qty">[]>> {
+export async function listReceiveItemsAction(brandLock?: FnbBrandCode | null): Promise<FnbActionResult<Pick<FnbItemRow, "id" | "short_code" | "name_th" | "count_uom" | "default_purchase_uom" | "recipe_per_purchase_uom" | "shelf_life_months" | "requires_expiry_tracking" | "brand_scope" | "alias_codes" | "external_code" | "item_category" | "allow_decimal_count_qty" | "is_catch_weight_produce" | "piece_uom_label" | "avg_gross_grams_per_piece" | "prep_yield_pct">[]>> {
   try {
-    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,alias_codes,external_code,name_th,count_uom,default_purchase_uom,recipe_per_purchase_uom,shelf_life_months,requires_expiry_tracking,brand_scope,item_category,allow_decimal_count_qty").eq("is_active", true).order("short_code", { ascending: true }).limit(500);
+    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,alias_codes,external_code,name_th,count_uom,default_purchase_uom,recipe_per_purchase_uom,shelf_life_months,requires_expiry_tracking,brand_scope,item_category,allow_decimal_count_qty,is_catch_weight_produce,piece_uom_label,avg_gross_grams_per_piece,prep_yield_pct").eq("is_active", true).order("short_code", { ascending: true }).limit(500);
     if (listed.error) return fail([], listed.error, "อ่านรายการสินค้าไม่สำเร็จ");
     return result(asRows(listed.data).map((row) => ({
       id: text(row.id),
@@ -120,10 +120,109 @@ export async function listReceiveItemsAction(brandLock?: FnbBrandCode | null): P
       external_code: row.external_code == null ? null : text(row.external_code),
       item_category: text(row.item_category),
       allow_decimal_count_qty: row.allow_decimal_count_qty === true,
+      is_catch_weight_produce: row.is_catch_weight_produce === true,
+      piece_uom_label: text(row.piece_uom_label) || "ลูก",
+      avg_gross_grams_per_piece: num(row.avg_gross_grams_per_piece) || 110,
+      prep_yield_pct: num(row.prep_yield_pct) || 80,
     })).filter((item) => !brandLock || item.brand_scope === brandLock));
   } catch (error) {
     return caught([], error, "อ่านรายการสินค้าไม่สำเร็จ");
   }
+}
+
+type ReceiptLine = {
+  item_id: string;
+  raw_desc?: string;
+  raw_code?: string;
+  received_qty: number;
+  received_uom: string;
+  recipe_qty_per_unit?: number;
+  unit_price?: number;
+  line_vat_mode?: string;
+  receive_mode?: string;
+  actual_piece_count?: number;
+  weight_grams?: number;
+};
+
+async function prepareCatchWeightLines(lines: ReceiptLine[]): Promise<{ lines: ReceiptLine[]; stamps: { item_id: string; pieces: number; grams: number; avg: number }[]; error: string | null }> {
+  const listed = await schemaAdmin().schema("fnb").from("items").select("id,is_catch_weight_produce,piece_uom_label,avg_gross_grams_per_piece,recipe_per_purchase_uom,recipe_uom").eq("is_active", true).limit(800);
+  if (listed.error) return { lines, stamps: [], error: "อ่านหน่วยผลไม้สดไม่สำเร็จ" };
+  const catalog = new Map(asRows(listed.data).map((row) => [text(row.id), row]));
+  const stamps: { item_id: string; pieces: number; grams: number; avg: number }[] = [];
+  const next: ReceiptLine[] = [];
+  for (const line of lines) {
+    const item = catalog.get(line.item_id);
+    const mode = text(line.receive_mode);
+    if (item?.is_catch_weight_produce !== true || (mode !== "WEIGHT" && mode !== "PIECE")) {
+      next.push(line);
+      continue;
+    }
+    const pieces = Math.trunc(Number(line.actual_piece_count) || 0);
+    const label = text(item.piece_uom_label) || "ลูก";
+    if (pieces <= 0) return { lines, stamps: [], error: `นับจำนวน${label}จริงก่อนบันทึกรับเข้า` };
+    const avg = num(item.avg_gross_grams_per_piece) || 110;
+    const qty = Number(line.received_qty) || 0;
+    const uom = text(line.received_uom);
+    let grams = 0;
+    let receivedQty = qty;
+    let receivedUom = uom;
+    if (mode === "PIECE") {
+      const typed = Number(line.weight_grams) || 0;
+      grams = typed > 0 ? typed : pieces * avg;
+      receivedQty = pieces;
+      receivedUom = label;
+    } else if (uom === "กก." || uom.toLowerCase() === "kg") {
+      grams = qty * 1000;
+    } else {
+      const per = num(item.recipe_per_purchase_uom) || 1000;
+      const recipeUom = text(item.recipe_uom).toLowerCase();
+      grams = qty * (recipeUom === "kg" || recipeUom === "กก." ? per * 1000 : per);
+    }
+    if (grams <= 0 || receivedQty <= 0) return { lines, stamps: [], error: "กรอกจำนวนที่รับเข้าให้มากกว่า 0" };
+    stamps.push({ item_id: line.item_id, pieces, grams, avg: grams / pieces });
+    next.push({
+      ...line,
+      received_qty: receivedQty,
+      received_uom: receivedUom,
+      recipe_qty_per_unit: grams / receivedQty,
+    });
+  }
+  return { lines: next, stamps, error: null };
+}
+
+async function stampCatchWeightReceipt(grNo: string, stamps: { item_id: string; pieces: number; grams: number; avg: number }[]): Promise<string | null> {
+  if (!grNo || stamps.length === 0) return null;
+  const db = schemaAdmin().schema("fnb");
+  const header = await db.from("goods_receipts").select("id").eq("gr_no", grNo).maybeSingle();
+  const grId = text((header.data as { id?: string } | null)?.id);
+  if (!grId) return "บันทึกจำนวนผลจริงไม่สำเร็จ";
+  const [lineRows, ledgerRows] = await Promise.all([
+    db.from("goods_receipt_lines").select("id,item_id,actual_piece_count").eq("gr_id", grId).order("id", { ascending: true }).limit(200),
+    db.from("stock_ledger").select("id,item_id,qty_delta,piece_qty_delta").eq("ref_table", "goods_receipts").eq("ref_id", grId).limit(200),
+  ]);
+  if (lineRows.error || ledgerRows.error) return "บันทึกจำนวนผลจริงไม่สำเร็จ";
+  const lines = asRows(lineRows.data);
+  const ledger = asRows(ledgerRows.data);
+  const usedLines = new Set<string>();
+  const usedLedger = new Set<string>();
+  for (const stamp of stamps) {
+    const line = lines.find((row) => text(row.item_id) === stamp.item_id && row.actual_piece_count == null && !usedLines.has(text(row.id)));
+    if (line) {
+      usedLines.add(text(line.id));
+      const updated = await db.from("goods_receipt_lines").update({
+        actual_piece_count: stamp.pieces,
+        computed_avg_grams_per_piece: Number(stamp.avg.toFixed(4)),
+      }).eq("id", text(line.id));
+      if (updated.error) return "บันทึกจำนวนผลจริงไม่สำเร็จ";
+    }
+    const entry = ledger.find((row) => text(row.item_id) === stamp.item_id && row.piece_qty_delta == null && !usedLedger.has(text(row.id)) && Math.abs(num(row.qty_delta) - stamp.grams) < 0.05);
+    if (entry) {
+      usedLedger.add(text(entry.id));
+      const updated = await db.from("stock_ledger").update({ piece_qty_delta: stamp.pieces }).eq("id", text(entry.id));
+      if (updated.error) return "บันทึกจำนวนผลจริงไม่สำเร็จ";
+    }
+  }
+  return null;
 }
 
 export async function submitBlindGoodsReceiptAction(formData: FormData): Promise<FnbActionResult<{ gr_no: string; line_count: number }>> {
@@ -148,7 +247,19 @@ export async function submitBlindGoodsReceiptAction(formData: FormData): Promise
       const access = owner.ok ? await getUserAccessContext(owner.userId) : null;
       reveal = Boolean(access?.isSuperAdmin || access?.fnbGuardrailPermissions.can_view_cost_price);
     }
-    const lines = JSON.parse(text(formData.get("lines_json")) || "[]") as { item_id: string; raw_desc?: string; raw_code?: string; received_qty: number; received_uom: string; recipe_qty_per_unit?: number; unit_price?: number; line_vat_mode?: string }[];
+    const parsed = JSON.parse(text(formData.get("lines_json")) || "[]") as ReceiptLine[];
+    const prepared = await prepareCatchWeightLines(parsed);
+    if (prepared.error) return result({ gr_no: "", line_count: 0 }, prepared.error);
+    const lines = prepared.lines.map((line) => ({
+      item_id: line.item_id,
+      raw_desc: line.raw_desc,
+      raw_code: line.raw_code,
+      received_qty: line.received_qty,
+      received_uom: line.received_uom,
+      recipe_qty_per_unit: line.recipe_qty_per_unit,
+      unit_price: line.unit_price,
+      line_vat_mode: line.line_vat_mode,
+    }));
     const safeLines = reveal ? lines : lines.map((line) => ({ ...line, unit_price: 0 }));
     const photos = await Promise.all(
       formData.getAll("photos").filter((entry): entry is File => entry instanceof File && entry.size > 0).map((file) => storeFile(branch, "gr", file)),
@@ -174,6 +285,8 @@ export async function submitBlindGoodsReceiptAction(formData: FormData): Promise
     const body = saved.data && typeof saved.data === "object" ? saved.data as Record<string, unknown> : {};
     if (body.ok === false) return result({ gr_no: "", line_count: 0 }, text(body.error) || "บันทึกรับของไม่สำเร็จ");
     const grNo = text(body.gr_no);
+    const stamped = await stampCatchWeightReceipt(grNo, prepared.stamps);
+    if (stamped) return result({ gr_no: grNo, line_count: safeLines.length }, stamped);
     const target = text(formData.get("target_location_code"));
     if (grNo && target) {
       await schemaAdmin().schema("fnb").from("goods_receipts").update({ target_location_code: target }).eq("gr_no", grNo);

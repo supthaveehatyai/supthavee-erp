@@ -15,6 +15,7 @@ import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
 import { VendorClaimPanel, WriteOffButton } from "@/components/fnb/write-off-panel";
 import { branchForBrand } from "@/lib/fnb/brand-branch";
 import { itemMatches } from "@/lib/fnb/item-search";
+import { produceProfile } from "@/lib/utils/fnb-format";
 import type { FnbBranchOption, FnbBrandCode, FnbExpiryLotRow, FnbItemRow, FnbReimbursementRow, FnbUnpackLine, FnbVendorSheetRow } from "@/types/fnb";
 
 const field = "h-10 w-full rounded-md border border-slate-200 px-3 text-sm";
@@ -31,7 +32,7 @@ export function ProcurementWorkspace({
   brand,
 }: {
   branches: FnbBranchOption[];
-  items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom" | "allow_decimal_count_qty" | "count_uom">[];
+  items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom" | "allow_decimal_count_qty" | "count_uom" | "is_catch_weight_produce" | "piece_uom_label" | "avg_gross_grams_per_piece" | "prep_yield_pct">[];
   brand: FnbBrandCode;
   pending: FnbUnpackLine[];
   lots: FnbExpiryLotRow[];
@@ -178,14 +179,15 @@ export function ManualReceive({
   branchCode = "",
 }: {
   branches: FnbBranchOption[];
-  items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom" | "allow_decimal_count_qty" | "count_uom">[];
+  items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom" | "allow_decimal_count_qty" | "count_uom" | "is_catch_weight_produce" | "piece_uom_label" | "avg_gross_grams_per_piece" | "prep_yield_pct">[];
   brandLock: FnbBrandCode | null;
   revealCost: boolean;
   actorSource?: "desktop" | "liff";
   setMessage?: (message: string) => void;
   branchCode?: string;
 }) {
-  const [lines, setLines] = useState([{ item_id: items[0]?.id ?? "", qty: "", uom: items[0]?.default_purchase_uom ?? "" }]);
+  const blankLine = { item_id: items[0]?.id ?? "", qty: "", uom: items[0]?.default_purchase_uom ?? "", mode: "WEIGHT" as "WEIGHT" | "PIECE", pieces: "", grams: "", gramUnit: "kg" as "g" | "kg" };
+  const [lines, setLines] = useState([blankLine]);
   const [receiveBranch, setReceiveBranch] = useState(branchCode || branches[0]?.branch_code || "");
   const [query, setQuery] = useState("");
   const [zones, setZones] = useState<{ locationCode: string; locationNameTh: string; isDefaultGrTarget: boolean }[]>([]);
@@ -212,9 +214,30 @@ export function ManualReceive({
       form.set("brand_lock", brandLock ?? "");
       form.set("actor_source", actorSource);
       form.set("reveal_cost", revealCost ? "true" : "false");
+      const catchMissing = lines.find((line) => {
+        const item = items.find((row) => row.id === line.item_id);
+        return item?.is_catch_weight_produce === true && Math.trunc(Number(line.pieces) || 0) <= 0;
+      });
+      if (catchMissing) {
+        const item = items.find((row) => row.id === catchMissing.item_id);
+        toast.error(`นับจำนวน${produceProfile(item).label}จริงในล็อตนี้`);
+        return;
+      }
       form.set("lines_json", JSON.stringify(lines.map((line) => {
         const item = items.find((row) => row.id === line.item_id);
-        return { item_id: line.item_id, raw_desc: item ? `${item.short_code} ${item.name_th}` : "", received_qty: Number(line.qty) || 0, received_uom: line.uom || item?.default_purchase_uom || "ชิ้น", recipe_qty_per_unit: item?.recipe_per_purchase_uom || 1, unit_price: 0 };
+        const profile = produceProfile(item);
+        const typedGrams = Number(line.grams) > 0 ? (line.gramUnit === "kg" ? Number(line.grams) * 1000 : Number(line.grams)) : 0;
+        return {
+          item_id: line.item_id,
+          raw_desc: item ? `${item.short_code} ${item.name_th}` : "",
+          received_qty: profile.enabled && line.mode === "PIECE" ? Math.trunc(Number(line.pieces) || 0) : Number(line.qty) || 0,
+          received_uom: profile.enabled && line.mode === "PIECE" ? profile.label : (line.uom || item?.default_purchase_uom || "ชิ้น"),
+          recipe_qty_per_unit: item?.recipe_per_purchase_uom || 1,
+          unit_price: 0,
+          receive_mode: profile.enabled ? line.mode : "",
+          actual_piece_count: profile.enabled ? Math.trunc(Number(line.pieces) || 0) : 0,
+          weight_grams: profile.enabled ? typedGrams : 0,
+        };
       })));
       setBusy(true);
       start(async () => {
@@ -231,14 +254,55 @@ export function ManualReceive({
         <input className={`${field} md:col-span-2`} value={query} placeholder="ค้นรหัสย่อ รหัสเรียก หรือชื่อสินค้า" onChange={(event) => setQuery(event.target.value)} />
         <input className={field} name="vendor_name" placeholder="ผู้ขาย" />
       </div>
-      {lines.map((line, index) => (
-        <div key={index} className="grid gap-2 md:grid-cols-3">
-          <select className={field} value={line.item_id} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, item_id: event.target.value } : row))}>{(visible.some((item) => item.id === line.item_id) ? visible : items.filter((item) => item.id === line.item_id).concat(visible)).map((item) => <option key={item.id} value={item.id}>{item.short_code} {item.name_th}</option>)}</select>
-          <FnbQtyInput value={line.qty} unit={items.find((item) => item.id === line.item_id)?.default_purchase_uom || "ชิ้น"} allowDecimal={items.find((item) => item.id === line.item_id)?.allow_decimal_count_qty === true} onChange={(value) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, qty: value } : row))} />
-          <input className={field} placeholder="หน่วยรับ เช่น แกลลอน" value={line.uom} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, uom: event.target.value } : row))} />
-        </div>
-      ))}
-      <button type="button" className="text-sm text-red-700" onClick={() => setLines((current) => [...current, { item_id: items[0]?.id ?? "", qty: "", uom: "" }])}>เพิ่มรายการ</button>
+      {lines.map((line, index) => {
+        const item = items.find((row) => row.id === line.item_id);
+        const profile = produceProfile(item);
+        const pieceCount = Math.trunc(Number(line.pieces) || 0);
+        const typedGrams = Number(line.grams) > 0 ? (line.gramUnit === "kg" ? Number(line.grams) * 1000 : Number(line.grams)) : 0;
+        const totalGrams = !profile.enabled ? 0 : line.mode === "PIECE"
+          ? (typedGrams > 0 ? typedGrams : pieceCount * profile.avg)
+          : (line.uom === "กก." || line.uom.toLowerCase() === "kg" ? (Number(line.qty) || 0) * 1000 : (Number(line.qty) || 0) * (item?.recipe_per_purchase_uom || 1000));
+        const choices = visible.some((row) => row.id === line.item_id) ? visible : items.filter((row) => row.id === line.item_id).concat(visible);
+        return (
+          <div key={index} className="space-y-2 rounded-lg bg-slate-50 p-3">
+            <select className={field} value={line.item_id} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, item_id: event.target.value, uom: items.find((candidate) => candidate.id === event.target.value)?.default_purchase_uom ?? row.uom } : row))}>{choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.short_code} {choice.name_th}</option>)}</select>
+            {profile.enabled ? (
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-2 text-sm">
+                  <button type="button" className={`rounded-full px-3 py-1 ${line.mode === "WEIGHT" ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, mode: "WEIGHT" } : row))}>ซื้อยกลัง / ชั่งกิโลกรัม</button>
+                  <button type="button" className={`rounded-full px-3 py-1 ${line.mode === "PIECE" ? "bg-[var(--fnb-brand)] text-white" : "bg-white"}`} onClick={() => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, mode: "PIECE" } : row))}>ซื้อปลีกเป็นราย{profile.label}</button>
+                </div>
+                {line.mode === "WEIGHT" ? (
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className="text-sm">จำนวนลัง/กก. ที่รับเข้า
+                      <span className="mt-1 flex items-center gap-2"><FnbQtyInput allowDecimal value={line.qty} onChange={(value) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, qty: value } : row))} /><select className="h-10 rounded-md border px-2 text-sm" value={line.uom || "กก."} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, uom: event.target.value } : row))}><option value={item?.default_purchase_uom || "ลัง"}>{item?.default_purchase_uom || "ลัง"}</option><option value="กก.">กก.</option></select></span>
+                    </label>
+                    <label className="text-sm">🔢 นับจำนวน{profile.label}จริงในลัง/ถุงนี้ *
+                      <span className="mt-1 flex items-center gap-2"><FnbQtyInput className="h-10 w-24" min={1} value={line.pieces} onChange={(value) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, pieces: value } : row))} /><strong>{profile.label}</strong></span>
+                    </label>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className="text-sm">จำนวน{profile.label}
+                      <span className="mt-1 flex items-center gap-2"><FnbQtyInput className="h-10 w-24" min={1} value={line.pieces} onChange={(value) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, pieces: value } : row))} /><strong>{profile.label}</strong></span>
+                    </label>
+                    <label className="text-sm">น้ำหนักรวมถ้าชั่งกิโล (ไม่บังคับ)
+                      <span className="mt-1 flex items-center gap-2"><FnbQtyInput allowDecimal value={line.grams} onChange={(value) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, grams: value } : row))} /><select className="h-10 rounded-md border px-2 text-sm" value={line.gramUnit} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, gramUnit: event.target.value === "g" ? "g" : "kg" } : row))}><option value="kg">กก.</option><option value="g">g</option></select></span>
+                    </label>
+                  </div>
+                )}
+                {pieceCount > 0 ? <p className="text-sm text-amber-900">เฉลี่ยล็อตนี้: {(totalGrams / pieceCount).toFixed(1)} g/{profile.label}</p> : null}
+              </div>
+            ) : (
+              <div className="grid gap-2 md:grid-cols-2">
+                <FnbQtyInput value={line.qty} unit={item?.default_purchase_uom || "ชิ้น"} allowDecimal={item?.allow_decimal_count_qty === true} onChange={(value) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, qty: value } : row))} />
+                <input className={field} placeholder="หน่วยรับ เช่น แกลลอน" value={line.uom} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, uom: event.target.value } : row))} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <button type="button" className="text-sm text-red-700" onClick={() => setLines((current) => [...current, { ...blankLine, item_id: items[0]?.id ?? "", uom: items[0]?.default_purchase_uom ?? "" }])}>เพิ่มรายการ</button>
       <label className="block rounded-lg border border-dashed p-3 text-sm" onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); }}>รูปของที่มาส่ง<input className="mt-2 block" name="photos" type="file" accept="image/*" capture="environment" multiple /></label>
       <SaveButton busy={busy}>บันทึกรับของ</SaveButton>
     </form>

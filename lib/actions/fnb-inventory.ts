@@ -17,22 +17,26 @@ export async function listFnbStockAction(): Promise<FnbActionResult<FnbStockBala
     const ctx = await requireFnbModuleAccess("branch_inventory_transfer");
     const db = schemaAdmin().schema("fnb");
     const [items, ledger] = await Promise.all([
-      db.from("items").select("id,short_code,alias_codes,external_code,name_th,count_uom,recipe_uom,recipe_per_count_uom").eq("is_active", true).limit(500),
-      db.from("stock_ledger").select("branch_code,item_id,qty_delta").limit(5000),
+      db.from("items").select("id,short_code,alias_codes,external_code,name_th,count_uom,recipe_uom,recipe_per_count_uom,is_catch_weight_produce,piece_uom_label").eq("is_active", true).limit(500),
+      db.from("stock_ledger").select("branch_code,item_id,qty_delta,piece_qty_delta").limit(8000),
     ]);
     if (items.error) return fail([], items.error, "อ่านสินค้าไม่สำเร็จ");
     if (ledger.error) return fail([], ledger.error, "อ่านสต็อกไม่สำเร็จ");
     const catalog = new Map(asRows(items.data).map((row) => [text(row.id), row]));
     const totals = new Map<string, number>();
+    const pieces = new Map<string, number>();
     for (const row of asRows(ledger.data)) {
       const key = `${text(row.branch_code)}|${text(row.item_id)}`;
       totals.set(key, (totals.get(key) ?? 0) + num(row.qty_delta));
+      pieces.set(key, (pieces.get(key) ?? 0) + num(row.piece_qty_delta));
     }
     const balances: FnbStockBalanceRow[] = [];
-    for (const [key, qty] of totals) {
+    for (const key of new Set([...totals.keys(), ...pieces.keys()])) {
+      const qty = totals.get(key) ?? 0;
+      const pieceQty = pieces.get(key) ?? 0;
       const [branch, itemId] = key.split("|");
       const item = catalog.get(itemId);
-      if (!item || Math.abs(qty) < 0.0001) continue;
+      if (!item || (Math.abs(qty) < 0.0001 && Math.abs(pieceQty) < 0.0001)) continue;
       if (!branchAllowed(ctx, branch)) continue;
       const hideQty = !ctx.isSuperAdmin && ctx.fnbGuardrailPermissions.enforce_blind_count;
       balances.push({
@@ -44,6 +48,7 @@ export async function listFnbStockAction(): Promise<FnbActionResult<FnbStockBala
         recipe_uom: text(item.recipe_uom),
         recipe_per_count_uom: num(item.recipe_per_count_uom) || 1,
         on_hand_recipe: hideQty ? 0 : qty,
+        piece_on_hand: hideQty ? 0 : pieceQty,
         alias_codes: Array.isArray(item.alias_codes) ? item.alias_codes.map((code) => text(code)) : [],
         external_code: item.external_code == null ? null : text(item.external_code),
       });
@@ -200,10 +205,10 @@ export async function submitBlindCountAction(input: {
   }
 }
 
-export async function listBrandCountItemsAction(brand: string): Promise<FnbActionResult<{ id: string; short_code: string; name_th: string; item_category: string; count_uom: string; allow_decimal_count_qty: boolean; recipe_per_count_uom: number }[]>> {
+export async function listBrandCountItemsAction(brand: string): Promise<FnbActionResult<{ id: string; short_code: string; name_th: string; item_category: string; count_uom: string; allow_decimal_count_qty: boolean; recipe_per_count_uom: number; is_catch_weight_produce: boolean; piece_uom_label: string; avg_gross_grams_per_piece: number; prep_yield_pct: number }[]>> {
   try {
     await requireFnbModuleAccess("branch_inventory_transfer");
-    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,name_th,item_category,count_uom,allow_decimal_count_qty,recipe_per_count_uom,brand_scope,is_active").eq("is_active", true).eq("brand_scope", brand).order("short_code", { ascending: true }).limit(800);
+    const listed = await schemaAdmin().schema("fnb").from("items").select("id,short_code,name_th,item_category,count_uom,allow_decimal_count_qty,recipe_per_count_uom,brand_scope,is_active,is_catch_weight_produce,piece_uom_label,avg_gross_grams_per_piece,prep_yield_pct").eq("is_active", true).eq("brand_scope", brand).order("short_code", { ascending: true }).limit(800);
     if (listed.error) return fail([], listed.error, "อ่านสินค้าแบรนด์ไม่สำเร็จ");
     return result(asRows(listed.data).map((row) => ({
       id: text(row.id),
@@ -213,6 +218,10 @@ export async function listBrandCountItemsAction(brand: string): Promise<FnbActio
       count_uom: text(row.count_uom) || "ชิ้น",
       allow_decimal_count_qty: row.allow_decimal_count_qty === true,
       recipe_per_count_uom: num(row.recipe_per_count_uom) || 1,
+      is_catch_weight_produce: row.is_catch_weight_produce === true,
+      piece_uom_label: text(row.piece_uom_label) || "ลูก",
+      avg_gross_grams_per_piece: num(row.avg_gross_grams_per_piece) || 110,
+      prep_yield_pct: num(row.prep_yield_pct) || 80,
     })));
   } catch (error) {
     return caught([], error, "อ่านสินค้าแบรนด์ไม่สำเร็จ");

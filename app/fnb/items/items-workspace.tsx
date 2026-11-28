@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { OpenShelfLifePanel } from "@/components/fnb/open-shelf-life-panel";
 import { commitFnbPriceExcelAction, previewFnbPriceExcelAction, saveFnbItemAction, saveFnbVendorPackAction } from "@/lib/actions/fnb-items";
 import { itemMatches } from "@/lib/fnb/item-search";
+import { produceProfile } from "@/lib/utils/fnb-format";
 import { FNB_BACKROOM_SCHEDULE_LABEL, FNB_BACKROOM_SCHEDULES, FNB_CATEGORY_LABEL, FNB_DISPLAY_SUB_GROUPS, FNB_FRONT_GROUPS, FNB_ITEM_CATEGORIES, FNB_RECIPE_UOMS, FNB_VAT_MODES, FNB_WEEKDAY_OPTIONS, type FnbExcelPriceRow, type FnbItemRow, type FnbVendorPackRow } from "@/types/fnb";
 
 const field = "h-10 w-full rounded-md border border-slate-200 px-3 text-sm";
@@ -54,7 +55,7 @@ export function ItemsWorkspace({ items, packs, initialTab = "items", brand }: { 
         <div className="max-h-[32rem] space-y-2 overflow-auto">
           {visible.map((row) => (
             <button key={row.id} type="button" onClick={() => setSelected(row.id)} className={`block w-full rounded-lg border p-3 text-left ${row.id === selected ? "border-red-700 bg-red-50" : "border-slate-200 bg-white"}`}>
-              <p className="font-semibold">{row.short_code}{row.alias_codes?.length ? ` / ${row.alias_codes.join(" ")}` : ""} · {row.name_th}</p>
+              <p className="font-semibold">{row.short_code}{row.alias_codes?.length ? ` / ${row.alias_codes.join(" ")}` : ""} · {row.name_th}{row.is_catch_weight_produce ? " · 🍋 นับคู่" : ""}</p>
               <p className="text-xs text-slate-500">{row.brand_scope} · อายุตู้โชว์ {row.display_shelf_life_days ?? "-"} วัน · {FNB_DISPLAY_SUB_GROUPS.find((group) => group.code === row.display_sub_group)?.label ?? "ยังไม่จัดกลุ่มโชว์"} · ลำดับ {row.display_walk_order ?? 100}</p>
             </button>
           ))}
@@ -148,6 +149,10 @@ function ItemForm({
           display_shelf_life_days: Number(form.get("display_shelf_life_days") ?? 0),
           display_sub_group: String(form.get("display_sub_group") ?? ""),
           display_walk_order: Number(form.get("display_walk_order") ?? 100),
+          is_catch_weight_produce: form.get("is_catch_weight_produce") === "on",
+          piece_uom_label: String(form.get("piece_uom_label") ?? "ลูก"),
+          avg_gross_grams_per_piece: Number(form.get("avg_gross_grams_per_piece") ?? 110),
+          prep_yield_pct: Number(form.get("prep_yield_pct") ?? 80),
         });
         if (saved.error) toast.error(saved.error);
         else toast.success("บันทึกวัตถุดิบแล้ว");
@@ -177,10 +182,41 @@ function ItemForm({
         <select className={field} name="backroom_count_schedule" defaultValue={item?.backroom_count_schedule || "WEEKLY_2X"}>{FNB_BACKROOM_SCHEDULES.map((key) => <option key={key} value={key}>{FNB_BACKROOM_SCHEDULE_LABEL[key]}</option>)}</select>
       </label>
       <div className="flex flex-wrap gap-3 text-sm md:col-span-2">{FNB_WEEKDAY_OPTIONS.map((day) => <label key={day.day} className="flex items-center gap-1"><input type="checkbox" name="weekday" value={day.day} defaultChecked={item?.backroom_count_weekdays?.includes(day.day)} />{day.label}</label>)}</div>
+      <CatchWeightFields item={item} />
       <label className="flex items-center gap-2 text-sm"><input name="is_front_back_checked" type="checkbox" defaultChecked={item?.is_front_back_checked} />เช็กหน้า/หลัง</label>
       <select className={field} name="front_back_group" defaultValue={item?.front_back_group ?? "BAKERY_CAKE"}>{FNB_FRONT_GROUPS.map((group) => <option key={group}>{group}</option>)}</select>
       <button className="rounded-md bg-[var(--fnb-brand)] px-4 py-2 text-sm text-white md:col-span-2" disabled={pending}>{item ? "บันทึกการแก้ไข" : "เพิ่มวัตถุดิบ"}</button>
     </form>
+  );
+}
+
+function CatchWeightFields({ item }: { item: FnbItemRow | null }) {
+  const [on, setOn] = useState(item?.is_catch_weight_produce === true);
+  const [label, setLabel] = useState(item?.piece_uom_label || "ลูก");
+  const [avg, setAvg] = useState(String(item?.avg_gross_grams_per_piece || 110));
+  const [yieldPct, setYieldPct] = useState(String(item?.prep_yield_pct || 80));
+  const profile = produceProfile({ is_catch_weight_produce: on, piece_uom_label: label, avg_gross_grams_per_piece: Number(avg), prep_yield_pct: Number(yieldPct) });
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 md:col-span-2">
+      <label className="flex items-center gap-2 text-sm font-medium">
+        <input name="is_catch_weight_produce" type="checkbox" checked={on} onChange={(event) => setOn(event.target.checked)} />
+        🍋 โหมดผลไม้สดนับคู่ (ซื้อเป็น กก./ลูก · หั่นเป็นลูก · ชั่งทิ้งเป็นกรัม)
+      </label>
+      {on ? (
+        <div className="mt-2 grid gap-2 md:grid-cols-3">
+          <label className="text-xs">หน่วยนับรายผล<input className={field} name="piece_uom_label" value={label} onChange={(event) => setLabel(event.target.value)} /></label>
+          <label className="text-xs">น้ำหนักเฉลี่ยต่อลูกเริ่มต้น (g)<input className={field} name="avg_gross_grams_per_piece" type="number" min="1" step="1" value={avg} onChange={(event) => setAvg(event.target.value)} /></label>
+          <label className="text-xs">เปอร์เซ็นต์เนื้อพร้อมใช้หลังหั่นปาดหัวท้าย/แกน (%)<input className={field} name="prep_yield_pct" type="number" min="1" max="100" step="1" value={yieldPct} onChange={(event) => setYieldPct(event.target.value)} /></label>
+          <p className="text-sm md:col-span-3">หั่น 1 {profile.label} (~{profile.avg} g) ได้เนื้อพร้อมใช้เฉลี่ย ~{profile.usablePerPiece} g</p>
+        </div>
+      ) : (
+        <>
+          <input type="hidden" name="piece_uom_label" value={label || "ลูก"} />
+          <input type="hidden" name="avg_gross_grams_per_piece" value={avg || "110"} />
+          <input type="hidden" name="prep_yield_pct" value={yieldPct || "80"} />
+        </>
+      )}
+    </div>
   );
 }
 

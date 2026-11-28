@@ -27,6 +27,24 @@ export function formatFnbQty(qty: number | string | null | undefined, uom?: stri
   return unit ? `${shown} ${unit}` : shown;
 }
 
+export function produceProfile(item: {
+  is_catch_weight_produce?: boolean | null;
+  piece_uom_label?: string | null;
+  avg_gross_grams_per_piece?: number | null;
+  prep_yield_pct?: number | null;
+} | null | undefined) {
+  const label = (item?.piece_uom_label || "").trim() || "ลูก";
+  const avg = Number(item?.avg_gross_grams_per_piece) > 0 ? Number(item?.avg_gross_grams_per_piece) : 110;
+  const yieldPct = Number(item?.prep_yield_pct) > 0 ? Number(item?.prep_yield_pct) : 80;
+  return {
+    enabled: item?.is_catch_weight_produce === true,
+    label,
+    avg,
+    yieldPct,
+    usablePerPiece: Math.round((avg * yieldPct) / 100),
+  };
+}
+
 export function formatPrepPortionPct(packsDeducted: number, brewPortionMode?: string): string {
   const mode = (brewPortionMode || "").trim().toUpperCase();
   if (mode === "PCT_25") return "25%";

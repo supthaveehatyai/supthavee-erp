@@ -318,6 +318,10 @@ export type FnbItemRow = {
   display_shelf_life_days: number | null;
   display_sub_group: string | null;
   display_walk_order: number;
+  is_catch_weight_produce: boolean;
+  piece_uom_label: string;
+  avg_gross_grams_per_piece: number;
+  prep_yield_pct: number;
 };
 
 export type FnbVendorPackRow = {
@@ -428,6 +432,7 @@ export type FnbStockBalanceRow = {
   recipe_uom: string;
   recipe_per_count_uom: number;
   on_hand_recipe: number;
+  piece_on_hand: number;
   alias_codes?: string[];
   external_code?: string | null;
 };
@@ -601,7 +606,7 @@ export type FnbWipBatchRow = {
 
 export type FnbWipBoard = {
   bases: { base_code: string; base_name_th: string; yield_qty_ml: number; sort_order: number }[];
-  items: { id: string; short_code: string; name_th: string; count_uom: string; alias_codes: string[]; external_code: string | null; allow_decimal_count_qty: boolean; item_category: string; has_open_shelf_rule: boolean }[];
+  items: { id: string; short_code: string; name_th: string; count_uom: string; alias_codes: string[]; external_code: string | null; allow_decimal_count_qty: boolean; item_category: string; has_open_shelf_rule: boolean; is_catch_weight_produce?: boolean; piece_uom_label?: string; avg_gross_grams_per_piece?: number; prep_yield_pct?: number }[];
   brews: FnbWipBatchRow[];
   containers: FnbWipBatchRow[];
 };
@@ -675,6 +680,9 @@ export type FnbZoneCountLine = {
   displayWalkOrder: number;
   shelfLifeDays: number;
   writeOffQty: number;
+  isCatchWeight?: boolean;
+  pieceLabel?: string;
+  avgGrossGrams?: number;
 };
 
 export type FnbDisplayLot = {

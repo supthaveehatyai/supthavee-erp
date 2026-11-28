@@ -29,7 +29,7 @@ export function BrandStore({
   title: string;
   branches: FnbBranchOption[];
   shelfItems: FnbItemRow[];
-  items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom" | "shelf_life_months" | "requires_expiry_tracking" | "allow_decimal_count_qty" | "count_uom">[];
+  items: Pick<FnbItemRow, "id" | "short_code" | "name_th" | "default_purchase_uom" | "recipe_per_purchase_uom" | "shelf_life_months" | "requires_expiry_tracking" | "allow_decimal_count_qty" | "count_uom" | "is_catch_weight_produce" | "piece_uom_label" | "avg_gross_grams_per_piece" | "prep_yield_pct">[];
   pendingLots: FnbUnpackLine[];
   lots: FnbExpiryLotRow[];
   schemaMessage: string | null;

@@ -115,7 +115,7 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
     const [branches, confirms, batches, transfers, shifts, sales, equipment, writeOffs, counts, items, rosters, bases, cleaningLogs, cleaningSpots] = await Promise.all([
       db.from("branches").select("branch_code,branch_name_th,brand_code,branch_status,coffee_dose_min_g,coffee_dose_max_g,espresso_time_min_s,espresso_time_max_s,espresso_yield_min_g,espresso_yield_max_g").eq("brand_code", scope).neq("branch_status", "INACTIVE").limit(20),
       db.from("daily_stage_section_confirmations").select("id,branch_code,stage_code,section_key,section_title_th,status_flag,numeric_amount,expected_amount,confirmed_by_name,confirmed_at,photo_urls,payload_json").eq("work_date", workDate).limit(2000),
-      db.from("bar_wip_batches").select("id,branch_code,batch_kind,prep_base_code,item_id,brew_portion_mode,packs_deducted,pack_uom,opened_at,opened_by_name,expires_at,sticker_label_text,open_photo_urls,batch_status,notes,is_voided_duplicate").eq("work_date", workDate).limit(1000),
+      db.from("bar_wip_batches").select("id,branch_code,batch_kind,prep_base_code,item_id,brew_portion_mode,packs_deducted,pack_uom,opened_at,opened_by_name,expires_at,sticker_label_text,open_photo_urls,batch_status,notes,is_voided_duplicate,sliced_piece_count,actual_usable_qty,is_estimated_net_weight").eq("work_date", workDate).limit(1000),
       db.from("internal_zone_transfers").select("branch_code,item_id,qty_in_count_uom,created_at").eq("work_date", workDate).limit(1000),
       db.from("shift_closings").select("branch_code,shift_type,staff_name,cash_variance,created_at").eq("work_date", workDate).limit(200),
       db.from("daily_menu_sales_headers").select("branch_code,created_at").eq("work_date", workDate).limit(50),
@@ -247,7 +247,9 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
       return {
         id: text(row.id),
         label: itemName.get(text(row.item_id)) || text(row.prep_base_code) || "วัตถุดิบ",
-        qtyLabel: note.match(/(\d+)\s*ลูก/) ? `${Number(note.match(/(\d+)\s*ลูก/)?.[1] || 0)} ลูก` : formatFnbQty(num(row.packs_deducted) || 1, text(row.pack_uom) || "ชิ้น", false),
+        qtyLabel: num(row.sliced_piece_count) > 0
+          ? `${num(row.sliced_piece_count)} ${text(row.pack_uom) || "ลูก"} (เนื้อ ${num(row.actual_usable_qty)} g · ${row.is_estimated_net_weight === false ? "ชั่งจริง" : "ค่าเฉลี่ย"})`
+          : note.match(/(\d+)\s*ลูก/) ? `${Number(note.match(/(\d+)\s*ลูก/)?.[1] || 0)} ลูก` : formatFnbQty(num(row.packs_deducted) || 1, text(row.pack_uom) || "ชิ้น", false),
         badge: note.includes("เปิดใช้") ? "เปิดใช้อยู่" : "เบิกใหม่",
         expiryLabel: expiry ? dayLabel(expiry) : (sticker || "เคลียร์สิ้นวัน"),
         staff: text(row.opened_by_name),
@@ -273,7 +275,16 @@ export async function getExecutiveInspectorAction(brand: string, workDate: strin
       const ml = num(rec.ml);
       return [`${code} ${portionLabel}${ml > 0 ? ` · ${formatFnbQty(ml, "ml")}` : ""}`];
     });
-    if (sec1Payload.lemons != null) sec1Lines.push(`เลมอน ${num(sec1Payload.lemons)} ลูก`);
+    if (Array.isArray(sec1Payload.produce)) {
+      for (const item of sec1Payload.produce) {
+        const rec = recordOf(item);
+        const pieces = num(rec.pieces);
+        if (pieces <= 0) continue;
+        const grams = num(rec.grams);
+        const label = text(rec.label) || "ลูก";
+        sec1Lines.push(`${text(rec.name) || "ผลไม้สด"} ${pieces} ${label} (เนื้อ ${grams > 0 ? grams : num(rec.usable)} g · ${rec.estimated === false ? "ชั่งจริง" : "ค่าเฉลี่ย"})`);
+      }
+    } else if (sec1Payload.lemons != null) sec1Lines.push(`เลมอน ${num(sec1Payload.lemons)} ลูก`);
     const prepLines = sec1Lines.length > 0 ? sec1Lines : prepRows.map((row) => `${row.label}: ${row.portion}${row.yieldLabel ? ` · ${row.yieldLabel}` : ""}`);
     const metric = (value: number | null, min: number, max: number, label: string, unit: string) => {
       if (value == null) return `${label} ยังไม่กรอก`;

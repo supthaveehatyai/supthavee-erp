@@ -227,7 +227,7 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
     const [zones, spots, items, lots, writeOffs, counts, transfers, sales, batches, calibration, receipts] = await Promise.all([
       db.from("storage_locations").select("id,branch_code,location_code,location_name_th,zone_type,default_count_schedule,count_weekdays,is_default_gr_target,sort_order").eq("branch_code", branchCode).eq("is_active", true).order("sort_order", { ascending: true }).limit(20),
       db.from("branch_cleaning_spots").select("id,branch_code,stage_code,spot_name_th,sort_order").eq("branch_code", branchCode).eq("is_active", true).order("sort_order", { ascending: true }).limit(40),
-      db.from("items").select("id,short_code,alias_codes,name_th,item_category,count_uom,allow_decimal_count_qty,track_front_display_daily,backroom_count_schedule,backroom_count_weekdays,brand_scope,display_shelf_life_days,display_sub_group,display_walk_order").eq("is_active", true).limit(800),
+      db.from("items").select("id,short_code,alias_codes,name_th,item_category,count_uom,allow_decimal_count_qty,track_front_display_daily,backroom_count_schedule,backroom_count_weekdays,brand_scope,display_shelf_life_days,display_sub_group,display_walk_order,is_catch_weight_produce,piece_uom_label,avg_gross_grams_per_piece").eq("is_active", true).limit(800),
       db.from("display_chiller_lots").select("id,item_id,remaining_qty,display_expiry_date,effective_day_1,lot_status").eq("branch_code", branchCode).eq("lot_status", "ACTIVE").limit(500),
       db.from("item_write_offs").select("item_id,location_code,qty_in_count_uom").eq("branch_code", branchCode).eq("work_date", workDate).limit(500),
       db.from("zone_stock_counts").select("item_id,location_code,count_stage,count_date,counted_qty,nearest_expiry_date").eq("branch_code", branchCode).gte("count_date", shiftDate(workDate, -14)).lte("count_date", workDate).limit(4000),
@@ -267,7 +267,16 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
       displaySubGroup: text(row.display_sub_group),
       displayWalkOrder: num(row.display_walk_order) || 100,
       shelfLifeDays: num(row.display_shelf_life_days),
+      catchWeight: row.is_catch_weight_produce === true,
+      pieceLabel: text(row.piece_uom_label) || "ลูก",
+      avgGrossGrams: num(row.avg_gross_grams_per_piece) || 110,
     })).filter((item) => (brandLock !== "LUCKY_CUP" && brandLock !== "CHATORN") || item.brand === brandLock);
+    const pieceOnHand = new Map<string, number>();
+    const pieceLedger = await db.from("stock_ledger").select("item_id,piece_qty_delta").eq("branch_code", branchCode).limit(8000);
+    for (const row of asRows(pieceLedger.data)) {
+      const id = text(row.item_id);
+      pieceOnHand.set(id, (pieceOnHand.get(id) ?? 0) + num(row.piece_qty_delta));
+    }
     const written = new Map<string, number>();
     for (const row of asRows(writeOffs.data)) {
       const key = `${text(row.location_code)}|${text(row.item_id)}`;
@@ -304,7 +313,8 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
       const replenished = moved.get(`${locationCode}|${item.id}`) ?? 0;
       const posSold = sold.get(item.id) ?? 0;
       const writeOffQty = written.get(`${locationCode}|${item.id}`) ?? 0;
-      const expected = Math.max(0, opening + replenished - posSold - writeOffQty);
+      const pieceMode = item.catchWeight && back?.locationCode === locationCode;
+      const expected = pieceMode ? Math.max(0, pieceOnHand.get(item.id) ?? 0) : Math.max(0, opening + replenished - posSold - writeOffQty);
       const counted = todayCount(locationCode, item.id, stage);
       const countedQty = counted.qty;
       const shrinkage = countedQty == null ? 0 : expected - countedQty;
@@ -325,8 +335,11 @@ export async function getStoreDayBoardAction(branchCode: string, workDate: strin
         suggestReplenishQty: countedQty != null && countedQty > expected ? countedQty - expected : 0,
         belowLastClose: stage === "OPENING" && openingToday != null && openingToday < lastClose(locationCode, item.id),
         dueTonight: isBackroomDue(item.schedule, item.weekdays, workDate),
-        countUom: item.countUom,
-        allowDecimal: item.allowDecimal,
+        countUom: pieceMode ? item.pieceLabel : item.countUom,
+        allowDecimal: pieceMode ? false : item.allowDecimal,
+        isCatchWeight: pieceMode,
+        pieceLabel: item.pieceLabel,
+        avgGrossGrams: item.avgGrossGrams,
         category: item.category,
         displaySubGroup: item.displaySubGroup,
         displayWalkOrder: item.displayWalkOrder,

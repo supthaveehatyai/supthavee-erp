@@ -3,7 +3,10 @@
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { LiveWatermarkCamera } from "@/components/fnb/live-watermark-camera";
+import { issueCatchWeightProduceSliceAction } from "@/lib/actions/fnb-produce";
 import { closeWipBatchAction, issueWipBatchAction, listWipBoardAction } from "@/lib/actions/fnb-wip";
+import { produceProfile } from "@/lib/utils/fnb-format";
+import { ProduceSliceFields } from "@/components/fnb/produce-slice-form";
 import { barItemLabel, barOpenItems, itemMatches, prepBaseLabel } from "@/lib/fnb/item-search";
 import { uploadFnbEvidenceAction } from "@/lib/actions/fnb-sop";
 import { FnbQtyInput } from "@/components/fnb/fnb-qty-input";
@@ -162,12 +165,34 @@ function OpenItemForm(props: {
   const [query, setQuery] = useState("");
   const [urls, setUrls] = useState<string[]>([]);
   const [qty, setQty] = useState("1");
+  const [pieces, setPieces] = useState("1");
+  const [grams, setGrams] = useState("");
+  const [itemId, setItemId] = useState("");
   const visible = barOpenItems(props.items).filter((item) => itemMatches(query, item)).slice(0, 80);
-  const selected = visible.find((item) => item.id === query) ?? visible[0];
+  const selected = visible.find((item) => item.id === itemId) ?? visible[0];
+  const profile = produceProfile(selected);
   return (
     <form className="space-y-2" onSubmit={(event) => {
       event.preventDefault();
       const body = new FormData(event.currentTarget);
+      if (profile.enabled && selected) {
+        void issueCatchWeightProduceSliceAction({
+          branch_code: props.branch,
+          work_date: props.workDate,
+          shift_instance: String(body.get("shift_instance") || "SHIFT_1"),
+          item_id: selected.id,
+          piece_count: Math.trunc(Number(pieces) || 0),
+          actual_sliced_grams: grams === "" ? null : Number(grams),
+          photo_urls: urls,
+          notes: `หั่น${selected.name_th}`,
+          actor_source: props.actorSource,
+          brand_lock: props.brand,
+        }).then((saved) => {
+          if (saved.error || !saved.data.ok) props.onError(saved.error || saved.data.message || "บันทึกหั่นผลไม้ไม่สำเร็จ");
+          else props.onDone(saved.data.sticker || `บันทึกหั่น${selected.name_th}แล้ว`);
+        });
+        return;
+      }
       body.set("actor_source", props.actorSource);
       body.set("brand_lock", props.brand);
       body.set("branch_code", props.branch);
@@ -184,18 +209,18 @@ function OpenItemForm(props: {
       <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-12">
         <label className="text-sm md:col-span-5">วัตถุดิบที่เบิกเปิดขึ้นบาร์
           <input className="mt-1 h-10 w-full rounded-md border px-3 text-sm" value={query} placeholder="ค้นหา LEM MK CMK" onChange={(event) => setQuery(event.target.value)} />
-          <select className="mt-1 h-10 w-full rounded-md border px-3 text-sm" name="item_id">{visible.map((item) => <option key={item.id} value={item.id}>{barItemLabel(item)}</option>)}</select>
+          <select className="mt-1 h-10 w-full rounded-md border px-3 text-sm" name="item_id" value={selected?.id ?? ""} onChange={(event) => setItemId(event.target.value)}>{visible.map((item) => <option key={item.id} value={item.id}>{barItemLabel(item)}</option>)}</select>
         </label>
-        <label className="text-sm md:col-span-2">จำนวน
-          <span className="mt-1 block"><FnbQtyInput value={qty} onChange={setQty} unit={selected?.count_uom || "ชิ้น"} allowDecimal={selected?.allow_decimal_count_qty === true} /></span>
-        </label>
+        <div className="text-sm md:col-span-4">
+          {profile.enabled ? <ProduceSliceFields label={profile.label} usablePerPiece={profile.usablePerPiece} pieces={pieces} grams={grams} onPieces={setPieces} onGrams={setGrams} /> : <label>จำนวน<span className="mt-1 block"><FnbQtyInput value={qty} onChange={setQty} unit={selected?.count_uom || "ชิ้น"} allowDecimal={selected?.allow_decimal_count_qty === true} /></span></label>}
+        </div>
         <label className="text-sm md:col-span-2">กะงาน
           <select className="mt-1 h-10 w-full rounded-md border px-3 text-sm" name="shift_instance"><option value="SHIFT_1">กะแรก</option><option value="SHIFT_2">กะสอง</option>{props.enableShift3 ? <option value="SHIFT_3">กะสาม</option> : null}</select>
         </label>
         <div className="space-y-2 md:col-span-3">
           <p className="text-sm">ถ่ายรูปสด</p>
           <LiveWatermarkCamera branchCode={props.branch} stage="WIP" staffName={props.actorName} taskTitle="เบิกเปิดของขึ้นบาร์" liveCameraOnly onCapture={(file, live) => void props.capture(file, live, (url) => setUrls((current) => [...current, url]))} />
-          <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={props.busy}>{props.busy ? "กำลังบันทึก..." : "เบิกขึ้นบาร์"}</button>
+          <button className="rounded-md bg-[var(--fnb-brand)] px-3 py-2 text-sm text-white" disabled={props.busy}>{props.busy ? "กำลังบันทึก..." : profile.enabled ? `💾 บันทึกหั่น${selected?.name_th ?? "ผลไม้สด"}` : "เบิกขึ้นบาร์"}</button>
         </div>
       </div>
     </form>

@@ -329,6 +329,10 @@ export async function listFrontBackItemsAction(brandLock?: FnbBrandCode | null):
       display_shelf_life_days: row.display_shelf_life_days == null ? null : num(row.display_shelf_life_days),
       display_sub_group: row.display_sub_group == null ? null : text(row.display_sub_group),
       display_walk_order: num(row.display_walk_order) || 100,
+      is_catch_weight_produce: row.is_catch_weight_produce === true,
+      piece_uom_label: text(row.piece_uom_label) || "ลูก",
+      avg_gross_grams_per_piece: num(row.avg_gross_grams_per_piece) || 110,
+      prep_yield_pct: num(row.prep_yield_pct) || 80,
     })).filter((item) => !brandLock || item.brand_scope === brandLock));
   } catch (error) {
     return caught([], error, "อ่านรายการเช็กของไม่สำเร็จ");

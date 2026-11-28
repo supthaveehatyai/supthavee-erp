@@ -38,6 +38,10 @@ function mapItem(row: Record<string, unknown>): FnbItemRow {
     display_shelf_life_days: row.display_shelf_life_days == null ? null : num(row.display_shelf_life_days),
     display_sub_group: row.display_sub_group == null ? null : text(row.display_sub_group),
     display_walk_order: num(row.display_walk_order) || 100,
+    is_catch_weight_produce: row.is_catch_weight_produce === true,
+    piece_uom_label: text(row.piece_uom_label) || "ลูก",
+    avg_gross_grams_per_piece: num(row.avg_gross_grams_per_piece) || 110,
+    prep_yield_pct: num(row.prep_yield_pct) || 80,
   };
 }
 
@@ -100,6 +104,10 @@ export async function saveFnbItemAction(input: {
   display_shelf_life_days?: number;
   display_sub_group?: string;
   display_walk_order?: number;
+  is_catch_weight_produce?: boolean;
+  piece_uom_label?: string;
+  avg_gross_grams_per_piece?: number;
+  prep_yield_pct?: number;
 }): Promise<FnbActionResult<{ ok: boolean }>> {
   try {
     await requireFnbModuleAccess("master_items_bom");
@@ -138,6 +146,10 @@ export async function saveFnbItemAction(input: {
       display_shelf_life_days: input.item_category === "BAKERY_FROZEN" ? Math.max(1, Number(input.display_shelf_life_days) || 4) : (Number(input.display_shelf_life_days) || null),
       display_sub_group: FNB_DISPLAY_SUB_GROUPS.some((group) => group.code === input.display_sub_group) ? input.display_sub_group : null,
       display_walk_order: Number(input.display_walk_order) || FNB_DISPLAY_SUB_GROUPS.find((group) => group.code === input.display_sub_group)?.walk || 100,
+      is_catch_weight_produce: input.is_catch_weight_produce === true,
+      piece_uom_label: (input.piece_uom_label || "ลูก").trim() || "ลูก",
+      avg_gross_grams_per_piece: Number(input.avg_gross_grams_per_piece) > 0 ? Number(input.avg_gross_grams_per_piece) : 110,
+      prep_yield_pct: Number(input.prep_yield_pct) > 0 ? Number(input.prep_yield_pct) : 80,
       is_active: true,
     };
     const table = schemaAdmin().schema("fnb").from("items");

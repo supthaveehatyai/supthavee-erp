@@ -193,7 +193,7 @@ export async function listWipBoardAction(input: {
     const db = schemaAdmin().schema("fnb");
     const [bases, items, batches, rules] = await Promise.all([
       db.from("prep_bases").select("base_code, base_name_th, yield_qty_ml, brand_code, is_active, sort_order").eq("is_active", true).limit(40),
-      db.from("items").select("id, short_code, alias_codes, external_code, name_th, count_uom, allow_decimal_count_qty, brand_scope, item_category").eq("is_active", true).order("short_code", { ascending: true }).limit(2000),
+      db.from("items").select("id, short_code, alias_codes, external_code, name_th, count_uom, allow_decimal_count_qty, brand_scope, item_category, is_catch_weight_produce, piece_uom_label, avg_gross_grams_per_piece, prep_yield_pct").eq("is_active", true).order("short_code", { ascending: true }).limit(2000),
       db.from("bar_wip_batches").select("*").eq("branch_code", input.branch_code).limit(500),
       db.from("item_open_shelf_life_rules").select("item_id").limit(2000),
     ]);
@@ -222,6 +222,10 @@ export async function listWipBoardAction(input: {
           allow_decimal_count_qty: row.allow_decimal_count_qty === true,
           item_category: text(row.item_category),
           has_open_shelf_rule: ruled.has(text(row.id)),
+          is_catch_weight_produce: row.is_catch_weight_produce === true,
+          piece_uom_label: text(row.piece_uom_label) || "ลูก",
+          avg_gross_grams_per_piece: num(row.avg_gross_grams_per_piece) || 110,
+          prep_yield_pct: num(row.prep_yield_pct) || 80,
         })),
       brews: rows.filter((row) => row.batch.batch_kind === "PREP_BASE" && row.work_date === input.work_date).map((row) => row.batch),
       containers: rows.filter((row) => row.batch.batch_status === "ACTIVE" && (row.batch.shelf_life_mode === "HOURS_AFTER_OPEN" || row.batch.shelf_life_mode === "DAYS_AFTER_OPEN")).map((row) => row.batch),

@@ -21,6 +21,9 @@ type CountItem = {
   count_uom: string;
   allow_decimal_count_qty: boolean;
   recipe_per_count_uom: number;
+  is_catch_weight_produce?: boolean;
+  piece_uom_label?: string;
+  avg_gross_grams_per_piece?: number;
 };
 
 export function InventoryWorkspace({
@@ -72,6 +75,7 @@ export function InventoryWorkspace({
   const [location, setLocation] = useState("");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ RAW_MATERIAL: true });
   const [packs, setPacks] = useState<Record<string, string>>({});
+  const [carton, setCarton] = useState<Record<string, boolean>>({});
   const [openGrams, setOpenGrams] = useState<Record<string, string>>({});
   const [expiry, setExpiry] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
@@ -82,6 +86,13 @@ export function InventoryWorkspace({
     const map = new Map<string, number>();
     for (const row of balances) {
       if (row.branch_code === branch) map.set(row.item_id, row.on_hand_recipe);
+    }
+    return map;
+  }, [balances, branch]);
+  const pieceOnHand = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const row of balances) {
+      if (row.branch_code === branch) map.set(row.item_id, row.piece_on_hand);
     }
     return map;
   }, [balances, branch]);
@@ -126,16 +137,25 @@ export function InventoryWorkspace({
                     <table className="min-w-full text-sm">
                       <thead className="bg-[var(--fnb-tint)] text-left"><tr><th className="p-2">รหัส</th><th className="p-2">ชื่อรายการ</th>{blindCount ? null : <th className="p-2">ยอดระบบ</th>}<th className="p-2">จำนวนแพ็ค/หน่วยเต็ม</th>{group.key === "RAW_MATERIAL" ? <th className="p-2">น้ำหนักแพ็คที่เปิดค้าง (g)</th> : null}<th className="p-2">วันหมดอายุใกล้สุด</th></tr></thead>
                       <tbody>
-                        {rows.map((row) => (
+                        {rows.map((row) => {
+                          const fruit = row.is_catch_weight_produce === true;
+                          const unit = fruit ? (row.piece_uom_label || "ลูก") : row.count_uom;
+                          const system = fruit ? `${Math.round(pieceOnHand.get(row.id) ?? 0)} ${unit}` : `${((onHand.get(row.id) ?? 0) / (row.recipe_per_count_uom || 1)).toFixed(0)} ${row.count_uom}`;
+                          return (
                           <tr key={row.id} className="border-t">
                             <td className="p-2">{row.short_code}</td>
                             <td className="p-2">{row.name_th}</td>
-                            {blindCount ? null : <td className="p-2">{((onHand.get(row.id) ?? 0) / (row.recipe_per_count_uom || 1)).toFixed(0)} {row.count_uom}</td>}
-                            <td className="p-2"><FnbQtyInput value={packs[row.id] ?? ""} onChange={(value) => setPacks((current) => ({ ...current, [row.id]: value }))} unit={row.count_uom} allowDecimal={row.allow_decimal_count_qty} /></td>
-                            {group.key === "RAW_MATERIAL" ? <td className="p-2"><FnbQtyInput value={openGrams[row.id] ?? ""} onChange={(value) => setOpenGrams((current) => ({ ...current, [row.id]: value }))} unit="g" allowDecimal /></td> : null}
+                            {blindCount ? null : <td className="p-2">{system}</td>}
+                            <td className="p-2">
+                              {fruit ? <label className="mb-1 flex items-center gap-1 text-xs"><input type="checkbox" checked={carton[row.id] === true} onChange={(event) => setCarton((current) => ({ ...current, [row.id]: event.target.checked }))} /> นับลังปิดเป็น กก.</label> : null}
+                              {fruit && carton[row.id] ? <FnbQtyInput allowDecimal unit="กก." onChange={(value) => setPacks((current) => ({ ...current, [row.id]: String(Math.round(((Number(value) || 0) * 1000) / (row.avg_gross_grams_per_piece || 110))) }))} /> : <FnbQtyInput value={packs[row.id] ?? ""} onChange={(value) => setPacks((current) => ({ ...current, [row.id]: value }))} unit={unit} allowDecimal={fruit ? false : row.allow_decimal_count_qty} />}
+                              {fruit && carton[row.id] && packs[row.id] ? <p className="text-xs">คิดเป็น {packs[row.id]} {unit}</p> : null}
+                            </td>
+                            {group.key === "RAW_MATERIAL" ? <td className="p-2">{fruit ? <span className="text-xs text-slate-500">นับเป็น {unit}</span> : <FnbQtyInput value={openGrams[row.id] ?? ""} onChange={(value) => setOpenGrams((current) => ({ ...current, [row.id]: value }))} unit="g" allowDecimal />}</td> : null}
                             <td className="p-2"><input className="h-10 w-36 rounded-md border px-2 text-sm" type="date" value={expiry[row.id] ?? ""} onChange={(event) => setExpiry((current) => ({ ...current, [row.id]: event.target.value }))} /></td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -147,7 +167,7 @@ export function InventoryWorkspace({
             const lines = items.filter((item) => packs[item.id] !== undefined && packs[item.id] !== "").map((item) => ({
               itemId: item.id,
               locationCode: location,
-              countedQty: item.allow_decimal_count_qty ? Number(packs[item.id]) : Math.trunc(Number(packs[item.id]) || 0),
+              countedQty: item.is_catch_weight_produce || !item.allow_decimal_count_qty ? Math.trunc(Number(packs[item.id]) || 0) : Number(packs[item.id]),
               nearestExpiry: expiry[item.id] || null,
               openingQty: 0,
               replenishedQty: 0,

@@ -16,6 +16,7 @@ import { MenuSalesPanel } from "@/components/fnb/menu-sales-panel";
 import { SopBoard } from "@/components/fnb/sop-board";
 import { SectionPhotoDrawer } from "@/components/fnb/section-photo-drawer";
 import { ExecutiveInspector } from "@/components/fnb/executive-inspector";
+import { ProduceWasteForm } from "@/components/fnb/produce-waste-form";
 import { MiddayShortcuts, NightCloseCount, OpeningChecklist } from "@/components/fnb/store-day-board";
 import { getMonthLockAction } from "@/lib/actions/fnb-audit";
 import { saveShift3HandoverAction } from "@/lib/actions/fnb-sop";
@@ -479,7 +480,7 @@ function WastePanel({
   const [editingWaste, setEditingWaste] = useState(false);
   const [editingShelf, setEditingShelf] = useState(false);
   const [group, setGroup] = useState<(typeof FNB_FRONT_GROUPS)[number]>("BAKERY_CAKE");
-  const [waste, setWaste] = useState<Record<string, string>>({ JT: "", BT: "", MMK: "", ML: "", LEM: "" });
+  const [waste, setWaste] = useState<Record<string, string>>({ JT: "", BT: "", MMK: "", ML: "" });
   const visible = shelfItems.filter((item) => item.front_back_group === group);
   return (
     <div className="space-y-4">
@@ -503,9 +504,10 @@ function WastePanel({
             }), "บันทึกของทิ้งเรียบร้อยแล้ว");
             setEditingWaste(false);
           }}>
-            <div className="grid gap-3 md:grid-cols-5">
-              {["JT", "BT", "MMK", "ML", "LEM"].map((code) => <label key={code} className="text-sm">{code} {code === "LEM" ? "(g)" : "(ml)"}<input className={field} value={waste[code] ?? ""} onChange={(event) => setWaste((current) => ({ ...current, [code]: event.target.value }))} /></label>)}
+            <div className="grid gap-3 md:grid-cols-4">
+              {["JT", "BT", "MMK", "ML"].map((code) => <label key={code} className="text-sm">{code} (ml)<input className={field} value={waste[code] ?? ""} onChange={(event) => setWaste((current) => ({ ...current, [code]: event.target.value }))} /></label>)}
             </div>
+            <ProduceWasteForm branch={branch} workDate={workDate} actorSource={actorSource} brand={brand} staffName={staffName} />
             <PhotoDrop name="photos" camera label="ถ่ายของที่เททิ้ง" />
             {day?.waste ? <label className="block text-sm">สาเหตุการแก้ไข *<input className={field} name="edit_reason" required minLength={3} /></label> : null}
             <SaveButton busy={busy === "waste"}>บันทึกของทิ้ง</SaveButton>
